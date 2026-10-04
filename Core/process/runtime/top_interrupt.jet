@@ -1,0 +1,437 @@
+// PORT-PENDING 0283 crates-jet-codegen-src-prelude-corelib-top-interrupt-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:1-433
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// The one signal-handler mechanism (#2027, I8 + I9).
+//RS ///
+//RS /// This file is the single home for every signal fact: the pending interrupt
+//RS /// count, typed process-signal bits, the platform handler, the arm path, and
+//RS /// the consumption rules. Nothing outside this file may declare a second
+//RS /// signal mark function or a second install path.
+//RS ///
+//RS /// Three tiers reach it and none of them restates it:
+//RS ///   * AOT — `Prelude/CoreLib/Top/FSIoEnvOsTesting.rs`'s `jet_os_interrupt`,
+//RS ///     which the generated program embeds with the process/filesystem adapter
+//RS ///     closure (`needs_process || needs_fs_runtime`);
+//RS ///     the full dispatcher remains the one shared implementation.
+//RS ///   * the resident Cranelift host — `jet-jit/src/CoreHost.rs`, via
+//RS ///     `jet_codegen::interrupt_runtime`;
+//RS ///   * the TIR evaluator ambient — `Codegen/TIR/eval/mod.rs`, via
+//RS ///     `crate::interrupt_runtime`.
+//RS ///
+//RS /// The last two share ONE compiled instance (`jet-codegen/src/lib.rs`,
+//RS /// `pub mod interrupt_runtime`), so the `jet` binary has one pending state,
+//RS /// one signal disposition, and one arm result no matter which tier is running.
+//RS /// `signal(SIGINT, …)` replaces the process handler, so a second instance
+//RS /// would silently disarm the first tier's queue.
+//RS ///
+//RS /// A tier supplies only its Ctrl-C handler storage and invocation adapter.
+//RS /// Typed process signals use a shared cancellation callback instead: it looks
+//RS /// up the current root task control when delivered, so a resident run cannot
+//RS /// keep a prior run alive.
+//RS ///
+//RS /// `#Shield` never enters this file, by construction. A shield defers a
+//RS /// *cooperative* interrupt — a cancel or a blown deadline — at the wait points
+//RS /// of the shielded task (`Prelude/Scheduler.rs::jet_scheduler_shielded`). A
+//RS /// process signal marks cancellation through the same task-control carrier;
+//RS /// the cancellation is delivered by the scheduler at its next unshielded wait
+//RS /// point.
+//RS pub fn jet_interrupt_poll_interval() -> std::time::Duration {
+//RS     std::time::Duration::from_millis(10)
+//RS }
+//RS 
+//RS pub fn jet_interrupt_core_error(message: &str) -> String {
+//RS     format!("core.sys.on_interrupt: {message}")
+//RS }
+//RS 
+//RS pub fn jet_process_signal_error(message: &str) -> String {
+//RS     format!("core.process.on_signal: {message}")
+//RS }
+//RS 
+//RS pub fn jet_interrupt_dispatcher_start_error(error: impl std::fmt::Display) -> String {
+//RS     format!("could not start interrupt dispatcher: {error}")
+//RS }
+//RS 
+//RS pub fn jet_interrupt_dispatcher_stopped_error() -> &'static str {
+//RS     "interrupt dispatcher stopped"
+//RS }
+//RS 
+//RS pub fn jet_interrupt_unavailable_error() -> &'static str {
+//RS     "interrupt handling is unavailable on this target"
+//RS }
+//RS 
+//RS // Keep the process-wide state in one carrier. The first field preserves the
+//RS // count-first behavior of `core.sys.on_interrupt`; the second coalesces typed
+//RS // process signals because cancellation is idempotent.
+//RS const JET_SIGNAL_INT: usize = 1 << 0;
+//RS const JET_SIGNAL_HUP: usize = 1 << 1;
+//RS const JET_SIGNAL_TERM: usize = 1 << 2;
+//RS const JET_SIGNAL_ALL: usize = JET_SIGNAL_INT | JET_SIGNAL_HUP | JET_SIGNAL_TERM;
+//RS 
+//RS #[doc(hidden)]
+//RS pub type JetProcessSignalCallback = std::sync::Arc<dyn Fn() + Send + Sync + 'static>;
+//RS 
+//RS struct JetInterruptState {
+//RS     pending_interrupts: std::sync::atomic::AtomicUsize,
+//RS     pending_process_signals: std::sync::atomic::AtomicUsize,
+//RS     installed: std::sync::atomic::AtomicUsize,
+//RS     install_lock: std::sync::Mutex<()>,
+//RS     process_dispatch_lock: std::sync::Mutex<()>,
+//RS     process_handlers: std::sync::Mutex<[Option<JetProcessSignalCallback>; 3]>,
+//RS }
+//RS 
+//RS static JET_INTERRUPT_STATE: std::sync::LazyLock<JetInterruptState> =
+//RS     std::sync::LazyLock::new(|| JetInterruptState {
+//RS         pending_interrupts: std::sync::atomic::AtomicUsize::new(0),
+//RS         pending_process_signals: std::sync::atomic::AtomicUsize::new(0),
+//RS         installed: std::sync::atomic::AtomicUsize::new(0),
+//RS         install_lock: std::sync::Mutex::new(()),
+//RS         process_dispatch_lock: std::sync::Mutex::new(()),
+//RS         process_handlers: std::sync::Mutex::new([None, None, None]),
+//RS     });
+//RS 
+//RS fn jet_process_signal_index(mask: usize) -> Option<usize> {
+//RS     match mask {
+//RS         JET_SIGNAL_INT => Some(0),
+//RS         JET_SIGNAL_HUP => Some(1),
+//RS         JET_SIGNAL_TERM => Some(2),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_interrupt_signal_bit(signal: i32) -> usize {
+//RS     match signal {
+//RS         2 => JET_SIGNAL_INT,
+//RS         1 => JET_SIGNAL_HUP,
+//RS         15 => JET_SIGNAL_TERM,
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS /// The platform callback and installation path are kept behind one audited
+//RS /// internal module. Its public-to-the-runtime surface is safe: callers can
+//RS /// only request the checked arm operation, never pass a raw handler or FFI
+//RS /// value through generated application code.
+//RS //
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_os_interrupt_ffi
+//RS #[cfg(any(unix, windows))]
+//RS mod jet_os_interrupt_ffi {
+//RS     #[cfg(unix)]
+//RS     extern "C" fn jet_interrupt_mark(signal: i32) {
+//RS         let state = &*super::JET_INTERRUPT_STATE;
+//RS         if signal == 2 {
+//RS             state
+//RS                 .pending_interrupts
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS         }
+//RS         let bit = super::jet_interrupt_signal_bit(signal);
+//RS         if bit != 0 {
+//RS             state
+//RS                 .pending_process_signals
+//RS                 .fetch_or(bit, std::sync::atomic::Ordering::Relaxed);
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     unsafe extern "system" fn jet_interrupt_mark(kind: u32) -> i32 {
+//RS         const CTRL_C_EVENT: u32 = 0;
+//RS         if kind == CTRL_C_EVENT {
+//RS             let state = &*super::JET_INTERRUPT_STATE;
+//RS             state
+//RS                 .pending_interrupts
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS             state
+//RS                 .pending_process_signals
+//RS                 .fetch_or(super::JET_SIGNAL_INT, std::sync::atomic::Ordering::Relaxed);
+//RS             1
+//RS         } else {
+//RS             0
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     pub(super) fn arm_mask(mask: usize) -> Result<(), String> {
+//RS         if mask & !super::JET_SIGNAL_ALL != 0 {
+//RS             return Err("invalid process signal".to_string());
+//RS         }
+//RS         extern "C" {
+//RS             fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+//RS         }
+//RS         let state = &*super::JET_INTERRUPT_STATE;
+//RS         let _lock = state
+//RS             .install_lock
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         let mut installed = state
+//RS             .installed
+//RS             .load(std::sync::atomic::Ordering::Acquire);
+//RS         for (bit, number, name) in [
+//RS             (super::JET_SIGNAL_INT, 2, "SIGINT"),
+//RS             (super::JET_SIGNAL_HUP, 1, "SIGHUP"),
+//RS             (super::JET_SIGNAL_TERM, 15, "SIGTERM"),
+//RS         ] {
+//RS             if mask & bit == 0 || installed & bit != 0 {
+//RS                 continue;
+//RS             }
+//RS             let previous = unsafe { signal(number, jet_interrupt_mark) };
+//RS             if previous == usize::MAX {
+//RS                 return Err(format!("could not install the {name} handler"));
+//RS             }
+//RS             installed |= bit;
+//RS             state
+//RS                 .installed
+//RS                 .store(installed, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     pub(super) fn arm_mask(mask: usize) -> Result<(), String> {
+//RS         if mask & !(super::JET_SIGNAL_INT) != 0 {
+//RS             return Err(super::jet_interrupt_unavailable_error().to_string());
+//RS         }
+//RS         extern "system" {
+//RS             fn SetConsoleCtrlHandler(
+//RS                 handler: Option<unsafe extern "system" fn(u32) -> i32>,
+//RS                 add: i32,
+//RS             ) -> i32;
+//RS         }
+//RS         let state = &*super::JET_INTERRUPT_STATE;
+//RS         let _lock = state
+//RS             .install_lock
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         if state
+//RS             .installed
+//RS             .load(std::sync::atomic::Ordering::Acquire)
+//RS             & super::JET_SIGNAL_INT
+//RS             != 0
+//RS         {
+//RS             return Ok(());
+//RS         }
+//RS         // A parent may have disabled Ctrl-C with the documented NULL handler;
+//RS         // clear that inherited process flag before installing Jet's handler.
+//RS         unsafe { SetConsoleCtrlHandler(None, 0) };
+//RS         let installed = unsafe { SetConsoleCtrlHandler(Some(jet_interrupt_mark), 1) };
+//RS         if installed == 0 {
+//RS             return Err("could not install the Windows console Ctrl-C handler".to_string());
+//RS         }
+//RS         state
+//RS             .installed
+//RS             .store(super::JET_SIGNAL_INT, std::sync::atomic::Ordering::Release);
+//RS         Ok(())
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_os_interrupt_ffi
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_interrupt_arm_mask(mask: usize) -> Result<(), String> {
+//RS     jet_os_interrupt_ffi::arm_mask(mask)
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn jet_interrupt_arm_mask(mask: usize) -> Result<(), String> {
+//RS     jet_os_interrupt_ffi::arm_mask(mask)
+//RS }
+//RS 
+//RS #[cfg(not(any(unix, windows)))]
+//RS fn jet_interrupt_arm_mask(_: usize) -> Result<(), String> {
+//RS     Err(jet_interrupt_unavailable_error().to_string())
+//RS }
+//RS 
+//RS /// Arm the process for Ctrl-C interrupts. Called by a tier's first
+//RS /// `core.sys.on_interrupt` registration; idempotent and shared.
+//RS pub fn jet_interrupt_arm() -> Result<(), String> {
+//RS     jet_interrupt_arm_mask(JET_SIGNAL_INT)
+//RS }
+//RS 
+//RS static JET_PROCESS_SIGNAL_DISPATCHER: std::sync::LazyLock<Result<(), String>> =
+//RS     std::sync::LazyLock::new(|| {
+//RS         std::thread::Builder::new()
+//RS             .name("jet-process-signal".to_string())
+//RS             .spawn(|| loop {
+//RS                 std::thread::sleep(jet_interrupt_poll_interval());
+//RS                 jet_process_signal_dispatch();
+//RS             })
+//RS             .map(|_| ())
+//RS             .map_err(jet_interrupt_dispatcher_start_error)
+//RS     });
+//RS 
+//RS fn jet_process_signal_dispatcher_start() -> Result<(), String> {
+//RS     match &*JET_PROCESS_SIGNAL_DISPATCHER {
+//RS         Ok(()) => Ok(()),
+//RS         Err(message) => Err(message.clone()),
+//RS     }
+//RS }
+//RS 
+//RS /// Register the cancellation callback for one typed process signal. The
+//RS /// callback slot is replaced, not accumulated: one signal has one root-task
+//RS /// meaning and resident runs must not retain old callbacks.
+//RS pub fn jet_process_signal_register(
+//RS     mask: usize,
+//RS     callback: JetProcessSignalCallback,
+//RS ) -> Result<(), String> {
+//RS     let Some(index) = jet_process_signal_index(mask) else {
+//RS         return Err("invalid process signal".to_string());
+//RS     };
+//RS     jet_interrupt_arm_mask(mask)?;
+//RS     jet_process_signal_dispatcher_start()?;
+//RS     JET_INTERRUPT_STATE
+//RS         .process_handlers
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner())[index] = Some(callback);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_process_signal_dispatch() {
+//RS     let state = &*JET_INTERRUPT_STATE;
+//RS     let _dispatch_lock = state
+//RS         .process_dispatch_lock
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     let callbacks = loop {
+//RS         let pending = state
+//RS             .pending_process_signals
+//RS             .load(std::sync::atomic::Ordering::Acquire);
+//RS         if pending == 0 {
+//RS             return;
+//RS         }
+//RS         let (registered, callbacks) = {
+//RS             let handlers = state
+//RS                 .process_handlers
+//RS                 .lock()
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             let mut registered = 0;
+//RS             let mut callbacks = Vec::new();
+//RS             for (bit, handler) in [
+//RS                 (JET_SIGNAL_TERM, handlers[2].as_ref()),
+//RS                 (JET_SIGNAL_HUP, handlers[1].as_ref()),
+//RS                 (JET_SIGNAL_INT, handlers[0].as_ref()),
+//RS             ] {
+//RS                 if pending & bit != 0 {
+//RS                     if let Some(handler) = handler {
+//RS                         registered |= bit;
+//RS                         callbacks.push(handler.clone());
+//RS                     }
+//RS                 }
+//RS             }
+//RS             (registered, callbacks)
+//RS         };
+//RS         let deliverable = pending & registered;
+//RS         if deliverable == 0 {
+//RS             // Keep an event for a later registration, matching the empty
+//RS             // `jet_interrupt_dispatch` rule.
+//RS             return;
+//RS         }
+//RS         if state
+//RS             .pending_process_signals
+//RS             .compare_exchange(
+//RS                 pending,
+//RS                 pending & !deliverable,
+//RS                 std::sync::atomic::Ordering::AcqRel,
+//RS                 std::sync::atomic::Ordering::Acquire,
+//RS             )
+//RS             .is_ok()
+//RS         {
+//RS             break callbacks;
+//RS         }
+//RS     };
+//RS     for callback in callbacks {
+//RS         callback();
+//RS     }
+//RS }
+//RS 
+//RS /// Drop anything pending. A run boundary starts with no signal, so a signal
+//RS /// marked for a previous resident run never lands on the next one.
+//RS pub fn jet_interrupt_clear() {
+//RS     let state = &*JET_INTERRUPT_STATE;
+//RS     let _dispatch_lock = state
+//RS         .process_dispatch_lock
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     state
+//RS         .pending_interrupts
+//RS         .store(0, std::sync::atomic::Ordering::Release);
+//RS     state
+//RS         .pending_process_signals
+//RS         .store(0, std::sync::atomic::Ordering::Release);
+//RS }
+//RS 
+//RS /// The one Ctrl-C consumption rule: take the whole pending count, then run
+//RS /// every registered handler once per counted interrupt, in registration order.
+//RS ///
+//RS /// An empty `handlers` slice does NOT consume. The count is process-wide and
+//RS /// shared, so a drain with nothing registered must leave the signal for the
+//RS /// drain that can actually deliver it.
+//RS pub fn jet_interrupt_dispatch<T>(handlers: &[T], mut invoke: impl FnMut(&T)) {
+//RS     if handlers.is_empty() {
+//RS         return;
+//RS     }
+//RS     let count = JET_INTERRUPT_STATE
+//RS         .pending_interrupts
+//RS         .swap(0, std::sync::atomic::Ordering::Acquire);
+//RS     for _ in 0..count {
+//RS         for handler in handlers {
+//RS             invoke(handler);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod jet_interrupt_tests {
+//RS     use super::*;
+//RS 
+//RS     /// Serialise the tests below: they share the one process count, which is
+//RS     /// the property under test.
+//RS     fn with_queue<R>(body: impl FnOnce() -> R) -> R {
+//RS         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+//RS         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+//RS         jet_interrupt_clear();
+//RS         let result = body();
+//RS         jet_interrupt_clear();
+//RS         result
+//RS     }
+//RS 
+//RS     fn note() {
+//RS         JET_INTERRUPT_STATE
+//RS             .pending_interrupts
+//RS             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dispatch_is_count_first_then_registration_order() {
+//RS         with_queue(|| {
+//RS             note();
+//RS             note();
+//RS             let mut seen = Vec::new();
+//RS             jet_interrupt_dispatch(&['a', 'b'], |handler| seen.push(*handler));
+//RS             assert_eq!(seen, vec!['a', 'b', 'a', 'b']);
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn a_drain_with_no_handlers_leaves_the_interrupt_for_the_tier_that_has_one() {
+//RS         with_queue(|| {
+//RS             note();
+//RS             let empty: [char; 0] = [];
+//RS             jet_interrupt_dispatch(&empty, |_| panic!("an empty drain must not invoke"));
+//RS             let mut seen = Vec::new();
+//RS             jet_interrupt_dispatch(&['a'], |handler| seen.push(*handler));
+//RS             assert_eq!(
+//RS                 seen,
+//RS                 vec!['a'],
+//RS                 "an empty drain stole the one process interrupt count"
+//RS             );
+//RS         });
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn clear_drops_a_previous_runs_interrupt() {
+//RS         with_queue(|| {
+//RS             note();
+//RS             jet_interrupt_clear();
+//RS             jet_interrupt_dispatch(&['a'], |_| panic!("a cleared interrupt was delivered"));
+//RS         });
+//RS     }
+//RS }
+// END-PORT-PENDING 0283 crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs:1-433
+

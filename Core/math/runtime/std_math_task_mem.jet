@@ -1,0 +1,1801 @@
+// PORT-PENDING 0164 crates-jet-codegen-src-prelude-corelib-jetstd-mathtaskmem-slice-1: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1-1797
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     // ── D-SIMD2 / D-SIMD3 / D-LINALG1: built-in math value types ────────────────
+//RS     // The pinned stable rustc has no `std::simd`, so the portable lane family is
+//RS     // represented by fixed arrays. F64x4 has a private host-native carrier
+//RS     // behind the same value API; the shared Prelude owns both representations,
+//RS     // and the public surface does not depend on a target feature.
+//RS 
+//RS     // Private place access uses the same checked lane index as value reads.
+//RS     pub(crate) trait JetNativeLane {
+//RS         type Scalar;
+//RS         const NAME: &'static str;
+//RS         fn lanes(&self) -> &[Self::Scalar];
+//RS         fn lanes_mut(&mut self) -> &mut [Self::Scalar];
+//RS     }
+//RS 
+//RS     pub(crate) fn jet_native_lane_ref<'a, L: JetNativeLane>(value: &'a L, index: i64, file: &str, line: u32) -> &'a L::Scalar {
+//RS         let lanes = value.lanes();
+//RS         let index = crate::jet_simd_lane_index(index, L::NAME, lanes.len())
+//RS             .unwrap_or_else(|message| crate::jet_panic(file, line, &message));
+//RS         &lanes[index]
+//RS     }
+//RS 
+//RS     pub(crate) fn jet_native_lane_mut<'a, L: JetNativeLane>(value: &'a mut L, index: i64, file: &str, line: u32) -> &'a mut L::Scalar {
+//RS         let lanes = value.lanes_mut();
+//RS         let index = crate::jet_simd_lane_index(index, L::NAME, lanes.len())
+//RS             .unwrap_or_else(|message| crate::jet_panic(file, line, &message));
+//RS         &mut lanes[index]
+//RS     }
+//RS 
+//RS     macro_rules! jet_lane_type {
+//RS         (F64x4, $E:ty, $N:literal) => {
+//RS             #[repr(transparent)]
+//RS             #[derive(Clone, Copy)]
+//RS             pub struct F64x4(pub(crate) crate::JetF64x4);
+//RS             impl JetNativeLane for F64x4 {
+//RS                 type Scalar = f64;
+//RS                 const NAME: &'static str = "F64x4";
+//RS                 fn lanes(&self) -> &[f64] {
+//RS                     // SAFETY: JetF64x4 is [f64; 4] or __m256d, the same four
+//RS                     // contiguous f64 lanes used by the native array bridge.
+//RS                     // Both carriers have sufficient alignment and no padding.
+//RS                     unsafe { &*((&self.0 as *const crate::JetF64x4).cast::<[f64; 4]>()) }
+//RS                 }
+//RS                 fn lanes_mut(&mut self) -> &mut [f64] {
+//RS                     // SAFETY: same representation as lanes(); this exclusive
+//RS                     // borrow is the sole access to the carrier for its lifetime.
+//RS                     unsafe { &mut *((&mut self.0 as *mut crate::JetF64x4).cast::<[f64; 4]>()) }
+//RS                 }
+//RS             }
+//RS         };
+//RS         ($T:ident, $E:ty, $N:literal) => {
+//RS             #[repr(transparent)]
+//RS             #[derive(Clone, Copy, Debug, PartialEq)]
+//RS             pub struct $T(pub [$E; $N]);
+//RS             impl JetNativeLane for $T {
+//RS                 type Scalar = $E;
+//RS                 const NAME: &'static str = stringify!($T);
+//RS                 fn lanes(&self) -> &[$E] { &self.0 }
+//RS                 fn lanes_mut(&mut self) -> &mut [$E] { &mut self.0 }
+//RS             }
+//RS         };
+//RS     }
+//RS 
+//RS     jet_lane_type!(F32x4, f32, 4);
+//RS     jet_lane_type!(F64x2, f64, 2);
+//RS     jet_lane_type!(F32x8, f32, 8);
+//RS     jet_lane_type!(F64x4, f64, 4);
+//RS     jet_lane_type!(I8x16, i8, 16);
+//RS     jet_lane_type!(I16x8, i16, 8);
+//RS     jet_lane_type!(I32x4, i32, 4);
+//RS     jet_lane_type!(I64x2, i64, 2);
+//RS     jet_lane_type!(U8x16, u8, 16);
+//RS     jet_lane_type!(U16x8, u16, 8);
+//RS     jet_lane_type!(U32x4, u32, 4);
+//RS     jet_lane_type!(U64x2, u64, 2);
+//RS     jet_lane_type!(I8x32, i8, 32);
+//RS     jet_lane_type!(I16x16, i16, 16);
+//RS     jet_lane_type!(I32x8, i32, 8);
+//RS     jet_lane_type!(I64x4, i64, 4);
+//RS     jet_lane_type!(U8x32, u8, 32);
+//RS     jet_lane_type!(U16x16, u16, 16);
+//RS     jet_lane_type!(U32x8, u32, 8);
+//RS     jet_lane_type!(U64x4, u64, 4);
+//RS     #[derive(Clone, Copy, PartialEq)]
+//RS     pub struct Vec2(pub [f64; 2]);
+//RS     #[derive(Clone, Copy, PartialEq)]
+//RS     pub struct Vec3(pub [f64; 3]);
+//RS     #[derive(Clone, Copy, PartialEq)]
+//RS     pub struct Vec4(pub [f64; 4]);
+//RS     // Column-major: element (row r, col c) is `.0[c * N + r]`.
+//RS     #[derive(Clone, Copy, PartialEq)]
+//RS     pub struct Mat3(pub [f64; 9]);
+//RS     #[derive(Clone, Copy, PartialEq)]
+//RS     pub struct Mat4(pub [f64; 16]);
+//RS 
+//RS     macro_rules! jet_lane_call {
+//RS         (ref, $op:path, $left:expr, $right:expr) => {
+//RS             $op(&$left, &$right)
+//RS         };
+//RS         (value, $op:path, $left:expr, $right:expr) => {
+//RS             $op($left, $right)
+//RS         };
+//RS     }
+//RS 
+//RS     macro_rules! jet_lane_ops {
+//RS         ($T:ident, $E:ty, $N:literal) => {
+//RS             jet_lane_ops!(
+//RS                 $T,
+//RS                 $E,
+//RS                 $N,
+//RS                 crate::jet_simd_add_array,
+//RS                 crate::jet_simd_sub_array,
+//RS                 crate::jet_simd_mul_array,
+//RS                 crate::jet_simd_div_array,
+//RS                 ref
+//RS             );
+//RS         };
+//RS         ($T:ident, $E:ty, $N:literal, $add:path, $sub:path, $mul:path, $div:path, $mode:ident) => {
+//RS             impl std::ops::Add for $T {
+//RS                 type Output = $T;
+//RS                 #[inline(always)]
+//RS                 fn add(self, o: $T) -> $T {
+//RS                     $T(jet_lane_call!($mode, $add, self.0, o.0))
+//RS                 }
+//RS             }
+//RS             impl std::ops::Sub for $T {
+//RS                 type Output = $T;
+//RS                 #[inline(always)]
+//RS                 fn sub(self, o: $T) -> $T {
+//RS                     $T(jet_lane_call!($mode, $sub, self.0, o.0))
+//RS                 }
+//RS             }
+//RS             impl std::ops::Mul for $T {
+//RS                 type Output = $T;
+//RS                 #[inline(always)]
+//RS                 fn mul(self, o: $T) -> $T {
+//RS                     $T(jet_lane_call!($mode, $mul, self.0, o.0))
+//RS                 }
+//RS             }
+//RS             impl std::ops::Div for $T {
+//RS                 type Output = $T;
+//RS                 #[inline(always)]
+//RS                 fn div(self, o: $T) -> $T {
+//RS                     $T(jet_lane_call!($mode, $div, self.0, o.0))
+//RS                 }
+//RS             }
+//RS             impl std::ops::AddAssign for $T {
+//RS                 #[inline(always)]
+//RS                 fn add_assign(&mut self, o: $T) {
+//RS                     *self = *self + o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::SubAssign for $T {
+//RS                 #[inline(always)]
+//RS                 fn sub_assign(&mut self, o: $T) {
+//RS                     *self = *self - o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::MulAssign for $T {
+//RS                 #[inline(always)]
+//RS                 fn mul_assign(&mut self, o: $T) {
+//RS                     *self = *self * o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::DivAssign for $T {
+//RS                 #[inline(always)]
+//RS                 fn div_assign(&mut self, o: $T) {
+//RS                     *self = *self / o;
+//RS                 }
+//RS             }
+//RS         };
+//RS     }
+//RS     jet_lane_ops!(
+//RS         F32x4,
+//RS         f32,
+//RS         4,
+//RS         crate::jet_simd_f32x4_add_array,
+//RS         crate::jet_simd_f32x4_sub_array,
+//RS         crate::jet_simd_f32x4_mul_array,
+//RS         crate::jet_simd_f32x4_div_array,
+//RS         ref
+//RS     );
+//RS     jet_lane_ops!(
+//RS         F64x2,
+//RS         f64,
+//RS         2,
+//RS         crate::jet_simd_f64x2_add_array,
+//RS         crate::jet_simd_f64x2_sub_array,
+//RS         crate::jet_simd_f64x2_mul_array,
+//RS         crate::jet_simd_f64x2_div_array,
+//RS         ref
+//RS     );
+//RS     jet_lane_ops!(
+//RS         F32x8,
+//RS         f32,
+//RS         8,
+//RS         crate::jet_simd_f32x8_add_array,
+//RS         crate::jet_simd_f32x8_sub_array,
+//RS         crate::jet_simd_f32x8_mul_array,
+//RS         crate::jet_simd_f32x8_div_array,
+//RS         ref
+//RS     );
+//RS     jet_lane_ops!(
+//RS         F64x4,
+//RS         f64,
+//RS         4,
+//RS         crate::jet_simd_f64x4_add_native,
+//RS         crate::jet_simd_f64x4_sub_native,
+//RS         crate::jet_simd_f64x4_mul_native,
+//RS         crate::jet_simd_f64x4_div_native,
+//RS         value
+//RS     );
+//RS     // The array entry points remain available to portable marshaling adapters
+//RS     // (`crate::jet_simd_f64x4_add_value`, and its sibling operators); the
+//RS     // generated F64x4 value itself stays on the native carrier above.
+//RS     jet_lane_ops!(I8x16, i8, 16);
+//RS     jet_lane_ops!(I16x8, i16, 8);
+//RS     jet_lane_ops!(I32x4, i32, 4);
+//RS     jet_lane_ops!(I64x2, i64, 2);
+//RS     jet_lane_ops!(U8x16, u8, 16);
+//RS     jet_lane_ops!(U16x8, u16, 8);
+//RS     jet_lane_ops!(U32x4, u32, 4);
+//RS     jet_lane_ops!(U64x2, u64, 2);
+//RS     jet_lane_ops!(I8x32, i8, 32);
+//RS     jet_lane_ops!(I16x16, i16, 16);
+//RS     jet_lane_ops!(I32x8, i32, 8);
+//RS     jet_lane_ops!(I64x4, i64, 4);
+//RS     jet_lane_ops!(U8x32, u8, 32);
+//RS     jet_lane_ops!(U16x16, u16, 16);
+//RS     jet_lane_ops!(U32x8, u32, 8);
+//RS     jet_lane_ops!(U64x4, u64, 4);
+//RS 
+//RS     macro_rules! jet_vec_ops {
+//RS         ($T:ident, $N:literal) => {
+//RS             impl std::ops::Add for $T {
+//RS                 type Output = $T;
+//RS                 fn add(self, o: $T) -> $T {
+//RS                     let mut r = self.0;
+//RS                     for i in 0..$N {
+//RS                         r[i] = self.0[i] + o.0[i];
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             impl std::ops::Sub for $T {
+//RS                 type Output = $T;
+//RS                 fn sub(self, o: $T) -> $T {
+//RS                     let mut r = self.0;
+//RS                     for i in 0..$N {
+//RS                         r[i] = self.0[i] - o.0[i];
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             // `v * w` is element-wise (Hadamard); the dot/cross products are methods.
+//RS             impl std::ops::Mul for $T {
+//RS                 type Output = $T;
+//RS                 fn mul(self, o: $T) -> $T {
+//RS                     let mut r = self.0;
+//RS                     for i in 0..$N {
+//RS                         r[i] = self.0[i] * o.0[i];
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             impl std::ops::AddAssign for $T {
+//RS                 fn add_assign(&mut self, o: $T) {
+//RS                     *self = *self + o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::SubAssign for $T {
+//RS                 fn sub_assign(&mut self, o: $T) {
+//RS                     *self = *self - o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::MulAssign for $T {
+//RS                 fn mul_assign(&mut self, o: $T) {
+//RS                     *self = *self * o;
+//RS                 }
+//RS             }
+//RS         };
+//RS     }
+//RS     jet_vec_ops!(Vec2, 2);
+//RS     jet_vec_ops!(Vec3, 3);
+//RS     jet_vec_ops!(Vec4, 4);
+//RS     
+//RS     macro_rules! jet_mat_ops {
+//RS         ($T:ident, $N:literal) => {
+//RS             impl std::ops::Add for $T {
+//RS                 type Output = $T;
+//RS                 fn add(self, o: $T) -> $T {
+//RS                     let mut r = self.0;
+//RS                     for i in 0..($N * $N) {
+//RS                         r[i] = self.0[i] + o.0[i];
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             impl std::ops::Sub for $T {
+//RS                 type Output = $T;
+//RS                 fn sub(self, o: $T) -> $T {
+//RS                     let mut r = self.0;
+//RS                     for i in 0..($N * $N) {
+//RS                         r[i] = self.0[i] - o.0[i];
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             // `m * n` is matrix multiply (column-major).
+//RS             impl std::ops::Mul for $T {
+//RS                 type Output = $T;
+//RS                 fn mul(self, o: $T) -> $T {
+//RS                     let mut r = [0.0f64; $N * $N];
+//RS                     for c in 0..$N {
+//RS                         for row in 0..$N {
+//RS                             let mut acc = 0.0f64;
+//RS                             for k in 0..$N {
+//RS                                 acc += self.0[k * $N + row] * o.0[c * $N + k];
+//RS                             }
+//RS                             r[c * $N + row] = acc;
+//RS                         }
+//RS                     }
+//RS                     $T(r)
+//RS                 }
+//RS             }
+//RS             impl std::ops::AddAssign for $T {
+//RS                 fn add_assign(&mut self, o: $T) {
+//RS                     *self = *self + o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::SubAssign for $T {
+//RS                 fn sub_assign(&mut self, o: $T) {
+//RS                     *self = *self - o;
+//RS                 }
+//RS             }
+//RS             impl std::ops::MulAssign for $T {
+//RS                 fn mul_assign(&mut self, o: $T) {
+//RS                     *self = *self * o;
+//RS                 }
+//RS             }
+//RS         };
+//RS     }
+//RS     jet_mat_ops!(Mat3, 3);
+//RS     jet_mat_ops!(Mat4, 4);
+//RS 
+//RS     // `Mat * Vec` transforms the vector (column-major).
+//RS     impl std::ops::Mul<Vec3> for Mat3 {
+//RS         type Output = Vec3;
+//RS         fn mul(self, v: Vec3) -> Vec3 {
+//RS             let mut r = [0.0f64; 3];
+//RS             for row in 0..3 {
+//RS                 let mut a = 0.0f64;
+//RS                 for k in 0..3 {
+//RS                     a += self.0[k * 3 + row] * v.0[k];
+//RS                 }
+//RS                 r[row] = a;
+//RS             }
+//RS             Vec3(r)
+//RS         }
+//RS     }
+//RS     impl std::ops::Mul<Vec4> for Mat4 {
+//RS         type Output = Vec4;
+//RS         fn mul(self, v: Vec4) -> Vec4 {
+//RS             let mut r = [0.0f64; 4];
+//RS             for row in 0..4 {
+//RS                 let mut a = 0.0f64;
+//RS                 for k in 0..4 {
+//RS                     a += self.0[k * 4 + row] * v.0[k];
+//RS                 }
+//RS                 r[row] = a;
+//RS             }
+//RS             Vec4(r)
+//RS         }
+//RS     }
+//RS 
+//RS macro_rules! jet_lane_show {
+//RS     ($T:ident) => {
+//RS         impl super::JetShow for $T {
+//RS             fn jet_show(&self) -> String {
+//RS                 format!("{}({:?})", stringify!($T), self.0)
+//RS             }
+//RS         }
+//RS         impl super::JetDebug for $T {
+//RS             fn jet_debug(&self) -> String {
+//RS                 format!("{}({:?})", stringify!($T), self.0)
+//RS             }
+//RS         }
+//RS         impl super::JetDisplay for $T {
+//RS             fn jet_display(&self) -> String {
+//RS                 self.jet_show()
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS     jet_lane_show!(F32x4);
+//RS     jet_lane_show!(F64x2);
+//RS     jet_lane_show!(F32x8);
+//RS     impl std::fmt::Debug for F64x4 {
+//RS         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS             f.debug_tuple("F64x4")
+//RS                 .field(&crate::jet_simd_f64x4_to_array_native(self.0))
+//RS                 .finish()
+//RS         }
+//RS     }
+//RS     impl PartialEq for F64x4 {
+//RS         fn eq(&self, other: &Self) -> bool {
+//RS             crate::jet_simd_f64x4_to_array_native(self.0)
+//RS                 == crate::jet_simd_f64x4_to_array_native(other.0)
+//RS         }
+//RS     }
+//RS     impl super::JetShow for F64x4 {
+//RS         fn jet_show(&self) -> String {
+//RS             format!("{self:?}")
+//RS         }
+//RS     }
+//RS     impl super::JetDebug for F64x4 {
+//RS         fn jet_debug(&self) -> String {
+//RS             format!("{self:?}")
+//RS         }
+//RS     }
+//RS     impl super::JetDisplay for F64x4 {
+//RS         fn jet_display(&self) -> String {
+//RS             self.jet_show()
+//RS         }
+//RS     }
+//RS     jet_lane_show!(I8x16);
+//RS     jet_lane_show!(I16x8);
+//RS     jet_lane_show!(I32x4);
+//RS     jet_lane_show!(I64x2);
+//RS     jet_lane_show!(U8x16);
+//RS     jet_lane_show!(U16x8);
+//RS     jet_lane_show!(U32x4);
+//RS     jet_lane_show!(U64x2);
+//RS     jet_lane_show!(I8x32);
+//RS     jet_lane_show!(I16x16);
+//RS     jet_lane_show!(I32x8);
+//RS     jet_lane_show!(I64x4);
+//RS     jet_lane_show!(U8x32);
+//RS     jet_lane_show!(U16x16);
+//RS     jet_lane_show!(U32x8);
+//RS     jet_lane_show!(U64x4);
+//RS     macro_rules! jet_math_debug {
+//RS         ($type:ident, $($field:literal => $index:literal),+ $(,)?) => {
+//RS             impl std::fmt::Debug for $type {
+//RS                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS                     let mut debug = f.debug_struct(stringify!($type));
+//RS                     $(debug.field($field, &self.0[$index]);)+
+//RS                     debug.finish()
+//RS                 }
+//RS             }
+//RS             impl super::JetShow for $type {
+//RS                 fn jet_show(&self) -> String {
+//RS                     format!("{self:?}")
+//RS                 }
+//RS             }
+//RS             impl super::JetDebug for $type {
+//RS                 fn jet_debug(&self) -> String {
+//RS                     format!("{self:?}")
+//RS                 }
+//RS             }
+//RS             impl super::JetDisplay for $type {
+//RS                 fn jet_display(&self) -> String {
+//RS                     self.jet_show()
+//RS                 }
+//RS             }
+//RS         };
+//RS     }
+//RS     jet_math_debug!(Vec2, "x" => 0, "y" => 1);
+//RS     jet_math_debug!(Vec3, "x" => 0, "y" => 1, "z" => 2);
+//RS     jet_math_debug!(Vec4, "x" => 0, "y" => 1, "z" => 2, "w" => 3);
+//RS     jet_math_debug!(
+//RS         Mat3,
+//RS         "m00" => 0, "m10" => 1, "m20" => 2,
+//RS         "m01" => 3, "m11" => 4, "m21" => 5,
+//RS         "m02" => 6, "m12" => 7, "m22" => 8,
+//RS     );
+//RS     jet_math_debug!(
+//RS         Mat4,
+//RS         "m00" => 0, "m10" => 1, "m20" => 2, "m30" => 3,
+//RS         "m01" => 4, "m11" => 5, "m21" => 6, "m31" => 7,
+//RS         "m02" => 8, "m12" => 9, "m22" => 10, "m32" => 11,
+//RS         "m03" => 12, "m13" => 13, "m23" => 14, "m33" => 15,
+//RS     );
+//RS 
+//RS     struct JetTaskState<T: Send + 'static> {
+//RS         handle: std::sync::Mutex<Option<super::JetSchedulerJoin<T>>>,
+//RS         control: std::sync::Arc<super::JetTaskControl>,
+//RS         // Typed operations such as AsyncEvent convert their inherited deadline
+//RS         // into their own result value. Re-checking the caller deadline after
+//RS         // join would replace that value with E3003 and violate the typed API.
+//RS         skip_join_deadline: bool,
+//RS     }
+//RS 
+//RS     trait JetTaskGroupChild: Send + Sync {
+//RS         fn cancel(&self);
+//RS         fn join(&self);
+//RS     }
+//RS 
+//RS     impl<T: Send + 'static> JetTaskGroupChild for JetTaskState<T> {
+//RS         fn cancel(&self) {
+//RS             if self.handle.lock().unwrap().is_some() {
+//RS                 self.control.cancel();
+//RS             }
+//RS         }
+//RS 
+//RS         fn join(&self) {
+//RS             if let Some(handle) = self.handle.lock().unwrap().take() {
+//RS                 // Group cleanup is not a parent wait point. The shared drain
+//RS                 // consumes the child completion even while the parent is
+//RS                 // unwinding from cancellation.
+//RS                 handle.drain();
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CONC-SPAWN1=D: the internal runtime identity shared by a lexical
+//RS     /// `task.group` and every named helper that receives it.
+//RS     pub struct JetTaskGroup {
+//RS         children: std::sync::Arc<JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>>,
+//RS         owner: bool,
+//RS     }
+//RS 
+//RS     impl Clone for JetTaskGroup {
+//RS         fn clone(&self) -> Self {
+//RS             Self {
+//RS                 children: self.children.clone(),
+//RS                 owner: false,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetTaskGroup {
+//RS         pub fn new() -> Self {
+//RS             Self {
+//RS                 children: std::sync::Arc::new(JetTaskGroupRuntime::new_defaulted(None)),
+//RS                 owner: true,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn with_limit(limit: i64) -> Self {
+//RS             Self {
+//RS                 children: std::sync::Arc::new(JetTaskGroupRuntime::new_defaulted(Some(limit))),
+//RS                 owner: true,
+//RS             }
+//RS         }
+//RS 
+//RS         /// D-TASKBORROW1=A: one canonical group spawn path covers both owned
+//RS         /// and sema-proven borrowed captures. The lexical group closes the
+//RS         /// loan by joining every registered child before it drops.
+//RS         pub fn spawn<'env, F, T>(&self, f: F) -> JetTask<T>
+//RS         where
+//RS             F: FnOnce() -> T + Send + 'env,
+//RS             T: Send + 'static,
+//RS         {
+//RS             self.spawn_at(0, "", f)
+//RS         }
+//RS 
+//RS         pub fn spawn_at<'env, F, T>(
+//RS             &self,
+//RS             spawn_site: usize,
+//RS             label: &str,
+//RS             f: F,
+//RS         ) -> JetTask<T>
+//RS         where
+//RS             F: FnOnce() -> T + Send + 'env,
+//RS             T: Send + 'static,
+//RS         {
+//RS             let boxed: Box<dyn FnOnce() -> T + Send + 'env> = Box::new(f);
+//RS             // JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_borrowed_spawn
+//RS             let erased: Box<dyn FnOnce() -> T + Send + 'static> =
+//RS                 unsafe { std::mem::transmute(boxed) };
+//RS             // JET_VETTED_UNSAFE_END: jet_taskgroup_borrowed_spawn
+//RS             let waiter = super::ParkSlot::new();
+//RS             let permit = self
+//RS                 .children
+//RS                 .acquire_with(waiter, |waiter| {
+//RS                     super::jet_scheduler_task_group_wait(waiter);
+//RS                     Ok::<(), ()>(())
+//RS                 })
+//RS                 .expect("task-group admission wait cannot fail");
+//RS             let task = JetTask::spawn_at(spawn_site, label, move || {
+//RS                 let _permit = permit;
+//RS                 erased()
+//RS             });
+//RS             self.children.register(task.state.clone());
+//RS             task
+//RS         }
+//RS 
+//RS         pub fn close(&self) {
+//RS             if jet_task_deadline_pending() {
+//RS                 self.children
+//RS                     .close_with_cancel(|child| child.cancel(), |child| child.join());
+//RS             } else {
+//RS                 self.children.close_with(|child| child.join());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for JetTaskGroup {
+//RS         fn drop(&mut self) {
+//RS             if self.owner {
+//RS                 self.close();
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub struct JetTask<T: Send + 'static> {
+//RS         state: std::sync::Arc<JetTaskState<T>>,
+//RS     }
+//RS 
+//RS     impl<T: Send + 'static> Default for JetTask<T> {
+//RS         fn default() -> Self {
+//RS             JetTask {
+//RS                 state: std::sync::Arc::new(JetTaskState {
+//RS                     handle: std::sync::Mutex::new(None),
+//RS                     control: super::JetTaskControl::new(),
+//RS                     skip_join_deadline: false,
+//RS                 }),
+//RS             }
+//RS         }
+//RS     }
+//RS     impl<T: Send + 'static> JetTask<T> {
+//RS         pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
+//RS             Self::spawn_at(0, "", f)
+//RS         }
+//RS 
+//RS         pub fn spawn_at<F: FnOnce() -> T + Send + 'static>(
+//RS             spawn_site: usize,
+//RS             label: &str,
+//RS             f: F,
+//RS         ) -> JetTask<T> {
+//RS             let inherited_deadline = super::jet_ctx_deadline_ms();
+//RS             let control = super::JetTaskControl::new();
+//RS             JetTask {
+//RS                 state: std::sync::Arc::new(JetTaskState {
+//RS                     handle: std::sync::Mutex::new(Some(
+//RS                         super::jet_scheduler_spawn_blocking_with_control_at(
+//RS                             spawn_site,
+//RS                             label,
+//RS                             move || {
+//RS                                 let _deadline_guard =
+//RS                                     inherited_deadline.map(super::jet_ctx_push_deadline);
+//RS                                 f()
+//RS                             },
+//RS                             control.clone(),
+//RS                         ),
+//RS                     )),
+//RS                     control,
+//RS                     skip_join_deadline: false,
+//RS                 }),
+//RS             }
+//RS         }
+//RS         pub(crate) fn spawn_typed_deadline<F: FnOnce() -> T + Send + 'static>(
+//RS             f: F,
+//RS             control: std::sync::Arc<super::JetTaskControl>,
+//RS         ) -> JetTask<T> {
+//RS             Self::spawn_typed_deadline_at(0, "", f, control)
+//RS         }
+//RS 
+//RS         pub(crate) fn spawn_typed_deadline_at<F: FnOnce() -> T + Send + 'static>(
+//RS             spawn_site: usize,
+//RS             label: &str,
+//RS             f: F,
+//RS             control: std::sync::Arc<super::JetTaskControl>,
+//RS         ) -> JetTask<T> {
+//RS             let inherited_deadline = super::jet_ctx_deadline_ms();
+//RS             JetTask {
+//RS                 state: std::sync::Arc::new(JetTaskState {
+//RS                     handle: std::sync::Mutex::new(Some(
+//RS                         super::jet_scheduler_spawn_blocking_with_control_at(
+//RS                             spawn_site,
+//RS                             label,
+//RS                             move || {
+//RS                                 let _deadline_guard =
+//RS                                     inherited_deadline.map(super::jet_ctx_push_deadline);
+//RS                                 let _typed_deadline_boundary =
+//RS                                     super::JetTypedDeadlineBoundary::enter();
+//RS                                 f()
+//RS                             },
+//RS                             control.clone(),
+//RS                         ),
+//RS                     )),
+//RS                     control,
+//RS                     skip_join_deadline: true,
+//RS                 }),
+//RS             }
+//RS         }
+//RS         // D-COROUTINE1=A: control-plane hooks on the M:N scheduler substrate.
+//RS         pub fn pause(&self) {
+//RS             self.pause_with_mode(0);
+//RS         }
+//RS         /// D-TASK-PAUSE-TIER1=E: `mode` 0 = WaitPoints, 1 = CheckLoops.
+//RS         pub fn pause_with_mode(&self, mode: i64) {
+//RS             let mode = if mode == 1 { 1 } else { 0 };
+//RS             self.state.control.pause_with_mode(mode);
+//RS         }
+//RS         pub fn resume(&self) {
+//RS             self.state.control.resume();
+//RS         }
+//RS         pub fn cancel(&self) {
+//RS             self.state.control.cancel();
+//RS         }
+//RS         /// Status-only probe for heterogeneous `task.all`. The probe caches
+//RS         /// the typed completion in the scheduler join; `join()` still owns and
+//RS         /// returns that concrete value later.
+//RS         pub fn poll(&self) -> super::JetSchedulerTaskPoll {
+//RS             self.state
+//RS                 .handle
+//RS                 .lock()
+//RS                 .unwrap()
+//RS                 .as_ref()
+//RS                 .expect("task already joined")
+//RS                 .poll()
+//RS         }
+//RS         /// D-CONC-FAIL1=A: child cancellation, deadline, and panic are values
+//RS         /// in the one TaskFailure rail; the scheduler owns only the wait-point
+//RS         /// adapter for cancellation of the joining parent.
+//RS         pub fn join(self) -> Result<T, JetTaskFailure> {
+//RS             let state = self.state;
+//RS             let skip_join_deadline = state.skip_join_deadline;
+//RS             if !skip_join_deadline {
+//RS                 super::jet_task_join_deadline_check();
+//RS             }
+//RS             let result = {
+//RS                 let mut handle = state.handle.lock().unwrap();
+//RS                 let result = handle
+//RS                     .as_mut()
+//RS                     .expect("task already joined")
+//RS                     .join();
+//RS                 let _ = handle.take();
+//RS                 result
+//RS             };
+//RS             if !skip_join_deadline {
+//RS                 super::jet_task_join_deadline_check();
+//RS             }
+//RS             result
+//RS         }
+//RS         /// Drain a completed or cancelled child without observing the parent
+//RS         /// wait policy. The heterogeneous `task.all` adapter uses this after
+//RS         /// fail-fast cancellation so cleanup cannot re-raise the parent's
+//RS         /// cancellation while consuming child completions.
+//RS         pub fn drain(self) {
+//RS             let state = self.state;
+//RS             let handle = { state.handle.lock().unwrap().take() };
+//RS             if let Some(handle) = handle {
+//RS                 handle.drain();
+//RS             }
+//RS         }
+//RS         pub fn detach(self) {
+//RS             let _ = self.state.handle.lock().unwrap().take();
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_task_entries<T: Send + 'static>(
+//RS         tasks: Vec<JetTask<T>>,
+//RS         operation: &str,
+//RS     ) -> Vec<(super::JetSchedulerJoin<T>, std::sync::Arc<super::JetTaskControl>)> {
+//RS         tasks
+//RS             .into_iter()
+//RS             .map(|task| {
+//RS                 (
+//RS                     task.state
+//RS                         .handle
+//RS                         .lock()
+//RS                         .unwrap()
+//RS                         .take()
+//RS                         .unwrap_or_else(|| panic!("{operation}: task already joined")),
+//RS                     task.state.control.clone(),
+//RS                 )
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     /// D-CONC-SPAWN1=D: `task.all` joins every child; fail fast and cancel siblings on error.
+//RS     pub fn jet_task_all<T: Send + 'static>(
+//RS         tasks: Vec<JetTask<T>>,
+//RS     ) -> Result<Vec<T>, JetTaskFailure> {
+//RS         super::jet_scheduler_all(jet_task_entries(tasks, "all"))
+//RS     }
+//RS 
+//RS     /// D-CONC-SPAWN1=D: `task.race` returns the first successful result and cancels siblings.
+//RS     pub fn jet_task_race<T: Send + 'static>(
+//RS         tasks: Vec<JetTask<T>>,
+//RS     ) -> Result<T, JetTaskFailure> {
+//RS         super::jet_scheduler_race(jet_task_entries(tasks, "race"))
+//RS     }
+//RS 
+//RS     /// D-CONC-SPAWN1=D: `task.any` returns the first completed result.
+//RS     pub fn jet_task_any<T: Send + 'static>(
+//RS         tasks: Vec<JetTask<T>>,
+//RS     ) -> Result<T, JetTaskFailure> {
+//RS         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
+//RS     }
+//RS 
+//RS     /// D-CONC-FAIL1=A: a propagating task body returns a private `Result`
+//RS     /// carrier. Flatten it at the task boundary before `join()` exposes the
+//RS     /// public `TaskFailure` rail.
+//RS     pub fn jet_task_join_result<T, E>(
+//RS         task: JetTask<Result<T, E>>,
+//RS     ) -> Result<T, JetTaskFailure>
+//RS     where
+//RS         T: Send + 'static,
+//RS         E: Send + 'static + std::fmt::Debug,
+//RS     {
+//RS         jet_task_flatten_result(task.join())
+//RS     }
+//RS 
+//RS     pub fn jet_task_all_result<T, E>(
+//RS         tasks: Vec<JetTask<Result<T, E>>>,
+//RS     ) -> Result<Vec<T>, JetTaskFailure>
+//RS     where
+//RS         T: Send + 'static,
+//RS         E: Send + 'static + std::fmt::Debug,
+//RS     {
+//RS         jet_task_flatten_results(jet_task_all(tasks))
+//RS     }
+//RS 
+//RS     pub fn jet_task_race_result<T, E>(
+//RS         tasks: Vec<JetTask<Result<T, E>>>,
+//RS     ) -> Result<T, JetTaskFailure>
+//RS     where
+//RS         T: Send + 'static,
+//RS         E: Send + 'static + std::fmt::Debug,
+//RS     {
+//RS         jet_task_flatten_result(jet_task_race(tasks))
+//RS     }
+//RS 
+//RS     pub fn jet_task_any_result<T, E>(
+//RS         tasks: Vec<JetTask<Result<T, E>>>,
+//RS     ) -> Result<T, JetTaskFailure>
+//RS     where
+//RS         T: Send + 'static,
+//RS         E: Send + 'static + std::fmt::Debug,
+//RS     {
+//RS         jet_task_flatten_result(jet_task_any(tasks))
+//RS     }
+//RS 
+//RS     /// Cooperative yield — park at a wait point with a zero timeout.
+//RS     pub fn jet_task_yield() {
+//RS         super::jet_scheduler_yield_now();
+//RS     }
+//RS 
+//RS     /// Control-plane trace of the currently running task (or the idle defaults).
+//RS     pub fn jet_task_current_trace() -> String {
+//RS         super::jet_scheduler_current_task_trace()
+//RS     }
+//RS 
+//RS     fn jet_select_duration_ns(value: &jet_foundation::Numeric::JetInt) -> i64 {
+//RS         jet_int_owned_to_i64(value).unwrap_or_else(|error| {
+//RS             super::jet_runtime_stop_with_context(
+//RS                 "E1003",
+//RS                 file!(),
+//RS                 line!(),
+//RS                 "",
+//RS                 "",
+//RS                 &error,
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     /// D-CONC-CHAN1: wait on plain endpoints and return the selected arm plus
+//RS     /// its receive payload. Timer arms carry no value, so the option is absent.
+//RS     pub fn jet_select_wait_tagged<T: Send + 'static>(
+//RS         recvs: Vec<JetReceiver<T>>,
+//RS         after_ns: Vec<jet_foundation::Numeric::JetInt>,
+//RS     ) -> (jet_foundation::Numeric::JetInt, JetOutcome<T, JetAbsent>) {
+//RS         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
+//RS         let after_ms = after_ns
+//RS             .into_iter()
+//RS             .map(|ns| {
+//RS                 super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(
+//RS                     jet_select_duration_ns(&ns),
+//RS                 ))
+//RS             })
+//RS             .collect();
+//RS         match super::jet_scheduler_select(inners, after_ms) {
+//RS             super::JetSelectOutcome::Recv { arm, value } => {
+//RS                 (jet_int_owned_from_i64(arm as i64), Ok(value))
+//RS             }
+//RS             super::JetSelectOutcome::After { arm } => (
+//RS                 jet_int_owned_from_i64((recvs.len() + arm) as i64),
+//RS                 Err(JetAbsent),
+//RS             ),
+//RS             super::JetSelectOutcome::Closed => super::jet_scheduler_fatal("select closed"),
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-CONC-CHAN2=D: probe a readiness table with an `else` arm. `-1` means
+//RS     /// that no receive or timer arm is ready, including a closed-only table.
+//RS     pub fn jet_select_try_wait_tagged<T: Send + 'static>(
+//RS         recvs: Vec<JetReceiver<T>>,
+//RS         after_ns: Vec<jet_foundation::Numeric::JetInt>,
+//RS     ) -> (jet_foundation::Numeric::JetInt, JetOutcome<T, JetAbsent>) {
+//RS         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
+//RS         let after_ms = after_ns
+//RS             .into_iter()
+//RS             .map(|ns| {
+//RS                 super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(
+//RS                     jet_select_duration_ns(&ns),
+//RS                 ))
+//RS             })
+//RS             .collect();
+//RS         match super::jet_scheduler_try_select(inners, after_ms) {
+//RS             Some(super::JetSelectOutcome::Recv { arm, value }) => {
+//RS                 (jet_int_owned_from_i64(arm as i64), Ok(value))
+//RS             }
+//RS             Some(super::JetSelectOutcome::After { arm }) => (
+//RS                 jet_int_owned_from_i64((recvs.len() + arm) as i64),
+//RS                 Err(JetAbsent),
+//RS             ),
+//RS             Some(super::JetSelectOutcome::Closed) | None => {
+//RS                 (jet_int_owned_from_i64(-1), Err(JetAbsent))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-TUPLE-DESTRUCT1: `channel<T>()` — mirrors Rust's `mpsc::channel()`:
+//RS     /// returns the `(Sender<T>, Receiver<T>)` pair directly (no combined "Channel"
+//RS     /// handle, and no `.sender()` method — a second sender is `tx.clone()`).
+//RS     pub fn channel<T: Send>() -> (JetSender<T>, JetReceiver<T>) {
+//RS         let inner = super::JetSchedulerChannel::new();
+//RS         let tx = inner.sender();
+//RS         (JetSender { tx }, JetReceiver { inner })
+//RS     }
+//RS 
+//RS     /// D-TASKRUNTIME1=A: bounded channel; `capacity` is a real memory/backpressure bound.
+//RS     pub fn channel_bounded<T: Send>(capacity: i64) -> (JetSender<T>, JetReceiver<T>) {
+//RS         let inner = super::JetSchedulerChannel::bounded(capacity);
+//RS         let tx = inner.sender();
+//RS         (JetSender { tx }, JetReceiver { inner })
+//RS     }
+//RS 
+//RS     // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the canonical pull/cancellation
+//RS     // protocol lives in the shared Prelude scheduler. This module only
+//RS     // exposes it under the `jet_std` namespace used by emitted AOT code.
+//RS     pub use super::{jet_stream_task, JetStream, JetStreamSender};
+//RS 
+//RS     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
+//RS     pub fn after(ms: i64) -> JetReceiver<()> {
+//RS         let delay = super::jet_task_delay_ms_defaulted(ms);
+//RS         let inner = super::JetSchedulerChannel::timer(delay as i64);
+//RS         let tx = inner.sender();
+//RS         super::jet_scheduler_spawn_detached_timer(move || {
+//RS             super::jet_scheduler_sleep_ms(delay);
+//RS             tx.send(());
+//RS         });
+//RS         JetReceiver { inner }
+//RS     }
+//RS 
+//RS     /// D-TASKRUNTIME1=A: one-shot typed timer channel for select timeout values.
+//RS     pub fn after_value<T: Send + 'static>(ms: i64, value: T) -> JetReceiver<T> {
+//RS         let delay = super::jet_task_delay_ms_defaulted(ms);
+//RS         let inner = super::JetSchedulerChannel::timer(delay as i64);
+//RS         let tx = inner.sender();
+//RS         super::jet_scheduler_spawn_detached_timer(move || {
+//RS             super::jet_scheduler_sleep_ms(delay);
+//RS             tx.send(value);
+//RS         });
+//RS         JetReceiver { inner }
+//RS     }
+//RS 
+//RS     /// D-TASKRUNTIME1=A: interval timer channel; sends 1, 2, ... until process exit.
+//RS     pub fn interval(ms: i64) -> JetReceiver<i64> {
+//RS         let delay = super::jet_task_interval_ms_defaulted(ms);
+//RS         let inner = super::JetSchedulerChannel::interval(delay as i64);
+//RS         let tx = inner.sender();
+//RS         super::jet_scheduler_spawn_detached_timer(move || {
+//RS             let mut tick = 1i64;
+//RS             loop {
+//RS                 super::jet_scheduler_sleep_ms(delay);
+//RS                 if !tx.send(tick) {
+//RS                     break;
+//RS                 }
+//RS                 tick += 1;
+//RS             }
+//RS         });
+//RS         JetReceiver { inner }
+//RS     }
+//RS 
+//RS     pub struct JetReceiver<T> {
+//RS         inner: super::JetSchedulerChannel<T>,
+//RS     }
+//RS     // D-TUPLE-DESTRUCT1: the tuple-destructure bind convention clones each
+//RS     // extracted field (`(tx, rx) :: channel<T>()` clones `rx` off the
+//RS     // synthesized `(Sender<T>, Receiver<T>)` struct, same as `Sender` below). The
+//RS     // underlying scheduler channel is `Arc`-backed and already supports concurrent
+//RS     // receivers (the same substrate races multiple receive arms
+//RS     // against), so cloning a `Receiver` is a cheap, sound pointer copy — not a
+//RS     // single-consumer `std::sync::mpsc::Receiver`.
+//RS     impl<T> Clone for JetReceiver<T> {
+//RS         fn clone(&self) -> Self {
+//RS             JetReceiver {
+//RS                 inner: self.inner.clone(),
+//RS             }
+//RS         }
+//RS     }
+//RS     impl<T: Send> JetReceiver<T> {
+//RS         pub fn receive(&self) -> Result<T, Closed> {
+//RS             // D-CANCELMODEL1=C: cancellation is handled preemptively inside
+//RS             // `inner.receive()` — a cancelled recv unwinds at the wait point rather
+//RS             // than returning a cooperative `Closed`. No pre-check sentinel here.
+//RS             // Deadline uses the same raise door; cleanup must defer it too.
+//RS             if !super::jet_scheduler_shielded() {
+//RS                 if let Some(remaining) = super::jet_deadline_remaining_ms() {
+//RS                     if remaining <= 0 {
+//RS                         super::jet_deadline_exceeded("channel receive");
+//RS                     }
+//RS                 }
+//RS             }
+//RS             match self.inner.receive() {
+//RS                 Some(v) => {
+//RS                     super::jet_deadline_check("channel receive");
+//RS                     Ok(v)
+//RS                 }
+//RS                 None => Err(Closed::Closed),
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn try_receive(&self) -> JetOutcome<T, JetAbsent> {
+//RS             self.inner.try_receive().ok_or(JetAbsent)
+//RS         }
+//RS 
+//RS         pub fn is_timer(&self) -> bool {
+//RS             self.inner.is_timer()
+//RS         }
+//RS 
+//RS         pub fn is_interval(&self) -> bool {
+//RS             self.inner.is_interval()
+//RS         }
+//RS 
+//RS         pub fn is_cancelled(&self) -> bool {
+//RS             self.inner.is_cancelled()
+//RS         }
+//RS 
+//RS         pub fn is_ready(&self) -> bool {
+//RS             self.inner.is_ready()
+//RS         }
+//RS 
+//RS         pub fn delay_ms(&self) -> i64 {
+//RS             self.inner.delay_ms()
+//RS         }
+//RS 
+//RS         /// Explicitly close the channel (wakes waiters); same as cancellation.
+//RS         pub fn close(&self) {
+//RS             self.inner.cancel();
+//RS         }
+//RS     }
+//RS 
+//RS     pub struct JetSender<T> {
+//RS         tx: super::JetSchedulerSender<T>,
+//RS     }
+//RS     impl<T: Send> JetSender<T> {
+//RS         pub fn send(&self, value: T) {
+//RS             let _ = self.tx.send(value);
+//RS         }
+//RS 
+//RS         /// Explicitly close the channel from the send side.
+//RS         pub fn close(&self) {
+//RS             self.tx.close();
+//RS         }
+//RS     }
+//RS     impl<T> Clone for JetSender<T> {
+//RS         fn clone(&self) -> Self {
+//RS             JetSender {
+//RS                 tx: self.tx.clone(),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub enum Closed {
+//RS         Closed
+//RS     }
+//RS 
+//RS     /// D-SHARED-REVISION1=A: a failed optimistic publication has a typed
+//RS     /// reason. Stale tickets are not failures: they return `Ok(false)` so a
+//RS     /// caller can distinguish a lost race from a malformed ticket or an
+//RS     /// exhausted generation.
+//RS     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS     pub enum JetSharedRevisionError {
+//RS         WrongOwner,
+//RS         GenerationExhausted,
+//RS     }
+//RS 
+//RS     impl super::JetShow for JetSharedRevisionError {
+//RS         fn jet_show(&self) -> String {
+//RS             match self {
+//RS                 Self::WrongOwner => "SharedRevisionError.WrongOwner".to_string(),
+//RS                 Self::GenerationExhausted => {
+//RS                     "SharedRevisionError.GenerationExhausted".to_string()
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     impl super::JetDisplay for JetSharedRevisionError {
+//RS         fn jet_display(&self) -> String {
+//RS             self.jet_show()
+//RS         }
+//RS     }
+//RS     impl super::JetDebug for JetSharedRevisionError {
+//RS         fn jet_debug(&self) -> String {
+//RS             self.jet_show()
+//RS         }
+//RS     }
+//RS 
+//RS     // D-SHARED-REVISION1=A: the owner and generation are intentionally private.
+//RS     // The copied projection is ordinary data, but the ticket cannot be forged,
+//RS     // decoded, cloned, or reused after it is moved to `try_replace`.
+//RS     pub struct JetSharedSnapshot<T: 'static, U> {
+//RS         owner: std::sync::Arc<JetSharedCell<T>>,
+//RS         revision: u64,
+//RS         valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS         consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS         value: Option<U>,
+//RS     }
+//RS 
+//RS     // JET_VETTED_UNSAFE_BEGIN: jet_shared_cell
+//RS     // AUDIT: JetSharedCell's UnsafeCell, permit-gated Send/Sync, and raw
+//RS     // projections implement the shared-cell lease. Safe Rust cannot express
+//RS     // that a runtime read or exclusive permit protects a dynamically selected
+//RS     // field projection across the callback. The invariant is that every
+//RS     // dereference holds its matching permit, projections are sema-validated
+//RS     // disjoint fields, and a revision ticket is consumed at most once.
+//RS     // Violating those conditions would create an aliasing/data race or a
+//RS     // dangling reference and is undefined behavior.
+//RS 
+//RS     // jet:shared-guard-internal-begin
+//RS     struct JetSharedOwnerLifetime {
+//RS         logical_owners: usize,
+//RS         active_borrows: usize,
+//RS     }
+//RS 
+//RS     struct JetSharedCell<T> {
+//RS         protocol: std::sync::Arc<crate::JetSharedProtocol>,
+//RS         scalar: Option<crate::JetSharedAtomic>,
+//RS         revision: std::sync::atomic::AtomicU64,
+//RS         owner_lifetime: std::sync::Mutex<JetSharedOwnerLifetime>,
+//RS         payload_finalizer: std::sync::Mutex<
+//RS             Option<crate::JetSharedPhysicalFinalizerBinding<T>>,
+//RS         >,
+//RS         value: std::cell::UnsafeCell<Option<T>>,
+//RS     }
+//RS 
+//RS     impl<T> JetSharedCell<T> {
+//RS         fn take_payload_for_retirement(
+//RS             &self,
+//RS         ) -> Option<(T, Option<crate::JetSharedPhysicalFinalizerBinding<T>>)> {
+//RS             // SAFETY: caller holds owner_lifetime and has observed zero logical
+//RS             // owners plus zero active borrows.
+//RS             let value = unsafe { (&mut *self.value.get()).take() }?;
+//RS             let finalizer = self
+//RS                 .payload_finalizer
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .take();
+//RS             Some((value, finalizer))
+//RS         }
+//RS 
+//RS         fn finish_retired_payload(
+//RS             retired: Option<(T, Option<crate::JetSharedPhysicalFinalizerBinding<T>>)>,
+//RS         ) -> Option<crate::JetSharedPhysicalCompletion> {
+//RS             match retired {
+//RS                 Some((value, Some(finalizer))) => Some(finalizer.finish(value)),
+//RS                 Some((value, None)) => {
+//RS                     drop(value);
+//RS                     None
+//RS                 }
+//RS                 None => None,
+//RS             }
+//RS         }
+//RS 
+//RS         fn deliver_retired_payload(
+//RS             retired: Option<(T, Option<crate::JetSharedPhysicalFinalizerBinding<T>>)>,
+//RS         ) {
+//RS             match retired {
+//RS                 Some((value, Some(finalizer))) => finalizer.finish_and_deliver(value),
+//RS                 Some((value, None)) => drop(value),
+//RS                 None => {}
+//RS             }
+//RS         }
+//RS 
+//RS         fn take_retired_after_release(
+//RS             &self,
+//RS             release_owner: bool,
+//RS         ) -> Option<(T, Option<crate::JetSharedPhysicalFinalizerBinding<T>>)> {
+//RS             let mut lifetime = self
+//RS                 .owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if release_owner {
+//RS                 if lifetime.logical_owners == 0 {
+//RS                     return None;
+//RS                 }
+//RS                 lifetime.logical_owners -= 1;
+//RS             } else {
+//RS                 if lifetime.active_borrows == 0 {
+//RS                     return None;
+//RS                 }
+//RS                 lifetime.active_borrows -= 1;
+//RS             }
+//RS             if lifetime.logical_owners == 0 && lifetime.active_borrows == 0 {
+//RS                 self.take_payload_for_retirement()
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         }
+//RS 
+//RS         fn release_logical_owner(&self) -> Option<crate::JetSharedPhysicalCompletion> {
+//RS             Self::finish_retired_payload(self.take_retired_after_release(true))
+//RS         }
+//RS 
+//RS         fn release_logical_owner_during_drop(&self) {
+//RS             Self::deliver_retired_payload(self.take_retired_after_release(true));
+//RS         }
+//RS 
+//RS         fn install_payload_finalizer(
+//RS             &self,
+//RS             finalizer: &mut Option<crate::JetSharedPhysicalFinalizerBinding<T>>,
+//RS         ) -> Result<(), String> {
+//RS             let lifetime = self
+//RS                 .owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if lifetime.logical_owners == 0 {
+//RS                 return Err("cannot install a finalizer for a retired Shared payload".to_string());
+//RS             }
+//RS             let mut slot = self
+//RS                 .payload_finalizer
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if slot.is_some() {
+//RS                 return Err("Shared payload finalizer is already installed".to_string());
+//RS             }
+//RS             let Some(candidate) = finalizer.take() else {
+//RS                 return Err("Shared payload finalizer candidate is empty".to_string());
+//RS             };
+//RS             *slot = Some(candidate);
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS     // jet:shared-guard-internal-end
+//RS 
+//RS     // jet:shared-guard-internal-begin
+//RS     fn jet_shared_scalar_read_as<T: 'static, U: Copy + 'static>(value: &T) -> U {
+//RS         debug_assert_eq!(
+//RS             std::any::TypeId::of::<T>(),
+//RS             std::any::TypeId::of::<U>()
+//RS         );
+//RS         // SAFETY: callers select U only after matching T's TypeId. Both
+//RS         // values therefore have the same size and valid representation.
+//RS         unsafe { std::mem::transmute_copy(value) }
+//RS     }
+//RS 
+//RS     fn jet_shared_scalar_write_as<T: 'static, U: Copy + 'static>(value: U) -> T {
+//RS         debug_assert_eq!(
+//RS             std::any::TypeId::of::<T>(),
+//RS             std::any::TypeId::of::<U>()
+//RS         );
+//RS         // SAFETY: callers select U only after matching T's TypeId. Both
+//RS         // values therefore have the same size and valid representation.
+//RS         unsafe { std::mem::transmute_copy(&value) }
+//RS     }
+//RS 
+//RS     fn jet_shared_scalar_bits<T: 'static>(
+//RS         value: &T,
+//RS         kind: crate::JetSharedScalarKind,
+//RS     ) -> u64 {
+//RS         match kind {
+//RS             crate::JetSharedScalarKind::I8 => {
+//RS                 jet_shared_scalar_read_as::<T, i8>(value) as i64 as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::U8 => {
+//RS                 jet_shared_scalar_read_as::<T, u8>(value) as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::I16 => {
+//RS                 jet_shared_scalar_read_as::<T, i16>(value) as i64 as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::U16 => {
+//RS                 jet_shared_scalar_read_as::<T, u16>(value) as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::I32 => {
+//RS                 jet_shared_scalar_read_as::<T, i32>(value) as i64 as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::U32 => {
+//RS                 jet_shared_scalar_read_as::<T, u32>(value) as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::I64 => {
+//RS                 jet_shared_scalar_read_as::<T, i64>(value) as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::U64 => {
+//RS                 jet_shared_scalar_read_as::<T, u64>(value)
+//RS             }
+//RS             crate::JetSharedScalarKind::F32 => {
+//RS                 jet_shared_scalar_read_as::<T, f32>(value).to_bits() as u64
+//RS             }
+//RS             crate::JetSharedScalarKind::F64 => {
+//RS                 jet_shared_scalar_read_as::<T, f64>(value).to_bits()
+//RS             }
+//RS             crate::JetSharedScalarKind::Bool => {
+//RS                 if jet_shared_scalar_read_as::<T, bool>(value) {
+//RS                     1
+//RS                 } else {
+//RS                     0
+//RS                 }
+//RS             }
+//RS             crate::JetSharedScalarKind::Char => {
+//RS                 jet_shared_scalar_read_as::<T, char>(value) as u32 as u64
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_shared_scalar_from_bits<T: 'static>(
+//RS         bits: u64,
+//RS         kind: crate::JetSharedScalarKind,
+//RS     ) -> T {
+//RS         match kind {
+//RS             crate::JetSharedScalarKind::I8 => {
+//RS                 jet_shared_scalar_write_as::<T, i8>(bits as i8)
+//RS             }
+//RS             crate::JetSharedScalarKind::U8 => {
+//RS                 jet_shared_scalar_write_as::<T, u8>(bits as u8)
+//RS             }
+//RS             crate::JetSharedScalarKind::I16 => {
+//RS                 jet_shared_scalar_write_as::<T, i16>(bits as i16)
+//RS             }
+//RS             crate::JetSharedScalarKind::U16 => {
+//RS                 jet_shared_scalar_write_as::<T, u16>(bits as u16)
+//RS             }
+//RS             crate::JetSharedScalarKind::I32 => {
+//RS                 jet_shared_scalar_write_as::<T, i32>(bits as i32)
+//RS             }
+//RS             crate::JetSharedScalarKind::U32 => {
+//RS                 jet_shared_scalar_write_as::<T, u32>(bits as u32)
+//RS             }
+//RS             crate::JetSharedScalarKind::I64 => {
+//RS                 jet_shared_scalar_write_as::<T, i64>(bits as i64)
+//RS             }
+//RS             crate::JetSharedScalarKind::U64 => {
+//RS                 jet_shared_scalar_write_as::<T, u64>(bits)
+//RS             }
+//RS             crate::JetSharedScalarKind::F32 => {
+//RS                 jet_shared_scalar_write_as::<T, f32>(f32::from_bits(bits as u32))
+//RS             }
+//RS             crate::JetSharedScalarKind::F64 => {
+//RS                 jet_shared_scalar_write_as::<T, f64>(f64::from_bits(bits))
+//RS             }
+//RS             crate::JetSharedScalarKind::Bool => {
+//RS                 jet_shared_scalar_write_as::<T, bool>(bits != 0)
+//RS             }
+//RS             crate::JetSharedScalarKind::Char => {
+//RS                 let value = crate::jet_shared_guard_validate_char(bits as i32)
+//RS                     .expect(crate::JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED);
+//RS                 jet_shared_scalar_write_as::<T, char>(value)
+//RS             }
+//RS         }
+//RS     }
+//RS     // jet:shared-guard-internal-end
+//RS 
+//RS     // jet:shared-guard-internal-begin
+//RS     impl<T: 'static> JetSharedCell<T> {
+//RS         fn logical_owner_count(&self) -> usize {
+//RS             self.owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .logical_owners
+//RS         }
+//RS 
+//RS         fn retain_logical_owner(&self) -> bool {
+//RS             let mut lifetime = self
+//RS                 .owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if lifetime.logical_owners == 0 {
+//RS                 return false;
+//RS             }
+//RS             lifetime.logical_owners = lifetime
+//RS                 .logical_owners
+//RS                 .checked_add(1)
+//RS                 .expect("Shared owner count exhausted");
+//RS             true
+//RS         }
+//RS         fn retain_guard_owner(&self) -> bool {
+//RS             let mut lifetime = self
+//RS                 .owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if lifetime.logical_owners == 0 && lifetime.active_borrows == 0 {
+//RS                 return false;
+//RS             }
+//RS             lifetime.logical_owners = lifetime
+//RS                 .logical_owners
+//RS                 .checked_add(1)
+//RS                 .expect("Shared owner count exhausted");
+//RS             true
+//RS         }
+//RS 
+//RS 
+//RS 
+//RS         fn begin_physical_borrow(&self) -> bool {
+//RS             let mut lifetime = self
+//RS                 .owner_lifetime
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if lifetime.logical_owners == 0 {
+//RS                 return false;
+//RS             }
+//RS             lifetime.active_borrows = lifetime
+//RS                 .active_borrows
+//RS                 .checked_add(1)
+//RS                 .expect("Shared active borrow count exhausted");
+//RS             true
+//RS         }
+//RS 
+//RS         fn end_physical_borrow(&self) -> Option<crate::JetSharedPhysicalCompletion> {
+//RS             Self::finish_retired_payload(self.take_retired_after_release(false))
+//RS         }
+//RS 
+//RS         fn end_physical_borrow_during_drop(&self) {
+//RS             Self::deliver_retired_payload(self.take_retired_after_release(false));
+//RS         }
+//RS 
+//RS         fn has_live_owner(&self) -> bool {
+//RS             self.logical_owner_count() > 0
+//RS         }
+//RS 
+//RS         fn scalar_snapshot(&self) -> Option<T> {
+//RS             self.scalar.as_ref().map(|scalar| {
+//RS                 jet_shared_scalar_from_bits(scalar.load(), scalar.kind())
+//RS             })
+//RS         }
+//RS 
+//RS         fn store_scalar_value(&self, value: &T) {
+//RS             if let Some(scalar) = self.scalar.as_ref() {
+//RS                 scalar.store(jet_shared_scalar_bits(value, scalar.kind()));
+//RS             }
+//RS         }
+//RS 
+//RS         fn with_read<F, R>(&self, f: F) -> R
+//RS         where
+//RS             F: FnOnce(&T) -> R,
+//RS         {
+//RS             let _permit = crate::jet_shared_acquire(&self.protocol, false, || false)
+//RS                 .expect("uncancelled Shared read acquires");
+//RS             if let Some(value) = self.scalar_snapshot() {
+//RS                 return f(&value);
+//RS             }
+//RS             // jet:shared-guard-internal-begin
+//RS             // SAFETY: the read permit is held through the callback.
+//RS             f(unsafe {
+//RS                 (&*self.value.get())
+//RS                     .as_ref()
+//RS                     .expect("Shared payload was retired")
+//RS             })
+//RS             // jet:shared-guard-internal-end
+//RS         }
+//RS 
+//RS         fn next_revision(&self) -> Result<u64, JetSharedRevisionError> {
+//RS             let current = self
+//RS                 .revision
+//RS                 .load(std::sync::atomic::Ordering::Acquire);
+//RS             current
+//RS                 .checked_add(1)
+//RS                 .ok_or(JetSharedRevisionError::GenerationExhausted)
+//RS         }
+//RS 
+//RS         fn commit_revision(&self) {
+//RS             let next = self
+//RS                 .next_revision()
+//RS                 .expect("Shared revision generation exhausted");
+//RS             self.revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS 
+//RS         fn commit_guard(&self) {
+//RS             let next = self
+//RS                 .next_revision()
+//RS                 .expect("Shared revision generation exhausted");
+//RS             if self.scalar.is_some() {
+//RS                 // SAFETY: the caller still holds the editable guard permit
+//RS                 // while committing the guard's shadow value.
+//RS                 let value = unsafe {
+//RS                     (&*self.value.get())
+//RS                         .as_ref()
+//RS                         .expect("Shared payload was retired")
+//RS                 };
+//RS                 self.store_scalar_value(value);
+//RS             }
+//RS             self.revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS 
+//RS         fn refresh_scalar_shadow(&self) {
+//RS             if let Some(value) = self.scalar_snapshot() {
+//RS                 // SAFETY: the caller holds this cell's guard permit while
+//RS                 // synchronizing the shadow used by the guard projection.
+//RS                 unsafe { *self.value.get() = Some(value) };
+//RS             }
+//RS         }
+//RS     }
+//RS     // jet:shared-guard-internal-end
+//RS 
+//RS     // jet:shared-guard-internal-begin
+//RS     // SAFETY: JetSharedProtocol grants either shared read permits or one
+//RS     // exclusive edit permit before any structured payload reference is
+//RS     // created. Scalar callback paths use the atomic carrier and do not touch
+//RS     // the shadow.
+//RS     unsafe impl<T: Send> Send for JetSharedCell<T> {}
+//RS     unsafe impl<T: Send + Sync> Sync for JetSharedCell<T> {}
+//RS     // jet:shared-guard-internal-end
+//RS 
+//RS     pub struct JetShared<T>(std::sync::Arc<JetSharedCell<T>>, bool);
+//RS     impl<T: 'static> JetShared<T> {
+//RS         pub fn new(value: T) -> Self {
+//RS             let kind = crate::jet_shared_scalar_kind::<T>();
+//RS             let scalar = kind.map(|kind| {
+//RS                 crate::JetSharedAtomic::new(kind, jet_shared_scalar_bits(&value, kind))
+//RS             });
+//RS             JetShared(
+//RS                 std::sync::Arc::new(JetSharedCell {
+//RS                     protocol: crate::JetSharedProtocol::new(),
+//RS                     scalar,
+//RS                     revision: std::sync::atomic::AtomicU64::new(0),
+//RS                     owner_lifetime: std::sync::Mutex::new(JetSharedOwnerLifetime {
+//RS                         logical_owners: 1,
+//RS                         active_borrows: 0,
+//RS                     }),
+//RS                     payload_finalizer: std::sync::Mutex::new(None),
+//RS                     // jet:shared-guard-internal-begin
+//RS                     value: std::cell::UnsafeCell::new(Some(value)),
+//RS                     // jet:shared-guard-internal-end
+//RS                 }),
+//RS                 true,
+//RS             )
+//RS         }
+//RS         /// Invocation-local identity used only to intern typed transport
+//RS         /// wrappers. It is never a Source handle or serialized MIR ID.
+//RS         pub fn physical_identity(&self) -> usize {
+//RS             std::sync::Arc::as_ptr(&self.0) as usize
+//RS         }
+//RS         /// Canonical ordering key of the physical Shared permit, used only
+//RS         /// while acquiring multiple owner roots in a deterministic order.
+//RS         pub fn physical_protocol_order_key(&self) -> usize {
+//RS             std::sync::Arc::as_ptr(&self.0.protocol) as usize
+//RS         }
+//RS 
+//RS         /// Compatibility surface for a Cell binding promoted across an HTTP
+//RS         /// handler boundary. The carrier is still the canonical lock-ordered
+//RS         /// Shared value; these methods preserve the ordinary Cell operations
+//RS         /// while the checked binding fact changes the storage type.
+//RS         pub fn get(&self) -> T
+//RS         where
+//RS             T: Clone,
+//RS         {
+//RS             self.read(Clone::clone)
+//RS         }
+//RS 
+//RS         pub fn set(&self, value: T) {
+//RS             let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+//RS                 .expect("uncancelled Shared set acquires");
+//RS             let next = self
+//RS                 .0
+//RS                 .next_revision()
+//RS                 .expect("Shared revision generation exhausted");
+//RS             if self.0.scalar.is_some() {
+//RS                 self.0.store_scalar_value(&value);
+//RS             } else {
+//RS                 // jet:shared-guard-internal-begin
+//RS                 // SAFETY: the exclusive permit is held for the whole write.
+//RS                 unsafe { *self.0.value.get() = Some(value) };
+//RS                 // jet:shared-guard-internal-end
+//RS             }
+//RS             self.0
+//RS                 .revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS 
+//RS         pub fn replace(&self, value: T) -> T {
+//RS             let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+//RS                 .expect("uncancelled Shared replace acquires");
+//RS             let next = self
+//RS                 .0
+//RS                 .next_revision()
+//RS                 .expect("Shared revision generation exhausted");
+//RS             let old = if let Some(scalar) = self.0.scalar.as_ref() {
+//RS                 let old = scalar.swap(jet_shared_scalar_bits(&value, scalar.kind()));
+//RS                 jet_shared_scalar_from_bits(old, scalar.kind())
+//RS             } else {
+//RS                 // jet:shared-guard-internal-begin
+//RS                 // SAFETY: the exclusive permit is held for the whole replace.
+//RS                 unsafe {
+//RS                     std::mem::replace(&mut *self.0.value.get(), Some(value))
+//RS                         .expect("Shared payload was retired")
+//RS                 }
+//RS                 // jet:shared-guard-internal-end
+//RS             };
+//RS             self.0
+//RS                 .revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS             old
+//RS         }
+//RS 
+//RS         pub fn read<F, R>(&self, f: F) -> R
+//RS         where
+//RS             F: FnOnce(&T) -> R,
+//RS         {
+//RS             self.0.with_read(f)
+//RS         }
+//RS         /// Return the canonical publication revision without copying the value.
+//RS         ///
+//RS         /// Readers that need an optimistic ticket must still use `capture`; this
+//RS         /// accessor is metadata only and deliberately does not create a second
+//RS         /// revision mechanism in callers.
+//RS         pub(crate) fn revision(&self) -> u64 {
+//RS             self.0
+//RS                 .revision
+//RS                 .load(std::sync::atomic::Ordering::Acquire)
+//RS         }
+//RS 
+//RS 
+//RS         /// Capture one value/revision pair under the Shared read permit.
+//RS         pub fn capture(&self) -> JetSharedSnapshot<T, T>
+//RS         where
+//RS             T: Clone,
+//RS         {
+//RS             self.capture_with(Clone::clone)
+//RS         }
+//RS 
+//RS         /// Capture a pure owned projection under the same read permit.
+//RS         pub fn capture_with<F, U>(&self, project: F) -> JetSharedSnapshot<T, U>
+//RS         where
+//RS             F: FnOnce(&T) -> U,
+//RS         {
+//RS             let owner = self.0.clone();
+//RS             let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+//RS             let consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS             let (revision, value) = owner.with_read(|value| {
+//RS                 (
+//RS                     owner
+//RS                         .revision
+//RS                         .load(std::sync::atomic::Ordering::Acquire),
+//RS                     project(value),
+//RS                 )
+//RS             });
+//RS             assert!(owner.retain_logical_owner(), "snapshot requires a live Shared owner");
+//RS             JetSharedSnapshot {
+//RS                 owner,
+//RS                 revision,
+//RS                 valid,
+//RS                 consumed,
+//RS                 value: Some(value),
+//RS             }
+//RS         }
+//RS 
+//RS         /// Transaction-local capture. Reads the current working value when
+//RS         /// this participant has a staged edit, and predicts the one revision
+//RS         /// that the outermost commit will publish. Abort invalidates the
+//RS         /// ticket; a later local write invalidates earlier tickets.
+//RS         pub fn capture_txn<F, U>(
+//RS             &self,
+//RS             stm: &mut super::jet_stm::Guard,
+//RS             project: F,
+//RS         ) -> JetSharedSnapshot<T, U>
+//RS         where
+//RS             F: FnOnce(&T) -> U,
+//RS         {
+//RS             let protocol: std::sync::Arc<dyn crate::JetSharedCanonicalOwner> = self.0.protocol.clone();
+//RS             stm.touch(protocol.clone());
+//RS             let snapshot = if let Some(staged) = stm.staged_value::<T>(&protocol) {
+//RS                 let owner = self.0.clone();
+//RS                 let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+//RS                 let consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS                 let revision = stm
+//RS                     .snapshot_revision(
+//RS                         &protocol,
+//RS                         owner.revision.load(std::sync::atomic::Ordering::Acquire),
+//RS                     )
+//RS                     .expect("SharedRevisionError.GenerationExhausted");
+//RS                 let value = project(&staged.borrow());
+//RS                 assert!(owner.retain_logical_owner(), "snapshot requires a live Shared owner");
+//RS                 JetSharedSnapshot {
+//RS                     owner,
+//RS                     revision,
+//RS                     valid,
+//RS                     consumed,
+//RS                     value: Some(value),
+//RS                 }
+//RS             } else {
+//RS                 self.capture_with(project)
+//RS             };
+//RS             stm.record_snapshot(protocol, snapshot.valid.clone());
+//RS             snapshot
+//RS         }
+//RS 
+//RS         /// Consume an owner-bound ticket. The write and revision comparison
+//RS         /// happen while holding the same exclusive permit, so a race has one
+//RS         /// winner and a stale ticket never mutates the payload.
+//RS         pub fn try_replace<U>(
+//RS             &self,
+//RS             snapshot: JetSharedSnapshot<T, U>,
+//RS             value: T,
+//RS         ) -> Result<bool, JetSharedRevisionError> {
+//RS             let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+//RS                 .expect("uncancelled Shared try_replace acquires");
+//RS             if !std::sync::Arc::ptr_eq(&self.0, &snapshot.owner) {
+//RS                 return Err(JetSharedRevisionError::WrongOwner);
+//RS             }
+//RS             if !snapshot
+//RS                 .valid
+//RS                 .load(std::sync::atomic::Ordering::Acquire)
+//RS             {
+//RS                 return Ok(false);
+//RS             }
+//RS             let current = self
+//RS                 .0
+//RS                 .revision
+//RS                 .load(std::sync::atomic::Ordering::Acquire);
+//RS             if current != snapshot.revision {
+//RS                 return Ok(false);
+//RS             }
+//RS             let next = self.0.next_revision()?;
+//RS             if snapshot
+//RS                 .consumed
+//RS                 .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS             {
+//RS                 return Ok(false);
+//RS             }
+//RS             if self.0.scalar.is_some() {
+//RS                 self.0.store_scalar_value(&value);
+//RS             } else {
+//RS                 // jet:shared-guard-internal-begin
+//RS                 // SAFETY: the exclusive permit is held for the whole write.
+//RS                 unsafe { *self.0.value.get() = Some(value) };
+//RS                 // jet:shared-guard-internal-end
+//RS             }
+//RS             self.0
+//RS                 .revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS             snapshot
+//RS                 .valid
+//RS                 .store(false, std::sync::atomic::Ordering::Release);
+//RS             Ok(true)
+//RS         }
+//RS 
+//RS         /// Register a read participant with the current Shared transaction,
+//RS         /// then read its transaction-local working value when one exists.
+//RS         pub fn read_txn<F, R>(&self, stm: &mut super::jet_stm::Guard, f: F) -> R
+//RS         where
+//RS             F: FnOnce(&T) -> R,
+//RS         {
+//RS             let protocol: std::sync::Arc<dyn crate::JetSharedCanonicalOwner> = self.0.protocol.clone();
+//RS             stm.touch(protocol.clone());
+//RS             if let Some(staged) = stm.staged_value::<T>(&protocol) {
+//RS                 f(&staged.borrow())
+//RS             } else {
+//RS                 self.read(f)
+//RS             }
+//RS         }
+//RS 
+//RS 
+//RS         pub fn edit<F, R>(&self, f: F) -> R
+//RS         where
+//RS             F: FnOnce(&mut T) -> R,
+//RS         {
+//RS             let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+//RS                 .expect("uncancelled Shared edit acquires");
+//RS             let next = self
+//RS                 .0
+//RS                 .next_revision()
+//RS                 .expect("Shared revision generation exhausted");
+//RS             if self.0.scalar.is_some() {
+//RS                 let mut value = self
+//RS                     .0
+//RS                     .scalar_snapshot()
+//RS                     .expect("scalar Shared payload disappeared");
+//RS                 let result = f(&mut value);
+//RS                 self.0.store_scalar_value(&value);
+//RS                 self.0
+//RS                     .revision
+//RS                     .store(next, std::sync::atomic::Ordering::Release);
+//RS                 return result;
+//RS             }
+//RS             // jet:shared-guard-internal-begin
+//RS             // SAFETY: the exclusive permit is held through the callback.
+//RS             let payload = unsafe {
+//RS                 (&mut *self.0.value.get())
+//RS                     .as_mut()
+//RS                     .expect("Shared payload was retired")
+//RS             };
+//RS             let result = f(payload);
+//RS             // jet:shared-guard-internal-end
+//RS             self.0
+//RS                 .revision
+//RS                 .store(next, std::sync::atomic::Ordering::Release);
+//RS             result
+//RS         }
+//RS         /// Prepare a complete physical-marshal replacement under the canonical
+//RS         /// exclusive permit. Transport failure publishes nothing; semantic
+//RS         /// callback outcomes belong in `R` so valid edits still publish once.
+// END-PORT-PENDING 0164 crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs:1-1797
+

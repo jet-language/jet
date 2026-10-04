@@ -1,0 +1,1011 @@
+// PORT-PENDING 0237 crates-jet-jit-src-ui-module-group-slice-3609: crates/jet-jit/src/Ui.rs:3609-4615
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_core_ui_preview_with_viewport(
+//RS     name: i64,
+//RS     viewport: i64,
+//RS     callable: i64,
+//RS ) -> i64 {
+//RS     jet_jit_core_ui_preview_with_viewport_kind(name, viewport, callable, false)
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_playground_with_viewport(
+//RS     name: i64,
+//RS     viewport: i64,
+//RS     callable: i64,
+//RS ) -> i64 {
+//RS     jet_jit_core_ui_preview_with_viewport_kind(name, viewport, callable, true)
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_preview_with_viewport_kind(
+//RS     name: i64,
+//RS     viewport: i64,
+//RS     callable: i64,
+//RS     playground: bool,
+//RS ) -> i64 {
+//RS     let Some(_) = core_ui_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     with_rt(|rt| {
+//RS         let Some(name) = rt.heap.clone_string(name) else {
+//RS             rt.set_host_fault("JIT UI preview received an invalid name handle");
+//RS             return 0;
+//RS         };
+//RS         if name.trim().is_empty() {
+//RS             rt.set_host_fault("JIT UI preview received an empty name");
+//RS             return 0;
+//RS         }
+//RS         let record = rt.heap.alloc_record(5);
+//RS         let name = rt.heap.alloc_string(name);
+//RS         let _ = rt.heap.record_set_string(record, 0, name);
+//RS         let _ = rt.heap.record_set_int(record, 1, viewport);
+//RS         let _ = rt.heap.record_set_int(record, 2, callable);
+//RS         let _ = rt.heap.record_set_bool(record, 3, playground);
+//RS         let _ = rt.heap.record_set_int(record, 4, 0);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_button_on_click(
+//RS     display: i64,
+//RS     shortcut: i64,
+//RS     accessible_label: i64,
+//RS     callable: i64,
+//RS ) -> i64 {
+//RS     let Some(slot) = core_ui_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     with_rt(|rt| {
+//RS         let Some(display) = rt.heap.clone_string(display) else {
+//RS             rt.set_host_fault("MIR UI button display text is not a string handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(shortcut) = ui_decode_optional_shortcut(rt, shortcut) else {
+//RS             rt.set_host_fault("MIR UI button shortcut is not an option handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(accessible_label) = ui_decode_optional_string(rt, accessible_label) else {
+//RS             rt.set_host_fault("MIR UI button accessible label is not an option handle");
+//RS             return 0;
+//RS         };
+//RS         let shortcut = shortcut.map_or(Err(ui_rt::JetAbsent), Ok);
+//RS         let accessible_label = accessible_label.map_or(Err(ui_rt::JetAbsent), Ok);
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_button_on_click(
+//RS             &display,
+//RS             shortcut,
+//RS             accessible_label,
+//RS             move || invoke_core_ui(slot),
+//RS         ));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_text_input_on_drop(state: i64, ime: i64, callable: i64) -> i64 {
+//RS     let Some(slot) = core_ui_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     with_rt(|rt| {
+//RS         let Some(state) = rt.heap.clone_string(state) else {
+//RS             rt.set_host_fault("MIR UI text_input state is not a string handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(ime) = ui_decode_ime_mode(rt, ime) else {
+//RS             return 0;
+//RS         };
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_text_input_on_drop(
+//RS             &state,
+//RS             ime,
+//RS             move |items| invoke_core_ui_drop(slot, items),
+//RS         ));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_reactive_render(callable: i64) -> i64 {
+//RS     let Some(slot) = core_ui_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     ui_rt::jet_ui_reactive_render(move || invoke_core_ui(slot));
+//RS     0
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_ui_node_color(label: i64, w: f64, h: f64, color: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt.heap.clone_string(label).unwrap_or_default();
+//RS         let color = rt.heap.clone_string(color).unwrap_or_default();
+//RS         rt.ui
+//RS             .nodes
+//RS             .push(ui_rt::jet_ui_node_color(&label, w, h, &color));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_node_role(label: i64, w: f64, h: f64, role: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt.heap.clone_string(label).unwrap_or_default();
+//RS         let role = *rt
+//RS             .ui
+//RS             .roles
+//RS             .get(role.saturating_sub(1) as usize)
+//RS             .unwrap_or(&ui_rt::JetUiAriaRole::Label);
+//RS         rt.ui
+//RS             .nodes
+//RS             .push(ui_rt::jet_ui_node_role(&label, w, h, role));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_box(children: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let n = rt.heap.list_len(children).unwrap_or(0);
+//RS         let mut kids = Vec::new();
+//RS         for i in 0..n {
+//RS             let id = rt.heap.list_get_int(children, i).unwrap_or(0);
+//RS             if let Some(node) = rt.ui.nodes.get(id.saturating_sub(1) as usize) {
+//RS                 kids.push(node.clone());
+//RS             }
+//RS         }
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_box(kids));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_constraint(a: f64, b: f64, c: f64, d: f64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.ui.constraints.push(ui_rt::jet_ui_constraint(a, b, c, d));
+//RS         rt.ui.constraints.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_rect(x: f64, y: f64, w: f64, h: f64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.ui.rects.push(ui_rt::jet_ui_rect(x, y, w, h));
+//RS         rt.ui.rects.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_key_event(code: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let code = rt.heap.clone_string(code).unwrap_or_default();
+//RS         rt.ui.events.push(ui_rt::jet_ui_key_event(&code));
+//RS         rt.ui.events.len() as i64
+//RS     })
+//RS }
+//RS fn jet_jit_ui_resize_event(width: f64, height: f64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.ui.events.push(ui_rt::jet_ui_resize_event(width, height));
+//RS         rt.ui.events.len() as i64
+//RS     })
+//RS }
+//RS fn jet_jit_tui_capabilities() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_capabilities(rt, ui_rt::jet_tui_capabilities()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_key_event(code: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let code = rt.heap.clone_string(code).unwrap_or_default();
+//RS         ui_push_tui_event(rt, ui_rt::jet_tui_key_event(&code))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_key_event_modifiers(code: i64, modifiers: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let code = rt.heap.clone_string(code).unwrap_or_default();
+//RS         ui_push_tui_event(rt, ui_rt::jet_tui_key_event_modifiers(&code, modifiers))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_resize_event(width: f64, height: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_event(rt, ui_rt::jet_tui_resize_event(width, height)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_timer_event(id: i64, elapsed_ms: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let id = rt.heap.clone_string(id).unwrap_or_default();
+//RS         ui_push_tui_event(rt, ui_rt::jet_tui_timer_event(&id, elapsed_ms))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_io_event(channel: i64, payload: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let channel = rt.heap.clone_string(channel).unwrap_or_default();
+//RS         let payload = (0..rt.heap.list_len(payload).unwrap_or(0))
+//RS             .filter_map(|index| rt.heap.list_get_int(payload, index))
+//RS             .map(|value| value.clamp(0, 255) as u8)
+//RS             .collect();
+//RS         ui_push_tui_event(rt, ui_rt::jet_tui_io_event(&channel, payload))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_focus_event(focused: i64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_event(rt, ui_rt::jet_tui_focus_event(focused != 0)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_interrupt_event() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_event(rt, ui_rt::jet_tui_interrupt_event()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_close_event() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_event(rt, ui_rt::jet_tui_close_event()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_color_ansi16(index: i64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_color(rt, ui_rt::jet_tui_color_ansi16(index)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_color_ansi256(index: i64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_color(rt, ui_rt::jet_tui_color_ansi256(index)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_color_rgb(red: i64, green: i64, blue: i64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_color(rt, ui_rt::jet_tui_color_rgb(red, green, blue)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_style() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_style(rt, ui_rt::jet_tui_style()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_foreground(style: i64, color: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         let Some(color) = ui_decode_tui_color(rt, color) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_style(rt, ui_rt::jet_tui_style_foreground(style, color))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_background(style: i64, color: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         let Some(color) = ui_decode_tui_color(rt, color) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_style(rt, ui_rt::jet_tui_style_background(style, color))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_bold(style: i64, enabled: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_style(rt, ui_rt::jet_tui_style_bold(style, enabled != 0))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_dim(style: i64, enabled: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_style(rt, ui_rt::jet_tui_style_dim(style, enabled != 0))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_underline(style: i64, enabled: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_style(rt, ui_rt::jet_tui_style_underline(style, enabled != 0))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_style_text(text: i64, style: i64, capabilities: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let text = rt.heap.clone_string(text).unwrap_or_default();
+//RS         let Some(style) = ui_decode_tui_style(rt, style) else {
+//RS             return 0;
+//RS         };
+//RS         let Some(capabilities) = ui_decode_tui_capabilities(rt, capabilities) else {
+//RS             return 0;
+//RS         };
+//RS         rt.heap
+//RS             .alloc_string(ui_rt::jet_tui_style_text(&text, style, capabilities))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_ascii(text: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let text = rt.heap.clone_string(text).unwrap_or_default();
+//RS         rt.heap.alloc_string(ui_rt::jet_tui_ascii(&text))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_display_width(text: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let text = rt.heap.clone_string(text).unwrap_or_default();
+//RS         ui_rt::jet_tui_display_width_int(&text)
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_tui_length(value: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_constraint(rt, ui_rt::jet_tui_length(value)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_min(value: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_constraint(rt, ui_rt::jet_tui_min(value)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_max(value: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_constraint(rt, ui_rt::jet_tui_max(value)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_percent(value: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_constraint(rt, ui_rt::jet_tui_percent(value)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_fill(value: f64) -> i64 {
+//RS     with_rt(|rt| ui_push_tui_constraint(rt, ui_rt::jet_tui_fill(value)))
+//RS }
+//RS 
+//RS fn jet_jit_tui_horizontal() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_direction(rt, ui_rt::jet_tui_horizontal()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_vertical() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_direction(rt, ui_rt::jet_tui_vertical()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_layout(area: i64, direction: i64, constraints: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(area) = rt.ui.rects.get(area.saturating_sub(1) as usize).copied() else {
+//RS             return 0;
+//RS         };
+//RS         let Some(direction) = ui_decode_tui_direction(rt, direction) else {
+//RS             return 0;
+//RS         };
+//RS         let mut values = Vec::new();
+//RS         for index in 0..rt.heap.list_len(constraints).unwrap_or(0) {
+//RS             let Some(handle) = rt.heap.list_get_int(constraints, index) else {
+//RS                 return 0;
+//RS             };
+//RS             let Some(value) = ui_decode_tui_constraint(rt, handle) else {
+//RS                 return 0;
+//RS             };
+//RS             values.push(value);
+//RS         }
+//RS         let frames = ui_rt::jet_tui_layout(area, direction, values);
+//RS         let output = rt.heap.alloc_empty_list();
+//RS         for frame in frames {
+//RS             rt.ui.rects.push(frame);
+//RS             let _ = rt.heap.list_push_int(output, rt.ui.rects.len() as i64);
+//RS         }
+//RS         output
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_list(items: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(items) = ui_list_strings(rt, items) else {
+//RS             return 0;
+//RS         };
+//RS         let area = rt.ui.rects.last().copied().unwrap_or_else(|| {
+//RS             let capabilities = ui_rt::jet_tui_capabilities();
+//RS             ui_rt::jet_ui_rect(
+//RS                 0.0,
+//RS                 0.0,
+//RS                 capabilities.width as f64,
+//RS                 capabilities.height as f64,
+//RS             )
+//RS         });
+//RS         let node = ui_rt::JetTuiList::new(items)
+//RS             .render(area, &mut ui_rt::JetTuiListState::default());
+//RS         rt.ui.nodes.push(node);
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_table(headers: i64, rows: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(headers) = ui_list_strings(rt, headers) else {
+//RS             return 0;
+//RS         };
+//RS         let mut table_rows = Vec::new();
+//RS         for index in 0..rt.heap.list_len(rows).unwrap_or(0) {
+//RS             let Some(row) = rt.heap.list_get_int(rows, index) else {
+//RS                 return 0;
+//RS             };
+//RS             let Some(row) = ui_list_strings(rt, row) else {
+//RS                 return 0;
+//RS             };
+//RS             table_rows.push(row);
+//RS         }
+//RS         let area = rt.ui.rects.last().copied().unwrap_or_else(|| {
+//RS             let capabilities = ui_rt::jet_tui_capabilities();
+//RS             ui_rt::jet_ui_rect(
+//RS                 0.0,
+//RS                 0.0,
+//RS                 capabilities.width as f64,
+//RS                 capabilities.height as f64,
+//RS             )
+//RS         });
+//RS         let node = ui_rt::JetTuiTable::new(headers, table_rows).render(area);
+//RS         rt.ui.nodes.push(node);
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_list_state() -> i64 {
+//RS     with_rt(|rt| ui_push_tui_list_state(rt, ui_rt::jet_tui_list_state()))
+//RS }
+//RS 
+//RS fn jet_jit_tui_list_state_select(state: i64, index: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(state) = ui_decode_tui_list_state(rt, state) else {
+//RS             return 0;
+//RS         };
+//RS         let state = ui_rt::jet_tui_list_state_select(state, index);
+//RS         ui_push_tui_list_state(rt, state)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_list_state_offset(state: i64, offset: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(state) = ui_decode_tui_list_state(rt, state) else {
+//RS             return 0;
+//RS         };
+//RS         ui_push_tui_list_state(rt, ui_rt::jet_tui_list_state_offset(state, offset))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_tui_list_state_selected(state: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         ui_decode_tui_list_state(rt, state)
+//RS             .map(|state| ui_rt::jet_tui_list_state_selected(state))
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS fn jet_jit_ui_point(x: f64, y: f64) -> i64 {
+//RS     push_struct_f64(&[x, y])
+//RS }
+//RS 
+//RS fn jet_jit_ui_size(width: f64, height: f64) -> i64 {
+//RS     push_struct_f64(&[width, height])
+//RS }
+//RS 
+//RS fn jet_jit_ui_aria_role(kind: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let role = match kind {
+//RS             0 => ui_rt::jet_ui_aria_role_button(),
+//RS             1 => ui_rt::jet_ui_aria_role_text_input(),
+//RS             2 => ui_rt::jet_ui_aria_role_label(),
+//RS             _ => ui_rt::jet_ui_aria_role_container(),
+//RS         };
+//RS         rt.ui.roles.push(role);
+//RS         rt.ui.roles.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_aria_role_button() -> i64 {
+//RS     jet_jit_ui_aria_role(0)
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_aria_role_text_input() -> i64 {
+//RS     jet_jit_ui_aria_role(1)
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_aria_role_label() -> i64 {
+//RS     jet_jit_ui_aria_role(2)
+//RS }
+//RS 
+//RS fn jet_jit_core_ui_aria_role_container() -> i64 {
+//RS     jet_jit_ui_aria_role(3)
+//RS }
+//RS 
+//RS fn ui_backend_clone(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     backend: i64,
+//RS ) -> Option<UiBackendSlot> {
+//RS     rt.ui
+//RS         .backends
+//RS         .get(backend.saturating_sub(1) as usize)
+//RS         .cloned()
+//RS }
+//RS 
+//RS fn ui_backend_clone_from_runtime(backend: i64) -> Option<UiBackendSlot> {
+//RS     with_rt(|rt| ui_backend_clone(rt, backend))
+//RS }
+//RS 
+//RS fn jet_jit_ui_measure(backend: i64, node: i64, constraint: i64) -> i64 {
+//RS     let Some((backend, node, constraint)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .nodes
+//RS                 .get(node.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS             *rt.ui
+//RS                 .constraints
+//RS                 .get(constraint.saturating_sub(1) as usize)?,
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui measure: bad backend, node, or constraint");
+//RS     };
+//RS     let size = match backend {
+//RS         UiBackendSlot::Null(b) => b.measure_node(node, constraint),
+//RS         UiBackendSlot::Tui(b) => b.measure_node(node, constraint),
+//RS         UiBackendSlot::Gtk(b) => b.measure_node(node, constraint),
+//RS     };
+//RS     with_rt(|rt| {
+//RS         rt.ui.sizes.push(size);
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_float(h, 0, size.width);
+//RS         let _ = rt.heap.record_set_float(h, 1, size.height);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_layout(backend: i64, node: i64, rect: i64) {
+//RS     let Some((backend, node, rect)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .nodes
+//RS                 .get(node.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS             *rt.ui.rects.get(rect.saturating_sub(1) as usize)?,
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui layout: bad backend, node, or rect");
+//RS     };
+//RS     match backend {
+//RS         UiBackendSlot::Null(b) => b.layout_node(node, rect),
+//RS         UiBackendSlot::Tui(b) => b.layout_node(node, rect),
+//RS         UiBackendSlot::Gtk(b) => b.layout_node(node, rect),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_paint(backend: i64, node: i64) {
+//RS     let Some((backend, node)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .nodes
+//RS                 .get(node.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui paint: bad backend or node");
+//RS     };
+//RS     match backend {
+//RS         UiBackendSlot::Null(b) => b.paint_node(node),
+//RS         UiBackendSlot::Tui(b) => b.paint_node(node),
+//RS         UiBackendSlot::Gtk(b) => b.paint_node(node),
+//RS     }
+//RS }
+//RS 
+//RS /// D-UI-MOUNT1=A: measure → layout → paint (I9: same Prelude methods AOT uses).
+//RS fn jet_jit_ui_mount(backend: i64, node: i64, constraint: i64) {
+//RS     let Some((backend, node, constraint)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .nodes
+//RS                 .get(node.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS             *rt.ui
+//RS                 .constraints
+//RS                 .get(constraint.saturating_sub(1) as usize)?,
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui mount: bad backend, node, or constraint");
+//RS     };
+//RS     match backend {
+//RS         UiBackendSlot::Null(b) => b.mount_node(node, constraint),
+//RS         UiBackendSlot::Tui(b) => b.mount_node(node, constraint),
+//RS         UiBackendSlot::Gtk(b) => b.mount_node(node, constraint),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_mount_default(backend: i64, node: i64) {
+//RS     let Some((backend, node)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .nodes
+//RS                 .get(node.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui mount_default: bad backend or node");
+//RS     };
+//RS     match backend {
+//RS         UiBackendSlot::Null(b) => b.mount_node_default(node),
+//RS         UiBackendSlot::Tui(b) => b.mount_node_default(node),
+//RS         UiBackendSlot::Gtk(b) => b.mount_node_default(node),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_on_event(backend: i64, event: i64) -> i64 {
+//RS     let Some((backend, event)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.ui
+//RS                 .events
+//RS                 .get(event.saturating_sub(1) as usize)?
+//RS                 .clone(),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui on_event: bad backend or event");
+//RS     };
+//RS     let result = match backend {
+//RS         UiBackendSlot::Null(b) => b.dispatch_event(event),
+//RS         UiBackendSlot::Tui(b) => b.dispatch_event(event),
+//RS         UiBackendSlot::Gtk(b) => b.dispatch_event(event),
+//RS     };
+//RS     // JetEventResult as packed unit enum: 0=Handled, 1=Ignored (JetShow names).
+//RS     match result {
+//RS         ui_rt::JetEventResult::Handled => 0,
+//RS         ui_rt::JetEventResult::Ignored => 1,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_commands(backend: i64) -> i64 {
+//RS     let backend = ui_backend_clone_from_runtime(backend)
+//RS         .expect("jit ui commands: bad backend");
+//RS     let cmds = match backend {
+//RS         UiBackendSlot::Null(b) => b.paint_commands(),
+//RS         UiBackendSlot::Tui(_) | UiBackendSlot::Gtk(_) => Vec::new(),
+//RS     };
+//RS     with_rt(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for cmd in cmds {
+//RS             let sid = rt.heap.alloc_string(cmd);
+//RS             let _ = rt.heap.list_push_int(list, sid);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_frame_lines(backend: i64) -> i64 {
+//RS     let backend = ui_backend_clone_from_runtime(backend)
+//RS         .expect("jit ui frame_lines: bad backend");
+//RS     let lines = match backend {
+//RS         UiBackendSlot::Tui(b) => b.frame_lines(),
+//RS         _ => Vec::new(),
+//RS     };
+//RS     with_rt(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for line in lines {
+//RS             let sid = rt.heap.alloc_string(line);
+//RS             let _ = rt.heap.list_push_int(list, sid);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_render_count(backend: i64) -> i64 {
+//RS     let backend = ui_backend_clone_from_runtime(backend)
+//RS         .expect("jit ui render_count: bad backend");
+//RS     let count = match backend {
+//RS         UiBackendSlot::Tui(b) => b.render_count(),
+//RS         _ => 0,
+//RS     };
+//RS     with_rt(|rt| rt.heap.int_from_i64(count))
+//RS }
+//RS 
+//RS fn jet_jit_ui_set_focus_group(backend: i64, nodes: i64) {
+//RS     let Some((backend, group)) = with_rt(|rt| {
+//RS         let n = rt.heap.list_len(nodes).unwrap_or(0);
+//RS         let mut group = Vec::new();
+//RS         for i in 0..n {
+//RS             let id = rt.heap.list_get_int(nodes, i).unwrap_or(0);
+//RS             if let Some(node) = rt.ui.nodes.get(id.saturating_sub(1) as usize) {
+//RS                 group.push(node.clone());
+//RS             }
+//RS         }
+//RS         Some((ui_backend_clone(rt, backend)?, group))
+//RS     }) else {
+//RS         panic!("jit ui set_focus_group: bad backend");
+//RS     };
+//RS     match backend {
+//RS         UiBackendSlot::Null(b) => b.set_focus_group(group),
+//RS         UiBackendSlot::Tui(b) => b.set_focus_group(group),
+//RS         UiBackendSlot::Gtk(b) => b.set_focus_group(group),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_focused_label(backend: i64) -> i64 {
+//RS     let backend = ui_backend_clone_from_runtime(backend)
+//RS         .expect("jit ui focused_label: bad backend");
+//RS     let label = match backend {
+//RS         UiBackendSlot::Null(b) => b.focused_label(),
+//RS         UiBackendSlot::Tui(b) => b.focused_label(),
+//RS         UiBackendSlot::Gtk(b) => b.focused_label(),
+//RS     };
+//RS     with_rt(|rt| rt.heap.alloc_string(label))
+//RS }
+//RS 
+//RS fn jet_jit_ui_gtk_button(backend: i64, label: i64) -> i64 {
+//RS     let Some((backend, label)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.heap.clone_string(label).unwrap_or_default(),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui gtk button: bad backend");
+//RS     };
+//RS     let widget = match backend {
+//RS         UiBackendSlot::Gtk(b) => b.button(&label),
+//RS         _ => 0,
+//RS     };
+//RS     with_rt(|rt| {
+//RS         rt.ui.gtk_widgets.push(widget);
+//RS         rt.ui.gtk_widgets.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_gtk_on_click(
+//RS     backend: i64,
+//RS     widget: i64,
+//RS     fn_ptr: i64,
+//RS     n_caps: i64,
+//RS     c0: i64,
+//RS     c1: i64,
+//RS     c2: i64,
+//RS     c3: i64,
+//RS ) {
+//RS     let cb = crate::Reactive::JitCb {
+//RS         fn_ptr: fn_ptr as u64,
+//RS         caps: [c0, c1, c2, c3],
+//RS         n_caps: n_caps.clamp(0, 4) as u8,
+//RS     };
+//RS     let Some((backend, widget)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             *rt.ui
+//RS                 .gtk_widgets
+//RS                 .get(widget.saturating_sub(1) as usize)
+//RS                 .unwrap_or(&0),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui gtk on_click: bad backend");
+//RS     };
+//RS     if let UiBackendSlot::Gtk(backend) = backend {
+//RS         // The backend clone owns the same native state, so GTK callbacks can
+//RS         // re-enter the runtime without holding its mutex.
+//RS         backend.on_click(widget, move || cb.invoke_void());
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_gtk_present(backend: i64, title: i64) {
+//RS     let Some((backend, title)) = with_rt(|rt| {
+//RS         Some((
+//RS             ui_backend_clone(rt, backend)?,
+//RS             rt.heap.clone_string(title).unwrap_or_default(),
+//RS         ))
+//RS     }) else {
+//RS         panic!("jit ui gtk present: bad backend");
+//RS     };
+//RS     if let UiBackendSlot::Gtk(backend) = backend {
+//RS         // `present` runs GTK's blocking loop. Do not hold the runtime mutex:
+//RS         // callbacks dispatched by that loop must be able to borrow it.
+//RS         backend.present(&title);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ui_reactive_render(fn_ptr: i64, n_caps: i64, c0: i64, c1: i64, c2: i64, c3: i64) {
+//RS     let cb = crate::Reactive::JitCb {
+//RS         fn_ptr: fn_ptr as u64,
+//RS         caps: [c0, c1, c2, c3],
+//RS         n_caps: n_caps.clamp(0, 4) as u8,
+//RS     };
+//RS     // Use canonical reactive effect so signal deps re-run the render body.
+//RS     crate::Reactive::reactive_rt::jet_reactive_effect_rooted(move || cb.invoke_void());
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct UiHostFns;
+//RS     register: register_ui_symbols;
+//RS     declare: declare_ui_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS 
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut preview_source = Signature::new(cc);
+//RS         for _ in 0..9 {
+//RS             preview_source.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         preview_source.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_void = Signature::new(cc);
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut node3 = Signature::new(cc);
+//RS         node3.params.push(AbiParam::new(types::I64));
+//RS         node3.params.push(AbiParam::new(types::F64));
+//RS         node3.params.push(AbiParam::new(types::F64));
+//RS         node3.returns.push(AbiParam::new(types::I64));
+//RS         let mut node4 = Signature::new(cc);
+//RS         node4.params.push(AbiParam::new(types::I64));
+//RS         node4.params.push(AbiParam::new(types::F64));
+//RS         node4.params.push(AbiParam::new(types::F64));
+//RS         node4.params.push(AbiParam::new(types::I64));
+//RS         node4.returns.push(AbiParam::new(types::I64));
+//RS         let mut f4 = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             f4.params.push(AbiParam::new(types::F64));
+//RS         }
+//RS         f4.returns.push(AbiParam::new(types::I64));
+//RS         let mut f2 = Signature::new(cc);
+//RS         f2.params.push(AbiParam::new(types::F64));
+//RS         f2.params.push(AbiParam::new(types::F64));
+//RS         f2.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut f1 = Signature::new(cc);
+//RS         f1.params.push(AbiParam::new(types::F64));
+//RS         f1.returns.push(AbiParam::new(types::I64));
+//RS         let mut i3 = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             i3.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         i3.returns.push(AbiParam::new(types::I64));
+//RS         let mut triary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             triary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         triary.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS         let mut measure = Signature::new(cc);
+//RS         measure.params.push(AbiParam::new(types::I64));
+//RS         measure.params.push(AbiParam::new(types::I64));
+//RS         measure.params.push(AbiParam::new(types::I64));
+//RS         measure.returns.push(AbiParam::new(types::I64));
+//RS         let mut layout = Signature::new(cc);
+//RS         layout.params.push(AbiParam::new(types::I64));
+//RS         layout.params.push(AbiParam::new(types::I64));
+//RS         layout.params.push(AbiParam::new(types::I64));
+//RS         let mut paint = Signature::new(cc);
+//RS         paint.params.push(AbiParam::new(types::I64));
+//RS         paint.params.push(AbiParam::new(types::I64));
+//RS         let mut cb6 = Signature::new(cc);
+//RS         for _ in 0..6 {
+//RS             cb6.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         let mut core_button = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             core_button.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         core_button.returns.push(AbiParam::new(types::I64));
+//RS         let mut gtk_click = Signature::new(cc);
+//RS         for _ in 0..8 {
+//RS             gtk_click.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         let mut node_dim = Signature::new(cc);
+//RS         node_dim.params.push(AbiParam::new(types::I64));
+//RS         node_dim.params.push(AbiParam::new(types::I64));
+//RS         node_dim.returns.push(AbiParam::new(types::F64));
+//RS     }
+//RS     tui_capabilities: "jet_tui_capabilities" => jet_jit_tui_capabilities: nullary;
+//RS     tui_ascii: "jet_tui_ascii" => jet_jit_tui_ascii: unary;
+//RS     tui_close_event: "jet_tui_close_event" => jet_jit_tui_close_event: nullary;
+//RS     tui_color_ansi16: "jet_tui_color_ansi16" => jet_jit_tui_color_ansi16: unary;
+//RS     tui_color_ansi256: "jet_tui_color_ansi256" => jet_jit_tui_color_ansi256: unary;
+//RS     tui_color_rgb: "jet_tui_color_rgb" => jet_jit_tui_color_rgb: i3;
+//RS     tui_display_width: "jet_tui_display_width_int" => jet_jit_tui_display_width: unary;
+//RS     tui_fill: "jet_tui_fill" => jet_jit_tui_fill: f1;
+//RS     tui_focus_event: "jet_tui_focus_event" => jet_jit_tui_focus_event: unary;
+//RS     tui_horizontal: "jet_tui_horizontal" => jet_jit_tui_horizontal: nullary;
+//RS     tui_interrupt_event: "jet_tui_interrupt_event" => jet_jit_tui_interrupt_event: nullary;
+//RS     tui_io_event: "jet_tui_io_event" => jet_jit_tui_io_event: binary;
+//RS     tui_key_event: "jet_tui_key_event" => jet_jit_tui_key_event: unary;
+//RS     tui_key_event_modifiers: "jet_tui_key_event_modifiers" => jet_jit_tui_key_event_modifiers: binary;
+//RS     tui_layout: "jet_tui_layout" => jet_jit_tui_layout: triary;
+//RS     tui_length: "jet_tui_length" => jet_jit_tui_length: f1;
+//RS     tui_list: "jet_tui_list" => jet_jit_tui_list: unary;
+//RS     tui_list_state: "jet_tui_list_state" => jet_jit_tui_list_state: nullary;
+//RS     tui_list_state_offset: "jet_tui_list_state_offset" => jet_jit_tui_list_state_offset: binary;
+//RS     tui_list_state_select: "jet_tui_list_state_select" => jet_jit_tui_list_state_select: binary;
+//RS     tui_list_state_selected: "jet_tui_list_state_selected" => jet_jit_tui_list_state_selected: unary;
+//RS     tui_max: "jet_tui_max" => jet_jit_tui_max: f1;
+//RS     tui_min: "jet_tui_min" => jet_jit_tui_min: f1;
+//RS     tui_percent: "jet_tui_percent" => jet_jit_tui_percent: f1;
+//RS     tui_resize_event: "jet_tui_resize_event" => jet_jit_tui_resize_event: f2;
+//RS     tui_style: "jet_tui_style" => jet_jit_tui_style: nullary;
+//RS     tui_style_background: "jet_tui_style_background" => jet_jit_tui_style_background: binary;
+//RS     tui_style_bold: "jet_tui_style_bold" => jet_jit_tui_style_bold: binary;
+//RS     tui_style_dim: "jet_tui_style_dim" => jet_jit_tui_style_dim: binary;
+//RS     tui_style_foreground: "jet_tui_style_foreground" => jet_jit_tui_style_foreground: binary;
+//RS     tui_style_text: "jet_tui_style_text" => jet_jit_tui_style_text: ternary;
+//RS     tui_style_underline: "jet_tui_style_underline" => jet_jit_tui_style_underline: binary;
+//RS     tui_table: "jet_tui_table" => jet_jit_tui_table: binary;
+//RS     tui_timer_event: "jet_tui_timer_event" => jet_jit_tui_timer_event: binary;
+//RS     tui_vertical: "jet_tui_vertical" => jet_jit_tui_vertical: nullary;
+//RS     null_backend: "jet_jit_ui_null_backend" => jet_jit_ui_null_backend: nullary;
+//RS     tui_backend: "jet_jit_ui_tui_backend" => jet_jit_ui_tui_backend: nullary;
+//RS     gtk_backend: "jet_jit_ui_gtk_backend" => jet_jit_ui_gtk_backend: nullary;
+//RS     font_system: "jet_font_system" => jet_jit_font_system: unary;
+//RS     font_shape: "jet_font_shape" => jet_jit_font_shape: binary;
+//RS     shortcut_command: "JetUiShortcut::cmd" => jet_jit_ui_shortcut_command: unary;
+//RS     node_accessibility: "jet_ui_node_accessibility" => jet_jit_ui_node_accessibility: binary;
+//RS     node_shortcut: "jet_ui_node_shortcut" => jet_jit_ui_node_shortcut: binary;
+//RS     text_input: "jet_ui_text_input" => jet_jit_ui_text_input: binary;
+//RS     host_capabilities: "jet_ui_host_capabilities" => jet_jit_ui_host_capabilities: nullary;
+//RS     host_file_filter: "jet_ui_host_file_filter" => jet_jit_ui_host_file_filter: ternary;
+//RS     host_file_filter_text: "jet_ui_host_file_filter_text" => jet_jit_ui_host_file_filter_text: nullary;
+//RS     host_fs_rights_read: "jet_ui_host_fs_rights_read" => jet_jit_ui_host_fs_rights_read: nullary;
+//RS     host_fs_rights_write: "jet_ui_host_fs_rights_write" => jet_jit_ui_host_fs_rights_write: nullary;
+//RS     host_fs_rights_read_write: "jet_ui_host_fs_rights_read_write" => jet_jit_ui_host_fs_rights_read_write: nullary;
+//RS     host_fs_grant: "jet_ui_host_fs_grant" => jet_jit_ui_host_fs_grant: binary;
+//RS     host_open_request: "jet_ui_host_open_request" => jet_jit_ui_host_open_request: unary;
+//RS     host_save_request: "jet_ui_host_save_request" => jet_jit_ui_host_save_request: unary;
+//RS     host_open_file: "jet_ui_host_open_file" => jet_jit_ui_host_open_file: unary;
+//RS     host_save_file: "jet_ui_host_save_file" => jet_jit_ui_host_save_file: unary;
+//RS     host_shortcut: "jet_ui_host_shortcut" => jet_jit_ui_host_shortcut: binary;
+//RS     core_preview_source_attach: "jet_ui_preview_attach_compiler_source" => jet_jit_core_ui_preview_attach_compiler_source: preview_source;
+//RS     host_accessibility: "jet_ui_host_accessibility" => jet_jit_ui_host_accessibility: binary;
+//RS     host_clipboard_read_text: "jet_ui_host_clipboard_read_text" => jet_jit_ui_host_clipboard_read_text: nullary;
+//RS     host_clipboard_write_text: "jet_ui_host_clipboard_write_text" => jet_jit_ui_host_clipboard_write_text: unary;
+//RS     host_ime_poll: "jet_ui_host_ime_poll" => jet_jit_ui_host_ime_poll: nullary;
+//RS     host_drag_poll: "jet_ui_host_drag_poll" => jet_jit_ui_host_drag_poll: nullary;
+//RS     host_shortcut_binding: "jet_ui_host_shortcut_binding" => jet_jit_ui_host_shortcut_binding: binary;
+//RS     host_shortcuts_register: "jet_ui_host_shortcuts_register" => jet_jit_ui_host_shortcuts_register: unary;
+//RS     host_shortcuts_dispatch: "jet_ui_host_shortcuts_dispatch" => jet_jit_ui_host_shortcuts_dispatch: unary;
+//RS     core_button_on_click: "jet_ui_button_on_click" => jet_jit_core_ui_button_on_click: core_button;
+//RS     core_preview_with_viewport: "jet_ui_preview_with_viewport" => jet_jit_core_ui_preview_with_viewport: ternary;
+//RS     core_playground_with_viewport: "jet_ui_playground_with_viewport" => jet_jit_core_ui_playground_with_viewport: ternary;
+//RS     core_text_input_on_drop: "jet_ui_text_input_on_drop" => jet_jit_core_ui_text_input_on_drop: ternary;
+//RS     text: "jet_jit_ui_text" => jet_jit_ui_text: unary;
+//RS     node: "jet_ui_node" => jet_jit_ui_node: node3;
+//RS     button: "jet_jit_ui_button" => jet_jit_ui_button: unary;
+//RS     preview_phone: "jet_ui_phone" => jet_jit_ui_phone: nullary;
+//RS     preview_tablet: "jet_ui_tablet" => jet_jit_ui_tablet: nullary;
+//RS     preview_desktop: "jet_ui_desktop" => jet_jit_ui_desktop: nullary;
+//RS     preview_registry: "jet_ui_previews" => jet_jit_ui_previews: unary;
+//RS     playground_registry: "jet_ui_playgrounds" => jet_jit_ui_playgrounds: unary;
+//RS     core_reactive_render: "jet_ui_reactive_render" => jet_jit_core_ui_reactive_render: unary;
+//RS     node_color: "jet_jit_ui_node_color" => jet_jit_ui_node_color: node4;
+//RS     point: "jet_jit_ui_point" => jet_jit_ui_point: f2;
+//RS     size: "jet_jit_ui_size" => jet_jit_ui_size: f2;
+//RS     node_role: "jet_jit_ui_node_role" => jet_jit_ui_node_role: node4;
+//RS     box_node: "jet_jit_ui_box" => jet_jit_ui_box: unary;
+//RS     constraint: "jet_jit_ui_constraint" => jet_jit_ui_constraint: f4;
+//RS     rect: "jet_jit_ui_rect" => jet_jit_ui_rect: f4;
+//RS     key_event: "jet_jit_ui_key_event" => jet_jit_ui_key_event: unary;
+//RS     resize_event: "jet_jit_ui_resize_event" => jet_jit_ui_resize_event: f2;
+//RS     aria_role: "jet_jit_ui_aria_role" => jet_jit_ui_aria_role: unary;
+//RS     core_aria_role_button: "jet_ui_aria_role_button" => jet_jit_core_ui_aria_role_button: nullary;
+//RS     core_aria_role_text_input: "jet_ui_aria_role_text_input" => jet_jit_core_ui_aria_role_text_input: nullary;
+//RS     core_aria_role_label: "jet_ui_aria_role_label" => jet_jit_core_ui_aria_role_label: nullary;
+//RS     core_aria_role_container: "jet_ui_aria_role_container" => jet_jit_core_ui_aria_role_container: nullary;
+//RS     node_label: "jet_jit_ui_node_label" => jet_jit_ui_node_label: unary;
+//RS     node_dim: "jet_jit_ui_node_dim" => jet_jit_ui_node_dim: node_dim;
+//RS     measure: "jet_jit_ui_measure" => jet_jit_ui_measure: measure;
+//RS     layout: "jet_jit_ui_layout" => jet_jit_ui_layout: layout;
+//RS     paint: "jet_jit_ui_paint" => jet_jit_ui_paint: paint;
+//RS     mount: "jet_jit_ui_mount" => jet_jit_ui_mount: layout;
+//RS     mount_default: "jet_jit_ui_mount_default" => jet_jit_ui_mount_default: paint;
+//RS     on_event: "jet_jit_ui_on_event" => jet_jit_ui_on_event: binary;
+//RS     commands: "jet_jit_ui_commands" => jet_jit_ui_commands: unary;
+//RS     frame_lines: "jet_jit_ui_frame_lines" => jet_jit_ui_frame_lines: unary;
+//RS     render_count: "jet_jit_ui_render_count" => jet_jit_ui_render_count: unary;
+//RS     set_focus_group: "jet_jit_ui_set_focus_group" => jet_jit_ui_set_focus_group: binary_void;
+//RS     set_focus_group_null: "JetNullBackend::set_focus_group" => jet_jit_ui_set_focus_group: binary_void;
+//RS     focused_label: "jet_jit_ui_focused_label" => jet_jit_ui_focused_label: unary;
+//RS     focused_label_null: "JetNullBackend::focused_label" => jet_jit_ui_focused_label: unary;
+//RS     gtk_button: "jet_jit_ui_gtk_button" => jet_jit_ui_gtk_button: binary;
+//RS     gtk_on_click: "jet_jit_ui_gtk_on_click" => jet_jit_ui_gtk_on_click: gtk_click;
+//RS     gtk_present: "jet_jit_ui_gtk_present" => jet_jit_ui_gtk_present: binary_void;
+//RS     reactive_render: "jet_jit_ui_reactive_render" => jet_jit_ui_reactive_render: cb6;
+//RS }
+// END-PORT-PENDING 0237 crates/jet-jit/src/Ui.rs:3609-4615
+

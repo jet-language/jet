@@ -1,0 +1,222 @@
+// RangeBounds.rs:1–85, D-RANGE-VALUE1=A: end_exclusive preserves empty ranges.
+use core.text.runtime.kernel_unicode_string as range_text
+
+// Rust jet_range_bounds (:3–14). I64 only: never spill endpoints into exact Int.
+pub fn jet_range_bounds(start: I64, end: I64, exclusive: Bool, len: I64) -> (start: I64, end_exclusive: I64)? Never! {
+    if start < (I64{0}) || end < (I64{0}) || start > end -> return None
+    end_exclusive := end
+    if !exclusive {
+        if end == (I64{9223372036854775807}) -> return None
+        end_exclusive = end + I64{1}
+    }
+    if end_exclusive > len -> return None
+    Val((start: start, end_exclusive: end_exclusive))
+}
+
+// Rust jet_view_bounds_error (:16–26); CP-BOUNDS owns only list wording.
+pub fn jet_view_bounds_error(start: I64, end: I64, exclusive: Bool, len: I64) -> String Never! {
+    kind :: if exclusive -> "exclusive" else -> "inclusive"
+    "can't view {len} items from {start} to {end} ({kind})"
+}
+
+// Rust jet_checked_view_bounds (:28–36); Result<_,String> is canonical Err!.
+pub fn jet_checked_view_bounds(start: I64, end: I64, exclusive: Bool, len: I64) -> (start: I64, end_exclusive: I64) Err! {
+    jet_range_bounds(start, end, exclusive, len) ?? return Err(jet_view_bounds_error(start, end, exclusive, len))
+}
+
+// Rust jet_string_slice_value (:39–59): borrow input, return an OWNED String.
+// Stream the sole scalar decoder/builder, not String.slice or a borrowed result.
+// Native integration is HELD #4318/#4392: range_text.utf8_bytes currently copies
+// a Vec; Main must supply the actual retained UTF-8 read leaf. Owned output is
+// not itself the #4392 borrowed-return contract. Native String builder finish
+// consumes the output buffer; input survives success, failure and stop/unwind.
+pub fn jet_string_slice_value(text: String, start: I64, end: I64, exclusive: Bool) -> String Err! {
+    raw :: range_text.utf8_bytes(text)
+    at := 0
+    len := I64{0}
+    loop at < raw.len() {
+        len = len + I64{1}
+        at = at + range_text.utf8_width_at(raw, at)
+    }
+    bounds :: jet_range_bounds(start, end, exclusive, len) ?? {
+        kind :: if exclusive -> "exclusive" else -> "inclusive"
+        return Err("can't slice {len} characters from {start} to {end} ({kind})")
+    }
+    out := [U8]{}
+    scalar := I64{0}
+    at = 0
+    loop scalar < bounds.end_exclusive {
+        if scalar >= bounds.start -> range_text.append_cp(&out, range_text.scalar_at(raw, at))
+        scalar = scalar + I64{1}
+        at = at + range_text.utf8_width_at(raw, at)
+    }
+    String.from_bytes(out) ?? panic("range scalar builder produced invalid UTF-8")
+}
+
+// Rust jet_range_contains (:61–68). Negative endpoints remain legal here;
+// bounds validation is only for indexing, not Range membership.
+pub fn jet_range_contains(start: I64, end: I64, exclusive: Bool, value: I64) -> Bool Never! {
+    value >= start && (if exclusive -> value < end else -> value <= end)
+}
+
+// Rust jet_range_structural_text (:70–72): canonical Foundation owner only.
+// HELD: Foundation StructuralDebug.rs:310–319 helper extraction/registration;
+// do not invent a second structural formatter or native successful placeholder.
+// Required delegate signature: (start: I64, end: I64, exclusive: Bool) -> String
+// Never!; borrow no owner, return owned canonical structural text unchanged.
+// Implementation must call Foundation jet_debug_range, never reproduce it here.
+
+// Rust jet_range_equal (:74–85): compare raw fields, not normalized extents.
+pub fn jet_range_equal(left_start: I64, left_end: I64, left_exclusive: Bool, right_start: I64, right_end: I64, right_exclusive: Bool) -> Bool Never! {
+    left_start == right_start && left_end == right_end && left_exclusive == right_exclusive
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:3
+const IO_CONTEXT_DEBUG_FIELDS: [String] = ["operation", "resource", "os_code", "cause"]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:7
+const IO_CONTEXT_FIELD_METADATA: [(String, Bool)] = [
+    ("operation", false), ("resource", false), ("os_code", false), ("cause", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:16
+const CBOR_OPTIONS_FIELD_METADATA: [(String, Bool)] = [
+    ("max_depth", false), ("max_items", false), ("max_bytes", false), ("require_canonical", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:24
+const ENCODING_ERROR_FIELD_METADATA: [(String, Bool)] = [
+    ("format", false), ("kind", false), ("byte_offset", false), ("line", false),
+    ("column", false), ("path", false), ("reason", false), ("cause", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:36
+const FIELD_ERROR_FIELD_METADATA: [(String, Bool)] = [("path", false), ("reason", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:38
+const ALLOC_ERROR_FIELD_METADATA: [(String, Bool)] = [("requested_bytes", false), ("allocator", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:41
+const CSV_ROW_FIELD_METADATA: [(String, Bool)] = [("fields", false), ("line", false)]
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:48
+const CORE_FIELD_METADATA: [(String, [(String, Bool)])] = [
+    ("IOContext", IO_CONTEXT_FIELD_METADATA),
+    ("CBOROptions", CBOR_OPTIONS_FIELD_METADATA),
+    ("EncodingError", ENCODING_ERROR_FIELD_METADATA),
+    ("FieldError", FIELD_ERROR_FIELD_METADATA),
+    ("AllocError", ALLOC_ERROR_FIELD_METADATA),
+    ("CSVRow", CSV_ROW_FIELD_METADATA)]
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:58
+pub fn jet_debug_field_metadata(type_name: String) -> [(String, Bool)]? Never! {
+    CORE_FIELD_METADATA.iter().find(|(name, _)| name == type_name).map(|(_, fields)| fields)
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:66
+pub fn jet_debug_field_metadata_rows() -> [(String, [(String, Bool)])] Never! {
+    CORE_FIELD_METADATA
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:72
+pub fn jet_debug_field_order(type_name: String) -> [String]? Never! {
+    match type_name {
+        "IOContext" -> Val(IO_CONTEXT_DEBUG_FIELDS)
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:83
+pub struct JetDebugField {
+    name: String
+    value: String
+    storage_index: Int
+    redacted: Bool
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:91
+pub fn jet_debug_record_fields(type_name: String, fields: [JetDebugField]) -> String Never! {
+    ordered := fields
+    if order :: jet_debug_field_order(type_name) {
+        ordered.sort_by_key(|field| order.iter().position(|name| field.name == name)
+            .map(|position| (0, position)) ?? (1, field.storage_index))
+    }
+    rendered :: ordered.iter().map(|field| {
+        value :: if field.redacted -> "[redacted]" else -> field.value
+        "{field.name}: {value}"
+    }).collect::<[String]>()
+    if rendered.is_empty() -> type_name + " {}"
+    else -> type_name + " { " + rendered.join(", ") + " }"
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:124
+pub fn jet_debug_record(type_name: String, fields: [(String, String)]) -> String Never! {
+    jet_debug_record_fields(type_name, fields.iter().enumerate().map(|(storage_index, (name, value))|
+        JetDebugField{name: name, value: value, storage_index: storage_index, redacted: false}).collect::<[JetDebugField]>())
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:143
+pub fn jet_debug_map(entries: [(String, String)]) -> String Never! {
+    rendered :: entries.iter().map(|(key, value)| "{key}: {value}").collect::<[String]>()
+    if rendered.is_empty() -> "[:]"
+    else -> "[" + rendered.join(", ") + "]"
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:158
+pub fn jet_debug_union(payload: String) -> String Never! { payload }
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:163
+pub fn jet_debug_variant(variant: String, payload: String?) -> String Never! {
+    match payload {
+        Val(value) -> "{variant}({value})"
+        None -> variant
+    }
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:171
+pub fn jet_debug_optional(payload: String?) -> String Never! {
+    match payload {
+        Val(value) -> "Val({value})"
+        None -> "None"
+    }
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:182
+pub fn jet_show_io_error(variant: I64, operation: I64, resource: String?, cause: String?) -> String Never! {
+    kind :: match variant {
+        0 -> "invalid input"
+        1 -> "not found"
+        2 -> "permission denied"
+        3 -> "timed out"
+        4 -> "cancelled"
+        5 -> "closed"
+        6 -> "protocol error"
+        _ -> "I/O error"
+    }
+    operation_text :: match operation {
+        0 -> "read"
+        1 -> "write"
+        2 -> "flush"
+        3 -> "connect"
+        4 -> "accept"
+        5 -> "close"
+        6 -> "resolve"
+        _ -> "codec"
+    }
+    text := "{kind} during {operation_text}"
+    if value :: resource -> text.push_str(" `{value}`")
+    if value :: cause -> text.push_str(": {value}")
+    text
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:220
+pub fn jet_show_process_resource_limit(variant: I64) -> String Never! {
+    match variant {
+        0 -> "wall time"
+        1 -> "CPU time"
+        2 -> "memory"
+        3 -> "open file handles"
+        4 -> "output"
+        _ -> "<bad ProcessResourceLimit>"
+    }
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:236
+pub fn jet_task_control_trace(paused: Bool, cancel: Bool) -> String Never! {
+    "paused={paused},cancel={cancel}"
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:310
+pub fn jet_debug_range(start: I64, end: I64, exclusive: Bool) -> String Never! {
+    jet_debug_record("Range", [("start", start.to_string()), ("end", end.to_string()), ("exclusive", exclusive.to_string())])
+}

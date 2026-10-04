@@ -1,0 +1,300 @@
+// EncodingBase.rs:239–520: fixed-width binary pack/unpack and struct formats.
+// Rust i64 arguments are I64 bit carriers: `as u8/u16/u32/u64` truncation and
+// the u64→i64 reinterpretation stay fixed-word operations, never exact Int
+// scratch. Inputs borrow the caller's original byte/value owner; only results
+// allocate. Rust Result<_, String> is the canonical Err! carrier, same text.
+// The public core.encoding.binary checked Int/BinaryError surface is unchanged
+// pending Main's owner ruling; native/JIT adapters marshal into this owner.
+// Float bit packing reuses the approved private Float↔U64 leaf, HELD #4467.
+use core.math.runtime.kernel_float_policy as binary_float_bits
+use core.text.runtime.kernel_unicode_string as binary_unicode
+
+// Two's-complement I64↔U64 reinterpretation (Rust `as u64`, from_ne_bytes).
+fn binary_word(value: I64) -> U64 Never! {
+    if value >= (I64{0}) -> return U64.from_i64(value) ?? panic("nonnegative binary word conversion failed")
+    magnitude :: (U64.from_i64(-(value + I64{1})) ?? panic("negative binary word conversion failed")).wrapping_add(U64{1})
+    U64{0}.wrapping_sub(magnitude)
+}
+fn binary_signed(value: U64) -> I64 Never! {
+    if value < (U64{9223372036854775808}) -> return I64.from_u64(value) ?? panic("low binary word conversion failed")
+    low :: I64.from_u64(value - U64{9223372036854775808}) ?? panic("high binary word conversion failed")
+    // #4391: construct MIN without the bootstrap's positive-2^63 literal trap.
+    (I64{-9223372036854775807} - I64{1}) + low
+}
+
+// Rust `(value as uN).to_{le,be}_bytes()`: the low `width` bytes, streamed into
+// the caller's output instead of a per-value temporary vector.
+fn binary_push_word(out: &[U8], word: U64, width: Int, little: Bool) Never! {
+    loop k in 0..<width {
+        shift :: if little -> k * 8 else -> (width - 1 - k) * 8
+        &out.push(U8.from_u64((word >> shift) & U64{255}) ?? panic("binary byte narrowing failed"))
+    }
+}
+fn binary_pack_word(value: I64, width: Int, little: Bool) -> [U8] Never! {
+    out := [U8]{}
+    binary_push_word(&out, binary_word(value), width, little)
+    out
+}
+
+// Rust jet_std_binary_pack_u8/i8 (:239–245).
+pub fn jet_std_binary_pack_u8(value: I64) -> [U8] Never! { binary_pack_word(value, 1, true) }
+pub fn jet_std_binary_pack_i8(value: I64) -> [U8] Never! { jet_std_binary_pack_u8(value) }
+// Rust jet_std_binary_pack_u16le/be (:247–253).
+pub fn jet_std_binary_pack_u16le(value: I64) -> [U8] Never! { binary_pack_word(value, 2, true) }
+pub fn jet_std_binary_pack_u16be(value: I64) -> [U8] Never! { binary_pack_word(value, 2, false) }
+// Rust jet_std_binary_pack_u32le/be (:255–261).
+pub fn jet_std_binary_pack_u32le(value: I64) -> [U8] Never! { binary_pack_word(value, 4, true) }
+pub fn jet_std_binary_pack_u32be(value: I64) -> [U8] Never! { binary_pack_word(value, 4, false) }
+// Rust jet_std_binary_pack_u64le/be (:263–269).
+pub fn jet_std_binary_pack_u64le(value: I64) -> [U8] Never! { binary_pack_word(value, 8, true) }
+pub fn jet_std_binary_pack_u64be(value: I64) -> [U8] Never! { binary_pack_word(value, 8, false) }
+
+// Assemble `width` bytes at `start`; the caller has proven the extent.
+fn binary_load_word(data: View<U8>, start: Int, width: Int, little: Bool) -> U64 Never! {
+    word := U64{0}
+    loop k in 0..<width {
+        index :: if little -> start + width - 1 - k else -> start + k
+        word = (word << 8) | U64.from_u8(data[index])
+    }
+    word
+}
+// Rust jet_std_binary_slice (:271–278): a negative offset or an extent past
+// the end is absent. Offsets are byte indexes; exact Int cannot overflow here.
+fn binary_read_word(data: View<U8>, offset: I64, width: Int, little: Bool) -> U64? Never! {
+    if offset < (I64{0}) -> return None
+    start :: Int.from_i64(offset)
+    if start + width > data.len() -> return None
+    Val(binary_load_word(data, start, width, little))
+}
+fn binary_read_narrow(data: View<U8>, offset: I64, width: Int, little: Bool) -> I64? Never! {
+    word :: binary_read_word(data, offset, width, little) ?? return None
+    Val(I64.from_u64(word) ?? panic("binary narrow word conversion failed"))
+}
+
+// Rust jet_std_binary_unpack_u8 (:280–283).
+pub fn jet_std_binary_unpack_u8(data: View<U8>, offset: I64) -> I64? Never! { binary_read_narrow(data, offset, 1, true) }
+// Rust jet_std_binary_unpack_u16le/be (:285–291).
+pub fn jet_std_binary_unpack_u16le(data: View<U8>, offset: I64) -> I64? Never! { binary_read_narrow(data, offset, 2, true) }
+pub fn jet_std_binary_unpack_u16be(data: View<U8>, offset: I64) -> I64? Never! { binary_read_narrow(data, offset, 2, false) }
+// Rust jet_std_binary_unpack_u32le/be (:293–299).
+pub fn jet_std_binary_unpack_u32le(data: View<U8>, offset: I64) -> I64? Never! { binary_read_narrow(data, offset, 4, true) }
+pub fn jet_std_binary_unpack_u32be(data: View<U8>, offset: I64) -> I64? Never! { binary_read_narrow(data, offset, 4, false) }
+// Rust jet_std_binary_unpack_u64le/be (:301–311): the u64 bits become I64.
+pub fn jet_std_binary_unpack_u64le(data: View<U8>, offset: I64) -> I64? Never! {
+    word :: binary_read_word(data, offset, 8, true) ?? return None
+    Val(binary_signed(word))
+}
+pub fn jet_std_binary_unpack_u64be(data: View<U8>, offset: I64) -> I64? Never! {
+    word :: binary_read_word(data, offset, 8, false) ?? return None
+    Val(binary_signed(word))
+}
+
+// Rust jet_std_binary_sign_extend (:313–319): bits outside 1..=64 return the
+// value unchanged; otherwise `(value << (64 - bits)) >> (64 - bits)`, written
+// as mask/sign-fill so no shifted-out bit relies on lossy shift behavior.
+pub fn jet_std_binary_sign_extend(value: I64, bits: I64) -> I64 Never! {
+    if bits < (I64{1}) || bits >= (I64{64}) -> return value
+    width :: Int.from_i64(bits)
+    mask :: (U64{1} << width) - U64{1}
+    word :: binary_word(value) & mask
+    if (word & (U64{1} << (width - 1))) == (U64{0}) -> return binary_signed(word)
+    binary_signed(word | (mask ~| U64{18446744073709551615}))
+}
+
+// Rust jet_std_binary_pack_f64le/be (:321–327): IEEE-754 bits, HELD #4467.
+pub fn jet_std_binary_pack_f64le(value: Float) -> [U8] Never! {
+    out := [U8]{}
+    binary_push_word(&out, binary_float_bits.float_policy_to_bits(value), 8, true)
+    out
+}
+pub fn jet_std_binary_pack_f64be(value: Float) -> [U8] Never! {
+    out := [U8]{}
+    binary_push_word(&out, binary_float_bits.float_policy_to_bits(value), 8, false)
+    out
+}
+// Rust jet_std_binary_unpack_f64le/be (:329–335), HELD #4467.
+pub fn jet_std_binary_unpack_f64le(data: View<U8>, offset: I64) -> Float? Never! {
+    word :: binary_read_word(data, offset, 8, true) ?? return None
+    Val(binary_float_bits.float_policy_from_bits(word))
+}
+pub fn jet_std_binary_unpack_f64be(data: View<U8>, offset: I64) -> Float? Never! {
+    word :: binary_read_word(data, offset, 8, false) ?? return None
+    Val(binary_float_bits.float_policy_from_bits(word))
+}
+
+// Rust (code, repeat, width) op tuple and JetStdBinaryEndian (:337–345).
+// usize counts are full U64 words; `little` is the Little/Big endian choice.
+struct BinaryFormatOp {
+    code: U8
+    repeat: U64
+    width: U64
+}
+struct BinaryFormat {
+    little: Bool
+    ops: [BinaryFormatOp]
+}
+
+// Rust unit widths (:369–375, :413–419). Unknown codes are absent.
+fn binary_unit_width(code: U8) -> U64? Never! {
+    if Int.from_u8(code) == {
+        120 | 99 | 98 | 66 -> Val(U64{1})
+        104 | 72 -> Val(U64{2})
+        105 | 73 | 108 | 76 -> Val(U64{4})
+        113 | 81 -> Val(U64{8})
+        else -> None
+    }
+}
+
+// Rust `code as char` (:374) maps the byte to the scalar of the same value.
+fn binary_unknown_code(code: U8) -> String Never! {
+    out := [U8]{}
+    binary_unicode.append_cp(&out, Int.from_u8(code))
+    character :: String.from_bytes(out) ?? panic("binary format character encoding failed")
+    "unknown binary format character `{character}`"
+}
+
+// Rust jet_std_binary_format (:343–382). Byte-wise over UTF-8; `<`, `=` and
+// `@` select little endian, `>` and `!` big, anything else little with no
+// prefix consumed. A zero (or absent) repeat count means one.
+fn binary_format(format: String) -> BinaryFormat Err! {
+    bytes :: binary_unicode.utf8_bytes(format)
+    little := true
+    cursor := 0
+    if bytes.len() > 0 {
+        first :: Int.from_u8(bytes[0])
+        if first == 60 || first == 61 || first == 64 -> cursor = 1
+        if first == 62 || first == 33 {
+            little = false
+            cursor = 1
+        }
+    }
+    ops := [BinaryFormatOp]{}
+    loop cursor < bytes.len() {
+        repeat := U64{0}
+        loop cursor < bytes.len() {
+            digit :: bytes[cursor]
+            if digit < (U8{48}) || digit > (U8{57}) -> break
+            scaled :: repeat.checked_mul(U64{10}) ?? return Err("binary format repeat count overflowed")
+            repeat = scaled.checked_add(U64.from_u8(digit) - U64{48}) ?? return Err("binary format repeat count overflowed")
+            cursor += 1
+        }
+        if repeat == (U64{0}) -> repeat = U64{1}
+        if cursor >= bytes.len() -> return Err("binary format repeat count is missing a type")
+        code :: bytes[cursor]
+        cursor += 1
+        unit :: binary_unit_width(code) ?? return Err(binary_unknown_code(code))
+        width :: repeat.checked_mul(unit) ?? return Err("binary format size overflowed")
+        &ops.push(BinaryFormatOp{code: code, repeat: repeat, width: width})
+    }
+    Ok(BinaryFormat{little: little, ops: ops})
+}
+
+// Rust jet_std_binary_calcsize (:384–387): each usize width reinterpreted as
+// i64, then summed; a sum past I64 traps like Rust's checked-overflow build.
+pub fn jet_std_binary_calcsize(format: String) -> I64 Err! {
+    parsed :: binary_format(format) ?? return Err(err)
+    total := I64{0}
+    loop op in parsed.ops -> total = total + binary_signed(op.width)
+    Ok(total)
+}
+
+// Rust jet_std_binary_pack_one (:389–405): pad is one zero byte; c/b/B keep
+// `value as u8`; wider codes keep the low bytes in the selected order.
+fn binary_pack_one(out: &[U8], code: U8, little: Bool, value: I64) Never! {
+    if code == (U8{120}) {
+        &out.push(U8{0})
+        return
+    }
+    unit :: binary_unit_width(code) ?? return
+    binary_push_word(&out, binary_word(value), Int.from_u64(unit), little)
+}
+
+// Rust jet_std_binary_unpack_one (:407–444): every code below 64 bits is
+// unsigned (no `b`/`h`/`i` sign extension); q/Q reinterpret the u64 bits.
+fn binary_unpack_one(code: U8, little: Bool, data: View<U8>, offset: U64) -> I64? Never! {
+    unit :: binary_unit_width(code) ?? return None
+    start :: Int.from_u64(offset)
+    width :: Int.from_u64(unit)
+    if start + width > data.len() -> return None
+    word :: binary_load_word(data, start, width, little)
+    if code == (U8{120}) -> return Val(I64{0})
+    if width == 8 -> return Val(binary_signed(word))
+    Val(I64.from_u64(word) ?? panic("binary narrow word conversion failed"))
+}
+
+// Rust jet_std_binary_pack (:446–476). Format errors precede the value count.
+pub fn jet_std_binary_pack(format: String, values: View<I64>) -> [U8] Err! {
+    parsed :: binary_format(format) ?? return Err(err)
+    expected := U64{0}
+    loop op in parsed.ops {
+        if op.code != (U8{120}) -> expected = expected + op.repeat
+    }
+    count :: U64.from_int(values.len()) ?? panic("binary value count exceeds U64")
+    if count != expected -> return Err("binary pack expected {expected} values, got {values.len()}")
+    out := [U8]{}
+    index := 0
+    loop op in parsed.ops {
+        remaining := op.repeat
+        loop remaining > (U64{0}) {
+            value := I64{0}
+            if op.code != (U8{120}) {
+                value = values[index]
+                index += 1
+            }
+            binary_pack_one(&out, op.code, parsed.little, value)
+            remaining -= U64{1}
+        }
+    }
+    Ok(out)
+}
+
+// Rust jet_std_binary_unpack (:478–504) after parsing. Trailing bytes beyond
+// the format size are ignored; only a short buffer is an error.
+fn binary_unpack_parsed(parsed: BinaryFormat, data: View<U8>, base: U64) -> [I64] Err! {
+    size := U64{0}
+    loop op in parsed.ops -> size = size + op.width
+    length :: U64.from_int(data.len()) ?? panic("binary buffer length exceeds U64")
+    if length < size || base > length - size -> return Err("binary unpack needs {size} bytes, got {data.len()}")
+    out := [I64]{}
+    offset := base
+    loop op in parsed.ops {
+        unit :: op.width / op.repeat
+        remaining := op.repeat
+        loop remaining > (U64{0}) {
+            if op.code != (U8{120}) {
+                value :: binary_unpack_one(op.code, parsed.little, data, offset) ?? return Err("binary unpack ran out of bytes")
+                &out.push(value)
+            }
+            offset = offset + unit
+            remaining -= U64{1}
+        }
+    }
+    Ok(out)
+}
+
+// Rust jet_std_binary_unpack (:478–504).
+pub fn jet_std_binary_unpack(format: String, data: View<U8>) -> [I64] Err! {
+    parsed :: binary_format(format) ?? return Err(err)
+    binary_unpack_parsed(parsed, data, U64{0})
+}
+
+// Rust jet_std_binary_iter_unpack (:505–520). Record offsets stay in the
+// original borrowed buffer, with no per-record byte copies or View slicing.
+// The format is parsed once (Rust re-parses identically per chunk).
+pub fn jet_std_binary_iter_unpack(format: String, data: View<U8>) -> [[I64]] Err! {
+    size :: jet_std_binary_calcsize(format) ?? return Err(err)
+    if size < (I64{0}) -> return Err("binary iter_unpack format size is invalid")
+    if size == (I64{0}) -> return Err("binary iter_unpack needs a positive format size")
+    width :: Int.from_i64(size)
+    if data.len() %% width != 0 -> return Err("binary iter_unpack buffer length is not a multiple of the format size")
+    parsed :: binary_format(format) ?? return Err(err)
+    rows := [[I64]]{}
+    at := 0
+    loop at < data.len() {
+        offset :: U64.from_int(at) ?? panic("binary record offset exceeds U64")
+        row :: binary_unpack_parsed(parsed, data, offset) ?? return Err(err)
+        &rows.push(row)
+        at += width
+    }
+    Ok(rows)
+}

@@ -1,0 +1,63 @@
+use core.mem.runtime.gc_core as gc_facts
+use core.mem.runtime.gc_core_02 as gc_graph
+
+// __gc_core.rs has no inline/macro-generated tests. These assertions cover
+// its portable facts and the actual edge-slot data policy, not a native mock.
+// Packet 0247 owns the original gc_collector.rs integration suite. Allocation,
+// mutex poison, callback unwind, Arc/Weak and automatic safepoints remain
+// #4494-gated; these controls do not establish native collector parity.
+
+#Test("GC ObjectId get preserves zero and every full-width identity bit") {
+    assert_eq(gc_facts.GCObjectID{value: U64{0}}.get(), U64{0})
+    assert_eq(gc_facts.GCObjectID{value: U64{9223372036854775808}}.get(), U64{9223372036854775808})
+    assert_eq(gc_facts.GCObjectID{value: U64{18446744073709551615}}.get(), U64{18446744073709551615})
+    assert_eq(gc_facts.GC_MAX_OBJECTS, 1000000)
+    assert_eq(gc_facts.GC_MAX_EDGES_PER_OBJECT, 65536)
+}
+
+#Test("GC Collection default initializes every independently reported extent") {
+    result :: gc_facts.gc_empty_collection()
+    assert_eq(result.reachable, 0)
+    assert_eq(result.reclaimed.len(), 0)
+    assert_eq(result.deferred.len(), 0)
+    assert_eq(result.finalizer_panics.len(), 0)
+    assert_eq(result.poisoned_payloads.len(), 0)
+    assert_eq(result.drop_panics.len(), 0)
+}
+
+#Test("GC replacing all edges discards every stale slot and preserves raw groups") {
+    // Rust AutomaticRoot::edit_replacing_all_edges :469–472. This is the
+    // post-success transition only; the native edit/commit/lock remains gated.
+    a :: gc_facts.GCObjectID{value: U64{1}}
+    b :: gc_facts.GCObjectID{value: U64{18446744073709551615}}
+    slots := [String:[[gc_facts.GCObjectID]]]{
+        "initial": [[gc_facts.GCObjectID]]{[gc_facts.GCObjectID]{a}},
+        "collection": [[gc_facts.GCObjectID]]{[gc_facts.GCObjectID]{a}, [gc_facts.GCObjectID]{}},
+        "value": [[gc_facts.GCObjectID]]{[gc_facts.GCObjectID]{a}},
+    }
+    edges :: [gc_facts.GCObjectID]{b, b, a}
+    gc_facts.gc_edge_slots_reset(&slots, edges)
+    assert_eq(slots.len(), 1)
+    assert(!slots.has_key("initial"))
+    assert(!slots.has_key("collection"))
+    assert_eq(slots["value"].len(), 1)
+    assert_eq(slots["value"][0], edges)
+    assert_eq(edges, [gc_facts.GCObjectID]{b, b, a})
+    assert_eq(gc_graph.gc_flatten_edge_slots(slots), [gc_facts.GCObjectID]{a, b})
+}
+
+#Test("GC clearing all edges removes the value slot rather than retaining an empty group") {
+    // Rust AutomaticRoot::edit_clearing_edges :476–477 passes [] to the same
+    // successful all-edge transition; it must not retain unrelated slots.
+    a :: gc_facts.GCObjectID{value: U64{1}}
+    slots := [String:[[gc_facts.GCObjectID]]]{
+        "child": [[gc_facts.GCObjectID]]{[gc_facts.GCObjectID]{a}},
+        "value": [[gc_facts.GCObjectID]]{[gc_facts.GCObjectID]{a}},
+    }
+    gc_facts.gc_edge_slots_reset(&slots, [gc_facts.GCObjectID]{})
+    assert_eq(slots.len(), 0)
+    assert(!slots.has_key("value"))
+    assert_eq(gc_graph.gc_flatten_edge_slots(slots).len(), 0)
+    gc_facts.gc_edge_slots_reset(&slots, [gc_facts.GCObjectID]{})
+    assert_eq(slots.len(), 0)
+}

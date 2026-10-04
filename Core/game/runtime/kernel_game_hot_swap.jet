@@ -1,0 +1,640 @@
+// D-DX-GAMEHOTSWAP1 / #2489. Canonical port of GameHotSwap.rs:1-1287.
+// Checked source/build facts only: no native links, listeners or transport.
+// Transaction checks precede mutation; scripts and assets stage atomically.
+// #4392/#4318: utf8_bytes still materializes in the bootstrap; native activation
+// requires the canonical text owner's retaining byte loan, not a local copy API.
+use core.text.runtime.kernel_unicode_string as game_text
+use core.math as game_math
+
+pub struct JetGameHotSwapIdentity {
+    pub source_revision: String
+    pub build_revision: String
+    pub fn new(source_revision: String, build_revision: String) -> JetGameHotSwapIdentity JetGameHotSwapError! {
+        jet_game_hot_swap_validate_revision(source_revision, "source_revision") ?? return Err(err)
+        jet_game_hot_swap_validate_revision(build_revision, "build_revision") ?? return Err(err)
+        Ok(JetGameHotSwapIdentity{source_revision: source_revision, build_revision: build_revision})
+    }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        self.write_json(&out)
+        finish_json(out)
+    }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"source_revision\":")
+        json_string(out, self.source_revision)
+        append(out, ",\"build_revision\":")
+        json_string(out, self.build_revision)
+        append(out, "}}")
+    }
+}
+pub enum JetGameLinkMode {
+    Restart
+    Script
+    Scene
+    ScriptAndScene
+    pub fn as_str(self) -> String Never! {
+        if self == { .Restart -> "restart", .Script -> "script", .Scene -> "scene", .ScriptAndScene -> "script_and_scene" }
+    }
+    pub fn scripts_enabled(self) -> Bool Never! { self == .Script || self == .ScriptAndScene }
+    pub fn scene_enabled(self) -> Bool Never! { self == .Scene || self == .ScriptAndScene }
+    pub fn is_restart(self) -> Bool Never! { self == .Restart }
+}
+pub enum JetGameHotSwapIncompatibility {
+    SourceRevisionMismatch(expected: String, actual: String)
+    BuildRevisionMismatch(expected: String, actual: String)
+    WorldSchemaChanged(expected: String, actual: String)
+    PersistBindingRemoved(key: String)
+    PersistSchemaChanged(key: String, expected: String, actual: String)
+    PersistValueTypeChanged(key: String, expected: String, actual: String)
+    ScriptTypeChanged(name: String, expected: String, actual: String)
+    ScriptRemoved(name: String)
+    ScriptSyncDisabled(mode: JetGameLinkMode)
+    AssetSyncDisabled(mode: JetGameLinkMode)
+    pub fn code(self) -> String Never! {
+        if self == {
+            .SourceRevisionMismatch(_, _) -> "source_revision_mismatch"
+            .BuildRevisionMismatch(_, _) -> "build_revision_mismatch"
+            .WorldSchemaChanged(_, _) -> "world_schema_changed"
+            .PersistBindingRemoved(_) -> "persist_binding_removed"
+            .PersistSchemaChanged(_, _, _) -> "persist_schema_changed"
+            .PersistValueTypeChanged(_, _, _) -> "persist_value_type_changed"
+            .ScriptTypeChanged(_, _, _) -> "script_type_changed"
+            .ScriptRemoved(_) -> "script_removed"
+            .ScriptSyncDisabled(_) -> "script_sync_disabled"
+            .AssetSyncDisabled(_) -> "asset_sync_disabled"
+        }
+    }
+    pub fn message(self) -> String Never! {
+        if self == {
+            .SourceRevisionMismatch(expected, actual) -> "source revision mismatch: expected `{expected}`, got `{actual}`"
+            .BuildRevisionMismatch(expected, actual) -> "build revision mismatch: expected `{expected}`, got `{actual}`"
+            .WorldSchemaChanged(expected, actual) -> "persisted world schema changed from `{expected}` to `{actual}`"
+            .PersistBindingRemoved(key) -> "persisted binding `{key}` was removed or renamed"
+            .PersistSchemaChanged(key, expected, actual) -> "persisted binding `{key}` schema changed from `{expected}` to `{actual}`"
+            .PersistValueTypeChanged(key, expected, actual) -> "persisted binding `{key}` value type changed from `{expected}` to `{actual}`"
+            .ScriptTypeChanged(name, expected, actual) -> "script `{name}` type changed from `{expected}` to `{actual}`"
+            .ScriptRemoved(name) -> "resident script `{name}` was removed or renamed"
+            .ScriptSyncDisabled(mode) -> "script changes are not enabled by explicit link mode `{mode.as_str()}`"
+            .AssetSyncDisabled(mode) -> "asset changes are not enabled by explicit link mode `{mode.as_str()}`"
+        }
+    }
+}
+#Error
+pub enum JetGameHotSwapError {
+    InvalidRevision(field: String)
+    InvalidIdentity(field: String)
+    InvalidFact(kind: String, key: String)
+    DuplicateFact(kind: String, key: String)
+    InvalidPersistValue(key: String, reason: String)
+    Incompatible(reason: JetGameHotSwapIncompatibility)
+    StaleLive(expected: JetGameHotSwapIdentity, actual: JetGameHotSwapIdentity)
+    TransactionIdMismatch(expected: U64, actual: U64)
+    InvalidPhase(expected: JetGameHotSwapReceiptPhase, actual: JetGameHotSwapReceiptPhase)
+    AlreadyFinalized
+    pub fn incompatibility(self) -> (@JetGameHotSwapIncompatibility)? Never! from self {
+        if self == { .Incompatible(reason) -> Val(@reason), else -> None }
+    }
+    pub fn is_incompatible(self) -> Bool Never! {
+        if self == { .Incompatible(_) -> true, else -> false }
+    }
+    pub fn message(self) -> String Never! {
+        if self == {
+            .InvalidRevision(field) -> "game hot-swap {field} revision must be non-empty and printable"
+            .InvalidIdentity(field) -> "game hot-swap {field} identity must be non-empty and printable"
+            .InvalidFact(kind, key) -> "game hot-swap {kind} fact `{key}` is invalid"
+            .DuplicateFact(kind, key) -> "game hot-swap contains duplicate {kind} fact `{key}`"
+            .InvalidPersistValue(key, reason) -> "persisted value `{key}` is invalid: {reason}"
+            .Incompatible(reason) -> reason.message()
+            .StaleLive(expected, actual) -> "game hot-swap live world is stale: expected source/build `{expected.source_revision}/{expected.build_revision}`, got `{actual.source_revision}/{actual.build_revision}`"
+            .TransactionIdMismatch(expected, actual) -> "game hot-swap transaction id mismatch: expected `{expected}`, got `{actual}`"
+            .InvalidPhase(expected, actual) -> "game hot-swap transaction requires phase `{expected.as_str()}`, got `{actual.as_str()}`"
+            .AlreadyFinalized -> "game hot-swap transaction is already finalized"
+        }
+    }
+}
+pub struct JetGameWorldRevisionFact {
+    pub identity: JetGameHotSwapIdentity
+    pub schema_revision: String
+    pub fn new(identity: JetGameHotSwapIdentity, schema_revision: String) -> JetGameWorldRevisionFact JetGameHotSwapError! {
+        jet_game_hot_swap_validate_revision(schema_revision, "world.schema_revision") ?? return Err(err)
+        Ok(JetGameWorldRevisionFact{identity: identity, schema_revision: schema_revision})
+    }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"identity\":"); self.identity.write_json(out)
+        append(out, ",\"schema_revision\":"); json_string(out, self.schema_revision); append(out, "}}")
+    }
+}
+pub struct JetGameScriptRevisionFact {
+    pub name: String
+    pub identity: JetGameHotSwapIdentity
+    pub type_revision: String
+    pub body_revision: String
+    pub fn new(name: String, identity: JetGameHotSwapIdentity, type_revision: String, body_revision: String) -> JetGameScriptRevisionFact JetGameHotSwapError! {
+        jet_game_hot_swap_validate_identity(name, "script.name") ?? return Err(err)
+        jet_game_hot_swap_validate_revision(type_revision, "script.type_revision") ?? return Err(err)
+        jet_game_hot_swap_validate_revision(body_revision, "script.body_revision") ?? return Err(err)
+        Ok(JetGameScriptRevisionFact{name: name, identity: identity, type_revision: type_revision, body_revision: body_revision})
+    }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"name\":"); json_string(out, self.name)
+        append(out, ",\"identity\":"); self.identity.write_json(out)
+        append(out, ",\"type_revision\":"); json_string(out, self.type_revision)
+        append(out, ",\"body_revision\":"); json_string(out, self.body_revision); append(out, "}}")
+    }
+}
+pub struct JetGameAssetRevisionFact {
+    pub logical_path: String
+    pub identity: JetGameHotSwapIdentity
+    pub output_revision: String
+    pub fn new(logical_path: String, identity: JetGameHotSwapIdentity, output_revision: String) -> JetGameAssetRevisionFact JetGameHotSwapError! {
+        jet_game_hot_swap_validate_identity(logical_path, "asset.logical_path") ?? return Err(err)
+        jet_game_hot_swap_validate_revision(output_revision, "asset.output_revision") ?? return Err(err)
+        Ok(JetGameAssetRevisionFact{logical_path: logical_path, identity: identity, output_revision: output_revision})
+    }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"logical_path\":"); json_string(out, self.logical_path)
+        append(out, ",\"identity\":"); self.identity.write_json(out)
+        append(out, ",\"output_revision\":"); json_string(out, self.output_revision); append(out, "}}")
+    }
+}
+pub enum JetGameHotSwapValue {
+    Bool(value: Bool)
+    Int(value: I64)
+    Float(value: Float)
+    Text(value: String)
+    Bytes(values: [U8])
+    List(values: [JetGameHotSwapValue])
+    Record(fields: [(String, JetGameHotSwapValue)])
+    pub fn text(value: String) -> JetGameHotSwapValue Never! { .Text(value) }
+    pub fn record(fields: ^[(String, JetGameHotSwapValue)]) -> JetGameHotSwapValue JetGameHotSwapError! {
+        sorted := ^fields
+        &sorted.sort_by((left: (String, JetGameHotSwapValue), right: (String, JetGameHotSwapValue)) -> left.0 <=> right.0)
+        loop i in 1..<sorted.len() {
+            if sorted[i - 1].0 == sorted[i].0 -> return Err(.DuplicateFact("persist record field", ~sorted[i - 1].0))
+        }
+        value :: JetGameHotSwapValue.Record(^sorted)
+        value.validate("record") ?? return Err(err)
+        Ok(value)
+    }
+    pub fn type_tag(self) -> String Never! {
+        if self == { .Bool(_) -> "Bool", .Int(_) -> "Int", .Float(_) -> "Float", .Text(_) -> "String", .Bytes(_) -> "Bytes", .List(_) -> "List", .Record(_) -> "Record" }
+    }
+    fn validate(self, key: String) JetGameHotSwapError! {
+        if self == {
+            .Float(value) -> if !game_math.is_finite(value) -> return Err(.InvalidPersistValue(~key, "Float must be finite for deterministic state"))
+            .List(values) -> loop i in 0..<values.len() -> values[i].validate("{key}[{i}]") ?? return Err(err)
+            .Record(fields) -> {
+                loop i in 1..<fields.len() {
+                    if fields[i - 1].0 >= fields[i].0 -> return Err(.InvalidPersistValue(~key, "Record fields must be sorted and unique"))
+                }
+                loop field in fields {
+                    jet_game_hot_swap_validate_identity(field.0, "persist.record.field") ?? return Err(err)
+                    field.1.validate("{key}.{field.0}") ?? return Err(err)
+                }
+            }
+            else -> {}
+        }
+        Ok()
+    }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        if self == {
+            .Bool(value) -> append(out, "{value}")
+            .Int(value) -> append(out, "{value}")
+            // Jet Float Display is the canonical Rust f64 Debug spelling (Values.rs:262).
+            .Float(value) -> append(out, "{value}")
+            .Text(value) -> json_string(out, value)
+            .Bytes(values) -> {
+                append(out, "[")
+                loop i in 0..<values.len() { if i > 0 -> append(out, ","); append(out, "{values[i]}") }
+                append(out, "]")
+            }
+            .List(values) -> {
+                append(out, "[")
+                loop i in 0..<values.len() { if i > 0 -> append(out, ","); values[i].write_json(out) }
+                append(out, "]")
+            }
+            .Record(fields) -> {
+                append(out, "{{")
+                loop i in 0..<fields.len() {
+                    if i > 0 -> append(out, ",")
+                    json_string(out, fields[i].0); append(out, ":"); fields[i].1.write_json(out)
+                }
+                append(out, "}}")
+            }
+        }
+    }
+}
+pub struct JetGameHotSwapPersistState {
+    pub key: String
+    pub schema_revision: String
+    pub value: JetGameHotSwapValue
+    pub fn new(key: String, schema_revision: String, value: JetGameHotSwapValue) -> JetGameHotSwapPersistState JetGameHotSwapError! {
+        jet_game_hot_swap_validate_identity(key, "persist.key") ?? return Err(err)
+        jet_game_hot_swap_validate_revision(schema_revision, "persist.schema_revision") ?? return Err(err)
+        value.validate(key) ?? return Err(err)
+        Ok(JetGameHotSwapPersistState{key: key, schema_revision: schema_revision, value: value})
+    }
+    pub fn value_type(self) -> String Never! { self.value.type_tag() }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"key\":"); json_string(out, self.key)
+        append(out, ",\"schema_revision\":"); json_string(out, self.schema_revision)
+        append(out, ",\"value_type\":"); json_string(out, self.value.type_tag())
+        append(out, ",\"value\":"); self.value.write_json(out); append(out, "}}")
+    }
+}
+pub struct JetGameHotSwapSnapshot {
+    pub identity: JetGameHotSwapIdentity
+    pub world: JetGameWorldRevisionFact
+    pub persist: [JetGameHotSwapPersistState]
+    pub scripts: [JetGameScriptRevisionFact]
+    pub assets: [JetGameAssetRevisionFact]
+    pub fn new(identity: JetGameHotSwapIdentity, world: JetGameWorldRevisionFact, persist: ^[JetGameHotSwapPersistState], scripts: ^[JetGameScriptRevisionFact], assets: ^[JetGameAssetRevisionFact]) -> JetGameHotSwapSnapshot JetGameHotSwapError! {
+        p := ^persist; s := ^scripts; a := ^assets
+        &p.sort_by((left: JetGameHotSwapPersistState, right: JetGameHotSwapPersistState) -> left.key <=> right.key)
+        &s.sort_by((left: JetGameScriptRevisionFact, right: JetGameScriptRevisionFact) -> left.name <=> right.name)
+        &a.sort_by((left: JetGameAssetRevisionFact, right: JetGameAssetRevisionFact) -> left.logical_path <=> right.logical_path)
+        snapshot :: JetGameHotSwapSnapshot{identity: identity, world: world, persist: ^p, scripts: ^s, assets: ^a}
+        snapshot.validate() ?? return Err(err)
+        Ok(snapshot)
+    }
+    pub fn validate(self) JetGameHotSwapError! {
+        jet_game_hot_swap_identity_error(self.identity, self.world.identity) ?? return Err(err)
+        loop i in 0..<self.persist.len() {
+            state :: self.persist[i]
+            if i > 0 && self.persist[i - 1].key >= state.key -> return Err(.DuplicateFact("persist", ~state.key))
+            state.value.validate(state.key) ?? return Err(err)
+        }
+        loop i in 0..<self.scripts.len() {
+            script :: self.scripts[i]
+            if i > 0 && self.scripts[i - 1].name >= script.name -> return Err(.DuplicateFact("script", ~script.name))
+            jet_game_hot_swap_identity_error(self.identity, script.identity) ?? return Err(err)
+        }
+        loop i in 0..<self.assets.len() {
+            asset :: self.assets[i]
+            if i > 0 && self.assets[i - 1].logical_path >= asset.logical_path -> return Err(.DuplicateFact("asset", ~asset.logical_path))
+            jet_game_hot_swap_identity_error(self.identity, asset.identity) ?? return Err(err)
+        }
+        Ok()
+    }
+    // Retaining projections preserve Rust Option<&T>; no owned result copies.
+    pub fn persist_value(self, key: String) -> (@JetGameHotSwapPersistState)? Never! from self {
+        loop state in self.persist -> if state.key == key -> return Val(@state)
+        None
+    }
+    pub fn script(self, name: String) -> (@JetGameScriptRevisionFact)? Never! from self {
+        loop script in self.scripts -> if script.name == name -> return Val(@script)
+        None
+    }
+    pub fn asset(self, logical_path: String) -> (@JetGameAssetRevisionFact)? Never! from self {
+        loop asset in self.assets -> if asset.logical_path == logical_path -> return Val(@asset)
+        None
+    }
+    pub fn render_json(self) -> String Never! { out := [U8]{}; self.write_json(&out); finish_json(out) }
+    fn write_json(self, out: &[U8]) Never! {
+        append(out, "{{\"identity\":"); self.identity.write_json(out)
+        append(out, ",\"world\":"); self.world.write_json(out)
+        append(out, ",\"persist\":[")
+        loop i in 0..<self.persist.len() { if i > 0 -> append(out, ","); self.persist[i].write_json(out) }
+        append(out, "],\"scripts\":[")
+        loop i in 0..<self.scripts.len() { if i > 0 -> append(out, ","); self.scripts[i].write_json(out) }
+        append(out, "],\"assets\":[")
+        loop i in 0..<self.assets.len() { if i > 0 -> append(out, ","); self.assets[i].write_json(out) }
+        append(out, "]}}")
+    }
+}
+pub enum JetGameHotSwapReceiptPhase {
+    Prepared
+    Paused
+    Applied
+    Committed
+    RolledBack
+    pub fn as_str(self) -> String Never! {
+        if self == { .Prepared -> "prepared", .Paused -> "paused", .Applied -> "applied", .Committed -> "committed", .RolledBack -> "rolled_back" }
+    }
+}
+pub struct JetGameHotSwapReceipt {
+    pub transaction_id: U64
+    pub phase: JetGameHotSwapReceiptPhase
+    pub from_identity: JetGameHotSwapIdentity
+    pub to_identity: JetGameHotSwapIdentity
+    pub link_mode: JetGameLinkMode
+    pub kept_values: [String]
+    pub reset_values: [String]
+    pub fresh_values: [String]
+    pub changed_scripts: [String]
+    pub changed_assets: [String]
+    pub incompatibility: JetGameHotSwapIncompatibility?
+    pub fn is_committed(self) -> Bool Never! { self.phase == .Committed }
+    pub fn is_rolled_back(self) -> Bool Never! { self.phase == .RolledBack }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        append(&out, "{{\"transaction_id\":{self.transaction_id},\"phase\":"); json_string(&out, self.phase.as_str())
+        append(&out, ",\"from\":"); self.from_identity.write_json(&out)
+        append(&out, ",\"to\":"); self.to_identity.write_json(&out)
+        append(&out, ",\"link_mode\":"); json_string(&out, self.link_mode.as_str())
+        append(&out, ",\"kept_values\":"); json_list(&out, self.kept_values)
+        append(&out, ",\"reset_values\":"); json_list(&out, self.reset_values)
+        append(&out, ",\"fresh_values\":"); json_list(&out, self.fresh_values)
+        append(&out, ",\"changed_scripts\":"); json_list(&out, self.changed_scripts)
+        append(&out, ",\"changed_assets\":"); json_list(&out, self.changed_assets)
+        append(&out, ",\"incompatibility\":")
+        if self.incompatibility == {
+            .None -> append(&out, "null")
+            .Val(reason) -> {
+                append(&out, "{{\"code\":"); json_string(&out, reason.code())
+                append(&out, ",\"message\":"); json_string(&out, reason.message()); append(&out, "}}")
+            }
+        }
+        append(&out, "}}"); finish_json(out)
+    }
+}
+pub struct JetGameHotSwapPlan {
+    pub current_identity: JetGameHotSwapIdentity
+    pub candidate_identity: JetGameHotSwapIdentity
+    pub link_mode: JetGameLinkMode
+    pub kept_values: [String]
+    pub reset_values: [String]
+    pub fresh_values: [String]
+    pub changed_scripts: [String]
+    pub changed_assets: [String]
+    id: U64
+    current: JetGameHotSwapSnapshot
+    candidate: JetGameHotSwapSnapshot
+    pub fn new(current: JetGameHotSwapSnapshot, candidate: JetGameHotSwapSnapshot, link_mode: JetGameLinkMode) -> JetGameHotSwapPlan JetGameHotSwapError! {
+        current.validate() ?? return Err(err)
+        candidate.validate() ?? return Err(err)
+        kept := [String]{}; reset := [String]{}; fresh := [String]{}
+        // Sorted checked String-key facts admit monotone joins; no temporary
+        // maps and no per-item whole-array search. Preserve Rust error order.
+        j := 0
+        loop state in current.persist {
+            loop j < candidate.persist.len() && candidate.persist[j].key < state.key -> j += 1
+            if j == candidate.persist.len() || candidate.persist[j].key != state.key -> return Err(.Incompatible(.PersistBindingRemoved(~state.key)))
+            next_state :: candidate.persist[j]
+            if state.schema_revision != next_state.schema_revision -> return Err(.Incompatible(.PersistSchemaChanged(~state.key, ~state.schema_revision, ~next_state.schema_revision)))
+            if state.value_type() != next_state.value_type() -> return Err(.Incompatible(.PersistValueTypeChanged(~state.key, state.value_type(), next_state.value_type())))
+            if link_mode.is_restart() -> &reset.push(~state.key) else -> &kept.push(~state.key)
+        }
+        j = 0
+        loop state in candidate.persist {
+            loop j < current.persist.len() && current.persist[j].key < state.key -> j += 1
+            if j == current.persist.len() || current.persist[j].key != state.key -> &fresh.push(~state.key)
+        }
+        if current.world.schema_revision != candidate.world.schema_revision -> return Err(.Incompatible(.WorldSchemaChanged(~current.world.schema_revision, ~candidate.world.schema_revision)))
+        changed_scripts := [String]{}
+        j = 0
+        loop script in current.scripts {
+            loop j < candidate.scripts.len() && candidate.scripts[j].name < script.name -> j += 1
+            if j == candidate.scripts.len() || candidate.scripts[j].name != script.name -> return Err(.Incompatible(.ScriptRemoved(~script.name)))
+            next_script :: candidate.scripts[j]
+            if script.type_revision != next_script.type_revision -> return Err(.Incompatible(.ScriptTypeChanged(~script.name, ~script.type_revision, ~next_script.type_revision)))
+        }
+        // Candidate-order walk emits changed + new scripts already sorted.
+        j = 0
+        loop script in candidate.scripts {
+            loop j < current.scripts.len() && current.scripts[j].name < script.name -> j += 1
+            if j == current.scripts.len() || current.scripts[j].name != script.name || current.scripts[j].body_revision != script.body_revision -> &changed_scripts.push(~script.name)
+        }
+        changed_assets := [String]{}
+        i := 0; j = 0
+        loop i < current.assets.len() || j < candidate.assets.len() {
+            if j == candidate.assets.len() || (i < current.assets.len() && current.assets[i].logical_path < candidate.assets[j].logical_path) {
+                &changed_assets.push(~current.assets[i].logical_path); i += 1
+            } else if i == current.assets.len() || candidate.assets[j].logical_path < current.assets[i].logical_path {
+                &changed_assets.push(~candidate.assets[j].logical_path); j += 1
+            } else {
+                if current.assets[i].output_revision != candidate.assets[j].output_revision -> &changed_assets.push(~current.assets[i].logical_path)
+                i += 1; j += 1
+            }
+        }
+        if changed_scripts.len() > 0 && !link_mode.scripts_enabled() && !link_mode.is_restart() -> return Err(.Incompatible(.ScriptSyncDisabled(link_mode)))
+        if changed_assets.len() > 0 && !link_mode.scene_enabled() && !link_mode.is_restart() -> return Err(.Incompatible(.AssetSyncDisabled(link_mode)))
+        id :: jet_game_hot_swap_transaction_id(current, candidate, link_mode, changed_scripts, changed_assets)
+        Ok(JetGameHotSwapPlan{current_identity: ~current.identity, candidate_identity: ~candidate.identity, link_mode: link_mode,
+            kept_values: ^kept, reset_values: ^reset, fresh_values: ^fresh, changed_scripts: ^changed_scripts, changed_assets: ^changed_assets,
+            id: id, current: ~current, candidate: ~candidate})
+    }
+    pub fn transaction_id(self) -> U64 Never! { self.id }
+    pub fn preflight(self, live: JetGameHotSwapSnapshot) JetGameHotSwapError! { self.verify_live(live) }
+    pub fn execute(self, live: &JetGameHotSwapSnapshot) -> JetGameHotSwapReceipt JetGameHotSwapError! {
+        transaction := JetGameHotSwapTransaction.begin(live, self) ?? return Err(err)
+        id :: transaction.transaction_id()
+        &transaction.pause(id) ?? return Err(err)
+        applied :: &transaction.apply_scripts_and_assets(live, id) ?? return Err(err)
+        // Commit consumes the returned stage. On failure the retained checked
+        // stage remains available for rollback, so success needs no spare copy.
+        if &transaction.commit(^applied.0, id) == {
+            .Ok(result) -> { live = result.0; Ok(result.1) }
+            .Err(error) -> {
+                if transaction.staged == .Val(staged) -> _ :: &transaction.rollback(~staged, id)
+                Err(error)
+            }
+        }
+    }
+    fn verify_live(self, live: JetGameHotSwapSnapshot) JetGameHotSwapError! {
+        live.validate() ?? return Err(err)
+        if live.identity != self.current_identity || live != self.current -> return Err(.StaleLive(~self.current_identity, ~live.identity))
+        Ok()
+    }
+    fn staged_snapshot(self, prior: JetGameHotSwapSnapshot) -> JetGameHotSwapSnapshot Never! {
+        staged := ~self.candidate
+        if self.link_mode.is_restart() -> return staged
+        j := 0
+        loop i in 0..<staged.persist.len() {
+            loop j < prior.persist.len() && prior.persist[j].key < staged.persist[i].key -> j += 1
+            if j < prior.persist.len() && prior.persist[j].key == staged.persist[i].key -> staged.persist[i].value = ~prior.persist[j].value
+        }
+        staged
+    }
+    fn receipt(self, phase: JetGameHotSwapReceiptPhase) -> JetGameHotSwapReceipt Never! {
+        JetGameHotSwapReceipt{transaction_id: self.id, phase: phase, from_identity: ~self.current_identity, to_identity: ~self.candidate_identity,
+            link_mode: self.link_mode, kept_values: ~self.kept_values, reset_values: ~self.reset_values, fresh_values: ~self.fresh_values,
+            changed_scripts: ~self.changed_scripts, changed_assets: ~self.changed_assets, incompatibility: None}
+    }
+}
+pub struct JetGameHotSwapExplanation {
+    pub current_identity: JetGameHotSwapIdentity
+    pub candidate_identity: JetGameHotSwapIdentity
+    pub link_mode: JetGameLinkMode
+    pub compatible: Bool
+    pub transaction_id: U64?
+    pub code: String
+    pub message: String
+    pub fn explain(current: JetGameHotSwapSnapshot, candidate: JetGameHotSwapSnapshot, link_mode: JetGameLinkMode) -> JetGameHotSwapExplanation Never! {
+        if JetGameHotSwapPlan.new(current, candidate, link_mode) == {
+            .Ok(plan) -> JetGameHotSwapExplanation{current_identity: ~current.identity, candidate_identity: ~candidate.identity,
+                link_mode: link_mode, compatible: true, transaction_id: Val(plan.transaction_id()), code: "ok", message: "reload can commit with the selected link mode"}
+            .Err(error) -> {
+                code := "invalid_reload"
+                if error.incompatibility() == .Val(reason) -> code = reason.code()
+                JetGameHotSwapExplanation{current_identity: ~current.identity, candidate_identity: ~candidate.identity,
+                    link_mode: link_mode, compatible: false, transaction_id: None, code: code, message: error.message()}
+            }
+        }
+    }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        append(&out, "{{\"current\":"); self.current_identity.write_json(&out)
+        append(&out, ",\"candidate\":"); self.candidate_identity.write_json(&out)
+        append(&out, ",\"link_mode\":"); json_string(&out, self.link_mode.as_str())
+        append(&out, ",\"compatible\":{self.compatible},\"transaction_id\":")
+        if self.transaction_id == { .None -> append(&out, "null"), .Val(id) -> append(&out, "{id}") }
+        append(&out, ",\"code\":"); json_string(&out, self.code)
+        append(&out, ",\"message\":"); json_string(&out, self.message); append(&out, "}}")
+        finish_json(out)
+    }
+}
+pub struct JetGameHotSwapTransaction {
+    plan: JetGameHotSwapPlan
+    prior: JetGameHotSwapSnapshot
+    staged: JetGameHotSwapSnapshot?
+    state: JetGameHotSwapReceiptPhase
+    pub fn begin(snapshot: JetGameHotSwapSnapshot, plan: JetGameHotSwapPlan) -> JetGameHotSwapTransaction JetGameHotSwapError! {
+        plan.preflight(snapshot) ?? return Err(err)
+        Ok(JetGameHotSwapTransaction{plan: ~plan, prior: ~snapshot, staged: None, state: .Prepared})
+    }
+    pub fn transaction_id(self) -> U64 Never! { self.plan.id }
+    pub fn phase(self) -> JetGameHotSwapReceiptPhase Never! { self.state }
+    fn check_transaction_id(self, id: U64) JetGameHotSwapError! {
+        if id != self.plan.id -> return Err(.TransactionIdMismatch(self.plan.id, id))
+        Ok()
+    }
+    pub fn pause(&self, id: U64) -> JetGameHotSwapReceipt JetGameHotSwapError! {
+        self.check_transaction_id(id) ?? return Err(err)
+        if self.state != .Prepared -> return Err(.InvalidPhase(.Prepared, self.state))
+        self.state = .Paused
+        Ok(self.plan.receipt(self.state))
+    }
+    pub fn apply_scripts_and_assets(&self, live: JetGameHotSwapSnapshot, id: U64) -> (JetGameHotSwapSnapshot, JetGameHotSwapReceipt) JetGameHotSwapError! {
+        self.check_transaction_id(id) ?? return Err(err)
+        if self.state != .Paused -> return Err(.InvalidPhase(.Paused, self.state))
+        self.plan.preflight(live) ?? return Err(err)
+        staged :: self.plan.staged_snapshot(self.prior)
+        staged.validate() ?? return Err(err)
+        self.staged = Val(~staged)
+        self.state = .Applied
+        Ok((staged, self.plan.receipt(self.state)))
+    }
+    pub fn commit(&self, live: ^JetGameHotSwapSnapshot, id: U64) -> (JetGameHotSwapSnapshot, JetGameHotSwapReceipt) JetGameHotSwapError! {
+        self.check_transaction_id(id) ?? return Err(err)
+        if self.state != .Applied -> return Err(.InvalidPhase(.Applied, self.state))
+        if self.staged == {
+            .Val(staged) -> if staged != live -> return Err(.StaleLive(~self.plan.candidate_identity, ~live.identity))
+            .None -> return Err(.StaleLive(~self.plan.candidate_identity, ~live.identity))
+        }
+        self.state = .Committed
+        Ok((^live, self.plan.receipt(self.state)))
+    }
+    pub fn rollback(&self, live: ^JetGameHotSwapSnapshot, id: U64) -> (JetGameHotSwapSnapshot, JetGameHotSwapReceipt) JetGameHotSwapError! {
+        self.check_transaction_id(id) ?? return Err(err)
+        if self.state == {
+            .Prepared -> {
+                if live != self.prior -> return Err(.StaleLive(~self.plan.current_identity, ~live.identity))
+                self.state = .RolledBack
+                Ok((^live, self.plan.receipt(self.state)))
+            }
+            .Paused -> {
+                if live != self.prior -> return Err(.StaleLive(~self.plan.current_identity, ~live.identity))
+                self.state = .RolledBack
+                Ok((^live, self.plan.receipt(self.state)))
+            }
+            .Applied -> {
+                if self.staged == {
+                    .Val(staged) -> if staged != live -> return Err(.StaleLive(~self.plan.candidate_identity, ~live.identity))
+                    .None -> return Err(.StaleLive(~self.plan.candidate_identity, ~live.identity))
+                }
+                self.state = .RolledBack
+                Ok((~self.prior, self.plan.receipt(self.state)))
+            }
+            .Committed -> Err(.AlreadyFinalized)
+            .RolledBack -> Err(.AlreadyFinalized)
+        }
+    }
+}
+fn has_control(value: String) -> Bool Never! {
+    raw :: game_text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        cp :: game_text.scalar_at(raw, at)
+        // Unicode General_Category=Cc: U+0000..001F and U+007F..009F.
+        if cp < 32 || (cp >= 127 && cp <= 159) -> return true
+        at += game_text.utf8_width_at(raw, at)
+    }
+    false
+}
+fn jet_game_hot_swap_validate_revision(value: String, field: String) JetGameHotSwapError! {
+    if value.len() == 0 || has_control(value) -> return Err(.InvalidRevision(~field))
+    Ok()
+}
+fn jet_game_hot_swap_validate_identity(value: String, field: String) JetGameHotSwapError! {
+    if value.len() == 0 || has_control(value) -> return Err(.InvalidIdentity(~field))
+    Ok()
+}
+fn jet_game_hot_swap_identity_error(expected: JetGameHotSwapIdentity, actual: JetGameHotSwapIdentity) JetGameHotSwapError! {
+    if expected.source_revision != actual.source_revision -> return Err(.Incompatible(.SourceRevisionMismatch(~expected.source_revision, ~actual.source_revision)))
+    if expected.build_revision != actual.build_revision -> return Err(.Incompatible(.BuildRevisionMismatch(~expected.build_revision, ~actual.build_revision)))
+    Ok()
+}
+fn jet_game_hot_swap_transaction_id(current: JetGameHotSwapSnapshot, candidate: JetGameHotSwapSnapshot, link_mode: JetGameLinkMode, changed_scripts: [String], changed_assets: [String]) -> U64 Never! {
+    hash := U64{0xcbf29ce484222325}
+    jet_game_hot_swap_hash_field(&hash, current.identity.source_revision)
+    jet_game_hot_swap_hash_field(&hash, current.identity.build_revision)
+    jet_game_hot_swap_hash_field(&hash, candidate.identity.source_revision)
+    jet_game_hot_swap_hash_field(&hash, candidate.identity.build_revision)
+    jet_game_hot_swap_hash_field(&hash, link_mode.as_str())
+    loop value in changed_scripts -> jet_game_hot_swap_hash_field(&hash, value)
+    loop value in changed_assets -> jet_game_hot_swap_hash_field(&hash, value)
+    hash
+}
+fn jet_game_hot_swap_hash_field(hash: &U64, value: String) Never! {
+    raw :: game_text.utf8_bytes(value)
+    length :: U64{raw.len()}
+    loop i in 0..<8 {
+        hash = (hash ~| ((length >> (i * 8)) & U64{255})).wrapping_mul(U64{0x100000001b3})
+    }
+    loop byte in raw -> hash = (hash ~| U64{Int.from_u8(byte)}).wrapping_mul(U64{0x100000001b3})
+}
+// Private protocol writer: unlike RFC8259's minimum escape set, the original
+// receipt format escapes ALL Cc scalars including DEL/C1. Not json.canonical.
+fn json_string(out: &[U8], value: String) Never! {
+    &out.push(U8{34})
+    raw :: game_text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        cp :: game_text.scalar_at(raw, at)
+        if cp == {
+            34 -> append(out, "\\\"")
+            92 -> append(out, "\\\\")
+            10 -> append(out, "\\n")
+            13 -> append(out, "\\r")
+            9 -> append(out, "\\t")
+            8 -> append(out, "\\b")
+            12 -> append(out, "\\f")
+            else -> {
+                if cp < 32 || (cp >= 127 && cp <= 159) {
+                    append(out, "\\u")
+                    loop shift in [Int]{12, 8, 4, 0} {
+                        digit :: (cp >> shift) & 15
+                        &out.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+                    }
+                } else -> game_text.append_cp(out, cp)
+            }
+        }
+        at += game_text.utf8_width_at(raw, at)
+    }
+    &out.push(U8{34})
+}
+fn json_list(out: &[U8], values: [String]) Never! {
+    append(out, "[")
+    loop i in 0..<values.len() { if i > 0 -> append(out, ","); json_string(out, values[i]) }
+    append(out, "]")
+}
+fn append(out: &[U8], value: String) Never! {
+    loop byte in game_text.utf8_bytes(value) -> &out.push(byte)
+}
+fn finish_json(out: [U8]) -> String Never! { String.from_bytes(out) ?? panic("game hot-swap writer produced invalid UTF-8") }

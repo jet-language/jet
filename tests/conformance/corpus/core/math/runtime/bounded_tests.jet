@@ -1,0 +1,34 @@
+// Held on Main's canonical private wide-integer/native product substrate.
+// Canonical message failures use Err!, not a new domain or String!.
+use core.math.runtime.kernel_seeded_random as rng_bounded_kernel
+
+#Test("checked integer bounds retain exact error and unchanged state") {
+    state := U64{99}
+    failed := false
+    rng_bounded_kernel.jet_seeded_rng_int_checked(&state, I64{2}, I64{1}) ?? {
+        failed = true
+        assert_eq(err.message, "RNG.int requires low <= high")
+        I64{0}
+    }
+    assert(failed)
+    assert_eq(state, U64{99})
+    assert_eq(rng_bounded_kernel.jet_seeded_rng_int(&state, I64{-7}, I64{-7}), I64{-7})
+    assert_eq(state, U64{99})
+    assert_eq(rng_bounded_kernel.jet_seeded_rng_int(&state, I64{1}, I64{100}), I64{27})
+}
+
+#Test("full signed64 domain consumes exactly one raw word") {
+    state := U64{99}
+    minimum :: I64{-9223372036854775807} - I64{1} // #4391 literal construction
+    assert_eq(rng_bounded_kernel.jet_seeded_rng_int(&state, minimum, I64{9223372036854775807}), I64{-4398986360337765405})
+    assert_eq(state, U64{11400714819323198584})
+    zero_bound := U64{99}
+    assert_eq(rng_bounded_kernel.jet_seeded_rng_bounded(&zero_bound, U64{0}), U64{4824385676517010403})
+    assert_eq(zero_bound, state)
+}
+
+#Test("multiply-high rejection preserves threshold and consumes rejected words") {
+    state := U64{0}
+    assert_eq(rng_bounded_kernel.jet_seeded_rng_bounded(&state, U64{9223372036854775809}), U64{243808509735772839})
+    assert_eq(state, U64{15755400384260043839}) // Three draws, two rejected.
+}

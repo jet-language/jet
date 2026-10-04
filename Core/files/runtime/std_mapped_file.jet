@@ -1,0 +1,668 @@
+// PORT-PENDING 0163 crates-jet-codegen-src-prelude-corelib-jetstd-mappedfile: crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:1-664
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Shared native read-only file mapping and byte-window storage.
+//RS //
+//RS // The mapping itself is deliberately private: callers can obtain only read-only
+//RS // byte views, never a writable pointer or a shared mutable mapping. Native
+//RS // adapters marshal into this carrier; public `files.map` projection and view
+//RS // provenance remain compiler-owned.
+//RS //
+//RS 
+//RS 
+//RS fn jet_mapped_source_identity(key: &str) -> String {
+//RS     let digest = super::jet_sha256_raw(key.as_bytes());
+//RS     let mut identity = String::with_capacity(71);
+//RS     identity.push_str("sha256-");
+//RS     for byte in digest {
+//RS         identity.push_str(&format!("{byte:02x}"));
+//RS     }
+//RS     identity
+//RS }
+//RS 
+//RS 
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_mapped_file
+//RS // AUDIT: this narrow native mapping seam calls flock/mmap (or the Windows
+//RS // mapping API) and constructs read-only slices from the returned address.
+//RS // Safe Rust cannot express those OS handles and foreign pointers. Callers must
+//RS // provide a readable regular file, keep the map owner alive for every view,
+//RS // and use only checked windows; violation can unlock/unmap the wrong resource,
+//RS // read outside the mapping, or cause a use-after-unmap.
+//RS 
+//RS #[cfg(unix)]
+//RS mod jet_mapped_os {
+//RS     use std::os::fd::{AsRawFd, RawFd};
+//RS 
+//RS     const LOCK_NB: i32 = 4;
+//RS     const LOCK_SH: i32 = 1;
+//RS     const LOCK_UN: i32 = 8;
+//RS     const MAP_FAILED: *mut std::ffi::c_void = !0usize as *mut std::ffi::c_void;
+//RS     const MAP_PRIVATE: i32 = 2;
+//RS     const PROT_READ: i32 = 1;
+//RS 
+//RS     unsafe extern "C" {
+//RS         fn flock(fd: RawFd, operation: i32) -> i32;
+//RS         fn mmap(
+//RS             address: *mut std::ffi::c_void,
+//RS             length: usize,
+//RS             protection: i32,
+//RS             flags: i32,
+//RS             fd: RawFd,
+//RS             offset: i64,
+//RS         ) -> *mut std::ffi::c_void;
+//RS         fn munmap(address: *mut std::ffi::c_void, length: usize) -> i32;
+//RS     }
+//RS 
+//RS     pub(super) fn shared_lock(file: &std::fs::File) -> std::io::Result<()> {
+//RS         let result = unsafe { flock(file.as_raw_fd(), LOCK_SH | LOCK_NB) };
+//RS         if result == 0 {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(std::io::Error::last_os_error())
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn shared_unlock(file: &std::fs::File) {
+//RS         // The mapping owns the descriptor and the one shared lock. Drop invokes
+//RS         // this exactly once after the view is unmapped.
+//RS         let _ = unsafe { flock(file.as_raw_fd(), LOCK_UN) };
+//RS     }
+//RS 
+//RS     pub(super) fn map(file: &std::fs::File, length: usize) -> std::io::Result<*const u8> {
+//RS         let pointer = unsafe {
+//RS             mmap(
+//RS                 std::ptr::null_mut(),
+//RS                 length,
+//RS                 PROT_READ,
+//RS                 MAP_PRIVATE,
+//RS                 file.as_raw_fd(),
+//RS                 0,
+//RS             )
+//RS         };
+//RS         if pointer == MAP_FAILED || pointer.is_null() {
+//RS             return Err(std::io::Error::last_os_error());
+//RS         }
+//RS         Ok(pointer.cast::<u8>())
+//RS     }
+//RS 
+//RS     pub(super) fn unmap(pointer: *const u8, length: usize) {
+//RS         // `map` checked the pointer and the storage checks the original length;
+//RS         // this call is therefore one complete unmap of the owned region.
+//RS         let _ = unsafe { munmap(pointer.cast_mut().cast(), length) };
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS mod jet_mapped_os {
+//RS     use std::os::windows::fs::OpenOptionsExt;
+//RS     use std::os::windows::io::{AsRawHandle, RawHandle};
+//RS 
+//RS     const FILE_MAP_READ: u32 = 0x0004;
+//RS     const FILE_SHARE_READ: u32 = 0x0000_0001;
+//RS     const PAGE_READONLY: u32 = 0x0000_0002;
+//RS 
+//RS     unsafe extern "system" {
+//RS         #[link_name = "CreateFileMappingW"]
+//RS         fn create_file_mapping(
+//RS             file: RawHandle,
+//RS             attributes: *mut std::ffi::c_void,
+//RS             protection: u32,
+//RS             maximum_size_high: u32,
+//RS             maximum_size_low: u32,
+//RS             name: *const u16,
+//RS         ) -> RawHandle;
+//RS         #[link_name = "MapViewOfFile"]
+//RS         fn map_view_of_file(
+//RS             mapping: RawHandle,
+//RS             desired_access: u32,
+//RS             file_offset_high: u32,
+//RS             file_offset_low: u32,
+//RS             number_of_bytes_to_map: usize,
+//RS         ) -> *mut std::ffi::c_void;
+//RS         #[link_name = "UnmapViewOfFile"]
+//RS         fn unmap_view_of_file(address: *const std::ffi::c_void) -> i32;
+//RS         #[link_name = "CloseHandle"]
+//RS         fn close_handle(handle: RawHandle) -> i32;
+//RS     }
+//RS 
+//RS     pub(super) fn open_read(path: &str) -> std::io::Result<std::fs::File> {
+//RS         // FILE_SHARE_READ deliberately excludes write and delete sharing. A
+//RS         // foreign writer therefore cannot replace or mutate a mapped file while
+//RS         // this read handle is live.
+//RS         std::fs::OpenOptions::new()
+//RS             .read(true)
+//RS             .share_mode(FILE_SHARE_READ)
+//RS             .open(path)
+//RS     }
+//RS 
+//RS     pub(super) fn map(
+//RS         file: &std::fs::File,
+//RS         length: usize,
+//RS     ) -> std::io::Result<(*const u8, RawHandle)> {
+//RS         let length = u64::try_from(length).map_err(|_| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidInput,
+//RS                 "mapped file length does not fit the Windows mapping size",
+//RS             )
+//RS         })?;
+//RS         let mapping = unsafe {
+//RS             create_file_mapping(
+//RS                 file.as_raw_handle(),
+//RS                 std::ptr::null_mut(),
+//RS                 PAGE_READONLY,
+//RS                 (length >> 32) as u32,
+//RS                 length as u32,
+//RS                 std::ptr::null(),
+//RS             )
+//RS         };
+//RS         if mapping.is_null() {
+//RS             return Err(std::io::Error::last_os_error());
+//RS         }
+//RS         let pointer = unsafe { map_view_of_file(mapping, FILE_MAP_READ, 0, 0, 0) };
+//RS         if pointer.is_null() {
+//RS             let _ = unsafe { close_handle(mapping) };
+//RS             return Err(std::io::Error::last_os_error());
+//RS         }
+//RS         Ok((pointer.cast::<u8>(), mapping))
+//RS     }
+//RS 
+//RS     pub(super) fn unmap(pointer: *const u8, mapping: RawHandle) {
+//RS         // The view and mapping object are separate native resources. Each is
+//RS         // released exactly once by JetMappedStorage::drop.
+//RS         let _ = unsafe { unmap_view_of_file(pointer.cast()) };
+//RS         let _ = unsafe { close_handle(mapping) };
+//RS     }
+//RS }
+//RS 
+//RS struct JetMappedStorage {
+//RS     path: String,
+//RS     key: String,
+//RS     source_identity: String,
+//RS     length: usize,
+//RS     pointer: *const u8,
+//RS     #[cfg(unix)]
+//RS     file: std::fs::File,
+//RS     #[cfg(windows)]
+//RS     file: std::fs::File,
+//RS     #[cfg(windows)]
+//RS     mapping: std::os::windows::io::RawHandle,
+//RS }
+//RS 
+//RS impl JetMappedStorage {
+//RS     fn open(path: &str) -> std::io::Result<Self> {
+//RS         #[cfg(not(any(unix, windows)))]
+//RS         {
+//RS             let _ = path;
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::Unsupported,
+//RS                 "read-only file mappings are unavailable on this target",
+//RS             ));
+//RS         }
+//RS 
+//RS         #[cfg(any(unix, windows))]
+//RS         {
+//RS             #[cfg(unix)]
+//RS             let file = std::fs::File::open(path)?;
+//RS             #[cfg(windows)]
+//RS             let file = jet_mapped_os::open_read(path)?;
+//RS 
+//RS             let length = file.metadata()?.len();
+//RS             let length = usize::try_from(length).map_err(|_| {
+//RS                 std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidInput,
+//RS                     "mapped file is too large for this target",
+//RS                 )
+//RS             })?;
+//RS             // Rust slice construction and pointer arithmetic require the region to
+//RS             // fit in isize even though the OS APIs take usize/SIZE_T.
+//RS             if length > isize::MAX as usize {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidInput,
+//RS                     "mapped file is too large for a byte view",
+//RS                 ));
+//RS             }
+//RS 
+//RS             #[cfg(unix)]
+//RS             jet_mapped_os::shared_lock(&file)?;
+//RS 
+//RS             let key = super::jet_mapped_path_key(path);
+//RS             let source_identity = jet_mapped_source_identity(&key);
+//RS             if length == 0 {
+//RS                 super::jet_mapped_register(&key);
+//RS                 return Ok(Self {
+//RS                     path: path.to_string(),
+//RS                     key,
+//RS                     source_identity,
+//RS                     length,
+//RS                     pointer: std::ptr::NonNull::<u8>::dangling().as_ptr(),
+//RS                     file,
+//RS                     #[cfg(windows)]
+//RS                     mapping: std::ptr::null_mut(),
+//RS                 });
+//RS             }
+//RS 
+//RS             #[cfg(unix)]
+//RS             let pointer = match jet_mapped_os::map(&file, length) {
+//RS                 Ok(pointer) => pointer,
+//RS                 Err(error) => {
+//RS                     jet_mapped_os::shared_unlock(&file);
+//RS                     return Err(error);
+//RS                 }
+//RS             };
+//RS             #[cfg(windows)]
+//RS             let (pointer, mapping) = jet_mapped_os::map(&file, length)?;
+//RS 
+//RS             super::jet_mapped_register(&key);
+//RS             Ok(Self {
+//RS                 path: path.to_string(),
+//RS                 key,
+//RS                 source_identity,
+//RS                 length,
+//RS                 pointer,
+//RS                 file,
+//RS                 #[cfg(windows)]
+//RS                 mapping,
+//RS             })
+//RS         }
+//RS     }
+//RS     fn invalid_window(&self, start: i64, end: i64) -> IOError {
+//RS         let length = i64::try_from(self.length).unwrap_or(i64::MAX);
+//RS         IOError::other(
+//RS             IOOperation::Read,
+//RS             Some(self.path.clone()),
+//RS             format!("mapped window {start}..{end} is outside file length {length}"),
+//RS         )
+//RS     }
+//RS 
+//RS     fn checked_window(&self, start: i64, end: i64) -> Result<(usize, usize), IOError> {
+//RS         let Some(start) = usize::try_from(start).ok() else {
+//RS             return Err(self.invalid_window(start, end));
+//RS         };
+//RS         let Some(end) = usize::try_from(end).ok() else {
+//RS             return Err(self.invalid_window(start as i64, end));
+//RS         };
+//RS         if start > end || end > self.length {
+//RS             return Err(self.invalid_window(start as i64, end as i64));
+//RS         }
+//RS         Ok((start, end))
+//RS     }
+//RS 
+//RS     fn bytes(&self, start: usize, end: usize) -> &[u8] {
+//RS         debug_assert!(start <= end && end <= self.length);
+//RS         // SAFETY: `open` maps exactly `length` readable bytes (or stores a
+//RS         // non-null dangling pointer for an empty file). `checked_window` and
+//RS         // all internal callers keep both bounds within that region.
+//RS         unsafe { std::slice::from_raw_parts(self.pointer.add(start), end - start) }
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_mapped_file
+//RS 
+//RS 
+//RS impl Drop for JetMappedStorage {
+//RS     fn drop(&mut self) {
+//RS         #[cfg(unix)]
+//RS         {
+//RS             if self.length != 0 {
+//RS                 jet_mapped_os::unmap(self.pointer, self.length);
+//RS             }
+//RS             jet_mapped_os::shared_unlock(&self.file);
+//RS         }
+//RS         #[cfg(windows)]
+//RS         {
+//RS             if self.length != 0 {
+//RS                 jet_mapped_os::unmap(self.pointer, self.mapping);
+//RS             }
+//RS         }
+//RS         // Keep the registry lease until after unmapping/unlocking, so a writer
+//RS         // can never observe the path as free while bytes are still borrowed.
+//RS         super::jet_mapped_unregister(&self.key);
+//RS     }
+//RS }
+//RS 
+//RS /// A private read-only mapping. The file descriptor/handle and native mapping
+//RS /// are owned by an `Arc` so every returned byte view pins the storage until its
+//RS /// own final drop. There is intentionally no `Clone` or mutable accessor.
+//RS pub struct JetMappedFile {
+//RS     storage: std::sync::Arc<JetMappedStorage>,
+//RS }
+//RS 
+//RS impl JetMappedFile {
+//RS     fn new(storage: JetMappedStorage) -> Self {
+//RS         Self {
+//RS             storage: std::sync::Arc::new(storage),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Stable opaque identity for the normalized source. The path remains
+//RS     /// private while adapters can carry the mapping provenance.
+//RS     pub fn source_identity(&self) -> &str {
+//RS         &self.storage.source_identity
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.storage.length == 0
+//RS     }
+//RS 
+//RS     /// Return a checked byte window described by offset and length.
+//RS     pub fn window_len(
+//RS         &self,
+//RS         offset: i64,
+//RS         length: i64,
+//RS     ) -> Result<JetMappedByteView, IOError> {
+//RS         let Some(end) = offset.checked_add(length) else {
+//RS             return Err(self.storage.invalid_window(offset, length));
+//RS         };
+//RS         self.window(offset, end)
+//RS     }
+//RS 
+//RS     pub fn len(&self) -> i64 {
+//RS         i64::try_from(self.storage.length).unwrap_or(i64::MAX)
+//RS     }
+//RS 
+//RS     /// Return a checked half-open byte window. The view owns a read-only Arc
+//RS     /// lease, so it cannot outlive the native mapping even when the map binding
+//RS     /// itself is dropped first.
+//RS     pub fn window(&self, start: i64, end: i64) -> Result<JetMappedByteView, IOError> {
+//RS         let (start, end) = self.storage.checked_window(start, end)?;
+//RS         Ok(JetMappedByteView {
+//RS             storage: self.storage.clone(),
+//RS             start,
+//RS             end,
+//RS         })
+//RS     }
+//RS     /// Return a borrowed byte window tied to this map binding.
+//RS     pub fn window_view(&self, start: i64, end: i64) -> Result<&[u8], IOError> {
+//RS         let (start, end) = self.storage.checked_window(start, end)?;
+//RS         Ok(self.storage.bytes(start, end))
+//RS     }
+//RS 
+//RS     /// Return a borrowed byte window described by offset and length.
+//RS     pub fn window_len_view(&self, offset: i64, length: i64) -> Result<&[u8], IOError> {
+//RS         let Some(end) = offset.checked_add(length) else {
+//RS             return Err(self.storage.invalid_window(offset, length));
+//RS         };
+//RS         self.window_view(offset, end)
+//RS     }
+//RS 
+//RS     /// Iterate line windows without materializing line bytes. Newline bytes are
+//RS     /// excluded, and a preceding CR is excluded with LF for CRLF input.
+//RS     pub fn lines(&self) -> JetMappedLines {
+//RS         JetMappedLines {
+//RS             storage: self.storage.clone(),
+//RS             cursor: 0,
+//RS         }
+//RS     }
+//RS     /// Borrowed line iteration ties every yielded slice to the map binding.
+//RS     pub fn lines_view(&self) -> JetMappedLineViews<'_> {
+//RS         JetMappedLineViews {
+//RS             storage: &self.storage,
+//RS             cursor: 0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// A read-only byte window pinned to one `JetMappedStorage` lease.
+//RS #[derive(Clone)]
+//RS pub struct JetMappedByteView {
+//RS     storage: std::sync::Arc<JetMappedStorage>,
+//RS     start: usize,
+//RS     end: usize,
+//RS }
+//RS 
+//RS impl JetMappedByteView {
+//RS     /// Stable opaque identity of the normalized source path. The path itself
+//RS     /// remains private so adapters can carry provenance without leaking it.
+//RS     pub fn source_identity(&self) -> &str {
+//RS         &self.storage.source_identity
+//RS     }
+//RS 
+//RS     /// Absolute byte offset of this view within its mapped source.
+//RS     pub fn offset(&self) -> u64 {
+//RS         u64::try_from(self.start).unwrap_or(u64::MAX)
+//RS     }
+//RS 
+//RS     pub fn len(&self) -> usize {
+//RS         self.end - self.start
+//RS     }
+//RS 
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.start == self.end
+//RS     }
+//RS 
+//RS     pub fn as_bytes(&self) -> &[u8] {
+//RS         self.storage.bytes(self.start, self.end)
+//RS     }
+//RS 
+//RS     /// Explicitly materialize a view when an owned byte buffer is required.
+//RS     pub fn to_vec(&self) -> Vec<u8> {
+//RS         self.as_bytes().to_vec()
+//RS     }
+//RS 
+//RS     pub fn get(&self, index: i64) -> Option<u8> {
+//RS         let index = usize::try_from(index).ok()?;
+//RS         self.as_bytes().get(index).copied()
+//RS     }
+//RS 
+//RS     pub fn starts_with(&self, prefix: &[u8]) -> bool {
+//RS         self.as_bytes().starts_with(prefix)
+//RS     }
+//RS 
+//RS     pub fn ends_with(&self, suffix: &[u8]) -> bool {
+//RS         self.as_bytes().ends_with(suffix)
+//RS     }
+//RS 
+//RS     pub fn iter(&self) -> std::slice::Iter<'_, u8> {
+//RS         self.as_bytes().iter()
+//RS     }
+//RS 
+//RS     pub fn window(&self, start: i64, end: i64) -> Result<Self, IOError> {
+//RS         let Some(start) = usize::try_from(start).ok() else {
+//RS             return Err(self.storage.invalid_window(start, end));
+//RS         };
+//RS         let Some(end) = usize::try_from(end).ok() else {
+//RS             return Err(self.storage.invalid_window(start as i64, end));
+//RS         };
+//RS         let relative_len = self.end - self.start;
+//RS         if start > end || end > relative_len {
+//RS             return Err(self.storage.invalid_window(start as i64, end as i64));
+//RS         }
+//RS         let Some(absolute_start) = self.start.checked_add(start) else {
+//RS             return Err(self.storage.invalid_window(start as i64, end as i64));
+//RS         };
+//RS         let Some(absolute_end) = self.start.checked_add(end) else {
+//RS             return Err(self.storage.invalid_window(start as i64, end as i64));
+//RS         };
+//RS         Ok(Self {
+//RS             storage: self.storage.clone(),
+//RS             start: absolute_start,
+//RS             end: absolute_end,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Return a checked nested window described by relative offset and length.
+//RS     pub fn window_len(&self, offset: i64, length: i64) -> Result<Self, IOError> {
+//RS         let Some(end) = offset.checked_add(length) else {
+//RS             return Err(self.storage.invalid_window(offset, length));
+//RS         };
+//RS         self.window(offset, end)
+//RS     }
+//RS }
+//RS 
+//RS impl AsRef<[u8]> for JetMappedByteView {
+//RS     fn as_ref(&self) -> &[u8] {
+//RS         self.as_bytes()
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Deref for JetMappedByteView {
+//RS     type Target = [u8];
+//RS 
+//RS     fn deref(&self) -> &Self::Target {
+//RS         self.as_bytes()
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> IntoIterator for &'a JetMappedByteView {
+//RS     type Item = &'a u8;
+//RS     type IntoIter = std::slice::Iter<'a, u8>;
+//RS 
+//RS     fn into_iter(self) -> Self::IntoIter {
+//RS         self.iter()
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Debug for JetMappedByteView {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         formatter
+//RS             .debug_struct("JetMappedByteView")
+//RS             .field("start", &self.start)
+//RS             .field("end", &self.end)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// Zero-copy line iterator over a mapped file. The iterator owns only another
+//RS /// Arc lease and each item remains a read-only byte view into the same mapping.
+//RS pub struct JetMappedLines {
+//RS     storage: std::sync::Arc<JetMappedStorage>,
+//RS     cursor: usize,
+//RS }
+//RS 
+//RS impl Iterator for JetMappedLines {
+//RS     type Item = JetMappedByteView;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         if self.cursor >= self.storage.length {
+//RS             return None;
+//RS         }
+//RS         let start = self.cursor;
+//RS         let bytes = self.storage.bytes(start, self.storage.length);
+//RS         let mut newline = 0usize;
+//RS         while newline < bytes.len() && bytes[newline] != b'\n' {
+//RS             newline += 1;
+//RS         }
+//RS         let newline_end = start + newline;
+//RS         let line_end = if newline_end > start
+//RS             && self.storage.bytes(newline_end - 1, newline_end)[0] == b'\r'
+//RS         {
+//RS             newline_end - 1
+//RS         } else {
+//RS             newline_end
+//RS         };
+//RS         self.cursor = if newline < bytes.len() {
+//RS             newline_end.saturating_add(1)
+//RS         } else {
+//RS             newline_end
+//RS         };
+//RS         Some(JetMappedByteView {
+//RS             storage: self.storage.clone(),
+//RS             start,
+//RS             end: line_end,
+//RS         })
+//RS     }
+//RS 
+//RS     fn size_hint(&self) -> (usize, Option<usize>) {
+//RS         (0, Some(self.storage.length.saturating_sub(self.cursor)))
+//RS     }
+//RS }
+//RS 
+//RS /// Borrowed line iterator over a mapped file. The map binding is the owner,
+//RS /// so each item remains valid for the iterator's lifetime without a copy.
+//RS pub struct JetMappedLineViews<'a> {
+//RS     storage: &'a JetMappedStorage,
+//RS     cursor: usize,
+//RS }
+//RS 
+//RS impl<'a> Iterator for JetMappedLineViews<'a> {
+//RS     type Item = &'a [u8];
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         if self.cursor >= self.storage.length {
+//RS             return None;
+//RS         }
+//RS         let start = self.cursor;
+//RS         let bytes = self.storage.bytes(start, self.storage.length);
+//RS         let mut newline = 0usize;
+//RS         while newline < bytes.len() && bytes[newline] != b'\n' {
+//RS             newline += 1;
+//RS         }
+//RS         let newline_end = start + newline;
+//RS         let line_end = if newline_end > start
+//RS             && self.storage.bytes(newline_end - 1, newline_end)[0] == b'\r'
+//RS         {
+//RS             newline_end - 1
+//RS         } else {
+//RS             newline_end
+//RS         };
+//RS         self.cursor = if newline < bytes.len() {
+//RS             newline_end.saturating_add(1)
+//RS         } else {
+//RS             newline_end
+//RS         };
+//RS         Some(self.storage.bytes(start, line_end))
+//RS     }
+//RS 
+//RS     fn size_hint(&self) -> (usize, Option<usize>) {
+//RS         (0, Some(self.storage.length.saturating_sub(self.cursor)))
+//RS     }
+//RS }
+//RS 
+//RS /// Shared low-level map entry. FSIo owns fault injection and the public Core
+//RS /// projection; this function owns the deterministic IOError conversion for the
+//RS /// native mapping operation.
+//RS pub(crate) fn jet_std_files_map(path: &String) -> Result<JetMappedFile, IOError> {
+//RS     JetMappedStorage::open(path)
+//RS         .map(JetMappedFile::new)
+//RS         .map_err(|error| io_error_at(IOOperation::Read, path, error))
+//RS }
+//RS 
+//RS /// Shared view constructor for map offsets. The checked offset/length policy
+//RS /// stays on `JetMappedFile`; adapters only marshal the carrier.
+//RS pub(crate) fn jet_std_files_map_window(
+//RS     map: &JetMappedFile,
+//RS     offset: i64,
+//RS     length: i64,
+//RS ) -> Result<JetMappedByteView, IOError> {
+//RS     map.window_len(offset, length)
+//RS }
+//RS pub(crate) fn jet_std_files_map_window_view(
+//RS     map: &JetMappedFile,
+//RS     start: i64,
+//RS     end: i64,
+//RS ) -> Result<&[u8], IOError> {
+//RS     map.window_view(start, end)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_files_map_window_len_view(
+//RS     map: &JetMappedFile,
+//RS     offset: i64,
+//RS     length: i64,
+//RS ) -> Result<&[u8], IOError> {
+//RS     map.window_len_view(offset, length)
+//RS }
+//RS 
+//RS /// Shared lazy line carrier. Each item pins the mapping through its own Arc.
+//RS pub(crate) fn jet_std_files_map_lines(map: &JetMappedFile) -> JetMappedLines {
+//RS     map.lines()
+//RS }
+//RS /// Borrowed line carrier; the caller's map binding owns the mapping lease.
+//RS pub(crate) fn jet_std_files_map_lines_view(map: &JetMappedFile) -> JetMappedLineViews<'_> {
+//RS     map.lines_view()
+//RS }
+//RS 
+//RS /// Writer paths call this before opening/truncating. The process registry closes
+//RS /// the same-process race; Unix also holds an advisory shared flock and Windows
+//RS /// denies write/delete sharing on the mapped handle. Foreign Unix writers must
+//RS /// cooperate with that advisory lock.
+//RS pub(crate) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
+//RS     super::jet_mapped_writer_refusal(path).map(|refusal| {
+//RS         IOError::other(
+//RS             IOOperation::Write,
+//RS             Some(refusal.path),
+//RS             refusal.reason,
+//RS         )
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0163 crates/jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs:1-664
+

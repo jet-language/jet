@@ -1,0 +1,1271 @@
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/comptime_sequence_parity.rs:1-440
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #392 packet A: sequence-method AOT/comptime parity.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use jet::REPL::run_transcript;
+//RS 
+//RS mod common;
+//RS #[test]
+//RS fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
+//RS     let source = r#"fn run() {
+//RS     values :: [1, 2, 3, 4]
+//RS     print(values.para_map((n: Int) -> n * 2))
+//RS     print(values.para_filter((n: Int) -> n % 2 == 0))
+//RS     split :: values.para_partition((n: Int) -> n % 2 == 0)
+//RS     print(split.false_)
+//RS     print(split.true_)
+//RS     print(values.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right))
+//RS }
+//RS "#;
+//RS     let dir = common::unique_tmp("jet_para_dev_matrix");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let expected = "[2, 4, 6, 8]\n[2, 4]\n[1, 3]\n[2, 4]\n10\n";
+//RS     for (tier, use_interpreter) in [("forced-interpreter", true), ("default-jit-dev", false)] {
+//RS         match dev_iteration(path.to_str().unwrap(), false, use_interpreter) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{tier} exit");
+//RS                 assert_eq!(stderr, "", "{tier} stderr");
+//RS                 assert_eq!(stdout, expected, "{tier} stdout");
+//RS             }
+//RS             RunOutcome::Problems(diags) => panic!("{tier} rejected parallel adapters: {diags:#?}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_list_and_fixed_list_sequence_methods_are_exact() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "[1, 2, 3].all((n: Int) -> n > 0)",
+//RS             "[1, 2, 3].any((n: Int) -> n == 2)",
+//RS             "[1, 2, 3, 4, 5].chunks(2)",
+//RS             "[1, 2, 3, 4].count_by((n: Int) -> \"{n % 2}\")",
+//RS             "[1, 1, 2, 2, 1].dedup()",
+//RS             "[4, 5].indexed()",
+//RS             "[\"1\", \"bad\", \"2\"].filter_map((s: String) -> Int.parse(s))",
+//RS             "[7, 8].first()",
+//RS             "[1, 2, 3].flat_map((n: Int) -> [n, n * 10])",
+//RS             "[[1, 2], [3], [4, 5]].flatten()",
+//RS             "[1, 2, 3].fold(10, (acc: Int, n: Int) -> acc + n)",
+//RS             "[1, 2, 3, 4].group_by((n: Int) -> \"{n % 2}\")",
+//RS             "[4, 5, 6].index_of(5)",
+//RS             "inserted := [1, 3]",
+//RS             "inserted.insert(1, 2)",
+//RS             "inserted",
+//RS             "[1, 2, 3].intersperse(0)",
+//RS             "[7, 8].last()",
+//RS             "[3, 9, 2].max()",
+//RS             "[\"bbb\", \"a\", \"cc\"].max_by((s: String) -> s.len())",
+//RS             "[3, 9, 2].min()",
+//RS             "[\"bbb\", \"a\", \"cc\"].min_by((s: String) -> s.len())",
+//RS             "[true, false, true].min()",
+//RS             "[true, false, true].max()",
+//RS             "[true, false, true].min_by((b: Bool) -> b)",
+//RS             "[true, false, true].max_by((b: Bool) -> b)",
+//RS             "[1, 2, 3, 4].para_filter((n: Int) -> n % 2 == 0)",
+//RS             "[1, 2, 3].para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)",
+//RS             "[1, 2, 3].para_map((n: Int) -> n * 2)",
+//RS             "[1, 2, 3, 4].para_partition((n: Int) -> n % 2 == 0)",
+//RS             "[1, 2, 3, 4].partition((n: Int) -> n % 2 == 0)",
+//RS             "[4, 5, 6].position((n: Int) -> n == 5)",
+//RS             "[2, 3, 4].product()",
+//RS             "[1, 2, 3].scan(0, (acc: Int, n: Int) -> acc + n)",
+//RS             "[1, 2, 3, 4].skip(2)",
+//RS             "[1, 2, 3, 4].skip_while((n: Int) -> n < 3)",
+//RS             "[1, 2, 3, 4, 5].step_by(2)",
+//RS             "[1, 2, 3, 4].sum()",
+//RS             "[1, 2, 3, 4].take(2)",
+//RS             "[1, 2, 3, 4].take_while((n: Int) -> n < 3)",
+//RS             "[\"1\", \"2\"].map((s: String) -> Int.parse(s)).try_collect()",
+//RS             "[(a: 1, b: \"x\"), (a: 2, b: \"y\")].unzip()",
+//RS             "[1, 2, 3, 4].windows(3)",
+//RS             "[1, 2, 3].zip([\"a\", \"b\"])",
+//RS             "fixed: [Int#4] :: [1, 2, 3, 4]",
+//RS             "fixed.all((n: Int) -> n > 0)",
+//RS             "fixed.chunks(3)",
+//RS             "fixed.fold(0, (acc: Int, n: Int) -> acc + n)",
+//RS             "fixed.zip([9, 8, 7])",
+//RS         ],
+//RS         None,
+//RS     );
+//RS 
+//RS     let expected = [
+//RS         "true : Bool",
+//RS         "true : Bool",
+//RS         "[[1, 2], [3, 4], [5]] : List",
+//RS         "[0: 2, 1: 2] : Map",
+//RS         "[1, 2, 1] : List",
+//RS         "[(idx,item)(idx: 0, item: 4), (idx,item)(idx: 1, item: 5)] : List",
+//RS         "[1, 2] : List",
+//RS         "7 : Option",
+//RS         "[1, 10, 2, 20, 3, 30] : List",
+//RS         "[1, 2, 3, 4, 5] : List",
+//RS         "16 : Int",
+//RS         "[0: [2, 4], 1: [1, 3]] : Map",
+//RS         "1 : Option",
+//RS         "[1, 2, 3] : List",
+//RS         "[1, 0, 2, 0, 3] : List",
+//RS         "8 : Option",
+//RS         "9 : Option",
+//RS         "bbb : Option",
+//RS         "2 : Option",
+//RS         "a : Option",
+//RS         "false : Option",
+//RS         "true : Option",
+//RS         "false : Option",
+//RS         "true : Option",
+//RS         "[2, 4] : List",
+//RS         "6 : Int",
+//RS         "[2, 4, 6] : List",
+//RS         "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)",
+//RS         "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)",
+//RS         "1 : Option",
+//RS         "24 : Int",
+//RS         "[1, 3, 6] : List",
+//RS         "[3, 4] : List",
+//RS         "[3, 4] : List",
+//RS         "[1, 3, 5] : List",
+//RS         "10 : Int",
+//RS         "[1, 2] : List",
+//RS         "[1, 2] : List",
+//RS         "[1, 2] : Result",
+//RS         "(a,b)(a: [1, 2], b: [x, y]) : (a,b)",
+//RS         "[[1, 2, 3], [2, 3, 4]] : List",
+//RS         "[(a,b)(a: 1, b: a), (a,b)(a: 2, b: b)] : List",
+//RS         "true : Bool",
+//RS         "[[1, 2, 3], [4]] : List",
+//RS         "10 : Int",
+//RS         "[(a,b)(a: 1, b: 9), (a,b)(a: 2, b: 8), (a,b)(a: 3, b: 7)] : List",
+//RS     ];
+//RS     let actual = out
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with("inserted:") && !line.starts_with("fixed:"))
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(actual, expected, "full REPL output:\n{out}");
+//RS     assert!(
+//RS         !out.contains("E0956"),
+//RS         "sequence method fell through: {out}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-CORE-EAGER1=A / D-LOOPMAP1=B: the public REPL exposes eager concrete
+//RS /// adapters and the same names on an explicit lazy view.
+//RS #[test]
+//RS fn repl_eager_collection_adapters_and_lazy_opt_in_are_exact() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "values := [1, 2, 3]",
+//RS             "values.map((n: Int) -> n * 2)",
+//RS             "values.filter((n: Int) -> n > 1)",
+//RS             "values.lazy().map((n: Int) -> n * 10).to_list()",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     let actual = out
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with("values:"))
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         actual,
+//RS         ["[2, 4, 6] : List", "[2, 3] : List", "[10, 20, 30] : List",],
+//RS         "REPL eager/lazy output:\n{out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_view_and_view_mut_sequence_methods_are_exact() {
+//RS     let out = run_transcript(
+//RS         &[
+//RS             "values := [10, 20, 30, 40]",
+//RS             "view :: values[1..3]",
+//RS             "view.len()",
+//RS             "view.is_empty()",
+//RS             "view.get(1)",
+//RS             "view.first()",
+//RS             "view.last()",
+//RS             "view.contains(30)",
+//RS             "view.index_of(40)",
+//RS             "view.fold(0, (acc: Int, n: Int) -> acc + n)",
+//RS             "view.map((n: Int) -> n / 10)",
+//RS             "edit :: &values[0..1]",
+//RS             "edit.len()",
+//RS             "edit.is_empty()",
+//RS             "edit.get(1)",
+//RS             "edit.first()",
+//RS             "edit.last()",
+//RS             "edit.contains(20)",
+//RS             "edit.index_of(20)",
+//RS             "edit.fold(0, (acc: Int, n: Int) -> acc + n)",
+//RS             "edit.map((n: Int) -> n / 10)",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     let actual = out
+//RS         .lines()
+//RS         .filter(|line| {
+//RS             !line.starts_with("values:") && !line.starts_with("view:") && !line.starts_with("edit:")
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         actual,
+//RS         [
+//RS             "3 : Int",
+//RS             "false : Bool",
+//RS             "30 : Option",
+//RS             "20 : Option",
+//RS             "40 : Option",
+//RS             "true : Bool",
+//RS             "2 : Option",
+//RS             "90 : Int",
+//RS             "[2, 3, 4] : List",
+//RS             "2 : Int",
+//RS             "false : Bool",
+//RS             "20 : Option",
+//RS             "10 : Option",
+//RS             "20 : Option",
+//RS             "true : Bool",
+//RS             "1 : Option",
+//RS             "30 : Int",
+//RS             "[1, 2] : List",
+//RS         ],
+//RS         "full REPL output:\n{out}"
+//RS     );
+//RS     assert!(!out.contains("E0956"), "view method fell through: {out}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_non_slice_write_place_is_not_silently_copied() {
+//RS     let out = run_transcript(&["values := [1, 2]", "edit :: &values", "edit.len()"], None);
+//RS     assert!(
+//RS         out.contains("E0956"),
+//RS         "non-slice write place was copied: {out}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sequence_return_shapes_match_rustc_backed_aot() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping sequence differential battery");
+//RS         return;
+//RS     }
+//RS     let cases = [
+//RS         ("scalar", "", "[1, 2, 3].all((n: Int) -> n > 0)"),
+//RS         (
+//RS             "float-literal-receiver",
+//RS             "",
+//RS             "[1.5, 2.5].all((n: Float) -> n > 1.0)",
+//RS         ),
+//RS         (
+//RS             "bool-literal-receiver",
+//RS             "",
+//RS             "[true, false].any((b: Bool) -> b)",
+//RS         ),
+//RS         (
+//RS             "float-fold-seed",
+//RS             "",
+//RS             "[1.5, 2.5].fold(0.5, (a: Float, n: Float) -> a + n)",
+//RS         ),
+//RS         (
+//RS             "bool-fold-seed",
+//RS             "",
+//RS             "[true, false].fold(true, (a: Bool, b: Bool) -> a && b)",
+//RS         ),
+//RS         (
+//RS             "float-reduce-seed",
+//RS             "",
+//RS             "[1.5, 2.5].reduce(0.5, (a: Float, n: Float) -> a + n)",
+//RS         ),
+//RS         (
+//RS             "bool-scan-seed",
+//RS             "",
+//RS             "[true, false].scan(true, (a: Bool, b: Bool) -> a && b)",
+//RS         ),
+//RS         (
+//RS             "float-para-fold-seed",
+//RS             "",
+//RS             "[1.5, 2.5].para_fold(() -> 0.5, (a: Float, n: Float) -> a + n, (left: Float, right: Float) -> left + right)",
+//RS         ),
+//RS         (
+//RS             "empty-float-sum",
+//RS             "fn empty_sum() -> Float {\n\
+//RS                  empty :: [Float]{}\n\
+//RS                  return empty.sum()\n\
+//RS              }",
+//RS             "empty_sum()",
+//RS         ),
+//RS         (
+//RS             "empty-float-product",
+//RS             "fn empty_product() -> Float {\n\
+//RS                  empty :: [Float]{}\n\
+//RS                  return empty.product()\n\
+//RS              }",
+//RS             "empty_product()",
+//RS         ),
+//RS         (
+//RS             "f32-nonempty-sum",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 1.0, 1.0] }",
+//RS             "f32_values().sum()",
+//RS         ),
+//RS         (
+//RS             "f32-nonempty-product",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 2.0] }",
+//RS             "f32_values().product()",
+//RS         ),
+//RS         (
+//RS             "f32-fold",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 1.0] }\n\
+//RS              fn f32_zero() -> F32 { return 0.0 }",
+//RS             "f32_values().fold(f32_zero(), (a: F32, n: F32) -> a + n)",
+//RS         ),
+//RS         (
+//RS             "f32-map",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 1.0] }\n\
+//RS              fn f32_one() -> F32 { return 1.0 }",
+//RS             "f32_values().map((n: F32) -> n + f32_one())",
+//RS         ),
+//RS         (
+//RS             "f32-min",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 1.0] }",
+//RS             "f32_values().min()",
+//RS         ),
+//RS         (
+//RS             "f32-max",
+//RS             "fn f32_values() -> [F32] { return [16777217.0, 1.0] }",
+//RS             "f32_values().max()",
+//RS         ),
+//RS         (
+//RS             "empty-f32-sum",
+//RS             "fn empty_f32_sum() -> F32 {\n\
+//RS                  empty :: [F32]{}\n\
+//RS                  return empty.sum()\n\
+//RS              }",
+//RS             "empty_f32_sum()",
+//RS         ),
+//RS         (
+//RS             "empty-f32-product",
+//RS             "fn empty_f32_product() -> F32 {\n\
+//RS                  empty :: [F32]{}\n\
+//RS                  return empty.product()\n\
+//RS              }",
+//RS             "empty_f32_product()",
+//RS         ),
+//RS         ("optional", "", "[3, 1, 2].min()"),
+//RS         ("owned-list", "", "[1, 2, 3].take(2)"),
+//RS         ("nested-list", "", "[1, 2, 3, 4].chunks(3)"),
+//RS         ("map", "", "[1, 2, 3].group_by((n: Int) -> \"{n % 2}\")"),
+//RS         ("tuple", "", "[(a: 1, b: \"x\"), (a: 2, b: \"y\")].unzip().a"),
+//RS         (
+//RS             "result",
+//RS             "",
+//RS             "[Int.parse(\"1\"), Int.parse(\"2\")].try_collect() ?? []",
+//RS         ),
+//RS         (
+//RS             "view",
+//RS             "fn view_sum(xs: [Int]) -> Int {\n\
+//RS                  view :: xs[0..1]\n\
+//RS                  return view.fold(0, (a: Int, n: Int) -> a + n)\n\
+//RS              }",
+//RS             "view_sum([10, 20, 30])",
+//RS         ),
+//RS         (
+//RS             "range-fixed-index",
+//RS             "Die :: distinct Int(1..6)\n\
+//RS              fn pick(faces: [Int#6], roll: Die) -> Int {\n\
+//RS                  return faces[roll.raw() - 1]\n\
+//RS              }",
+//RS             "pick([0, 1, 2, 3, 4, 5], Die.from_int(3))",
+//RS         ),
+//RS     ];
+//RS     for (index, (name, preamble, expression)) in cases.iter().enumerate() {
+//RS         check_aot_comptime(index, name, preamble, expression);
+//RS     }
+//RS }
+//RS 
+//RS fn check_aot_comptime(index: usize, name: &str, preamble: &str, expression: &str) {
+//RS     let src = format!(
+//RS         "{preamble}\nEXPECTED :: prep {{ {expression} }}\nfn run() {{\n\
+//RS              actual :: {expression}\n\
+//RS              print(\"{{EXPECTED}}\")\n\
+//RS              print(\"{{actual}}\")\n\
+//RS          }}\n"
+//RS     );
+//RS     let compiled = jet::Driver::compile_generated_src(
+//RS         &src,
+//RS         "comptime_sequence_parity.jet",
+//RS         jet::Sema::CompileMode::Run,
+//RS     )
+//RS     .unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "{name} failed front end:\n{}",
+//RS             jet::render_diagnostics("comptime_sequence_parity.jet", &src, &diags)
+//RS         )
+//RS     });
+//RS     let user_rust = common::strip_vetted_prelude_modules(&compiled.rust);
+//RS     assert!(!user_rust.contains("unsafe"), "{name} generated unsafe");
+//RS 
+//RS     let dir = common::unique_tmp("jet_sequence");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let rs = dir.join(format!("jet_sequence_{}_{}.rs", std::process::id(), index));
+//RS     let bin = dir.join(format!("jet_sequence_{}_{}", std::process::id(), index));
+//RS     fs::write(&rs, compiled.rust).unwrap();
+//RS     let rustc = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "I2 violated for {name}: {}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     assert!(run.status.success(), "{name} runtime failed");
+//RS     let lines = String::from_utf8(run.stdout).unwrap();
+//RS     let lines = lines.lines().collect::<Vec<_>>();
+//RS     assert_eq!(lines.len(), 2, "{name} output shape: {lines:?}");
+//RS     assert_eq!(lines[0], lines[1], "{name} comptime/AOT mismatch");
+//RS     fs::remove_file(rs).ok();
+//RS     fs::remove_file(bin).ok();
+//RS     fs::remove_dir(dir).ok();
+//RS }
+// END-PORT-PENDING 1008 tests/comptime_sequence_parity.rs:1-440
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/core_units_foundations.rs:1-29
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Source-owned `core.units` conversion and hostile-scale behavior across tiers.
+//RS 
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn core_units_conversion_rejects_nonfinite_and_zero_targets() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "core_units_conversion_hostile_targets",
+//RS         r#"
+//RS use core.units as units
+//RS 
+//RS fn run() {
+//RS     measured :: measurement(12.0, uncertainty: 0.5)
+//RS     converted :: units.convert(measured, 1000.0)
+//RS     print(units.show(converted))
+//RS 
+//RS     // Invalid target scales keep the existing non-fallible measurement carrier
+//RS     // unchanged instead of manufacturing NaN or infinity.
+//RS     print(units.to_si(units.convert(measured, Float.NAN)) == 12.0)
+//RS     print(units.to_si(units.convert(measured, Float.INFINITY)) == 12.0)
+//RS     print(units.to_si(units.convert(measured, Float{0.0})) == 12.0)
+//RS     huge :: units.convert(measurement(Float.MAX, uncertainty: 1.0), 0.5)
+//RS     print(units.to_si(huge) == Float.MAX)
+//RS }
+//RS "#,
+//RS         "0.012 ± 0.0005\ntrue\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1008 tests/core_units_foundations.rs:1-29
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib.rs:1-7
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/derives.rs");
+//RS include!("corelib_parts/email.rs");
+// END-PORT-PENDING 1008 tests/corelib.rs:1-7
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_compile.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/compile.rs");
+// END-PORT-PENDING 1008 tests/corelib_compile.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_derives.rs:1-6
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/derives.rs");
+// END-PORT-PENDING 1008 tests/corelib_derives.rs:1-6
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_encoding_streams.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/encoding_streams.rs");
+// END-PORT-PENDING 1008 tests/corelib_encoding_streams.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_encoding_surface.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/encoding_surface.rs");
+// END-PORT-PENDING 1008 tests/corelib_encoding_surface.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_http_data.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/http_data.rs");
+// END-PORT-PENDING 1008 tests/corelib_http_data.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_net.rs:1-70
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/net.rs");
+//RS 
+//RS #[test]
+//RS fn core_net_socket_address_values_match_aot_default_and_interpreter() {
+//RS     let scratch = common::Scratch::new("core_net_socket_address_tiers");
+//RS     let dir = scratch.path.clone();
+//RS     let source = r#"
+//RS use core.net as net
+//RS 
+//RS fn run() -[IO, Net, Time.Wait]> {
+//RS     address :: net.socket_addr("::1", 53) ?? panic("socket address")
+//RS     print(net.socket_to_string(address))
+//RS     if net.socket_addr("::1", 65536) == {
+//RS         .Ok(_) -> panic("out-of-range port succeeded")
+//RS         .Err(error) -> {
+//RS             print(net.error_operation(error))
+//RS             print(net.error_address(error) ?? "missing address")
+//RS             print(net.error_message(error))
+//RS             if error == {
+//RS                 .InvalidInput(_) -> { print("invalid-input") }
+//RS                 else -> { panic("wrong network error kind") }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let expected = "[::1]:53\nsocket_addr\n::1\nport must be in 0..=65535\ninvalid-input\n";
+//RS     let (code, aot_stdout, stderr) =
+//RS         build_and_run(&dir, "net_socket_address_tiers", source, &[], None);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert_eq!(aot_stdout, expected);
+//RS 
+//RS     let file = dir.join("net_socket_address_tiers.jet");
+//RS     std::fs::write(&file, source).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"net_socket_address_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let default_stdout = match jet::Interpreter::dev_iteration(
+//RS         file.to_str().unwrap(),
+//RS         false,
+//RS         false,
+//RS     ) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+//RS             stdout
+//RS         }
+//RS         other => panic!("Core.net socket address failed in default dev: {other:?}"),
+//RS     };
+//RS     let interpreter_stdout = match jet::Interpreter::dev_iteration(
+//RS         file.to_str().unwrap(),
+//RS         false,
+//RS         true,
+//RS     ) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+//RS             stdout
+//RS         }
+//RS         other => panic!("Core.net socket address failed in forced interpreter: {other:?}"),
+//RS     };
+//RS     assert_eq!(default_stdout, aot_stdout);
+//RS     assert_eq!(interpreter_stdout, aot_stdout);
+//RS }
+// END-PORT-PENDING 1008 tests/corelib_net.rs:1-70
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_platform.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/platform.rs");
+// END-PORT-PENDING 1008 tests/corelib_platform.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_platform_email.rs:1-44
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/platform_email.rs");
+//RS 
+//RS #[test]
+//RS fn core_email_address_rejects_domain_labels_over_63_bytes() {
+//RS     let scratch = common::Scratch::new("email-domain-labels");
+//RS     let dir = &scratch.path;
+//RS     let src = r#"
+//RS use core.email as email
+//RS 
+//RS fn run() {
+//RS     label_63 := "a".repeat(63)
+//RS     valid :: email.address("person@{label_63}.example") ?? panic("valid 63-byte domain label rejected")
+//RS     print(valid.mailbox == "person@{label_63}.example")
+//RS     label_64 := "a".repeat(64)
+//RS     if email.address("person@{label_64}.example") == {
+//RS         .Ok(_) -> panic("64-byte domain label accepted")
+//RS         .Err(_) -> print("overlong-label-rejected")
+//RS     }
+//RS }
+//RS 
+//RS "#;
+//RS     let expected = "true\noverlong-label-rejected";
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "email_domain_labels", src, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout.trim(), expected, "{stdout}");
+//RS     let file = dir.join("email_domain_labels.jet");
+//RS     fs::write(&file, src).unwrap();
+//RS     for (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
+//RS         match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, use_interpreter) {
+//RS             jet::Interpreter::RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "email address failed in {tier}: {stderr}");
+//RS                 assert_eq!(stdout.trim(), expected, "{tier}: {stdout}");
+//RS             }
+//RS             other => panic!("email address did not run in {tier}: {other:?}"),
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1008 tests/corelib_platform_email.rs:1-44
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_runtime.rs:1-4
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/runtime.rs");
+// END-PORT-PENDING 1008 tests/corelib_runtime.rs:1-4
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/corelib_system.rs:1-6
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS include!("corelib_parts/support.rs");
+//RS include!("corelib_parts/system.rs");
+// END-PORT-PENDING 1008 tests/corelib_system.rs:1-6
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/crypto_c12.rs:1-118
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #302 C12: exact nominal-role and cross-tier crypto closeout proof.
+//RS 
+//RS mod common;
+//RS 
+//RS use common::{build_and_run, ffi_bridge_cache_root, have_rustc};
+//RS use jet::Diagnostics::Severity;
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS 
+//RS fn assert_single_type_error(source: &str, expected: &[&str]) {
+//RS     let diagnostics = jet::compile(source).expect_err("wrong crypto role must fail in sema");
+//RS     let errors: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.severity == Severity::Error)
+//RS         .collect();
+//RS     assert_eq!(errors.len(), 1, "expected one type error: {diagnostics:?}");
+//RS     assert_eq!(errors[0].code, "E0112");
+//RS     let rendered = jet::render_diagnostics("crypto_wrong_role.jet", source, &diagnostics);
+//RS     for text in expected {
+//RS         assert!(
+//RS             rendered.contains(text),
+//RS             "missing {text:?} in wrong-role diagnostic:\n{rendered}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn nominal_crypto_roles_are_rejected_during_compilation() {
+//RS     assert_single_type_error(
+//RS         r#"use core.crypto as crypto
+//RS 
+//RS fn run() {
+//RS     recipient :: crypto.X25519SecretKey.new_random() ?? return
+//RS     crypto.sign(recipient, [1, 2, 3]) ?? return
+//RS }
+//RS "#,
+//RS         &["SigningKey", "X25519SecretKey"],
+//RS     );
+//RS 
+//RS     assert_single_type_error(
+//RS         r#"use core.crypto as crypto
+//RS 
+//RS fn run() {
+//RS     signing :: crypto.SigningKey.new_random() ?? return
+//RS     recipient :: crypto.X25519SecretKey.new_random() ?? return
+//RS     sealed :: crypto.seal([recipient.public_key()], [1, 2, 3], []) ?? return
+//RS     crypto.open(signing, sealed, []) ?? return
+//RS }
+//RS "#,
+//RS         &["X25519SecretKey", "SigningKey"],
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     std::fs::create_dir_all(std::env::temp_dir()).unwrap();
+//RS     let path = "Examples/features/crypto/typed_crypto.jet";
+//RS     let source = std::fs::read_to_string(path).unwrap();
+//RS     let expected =
+//RS         std::fs::read_to_string("Examples/features/expected/crypto/typed_crypto.out").unwrap();
+//RS 
+//RS     let mut bundle = jet::Loader::load_entry(path).expect("typed crypto bundle loads");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     let errors: Vec<_> = diagnostics
+//RS         .iter()
+//RS         .filter(|diagnostic| diagnostic.severity == Severity::Error)
+//RS         .collect();
+//RS     assert!(
+//RS         errors.is_empty(),
+//RS         "typed crypto must type-check: {errors:?}"
+//RS     );
+//RS     let policy = common::development_policy();
+//RS     common::compile_cranelift_bundle(&bundle, &policy)
+//RS         .expect("typed crypto must compile natively in the resident JIT");
+//RS 
+//RS     let (aot_code, aot_stdout, aot_stderr) =
+//RS         build_and_run("jet_crypto_c12", "typed_crypto", &source);
+//RS     assert_eq!(aot_code, 0);
+//RS     assert_eq!(aot_stderr, "");
+//RS     assert_eq!(aot_stdout, expected);
+//RS 
+//RS     let helper = jetpack::FFI::cached_crypto_helper_path();
+//RS     let manifest = std::fs::read_to_string(ffi_bridge_cache_root(&helper).join("Cargo.toml"))
+//RS         .expect("actual emitted crypto bridge manifest exists");
+//RS     let dependencies = manifest
+//RS         .split_once("[dependencies]\n")
+//RS         .expect("crypto bridge has dependencies")
+//RS         .1;
+//RS     assert_eq!(
+//RS         dependencies,
+//RS         concat!(
+//RS             "aes-gcm = { version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }\n",
+//RS             "argon2 = { version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }\n",
+//RS             "blake3 = { version = \"=1.8.2\", default-features = false, features = [\"std\", \"pure\"] }\n",
+//RS             "chacha20poly1305 = { version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }\n",
+//RS             "ed25519-dalek = { version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }\n",
+//RS             "hkdf = { version = \"=0.12.4\", default-features = false, features = [] }\n",
+//RS             "sha2 = { version = \"=0.10.9\", default-features = false, features = [] }\n",
+//RS             "subtle = { version = \"=2.6.1\", default-features = false, features = [] }\n",
+//RS             "x25519-dalek = { version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }\n",
+//RS         ),
+//RS         "generated crypto dependencies must be exact and feature-minimal",
+//RS     );
+//RS 
+//RS     let dev = match dev_iteration(path, false, false) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => (exit_code, stdout, stderr),
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("default dev rejected typed crypto: {diagnostics:?}")
+//RS         }
+//RS     };
+//RS     assert_eq!(dev, (aot_code, aot_stdout, aot_stderr));
+//RS }
+// END-PORT-PENDING 1008 tests/crypto_c12.rs:1-118
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/crypto_diagnostics.rs:1-203
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn scratch() -> PathBuf {
+//RS     let path = std::env::temp_dir().join(format!(
+//RS         "jet-e2702-{}-{}",
+//RS         std::process::id(),
+//RS         std::thread::current().name().unwrap_or("test")
+//RS     ));
+//RS     let _ = std::fs::remove_dir_all(&path);
+//RS     std::fs::create_dir_all(&path).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS #[test]
+//RS fn e2702_json_exits_one_and_creates_no_artifact() {
+//RS     let root = scratch();
+//RS     std::fs::write(
+//RS         root.join("main.jet"),
+//RS         concat!(
+//RS             "use core.crypto as crypto\n",
+//RS             "fn run() {\n",
+//RS             "    safe :: crypto.hkdf_sha256(\n",
+//RS             "        crypto.Secret.from_bytes([1]), [], [], 8161\n",
+//RS             "    )\n",
+//RS             "}\n",
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", "main.jet", "--json"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(output.stdout.is_empty());
+//RS     let json = String::from_utf8(output.stderr).unwrap();
+//RS     assert!(
+//RS         json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""),
+//RS         "{json}"
+//RS     );
+//RS     for field in [
+//RS         "\"code\":\"E2702\"",
+//RS         "\"what\":\"crypto API misuse\"",
+//RS         "\"reason\":\"output_length\"",
+//RS         "\"operation\":\"hkdf_sha256\"",
+//RS         "\"expected\":\"0..8160\"",
+//RS         "\"actual\":8161",
+//RS         "\"span\":",
+//RS         "\"cause\":[],\"clears\":0",
+//RS     ] {
+//RS         assert!(json.contains(field), "missing {field}: {json}");
+//RS     }
+//RS     for forbidden in [
+//RS         "password",
+//RS         "plaintext",
+//RS         "ciphertext",
+//RS         "backend",
+//RS         "rustc",
+//RS         "dependency",
+//RS     ] {
+//RS         assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
+//RS     }
+//RS     assert!(
+//RS         !root.join(".jet").join("build").exists(),
+//RS         "check emitted a build artifact"
+//RS     );
+//RS     std::fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn e2702_json_redacts_an_absolute_input_to_its_project_path() {
+//RS     let root = scratch();
+//RS     let project = root.join("project");
+//RS     let source_dir = project.join("src");
+//RS     std::fs::create_dir_all(project.join(".git")).unwrap();
+//RS     std::fs::create_dir_all(&source_dir).unwrap();
+//RS     let source = source_dir.join("main.jet");
+//RS     std::fs::write(
+//RS         &source,
+//RS         concat!(
+//RS             "use core.crypto as crypto\n",
+//RS             "fn run() {\n",
+//RS             "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)\n",
+//RS             "}\n",
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .arg("check")
+//RS         .arg(&source)
+//RS         .arg("--json")
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let json = String::from_utf8(output.stderr).unwrap();
+//RS     assert!(json.contains("\"file\":\"src/main.jet\""), "{json}");
+//RS     assert!(
+//RS         !json.contains(&root.to_string_lossy().into_owned()),
+//RS         "absolute path leaked: {json}"
+//RS     );
+//RS     std::fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn multiple_e2702_diagnostics_are_independent_json_lines() {
+//RS     let root = scratch();
+//RS     std::fs::write(
+//RS         root.join("main.jet"),
+//RS         concat!(
+//RS             "use core.crypto as crypto\n",
+//RS             "fn first() {\n",
+//RS             "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)\n",
+//RS             "}\n",
+//RS             "fn second() {\n",
+//RS             "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([2]), [], [], 8162)\n",
+//RS             "}\n",
+//RS             "fn run() {}\n",
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", "main.jet", "--json"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     assert!(output.stdout.is_empty());
+//RS     let json = String::from_utf8(output.stderr).unwrap();
+//RS     let lines = json.lines().collect::<Vec<_>>();
+//RS     assert_eq!(lines.len(), 2, "{json}");
+//RS     for (line, actual) in lines.into_iter().zip([8161, 8162]) {
+//RS         assert!(
+//RS             line.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""),
+//RS             "{line}"
+//RS         );
+//RS         assert!(line.contains("\"code\":\"E2702\""), "{line}");
+//RS         assert!(line.contains("\"reason\":\"output_length\""), "{line}");
+//RS         assert!(line.contains("\"operation\":\"hkdf_sha256\""), "{line}");
+//RS         assert!(line.contains(&format!("\"actual\":{actual}")), "{line}");
+//RS     }
+//RS     assert!(
+//RS         !root.join(".jet").join("build").exists(),
+//RS         "check emitted a build artifact"
+//RS     );
+//RS     std::fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn safe_raw_nonce_json_omits_inapplicable_bounds() {
+//RS     let root = scratch();
+//RS     std::fs::write(
+//RS         root.join("main.jet"),
+//RS         concat!(
+//RS             "use core.crypto as crypto\n",
+//RS             "fn run() {\n",
+//RS             "    _ :: crypto.seal([], [], [], nonce: [0])\n",
+//RS             "}\n",
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["check", "main.jet", "--json"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let json = String::from_utf8(output.stderr).unwrap();
+//RS     assert!(json.contains("\"reason\":\"raw_nonce\""), "{json}");
+//RS     assert!(json.contains("\"operation\":\"seal\""), "{json}");
+//RS     assert!(!json.contains("\"expected\":"), "{json}");
+//RS     assert!(!json.contains("\"actual\":"), "{json}");
+//RS     assert!(
+//RS         !root.join(".jet").join("build").exists(),
+//RS         "check emitted a build artifact"
+//RS     );
+//RS     std::fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn explain_e2702_teaches_precedence_and_dynamic_values() {
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["explain", "E2702"])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(output.status.success());
+//RS     let text = String::from_utf8(output.stdout).unwrap();
+//RS     for teaching in [
+//RS         "syntax, effects, and types",
+//RS         "compiler-known",
+//RS         "Dynamic values",
+//RS     ] {
+//RS         assert!(text.contains(teaching), "missing `{teaching}`:\n{text}");
+//RS     }
+//RS }
+// END-PORT-PENDING 1008 tests/crypto_diagnostics.rs:1-203
+
+// PORT-PENDING 1008 tests-comptime-sequence-parity-module-group: tests/encoding_edition.rs:1-260
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Edition-gated encoding surfaces (card #712 / #715 C5).
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS fn scratch(name: &str) -> PathBuf {
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_edition_{name}_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     dir
+//RS }
+//RS 
+//RS fn write_single_file(root: &PathBuf, body: &str) -> PathBuf {
+//RS     let path = root.join("run.jet");
+//RS     fs::write(&path, body).unwrap();
+//RS     path
+//RS }
+//RS 
+//RS fn write_project(root: &PathBuf, edition: &str, body: &str) -> PathBuf {
+//RS     fs::write(
+//RS         root.join("package.jet"),
+//RS         format!("name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"),
+//RS     )
+//RS     .unwrap();
+//RS     write_single_file(root, body)
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2027_base64_strict_rejects_whitespace_without_allowance_surface() {
+//RS     // D-ENCBASE-STRICT1=A: edition 2027 strict decode rejects ASCII whitespace.
+//RS     // Named allowance args (`allow_whitespace`, `allow_missing_padding`) are
+//RS     // ratified but not yet on the public sema/codegen surface (fixed_sigs and
+//RS     // emit still 1-arg). That gap is explicit and cannot satisfy allowance parity.
+//RS     let root = scratch("2027_b64_strict");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2027",
+//RS         "use core.encoding.base64 as base64\n\nfn run() {\n    if base64.decode(\"Zg==\\n\") == {\n        .Ok(_) -> print(\"accepted\")\n        .Err(reason) -> print(reason)\n    }\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "edition 2027 1-arg decode must type-check:\n{}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS 
+//RS     // Allowance arity is not shipped — keep the red explicit.
+//RS     let allow_root = scratch("2027_b64_allow_gap");
+//RS     let allow_path = write_project(
+//RS         &allow_root,
+//RS         "2027",
+//RS         "use core.encoding.base64 as base64\n\nfn run() {\n    bytes := base64.decode(\"Zg==\\n\", true, false) ?? panic(\"decode\")\n    print(bytes.len())\n}\n",
+//RS     );
+//RS     let allow_diags = jet::check_with_path(allow_path.to_str().unwrap());
+//RS     assert!(
+//RS         allow_diags.iter().any(|d| d.code == "E0104"),
+//RS         "named gap: 2027 allowance args must not silently type-check until wired; got:\n{}",
+//RS         jet::render_diagnostics(allow_path.to_str().unwrap(), "", &allow_diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2026_base64_keeps_compatibility_union() {
+//RS     let root = scratch("2026_b64");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2026",
+//RS         "use core.encoding.base64 as base64\n\nfn run() {\n    bytes := base64.decode(\"Zg==\\n\") ?? panic(\"decode\")\n    print(bytes.len())\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "edition 2026 should keep compatibility decode:\n{}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2027_json_canonical_is_fallible_jcs() {
+//RS     let root = scratch("2027_json_canon");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2027",
+//RS         "use core.encoding.json as json\n\nfn run() {\n    data := json.parse(\"{{\\\"b\\\":2,\\\"a\\\":1}}\") ?? panic(\"json\")\n    print(json.canonical(data) ?? panic(\"canon\"))\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "edition 2027 json.canonical must type-check:\n{}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2026_json_canonical_stays_infallible() {
+//RS     let root = scratch("2026_json_canon");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2026",
+//RS         "use core.encoding.json as json\n\nfn run() {\n    data := json.parse(\"{{\\\"b\\\":2,\\\"a\\\":1}}\") ?? panic(\"json\")\n    print(json.canonical(data))\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags.is_empty(),
+//RS         "edition 2026 json.canonical must stay infallible:\n{}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2027_cbor_encode_emits_l2001() {
+//RS     let root = scratch("l2001");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2027",
+//RS         "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree := json.parse(\"{{}}\") ?? panic(\"json\")\n    payload := cbor.encode(tree)\n    print(\"ok\")\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags.iter().any(|d| d.code == "L2001"),
+//RS         "expected L2001 for cbor.encode, got: {}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn edition_2027_cbor_decode_emits_l2001_and_2028_removes_it() {
+//RS     let source = "use core.encoding.cbor as cbor\n\nfn run() {\n    decoded := cbor.decode([U8]{ 0x81, 0x01 }) ?? panic(\"decode\")\n    print(decoded)\n}\n";
+//RS     let before = scratch("2027_cbor_decode");
+//RS     let before_path = write_project(&before, "2027", source);
+//RS     let before_diags = jet::check_with_path(before_path.to_str().unwrap());
+//RS     assert!(
+//RS         before_diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "L2001"),
+//RS         "expected L2001 for cbor.decode, got: {}",
+//RS         jet::render_diagnostics(before_path.to_str().unwrap(), "", &before_diags)
+//RS     );
+//RS 
+//RS     let after = scratch("2028_cbor_decode");
+//RS     let after_path = write_project(&after, "2028", source);
+//RS     let after_diags = jet::check_with_path(after_path.to_str().unwrap());
+//RS     assert!(
+//RS         after_diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E2002"),
+//RS         "expected E2002 after cbor.decode removal, got: {}",
+//RS         jet::render_diagnostics(after_path.to_str().unwrap(), "", &after_diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn user_deprecated_marker_emits_l2001_for_a_consumer() {
+//RS     let root = scratch("user_deprecated");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2027",
+//RS         "#Deprecated(since: \"1.2\", use: \"parse\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+//RS     );
+//RS     let diags = jet::check_with_path(path.to_str().unwrap());
+//RS     assert!(
+//RS         diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "L2001" && diagnostic.what.contains("`decode`")),
+//RS         "expected L2001 for a user #Deprecated function, got: {}",
+//RS         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+//RS     );
+//RS 
+//RS     let removed_root = scratch("user_removed");
+//RS     let removed_path = write_project(
+//RS         &removed_root,
+//RS         "2028",
+//RS         "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+//RS     );
+//RS     let removed_diags = jet::check_with_path(removed_path.to_str().unwrap());
+//RS     assert!(
+//RS         removed_diags
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E2002" && diagnostic.what.contains("`decode`")),
+//RS         "expected E2002 after the user marker removal edition, got: {}",
+//RS         jet::render_diagnostics(removed_path.to_str().unwrap(), "", &removed_diags)
+//RS     );
+//RS 
+//RS     let before_root = scratch("user_removed_dormant");
+//RS     let before_path = write_project(
+//RS         &before_root,
+//RS         "2026",
+//RS         "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+//RS     );
+//RS     let before_diags = jet::check_with_path(before_path.to_str().unwrap());
+//RS     assert!(
+//RS         before_diags
+//RS             .iter()
+//RS             .all(|diagnostic| diagnostic.code != "L2001" && diagnostic.code != "E2002"),
+//RS         "removed_in must stay dormant before the deprecation edition: {}",
+//RS         jet::render_diagnostics(before_path.to_str().unwrap(), "", &before_diags)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lifecycle_marker_metadata_erases_before_web_codegen() {
+//RS     let source = "#Deprecated(since: \"2027\", use: \"replacement\", removed_in: \"2028\")\npub fn legacy() { print(\"legacy\") }\npub fn replacement() { print(\"replacement\") }\n\nfn run() {\n    replacement()\n}\n";
+//RS     let output = jet::compile_web_with_path(source, "tests/fixtures/lifecycle_marker_web.jet")
+//RS         .expect("user lifecycle marker must compile for web");
+//RS     let web = output
+//RS         .web
+//RS         .expect("user lifecycle marker must produce web artifacts");
+//RS     assert!(!web.wasm_rust.contains("Deprecated"));
+//RS     assert!(!web.js_app.contains("Deprecated"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn deprecation_fix_replaces_plain_and_core_member_names() {
+//RS     let root = scratch("deprecation_fix");
+//RS     let path = write_project(
+//RS         &root,
+//RS         "2027",
+//RS         "#Deprecated(since: \"2027\", use: \"parse\")\npub fn decode() {}\npub fn parse() {}\n\nfn run() {\n    decode()\n}\n",
+//RS     );
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["fix", path.to_str().unwrap()])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "user deprecation fix failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         fs::read_to_string(&path).unwrap().contains("    parse()"),
+//RS         "plain replacement was not applied"
+//RS     );
+//RS 
+//RS     let cbor_root = scratch("cbor_deprecation_fix");
+//RS     let cbor_path = write_project(
+//RS         &cbor_root,
+//RS         "2027",
+//RS         "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree := json.parse(\"{{}}\") ?? panic(\"json\")\n    payload := cbor.encode(tree)\n    print(\"ok\")\n}\n",
+//RS     );
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["fix", cbor_path.to_str().unwrap()])
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "Core deprecation fix failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         fs::read_to_string(&cbor_path)
+//RS             .unwrap()
+//RS             .contains("payload := cbor.to_bytes(tree)"),
+//RS         "Core replacement was not applied"
+//RS     );
+//RS }
+// END-PORT-PENDING 1008 tests/encoding_edition.rs:1-260
+

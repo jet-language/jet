@@ -1,0 +1,1715 @@
+// PORT-PENDING 2105 crates-jet-jit-src-text: crates/jet-jit/src/Text.rs:1-1711
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.text` hosts (#729). `include!` canonical UnicodeTables + UnicodeString +
+//RS //! Top/Text.rs — no third algorithm.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{alloc_string, clone_string, result_err_msg};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS /// Canonical text/unicode runtime — types stubbed, algorithm via include!
+//RS pub(crate) mod text_rt {
+//RS     mod jet_regex_syntax {
+//RS         include!("../../jet-foundation/src/RegexSyntax.rs");
+//RS     }
+//RS 
+//RS     pub mod jet_std {
+//RS         #[derive(Clone, Copy, Debug, PartialEq)]
+//RS         pub enum IOOperation {
+//RS             Read,
+//RS             Write,
+//RS             Flush,
+//RS             Connect,
+//RS             Accept,
+//RS             Close,
+//RS             Resolve,
+//RS             Codec,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct IOContext {
+//RS             pub operation: IOOperation,
+//RS             pub resource: Option<String>,
+//RS             pub os_code: Option<i64>,
+//RS             pub cause: Option<String>,
+//RS         }
+//RS 
+//RS         impl IOContext {
+//RS             pub fn new(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 os_code: Option<i64>,
+//RS                 cause: Option<String>,
+//RS             ) -> Self {
+//RS                 Self {
+//RS                     operation,
+//RS                     resource,
+//RS                     os_code,
+//RS                     cause,
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum IOError {
+//RS             InvalidInput(IOContext),
+//RS             NotFound(IOContext),
+//RS             PermissionDenied(IOContext),
+//RS             TimedOut(IOContext),
+//RS             Cancelled(IOContext),
+//RS             Closed(IOContext),
+//RS             Protocol(IOContext),
+//RS             Other(IOContext),
+//RS         }
+//RS 
+//RS         impl IOError {
+//RS             pub fn other(
+//RS                 operation: IOOperation,
+//RS                 resource: Option<String>,
+//RS                 cause: impl ToString,
+//RS             ) -> Self {
+//RS                 Self::Other(IOContext::new(
+//RS                     operation,
+//RS                     resource,
+//RS                     None,
+//RS                     Some(cause.to_string()),
+//RS                 ))
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
+//RS             let context = IOContext::new(
+//RS                 operation,
+//RS                 Some(path.to_string()),
+//RS                 e.raw_os_error().map(i64::from),
+//RS                 Some(e.to_string()),
+//RS             );
+//RS             match e.kind() {
+//RS                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+//RS                     IOError::InvalidInput(context)
+//RS                 }
+//RS                 std::io::ErrorKind::NotFound => IOError::NotFound(context),
+//RS                 std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+//RS                 std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+//RS                 std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+//RS                     IOError::Closed(context)
+//RS                 }
+//RS                 _ => IOError::Other(context),
+//RS             }
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum TextWidthAmbiguous {
+//RS             Narrow,
+//RS             Wide,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub enum TextWidthControls {
+//RS             Zero,
+//RS             Reject,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct TextWidth {
+//RS             pub ambiguous: TextWidthAmbiguous,
+//RS             pub controls: TextWidthControls,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct TextError {
+//RS             pub message: String,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct DirEntry {
+//RS             pub name: String,
+//RS             pub path: String,
+//RS             pub is_dir: bool,
+//RS         }
+//RS 
+//RS         // D-REGEXENGINE1: canonical regex engine from JetStd/Regex.rs (build.rs extract).
+//RS         #[allow(unused_imports)]
+//RS         pub use jet_foundation::Outcome::*;
+//RS         include!(concat!(env!("OUT_DIR"), "/regex_rt.rs"));
+//RS     }
+//RS 
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_unicode::*;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Ascii.rs");
+//RS     use crate::fault_injection::jet_fault_should_fail;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
+//RS 
+//RS     pub(crate) fn lower(s: &str) -> String {
+//RS         jet_text_lower(&s.to_string())
+//RS     }
+//RS     pub(crate) fn upper(s: &str) -> String {
+//RS         jet_text_upper(&s.to_string())
+//RS     }
+//RS     pub(crate) fn ascii_lower(s: &str) -> String {
+//RS         jet_text_ascii_lower(&s.to_string())
+//RS     }
+//RS     pub(crate) fn casefold(s: &str) -> String {
+//RS         jet_text_casefold(&s.to_string())
+//RS     }
+//RS     pub(crate) fn unicode_scalar_count(s: &str) -> i64 {
+//RS         jet_text_unicode_scalar_count(&s.to_string())
+//RS     }
+//RS     pub(crate) fn unicode_byte_count(s: &str) -> i64 {
+//RS         jet_text_unicode_byte_count(&s.to_string())
+//RS     }
+//RS     pub(crate) fn rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
+//RS         jet_text_rsplitn(&s.to_string(), &pat.to_string(), n)
+//RS     }
+//RS     pub(crate) fn splitn(s: &str, pat: &str, n: i64) -> Vec<String> {
+//RS         jet_text_splitn(&s.to_string(), &pat.to_string(), n)
+//RS     }
+//RS     pub(crate) fn ascii_upper(s: &str) -> String {
+//RS         jet_text_ascii_upper(&s.to_string())
+//RS     }
+//RS     pub(crate) fn graphemes(s: &str) -> Vec<String> {
+//RS         jet_text_graphemes(&s.to_string())
+//RS     }
+//RS     pub(crate) fn words(s: &str) -> Vec<String> {
+//RS         jet_text_words(&s.to_string())
+//RS     }
+//RS     pub(crate) fn sentences(s: &str) -> Vec<String> {
+//RS         jet_text_sentences(&s.to_string())
+//RS     }
+//RS     pub(crate) fn nfc(s: &str) -> String {
+//RS         jet_text_nfc(&s.to_string())
+//RS     }
+//RS     pub(crate) fn nfkc(s: &str) -> String {
+//RS         jet_text_nfkc(&s.to_string())
+//RS     }
+//RS     pub(crate) fn nfd(s: &str) -> String {
+//RS         jet_text_nfd(&s.to_string())
+//RS     }
+//RS     pub(crate) fn nfkd(s: &str) -> String {
+//RS         jet_text_nfkd(&s.to_string())
+//RS     }
+//RS     pub(crate) fn caseless_eq(a: &str, b: &str) -> bool {
+//RS         jet_text_caseless_eq(&a.to_string(), &b.to_string())
+//RS     }
+//RS     pub(crate) fn display_width_default(s: &str) -> i64 {
+//RS         jet_text_display_width_default(&s.to_string())
+//RS     }
+//RS     pub(crate) fn display_width_policy(
+//RS         s: &str,
+//RS         ambiguous_wide: bool,
+//RS         controls_reject: bool,
+//RS     ) -> Result<i64, String> {
+//RS         jet_text_display_width_policy(&s.to_string(), ambiguous_wide, controls_reject)
+//RS     }
+//RS     pub(crate) fn is_alphabetic(s: &str) -> bool {
+//RS         jet_text_is_alphabetic(&s.to_string())
+//RS     }
+//RS     pub(crate) fn is_numeric(s: &str) -> bool {
+//RS         jet_text_is_numeric(&s.to_string())
+//RS     }
+//RS     pub(crate) fn is_whitespace(s: &str) -> bool {
+//RS         jet_text_is_whitespace(&s.to_string())
+//RS     }
+//RS     pub(crate) fn is_ascii(s: &str) -> bool {
+//RS         jet_text_unicode_is_ascii(&s.to_string())
+//RS     }
+//RS     pub(crate) fn trim_start(s: &str) -> String {
+//RS         jet_text_trim_start(&s.to_string())
+//RS     }
+//RS     pub(crate) fn trim(s: &str) -> String {
+//RS         jet_text_trim(&s.to_string())
+//RS     }
+//RS 
+//RS     pub(crate) fn trim_end(s: &str) -> String {
+//RS         jet_text_trim_end(&s.to_string())
+//RS     }
+//RS     pub(crate) fn pad_start(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_pad_start(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(crate) fn pad_end(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_pad_end(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(crate) fn index_of(s: &str, needle: &str) -> Option<i64> {
+//RS         jet_unicode_index_of(&s.to_string(), &needle.to_string())
+//RS     }
+//RS     pub(crate) fn count(s: &str, needle: &str) -> i64 {
+//RS         jet_unicode_count(&s.to_string(), &needle.to_string())
+//RS     }
+//RS     pub(crate) fn title(s: &str) -> String {
+//RS         jet_text_title(&s.to_string())
+//RS     }
+//RS     pub(crate) fn is_lower(s: &str) -> bool {
+//RS         jet_text_is_lower(&s.to_string())
+//RS     }
+//RS     pub(crate) fn is_upper(s: &str) -> bool {
+//RS         jet_text_is_upper(&s.to_string())
+//RS     }
+//RS     pub(crate) fn capitalize(s: &str) -> String {
+//RS         jet_text_capitalize(&s.to_string())
+//RS     }
+//RS     pub(crate) fn swapcase(s: &str) -> String {
+//RS         jet_text_swapcase(&s.to_string())
+//RS     }
+//RS     pub(crate) fn remove_prefix(s: &str, prefix: &str) -> String {
+//RS         jet_text_remove_prefix(&s.to_string(), &prefix.to_string())
+//RS     }
+//RS     pub(crate) fn remove_suffix(s: &str, suffix: &str) -> String {
+//RS         jet_text_remove_suffix(&s.to_string(), &suffix.to_string())
+//RS     }
+//RS     pub(crate) fn compare(a: &str, b: &str) -> i64 {
+//RS         jet_text_compare(a, b)
+//RS     }
+//RS     pub(crate) fn reverse(s: &str) -> String {
+//RS         jet_text_reverse(&s.to_string())
+//RS     }
+//RS     pub(crate) fn normalize_nfc(s: &str) -> String {
+//RS         jet_text_normalize_nfc(&s.to_string())
+//RS     }
+//RS     pub(crate) fn last_index_of(s: &str, needle: &str) -> Option<i64> {
+//RS         jet_unicode_last_index_of(&s.to_string(), &needle.to_string())
+//RS     }
+//RS     pub(crate) fn split_once(s: &str, separator: &str) -> Option<(String, String)> {
+//RS         jet_unicode_split_once(&s.to_string(), &separator.to_string()).ok()
+//RS     }
+//RS     pub(crate) fn cut_last(s: &str, separator: &str) -> Option<(String, String)> {
+//RS         jet_unicode_cut_last(&s.to_string(), &separator.to_string()).ok()
+//RS     }
+//RS     pub(crate) fn center(s: &str, width: i64, fill: &str) -> String {
+//RS         jet_text_center(
+//RS             &s.to_string(),
+//RS             jet_foundation::Numeric::JetInt::from_i64(width),
+//RS             &fill.to_string(),
+//RS         )
+//RS     }
+//RS     pub(crate) fn starts_any(s: &str, prefixes: &[String]) -> bool {
+//RS         jet_text_starts_any(&s.to_string(), &prefixes.to_vec())
+//RS     }
+//RS     pub(crate) fn ends_any(s: &str, suffixes: &[String]) -> bool {
+//RS         jet_text_ends_any(&s.to_string(), &suffixes.to_vec())
+//RS     }
+//RS     pub(crate) fn char_indices(s: &str) -> Vec<String> {
+//RS         jet_text_char_indices(&s.to_string())
+//RS     }
+//RS     pub(crate) fn inspect(s: &str) -> Vec<String> {
+//RS         jet_text_inspect(&s.to_string())
+//RS     }
+//RS }
+//RS 
+//RS fn list_from_strings(items: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for s in items {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             rt.heap.list_push_int(list, sid).expect("jit text list");
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS fn list_from_bytes(bytes: &[u8]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for &byte in bytes {
+//RS             rt.heap
+//RS                 .list_push_int(list, i64::from(byte))
+//RS                 .expect("jit text byte list");
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn list_of_strings(list: i64) -> Vec<String> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let sid = rt.heap.list_get_int(list, i).unwrap_or(0);
+//RS             out.push(rt.heap.clone_string(sid).unwrap_or_default());
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn result_ok_i64(v: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.results.push(crate::JitResultValue {
+//RS             ok: true,
+//RS             bits: v as u64,
+//RS         });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS /// TextWidth record: field0=ambiguous disc (Narrow=0, Wide=1), field1=controls (Zero=0, Reject=1).
+//RS fn decode_text_width(policy: i64) -> (bool, bool) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let amb = rt.heap.record_get_int(policy, 0).unwrap_or(0);
+//RS         let ctrl = rt.heap.record_get_int(policy, 1).unwrap_or(0);
+//RS         (amb == 1, ctrl == 1)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_text_lower(s: i64) -> i64 {
+//RS     alloc_string(text_rt::lower(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_upper(s: i64) -> i64 {
+//RS     alloc_string(text_rt::upper(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_ascii_lower(s: i64) -> i64 {
+//RS     alloc_string(text_rt::ascii_lower(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_ascii_upper(s: i64) -> i64 {
+//RS     alloc_string(text_rt::ascii_upper(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_casefold(s: i64) -> i64 {
+//RS     alloc_string(text_rt::casefold(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_unicode_scalar_count(s: i64) -> i64 {
+//RS     text_rt::unicode_scalar_count(&clone_string(s))
+//RS }
+//RS 
+//RS fn jet_jit_text_unicode_byte_count(s: i64) -> i64 {
+//RS     text_rt::unicode_byte_count(&clone_string(s))
+//RS }
+//RS fn jet_jit_text_rsplitn(s: i64, pat: i64, n: i64) -> i64 {
+//RS     list_from_strings(text_rt::rsplitn(
+//RS         &clone_string(s),
+//RS         &clone_string(pat),
+//RS         n,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_splitn(s: i64, pat: i64, n: i64) -> i64 {
+//RS     list_from_strings(text_rt::splitn(
+//RS         &clone_string(s),
+//RS         &clone_string(pat),
+//RS         n,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_split(s: i64, separator: i64) -> i64 {
+//RS     list_from_strings(text_rt::jet_text_parse_split(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_rsplit(s: i64, separator: i64, maxsplit: i64) -> i64 {
+//RS     list_from_strings(text_rt::jet_text_parse_rsplit(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS         maxsplit,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_split_once(s: i64, separator: i64) -> i64 {
+//RS     let (found, before, after) = text_rt::jet_text_parse_split_once(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS     );
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(3);
+//RS         let before_id = rt.heap.alloc_string(before);
+//RS         let after_id = rt.heap.alloc_string(after);
+//RS         let _ = rt.heap.record_set_bool(record, 0, found);
+//RS         let _ = rt.heap.record_set_string(record, 1, before_id);
+//RS         let _ = rt.heap.record_set_string(record, 2, after_id);
+//RS         record
+//RS     })
+//RS }
+//RS fn jet_jit_text_parse_partition(s: i64, separator: i64) -> i64 {
+//RS     let (head, sep, tail) = text_rt::jet_text_parse_partition(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS     );
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(3);
+//RS         let head_id = rt.heap.alloc_string(head);
+//RS         let sep_id = rt.heap.alloc_string(sep);
+//RS         let tail_id = rt.heap.alloc_string(tail);
+//RS         let _ = rt.heap.record_set_string(record, 0, head_id);
+//RS         let _ = rt.heap.record_set_string(record, 1, sep_id);
+//RS         let _ = rt.heap.record_set_string(record, 2, tail_id);
+//RS         record
+//RS     })
+//RS }
+//RS fn jet_jit_text_parse_rpartition(s: i64, separator: i64) -> i64 {
+//RS     let (head, sep, tail) = text_rt::jet_text_parse_rpartition(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS     );
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(3);
+//RS         let head_id = rt.heap.alloc_string(head);
+//RS         let sep_id = rt.heap.alloc_string(sep);
+//RS         let tail_id = rt.heap.alloc_string(tail);
+//RS         let _ = rt.heap.record_set_string(record, 0, head_id);
+//RS         let _ = rt.heap.record_set_string(record, 1, sep_id);
+//RS         let _ = rt.heap.record_set_string(record, 2, tail_id);
+//RS         record
+//RS     })
+//RS }
+//RS fn jet_jit_text_parse_split_ws(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::jet_text_parse_split_ws(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_bool(s: i64) -> i64 {
+//RS     text_rt::jet_text_parse_bool(&clone_string(s))
+//RS         .map_or(0, |value| i64::from(value) + 1)
+//RS }
+//RS fn jet_jit_text_parse_int(s: i64) -> i64 {
+//RS     text_rt::jet_text_parse_int(&clone_string(s)).map_or(0, |value| value.wrapping_add(1))
+//RS }
+//RS fn jet_jit_text_parse_int_base(s: i64, base: i64) -> i64 {
+//RS     text_rt::jet_text_parse_int_base(&clone_string(s), base)
+//RS         .map_or(0, |value| value.wrapping_add(1))
+//RS }
+//RS fn jet_jit_text_wrap(s: i64, width: i64) -> i64 {
+//RS     list_from_strings(text_rt::jet_text_wrap(&clone_string(s), width))
+//RS }
+//RS fn jet_jit_text_fill(s: i64, width: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_fill(&clone_string(s), width))
+//RS }
+//RS fn jet_jit_text_indent_with(s: i64, prefix: i64, predicate_nonblank: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_indent_with(
+//RS         &clone_string(s),
+//RS         &clone_string(prefix),
+//RS         predicate_nonblank != 0,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_wrap_paragraphs(s: i64, width: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_wrap_paragraphs(&clone_string(s), width))
+//RS }
+//RS fn jet_jit_text_hanging_indent(s: i64, first: i64, rest: i64, width: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_hanging_indent(
+//RS         &clone_string(s),
+//RS         &clone_string(first),
+//RS         &clone_string(rest),
+//RS         width,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_shorten(s: i64, width: i64, placeholder: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_shorten(
+//RS         &clone_string(s),
+//RS         width,
+//RS         &clone_string(placeholder),
+//RS     ))
+//RS }
+//RS fn jet_jit_text_indent(s: i64, prefix: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_indent(
+//RS         &clone_string(s),
+//RS         &clone_string(prefix),
+//RS     ))
+//RS }
+//RS fn jet_jit_text_dedent(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_dedent(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_expand_tabs(s: i64, tabsize: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_expand_tabs(&clone_string(s), tabsize))
+//RS }
+//RS fn jet_jit_text_html_escape(s: i64, quote: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_escape(
+//RS         &clone_string(s),
+//RS         quote != 0,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_html_escape_quoted(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_escape_quoted(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_html_escape_text(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_escape_text(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_html_unescape(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_unescape(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_html_strip_tags(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_strip_tags(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_html_unescape_and_strip(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_html_unescape_and_strip(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_float(s: i64) -> i64 {
+//RS     text_rt::jet_text_parse_float(&clone_string(s))
+//RS         .map_or(0, |value| value.to_bits().wrapping_add(1) as i64)
+//RS }
+//RS fn jet_jit_text_parse_kv(s: i64, separator: i64) -> i64 {
+//RS     let (key, ok, value) = text_rt::jet_text_parse_kv(
+//RS         &clone_string(s),
+//RS         &clone_string(separator),
+//RS     );
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(3);
+//RS         let key_id = rt.heap.alloc_string(key);
+//RS         let value_id = rt.heap.alloc_string(value);
+//RS         let _ = rt.heap.record_set_string(record, 0, key_id);
+//RS         let _ = rt.heap.record_set_bool(record, 1, ok);
+//RS         let _ = rt.heap.record_set_string(record, 2, value_id);
+//RS         record
+//RS     })
+//RS }
+//RS fn jet_jit_text_parse_find(s: i64, needle: i64) -> i64 {
+//RS     text_rt::jet_text_parse_find(&clone_string(s), &clone_string(needle))
+//RS }
+//RS fn jet_jit_text_parse_rfind(s: i64, needle: i64) -> i64 {
+//RS     text_rt::jet_text_parse_rfind(&clone_string(s), &clone_string(needle))
+//RS }
+//RS fn jet_jit_text_parse_count(s: i64, needle: i64) -> i64 {
+//RS     text_rt::jet_text_parse_count(&clone_string(s), &clone_string(needle))
+//RS }
+//RS fn jet_jit_text_parse_replace_n(s: i64, old: i64, new: i64, count: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_replace_n(
+//RS         &clone_string(s),
+//RS         &clone_string(old),
+//RS         &clone_string(new),
+//RS         count,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_join(parts: i64, separator: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_join(
+//RS         &list_of_strings(parts),
+//RS         &clone_string(separator),
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_splitlines(s: i64, keepends: i64) -> i64 {
+//RS     list_from_strings(text_rt::jet_text_parse_splitlines(
+//RS         &clone_string(s),
+//RS         keepends != 0,
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_capwords(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_capwords(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_find_from(s: i64, needle: i64, start: i64) -> i64 {
+//RS     text_rt::jet_text_parse_find_from(&clone_string(s), &clone_string(needle), start)
+//RS }
+//RS fn jet_jit_text_parse_rfind_from(s: i64, needle: i64, end: i64) -> i64 {
+//RS     text_rt::jet_text_parse_rfind_from(&clone_string(s), &clone_string(needle), end)
+//RS }
+//RS fn jet_jit_text_parse_index(s: i64, needle: i64) -> i64 {
+//RS     text_rt::jet_text_parse_index(&clone_string(s), &clone_string(needle))
+//RS }
+//RS fn jet_jit_text_parse_contains(s: i64, needle: i64) -> i8 {
+//RS     i8::from(text_rt::jet_text_parse_contains(
+//RS         &clone_string(s),
+//RS         &clone_string(needle),
+//RS     ))
+//RS }
+//RS fn jet_jit_text_parse_lstrip(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_lstrip(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_rstrip(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_rstrip(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_strip(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_strip(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_escape_c(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_escape_c(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_parse_unescape_c(s: i64) -> i64 {
+//RS     alloc_string(text_rt::jet_text_parse_unescape_c(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_string_lines(s: i64) -> i64 {
+//RS     let text = clone_string(s);
+//RS     list_from_strings(
+//RS         text_rt::jet_text_line_views(&text)
+//RS             .into_iter()
+//RS             .map(str::to_owned)
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_text_graphemes(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::graphemes(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_words(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::words(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_sentences(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::sentences(&clone_string(s)))
+//RS }
+//RS 
+//RS /// Byte spans of `parts` inside `source`, or the reason a part escaped it.
+//RS /// Computed on a shared borrow so the caller can trap on `rt` afterwards.
+//RS fn view_spans<'a, P: AsRef<[u8]> + 'a>(
+//RS     source: &'a str,
+//RS     parts: impl IntoIterator<Item = P>,
+//RS     kind: &'static str,
+//RS ) -> Result<Vec<(usize, usize)>, String> {
+//RS     let base = source.as_ptr() as usize;
+//RS     let mut spans = Vec::new();
+//RS     for part in parts {
+//RS         let part = part.as_ref();
+//RS         let Some(start) = (part.as_ptr() as usize).checked_sub(base) else {
+//RS             return Err(format!("{kind} view escaped its source string"));
+//RS         };
+//RS         let Some(end) = start.checked_add(part.len()) else {
+//RS             return Err(format!("{kind} view range overflow"));
+//RS         };
+//RS         if end > source.len() {
+//RS             return Err(format!("{kind} view escaped its source string"));
+//RS         }
+//RS         spans.push((start, end));
+//RS     }
+//RS     Ok(spans)
+//RS }
+//RS 
+//RS fn alloc_text_views(
+//RS     rt: &mut crate::JitRuntime,
+//RS     text: i64,
+//RS     spans: Result<Vec<(usize, usize)>, String>,
+//RS     bytes: bool,
+//RS ) -> i64 {
+//RS     let spans = match spans {
+//RS         Ok(spans) => spans,
+//RS         Err(reason) => {
+//RS             rt.set_trap(&reason);
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     let out = rt.heap.alloc_empty_list();
+//RS     for (start, end) in spans {
+//RS         let slot = rt.view_slots.len();
+//RS         rt.view_slots.push(crate::runtime_host::JitViewSlot::String {
+//RS             owner: text,
+//RS             start,
+//RS             end,
+//RS             bytes,
+//RS         });
+//RS         rt.heap
+//RS             .list_push_int(out, crate::runtime_host::view_handle(slot))
+//RS             .expect("JIT text view list");
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn alloc_text_string_views<F>(text: i64, make: F) -> i64
+//RS where
+//RS     F: for<'a> FnOnce(&'a str) -> text_rt::JetViewIter<'a, &'a str>,
+//RS {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let spans = rt
+//RS             .heap
+//RS             .get_string(text)
+//RS             .ok_or_else(|| "invalid String handle for text view".to_string())
+//RS             .and_then(|source| view_spans(source, make(source), "text"));
+//RS         alloc_text_views(rt, text, spans, false)
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_text_byte_views<F>(text: i64, make: F) -> i64
+//RS where
+//RS     F: for<'a> FnOnce(&'a str) -> text_rt::JetViewIter<'a, &'a [u8]>,
+//RS {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let spans = rt
+//RS             .heap
+//RS             .get_string(text)
+//RS             .ok_or_else(|| "invalid String handle for byte view".to_string())
+//RS             .and_then(|source| view_spans(source, make(source), "byte"));
+//RS         alloc_text_views(rt, text, spans, true)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_text_grapheme_views(text: i64) -> i64 {
+//RS     alloc_text_string_views(text, text_rt::jet_text_grapheme_views)
+//RS }
+//RS 
+//RS fn jet_jit_text_word_views(text: i64) -> i64 {
+//RS     alloc_text_string_views(text, text_rt::jet_text_word_views)
+//RS }
+//RS 
+//RS fn jet_jit_text_line_views(text: i64) -> i64 {
+//RS     alloc_text_string_views(text, text_rt::jet_text_line_views)
+//RS }
+//RS 
+//RS fn jet_jit_text_byte_views(text: i64) -> i64 {
+//RS     alloc_text_byte_views(text, text_rt::jet_text_byte_views)
+//RS }
+//RS 
+//RS fn jet_jit_text_nfc(s: i64) -> i64 {
+//RS     alloc_string(text_rt::nfc(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_nfkc(s: i64) -> i64 {
+//RS     alloc_string(text_rt::nfkc(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_nfd(s: i64) -> i64 {
+//RS     alloc_string(text_rt::nfd(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_nfkd(s: i64) -> i64 {
+//RS     alloc_string(text_rt::nfkd(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_caseless_eq(a: i64, b: i64) -> i8 {
+//RS     i8::from(text_rt::caseless_eq(&clone_string(a), &clone_string(b)))
+//RS }
+//RS 
+//RS fn jet_jit_text_display_width(s: i64) -> i64 {
+//RS     text_rt::display_width_default(&clone_string(s))
+//RS }
+//RS 
+//RS fn jet_jit_text_display_width_policy(s: i64, policy: i64) -> i64 {
+//RS     let (ambiguous_wide, controls_reject) = decode_text_width(policy);
+//RS     match text_rt::display_width_policy(&clone_string(s), ambiguous_wide, controls_reject) {
+//RS         Ok(w) => result_ok_i64(w),
+//RS         Err(msg) => result_err_msg(&msg),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_text_is_alphabetic(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_alphabetic(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_is_numeric(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_numeric(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_is_whitespace(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_whitespace(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_is_ascii(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_ascii(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_is_lower(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_lower(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_is_upper(s: i64) -> i8 {
+//RS     i8::from(text_rt::is_upper(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_capitalize(s: i64) -> i64 {
+//RS     alloc_string(text_rt::capitalize(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_swapcase(s: i64) -> i64 {
+//RS     alloc_string(text_rt::swapcase(&clone_string(s)))
+//RS }
+//RS fn jet_jit_text_remove_prefix(s: i64, prefix: i64) -> i64 {
+//RS     alloc_string(text_rt::remove_prefix(
+//RS         &clone_string(s),
+//RS         &clone_string(prefix),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_text_remove_suffix(s: i64, suffix: i64) -> i64 {
+//RS     alloc_string(text_rt::remove_suffix(
+//RS         &clone_string(s),
+//RS         &clone_string(suffix),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_text_compare(a: i64, b: i64) -> i64 {
+//RS     text_rt::compare(&clone_string(a), &clone_string(b))
+//RS }
+//RS 
+//RS fn jet_jit_text_reverse(s: i64) -> i64 {
+//RS     alloc_string(text_rt::reverse(&clone_string(s)))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_text_trim_start(s: i64) -> i64 {
+//RS     alloc_string(text_rt::trim_start(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_trim(s: i64) -> i64 {
+//RS     alloc_string(text_rt::trim(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_trim_end(s: i64) -> i64 {
+//RS     alloc_string(text_rt::trim_end(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_pad_start(s: i64, width: i64, fill: i64) -> i64 {
+//RS     alloc_string(text_rt::pad_start(
+//RS         &clone_string(s),
+//RS         width,
+//RS         &clone_string(fill),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_text_pad_end(s: i64, width: i64, fill: i64) -> i64 {
+//RS     alloc_string(text_rt::pad_end(
+//RS         &clone_string(s),
+//RS         width,
+//RS         &clone_string(fill),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
+//RS     text_rt::index_of(&clone_string(s), &clone_string(needle))
+//RS         .map_or(0, |index| index.wrapping_add(1))
+//RS }
+//RS fn jet_jit_text_last_index_of(s: i64, needle: i64) -> i64 {
+//RS     text_rt::last_index_of(&clone_string(s), &clone_string(needle))
+//RS         .map_or(0, |index| index.wrapping_add(1))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
+//RS     text_rt::count(&clone_string(s), &clone_string(needle))
+//RS }
+//RS 
+//RS fn jet_jit_text_title(s: i64) -> i64 {
+//RS     alloc_string(text_rt::title(&clone_string(s)))
+//RS }
+//RS 
+//RS /// #1476 StringMethod dispatcher. method ids mirror lower_ctx match.
+//RS /// Returns i64; bool methods use 0/1 and are narrowed to i8 by the caller.
+//RS fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
+//RS     let s = clone_string(recv);
+//RS     match method {
+//RS         0 => {
+//RS             text_rt::last_index_of(&s, &clone_string(arg0)).map_or(0, |index| index.wrapping_add(1))
+//RS         }
+//RS         1 => i64::from(text_rt::is_lower(&s)),
+//RS         2 => i64::from(text_rt::is_upper(&s)),
+//RS         3 => alloc_string(text_rt::capitalize(&s)),
+//RS         4 => alloc_string(text_rt::swapcase(&s)),
+//RS         5 => alloc_string(text_rt::remove_prefix(&s, &clone_string(arg0))),
+//RS         6 => alloc_string(text_rt::remove_suffix(&s, &clone_string(arg0))),
+//RS         7 => text_rt::compare(&s, &clone_string(arg0)),
+//RS         8 => i64::from(s == clone_string(arg0)),
+//RS         9 => alloc_string(s),
+//RS         10 => alloc_string(text_rt::reverse(&s)),
+//RS         11 => alloc_string(text_rt::normalize_nfc(&s)),
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
+//RS     let Some((before, after)) = text_rt::split_once(&clone_string(s), &clone_string(separator))
+//RS     else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let before_id = rt.heap.alloc_string(before);
+//RS         let after_id = rt.heap.alloc_string(after);
+//RS         let _ = rt.heap.record_set_string(record, 0, before_id);
+//RS         let _ = rt.heap.record_set_string(record, 1, after_id);
+//RS         record.wrapping_add(1)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_text_cut_last(s: i64, separator: i64) -> i64 {
+//RS     let Some((before, after)) = text_rt::cut_last(&clone_string(s), &clone_string(separator))
+//RS     else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let before_id = rt.heap.alloc_string(before);
+//RS         let after_id = rt.heap.alloc_string(after);
+//RS         let _ = rt.heap.record_set_string(record, 0, before_id);
+//RS         let _ = rt.heap.record_set_string(record, 1, after_id);
+//RS         record.wrapping_add(1)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
+//RS     alloc_string(text_rt::center(
+//RS         &clone_string(s),
+//RS         width,
+//RS         &clone_string(fill),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
+//RS     let prefs = list_of_strings(prefixes);
+//RS     i8::from(text_rt::starts_any(&clone_string(s), &prefs))
+//RS }
+//RS 
+//RS fn jet_jit_text_ends_any(s: i64, suffixes: i64) -> i8 {
+//RS     let suffixes = list_of_strings(suffixes);
+//RS     i8::from(text_rt::ends_any(&clone_string(s), &suffixes))
+//RS }
+//RS 
+//RS fn jet_jit_text_rindex(s: i64, needle: i64) -> i64 {
+//RS     clone_string(s)
+//RS         .rfind(clone_string(needle).as_str())
+//RS         .map(|index| index as i64)
+//RS         .unwrap_or(-1)
+//RS }
+//RS 
+//RS fn jet_jit_text_encode(s: i64) -> i64 {
+//RS     let text = clone_string(s);
+//RS     list_from_bytes(text.as_bytes())
+//RS }
+//RS 
+//RS fn jet_jit_text_isdecimal(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     i8::from(!text.is_empty() && text.chars().all(|character| character.is_ascii_digit()))
+//RS }
+//RS 
+//RS fn jet_jit_text_isnumeric(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     i8::from(!text.is_empty() && text.chars().all(char::is_numeric))
+//RS }
+//RS 
+//RS fn jet_jit_text_isalnum(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     i8::from(!text.is_empty() && text.chars().all(char::is_alphanumeric))
+//RS }
+//RS 
+//RS fn jet_jit_text_isdigit(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     i8::from(!text.is_empty() && text.chars().all(|character| character.is_ascii_digit()))
+//RS }
+//RS 
+//RS fn jet_jit_text_isidentifier(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     let mut chars = text.chars();
+//RS     let valid = match chars.next() {
+//RS         Some(first) => {
+//RS             (first == '_' || first.is_alphabetic())
+//RS                 && chars.all(|character| character == '_' || character.is_alphanumeric())
+//RS         }
+//RS         None => false,
+//RS     };
+//RS     i8::from(valid)
+//RS }
+//RS 
+//RS fn jet_jit_text_istitle(s: i64) -> i8 {
+//RS     let text = clone_string(s);
+//RS     let mut has_cased = false;
+//RS     let mut expect_upper = true;
+//RS     let mut valid = true;
+//RS     for character in text.chars() {
+//RS         if character.is_uppercase() {
+//RS             has_cased = true;
+//RS             expect_upper = false;
+//RS         } else if character.is_lowercase() {
+//RS             has_cased = true;
+//RS             if expect_upper {
+//RS                 valid = false;
+//RS                 break;
+//RS             }
+//RS         } else if character.is_alphabetic() {
+//RS             valid = false;
+//RS             break;
+//RS         } else {
+//RS             expect_upper = true;
+//RS         }
+//RS     }
+//RS     i8::from(valid && has_cased)
+//RS }
+//RS 
+//RS fn jet_jit_text_isprintable(s: i64) -> i8 {
+//RS     i8::from(clone_string(s).chars().all(|character| !character.is_control()))
+//RS }
+//RS 
+//RS fn jet_jit_text_expandtabs(s: i64, tabsize: i64) -> i64 {
+//RS     let text = clone_string(s);
+//RS     let width = tabsize.max(0);
+//RS     let mut column = 0i64;
+//RS     let mut out = String::with_capacity(text.len());
+//RS     for character in text.chars() {
+//RS         match character {
+//RS             '\t' if width > 0 => {
+//RS                 let spaces = width - column.rem_euclid(width);
+//RS                 out.extend(std::iter::repeat(' ').take(spaces as usize));
+//RS                 column += spaces;
+//RS             }
+//RS             '\t' => {}
+//RS             '\n' | '\r' => {
+//RS                 out.push(character);
+//RS                 column = 0;
+//RS             }
+//RS             _ => {
+//RS                 out.push(character);
+//RS                 column += 1;
+//RS             }
+//RS         }
+//RS     }
+//RS     alloc_string(out)
+//RS }
+//RS fn jet_jit_text_zfill(s: i64, width: i64) -> i64 {
+//RS     let text = clone_string(s);
+//RS     let length = text.chars().count() as i64;
+//RS     if width <= length {
+//RS         return alloc_string(text);
+//RS     }
+//RS     let (sign, body) = if let Some(rest) = text.strip_prefix('+') {
+//RS         ("+", rest)
+//RS     } else if let Some(rest) = text.strip_prefix('-') {
+//RS         ("-", rest)
+//RS     } else {
+//RS         ("", text.as_str())
+//RS     };
+//RS     alloc_string(format!("{sign}{}{}", "0".repeat((width - length) as usize), body))
+//RS }
+//RS fn jet_jit_text_char_indices(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::char_indices(&clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_text_inspect(s: i64) -> i64 {
+//RS     list_from_strings(text_rt::inspect(&clone_string(s)))
+//RS }
+//RS 
+//RS pub(crate) enum RegexValue {
+//RS     Regex(text_rt::jet_std::JetRegex),
+//RS     Match(text_rt::jet_std::JetRegexMatch),
+//RS     Flags(text_rt::jet_std::RegexFlags),
+//RS }
+//RS 
+//RS fn push_regex(v: RegexValue) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.regex_values.push(Some(v));
+//RS         rt.regex_values.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn with_regex<R: Default>(handle: i64, f: impl FnOnce(&RegexValue) -> R) -> R {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match rt
+//RS             .regex_values
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .and_then(|s| s.as_ref())
+//RS         {
+//RS             Some(v) => f(v),
+//RS             None => R::default(),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn clone_compiled_regex(handle: i64) -> Option<text_rt::jet_std::JetRegex> {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Regex(regex) => Some(regex.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn regex_result_ok(bits: u64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.results.push(super::JitResultValue { ok: true, bits });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn regex_result_err(msg: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let sid = rt.heap.alloc_string(msg);
+//RS         rt.results.push(super::JitResultValue {
+//RS             ok: false,
+//RS             bits: sid as u64,
+//RS         });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn option_string_bits(opt: Option<String>) -> i64 {
+//RS     match opt {
+//RS         None => 0,
+//RS         Some(s) => {
+//RS             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS             sid.wrapping_add(1)
+//RS         }
+//RS     }
+//RS }
+//RS fn option_string_result(
+//RS     value: text_rt::jet_std::JetOutcome<String, text_rt::jet_std::JetAbsent>,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match value {
+//RS         Ok(text) => {
+//RS             let sid = rt.heap.alloc_string(text);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+//RS         }
+//RS         Err(_) => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn option_int_bits(opt: Option<i64>) -> i64 {
+//RS     opt.map_or(0, |value| value.wrapping_add(1))
+//RS }
+//RS 
+//RS fn list_strings(items: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for s in items {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             let _ = rt.heap.list_push_int(list, sid);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS fn list_nested_strings(items: Vec<Vec<String>>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let outer = rt.heap.alloc_empty_list();
+//RS         for pair in items {
+//RS             let inner = rt.heap.alloc_empty_list();
+//RS             for s in pair {
+//RS                 let sid = rt.heap.alloc_string(s);
+//RS                 let _ = rt.heap.list_push_int(inner, sid);
+//RS             }
+//RS             let _ = rt.heap.list_push_int(outer, inner);
+//RS         }
+//RS         outer
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_regex_string_property(
+//RS     handle: i64,
+//RS     property: impl FnOnce(&text_rt::jet_std::JetRegex) -> String,
+//RS ) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Regex(regex) => Some(property(regex)),
+//RS         _ => None,
+//RS     })
+//RS     .map(alloc_string)
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_pattern(handle: i64) -> i64 {
+//RS     jet_jit_regex_string_property(handle, |regex| regex.pattern())
+//RS }
+//RS 
+//RS fn jet_jit_regex_source(handle: i64) -> i64 {
+//RS     jet_jit_regex_string_property(handle, |regex| regex.source())
+//RS }
+//RS 
+//RS fn jet_jit_regex_flags_property(handle: i64) -> i64 {
+//RS     jet_jit_regex_string_property(handle, |regex| regex.flags())
+//RS }
+//RS 
+//RS fn jet_jit_regex_options(handle: i64) -> i64 {
+//RS     jet_jit_regex_string_property(handle, |regex| regex.options())
+//RS }
+//RS 
+//RS fn jet_jit_regex_names(handle: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Regex(regex) => Some(regex.names()),
+//RS         _ => None,
+//RS     })
+//RS     .map(list_strings)
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
+//RS     push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(
+//RS         ci != 0,
+//RS         ml != 0,
+//RS         ds != 0,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_regex_literal(pat: i64) -> i64 {
+//RS     push_regex(RegexValue::Regex(text_rt::jet_std::jet_regex_literal(
+//RS         &clone_string(pat),
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| i8::from(regex.is_match(&t)))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_full_match(pat: i64, text: i64) -> i8 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| i8::from(regex.full_match(&t)))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| option_string_bits(regex.find(&t).ok()))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_find_all(pat: i64, text: i64) -> i64 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| list_strings(regex.find_all(&t)))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(regex) = clone_compiled_regex(pat) else {
+//RS         return 0;
+//RS     };
+//RS     let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+//RS     for found in regex.matches(&text) {
+//RS         let handle = push_regex(RegexValue::Match(found));
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let _ = rt.heap.list_push_int(list, handle);
+//RS         });
+//RS     }
+//RS     list
+//RS }
+//RS fn jet_jit_regex_count(pat: i64, text: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| regex.count(&text))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_replace_method(pat: i64, text: i64, repl: i64) -> i64 {
+//RS     jet_jit_regex_replace(pat, repl, text)
+//RS }
+//RS 
+//RS fn jet_jit_regex_replace_first_method(pat: i64, text: i64, repl: i64) -> i64 {
+//RS     jet_jit_regex_replace_first(pat, repl, text)
+//RS }
+//RS 
+//RS fn regex_replacement_callback(
+//RS     callback: i64,
+//RS ) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(slot) = crate::runtime_host::jit_callable_parts(rt, callback) else {
+//RS             rt.set_host_fault("JIT Regex replacement callback is invalid");
+//RS             return None;
+//RS         };
+//RS         if slot.raw_unary.is_none() || slot.raw_pair.is_some() || slot.raw_many.is_some() {
+//RS             rt.set_host_fault(
+//RS                 "JIT Regex replacement callback has no unary universal thunk",
+//RS             );
+//RS             return None;
+//RS         }
+//RS         Some(slot)
+//RS     })
+//RS }
+//RS 
+//RS fn regex_replacement_callback_trapped() -> bool {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::runtime_stop_pending(rt))
+//RS }
+//RS 
+//RS fn jet_jit_regex_replace_all_with(pat: i64, text: i64, callback: i64) -> i64 {
+//RS     let Some(callback) = regex_replacement_callback(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let text = clone_string(text);
+//RS     let Some(regex) = clone_compiled_regex(pat) else {
+//RS         return 0;
+//RS     };
+//RS     match regex.replace_all_with_result(&text, |matched| {
+//RS         let match_handle = push_regex(RegexValue::Match(matched));
+//RS         let Some(replacement) =
+//RS             crate::runtime_host::invoke_universal_unary(callback, match_handle)
+//RS         else {
+//RS             return Err("JIT Regex replacement callback has no unary universal thunk".to_string());
+//RS         };
+//RS         if regex_replacement_callback_trapped() {
+//RS             return Err(String::new());
+//RS         }
+//RS         Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(replacement))
+//RS             .ok_or_else(|| {
+//RS                 "JIT Regex replacement callback returned an invalid String carrier".to_string()
+//RS             })
+//RS     }) {
+//RS         Ok(replaced) => alloc_string(replaced),
+//RS         Err(message) => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 if !crate::runtime_host::runtime_stop_pending(rt) {
+//RS                     rt.set_host_fault(if message.is_empty() {
+//RS                         "JIT Regex replacement callback stopped".to_string()
+//RS                     } else {
+//RS                         message
+//RS                     });
+//RS                 }
+//RS             });
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .and_then(|regex| regex.match_value(&t).ok())
+//RS         .map(|found| push_regex(RegexValue::Match(found)).wrapping_add(1))
+//RS         .unwrap_or_default()
+//RS }
+//RS fn jet_jit_regex_match_start(handle: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => matched.start(),
+//RS         _ => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_end(handle: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => matched.end(),
+//RS         _ => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_named_captures(handle: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => Some(matched.named_captures()),
+//RS         _ => None,
+//RS     })
+//RS     .map(list_nested_strings)
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_group(handle: i64, group: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => Some(matched.clone()),
+//RS         _ => None,
+//RS     })
+//RS     .map(|matched| option_string_bits(matched.group(group).ok()))
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_name(handle: i64, name: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => Some(matched.clone()),
+//RS         _ => None,
+//RS     })
+//RS     .map(|matched| option_string_bits(matched.name(&name).ok()))
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_group_start(handle: i64, group: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => Some(matched.clone()),
+//RS         _ => None,
+//RS     })
+//RS     .map(|matched| option_int_bits(matched.group_start(group).ok()))
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_match_group_end(handle: i64, group: i64) -> i64 {
+//RS     with_regex(handle, |value| match value {
+//RS         RegexValue::Match(matched) => Some(matched.clone()),
+//RS         _ => None,
+//RS     })
+//RS     .map(|matched| option_int_bits(matched.group_end(group).ok()))
+//RS     .unwrap_or_default()
+//RS }
+//RS fn jet_jit_regex_replace_impl(pat: i64, repl: i64, text: i64, first: bool) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let replacement = clone_string(repl);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| {
+//RS             let replaced = if first {
+//RS                 regex.replace_first(&text, &replacement)
+//RS             } else {
+//RS                 regex.replace(&text, &replacement)
+//RS             };
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.heap.alloc_string(replaced)
+//RS             })
+//RS         })
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_replace(pat: i64, repl: i64, text: i64) -> i64 {
+//RS     jet_jit_regex_replace_impl(pat, repl, text, false)
+//RS }
+//RS 
+//RS fn jet_jit_regex_replace_first(pat: i64, repl: i64, text: i64) -> i64 {
+//RS     jet_jit_regex_replace_impl(pat, repl, text, true)
+//RS }
+//RS 
+//RS fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
+//RS     let t = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| list_strings(regex.split(&t)))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_regex_split_limit(pat: i64, text: i64, limit: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     clone_compiled_regex(pat)
+//RS         .map(|regex| list_strings(regex.split_limit(&text, limit)))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_string_matches(text: i64, pattern: i64) -> i64 {
+//RS     match text_rt::jet_std::jet_string_matches(&clone_string(text), &clone_string(pattern)) {
+//RS         Ok(value) => regex_result_ok(u64::from(value)),
+//RS         Err(error) => regex_result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_string_match(text: i64, pattern: i64) -> i64 {
+//RS     match text_rt::jet_std::jet_string_match(&clone_string(text), &clone_string(pattern)) {
+//RS         Ok(value) => regex_result_ok(option_string_result(value) as u64),
+//RS         Err(error) => regex_result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_regex_compile(pat: i64) -> i64 {
+//RS     match text_rt::jet_std::jet_regex_compile(&clone_string(pat)) {
+//RS         Ok(rx) => regex_result_ok(push_regex(RegexValue::Regex(rx)) as u64),
+//RS         Err(e) => regex_result_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
+//RS     let flags = with_regex(flags, |v| match v {
+//RS         RegexValue::Flags(f) => Some(f.clone()),
+//RS         _ => None,
+//RS     });
+//RS     let Some(flags) = flags else {
+//RS         return regex_result_err("bad RegexFlags".into());
+//RS     };
+//RS     match text_rt::jet_std::jet_regex_compile_with(&clone_string(pat), &flags) {
+//RS         Ok(rx) => regex_result_ok(push_regex(RegexValue::Regex(rx)) as u64),
+//RS         Err(e) => regex_result_err(e),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_regex_escape(text: i64) -> i64 {
+//RS     let s = text_rt::jet_std::jet_regex_escape(&clone_string(text));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct TextHostFns;
+//RS     register: register_text_symbols;
+//RS     declare: declare_text_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_i8 = Signature::new(cc);
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut ternary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut quaternary = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             quaternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         quaternary.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     wrap: "jet_text_wrap" => jet_jit_text_wrap: binary;
+//RS     fill: "jet_text_fill" => jet_jit_text_fill: binary;
+//RS     shorten: "jet_text_shorten" => jet_jit_text_shorten: ternary;
+//RS     indent: "jet_text_indent" => jet_jit_text_indent: binary;
+//RS     indent_with: "jet_text_indent_with" => jet_jit_text_indent_with: ternary;
+//RS     wrap_paragraphs: "jet_text_wrap_paragraphs" => jet_jit_text_wrap_paragraphs: binary;
+//RS     hanging_indent: "jet_text_hanging_indent" => jet_jit_text_hanging_indent: quaternary;
+//RS     dedent: "jet_text_dedent" => jet_jit_text_dedent: unary;
+//RS     expand_tabs: "jet_text_expand_tabs" => jet_jit_text_expand_tabs: binary;
+//RS     html_escape: "jet_text_html_escape" => jet_jit_text_html_escape: binary;
+//RS     html_escape_quoted: "jet_text_html_escape_quoted" => jet_jit_text_html_escape_quoted: unary;
+//RS     html_escape_text: "jet_text_html_escape_text" => jet_jit_text_html_escape_text: unary;
+//RS     html_unescape: "jet_text_html_unescape" => jet_jit_text_html_unescape: unary;
+//RS     html_strip_tags: "jet_text_html_strip_tags" => jet_jit_text_html_strip_tags: unary;
+//RS     html_unescape_and_strip: "jet_text_html_unescape_and_strip" => jet_jit_text_html_unescape_and_strip: unary;
+//RS     unicode_lower: "jet_unicode_lower" => jet_jit_text_lower: unary;
+//RS     unicode_upper: "jet_unicode_upper" => jet_jit_text_upper: unary;
+//RS     ascii_lower: "jet_text_ascii_lower" => jet_jit_text_ascii_lower: unary;
+//RS     ascii_upper: "jet_text_ascii_upper" => jet_jit_text_ascii_upper: unary;
+//RS     casefold: "jet_text_casefold" => jet_jit_text_casefold: unary;
+//RS     unicode_scalar_count: "jet_text_unicode_scalar_count" => jet_jit_text_unicode_scalar_count: unary;
+//RS     unicode_byte_count: "jet_text_unicode_byte_count" => jet_jit_text_unicode_byte_count: unary;
+//RS     rsplitn: "jet_text_rsplitn" => jet_jit_text_rsplitn: ternary;
+//RS     splitn: "jet_text_splitn" => jet_jit_text_splitn: ternary;
+//RS     parse_split: "jet_text_parse_split" => jet_jit_text_parse_split: binary;
+//RS     parse_rsplit: "jet_text_parse_rsplit" => jet_jit_text_parse_rsplit: ternary;
+//RS     parse_split_once: "jet_text_parse_split_once" => jet_jit_text_parse_split_once: binary;
+//RS     parse_partition: "jet_text_parse_partition" => jet_jit_text_parse_partition: binary;
+//RS     parse_rpartition: "jet_text_parse_rpartition" => jet_jit_text_parse_rpartition: binary;
+//RS     parse_split_ws: "jet_text_parse_split_ws" => jet_jit_text_parse_split_ws: unary;
+//RS     parse_bool: "jet_text_parse_bool" => jet_jit_text_parse_bool: unary;
+//RS     parse_int: "jet_text_parse_int" => jet_jit_text_parse_int: unary;
+//RS     parse_int_base: "jet_text_parse_int_base" => jet_jit_text_parse_int_base: binary;
+//RS     parse_kv: "jet_text_parse_kv" => jet_jit_text_parse_kv: binary;
+//RS     parse_float: "jet_text_parse_float" => jet_jit_text_parse_float: unary;
+//RS     parse_find: "jet_text_parse_find" => jet_jit_text_parse_find: binary;
+//RS     parse_rfind: "jet_text_parse_rfind" => jet_jit_text_parse_rfind: binary;
+//RS     parse_count: "jet_text_parse_count" => jet_jit_text_parse_count: binary;
+//RS     parse_replace_n: "jet_text_parse_replace_n" => jet_jit_text_parse_replace_n: quaternary;
+//RS     parse_join: "jet_text_parse_join" => jet_jit_text_parse_join: binary;
+//RS     parse_splitlines: "jet_text_parse_splitlines" => jet_jit_text_parse_splitlines: binary;
+//RS     parse_capwords: "jet_text_parse_capwords" => jet_jit_text_parse_capwords: unary;
+//RS     parse_find_from: "jet_text_parse_find_from" => jet_jit_text_parse_find_from: ternary;
+//RS     parse_rfind_from: "jet_text_parse_rfind_from" => jet_jit_text_parse_rfind_from: ternary;
+//RS     parse_index: "jet_text_parse_index" => jet_jit_text_parse_index: binary;
+//RS     parse_contains: "jet_text_parse_contains" => jet_jit_text_parse_contains: binary_i8;
+//RS     parse_lstrip: "jet_text_parse_lstrip" => jet_jit_text_parse_lstrip: unary;
+//RS     parse_rstrip: "jet_text_parse_rstrip" => jet_jit_text_parse_rstrip: unary;
+//RS     parse_strip: "jet_text_parse_strip" => jet_jit_text_parse_strip: unary;
+//RS     parse_escape_c: "jet_text_parse_escape_c" => jet_jit_text_parse_escape_c: unary;
+//RS     parse_unescape_c: "jet_text_parse_unescape_c" => jet_jit_text_parse_unescape_c: unary;
+//RS     string_lines: "jet_string_lines" => jet_jit_string_lines: unary;
+//RS     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
+//RS     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
+//RS     graphemes: "jet_jit_text_graphemes" => jet_jit_text_graphemes: unary;
+//RS     words: "jet_jit_text_words" => jet_jit_text_words: unary;
+//RS     sentences: "jet_jit_text_sentences" => jet_jit_text_sentences: unary;
+//RS     grapheme_views: "jet_jit_text_grapheme_views" => jet_jit_text_grapheme_views: unary;
+//RS     word_views: "jet_jit_text_word_views" => jet_jit_text_word_views: unary;
+//RS     line_views: "jet_jit_text_line_views" => jet_jit_text_line_views: unary;
+//RS     byte_views: "jet_jit_text_byte_views" => jet_jit_text_byte_views: unary;
+//RS     nfc: "jet_jit_text_nfc" => jet_jit_text_nfc: unary;
+//RS     nfkc: "jet_jit_text_nfkc" => jet_jit_text_nfkc: unary;
+//RS     nfd: "jet_jit_text_nfd" => jet_jit_text_nfd: unary;
+//RS     nfkd: "jet_jit_text_nfkd" => jet_jit_text_nfkd: unary;
+//RS     caseless_eq: "jet_jit_text_caseless_eq" => jet_jit_text_caseless_eq: binary_i8;
+//RS     display_width: "jet_jit_text_display_width" => jet_jit_text_display_width: unary;
+//RS     display_width_policy: "jet_jit_text_display_width_policy" => jet_jit_text_display_width_policy: binary;
+//RS     is_alphabetic: "jet_jit_text_is_alphabetic" => jet_jit_text_is_alphabetic: unary_i8;
+//RS     is_numeric: "jet_jit_text_is_numeric" => jet_jit_text_is_numeric: unary_i8;
+//RS     is_whitespace: "jet_jit_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
+//RS     is_ascii: "jet_jit_text_is_ascii" => jet_jit_text_is_ascii: unary_i8;
+//RS     checked_text_is_alphabetic: "jet_text_is_alphabetic" => jet_jit_text_is_alphabetic: unary_i8;
+//RS     checked_text_is_numeric: "jet_text_is_numeric" => jet_jit_text_is_numeric: unary_i8;
+//RS     checked_text_is_whitespace: "jet_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
+//RS     is_lower: "jet_text_is_lower" => jet_jit_text_is_lower: unary_i8;
+//RS     is_upper: "jet_text_is_upper" => jet_jit_text_is_upper: unary_i8;
+//RS     capitalize: "jet_text_capitalize" => jet_jit_text_capitalize: unary;
+//RS     swapcase: "jet_text_swapcase" => jet_jit_text_swapcase: unary;
+//RS     remove_prefix: "jet_text_remove_prefix" => jet_jit_text_remove_prefix: binary;
+//RS     remove_suffix: "jet_text_remove_suffix" => jet_jit_text_remove_suffix: binary;
+//RS     compare: "jet_text_compare" => jet_jit_text_compare: binary;
+//RS     reverse: "jet_text_reverse" => jet_jit_text_reverse: unary;
+//RS     checked_text_is_ascii: "jet_text_unicode_is_ascii" => jet_jit_text_is_ascii: unary_i8;
+//RS     direct_trim_start: "jet_text_trim_start" => jet_jit_text_trim_start: unary;
+//RS     trim_start: "jet_jit_text_trim_start" => jet_jit_text_trim_start: unary;
+//RS     trim: "jet_unicode_trim" => jet_jit_text_trim: unary;
+//RS     checked_text_trim: "jet_text_trim" => jet_jit_text_trim: unary;
+//RS     direct_trim_end: "jet_text_trim_end" => jet_jit_text_trim_end: unary;
+//RS     trim_end: "jet_jit_text_trim_end" => jet_jit_text_trim_end: unary;
+//RS     direct_pad_start: "jet_text_pad_start" => jet_jit_text_pad_start: ternary;
+//RS     pad_start: "jet_jit_text_pad_start" => jet_jit_text_pad_start: ternary;
+//RS     direct_pad_end: "jet_text_pad_end" => jet_jit_text_pad_end: ternary;
+//RS     pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;
+//RS     index_of: "jet_jit_text_index_of" => jet_jit_text_index_of: binary;
+//RS     checked_unicode_index_of: "jet_unicode_index_of" => jet_jit_text_index_of: binary;
+//RS     checked_unicode_last_index_of: "jet_unicode_last_index_of" => jet_jit_text_last_index_of: binary;
+//RS     checked_unicode_count: "jet_unicode_count" => jet_jit_text_count: binary;
+//RS     count: "jet_jit_text_count" => jet_jit_text_count: binary;
+//RS     direct_title: "jet_text_title" => jet_jit_text_title: unary;
+//RS     title: "jet_jit_text_title" => jet_jit_text_title: unary;
+//RS     normalize_nfc: "jet_text_normalize_nfc" => jet_jit_text_nfc: unary;
+//RS     split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
+//RS     checked_unicode_split_once: "jet_unicode_split_once" => jet_jit_text_split_once: binary;
+//RS 
+//RS     cut_last: "jet_jit_text_cut_last" => jet_jit_text_cut_last: binary;
+//RS     checked_unicode_cut_last: "jet_unicode_cut_last" => jet_jit_text_cut_last: binary;
+//RS     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
+//RS     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
+//RS     direct_center: "jet_text_center" => jet_jit_text_center: ternary;
+//RS     method_center_ref: "jet_text_center_ref" => jet_jit_text_center: ternary;
+//RS     method_pad_end_ref: "jet_text_pad_end_ref" => jet_jit_text_pad_end: ternary;
+//RS     method_pad_start_ref: "jet_text_pad_start_ref" => jet_jit_text_pad_start: ternary;
+//RS     string_center_i64: "jet_text_center_i64" => jet_jit_text_center: ternary;
+//RS     string_pad_end_i64: "jet_text_pad_end_i64" => jet_jit_text_pad_end: ternary;
+//RS     string_pad_start_i64: "jet_text_pad_start_i64" => jet_jit_text_pad_start: ternary;
+//RS     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
+//RS     ends_any: "jet_text_ends_any" => jet_jit_text_ends_any: binary_i8;
+//RS     inspect: "jet_jit_text_inspect" => jet_jit_text_inspect: unary;
+//RS     char_indices: "jet_jit_text_char_indices" => jet_jit_text_char_indices: unary;
+//RS     parse_rindex: "jet_text_rindex" => jet_jit_text_rindex: binary;
+//RS     parse_encode: "jet_text_encode" => jet_jit_text_encode: unary;
+//RS     parse_isdecimal: "jet_text_isdecimal" => jet_jit_text_isdecimal: unary_i8;
+//RS     parse_isnumeric: "jet_text_isnumeric" => jet_jit_text_isnumeric: unary_i8;
+//RS     parse_isalnum: "jet_text_isalnum" => jet_jit_text_isalnum: unary_i8;
+//RS     parse_isdigit: "jet_text_isdigit" => jet_jit_text_isdigit: unary_i8;
+//RS     parse_isidentifier: "jet_text_isidentifier" => jet_jit_text_isidentifier: unary_i8;
+//RS     parse_istitle: "jet_text_istitle" => jet_jit_text_istitle: unary_i8;
+//RS     parse_isprintable: "jet_text_isprintable" => jet_jit_text_isprintable: unary_i8;
+//RS     parse_expandtabs: "jet_text_expandtabs" => jet_jit_text_expandtabs: binary;
+//RS     parse_zfill: "jet_text_zfill" => jet_jit_text_zfill: binary;
+//RS     parse_zfill_int: "jet_text_zfill_int" => jet_jit_text_zfill: binary;
+//RS     regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
+//RS     regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
+//RS     parse_zfill_ref: "jet_text_zfill_ref" => jet_jit_text_zfill: binary;
+//RS     regex_literal: "jet_jit_regex_literal" => jet_jit_regex_literal: unary;
+//RS     direct_regex_flags: "jet_std::jet_regex_flags" => jet_jit_regex_flags: ternary;
+//RS     direct_regex_escape: "jet_std::jet_regex_escape" => jet_jit_regex_escape: unary;
+//RS     direct_regex_compile: "jet_std::jet_regex_compile" => jet_jit_regex_compile: unary;
+//RS     direct_regex_compile_with: "jet_std::jet_regex_compile_with" => jet_jit_regex_compile_with: binary;
+//RS     direct_regex_literal: "jet_std::jet_regex_literal" => jet_jit_regex_literal: unary;
+//RS     regex_is_match: "jet_jit_regex_is_match" => jet_jit_regex_is_match: binary_i8;
+//RS     regex_full_match: "jet_jit_regex_full_match" => jet_jit_regex_full_match: binary_i8;
+//RS     regex_find: "jet_jit_regex_find" => jet_jit_regex_find: binary;
+//RS     regex_find_all: "jet_jit_regex_find_all" => jet_jit_regex_find_all: binary;
+//RS     regex_matches: "jet_jit_regex_matches" => jet_jit_regex_matches: binary;
+//RS     regex_match: "jet_jit_regex_match" => jet_jit_regex_match: binary;
+//RS     regex_replace: "jet_jit_regex_replace" => jet_jit_regex_replace: ternary;
+//RS     regex_replace_first: "jet_jit_regex_replace_first" => jet_jit_regex_replace_first: ternary;
+//RS     string_matches: "jet_std::jet_string_matches" => jet_jit_string_matches: binary;
+//RS     string_match: "jet_std::jet_string_match" => jet_jit_string_match: binary;
+//RS     regex_split: "jet_jit_regex_split" => jet_jit_regex_split: binary;
+//RS     regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;
+//RS     direct_regex_is_match: "jet_std::jet_regex_is_match" => jet_jit_regex_is_match: binary_i8;
+//RS     direct_regex_full_match: "jet_std::jet_regex_full_match" => jet_jit_regex_full_match: binary_i8;
+//RS     direct_regex_match: "jet_std::jet_regex_match" => jet_jit_regex_match: binary;
+//RS     direct_regex_find: "jet_std::jet_regex_find" => jet_jit_regex_find: binary;
+//RS     direct_regex_find_all: "jet_std::jet_regex_find_all" => jet_jit_regex_find_all: binary;
+//RS     direct_regex_matches: "jet_std::jet_regex_matches" => jet_jit_regex_matches: binary;
+//RS     direct_regex_split: "jet_std::jet_regex_split" => jet_jit_regex_split: binary;
+//RS     direct_regex_split_limit: "jet_std::jet_regex_split_limit" => jet_jit_regex_split_limit: ternary;
+//RS     direct_regex_replace: "jet_std::jet_regex_replace" => jet_jit_regex_replace: ternary;
+//RS     direct_regex_replace_first: "jet_std::jet_regex_replace_first" => jet_jit_regex_replace_first: ternary;
+//RS     regex_compile: "jet_jit_regex_compile" => jet_jit_regex_compile: unary;
+//RS     regex_compile_with: "jet_jit_regex_compile_with" => jet_jit_regex_compile_with: binary;
+//RS     checked_regex_pattern: "jet_std::JetRegex::pattern" => jet_jit_regex_pattern: unary;
+//RS     checked_regex_source: "jet_std::JetRegex::source" => jet_jit_regex_source: unary;
+//RS     checked_regex_flags: "jet_std::JetRegex::flags" => jet_jit_regex_flags_property: unary;
+//RS     checked_regex_options: "jet_std::JetRegex::options" => jet_jit_regex_options: unary;
+//RS     checked_regex_names: "jet_std::JetRegex::names" => jet_jit_regex_names: unary;
+//RS     checked_regex_count: "jet_std::JetRegex::count" => jet_jit_regex_count: binary;
+//RS     checked_regex_is_match: "jet_std::JetRegex::is_match" => jet_jit_regex_is_match: binary_i8;
+//RS     checked_regex_full_match: "jet_std::JetRegex::full_match" => jet_jit_regex_full_match: binary_i8;
+//RS     checked_regex_match_value: "jet_std::JetRegex::match_value" => jet_jit_regex_match: binary;
+//RS     checked_regex_find: "jet_std::JetRegex::find" => jet_jit_regex_find: binary;
+//RS     checked_regex_find_all: "jet_std::JetRegex::find_all" => jet_jit_regex_find_all: binary;
+//RS     checked_regex_matches: "jet_std::JetRegex::matches" => jet_jit_regex_matches: binary;
+//RS     checked_regex_split: "jet_std::JetRegex::split" => jet_jit_regex_split: binary;
+//RS     checked_regex_replace: "jet_std::JetRegex::replace" => jet_jit_regex_replace_method: ternary;
+//RS     checked_regex_replace_first: "jet_std::JetRegex::replace_first" => jet_jit_regex_replace_first_method: ternary;
+//RS     checked_regex_replace_all_with: "jet_std::JetRegex::replace_all_with" => jet_jit_regex_replace_all_with: ternary;
+//RS     checked_regex_split_limit: "jet_std::JetRegex::split_limit" => jet_jit_regex_split_limit: ternary;
+//RS     checked_regex_match_start: "jet_std::JetRegexMatch::start" => jet_jit_regex_match_start: unary;
+//RS     checked_regex_match_end: "jet_std::JetRegexMatch::end" => jet_jit_regex_match_end: unary;
+//RS     checked_regex_match_named_captures: "jet_std::JetRegexMatch::named_captures" => jet_jit_regex_match_named_captures: unary;
+//RS     checked_regex_match_group: "jet_std::JetRegexMatch::group" => jet_jit_regex_match_group: binary;
+//RS     checked_regex_match_name: "jet_std::JetRegexMatch::name" => jet_jit_regex_match_name: binary;
+//RS     checked_regex_match_group_start: "jet_std::JetRegexMatch::group_start" => jet_jit_regex_match_group_start: binary;
+//RS     checked_regex_match_group_end: "jet_std::JetRegexMatch::group_end" => jet_jit_regex_match_group_end: binary;
+//RS }
+//RS 
+// END-PORT-PENDING 2105 crates/jet-jit/src/Text.rs:1-1711
+

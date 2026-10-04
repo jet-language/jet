@@ -1,0 +1,17 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/FloatOrdering.rs:1-13
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FLOATSORT1: the total ordering used by every collection sort.
+//RS //
+//RS // Ordinary Float comparisons keep IEEE partial-order behavior. Sorting needs
+//RS // a comparator, so its NaN placement is explicit and stable across engines:
+//RS // every NaN follows every non-NaN value, and two NaNs compare equal.
+//RS pub(crate) fn jet_float_sort_cmp(left: f64, right: f64) -> std::cmp::Ordering {
+//RS     match left.partial_cmp(&right) {
+//RS         Some(ordering) => ordering,
+//RS         None if left.is_nan() && right.is_nan() => std::cmp::Ordering::Equal,
+//RS         None if left.is_nan() => std::cmp::Ordering::Greater,
+//RS         None => std::cmp::Ordering::Less,
+//RS     }
+//RS }
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/FloatOrdering.rs:1-13
+

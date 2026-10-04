@@ -1,0 +1,65 @@
+// Top/Mod.rs portable gate; actual native loader/call/drop remain stage2.
+use core.mod.runtime.top_mod as mod_policy
+use core.mod.[ModError]
+use jet_foundation.[JetLibIdentity, JetLibStamp, JetLibExport, JetLibScalar, JETLIB_ABI_IDENTITY]
+fn mod_test_identity() -> JetLibIdentity Never! {
+    JetLibIdentity{compiler_version: "1.4.2", target: "linux-x86_64", host_max: 18446744073709551615}
+}
+fn mod_test_stamp() -> JetLibStamp Never! {
+    stamp := JetLibStamp.for_library("loadable", [JetLibExport]{JetLibExport.new("advance", JetLibScalar.Int, 1)}, [String]{}, mod_test_identity())
+    // A format-valid digest fixture for metadata policy, not a fake hash.
+    stamp.payload_digest = "sha256-0000000000000000000000000000000000000000000000000000000000000000"
+    stamp
+}
+#Test("mod tagged refusal mapping preserves all cases and unknown reasons") {
+    assert_eq(mod_policy.mod_error("Denied: denied"), ModError.Denied("denied"))
+    assert_eq(mod_policy.mod_error("NotFound: missing"), ModError.NotFound("missing"))
+    assert_eq(mod_policy.mod_error("Invalid: corrupt"), ModError.Invalid("corrupt"))
+    assert_eq(mod_policy.mod_error("Unsupported: ABI"), ModError.Unsupported("ABI"))
+    assert_eq(mod_policy.mod_error("Denied:without-space"), ModError.Invalid("Denied:without-space"))
+    assert_eq(mod_policy.failure_from_io(true), mod_policy.ModFailure.NotFound)
+    assert_eq(mod_policy.failure_from_io(false), mod_policy.ModFailure.Invalid)
+}
+#Test("mod compiler identity wins over ABI and effects") {
+    stamp := mod_test_stamp()
+    stamp.compiler_version = "old"
+    stamp.abi_version = 7
+    stamp.declared_effects = [String]{"Net"}
+    expected :: "Unsupported: E1338: library `loadable` was built by Jet `old`, but the loader uses Jet `1.4.2`"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected))
+}
+#Test("mod ABI then library name then metadata order") {
+    stamp := mod_test_stamp()
+    stamp.library_name = ""
+    stamp.abi_version = 7
+    expected :: "Unsupported: E1341: library `` uses unsupported .jetlib ABI version 7; this loader accepts ABI version 2"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected))
+    stamp.abi_version = 2
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val("Invalid: E1341: .jetlib metadata has no valid Library name"))
+}
+#Test("mod loader accepts FS roots but keeps wire effect refusal order") {
+    stamp := mod_test_stamp()
+    stamp.declared_effects = [String]{"FS", "FS.Read", "FS.any.leaf"}
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), None)
+    stamp.declared_effects = [String]{"Net.Z", "Env.A"}
+    expected :: "Denied: E1339: library `loadable` declares `Net.Z`, which this load site does not grant"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected))
+    stamp.declared_effects = [String]{"FSx"}
+    expected2 :: "Denied: E1339: library `loadable` declares `FSx`, which this load site does not grant"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected2))
+}
+#Test("mod target and native ABI refusals are Unsupported") {
+    stamp := mod_test_stamp()
+    stamp.target = "foreign"
+    expected :: "Unsupported: E1341: library `loadable` targets `foreign`, but this loader targets `linux-x86_64`"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected))
+    stamp.target = "linux-x86_64"
+    stamp.abi_identity = "foreign"
+    expected2 :: "Unsupported: E1341: library `loadable` uses unsupported native ABI identity `foreign`"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val(expected2))
+}
+#Test("mod loader payload digest wording remains exact") {
+    stamp := mod_test_stamp()
+    stamp.payload_digest = "sha256-INVALID"
+    assert_eq(mod_policy.check_before_map(stamp, mod_test_identity()), Val("Invalid: E1341: library `loadable` has no valid native payload digest"))
+}

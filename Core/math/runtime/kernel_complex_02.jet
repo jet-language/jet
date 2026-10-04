@@ -1,0 +1,841 @@
+use jet_foundation.Traits.[TraitRegistry, TraitInfo, OperatorImpl, e0906, e0907, PRINTABLE, EQUATABLE, DEBUG, DISPLAY, COMPARABLE, ENCODE, DECODE, SERIALIZE, RENDERABLE, CLOSE]
+use jet_foundation.AST.[Type, TypeParam, Item, VariantPayload, TagMarker, InternalTag, AccessConvention, Param, ParamZone, TraitMethodSig, Span, OperatorMarker, Func, Marker, StructDef, EnumDef, TraitDef, ViewSource]
+use jet_foundation.[Generics, Syntax, Names]
+use jet_foundation.Generics.[unify_types, substitute_type]
+use jet_foundation.Diagnostics.Diagnostic
+use jet_foundation.Symbols.FuncSig
+use std.collections.HashSet
+
+impl TraitRegistry {
+    // Rust: crates/jet-foundation/src/Traits.rs:1796
+    fn auto_derive_set(self, trait_name: String) -> HashSet<String>? Never! {
+        match trait_name {
+            PRINTABLE -> Val(self.auto_printable)
+            EQUATABLE -> Val(self.auto_equatable)
+            DEBUG -> Val(self.auto_debug)
+            COMPARABLE -> Val(self.auto_comparable)
+            ENCODE -> Val(self.auto_encode)
+            DECODE -> Val(self.auto_decode)
+            _ -> None
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:1808
+    fn auto_derive_set_mut(&self, trait_name: String) -> HashSet<String>? Never! {
+        match trait_name {
+            PRINTABLE -> Val(&self.auto_printable)
+            EQUATABLE -> Val(&self.auto_equatable)
+            DEBUG -> Val(&self.auto_debug)
+            COMPARABLE -> Val(&self.auto_comparable)
+            ENCODE -> Val(&self.auto_encode)
+            DECODE -> Val(&self.auto_decode)
+            _ -> None
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:1822
+    fn auto_derive_fields_ready(self, item: Item, trait_name: String, supports: fn(String, String) -> Bool?) -> Bool Never! {
+        type_params :: match item {
+            Item.Struct(s) -> s.type_params
+            Item.Enum(e) -> e.type_params
+            _ -> return false
+        }
+        ready :: |ty| self.auto_derive_type_ready(ty, trait_name, type_params, supports)
+        match item {
+            Item.Struct(s) -> s.fields.iter()
+                .filter(|field| field.computed.is_none())
+                // A redacted field's carrier needs no Debug implementation.
+                .filter(|field| !(trait_name == DEBUG && field.redact))
+                .all(|field| ready(field.ty))
+            Item.Enum(e) -> e.variants.iter().all(|variant| match variant.payload {
+                VariantPayload.Unit -> true
+                VariantPayload.Single(ty, _) -> ready(ty)
+                VariantPayload.Named(fields) -> fields.iter().all(|field| ready(field.ty))
+            })
+            _ -> false
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:1857
+    fn auto_derive_type_ready(self, ty: Type, trait_name: String, type_params: [TypeParam], foreign_supports: fn(String, String) -> Bool?) -> Bool Never! {
+        codec :: trait_name == ENCODE || trait_name == DECODE
+        match ty {
+            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} -> {
+                if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
+                else -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            }
+            Type.Result{ok, err} -> {
+                if codec -> false
+                else if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
+                else -> self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
+                    && self.auto_derive_type_ready(err, trait_name, type_params, foreign_supports)
+            }
+            Type.Map{key, value, ..} -> {
+                if trait_name == COMPARABLE -> false
+                else -> (!codec || matches(key, Type.String))
+                    && self.auto_derive_type_ready(key, trait_name, type_params, foreign_supports)
+                    && self.auto_derive_type_ready(value, trait_name, type_params, foreign_supports)
+            }
+            Type.Tuple(fields) -> {
+                if codec -> false
+                else if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
+                else -> fields.iter().all(|(_, field)| self.auto_derive_type_ready(field, trait_name, type_params, foreign_supports))
+            }
+            Type.Union(members) -> {
+                if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
+                else -> members.iter().all(|member| self.auto_derive_type_ready(member, trait_name, type_params, foreign_supports))
+            }
+            Type.Apply{name, args} -> {
+                if trait_name == COMPARABLE -> false
+                else -> (foreign_supports(name, trait_name) ?? self.implements_trait(name, trait_name))
+                    && args.iter().all(|arg| self.auto_derive_type_ready(arg, trait_name, type_params, foreign_supports))
+            }
+            Type.Tagged{marker: TagMarker.Internal(InternalTag.CoreCryptoNominal), inner}
+                if trait_name == DEBUG && matches(inner, Type.Named(name) if name == "Secret") -> true
+            Type.Tagged{inner, ..} -> {
+                if codec -> false
+                else if trait_name == COMPARABLE -> Self.native_ordering_ready(ty)
+                else -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            }
+            Type.InlineRange{base: inner, ..} -> self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            Type.Named(name) if type_params.iter().any(|param| param.name == name) ->
+                type_params.iter().find(|param| param.name == name)
+                    .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name))
+            Type.Named(name) -> foreign_supports(name, trait_name) ?? self.implements_trait(name, trait_name)
+            Type.Float | Type.Float32 -> trait_name != COMPARABLE
+            Type.Int | Type.Bool | Type.String | Type.Char | Type.IntN{..} -> true
+            Type.Quantity{base, ..} -> !codec && self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
+            Type.Measure(_) -> !codec
+            Type.Shared(_) | Type.TraitObject(_) | Type.Fn{..} -> false
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:1999
+    pub fn is_trait_name(self, name: String) -> Bool Never! {
+        self.traits.contains_key(name) || Generics.is_builtin_trait(name) || Generics.is_literal_capability(name)
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2005
+    pub fn resolve_type_name(self, name: String, type_param_scope: [TypeParam]) -> Type Never! {
+        if type_param_scope.iter().any(|p| p.name == name) -> Type.Named(name)
+        else if self.is_trait_name(name) -> Type.TraitObject([name])
+        else -> Type.Named(name)
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2015
+    pub fn implements_trait(self, type_name: String, trait_name: String) -> Bool Never! {
+        if [Syntax.TYPE_INT, Syntax.TYPE_FLOAT, Syntax.TYPE_BOOL, Syntax.TYPE_STRING, Syntax.TYPE_CHAR].contains(type_name)
+            && Generics.is_builtin_trait(trait_name) && trait_name != CLOSE && trait_name != Generics.CHECKED_TEXT {
+            if trait_name == Generics.NUMERIC -> return type_name == Syntax.TYPE_INT || type_name == Syntax.TYPE_FLOAT
+            if [Syntax.TRAIT_ADD, Syntax.TRAIT_SUB, Syntax.TRAIT_MUL, Syntax.TRAIT_DIV].contains(trait_name)
+                && type_name != Syntax.TYPE_INT && type_name != Syntax.TYPE_FLOAT -> return false
+            return true
+        }
+        if (type_name == Syntax.TYPE_DECIMAL || type_name == Syntax.TYPE_FRACTION)
+            && (trait_name == Generics.NUMERIC || Syntax.NUMERIC_SUPERTRAITS.contains(trait_name)) -> return true
+        // GATE #4499: exact composite-key equality/hash.
+        if self.trait_impls.contains((type_name, trait_name)) -> return true
+        match trait_name {
+            PRINTABLE if self.auto_printable.contains(type_name) -> true
+            DEBUG if self.auto_debug.contains(type_name) -> true
+            DISPLAY -> self.trait_impls.contains((type_name, DISPLAY))
+            EQUATABLE if self.auto_equatable.contains(type_name) -> true
+            COMPARABLE if self.auto_comparable.contains(type_name) -> true
+            ENCODE if self.auto_encode.contains(type_name) -> true
+            DECODE if self.auto_decode.contains(type_name) -> true
+            COMPARABLE | SERIALIZE | ENCODE | DECODE -> self.derives.get(type_name).is_some_and(|d| d.contains(trait_name))
+            _ if trait_name == Syntax.MARKER_CLI -> self.derives.get(type_name).is_some_and(|d| d.contains(trait_name))
+            RENDERABLE -> self.auto_printable.contains(type_name) || self.trait_impls.contains((type_name, DISPLAY))
+            _ -> false
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2096
+    pub fn type_implements_trait(self, ty: Type, trait_name: String) -> Bool Never! {
+        match ty {
+            Type.IntN{..} | Type.InlineRange{..} | Type.Float32 ->
+                Generics.is_builtin_trait(trait_name) && trait_name != CLOSE && trait_name != Generics.CHECKED_TEXT
+            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} if trait_name == EQUATABLE ->
+                self.type_implements_trait(inner, trait_name)
+            Type.Map{key, value, ..} if trait_name == EQUATABLE ->
+                self.type_implements_trait(key, trait_name) && self.type_implements_trait(value, trait_name)
+            Type.List(inner) | Type.Option(inner) | Type.FixedList{elem: inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
+            Type.Result{ok, err} if trait_name == EQUATABLE -> self.type_implements_trait(ok, trait_name) && self.type_implements_trait(err, trait_name)
+            Type.Result{ok, err} if trait_name == COMPARABLE -> Self.native_ordering_ready(ok) && Self.native_ordering_ready(err)
+            Type.Tuple(fields) if trait_name == EQUATABLE -> fields.iter().all(|(_, field)| self.type_implements_trait(field, trait_name))
+            Type.Tuple(fields) if trait_name == COMPARABLE -> fields.iter().all(|(_, field)| Self.native_ordering_ready(field))
+            Type.Named(name) -> self.implements_trait(name, trait_name)
+            Type.Apply{name, args} -> {
+                if !self.implements_trait(name, trait_name) -> return false
+                params :: self.struct_params.get(name) ?? return true
+                params.len() == args.len() && params.iter().zip(args).enumerate().all(|(index, (param, arg))|
+                    param.bounds.iter().all(|bound| self.type_implements_trait(arg, bound))
+                    && (!(trait_name == EQUATABLE || trait_name == COMPARABLE)
+                        || self.structural_params.get(name).is_some_and(|used| !used.contains(index) || self.type_implements_trait(arg, trait_name))
+                        || (!self.structural_params.contains_key(name) && self.type_implements_trait(arg, trait_name))))
+            }
+            Type.TraitObject(bounds) -> bounds.iter().any(|bound| bound == trait_name)
+            Type.Tagged{inner, ..} if trait_name == COMPARABLE -> Self.native_ordering_ready(inner)
+            Type.Tagged{inner, ..} -> self.type_implements_trait(inner, trait_name)
+            other -> self.implements_trait(other.name(), trait_name)
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2169
+    pub fn infer_fn_subst(self, sig: FuncSig, arg_types: [Type], type_params: [TypeParam], expected_ret: Type?) -> [String: Type] Err! {
+        self.infer_subst(sig.params, sig.return_type, arg_types, type_params, expected_ret)!
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2185
+    pub fn infer_fn_subst_without_bounds(self, sig: FuncSig, arg_types: [Type], type_params: [TypeParam], expected_ret: Type?) -> [String: Type] Err! {
+        self.infer_subst_inner(sig.params, sig.return_type, arg_types, type_params, expected_ret, false)!
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2204
+    pub fn infer_subst(self, params: [(AccessConvention, Type)], return_type: Type?, arg_types: [Type], type_params: [TypeParam], expected_ret: Type?) -> [String: Type] Err! {
+        self.infer_subst_inner(params, return_type, arg_types, type_params, expected_ret, true)!
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2226
+    pub fn infer_subst_without_bounds(self, params: [(AccessConvention, Type)], return_type: Type?, arg_types: [Type], type_params: [TypeParam], expected_ret: Type?) -> [String: Type] Err! {
+        self.infer_subst_inner(params, return_type, arg_types, type_params, expected_ret, false)!
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2244
+    fn infer_subst_inner(self, params: [(AccessConvention, Type)], return_type: Type?, arg_types: [Type], type_params: [TypeParam], expected_ret: Type?, check_bounds: Bool) -> [String: Type] Err! {
+        if type_params.is_empty() -> return [String: Type]{}
+        tp_set :: type_params.iter().map(|p| p.name).collect::<HashSet<String>>()
+        subst := [String: Type]{}
+        loop (i, (_, pty)) in params.iter().enumerate() {
+            if arg_ty :: arg_types.get(i) {
+                if !unify_types(pty, arg_ty, &subst, tp_set) -> return Err(type_params.first().map(|p| p.name) ?? "")
+            }
+        }
+        if expected :: expected_ret {
+            if ret :: return_type {
+                inst_ret :: substitute_type(ret, subst)
+                _ :: unify_types(inst_ret, expected, &subst, tp_set)
+            }
+        }
+        loop p in type_params {
+            if !subst.contains_key(p.name) -> return Err(p.name)
+            if check_bounds {
+                loop b in p.bounds {
+                    if !self.type_implements_trait(subst.get(p.name).unwrap(), b) -> return Err(p.name)
+                }
+            }
+        }
+        subst
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2291
+    pub fn instantiate_type(self, ty: Type, subst: [String: Type]) -> Type Never! {
+        substitute_type(ty, subst)
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2298
+    pub fn register_error_conv(&self, from_ty: String, to_ty: String, span: Span, diags: & [Diagnostic]) Never! {
+        from_local :: self.local_types.contains(from_ty)
+        to_local :: self.local_types.contains(to_ty)
+        if to_ty != Syntax.TYPE_ERR && !from_local && !to_local {
+            diags.push(Diagnostic.error("E2406",
+                "can't declare `impl {from_ty} -> {to_ty}` — neither type is defined in this program",
+                "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source",
+                "define one of these types locally, or convert the foreign source into `Err`", Val(span)))
+            return
+        }
+        key :: (from_ty, to_ty)
+        if prev :: self.error_conversions.get(key) {
+            diags.push(Diagnostic.error("E2405",
+                "duplicate error conversion: `impl {from_ty} -> {to_ty}` is already declared",
+                "there can be at most one declared way to convert a `Source` error into a `Target`",
+                "remove one of the two `impl … -> …` blocks", Val(span)))
+            _ :: prev
+            return
+        }
+        if from_ty == to_ty || self.error_conversion_path_exists(to_ty, from_ty) {
+            diags.push(Diagnostic.from_row("E2418", [("Source", from_ty), ("Target", to_ty)], Val(span)))
+            return
+        }
+        if self.error_conversion_path_exists(from_ty, to_ty) {
+            diags.push(Diagnostic.from_row("E2419", [("Source", from_ty), ("Target", to_ty)], Val(span)))
+            return
+        }
+        self.error_conversions.insert(key, span)
+        if (source, target) :: self.ambiguous_error_conversion_pair() {
+            self.error_conversions.remove(key)
+            diags.push(Diagnostic.from_row("E2419", [("Source", source), ("Target", target)], Val(span)))
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2370
+    fn error_conversion_path_exists(self, from_ty: String, to_ty: String) -> Bool Never! {
+        if from_ty == to_ty -> return true
+        pending := [from_ty]
+        seen := HashSet<String>{}
+        loop {
+            current :: pending.pop() ?? break
+            if !seen.insert(current) -> continue
+            loop (source, target) in self.error_conversions.keys() {
+                if source == current {
+                    if target == to_ty -> return true
+                    pending.push(target)
+                }
+            }
+        }
+        false
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2392
+    fn ambiguous_error_conversion_pair(self) -> (String, String)? Never! {
+        nodes := HashSet<String>{}
+        loop (source, target) in self.error_conversions.keys() {
+            nodes.insert(source)
+            nodes.insert(target)
+        }
+        ordered := nodes.iter().collect::<[String]>()
+        ordered.sort()
+        loop source in ordered {
+            loop target in ordered {
+                if source == target -> continue
+                visiting := HashSet<String>{}
+                if self.error_conversion_path_count(source, target, &visiting) > U8{1} -> return Val((source, target))
+            }
+        }
+        None
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2412
+    fn error_conversion_path_count(self, from_ty: String, to_ty: String, visiting: &HashSet<String>) -> U8 Never! {
+        if from_ty == to_ty -> return U8{1}
+        if !visiting.insert(from_ty) -> return U8{0}
+        paths := U8{0}
+        loop (source, target) in self.error_conversions.keys() {
+            if source != from_ty -> continue
+            paths = (paths + self.error_conversion_path_count(target, to_ty, &visiting)).min(U8{2})
+            if paths == U8{2} -> break
+        }
+        visiting.remove(from_ty)
+        paths
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2439
+    pub fn has_error_conv(self, from_ty: String, to_ty: String) -> Bool Never! {
+        self.error_conversions.contains_key((from_ty, to_ty))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2449
+    pub fn register_synthetic_rollback(&self) Never! {
+        if self.traits.contains_key(Syntax.TRAIT_ROLLBACK) -> return
+        dummy :: Span{start: 0, end: 0}
+        snapshot_sig :: TraitMethodSig{
+            name: "snapshot", name_span: dummy,
+            params: [Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                convention: AccessConvention.Read, root: false, default: None, variadic: false,
+                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+            return_type: Val(Type.Named("Snapshot")), span: dummy, default_body: None, is_pure: false,
+            declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        restore_sig :: TraitMethodSig{
+            name: "restore", name_span: dummy,
+            params: [
+                Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                    convention: AccessConvention.Write, root: false, default: None, variadic: false,
+                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either},
+                Param{name: "snap", name_span: dummy, ty: Type.Named("Snapshot"), ty_span: dummy,
+                    convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+            return_type: None, span: dummy, default_body: None, is_pure: false,
+            declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        methods := [String: TraitMethodSig]{}
+        methods.insert("snapshot", ^snapshot_sig)
+        methods.insert("restore", ^restore_sig)
+        self.local_traits.insert(Syntax.TRAIT_ROLLBACK)
+        self.traits.insert(Syntax.TRAIT_ROLLBACK, TraitInfo{methods: ^methods, assoc_types: ["Snapshot"], span: dummy})
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2541
+    const PRELUDE_JET_SHOW_PRINTABLE_TYPES: [String] = [
+        "ComputeDevice", "SyncText", "SyncCounter", "SyncMap", "SyncList",
+        "ServiceRestart", "ServiceDelivery", "ServiceRuntime", "ServiceStateStore"]
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2554
+    pub fn register_synthetic_display_debug(&self) Never! {
+        self.register_synthetic_trait_method(Syntax.TRAIT_DISPLAY, "display", Val(Type.String), AccessConvention.Read)
+        self.register_synthetic_trait_method(Syntax.TRAIT_DEBUG, "debug", Val(Type.String), AccessConvention.Move)
+        loop ty in [
+            "ArgsSpec", "AriaRole", Syntax.TYPE_BITS, "BuildError", "BrowserError", Syntax.TYPE_BYTES,
+            "Clock", "CountMinSketch", "DataError", "DataTracked", "DataWatch", "DataWatchStatus", "DataTree",
+            "DBValue", "DBLease", "DBPoolReceipt", "Date", "DateTime", "Decimal", "FieldError", "DirEntry",
+            "DNSSRV", "Duration", "EncodingError", "EmailError", "EnvError", "EventResult", "F32x4", "F64x2",
+            "Field", "FileLock", "GameAssets", "GameBackend", "GameFrame", "GameImage", "GameInputMap",
+            "GameInputSnapshot", "GameReplay", "GameScene", "GameSound", "HTTPError", "HTTPHeaderName",
+            "HTTPHeaderValue", "HTTPMethod", "HTTPRequest", "HTTPResponse", "HTTPRouter", "HTTPStatus",
+            "HTTPVersion", "HyperLogLog", "ID", "Instant", "IOError", "IPAddr", "JSON", "Key", "LocalDate",
+            "LocalTime", "Cache", "Mat3", "Mat4", "Measurement", "MIME", "NetError", "ParsedArgs", "Path",
+            "Period", "Point", "Pool", "ProcessChild", "ProcessReceipt", "ProcessResult", "ProcessSpec", "Quat",
+            "Range", "RangeError", "Rect", "ReflectField", "ReflectValue", "Regex", "RegexFlags", "RegexMatch",
+            "ReservoirSampler", "RNG", "Fake", "Size", "SocketAddr", "Solver", "Stat", "Stopwatch", "TestSuite",
+            "TcpListener", "TcpStream", "TDigest", "TempDir", "TempFile", "TextError", "TLSStream", "TLSVersion",
+            "UDPPacket", "UdpSocket", "UnixListener", "UnixStream", "URL", "UTF8Error", "Value", "Vec2",
+            "Vec3", "Vec4", "WalkEntry", "WatchEvent", "WsError", "Zone", "ZonedDateTime"
+        ].iter().chain(Self.PRELUDE_JET_SHOW_PRINTABLE_TYPES.iter()) -> self.auto_printable.insert(ty)
+        loop ty in [
+            Syntax.TYPE_BITS, Syntax.TYPE_BYTES, "Clock", "Decimal", "DataTracked", "DataWatch", "DataWatchStatus",
+            "DataTree", "Date", "DateTime", "Duration", "GameImage", "GameSound", "ID", "IOError", "Instant",
+            "LocalDate", "LocalTime", "Cache", "Mat3", "Mat4", "Period", "Quat", "Range", "Vec2", "Vec3",
+            "Vec4", "Zone", "ZonedDateTime"
+        ] -> self.auto_debug.insert(ty)
+        loop ty in ["DateTime", "LocalDate", "LocalTime", "Duration", "Instant", "ZonedDateTime"] {
+            self.auto_equatable.insert(ty)
+            self.auto_comparable.insert(ty)
+        }
+        self.auto_comparable.insert("Decimal")
+        self.auto_equatable.insert(Syntax.TYPE_RANGE)
+        self.auto_equatable.insert("TLSVersion")
+        self.trait_impls.insert((Syntax.TYPE_RANGE, DISPLAY))
+        self.trait_impls.insert(("EncodingError", DISPLAY))
+        self.trait_impls.insert(("DataError", DISPLAY))
+        self.trait_impls.insert(("FieldError", DISPLAY))
+        loop ty in ["EncodingErrorKind", "EncodingFormat", "EncodingCause", "EncodingError", "EncodingLimits",
+            "DataError", "DataErrorKind", "DataLimits"] {
+            self.auto_equatable.insert(ty)
+            self.auto_debug.insert(ty)
+        }
+        loop ty in Syntax.SIMD_LANE_TYPE_NAMES {
+            self.auto_printable.insert(ty)
+            self.auto_debug.insert(ty)
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2792
+    pub fn register_synthetic_close(&self) Never! {
+        self.register_synthetic_trait_method(Syntax.TRAIT_CLOSE, Syntax.RESOURCE_CLOSE, None, AccessConvention.Move)
+        loop ty in ["FileReader", "FileWriter", "FileLock", "TempDir", "TempFile", "TCPStream", "TcpStream",
+            "UnixStream", "TLSStream", "DBConnection", "DBScope", "DBPool", "DBLease", "Arena", "Bump", "Pool", "Fixed"] ->
+            self.trait_impls.insert((ty, Syntax.TRAIT_CLOSE))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2824
+    pub fn register_synthetic_operators(&self) Never! {
+        loop (trait_name, method, ret) in [
+            (Syntax.TRAIT_ADD, "add", Type.Named("")), (Syntax.TRAIT_SUB, "sub", Type.Named("")),
+            (Syntax.TRAIT_MUL, "mul", Type.Named("")), (Syntax.TRAIT_DIV, "div", Type.Named("")),
+            (Syntax.TRAIT_EQUATABLE, "equal", Type.Bool),
+            (Syntax.TRAIT_COMPARABLE, "compare", Type.Named(Syntax.TYPE_ORDERING))
+        ] -> self.register_synthetic_binary_trait(trait_name, method, ret)
+        dummy :: Span{start: 0, end: 0}
+        loop (left, trait_name, rhs, result) in [
+            ("Vec3", Syntax.TRAIT_MUL, Type.Named(Syntax.TYPE_FLOAT), Type.Named("Vec3")),
+            ("Vec3", Syntax.TRAIT_DIV, Type.Named(Syntax.TYPE_FLOAT), Type.Named("Vec3")),
+            (Syntax.TYPE_FLOAT, Syntax.TRAIT_DIV, Type.Named("Vec3"), Type.Named("Vec3"))
+        ] {
+            if !self.operator_impls.iter().any(|implementation|
+                implementation.left == left && implementation.trait_name == trait_name && implementation.rhs == rhs) {
+                self.operator_impls.push(OperatorImpl{left: left, trait_name: trait_name, rhs: ^rhs,
+                    result: ^result, span: dummy, explicit_rhs: true,
+                    operator_marker: if left == "Vec3" && trait_name == Syntax.TRAIT_MUL -> Val(OperatorMarker.Commutative) else -> None})
+            }
+            self.trait_impls.insert((left, trait_name))
+        }
+        self.trait_impls.insert(("ID", Syntax.TRAIT_EQUATABLE))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:2894
+    pub fn register_synthetic_driver(&self) Never! {
+        dummy :: Span{start: 0, end: 0}
+        db_error :: Type.Named("DBError")
+        row :: Type.Map{key: Type.String, key_span: None, value: Type.Named(Syntax.TYPE_DB_VALUE)}
+        write_self :: Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+            convention: AccessConvention.Write, root: false, default: None, variadic: false,
+            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+        sql_param :: |name| Param{name: name, name_span: dummy, ty: Type.Named("SQL"), ty_span: dummy,
+            convention: AccessConvention.Move, root: false, default: None, variadic: false,
+            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+        if !self.traits.contains_key(Syntax.TRAIT_DRIVER) {
+            methods := [String: TraitMethodSig]{}
+            loop (name, ret) in [
+                ("query", Type.Result{ok: Type.List(row), err: db_error}),
+                ("query_one", Type.Result{ok: Type.Option(row), err: db_error}),
+                ("execute", Type.Result{ok: Type.Int, err: db_error})
+            ] {
+                methods.insert(name, TraitMethodSig{name: name, name_span: dummy,
+                    params: [write_self, sql_param("sql")], return_type: Val(^ret), span: dummy,
+                    default_body: None, is_pure: false, declared_effects: None,
+                    return_view_provenance: Default.default(), declared_return_view_provenance: None})
+            }
+            loop name in ["begin", "commit", "rollback"] {
+                methods.insert(name, TraitMethodSig{name: name, name_span: dummy,
+                    params: [write_self], return_type: Val(Type.Bool), span: dummy,
+                    default_body: None, is_pure: false, declared_effects: None,
+                    return_view_provenance: Default.default(), declared_return_view_provenance: None})
+            }
+            self.local_traits.insert(Syntax.TRAIT_DRIVER)
+            self.traits.insert(Syntax.TRAIT_DRIVER, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+        }
+        self.trait_impls.insert(("DBScope", Syntax.TRAIT_DRIVER))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3006
+    pub fn register_synthetic_io(&self) Never! {
+        dummy :: Span{start: 0, end: 0}
+        io_error :: Type.Named(Syntax.TYPE_IO_ERROR)
+        bytes :: Type.List(Type.IntN{signed: false, bits: 8})
+        write_self :: Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+            convention: AccessConvention.Write, root: false, default: None, variadic: false,
+            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+        if !self.traits.contains_key(Syntax.TRAIT_IO_READER) {
+            methods := [String: TraitMethodSig]{}
+            methods.insert("read", TraitMethodSig{name: "read", name_span: dummy,
+                params: [write_self, Param{name: "limit", name_span: dummy, ty: Type.Int, ty_span: dummy,
+                    convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+                return_type: Val(Type.Result{ok: bytes, err: io_error}), span: dummy,
+                default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default.default(), declared_return_view_provenance: None})
+            self.local_traits.insert(Syntax.TRAIT_IO_READER)
+            self.traits.insert(Syntax.TRAIT_IO_READER, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+        }
+        if !self.traits.contains_key(Syntax.TRAIT_IO_WRITER) {
+            bytes_param :: Param{name: "bytes", name_span: dummy, ty: bytes, ty_span: dummy,
+                convention: AccessConvention.Read, root: false, default: None, variadic: false,
+                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+            methods := [String: TraitMethodSig]{}
+            methods.insert("write", TraitMethodSig{name: "write", name_span: dummy,
+                params: [write_self, bytes_param], return_type: Val(Type.Result{ok: Type.Int, err: io_error}),
+                span: dummy, default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default.default(), declared_return_view_provenance: None})
+            methods.insert("write_all", TraitMethodSig{name: "write_all", name_span: dummy,
+                params: [write_self, bytes_param], return_type: Val(Type.Result{ok: Type.Named("Unit"), err: io_error}),
+                span: dummy, default_body: None, is_pure: false, declared_effects: None,
+                return_view_provenance: Default.default(), declared_return_view_provenance: None})
+            self.local_traits.insert(Syntax.TRAIT_IO_WRITER)
+            self.traits.insert(Syntax.TRAIT_IO_WRITER, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+        }
+        self.trait_impls.insert(("TcpStream", Syntax.TRAIT_IO_READER))
+        self.trait_impls.insert(("TcpStream", Syntax.TRAIT_IO_WRITER))
+        self.trait_impls.insert(("UnixStream", Syntax.TRAIT_IO_READER))
+        self.trait_impls.insert(("UnixStream", Syntax.TRAIT_IO_WRITER))
+        self.trait_impls.insert(("TLSStream", Syntax.TRAIT_IO_READER))
+        self.trait_impls.insert(("TLSStream", Syntax.TRAIT_IO_WRITER))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3156
+    pub fn register_synthetic_iter_index(&self) Never! {
+        dummy :: Span{start: 0, end: 0}
+        if !self.traits.contains_key(Syntax.TRAIT_ITERATOR) {
+            next_sig :: TraitMethodSig{name: "next", name_span: dummy,
+                params: [Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                    convention: AccessConvention.Write, root: false, default: None, variadic: false,
+                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+                return_type: Val(Type.Option(Type.Named("Item"))), span: dummy, default_body: None, is_pure: false,
+                declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+            methods := [String: TraitMethodSig]{}
+            methods.insert("next", ^next_sig)
+            self.local_traits.insert(Syntax.TRAIT_ITERATOR)
+            self.traits.insert(Syntax.TRAIT_ITERATOR, TraitInfo{methods: ^methods, assoc_types: ["Item"], span: dummy})
+        }
+        if !self.traits.contains_key(Syntax.TRAIT_ITERABLE) {
+            iter_sig :: TraitMethodSig{name: "iter", name_span: dummy,
+                params: [Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                    convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+                return_type: Val(Type.Named("Iter")), span: dummy, default_body: None, is_pure: false,
+                declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+            methods := [String: TraitMethodSig]{}
+            methods.insert("iter", ^iter_sig)
+            self.local_traits.insert(Syntax.TRAIT_ITERABLE)
+            self.traits.insert(Syntax.TRAIT_ITERABLE, TraitInfo{methods: ^methods, assoc_types: ["Iter"], span: dummy})
+        }
+        if !self.traits.contains_key(Syntax.TRAIT_INDEX) {
+            get_sig :: TraitMethodSig{name: "get", name_span: dummy,
+                params: [
+                    Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                        convention: AccessConvention.Read, root: false, default: None, variadic: false,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either},
+                    Param{name: "k", name_span: dummy, ty: Type.Named("Key"), ty_span: dummy,
+                        convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+                return_type: Val(Type.Option(Type.Named("Value"))), span: dummy, default_body: None, is_pure: false,
+                declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+            methods := [String: TraitMethodSig]{}
+            methods.insert("get", ^get_sig)
+            self.local_traits.insert(Syntax.TRAIT_INDEX)
+            self.traits.insert(Syntax.TRAIT_INDEX, TraitInfo{methods: ^methods, assoc_types: ["Key", "Value"], span: dummy})
+        }
+        if !self.traits.contains_key(Syntax.TRAIT_INDEX_MUT) {
+            set_sig :: TraitMethodSig{name: "set", name_span: dummy,
+                params: [
+                    Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                        convention: AccessConvention.Write, root: false, default: None, variadic: false,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either},
+                    Param{name: "k", name_span: dummy, ty: Type.Named("Key"), ty_span: dummy,
+                        convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either},
+                    Param{name: "v", name_span: dummy, ty: Type.Named("Value"), ty_span: dummy,
+                        convention: AccessConvention.Move, root: false, default: None, variadic: false,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+                return_type: None, span: dummy, default_body: None, is_pure: false,
+                declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+            methods := [String: TraitMethodSig]{}
+            methods.insert("set", ^set_sig)
+            self.local_traits.insert(Syntax.TRAIT_INDEX_MUT)
+            self.traits.insert(Syntax.TRAIT_INDEX_MUT, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+        }
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3370
+    fn check_serde_impl_methods(self, type_name: String, trait_name: String, methods: [Func], span: Span, diags: & [Diagnostic]) Never! {
+        verb :: if trait_name == ENCODE -> "encode" else -> "decode"
+        is_data :: |ty| matches(ty, Type.Named(n) if Syntax.is_data_type_name(n))
+        expected :: if trait_name == ENCODE -> "`fn encode(self) -> DataTree`"
+            else -> "`fn decode(tree: DataTree) -> {type_name} [FieldError]!`"
+        saw_verb := false
+        loop m in methods {
+            if m.name != verb {
+                diags.push(e0907(trait_name, m.name, "only `{verb}`", m.name_span))
+                continue
+            }
+            saw_verb = true
+            has_self :: m.params.first().is_some_and(|p| p.name == Syntax.KW_SELF)
+            non_self :: m.params.iter().filter(|p| p.name != Syntax.KW_SELF).collect::<[Param]>()
+            ok :: if trait_name == ENCODE {
+                has_self && non_self.is_empty() && m.return_type.is_some_and(is_data)
+            } else {
+                ret_ok :: matches(m.return_type, Val(Type.Result{ok, err})
+                    if (matches(ok, Type.Named(n) if n == type_name || n == "Self")
+                        || matches(ok, Type.Apply{name, ..} if name == type_name))
+                    && matches(err, Type.List(inner) if matches(inner, Type.Named(n) if n == "FieldError")))
+                !has_self && non_self.len() == 1 && is_data(non_self[0].ty) && ret_ok
+            }
+            if !ok -> diags.push(e0907(trait_name, m.name, expected, m.name_span))
+        }
+        if !saw_verb -> diags.push(e0906(trait_name, [verb], span))
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3433
+    fn register_synthetic_trait_method(&self, trait_name: String, method: String, ret: Type?, self_conv: AccessConvention) Never! {
+        if self.traits.contains_key(trait_name) -> return
+        dummy :: Span{start: 0, end: 0}
+        sig :: TraitMethodSig{name: method, name_span: dummy,
+            params: [Param{name: Syntax.KW_SELF, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+                convention: self_conv, root: false, default: None, variadic: false,
+                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}],
+            return_type: ^ret, span: dummy, default_body: None, is_pure: false,
+            declared_effects: None, return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        methods := [String: TraitMethodSig]{}
+        methods.insert(method, ^sig)
+        self.local_traits.insert(trait_name)
+        self.traits.insert(trait_name, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3487
+    fn register_prelude_checked_text(&self) Never! {
+        if self.traits.contains_key(Generics.CHECKED_TEXT) -> return
+        dummy :: Span{start: 0, end: 0}
+        param :: |name, ty| Param{name: name, name_span: dummy, ty: ^ty, ty_span: dummy,
+            convention: AccessConvention.Read, root: false, default: None, variadic: false,
+            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+        check :: TraitMethodSig{name: "check", name_span: dummy, params: [param("text", Type.String)],
+            return_type: Val(Type.Result{ok: Type.Named(Syntax.INTERNAL_UNIT_TYPE), err: Type.Named("Error")}),
+            span: dummy, default_body: None, is_pure: true, declared_effects: Val([]),
+            return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        encode_hole :: TraitMethodSig{name: "encode_hole", name_span: dummy, params: [param("value", Type.Named("T"))],
+            return_type: Val(Type.String), span: dummy, default_body: None, is_pure: true, declared_effects: Val([]),
+            return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        methods := [String: TraitMethodSig]{}
+        methods.insert(check.name, ^check)
+        methods.insert(encode_hole.name, ^encode_hole)
+        self.traits.insert(Generics.CHECKED_TEXT, TraitInfo{methods: ^methods, assoc_types: ["Error"], span: dummy})
+    }
+
+    // Rust: crates/jet-foundation/src/Traits.rs:3546
+    fn register_synthetic_binary_trait(&self, trait_name: String, method: String, ret: Type) Never! {
+        if self.traits.contains_key(trait_name) -> return
+        dummy :: Span{start: 0, end: 0}
+        param :: |name| Param{name: name, name_span: dummy, ty: Type.Named(""), ty_span: dummy,
+            convention: AccessConvention.Read, root: false, default: None, variadic: false,
+            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: ParamZone.Either}
+        sig :: TraitMethodSig{name: method, name_span: dummy, params: [param(Syntax.KW_SELF), param("rhs")],
+            return_type: Val(^ret), span: dummy, default_body: None, is_pure: false, declared_effects: None,
+            return_view_provenance: Default.default(), declared_return_view_provenance: None}
+        methods := [String: TraitMethodSig]{}
+        methods.insert(method, ^sig)
+        self.local_traits.insert(trait_name)
+        self.traits.insert(trait_name, TraitInfo{methods: ^methods, assoc_types: [], span: dummy})
+    }
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3589
+pub fn auto_derive_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
+    markers.iter().rev().find(|marker| marker.name == trait_name
+        || ((trait_name == ENCODE || trait_name == DECODE) && marker.name == Syntax.MARKER_CODABLE))
+        .map_or(package_default, |marker| !marker.negated)
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3604
+pub fn struct_auto_derive_ok(s: StructDef) -> Bool Never! {
+    !s.is_single_use && s.reflection_fields().all(|field| field_auto_ok(field.ty, s.name))
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3610
+pub fn enum_auto_derive_ok(e: EnumDef) -> Bool Never! {
+    !e.is_single_use && e.variants.iter().all(|v| match v.payload {
+        VariantPayload.Unit -> true
+        VariantPayload.Single(t, _) -> field_auto_ok(t, e.name)
+        VariantPayload.Named(fs) -> fs.iter().all(|f| field_auto_ok(f.ty, e.name))
+    })
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3620
+fn field_auto_ok(ty: Type, owner: String) -> Bool Never! {
+    match ty {
+        Type.Int | Type.Float | Type.Bool | Type.String | Type.Char | Type.IntN{..} | Type.Float32 -> true
+        Type.List(inner) | Type.Option(inner) | Type.Tagged{inner, ..}
+            | Type.FixedList{elem: inner, ..} | Type.InlineRange{base: inner, ..} -> field_auto_ok(inner, owner)
+        Type.Map{key, value, ..} | Type.Result{ok: key, err: value} -> field_auto_ok(key, owner) && field_auto_ok(value, owner)
+        Type.Tuple(fields) -> fields.iter().all(|(_, field)| field_auto_ok(field, owner))
+        Type.Union(members) -> members.iter().all(|member| field_auto_ok(member, owner))
+        Type.Named(_) -> true
+        Type.Apply{name, ..} -> name != Syntax.TYPE_SHARED_GUARD
+        Type.Quantity{base, ..} -> field_auto_ok(base, owner)
+        Type.Measure(_) -> true
+        Type.Shared(_) | Type.TraitObject(_) | Type.Fn{..} -> false
+    }
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3655
+fn wire_param_indices(params: [TypeParam], wire_types: [Type]) -> [Int] Never! {
+    names :: params.iter().map(|p| p.name).collect::<HashSet<String>>()
+    mentioned := HashSet<String>{}
+    loop ty in wire_types -> Generics.collect_type_param_mentions(ty, names, &mentioned)
+    params.iter().enumerate().filter(|(_, p)| mentioned.contains(p.name)).map(|(i, _)| i).collect::<[Int]>()
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3669
+pub fn rust_type_name(ty: Type) -> String Never! {
+    rust_type_name_assoc(ty, HashSet<String>{})
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3676
+pub fn rust_type_name_assoc(ty: Type, assoc: HashSet<String>) -> String Never! {
+    match ty {
+        Type.Int -> "i64"
+        Type.Float -> "f64"
+        Type.Bool -> "bool"
+        Type.String -> "String"
+        Type.Char -> "char"
+        Type.IntN{signed, bits} -> {
+            prefix :: if signed -> "i" else -> "u"
+            "{prefix}{bits}"
+        }
+        Type.Float32 -> "f32"
+        Type.List(inner) -> "Vec<{rust_type_name_assoc(inner, assoc)}>"
+        Type.FixedList{elem, len, ..} -> "[{rust_type_name_assoc(elem, assoc)}; {len}]"
+        Type.Result{ok, err} -> "JetOutcome<{rust_type_name_assoc(ok, assoc)}, {rust_type_name_assoc(err, assoc)}>"
+        Type.Named(n) if n.is_empty() -> "Self"
+        Type.Named(n) if n == Syntax.INTERNAL_UNIT_TYPE -> "()"
+        Type.Named(n) if n == Syntax.TYPE_ERR -> "JetErr"
+        Type.Named(n) if n == Syntax.TYPE_NEVER -> "std::convert::Infallible"
+        Type.Named(n) if assoc.contains(n) -> "Self::{n}"
+        Type.Named(n) -> Names.mangle_path(n)
+        Type.Apply{name, args} if name == "View" && args.len() == 1 -> {
+            if matches(args[0], Type.Named(inner) if inner == "str") -> "&str"
+            else -> "&[{rust_type_name_assoc(args[0], assoc)}]"
+        }
+        Type.Apply{name, args} if name == "ViewMut" && args.len() == 1 -> "&mut [{rust_type_name_assoc(args[0], assoc)}]"
+        Type.Apply{name, args} -> {
+            rendered :: args.iter().map(|a| rust_type_name_assoc(a, assoc)).collect::<[String]>().join(", ")
+            "{Names.mangle_path(name)}<{rendered}>"
+        }
+        Type.TraitObject(t) -> {
+            rendered :: t.iter().map(|name| Names.mangle_path(name)).collect::<[String]>().join(" + ")
+            "Box<dyn {rendered}>"
+        }
+        Type.Option(inner) -> "JetOutcome<{rust_type_name_assoc(inner, assoc)}, JetAbsent>"
+        Type.Map{key, value, ..} -> "std::collections::BTreeMap<{rust_type_name_assoc(key, assoc)}, {rust_type_name_assoc(value, assoc)}>"
+        Type.Fn{..} -> "Box<dyn Fn()>"
+        _ -> "()"
+    }
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3741
+fn generated_view_lifetime() -> String Never! {
+    "'{Names.mangle_generated("view")}"
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3745
+fn add_view_lifetime(rust: String) -> String Never! {
+    if rest :: rust.strip_prefix("&mut ") -> "&{generated_view_lifetime()} mut {rest}"
+    else if rest :: rust.strip_prefix("&") -> "&{generated_view_lifetime()} {rest}"
+    else -> rust
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3755
+pub fn emit_trait_def(t: TraitDef, out: &String, render_view_return: fn(Type, HashSet<String>) -> String) Never! {
+    out.push_str("pub trait {Names.mangle(t.name)} {{\n")
+    assoc :: t.assoc_types.iter().map(|(n, _)| n).collect::<HashSet<String>>()
+    loop (name, _) in t.assoc_types -> out.push_str("    type {name};\n")
+    loop m in t.methods {
+        view_provenance :: m.return_view_provenance.get()
+        has_view_return :: view_provenance.is_some_and(|map| !map.is_empty())
+        borrows_receiver :: view_provenance.is_some_and(|map| map.values().any(|provenance|
+            provenance.sources.iter().any(|source| matches(source.source, ViewSource.Receiver))))
+        ret_type :: m.return_type.map(|_| m.effective_return_type())
+        ret :: ret_type.map(|ty| if has_view_return -> render_view_return(ty, assoc) else -> rust_type_name_assoc(ty, assoc)) ?? "()"
+        param_index := 0
+        params :: m.params.iter().map(|p| {
+            if p.name == Syntax.KW_SELF {
+                match p.convention {
+                    AccessConvention.Write if borrows_receiver -> "&{generated_view_lifetime()} mut self"
+                    AccessConvention.Read if borrows_receiver -> "&{generated_view_lifetime()} self"
+                    AccessConvention.Write -> "&mut self"
+                    AccessConvention.Move -> "self"
+                    AccessConvention.Read -> "&self"
+                }
+            } else {
+                base :: rust_type_name_assoc(p.ty, assoc)
+                rust_ty := match p.convention {
+                    AccessConvention.Read if p.ty.is_scalar() -> base
+                    AccessConvention.Read -> "&{base}"
+                    AccessConvention.Write -> "&mut {base}"
+                    AccessConvention.Move -> base
+                }
+                if view_provenance.is_some_and(|map| map.values().any(|provenance|
+                    provenance.sources.iter().any(|source| matches(source.source, ViewSource.Parameter(index) if index == param_index)))) {
+                    rust_ty = add_view_lifetime(^rust_ty)
+                }
+                param_index = param_index + 1
+                "_{p.name}: {rust_ty}"
+            }
+        }).collect::<[String]>()
+        lifetime :: if has_view_return -> "<{generated_view_lifetime()}>" else -> ""
+        rendered :: params.join(", ")
+        out.push_str("    fn {m.name}{lifetime}({rendered}) -> {ret};\n")
+    }
+    out.push_str("}\n\n")
+}
+
+// Rust: crates/jet-foundation/src/Traits.rs:3856
+fn trait_assoc(items: [Item], type_name: String, trait_name: String, assoc: String) -> Type? Never! {
+    loop item in items {
+        match item {
+            Item.Impl(i) if i.type_name == type_name && i.trait_name == Val(trait_name) ->
+                return i.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
+            Item.Struct(s) if s.name == type_name -> {
+                loop block in s.trait_impls {
+                    if block.trait_name == trait_name ->
+                        return block.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
+                }
+            }
+            Item.Enum(e) if e.name == type_name -> {
+                loop block in e.trait_impls {
+                    if block.trait_name == trait_name ->
+                        return block.assoc_type_impls.iter().find(|(n, _, _)| n == assoc).map(|(_, _, t)| t.clone())
+                }
+            }
+            _ -> {}
+        }
+    }
+    None
+}
+

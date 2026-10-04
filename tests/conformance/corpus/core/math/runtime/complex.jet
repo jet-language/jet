@@ -1,0 +1,175 @@
+// Direct assertions on MathLibPure.rs:1–83's portable Float-pair policy.
+use core.math.runtime.kernel_complex as complex_kernel
+use core.math as complex_test_math
+
+#Test("unit_family.rs:115-129 imaginary arithmetic and magnitude") {
+    z :: complex_kernel.jet_complex_from_parts(Float{3.0}, Float{4.0})
+    squared :: complex_kernel.jet_complex_mul(z, z)
+    assert_eq(squared.real, -Float{7.0})
+    assert_eq(squared.imaginary, Float{24.0})
+    assert_eq(complex_kernel.jet_complex_abs(z), Float{5.0})
+    i :: 9
+    assert_eq(i, 9)
+}
+
+#Test("complex constructors add subtract multiply and divide") {
+    left :: complex_kernel.jet_complex_from_parts(Float{3.0}, Float{4.0})
+    right :: complex_kernel.jet_complex_from_parts(Float{1.0}, -Float{2.0})
+    assert_eq(left.real, Float{3.0})
+    assert_eq(left.imaginary, Float{4.0})
+    sum :: complex_kernel.jet_complex_add(left, right)
+    assert_eq(sum.real, Float{4.0})
+    assert_eq(sum.imaginary, Float{2.0})
+    difference :: complex_kernel.jet_complex_sub(left, right)
+    assert_eq(difference.real, Float{2.0})
+    assert_eq(difference.imaginary, Float{6.0})
+    product :: complex_kernel.jet_complex_mul(left, right)
+    assert_eq(product.real, Float{11.0})
+    assert_eq(product.imaginary, -Float{2.0})
+    quotient :: complex_kernel.jet_complex_div(left, right)
+    assert_eq(quotient.real, -Float{1.0})
+    assert_eq(quotient.imaginary, Float{2.0})
+}
+
+#Test("complex zero divisor retains IEEE NaNs without a checked error") {
+    nonzero :: complex_kernel.jet_complex_from_parts(Float{3.0}, Float{4.0})
+    zero :: complex_kernel.jet_complex_from_parts(Float{0.0}, Float{0.0})
+    quotient :: complex_kernel.jet_complex_div(nonzero, zero)
+    assert(complex_test_math.is_nan(quotient.real))
+    assert(complex_test_math.is_nan(quotient.imaginary))
+    zero_quotient :: complex_kernel.jet_complex_div(zero, zero)
+    assert(complex_test_math.is_nan(zero_quotient.real))
+    assert(complex_test_math.is_nan(zero_quotient.imaginary))
+}
+
+#Test("complex construction and arithmetic preserve signed zero") {
+    negative :: complex_kernel.jet_complex_from_parts(-Float{0.0}, -Float{0.0})
+    positive :: complex_kernel.jet_complex_from_parts(Float{0.0}, Float{0.0})
+    assert(complex_test_math.sign_bit(negative.real))
+    assert(complex_test_math.sign_bit(negative.imaginary))
+    sum :: complex_kernel.jet_complex_add(negative, negative)
+    assert(complex_test_math.sign_bit(sum.real))
+    assert(complex_test_math.sign_bit(sum.imaginary))
+    difference :: complex_kernel.jet_complex_sub(negative, positive)
+    assert(complex_test_math.sign_bit(difference.real))
+    assert(complex_test_math.sign_bit(difference.imaginary))
+    product :: complex_kernel.jet_complex_mul(negative, complex_kernel.jet_complex_from_parts(Float{1.0}, Float{0.0}))
+    assert(!complex_test_math.sign_bit(product.real))
+    assert(complex_test_math.sign_bit(product.imaginary))
+    quotient :: complex_kernel.jet_complex_div(negative, complex_kernel.jet_complex_from_parts(Float{1.0}, Float{0.0}))
+    assert(complex_test_math.sign_bit(quotient.real))
+    assert(!complex_test_math.sign_bit(quotient.imaginary))
+    magnitude :: complex_kernel.jet_complex_abs(negative)
+    assert_eq(magnitude, Float{0.0})
+    assert(!complex_test_math.sign_bit(magnitude))
+}
+
+#Test("complex hypot avoids squared-product overflow and underflow") {
+    huge :: complex_kernel.jet_complex_from_parts(Float{3e200}, Float{4e200})
+    huge_abs :: complex_kernel.jet_complex_abs(huge)
+    assert(complex_test_math.is_finite(huge_abs))
+    assert(complex_test_math.abs_float(huge_abs / Float{5e200} - Float{1.0}) < (Float{1e-15}))
+    tiny :: complex_kernel.jet_complex_from_parts(Float{3e-200}, Float{4e-200})
+    tiny_abs :: complex_kernel.jet_complex_abs(tiny)
+    assert(tiny_abs > (Float{0.0}))
+    assert(complex_test_math.abs_float(tiny_abs / Float{5e-200} - Float{1.0}) < (Float{1e-15}))
+    exceptional :: complex_kernel.jet_complex_from_parts(complex_test_math.infinity(), complex_test_math.nan())
+    assert(complex_test_math.is_inf(complex_kernel.jet_complex_abs(exceptional)))
+    nan_only :: complex_kernel.jet_complex_from_parts(Float{1.0}, complex_test_math.nan())
+    assert(complex_test_math.is_nan(complex_kernel.jet_complex_abs(nan_only)))
+}
+
+#Test("complex multiplication and division keep original product order at extremes") {
+    huge :: complex_kernel.jet_complex_from_parts(Float{1e308}, Float{1e308})
+    product :: complex_kernel.jet_complex_mul(huge, huge)
+    assert(complex_test_math.is_nan(product.real))
+    assert(complex_test_math.is_inf(product.imaginary))
+    assert(!complex_test_math.sign_bit(product.imaginary))
+    quotient :: complex_kernel.jet_complex_div(huge, huge)
+    assert(complex_test_math.is_nan(quotient.real))
+    assert(complex_test_math.is_nan(quotient.imaginary))
+    small :: complex_kernel.jet_complex_from_parts(Float{1e-200}, Float{1e-200})
+    underflow :: complex_kernel.jet_complex_mul(small, small)
+    assert_eq(underflow.real, Float{0.0})
+    assert_eq(underflow.imaginary, Float{0.0})
+    underflow_quotient :: complex_kernel.jet_complex_div(small, small)
+    assert(complex_test_math.is_nan(underflow_quotient.real))
+    assert(complex_test_math.is_nan(underflow_quotient.imaginary))
+    denominator :: complex_kernel.jet_complex_from_parts(Float{1e200}, Float{0.0})
+    numerator :: complex_kernel.jet_complex_from_parts(Float{1.0}, -Float{1.0})
+    overflow_divisor :: complex_kernel.jet_complex_div(numerator, denominator)
+    assert_eq(overflow_divisor.real, Float{0.0})
+    assert(!complex_test_math.sign_bit(overflow_divisor.real))
+    assert_eq(overflow_divisor.imaginary, Float{0.0})
+    assert(complex_test_math.sign_bit(overflow_divisor.imaginary))
+}
+
+#Test("complex NaN parts propagate through each arithmetic operation") {
+    invalid :: complex_kernel.jet_complex_from_parts(complex_test_math.nan(), Float{1.0})
+    finite :: complex_kernel.jet_complex_from_parts(Float{2.0}, Float{3.0})
+    sum :: complex_kernel.jet_complex_add(invalid, finite)
+    assert(complex_test_math.is_nan(sum.real))
+    assert_eq(sum.imaginary, Float{4.0})
+    difference :: complex_kernel.jet_complex_sub(invalid, finite)
+    assert(complex_test_math.is_nan(difference.real))
+    assert_eq(difference.imaginary, -Float{2.0})
+    product :: complex_kernel.jet_complex_mul(invalid, finite)
+    assert(complex_test_math.is_nan(product.real))
+    assert(complex_test_math.is_nan(product.imaginary))
+    quotient :: complex_kernel.jet_complex_div(invalid, finite)
+    assert(complex_test_math.is_nan(quotient.real))
+    assert(complex_test_math.is_nan(quotient.imaginary))
+}
+
+#Test("negative Float sqrt and scalar conjugate retain canonical math meaning") {
+    // Rust math's sqrt returns Float NaN for negatives, not a new Complex;
+    // conj accepts Float/F32 and is identity, not a Complex-only extension.
+    assert(complex_test_math.is_nan(complex_test_math.sqrt(-Float{4.0})))
+    zero_root :: complex_test_math.sqrt(-Float{0.0})
+    assert(complex_test_math.sign_bit(zero_root))
+    assert_eq(complex_test_math.conj(-Float{3.0}), -Float{3.0})
+    assert(complex_test_math.sign_bit(complex_test_math.conj(-Float{0.0})))
+}
+
+// HELD PUBLIC COMPLEX CONSUMERS: exact expectations, not portable-policy proof.
+// Main's compiler ABI/trait marshalling and canonical shortest Rust-Display
+// Float append seam must route these consumers to kernel_complex before cutover.
+use core.math.[abs]
+#Test("unit_family.rs imaginary public display Show and Debug share to_string") {
+    z :: 3 + 4i
+    squared :: z * z
+    // Printable's print route and interpolation share the internal to_string.
+    print(squared)
+    assert_eq("{squared}", "-7 + 24i")
+    assert_eq("{squared:Debug}", "-7 + 24i")
+    assert_eq(abs(z), Float{5.0})
+    i :: 9
+    assert_eq("{i}", "9")
+}
+
+#Test("complex public formatter observes negative zero and NaN imaginary sign bits") {
+    positive :: Complex(Float{3.0}, Float{4.0})
+    negative :: Complex(-Float{3.0}, -Float{4.0})
+    zero :: Complex(-Float{0.0}, -Float{0.0})
+    assert_eq("{positive}", "3 + 4i")
+    assert_eq("{negative}", "-3 - 4i")
+    assert_eq("{zero}", "-0 - 0i")
+    assert_eq("{zero:Debug}", "-0 - 0i")
+    positive_nan :: complex_test_math.copysign(complex_test_math.nan(), Float{1.0})
+    negative_nan :: complex_test_math.copysign(complex_test_math.nan(), -Float{1.0})
+    first :: Complex(Float{1.0}, positive_nan)
+    second :: Complex(Float{1.0}, negative_nan)
+    assert_eq("{first}", "1 + NaNi")
+    assert_eq("{second}", "1 - NaNi")
+    assert_eq("{second:Debug}", "1 - NaNi")
+}
+
+#Test("complex public formatter preserves shortest decimal and non-exponent Rust Display") {
+    fractional :: Complex(Float{1.2345678901234567}, -Float{0.125})
+    large :: Complex(Float{1e20}, Float{1e-7})
+    infinity :: Complex(complex_test_math.infinity(), -complex_test_math.infinity())
+    assert_eq("{fractional}", "1.2345678901234567 - 0.125i")
+    assert_eq("{large}", "100000000000000000000 + 0.0000001i")
+    assert_eq("{infinity}", "inf - infi")
+    assert_eq("{large:Debug}", "100000000000000000000 + 0.0000001i")
+}

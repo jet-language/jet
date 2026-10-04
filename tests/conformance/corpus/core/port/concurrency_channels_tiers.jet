@@ -1,0 +1,1150 @@
+// PORT-PENDING 1010 tests-concurrency-channels-tiers-module-group: tests/concurrency_channels_tiers.rs:1-131
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1560 / D-CONC-CHAN1 / D-CONC-CHAN2: one channel/readiness meaning
+//RS //! through parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL, and web.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS const SOURCE: &str = include_str!("../Examples/features/concurrency/select_channel.jet");
+//RS const EXPECTED: &str = include_str!("../Examples/features/expected/concurrency/select_channel.out");
+//RS 
+//RS const COMPTIME_SOURCE: &str = r#"
+//RS fn choose() -> Int {
+//RS     (sender, receiver) :: channel<Int>()
+//RS     sender.send(7)
+//RS     result := 0
+//RS     if {
+//RS         value, receiver -> result = value
+//RS         after 0ms -> result = -1
+//RS     }
+//RS     return result
+//RS }
+//RS 
+//RS FOLDED :: prep { choose() }
+//RS 
+//RS fn run() {
+//RS     print(FOLDED)
+//RS }
+//RS "#;
+//RS 
+//RS const REPL_SOURCE: &str = r#"
+//RS fn wait_for_value(receiver: Receiver<Int>) {
+//RS     if {
+//RS         value, receiver -> print(value)
+//RS         after 0ms -> print(-1)
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     (sender, receiver) :: channel<Int>()
+//RS     sender.send(7)
+//RS     wait_for_value(receiver)
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn aot_runs_the_channel_readiness_example() {
+//RS     if tir_support::have_rustc() {
+//RS         let (code, stdout, stderr) =
+//RS             tir_support::build_and_run_full("jet_channel_tiers", "aot", SOURCE);
+//RS         assert_eq!(code, 0, "AOT failed: {stderr}");
+//RS         assert_eq!(stdout, EXPECTED, "AOT output drifted: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn jit_runs_the_channel_readiness_example() {
+//RS     let (code, stdout, stderr) = tir_support::jit_run("channel_tiers_jit", SOURCE);
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(stdout, EXPECTED, "default jet run output drifted: {stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn interpreter_runs_the_channel_readiness_example() {
+//RS     let (code, stdout, stderr) = tir_support::interpreter_run("channel_tiers_interpreter", SOURCE);
+//RS     assert_eq!(code, 0, "interpreter failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout, EXPECTED,
+//RS         "interpreter output drifted from the channel Prelude: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_channel_result_reaches_runtime() {
+//RS     if tir_support::have_rustc() {
+//RS         let (code, stdout, stderr) =
+//RS             tir_support::build_and_run_full("jet_channel_comptime", "aot", COMPTIME_SOURCE);
+//RS         assert_eq!(code, 0, "comptime channel program failed: {stderr}");
+//RS         assert_eq!(stdout, "7\n");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_runs_plain_endpoint_readiness() {
+//RS     let transcript = jet::REPL::run_transcript(&[REPL_SOURCE, "run()"], None);
+//RS     assert_eq!(
+//RS         transcript,
+//RS         format!("ok\n{EXPECTED_REPL}"),
+//RS         "REPL channel/readiness output drifted"
+//RS     );
+//RS }
+//RS 
+//RS const EXPECTED_REPL: &str = "7\n";
+//RS 
+//RS #[test]
+//RS fn web_runs_the_same_channel_readiness_example() {
+//RS     let scratch = common::Scratch::new("channel-readiness-web");
+//RS     let output =
+//RS         jet::compile_web_with_path(SOURCE, "Examples/features/concurrency/select_channel.jet")
+//RS             .unwrap_or_else(|diagnostics| {
+//RS                 panic!(
+//RS                     "web target rejected channel/readiness:\n{}",
+//RS                     jet::render_diagnostics(
+//RS                         "Examples/features/concurrency/select_channel.jet",
+//RS                         SOURCE,
+//RS                         &diagnostics
+//RS                     )
+//RS                 )
+//RS             });
+//RS     let web = output.web.expect("web target must produce artifacts");
+//RS     fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+//RS     fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+//RS     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+//RS     if Command::new("node").arg("--version").output().is_ok() {
+//RS         let node = Command::new("node")
+//RS             .current_dir(&scratch.path)
+//RS             .arg("app.js")
+//RS             .output()
+//RS             .expect("spawn node");
+//RS         assert!(
+//RS             node.status.success(),
+//RS             "web channel example failed:\nstdout: {}\nstderr: {}",
+//RS             String::from_utf8_lossy(&node.stdout),
+//RS             String::from_utf8_lossy(&node.stderr)
+//RS         );
+//RS         assert_eq!(String::from_utf8_lossy(&node.stdout), EXPECTED);
+//RS     }
+//RS }
+// END-PORT-PENDING 1010 tests/concurrency_channels_tiers.rs:1-131
+
+// PORT-PENDING 1010 tests-concurrency-channels-tiers-module-group: tests/concurrency_freeze_tiers.rs:1-193
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-CONC-CROSS1 / D-CONC-FREEZE1: crossing and frozen values keep one meaning
+//RS //! through the parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL, and web.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS const SOURCE: &str = r#"
+//RS struct Snapshot { value: Int }
+//RS 
+//RS fn run() {
+//RS     source := Snapshot.{ value: 41 }
+//RS     frozen :: freeze(source)
+//RS     twice :: freeze(freeze(source))
+//RS     task.group snapshots {
+//RS         first :: task { frozen.value }
+//RS         second :: task { frozen.value }
+//RS         print(first.join() ?? 0)
+//RS         print(second.join() ?? 0)
+//RS     }
+//RS 
+//RS     owned := Snapshot.{ value: 7 }
+//RS     task.group moved {
+//RS         child :: task ^owned { owned.value }
+//RS         print(child.join() ?? 0)
+//RS     }
+//RS     print(twice.value)
+//RS }
+//RS "#;
+//RS 
+//RS const EXPECTED: &str = "41\n41\n7\n41\n";
+//RS 
+//RS #[test]
+//RS fn parser_and_sema_accept_the_ratified_crossing_surface() {
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(SOURCE);
+//RS     assert!(
+//RS         lexer_diagnostics.is_empty(),
+//RS         "lexer diagnostics: {lexer_diagnostics:?}"
+//RS     );
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_ok(),
+//RS         "freeze/^ fixture must parse"
+//RS     );
+//RS     jet::compile(SOURCE).expect("freeze/^ fixture must pass sema");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tir_keeps_freeze_as_an_owned_value_operation() {
+//RS     let output = jet::compile(SOURCE).expect("freeze/^ fixture must compile");
+//RS     assert!(
+//RS         output.rust.contains("clone") || output.rust.contains("Snapshot"),
+//RS         "freeze must lower through the existing owned-value representation"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn aot_jit_and_interpreter_agree_on_crossing_and_freeze() {
+//RS     tir_support::assert_tiers_agree("concurrency_freeze_tiers", SOURCE, EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_accepts_the_same_pure_freeze_operation() {
+//RS     let source =
+//RS         format!("{SOURCE}\nFOLDED :: prep {{ freeze(41) }}\n\nfn show() {{\n    print(FOLDED)\n}}\n");
+//RS     jet::compile(&source).expect("comptime freeze must use the shared front end");
+//RS }
+//RS 
+//RS #[test]
+//RS fn repl_accepts_and_runs_freeze() {
+//RS     let transcript = jet::REPL::run_transcript(
+//RS         &["source := 41", "frozen :: freeze(source)", "print(frozen)"],
+//RS         None,
+//RS     );
+//RS     assert_eq!(transcript, "41\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn web_accepts_the_pure_freeze_representation() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     source := 41
+//RS     frozen :: freeze(source)
+//RS     print(frozen)
+//RS }
+//RS "#;
+//RS     let output = jet::compile_web_with_path(source, "tests/fixtures/concurrency_freeze.jet")
+//RS         .expect("web target must accept the shared freeze operation");
+//RS     assert!(output.web.is_some(), "web target must produce artifacts");
+//RS }
+//RS 
+//RS // D-CONC-CROSS1=A / I9: this is the smallest accepted crossing. The same
+//RS // parser, fact proof, TIR, and task adapter must carry the frozen value on
+//RS // every execution surface.
+//RS const CROSSING_SOURCE: &str = r#"
+//RS struct Snapshot { value: Int }
+//RS 
+//RS fn run() {
+//RS     source := Snapshot{value: 41}
+//RS     frozen :: freeze(source)
+//RS     worker :: task frozen.value + 1
+//RS     print(worker.join() ?? 0)
+//RS }
+//RS "#;
+//RS 
+//RS const CROSSING_EXPECTED: &str = "42\n";
+//RS 
+//RS #[test]
+//RS fn crossing_plane_parser_accepts_the_canonical_source() {
+//RS     let (tokens, diagnostics) = jet::Lexer::lex(CROSSING_SOURCE);
+//RS     assert!(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}");
+//RS     assert!(
+//RS         jet::Parser::parse(&tokens).is_ok(),
+//RS         "crossing source must parse on the shared parser"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_sema_accepts_the_fact_proof() {
+//RS     jet::compile(CROSSING_SOURCE).expect("crossing source must pass sema");
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_tir_erase_the_fact() {
+//RS     let output = jet::compile(CROSSING_SOURCE).expect("crossing source must pass sema");
+//RS     assert!(
+//RS         output.rust.contains("JetTask::spawn") || output.rust.contains("jet_scheduler_spawn"),
+//RS         "TIR must lower the accepted crossing to the task adapter"
+//RS     );
+//RS     assert!(
+//RS         !output.rust.contains("Sendability") && !output.rust.contains("FlowFacts"),
+//RS         "crossing facts must erase before codegen"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_aot_matches_expected() {
+//RS     if tir_support::have_rustc() {
+//RS         let (code, stdout, stderr) =
+//RS             tir_support::build_and_run_full("jet_crossing_plane", "aot", CROSSING_SOURCE);
+//RS         assert_eq!(code, 0, "AOT failed: {stderr}");
+//RS         assert_eq!(stdout, CROSSING_EXPECTED, "AOT output drifted: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_jit_matches_expected() {
+//RS     let (code, stdout, stderr) =
+//RS         tir_support::jit_run("concurrency_crossing_plane_jit", CROSSING_SOURCE);
+//RS     assert_eq!(code, 0, "default jet run failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout, CROSSING_EXPECTED,
+//RS         "default jet run output drifted: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_interpreter_matches_expected() {
+//RS     let (code, stdout, stderr) =
+//RS         tir_support::interpreter_run("concurrency_crossing_plane_interpreter", CROSSING_SOURCE);
+//RS     assert_eq!(code, 0, "interpreter failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout, CROSSING_EXPECTED,
+//RS         "interpreter output drifted: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_comptime_uses_the_same_front_end() {
+//RS     let source =
+//RS         format!("{CROSSING_SOURCE}\nFOLDED :: prep {{ 40 + 2 }}\n\nfn show() {{ print(FOLDED) }}\n");
+//RS     jet::compile(&source).expect("comptime crossing source must use the shared sema path");
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_repl_matches_the_runtime_result() {
+//RS     let transcript = jet::REPL::run_transcript(&[CROSSING_SOURCE, "run()"], None);
+//RS     assert_eq!(transcript, format!("ok\n{CROSSING_EXPECTED}"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn crossing_plane_web_accepts_the_same_source() {
+//RS     let output = jet::compile_web_with_path(
+//RS         CROSSING_SOURCE,
+//RS         "tests/fixtures/concurrency_crossing_plane.jet",
+//RS     )
+//RS     .expect("web target must accept the crossing source");
+//RS     let web = output.web.expect("web target must produce artifacts");
+//RS     assert!(
+//RS         web.js_app.contains("jet_task_spawn"),
+//RS         "web adapter must retain the accepted task crossing"
+//RS     );
+//RS }
+// END-PORT-PENDING 1010 tests/concurrency_freeze_tiers.rs:1-193
+
+// PORT-PENDING 1010 tests-concurrency-channels-tiers-module-group: tests/core_args_foundations.rs:1-30
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Source-owned `core.args` defaults and destination aliases across all tiers.
+//RS 
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn core_args_defaults_do_not_override_a_named_alias() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "core_args_foundations",
+//RS         r#"
+//RS use core.args as api
+//RS 
+//RS fn run() {
+//RS     definition :: api.define("mode", "execution mode", false)
+//RS     aliased :: api.dest(definition, "profile")
+//RS     configured :: api.default_value(aliased, "safe")
+//RS     defs :: [ArgDef]{configured}
+//RS 
+//RS     named :: api.decode_argv([String]{"tool", "--mode", "cli"})
+//RS     named_with_defaults :: api.apply_defaults(named, defs)
+//RS     print(api.get_text(named_with_defaults, "mode"))
+//RS     print(api.get_text(named_with_defaults, "profile"))
+//RS 
+//RS     absent :: api.apply_defaults(api.decode_argv([String]{"tool"}), defs)
+//RS     print(api.get_text(absent, "profile"))
+//RS }
+//RS "#,
+//RS         "cli\n\nsafe\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1010 tests/core_args_foundations.rs:1-30
+
+// PORT-PENDING 1010 tests-concurrency-channels-tiers-module-group: tests/core_array_foundations.rs:1-57
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Source-owned array/list algorithms in `core.collections` across all tiers.
+//RS 
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn core_collection_array_algorithms_match_across_tiers() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "core_array_foundations",
+//RS         r#"
+//RS use core.collections as api
+//RS 
+//RS fn run() {
+//RS     values :: [Int]{7, 1, 4, 1, 9}
+//RS     heap :: api.heapify(values)
+//RS     print(values == [Int]{7, 1, 4, 1, 9})
+//RS     print(heap == [Int]{1, 1, 4, 7, 9})
+//RS 
+//RS     pushed :: api.heappush(heap, 0)
+//RS     print(pushed == [Int]{0, 1, 1, 7, 9, 4})
+//RS     popped :: api.heappop(pushed)
+//RS     print(popped.value ?? -1)
+//RS     print(popped.heap == [Int]{1, 4, 1, 7, 9})
+//RS 
+//RS     print(api.nsmallest(3, values) == [Int]{1, 1, 4})
+//RS     print(api.nlargest(2, values) == [Int]{9, 7})
+//RS     print(api.merge_sorted([Int]{1, 3, 5}, [Int]{2, 3, 4}) == [Int]{1, 2, 3, 3, 4, 5})
+//RS 
+//RS     sorted :: [Int]{1, 3, 3, 5}
+//RS     print(api.bisect_left(sorted, 3))
+//RS     print(api.bisect_right(sorted, 3))
+//RS     print(api.insort_left(sorted, 3) == [Int]{1, 3, 3, 3, 5})
+//RS     print(api.insort_right(sorted, 3) == [Int]{1, 3, 3, 3, 5})
+//RS }
+//RS "#,
+//RS         "true\ntrue\ntrue\n0\ntrue\ntrue\ntrue\ntrue\n1\n3\ntrue\ntrue\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_collection_ordered_map_lookup_scans_parallel_arrays() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "core_array_ordered_map_lookup",
+//RS         r#"
+//RS use core.collections as api
+//RS 
+//RS fn run() {
+//RS     m :: api.map_set(api.map_set(api.ordered_map(), "first", "one"), "second", "two")
+//RS     print(api.map_get(m, "second") ?? "missing")
+//RS     print(api.map_get(m, "missing") == None)
+//RS     print(api.map_contains(m, "second"))
+//RS     print(!api.map_contains(m, "missing"))
+//RS }
+//RS "#,
+//RS         "two\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1010 tests/core_array_foundations.rs:1-57
+
+// PORT-PENDING 1010 tests-concurrency-channels-tiers-module-group: tests/core_call_table.rs:1-719
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ONCE-LAW1=A: Core-call rows have one home and engine projections.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::HashSet;
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn read(path: &str) -> String {
+//RS     fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path))
+//RS         .unwrap_or_else(|error| panic!("read {path}: {error}"))
+//RS }
+//RS 
+//RS fn quoted(text: &str) -> Vec<&str> {
+//RS     let mut values = Vec::new();
+//RS     let mut rest = text;
+//RS     while let Some((_, after_open)) = rest.split_once('"') {
+//RS         let Some((value, after_close)) = after_open.split_once('"') else {
+//RS             break;
+//RS         };
+//RS         values.push(value);
+//RS         rest = after_close;
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn listed_pairs(source: &str, marker: &str) -> Vec<(String, String)> {
+//RS     let body = source
+//RS         .split_once(marker)
+//RS         .map(|(_, body)| body)
+//RS         .and_then(|body| body.split_once("];"))
+//RS         .map(|(body, _)| body)
+//RS         .unwrap_or_else(|| panic!("missing pair list {marker}"));
+//RS     body.lines()
+//RS         .filter_map(|line| {
+//RS             let values = quoted(line);
+//RS             (values.len() == 2).then(|| (values[0].to_string(), values[1].to_string()))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn arm_pairs(source: &str) -> Vec<(String, String)> {
+//RS     let mut pairs = Vec::new();
+//RS     let mut pattern = String::new();
+//RS     for line in source.lines() {
+//RS         if pattern.is_empty() && !line.trim_start().starts_with("(\"") {
+//RS             continue;
+//RS         }
+//RS         pattern.push_str(line);
+//RS         if !line.contains("=>") {
+//RS             continue;
+//RS         }
+//RS         let tuple = pattern
+//RS             .split_once("=>")
+//RS             .map(|(head, _)| head)
+//RS             .unwrap_or(&pattern)
+//RS             .trim_start()
+//RS             .trim_start_matches('(')
+//RS             .split_once(')')
+//RS             .map(|(tuple, _)| tuple)
+//RS             .unwrap_or_default();
+//RS         if let Some((modules, members)) = tuple.split_once(',') {
+//RS             for module in quoted(modules) {
+//RS                 for member in quoted(members) {
+//RS                     pairs.push((module.to_string(), member.to_string()));
+//RS                 }
+//RS             }
+//RS         }
+//RS         pattern.clear();
+//RS     }
+//RS     pairs
+//RS }
+//RS 
+//RS fn pure_route_pairs(source: &str) -> Vec<(String, String)> {
+//RS     let mut pairs = Vec::new();
+//RS     for line in source.lines() {
+//RS         let Some((head, _)) = line.split_once("=>") else {
+//RS             continue;
+//RS         };
+//RS         let Some((_, route_and_member)) = head.split_once("CoreCallPureRoute::") else {
+//RS             continue;
+//RS         };
+//RS         let route = route_and_member
+//RS             .split(|character| matches!(character, ',' | ')' | ' '))
+//RS             .next()
+//RS             .unwrap_or_default();
+//RS         let Some((_, members)) = head.split_once(',') else {
+//RS             continue;
+//RS         };
+//RS         for member in quoted(members) {
+//RS             pairs.push((route.to_string(), member.to_string()));
+//RS         }
+//RS     }
+//RS     pairs
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_projection_is_complete_both_directions() {
+//RS     assert_eq!(
+//RS         arm_pairs("(\"core.a\" | \"core.b\", \"x\" | \"y\") => value"),
+//RS         [
+//RS             ("core.a".to_string(), "x".to_string()),
+//RS             ("core.a".to_string(), "y".to_string()),
+//RS             ("core.b".to_string(), "x".to_string()),
+//RS             ("core.b".to_string(), "y".to_string()),
+//RS         ]
+//RS     );
+//RS     assert_eq!(
+//RS         pure_route_pairs("(CoreCallPureRoute::Mime, \"parse\" | \"extension\") => value"),
+//RS         [
+//RS             ("Mime".to_string(), "parse".to_string()),
+//RS             ("Mime".to_string(), "extension".to_string()),
+//RS         ]
+//RS     );
+//RS     let mut keys = HashSet::new();
+//RS     let mut receiver_keys = HashSet::new();
+//RS     for row in jet::Syntax::CORE_CALLS {
+//RS         assert_eq!(row.signature.arity, row.signature.borrow_mask.len());
+//RS         assert!(
+//RS             row.signature.arity <= row.signature.max_arity,
+//RS             "invalid arity range for {}.{}",
+//RS             row.module,
+//RS             row.member
+//RS         );
+//RS         assert_eq!(row.fallibility, jet::Syntax::CoreCallFallibility::Sema);
+//RS         assert_eq!(
+//RS             row.coverage.bits() & !jet::Syntax::CoreCallCoverage::KNOWN,
+//RS             0,
+//RS             "{}.{}, unknown coverage bits",
+//RS             row.module,
+//RS             row.member
+//RS         );
+//RS         if row.is_receiver() {
+//RS             assert!(row.module.is_empty());
+//RS             assert!(!row.has_direct_symbol());
+//RS             assert!(
+//RS                 row.receiver_types.iter().all(|receiver| receiver_keys
+//RS                     .insert(((*receiver).to_string(), row.member.to_string()))),
+//RS                 "duplicate receiver Core row: {:?}.{}",
+//RS                 row.receiver_types,
+//RS                 row.member
+//RS             );
+//RS             for receiver in row.receiver_types {
+//RS                 assert_eq!(
+//RS                     jet::Syntax::core_receiver_method(receiver, row.member),
+//RS                     Some(row)
+//RS                 );
+//RS             }
+//RS             continue;
+//RS         }
+//RS         assert!(
+//RS             keys.insert((row.module.to_string(), row.member.to_string())),
+//RS             "duplicate Core call row: {}.{}",
+//RS             row.module,
+//RS             row.member
+//RS         );
+//RS         assert_eq!(row.has_direct_symbol(), row.aot_direct);
+//RS         assert_eq!(
+//RS             row.effect(),
+//RS             jet_foundation::Effects::core_effect(row.module, row.member)
+//RS         );
+//RS         assert_eq!(
+//RS             row.sink_class(),
+//RS             jet_foundation::Syntax::sink_row(row.module, row.member).map(|sink| sink.class)
+//RS         );
+//RS         assert_eq!(jet::Syntax::core_call(row.module, row.member), Some(row));
+//RS     }
+//RS     let ambient_rows: Vec<_> = jet::Syntax::CORE_CALLS
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|row| row.interpreter_route == jet::Syntax::CoreCallInterpreterRoute::Ambient)
+//RS         .collect();
+//RS     let ambient_mismatch = jet::Syntax::core_call_mismatch(
+//RS         &ambient_rows,
+//RS         "interpreter ambient",
+//RS         jet::Syntax::core_call_ambient_routes(),
+//RS     );
+//RS     assert!(
+//RS         ambient_mismatch.is_empty(),
+//RS         "ambient route/table mismatch:\n{}",
+//RS         ambient_mismatch.join("\n")
+//RS     );
+//RS     let ambient_keys: HashSet<_> = jet::Syntax::core_call_ambient_routes()
+//RS         .iter()
+//RS         .copied()
+//RS         .collect();
+//RS     assert_eq!(
+//RS         ambient_keys.len(),
+//RS         jet::Syntax::core_call_ambient_routes().len(),
+//RS         "ambient route manifest contains duplicate keys"
+//RS     );
+//RS     for (module, member) in [
+//RS         ("core.files", "rename"),
+//RS         ("core.files", "glob"),
+//RS         ("core.files", "canonicalize"),
+//RS         ("core.files", "stat"),
+//RS         ("core.time", "parse_rfc3339"),
+//RS         ("core.math", "from_bits"),
+//RS         ("core.crypto.uuid", "v4"),
+//RS         ("core.time", "new"),
+//RS     ] {
+//RS         let row = jet::Syntax::core_call(module, member)
+//RS             .unwrap_or_else(|| panic!("missing named route row {module}.{member}"));
+//RS         assert_eq!(
+//RS             row.interpreter_route,
+//RS             jet::Syntax::CoreCallInterpreterRoute::Ambient,
+//RS             "named route {module}.{member} is not ambient"
+//RS         );
+//RS     }
+//RS     let ambient = read("crates/jet-jit/src/ambient_interp.rs");
+//RS     assert!(
+//RS         ambient.contains("fn ambient_core_call_keys")
+//RS             && ambient.contains("core_call_ambient_routes()"),
+//RS         "ambient dispatcher does not export the canonical route set"
+//RS     );
+//RS     let enc_stream = read("crates/jet-jit/src/enc_stream/mod.rs");
+//RS     assert!(
+//RS         enc_stream.contains("const AMBIENT_CORE_CALLS")
+//RS             && enc_stream.contains("fn ambient_core_call_keys"),
+//RS         "stream dispatcher does not export its registry-facing route set"
+//RS     );
+//RS     let stream_keys = listed_pairs(&enc_stream, "AMBIENT_CORE_CALLS");
+//RS     let stream_key_refs: Vec<_> = stream_keys
+//RS         .iter()
+//RS         .map(|(module, member)| (module.as_str(), member.as_str()))
+//RS         .collect();
+//RS     let stream_rows: Vec<_> = jet::Syntax::CORE_CALLS
+//RS         .iter()
+//RS         .copied()
+//RS         .filter(|row| {
+//RS             stream_keys
+//RS                 .iter()
+//RS                 .any(|(module, member)| *module == row.module && *member == row.member)
+//RS         })
+//RS         .collect();
+//RS     let stream_mismatch =
+//RS         jet::Syntax::core_call_mismatch(&stream_rows, "encoding stream", &stream_key_refs);
+//RS     assert!(
+//RS         stream_mismatch.is_empty(),
+//RS         "encoding stream/table mismatch:\n{}",
+//RS         stream_mismatch.join("\n")
+//RS     );
+//RS     let stream_unique: HashSet<_> = stream_keys.iter().collect();
+//RS     assert_eq!(
+//RS         stream_unique.len(),
+//RS         stream_keys.len(),
+//RS         "encoding stream route manifest contains duplicate keys"
+//RS     );
+//RS     assert!(
+//RS         keys.len() > 500,
+//RS         "Core call table lost rows: {}",
+//RS         keys.len()
+//RS     );
+//RS     assert!(
+//RS         receiver_keys.len() > 90,
+//RS         "receiver Core table lost rows: {}",
+//RS         receiver_keys.len()
+//RS     );
+//RS     assert!(
+//RS         jet::Syntax::core_call_table_violations(jet::Syntax::CORE_CALLS).is_empty(),
+//RS         "canonical Core-call table is structurally invalid"
+//RS     );
+//RS 
+//RS     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
+//RS     let evaluate = parity
+//RS         .split_once("pub(super) fn evaluate_method")
+//RS         .map(|(source, _)| source)
+//RS         .expect("CorePureParity evaluator boundary");
+//RS     assert!(
+//RS         !evaluate.contains("(\"core."),
+//RS         "pure evaluator retained a second module/member membership table"
+//RS     );
+//RS     let table_pure: HashSet<(String, String)> = jet::Syntax::CORE_CALLS
+//RS         .iter()
+//RS         .filter(|row| !row.is_receiver() && row.pure_route != jet::Syntax::CoreCallPureRoute::None)
+//RS         .map(|row| (format!("{:?}", row.pure_route), row.member.to_string()))
+//RS         .collect();
+//RS     let consumer_pure: HashSet<(String, String)> = pure_route_pairs(evaluate).into_iter().collect();
+//RS     assert_eq!(
+//RS         consumer_pure, table_pure,
+//RS         "pure route consumer/table mismatch"
+//RS     );
+//RS     let method_start = parity
+//RS         .find("pub(super) fn evaluate_method")
+//RS         .expect("CorePureParity receiver evaluator");
+//RS     let method_end = parity[method_start..]
+//RS         .find("pub(super) fn sketch_add")
+//RS         .map(|offset| method_start + offset)
+//RS         .unwrap_or(parity.len());
+//RS     let receiver_source = &parity[method_start..method_end];
+//RS     for (receiver, member) in arm_pairs(receiver_source) {
+//RS         assert!(
+//RS             jet::Syntax::core_receiver_method(&receiver, &member).is_some(),
+//RS             "receiver evaluator owns an unregistered method: {receiver}.{member}"
+//RS         );
+//RS     }
+//RS     let table_receivers: HashSet<(String, String)> = jet::Syntax::CORE_CALLS
+//RS         .iter()
+//RS         .filter(|row| row.is_receiver())
+//RS         .flat_map(|row| {
+//RS             row.receiver_types
+//RS                 .iter()
+//RS                 .map(move |receiver| ((*receiver).to_string(), row.member.to_string()))
+//RS         })
+//RS         .collect();
+//RS     let consumer_receivers: HashSet<(String, String)> =
+//RS         arm_pairs(receiver_source).into_iter().collect();
+//RS     assert!(
+//RS         consumer_receivers.is_subset(&table_receivers),
+//RS         "receiver evaluator owns calls outside the canonical table: {:?}",
+//RS         consumer_receivers
+//RS             .difference(&table_receivers)
+//RS             .collect::<Vec<_>>()
+//RS     );
+//RS     // Receiver calls also have typed projections outside `evaluate_method`:
+//RS     // sketch mutation, solver construction/requirement, and display. Those
+//RS     // adapters must all consult the same lookup before their typed marshalling.
+//RS     for marker in [
+//RS         "core_receiver_method(type_name, \"add\")?",
+//RS         "core_receiver_method(type_name, \"require\")?",
+//RS         "core_receiver_method(crate::Syntax::SOLVER_TYPE, \"new\")",
+//RS         "core_receiver_method(core_type, \"__display\")",
+//RS     ] {
+//RS         assert!(
+//RS             parity.contains(marker),
+//RS             "receiver projection lost its canonical-table guard: {marker}"
+//RS         );
+//RS     }
+//RS 
+//RS     let emit = read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs");
+//RS     assert!(
+//RS         emit.contains("crate::Syntax::core_call(module, method)?"),
+//RS         "AOT emit no longer projects from the foundation Core-call table"
+//RS     );
+//RS     assert!(
+//RS         !emit.contains("const PLAIN_CORE_CALLS"),
+//RS         "AOT emit regained a hand-kept Core-call list"
+//RS     );
+//RS     let bespoke = emit
+//RS         .find("// #1635: every arm below stays bespoke")
+//RS         .expect("bespoke Core-call emission is named");
+//RS     let direct_keys: HashSet<(String, String)> = jet::Syntax::CORE_CALLS
+//RS         .iter()
+//RS         .filter(|row| row.aot_direct && !row.is_receiver())
+//RS         .map(|row| (row.module.to_string(), row.member.to_string()))
+//RS         .collect();
+//RS     let shadowed: Vec<String> = arm_pairs(&emit[bespoke..])
+//RS         .into_iter()
+//RS         .filter(|pair| direct_keys.contains(pair))
+//RS         .map(|(module, member)| format!("{module}.{member}"))
+//RS         .collect();
+//RS     assert!(
+//RS         shadowed.is_empty(),
+//RS         "bespoke AOT arms repeat foundation rows:\n{}",
+//RS         shadowed.join("\n")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn one_fake_record_projects_without_a_consumer_arm() {
+//RS     const FAKE: &[jet_foundation::Syntax::CoreCallRecord] =
+//RS         &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+//RS             "core.fake",
+//RS             "only",
+//RS             "jet_fake_only",
+//RS             true,
+//RS             &[],
+//RS             jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS                 jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+//RS             ),
+//RS         )];
+//RS 
+//RS     let row = jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "only")
+//RS         .expect("a data-only Core row must be visible through the generic lookup");
+//RS     assert_eq!(row.signature.arity, 0);
+//RS     assert_eq!(row.symbol.name(), "jet_fake_only");
+//RS     let candidates = row.jit_symbol_candidates();
+//RS     assert!(candidates.contains(&"jet_fake_only".to_string()));
+//RS     assert!(candidates.contains(&"jet_jit_fake_only".to_string()));
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_projection_in(
+//RS             FAKE,
+//RS             "core.fake",
+//RS             "only",
+//RS             jet_foundation::Syntax::CoreCallCoverage::JIT,
+//RS             0,
+//RS         ),
+//RS         Ok(row)
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "missing"),
+//RS         None
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn coverage_guard_rejects_a_missing_tier_projection() {
+//RS     const SEMA_ONLY: &[jet_foundation::Syntax::CoreCallRecord] =
+//RS         &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+//RS             "core.fake",
+//RS             "sema_only",
+//RS             "jet_fake_sema_only",
+//RS             true,
+//RS             &[],
+//RS             jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS                 jet_foundation::Syntax::CoreCallCoverage::SEMA,
+//RS             ),
+//RS         )];
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_coverage_violations(
+//RS             SEMA_ONLY,
+//RS             jet_foundation::Syntax::CoreCallCoverage::JIT,
+//RS         ),
+//RS         vec!["core.fake.sema_only missing projection 0x40".to_string()]
+//RS     );
+//RS     assert!(jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS         jet_foundation::Syntax::CoreCallCoverage::KNOWN
+//RS     )
+//RS     .is_complete());
+//RS     assert!(!jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS         jet_foundation::Syntax::CoreCallCoverage::SEMA
+//RS     )
+//RS     .is_complete());
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_projection_in(
+//RS             SEMA_ONLY,
+//RS             "core.fake",
+//RS             "sema_only",
+//RS             jet_foundation::Syntax::CoreCallCoverage::JIT,
+//RS             0,
+//RS         ),
+//RS         Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered {
+//RS             projection: jet_foundation::Syntax::CoreCallCoverage::JIT,
+//RS         })
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn coverage_guard_rejects_interpreter_without_executable_route() {
+//RS     const NO_INTERPRETER_ROUTE: &[jet_foundation::Syntax::CoreCallRecord] = &[
+//RS         jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+//RS             "core.fake",
+//RS             "no_interpreter_route",
+//RS             "jet_fake_no_interpreter_route",
+//RS             true,
+//RS             &[],
+//RS             jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS                 jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+//RS             ),
+//RS         )
+//RS         .with_interpreter_route(jet_foundation::Syntax::CoreCallInterpreterRoute::None),
+//RS         jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+//RS             "core.fake",
+//RS             "empty_pure_route",
+//RS             "jet_fake_empty_pure_route",
+//RS             true,
+//RS             &[],
+//RS             jet_foundation::Syntax::CoreCallCoverage::from_bits(
+//RS                 jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+//RS             ),
+//RS         )
+//RS         .with_interpreter_route(jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
+//RS                 jet_foundation::Syntax::CoreCallPureRoute::None,
+//RS         )),
+//RS     ];
+//RS     assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::None.is_executable());
+//RS     assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
+//RS         jet_foundation::Syntax::CoreCallPureRoute::None
+//RS     )
+//RS     .is_executable());
+//RS     let route_violation = jet_foundation::Syntax::core_call_coverage_violations(
+//RS         NO_INTERPRETER_ROUTE,
+//RS         jet_foundation::Syntax::CoreCallCoverage::INTERPRETER,
+//RS     );
+//RS     assert_eq!(
+//RS         route_violation,
+//RS         vec![
+//RS             "core.fake.no_interpreter_route declares interpreter coverage without an interpreter route"
+//RS                 .to_string(),
+//RS             "core.fake.empty_pure_route declares interpreter coverage without an interpreter route"
+//RS                 .to_string(),
+//RS         ]
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_table_violations(NO_INTERPRETER_ROUTE),
+//RS         route_violation
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
+//RS     let sema = read("crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs");
+//RS     assert!(
+//RS         sema.contains("Syntax::core_call(module, name)"),
+//RS         "sema effect routing no longer reads the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         sema.contains("CoreCallCoverage::SEMA") && sema.contains("Syntax::core_call_projection"),
+//RS         "sema no longer uses the row projection guard"
+//RS     );
+//RS     assert!(
+//RS         sema.contains("core_fixed_sig_for_row(row)"),
+//RS         "sema typed signatures no longer project through the Core-call record"
+//RS     );
+//RS     let fixed_sigs = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
+//RS     assert!(
+//RS         fixed_sigs.contains("pub fn core_fixed_sig_for_row"),
+//RS         "sema has no typed-signature adapter for Core-call rows"
+//RS     );
+//RS 
+//RS     let tir = read("crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs");
+//RS     assert!(
+//RS         tir.contains("crate::Syntax::core_call(module, method)"),
+//RS         "TIR coverage no longer reads the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         tir.contains("CoreCallCoverage::TIR_SUBSET") && interpreter_source_has_projection(),
+//RS         "TIR/interpreter projections do not use the row coverage guard"
+//RS     );
+//RS 
+//RS     let comptime = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
+//RS     assert!(
+//RS         comptime.contains("jet_foundation::Syntax::core_call(module, method)"),
+//RS         "comptime dispatch no longer reads the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         comptime.contains("core_call_allows_pure_parity(row)"),
+//RS         "comptime pure parity is not gated by the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         comptime.contains("CoreCallCoverage::COMPTIME"),
+//RS         "comptime no longer uses the row projection guard"
+//RS     );
+//RS     assert!(
+//RS         comptime.contains("core_pure_parity::evaluate(row"),
+//RS         "comptime does not pass the canonical row into the pure evaluator"
+//RS     );
+//RS     assert!(
+//RS         !comptime.contains("const CORE_CALLS") && !comptime.contains("const PLAIN_CORE_CALLS"),
+//RS         "comptime regained a second Core-call table"
+//RS     );
+//RS 
+//RS     let interpreter = read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs");
+//RS     assert!(
+//RS         interpreter.contains("jet_foundation::Syntax::core_call(module, method)"),
+//RS         "TIR evaluation no longer reads the Core-call record"
+//RS     );
+//RS 
+//RS     let jit = read("crates/jet-jit/src/jit/lower_ctx.rs");
+//RS     assert!(
+//RS         jit.contains("jet_foundation::Syntax::core_call(module, method)"),
+//RS         "JIT lowering no longer reads the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         jit.contains("lower_recorded_core_call") && jit.contains("self.host.lookup(&symbol)"),
+//RS         "JIT lowering has no table-driven direct host projection"
+//RS     );
+//RS     assert!(
+//RS         jit.contains("CoreCallCoverage::JIT"),
+//RS         "JIT lowering no longer uses the row projection guard"
+//RS     );
+//RS     assert!(
+//RS         read("crates/jet-jit/src/lib.rs").contains("pub(crate) fn lookup(&self, symbol: &str)"),
+//RS         "JIT host declarations do not expose their generated symbol lookup"
+//RS     );
+//RS 
+//RS     let ambient = read("crates/jet-jit/src/ambient_interp.rs");
+//RS     assert!(
+//RS         ambient.contains("jet_foundation::Syntax::core_call(module, method)"),
+//RS         "the interpreter ambient adapter no longer reads the Core-call record"
+//RS     );
+//RS     assert!(
+//RS         ambient.contains("CoreCallCoverage::INTERPRETER"),
+//RS         "the interpreter ambient adapter no longer uses the row projection guard"
+//RS     );
+//RS     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
+//RS     assert!(
+//RS         parity.contains("core_receiver_method(type_name, method)"),
+//RS         "receiver parity does not resolve through the shared Core-call table"
+//RS     );
+//RS 
+//RS     fn interpreter_source_has_projection() -> bool {
+//RS         read("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs")
+//RS             .contains("CoreCallCoverage::TIR_EVAL")
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
+//RS     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
+//RS     assert!(table.contains("pub const CORE_CALLS"));
+//RS     assert!(table.contains("pub struct CoreCallSignature"));
+//RS     assert!(table.contains("pub struct CoreCallCoverage"));
+//RS     assert!(table.contains("pub fn core_call_projection"));
+//RS     assert!(table.contains("pub fn core_call_mismatch"));
+//RS     assert!(table.contains("pub fallibility: CoreCallFallibility"));
+//RS     assert!(table.contains("jit_direct: bool"));
+//RS     assert!(table.contains("receiver_types: &'static [&'static str]"));
+//RS 
+//RS     for path in [
+//RS         "crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs",
+//RS         "crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs",
+//RS         "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs",
+//RS         "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+//RS         "crates/jet-jit/src/jit/lower_ctx.rs",
+//RS         "crates/jet-jit/src/ambient_interp.rs",
+//RS     ] {
+//RS         let source = read(path);
+//RS         assert!(
+//RS             !source.contains("AOT_CORE_CALLS") && !source.contains("PLAIN_CORE_CALLS"),
+//RS             "{path} retained a retired second Core-call table"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn receiver_and_plain_consumer_sets_have_one_table_home() {
+//RS     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
+//RS     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
+//RS     let jit = read("crates/jet-jit/src/jit/lower_ctx.rs");
+//RS 
+//RS     assert!(
+//RS         table.contains("pub fn core_receiver_method"),
+//RS         "receiver lookup is not exported from the canonical table"
+//RS     );
+//RS     assert!(
+//RS         parity.contains("core_receiver_method(type_name, method)"),
+//RS         "receiver evaluator has a hand-kept membership gate"
+//RS     );
+//RS     assert!(
+//RS         jit.contains("fn lower_recorded_core_call") && jit.contains("jit_symbol_candidates()"),
+//RS         "JIT has no row-driven receiver/plain projection seam"
+//RS     );
+//RS     assert!(
+//RS         !jit.contains("if module == \"core.log\"") && !jit.contains("if module == \"core.files\""),
+//RS         "JIT retained a per-module Core-call dispatch table"
+//RS     );
+//RS 
+//RS     // Exercise the mismatch detector itself with both directions. This keeps
+//RS     // the guard honest: a consumer-only row and a table-only row are distinct
+//RS     // failures, not one collapsed length check.
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_call_mismatch(
+//RS             &[jet_foundation::Syntax::CoreCallRecord::new(
+//RS                 "core.fake",
+//RS                 "only",
+//RS                 "jet_fake_only",
+//RS                 true,
+//RS                 &[],
+//RS             )],
+//RS             "fake consumer",
+//RS             &[],
+//RS         ),
+//RS         vec!["fake consumer does not project core.fake.only".to_string()]
+//RS     );
+//RS     let consumer_only = jet_foundation::Syntax::core_call_mismatch(
+//RS         &[],
+//RS         "fake consumer",
+//RS         &[("core.consumer", "only")],
+//RS     );
+//RS     assert_eq!(consumer_only.len(), 1);
+//RS     assert!(consumer_only[0].contains("projects unknown core.consumer.only"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn core_call_truth_names_the_foundation_home() {
+//RS     let row = jet_foundation::Registry::row("CoreCalls").expect("CoreCalls truth is registered");
+//RS     assert_eq!(
+//RS         row.home,
+//RS         Some("crates/jet-foundation/src/Syntax/core_calls.rs")
+//RS     );
+//RS     assert_eq!(
+//RS         row.guard.map(|guard| guard.test),
+//RS         Some("core_projection_is_complete_both_directions")
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn canonical_core_module_spellings_are_the_only_public_rows() {
+//RS     let rows = jet_foundation::Syntax::CORE_CALLS;
+//RS     assert!(
+//RS         rows.iter()
+//RS             .any(|row| row.module == "core.service" && row.member == "runtime"),
+//RS         "canonical core.service.runtime row is missing"
+//RS     );
+//RS     assert!(
+//RS         rows.iter()
+//RS             .any(|row| row.module == "core.tasks" && row.member == "interval"),
+//RS         "canonical core.tasks rows are missing"
+//RS     );
+//RS     assert!(
+//RS         !rows
+//RS             .iter()
+//RS             .any(|row| matches!(row.module, "core.task" | "core.services")),
+//RS         "retired Core module spellings leaked into the public dispatcher"
+//RS     );
+//RS     assert!(
+//RS         jet_foundation::Syntax::core_call("core.task", "timeout").is_none(),
+//RS         "retired core.task.timeout dispatcher row must be deleted"
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_module_for_alias("task"),
+//RS         None,
+//RS         "retired task alias must not resolve"
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_module_for_alias("services"),
+//RS         None,
+//RS         "retired services alias must not resolve"
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_module_for_alias("tasks"),
+//RS         Some("core.tasks")
+//RS     );
+//RS     assert_eq!(
+//RS         jet_foundation::Syntax::core_module_for_alias("service"),
+//RS         Some("core.service")
+//RS     );
+//RS }
+// END-PORT-PENDING 1010 tests/core_call_table.rs:1-719
+

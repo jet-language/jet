@@ -13,10 +13,11 @@ package {
 //
 // Jet `String` is UTF-8. Counting, trimming, and case mapping are defined on
 // scalars, not raw bytes, except where a function is named `byte_*`. UTF-8
-// decode, Hangul NFD/NFC, UAX #29 grapheme/word segmentation (extended
-// grapheme clusters, WB simple alphanumerics), East-Asian width, and Latin-1
-// case mapping are Jet. Full Unicode case-fold tables beyond Latin-1 map
-// identity (C+F for ASCII/Latin-1 still applied).
+// decode and Unicode 17.0.0 normalization/casing/classification/width use the
+// canonical pinned assets. UAX #29 grapheme segmentation is below; word and
+// sentence segmentation is the private runtime kernel_text_segments owner.
+// Tables: node Tools/agent/gen-unicode-tables.mjs --core-only tests/data/unicode/ucd
+// All immutable JUCD schema-1 assets use little-endian fields and pinned inputs.
 //
 // Predicates on the empty string are false (`is_alphabetic("")` is false).
 // `splitn` / `rsplitn` take a maximum part count, matching Rust `splitn`.
@@ -27,6 +28,22 @@ module parse
 module wrap
 module html
 module combinators
+module runtime
+use core.text.runtime.kernel_unicode_string as text_unicode_string
+use core.text.runtime.unicode_assets as text_unicode_assets
+use core.text.runtime.kernel_text_segments as text_segments
+use core.text.runtime.assets.unicode_decomp_index as text_normal_index
+use core.text.runtime.assets.unicode_decomp_pool as text_normal_pool
+use core.text.runtime.assets.unicode_ccc as text_normal_ccc
+use core.text.runtime.assets.unicode_compose_pairs as text_normal_compose
+use core.text.runtime.assets.unicode_general_category as text_category
+use core.text.runtime.assets.unicode_default_ignorable as text_ignorable
+use core.text.runtime.assets.unicode_east_asian_width as text_eaw
+use core.text.runtime.assets.unicode_grapheme_break as text_grapheme
+use core.text.runtime.assets.unicode_extended_pictographic as text_pictographic
+use core.text.runtime.assets.unicode_emoji as text_emoji
+use core.text.runtime.assets.unicode_emoji_presentation as text_emoji_presentation
+use core.text.runtime.assets.unicode_incb as text_incb
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 pub struct Cursor {
@@ -42,20 +59,20 @@ pub fn cursor(_text: String) -> Cursor Never! {
 
 /// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
 pub fn cursor_advance(text: String, cur: Cursor) -> Cursor Never! {
-    raw :: text.bytes()
+    raw :: text_unicode_string.utf8_bytes(text)
     if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
     if cur.offset >= raw.len() -> return ~cur
-    width :: utf8_width_at(raw, cur.offset)
+    width :: text_unicode_string.utf8_width_at(raw, cur.offset)
     next :: cur.offset + width
     if raw[cur.offset] == (U8{10}) -> return Cursor{offset: next, line: cur.line + 1, column: 1}
     Cursor{offset: next, line: cur.line, column: cur.column + 1}
 }
 
 /// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.
-pub fn byte_count(text: String) -> Int Never! { text.bytes().len() }
+pub fn byte_count(text: String) -> Int Never! { text_unicode_string.utf8_bytes(text).len() }
 
 pub fn is_ascii(text: String) -> Bool Never! {
-    loop b in text.bytes() {
+    loop b in text_unicode_string.utf8_bytes(text) {
         if b > (U8{127}) -> return false
     }
     true
@@ -70,23 +87,34 @@ pub fn scalars(text: String) -> [String] Never! {
     out
 }
 
-pub fn lower(text: String) -> String Never! { map_case(text, false) }
+pub fn lower(text: String) -> String Never! { text_unicode_string.lower(text) }
 
-pub fn upper(text: String) -> String Never! { map_case(text, true) }
+pub fn upper(text: String) -> String Never! { text_unicode_string.upper(text) }
 
-/// Unicode C+F case folding. Latin-1 folds through `lower`; other scalars identity.
-pub fn casefold(text: String) -> String Never! { lower(text) }
+/// Unicode 17.0.0 default full C+F folding (locale-free).
+pub fn casefold(text: String) -> String Never! { text_unicode_string.casefold(text) }
 
-pub fn caseless_eq(left: String, right: String) -> Bool Never! { casefold(left) == casefold(right) }
+// Rust Text.rs:337-341: canonical default caseless matching, not fold-only.
+pub fn caseless_eq(left: String, right: String) -> Bool Never! {
+    nfd(casefold(nfd(left))) == nfd(casefold(nfd(right)))
+}
 
-pub fn nfc(text: String) -> String Never! { compose(decompose(text, false)) }
-pub fn nfd(text: String) -> String Never! { encode_cps(decompose(text, false)) }
-pub fn nfkc(text: String) -> String Never! { compose(decompose(text, true)) }
-pub fn nfkd(text: String) -> String Never! { encode_cps(decompose(text, true)) }
+/// Unicode 17.0.0 canonical composition (UAX #15 NFC).
+pub fn nfc(text: String) -> String Never! { normalize(text, false, true) }
+/// Unicode 17.0.0 canonical decomposition (UAX #15 NFD).
+pub fn nfd(text: String) -> String Never! { normalize(text, false, false) }
+/// Unicode 17.0.0 compatibility decomposition followed by composition.
+pub fn nfkc(text: String) -> String Never! { normalize(text, true, true) }
+/// Unicode 17.0.0 compatibility decomposition (UAX #15 NFKD).
+pub fn nfkd(text: String) -> String Never! { normalize(text, true, false) }
 
 pub fn graphemes(text: String) -> [String] Never! { split_graphemes(text) }
-pub fn words(text: String) -> [String] Never! { split_words(text) }
-pub fn sentences(text: String) -> [String] Never! { split_sentences(text) }
+/// Unicode 17.0.0 UAX #29 owned word segments containing Alphabetic or Numeric.
+// Rust Text.rs:689-694; boundary/filter policy lives in kernel_text_segments.
+pub fn words(text: String) -> [String] Never! { text_segments.words(text) }
+/// Unicode 17.0.0 UAX #29 owned sentences, White_Space-trimmed; empty segments omitted.
+// Rust Text.rs:880-885; boundary/trim policy lives in kernel_text_segments.
+pub fn sentences(text: String) -> [String] Never! { text_segments.sentences(text) }
 pub fn inspect(text: String) -> [String] Never! {
     out := [String]{}
     loop cp in decode_scalars(text) -> &out.push(hex_cp(cp))
@@ -111,66 +139,23 @@ pub fn word_views(text: String) -> [String] Never! { words(text) }
 pub fn line_views(text: String) -> [String] Never! { split_lines(text) }
 pub fn byte_views(text: String) -> [String] Never! {
     out := [String]{}
-    loop b in text.bytes() -> &out.push("{b}")
+    loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
     out
 }
 
-pub fn is_alphabetic(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    if is_ascii(text) {
-        loop b in text.bytes() {
-            if !ascii_alpha(b) -> return false
-        }
-        return true
-    }
-    loop cp in decode_scalars(text) {
-        if !is_alpha_cp(cp) -> return false
-    }
-    true
-}
+// Rust Text.rs:939: nonempty, all scalars have DerivedCoreProperties Alphabetic.
+pub fn is_alphabetic(text: String) -> Bool Never! { text_unicode_string.is_alphabetic(text) }
 
-pub fn is_numeric(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    loop cp in decode_scalars(text) {
-        if !is_digit_cp(cp) -> return false
-    }
-    true
-}
+// Rust Text.rs:940: Numeric is General_Category Nd/Nl/No, not only decimal digits.
+pub fn is_numeric(text: String) -> Bool Never! { text_unicode_string.is_numeric(text) }
 
-pub fn is_whitespace(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    loop cp in decode_scalars(text) {
-        if !is_space_cp(cp) -> return false
-    }
-    true
-}
+pub fn is_whitespace(text: String) -> Bool Never! { text_unicode_string.is_whitespace(text) }
 
-pub fn trim(text: String) -> String Never! { trim_end(trim_start(text)) }
+pub fn trim(text: String) -> String Never! { text_unicode_string.trim(text) }
 
-pub fn trim_start(text: String) -> String Never! {
-    pairs :: decode_indexed(text)
-    i := 0
-    loop i < pairs.len() {
-        if !is_space_cp(pairs[i].cp) -> break
-        i = i + 1
-    }
-    if i >= pairs.len() -> return ""
-    slice_bytes(text.bytes(), pairs[i].index, text.bytes().len())
-}
+pub fn trim_start(text: String) -> String Never! { text_unicode_string.trim_start(text) }
 
-pub fn trim_end(text: String) -> String Never! {
-    pairs :: decode_indexed(text)
-    end := text.bytes().len()
-    i := pairs.len() - 1
-    loop i >= 0 {
-        if !is_space_cp(pairs[i].cp) {
-            end = pairs[i].index + utf8_width_at(text.bytes(), pairs[i].index)
-            break
-        }
-        i = i - 1
-    }
-    slice_bytes(text.bytes(), 0, end)
-}
+pub fn trim_end(text: String) -> String Never! { text_unicode_string.trim_end(text) }
 
 /// Pad on the left until `width` UTF-8 scalars. Empty `fill` returns text unchanged.
 pub fn pad_start(text: String, width: Int, fill: String) -> String Never! { pad_side(text, width, fill, true) }
@@ -203,40 +188,10 @@ pub fn splitn(text: String, sep: String, n: Int) -> [String] Never! { split_limi
 
 pub fn rsplitn(text: String, sep: String, n: Int) -> [String] Never! { split_limit(text, sep, n, true) }
 
-fn ascii_alpha(b: U8) -> Bool {
-    n :: b
-    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-}
 
 fn ascii_space(b: U8) -> Bool {
     n :: b
     n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13
-}
-
-fn ascii_lower(text: String) -> String {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 65 && n <= 90 {
-            &out.push(U8{n + 32})
-        } else {
-            &out.push(b)
-        }
-    }
-    String.from_bytes(out) ?? ""
-}
-
-fn ascii_upper(text: String) -> String {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 97 && n <= 122 {
-            &out.push(U8{n - 32})
-        } else {
-            &out.push(b)
-        }
-    }
-    String.from_bytes(out) ?? ""
 }
 
 fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
@@ -255,8 +210,8 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String {
 }
 
 fn starts_with(text: String, prefix: String) -> Bool {
-    a :: text.bytes()
-    b :: prefix.bytes()
+    a :: text_unicode_string.utf8_bytes(text)
+    b :: text_unicode_string.utf8_bytes(prefix)
     if b.len() > a.len() -> return false
     loop i in 0..<b.len() {
         if a[i] != b[i] -> return false
@@ -265,8 +220,8 @@ fn starts_with(text: String, prefix: String) -> Bool {
 }
 
 fn ends_with(text: String, suffix: String) -> Bool {
-    a :: text.bytes()
-    b :: suffix.bytes()
+    a :: text_unicode_string.utf8_bytes(text)
+    b :: text_unicode_string.utf8_bytes(suffix)
     if b.len() > a.len() -> return false
     off :: a.len() - b.len()
     loop i in 0..<b.len() {
@@ -295,7 +250,7 @@ fn pad_side(text: String, width: Int, fill: String, left: Bool) -> String {
 
 fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] {
     if n <= 0 -> return [String]{}
-    if n == 1 || sep.bytes().len() == 0 -> return [String]{text}
+    if n == 1 || text_unicode_string.utf8_bytes(sep).len() == 0 -> return [String]{text}
     parts := [String]{}
     rest := text
     loop {
@@ -309,11 +264,11 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
             return ~parts
         }
         if from_right {
-            &parts.push(slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len()))
-            rest = slice_bytes(rest.bytes(), 0, at)
+            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len()))
+            rest = slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at)
         } else {
-            &parts.push(slice_bytes(rest.bytes(), 0, at))
-            rest = slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len())
+            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at))
+            rest = slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len())
         }
     }
 }
@@ -357,14 +312,14 @@ fn decode_scalars(text: String) -> [Int] Never! {
 }
 
 fn decode_indexed(text: String) -> [IndexedCp] Never! {
-    raw :: text.bytes()
+    raw :: text_unicode_string.utf8_bytes(text)
     out := [IndexedCp]{}
     i := 0
     loop {
         if i >= raw.len() -> return ~out
         start := i
         first := Int.from_u8(raw[i])
-        width :: utf8_width_at(raw, i)
+        width :: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
                 &out.push(IndexedCp{index: start, cp: first})
@@ -399,195 +354,21 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
     }
 }
 
-fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
-    if at < 0 || at >= raw.len() -> return 1
-    first :: raw[at]
-    if first < 128 -> return 1
-    if first >= 194 && first <= 223 {
-        if at + 1 < raw.len() {
-            second :: raw[at + 1]
-            if second >= 128 && second <= 191 -> return 2
-        }
-        return 1
-    }
-    if first >= 224 && first <= 239 {
-        if at + 2 < raw.len() {
-            second :: raw[at + 1]
-            third :: raw[at + 2]
-            if second >= 128 && second <= 191 && third >= 128 && third <= 191 {
-                if first != 224 || second >= 160 {
-                    if first != 237 || second <= 159 -> return 3
-                }
-            }
-        }
-        return 1
-    }
-    if first >= 240 && first <= 244 {
-        if at + 3 < raw.len() {
-            second :: raw[at + 1]
-            third :: raw[at + 2]
-            fourth :: raw[at + 3]
-            if second >= 128 && second <= 191 && third >= 128 && third <= 191 && fourth >= 128 && fourth <= 191 {
-                if first != 240 || second >= 144 {
-                    if first != 244 || second <= 143 -> return 4
-                }
-            }
-        }
-    }
-    1
-}
 fn encode_cp(cp: Int) -> String {
-    n := cp
-    if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     out := [U8]{}
-    if n < 128 {
-        &out.push(U8{n})
-    } else if n < 2048 {
-        &out.push(U8{Int{192} | (n >> 6)})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    } else if n < 65536 {
-        &out.push(U8{Int{224} | (n >> 12)})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    } else {
-        &out.push(U8{Int{240} | (n >> 18)})
-        &out.push(U8{Int{128} | ((n >> 12) & Int{63})})
-        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
-        &out.push(U8{Int{128} | (n & Int{63})})
-    }
+    text_unicode_string.append_cp(&out, cp)
     String.from_bytes(out) ?? ""
 }
 
-fn encode_cps(cps: [Int]) -> String {
-    out := ""
-    loop cp in cps -> out = "{out}{encode_cp(cp)}"
-    out
+
+fn encode_cps(cps: [Int]) -> String { encode_cps_prefix(cps, cps.len()) }
+
+fn encode_cps_prefix(cps: [Int], length: Int) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<length -> text_unicode_string.append_cp(&out, cps[i])
+    String.from_bytes(out) ?? ""
 }
 
-fn map_case(text: String, to_upper: Bool) -> String {
-    out := ""
-    loop cp in decode_scalars(text) -> out = "{out}{case_string(cp, to_upper)}"
-    out
-}
-
-fn case_string(cp: Int, to_upper: Bool) -> String {
-    if to_upper {
-        if cp == 223 || cp == 7838 -> return "SS"
-        if cp >= 97 && cp <= 122 -> return encode_cp(cp - 32)
-        if cp >= 224 && cp <= 254 && cp != 247 -> return encode_cp(cp - 32)
-        if cp == 255 -> return encode_cp(376)
-        if cp >= 945 && cp <= 961 -> return encode_cp(cp - 32)
-        if cp >= 963 && cp <= 969 -> return encode_cp(cp - 32)
-        if cp >= 1072 && cp <= 1103 -> return encode_cp(cp - 32)
-        return encode_cp(cp)
-    }
-    if cp >= 65 && cp <= 90 -> return encode_cp(cp + 32)
-    if cp >= 192 && cp <= 222 && cp != 215 -> return encode_cp(cp + 32)
-    if cp == 376 -> return encode_cp(255)
-    if cp >= 913 && cp <= 929 -> return encode_cp(cp + 32)
-    if cp >= 931 && cp <= 939 -> return encode_cp(cp + 32)
-    if cp >= 1040 && cp <= 1071 -> return encode_cp(cp + 32)
-    encode_cp(cp)
-}
-
-fn fold_case(text: String) -> String {
-    out := ""
-    loop cp in decode_scalars(text) {
-        if cp == 223 || cp == 7838 {
-            out = "{out}ss"
-        } else if cp == 304 {
-            out = "{out}i{encode_cp(775)}"
-        } else if cp == 962 {
-            out = "{out}{encode_cp(963)}"
-        } else if cp == 8490 {
-            out = "{out}k"
-        } else if cp == 8491 {
-            out = "{out}{encode_cp(229)}"
-        } else {
-            out = "{out}{case_string(cp, false)}"
-        }
-    }
-    out
-}
-
-fn is_alpha_cp(cp: Int) -> Bool {
-    if (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) -> return true
-    if (cp >= 192 && cp <= 214) || (cp >= 216 && cp <= 246) || (cp >= 248 && cp <= 255) -> return true
-    if cp >= 256 && cp <= 687 -> return true
-    if cp >= 880 && cp <= 1023 -> return true
-    if cp >= 1024 && cp <= 1279 -> return true
-    if cp >= 1329 && cp <= 1366 -> return true
-    if cp >= 1377 && cp <= 1415 -> return true
-    if cp >= 1424 && cp <= 1469 -> return true
-    if cp >= 1471 && cp <= 1471 -> return true
-    if cp >= 1488 && cp <= 1514 -> return true
-    if cp >= 1568 && cp <= 1747 -> return true
-    if cp >= 1810 && cp <= 1866 -> return true
-    if cp >= 1994 && cp <= 2026 -> return true
-    if cp >= 2304 && cp <= 2423 -> return true
-    if cp >= 2437 && cp <= 2444 -> return true
-    if cp >= 2561 && cp <= 2576 -> return true
-    if cp >= 3585 && cp <= 3632 -> return true
-    if cp >= 4256 && cp <= 4293 -> return true
-    if cp >= 4304 && cp <= 4346 -> return true
-    if cp >= 4352 && cp <= 4607 -> return true
-    if cp >= 7680 && cp <= 7935 -> return true
-    if cp >= 7936 && cp <= 8191 -> return true
-    if cp >= 8448 && cp <= 8521 -> return true
-    if cp >= 11264 && cp <= 11310 -> return true
-    if cp >= 11312 && cp <= 11358 -> return true
-    if cp >= 19968 && cp <= 40959 -> return true
-    if cp >= 44032 && cp <= 55203 -> return true
-    if cp >= 65313 && cp <= 65338 -> return true
-    if cp >= 65345 && cp <= 65370 -> return true
-    if cp >= 66560 && cp <= 66639 -> return true
-    false
-}
-
-fn is_digit_cp(cp: Int) -> Bool {
-    if cp >= 48 && cp <= 57 -> return true
-    if cp >= 1632 && cp <= 1641 -> return true
-    if cp >= 1776 && cp <= 1785 -> return true
-    if cp >= 1984 && cp <= 1993 -> return true
-    if cp >= 2406 && cp <= 2415 -> return true
-    if cp >= 2534 && cp <= 2543 -> return true
-    if cp >= 2662 && cp <= 2671 -> return true
-    if cp >= 2790 && cp <= 2799 -> return true
-    if cp >= 2918 && cp <= 2927 -> return true
-    if cp >= 3046 && cp <= 3055 -> return true
-    if cp >= 3174 && cp <= 3183 -> return true
-    if cp >= 3302 && cp <= 3311 -> return true
-    if cp >= 3430 && cp <= 3439 -> return true
-    if cp >= 3558 && cp <= 3567 -> return true
-    if cp >= 3664 && cp <= 3673 -> return true
-    if cp >= 3792 && cp <= 3801 -> return true
-    if cp >= 3872 && cp <= 3881 -> return true
-    if cp >= 4160 && cp <= 4169 -> return true
-    if cp >= 4240 && cp <= 4249 -> return true
-    if cp >= 6112 && cp <= 6121 -> return true
-    if cp >= 6470 && cp <= 6479 -> return true
-    if cp >= 65296 && cp <= 65305 -> return true
-    false
-}
-
-fn is_space_cp(cp: Int) -> Bool {
-    if cp >= 9 && cp <= 13 -> return true
-    if cp == 32 || cp == 133 || cp == 160 -> return true
-    if cp == 5760 || cp == 8239 || cp == 8287 || cp == 12288 -> return true
-    if cp >= 8192 && cp <= 8202 -> return true
-    if cp == 8232 || cp == 8233 -> return true
-    false
-}
-
-fn combining_class(cp: Int) -> Int {
-    if cp >= 768 && cp <= 879 -> return 230
-    if cp >= 7616 && cp <= 7679 -> return 230
-    if cp >= 8400 && cp <= 8432 -> return 230
-    if cp >= 65056 && cp <= 65071 -> return 230
-    0
-}
-
-fn is_extend(cp: Int) -> Bool { combining_class(cp) != 0 || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp == 0x200C || cp == 0x200D || cp == 0xFF9E || cp == 0xFF9F }
 
 C_SBASE :: 44032
 C_LBASE :: 4352
@@ -599,15 +380,6 @@ C_TCOUNT :: 28
 C_NCOUNT :: 588
 C_SCOUNT :: 11172
 
-fn hangul_decompose(cp: Int) -> [Int] {
-    sindex :: cp - C_SBASE
-    if sindex < 0 || sindex >= C_SCOUNT -> return [Int]{cp}
-    l :: C_LBASE + sindex /% C_NCOUNT
-    v :: C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT
-    t :: C_TBASE + sindex % C_TCOUNT
-    if t == C_TBASE -> return [Int]{l, v}
-    [Int]{l, v, t}
-}
 
 fn hangul_compose(a: Int, b: Int) -> Int? {
     lindex :: a - C_LBASE
@@ -623,323 +395,256 @@ fn hangul_compose(a: Int, b: Int) -> Int? {
     None
 }
 
-fn decompose(text: String, compat: Bool) -> [Int] {
-    raw := [Int]{}
-    loop cp in decode_scalars(text) {
-        pieces :: decompose_cp(cp, compat)
-        loop p in pieces -> &raw.push(p)
+// Rust `nfc` / `canonical_decompose` (BudgetStore.rs:1259-1325);
+// compatibility uses the same jet_unicode decomposition index, including tagged rows.
+fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
+    bytes :: text.bytes()
+    non_ascii := false
+    loop byte in bytes {
+        if byte >= (U8{128}) {
+            non_ascii = true
+            break
+        }
     }
-    canon_order(raw)
-}
-
-fn decompose_cp(cp: Int, compat: Bool) -> [Int] {
-    if cp >= C_SBASE && cp < C_SBASE + C_SCOUNT -> return hangul_decompose(cp)
-    if cp == 192 -> return [Int]{65, 768}
-    if cp == 193 -> return [Int]{65, 769}
-    if cp == 194 -> return [Int]{65, 770}
-    if cp == 195 -> return [Int]{65, 771}
-    if cp == 196 -> return [Int]{65, 776}
-    if cp == 197 -> return [Int]{65, 778}
-    if cp == 199 -> return [Int]{67, 807}
-    if cp == 200 -> return [Int]{69, 768}
-    if cp == 201 -> return [Int]{69, 769}
-    if cp == 202 -> return [Int]{69, 770}
-    if cp == 203 -> return [Int]{69, 776}
-    if cp == 204 -> return [Int]{73, 768}
-    if cp == 205 -> return [Int]{73, 769}
-    if cp == 206 -> return [Int]{73, 770}
-    if cp == 207 -> return [Int]{73, 776}
-    if cp == 209 -> return [Int]{78, 771}
-    if cp == 210 -> return [Int]{79, 768}
-    if cp == 211 -> return [Int]{79, 769}
-    if cp == 212 -> return [Int]{79, 770}
-    if cp == 213 -> return [Int]{79, 771}
-    if cp == 214 -> return [Int]{79, 776}
-    if cp == 217 -> return [Int]{85, 768}
-    if cp == 218 -> return [Int]{85, 769}
-    if cp == 219 -> return [Int]{85, 770}
-    if cp == 220 -> return [Int]{85, 776}
-    if cp == 221 -> return [Int]{89, 769}
-    if cp == 224 -> return [Int]{97, 768}
-    if cp == 225 -> return [Int]{97, 769}
-    if cp == 226 -> return [Int]{97, 770}
-    if cp == 227 -> return [Int]{97, 771}
-    if cp == 228 -> return [Int]{97, 776}
-    if cp == 229 -> return [Int]{97, 778}
-    if cp == 231 -> return [Int]{99, 807}
-    if cp == 232 -> return [Int]{101, 768}
-    if cp == 233 -> return [Int]{101, 769}
-    if cp == 234 -> return [Int]{101, 770}
-    if cp == 235 -> return [Int]{101, 776}
-    if cp == 236 -> return [Int]{105, 768}
-    if cp == 237 -> return [Int]{105, 769}
-    if cp == 238 -> return [Int]{105, 770}
-    if cp == 239 -> return [Int]{105, 776}
-    if cp == 241 -> return [Int]{110, 771}
-    if cp == 242 -> return [Int]{111, 768}
-    if cp == 243 -> return [Int]{111, 769}
-    if cp == 244 -> return [Int]{111, 770}
-    if cp == 245 -> return [Int]{111, 771}
-    if cp == 246 -> return [Int]{111, 776}
-    if cp == 249 -> return [Int]{117, 768}
-    if cp == 250 -> return [Int]{117, 769}
-    if cp == 251 -> return [Int]{117, 770}
-    if cp == 252 -> return [Int]{117, 776}
-    if cp == 253 -> return [Int]{121, 769}
-    if cp == 255 -> return [Int]{121, 776}
-    if cp == 304 -> return [Int]{73, 775}
-    if compat {
-        if cp >= 65281 && cp <= 65374 -> return [Int]{cp - 65248}
-        if cp == 338 -> return [Int]{79, 69}
-        if cp == 339 -> return [Int]{111, 101}
-        if cp == 64256 -> return [Int]{102, 102}
-        if cp == 64257 -> return [Int]{102, 105}
-        if cp == 64258 -> return [Int]{102, 108}
-        if cp == 64259 -> return [Int]{102, 102, 105}
-        if cp == 64260 -> return [Int]{102, 102, 108}
-        if cp == 64261 -> return [Int]{115, 116}
-        if cp == 64262 -> return [Int]{115, 116}
-        if cp == 185 -> return [Int]{49}
-        if cp == 178 -> return [Int]{50}
-        if cp == 179 -> return [Int]{51}
-    }
-    [Int]{cp}
-}
-
-fn canon_order(cps: [Int]) -> [Int] {
+    if !non_ascii -> return ~text
+    // #4318: capture static-list values once, not at each lookup/recursive child;
+    // current bootstrap constant emission copies a list at each mention.
+    index_asset :: text_normal_index.UNICODE_DECOMP_INDEX
+    pool_asset :: text_normal_pool.UNICODE_DECOMP_POOL
+    ccc_asset :: text_normal_ccc.UNICODE_CCC
+    // #4392: keep validated record borrows inside their retained asset scope.
+    assert(text_unicode_assets.valid(index_asset, 5, 7), "invalid Unicode asset schema/version/extent")
+    assert(text_unicode_assets.valid(pool_asset, 1, 3), "invalid Unicode asset schema/version/extent")
+    assert(text_unicode_assets.valid(ccc_asset, 3, 7), "invalid Unicode asset schema/version/extent")
+    index_bytes :: index_asset[0..<index_asset.len()]
+    pool_bytes :: pool_asset[0..<pool_asset.len()]
+    ccc_bytes :: ccc_asset[0..<ccc_asset.len()]
+    index :: index_asset[40..<text_unicode_assets.uint(index_bytes, 28, 4)]
+    pool :: pool_asset[40..<text_unicode_assets.uint(pool_bytes, 28, 4)]
+    ccc :: ccc_asset[40..<text_unicode_assets.uint(ccc_bytes, 28, 4)]
     out := [Int]{}
-    loop c in cps -> &out.push(c)
-    i := 1
-    loop {
-        if i >= out.len() -> return ~out
-        cc :: combining_class(out[i])
-        prev :: combining_class(out[i - 1])
-        if cc != 0 && prev > cc {
-            tmp := out[i]
-            out[i] = out[i - 1]
-            out[i - 1] = tmp
-            if i > 1 {
-                i = i - 1
-                next
-            }
-        }
-        i = i + 1
+    at := 0
+    loop at < bytes.len() {
+        width :: text_unicode_string.utf8_width_at(bytes, at)
+        cp := Int.from_u8(bytes[at])
+        if width == 2 -> cp = cp & 31
+        if width == 3 -> cp = cp & 15
+        if width == 4 -> cp = cp & 7
+        loop k in 1..<width -> cp = (cp << 6) | (Int.from_u8(bytes[at + k]) & 63)
+        decompose_cp(&out, cp, compat, index, pool)
+        at = at + width
     }
-}
-
-fn compose(cps: [Int]) -> String {
-    if cps.len() == 0 -> return ""
-    out := [Int]{}
-    starter := -1
-    last_class := -1
-    loop cp in cps {
-        cc :: combining_class(cp)
-        if starter >= 0 {
-            composed :: compose_pair(out[starter], cp)
-            if composed != None && last_class < cc {
-                out[starter] = composed
-                next
-            }
-        }
-        &out.push(cp)
-        if cc == 0 {
-            starter = out.len() - 1
-            last_class = -1
-        } else {
-            last_class = cc
-        }
+    canon_order(&out, ccc)
+    if recompose {
+        pairs_asset :: text_normal_compose.UNICODE_COMPOSE_PAIRS
+        assert(text_unicode_assets.valid(pairs_asset, 6, 9), "invalid Unicode asset schema/version/extent")
+        pairs_bytes :: pairs_asset[0..<pairs_asset.len()]
+        pairs :: pairs_asset[40..<text_unicode_assets.uint(pairs_bytes, 28, 4)]
+        return compose(&out, ccc, pairs)
     }
     encode_cps(out)
 }
 
-fn compose_pair(a: Int, b: Int) -> Int? {
-    h :: hangul_compose(a, b)
-    if h != None -> return Val(h)
-    if b == 768 {
-        if a == 65 -> return Val(192)
-        if a == 69 -> return Val(200)
-        if a == 73 -> return Val(204)
-        if a == 79 -> return Val(210)
-        if a == 85 -> return Val(217)
-        if a == 97 -> return Val(224)
-        if a == 101 -> return Val(232)
-        if a == 105 -> return Val(236)
-        if a == 111 -> return Val(242)
-        if a == 117 -> return Val(249)
+// Recursive expansion appends to one buffer, including algorithmic Hangul LV/LVT.
+fn decompose_cp(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
+    sindex :: cp - C_SBASE
+    if sindex >= 0 && sindex < C_SCOUNT {
+        &out.push(C_LBASE + sindex /% C_NCOUNT)
+        &out.push(C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT)
+        if sindex % C_TCOUNT != 0 -> &out.push(C_TBASE + sindex % C_TCOUNT)
+        return
     }
-    if b == 769 {
-        if a == 65 -> return Val(193)
-        if a == 69 -> return Val(201)
-        if a == 73 -> return Val(205)
-        if a == 79 -> return Val(211)
-        if a == 85 -> return Val(218)
-        if a == 89 -> return Val(221)
-        if a == 97 -> return Val(225)
-        if a == 101 -> return Val(233)
-        if a == 105 -> return Val(237)
-        if a == 111 -> return Val(243)
-        if a == 117 -> return Val(250)
-        if a == 121 -> return Val(253)
+    low := 0
+    high := index.len() /% 7
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 7
+        code :: text_unicode_assets.uint(index, row, 3)
+        if {
+            cp < code -> high = mid
+            cp > code -> low = mid + 1
+            else -> {
+                if compat || index[row + 6] == (U8{1}) {
+                    offset :: text_unicode_assets.uint(index, row + 3, 2)
+                    length :: Int.from_u8(index[row + 5])
+                    loop child in offset..<(offset + length) {
+                        decompose_cp(&out, text_unicode_assets.scalar(pool, child), compat, index, pool)
+                    }
+                    return
+                }
+                break
+            }
+        }
     }
-    if b == 770 {
-        if a == 65 -> return Val(194)
-        if a == 69 -> return Val(202)
-        if a == 73 -> return Val(206)
-        if a == 79 -> return Val(212)
-        if a == 85 -> return Val(219)
-        if a == 97 -> return Val(226)
-        if a == 101 -> return Val(234)
-        if a == 105 -> return Val(238)
-        if a == 111 -> return Val(244)
-        if a == 117 -> return Val(251)
+    &out.push(cp)
+}
+
+// Rust `ccc` (BudgetStore.rs:1326-1342): binary search the generated nonzero ranges.
+fn normal_ccc(table: View<U8>, cp: Int) -> Int Never! {
+    text_unicode_assets.tag(table, cp, 0)
+}
+
+
+// Rust `nfc` canonical ordering (BudgetStore.rs:1264-1276).
+// Stable counting sort of each nonstarter run gives linear time even for hostile
+// descending CCC sequences. Sorted runs (the usual case) need no scratch allocation.
+fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
+    positions := [Int]{}
+    scratch := [Int]{}
+    at := 0
+    loop at < cps.len() {
+        if normal_ccc(ccc, cps[at]) == 0 {
+            at = at + 1
+            next
+        }
+        start :: at
+        previous := 0
+        unordered := false
+        loop at < cps.len() {
+            class :: normal_ccc(ccc, cps[at])
+            if class == 0 -> break
+            if previous > class -> unordered = true
+            previous = class
+            at = at + 1
+        }
+        if !unordered -> next
+        if positions.len() == 0 -> loop _ in 0..<256 -> &positions.push(0)
+        loop class in 1..<256 -> positions[class] = 0
+        loop i in start..<at {
+            class :: normal_ccc(ccc, cps[i])
+            positions[class] = positions[class] + 1
+        }
+        offset := 0
+        loop class in 1..<256 {
+            count :: ~positions[class]
+            positions[class] = offset
+            offset = offset + count
+        }
+        loop scratch.len() < at - start -> &scratch.push(0)
+        loop i in start..<at {
+            class :: normal_ccc(ccc, cps[i])
+            scratch[positions[class]] = cps[i]
+            positions[class] = positions[class] + 1
+        }
+        loop i in 0..<(at - start) -> cps[start + i] = scratch[i]
     }
-    if b == 771 {
-        if a == 65 -> return Val(195)
-        if a == 78 -> return Val(209)
-        if a == 79 -> return Val(213)
-        if a == 97 -> return Val(227)
-        if a == 110 -> return Val(241)
-        if a == 111 -> return Val(245)
+}
+
+// Rust `nfc` composition/blocking (BudgetStore.rs:1277-1293).
+// Compact in place: a successful composition does not change last_class.
+fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
+    length := 0
+    starter := 0
+    last_class := 0
+    loop i in 0..<cps.len() {
+        cp :: ~cps[i]
+        class :: normal_ccc(ccc, cp)
+        if length > 0 && (last_class < class || last_class == 0) {
+            if compose_pair(pairs, cps[starter], cp) == .Val(combined) {
+                cps[starter] = combined
+                next
+            }
+        }
+        if class == 0 -> starter = length
+        cps[length] = cp
+        length = length + 1
+        last_class = class
     }
-    if b == 775 && a == 73 -> return Val(304)
-    if b == 776 {
-        if a == 65 -> return Val(196)
-        if a == 69 -> return Val(203)
-        if a == 73 -> return Val(207)
-        if a == 79 -> return Val(214)
-        if a == 85 -> return Val(220)
-        if a == 97 -> return Val(228)
-        if a == 101 -> return Val(235)
-        if a == 105 -> return Val(239)
-        if a == 111 -> return Val(246)
-        if a == 117 -> return Val(252)
-        if a == 121 -> return Val(255)
-    }
-    if b == 778 {
-        if a == 65 -> return Val(197)
-        if a == 97 -> return Val(229)
-    }
-    if b == 807 {
-        if a == 67 -> return Val(199)
-        if a == 99 -> return Val(231)
+    encode_cps_prefix(cps, length)
+}
+
+// Rust `compose` (BudgetStore.rs:1343-1367); excluded compositions are absent
+// from the generated pairs, including singleton and nonstarter exclusions.
+fn compose_pair(pairs: View<U8>, a: Int, b: Int) -> Int? {
+    if hangul_compose(a, b) == .Val(cp) -> return Val(cp)
+    low := 0
+    high := pairs.len() /% 9
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 9
+        left :: text_unicode_assets.uint(pairs, row, 3)
+        right :: text_unicode_assets.uint(pairs, row + 3, 3)
+        if {
+            a < left || (a == left && b < right) -> high = mid
+            a > left || (a == left && b > right) -> low = mid + 1
+            else -> return Val(text_unicode_assets.uint(pairs, row + 6, 3))
+        }
     }
     None
 }
 
+
+// Rust Text.rs:429-466 jet_text_graphemes: GB11 keeps the Extended_Pictographic
+// state through Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
+// Consonant [Extend|Linker]* Linker [Extend|Linker]* × Consonant.
 fn split_graphemes(text: String) -> [String] {
     cps :: decode_scalars(text)
     if cps.len() == 0 -> return [String]{}
     out := [String]{}
     cluster := [Int]{cps[0]}
     ri_run := if is_ri(cps[0]) -> 1 else -> 0
-    i := 1
-    loop {
-        if i >= cps.len() {
-            &out.push(encode_cps(cluster))
-            return ~out
-        }
-        prev :: cluster[cluster.len() - 1]
+    saw_pic := is_extended_pictographic(cps[0])
+    incb_pending := incb_class(cps[0]) == 2
+    incb_linker := false
+    loop i in 1..<cps.len() {
         cur :: cps[i]
-        break_here := grapheme_break(prev, cur)
-        // GB11 needs a pictographic Extend* prefix before the ZWJ.
-        if prev == 0x200D && is_emoji(cur) -> break_here = !has_emoji_zwj_prefix(cluster)
-        if is_ri(prev) && is_ri(cur) && ri_run % 2 == 0 -> break_here = true
+        pc :: grapheme_class(cps[i - 1])
+        cc :: grapheme_class(cur)
+        incb :: incb_class(cur)
+        break_here :: if {
+            pc == 5 && saw_pic && is_extended_pictographic(cur) -> false
+            pc == 6 && cc == 6 -> ri_run % 2 == 0
+            incb_pending && incb_linker && incb == 2 -> false
+            else -> grapheme_break_classes(pc, cc)
+        }
         if break_here {
             &out.push(encode_cps(cluster))
-            cluster = [Int]{cur}
-            ri_run = if is_ri(cur) -> 1 else -> 0
-        } else {
-            &cluster.push(cur)
-            if is_ri(cur) -> ri_run = ri_run + 1 else -> ri_run = 0
+            cluster = [Int]{}
         }
-        i = i + 1
+        &cluster.push(cur)
+        ri_run = if cc == 6 -> ri_run + 1 else -> 0
+        if cc != 4 && cc != 5 -> saw_pic = is_extended_pictographic(cur)
+        if incb == 2 {
+            incb_pending = true
+            incb_linker = false
+        } else if incb == 1 {
+            if incb_pending -> incb_linker = true
+        } else if incb != 3 {
+            incb_pending = false
+            incb_linker = false
+        }
     }
+    &out.push(encode_cps(cluster))
+    out
 }
 
-fn grapheme_break(prev: Int, cur: Int) -> Bool {
-    // GB3 CR × LF
-    if prev == 13 && cur == 10 -> return false
-    // GB4 / GB5
-    if prev == 13 || prev == 10 || is_control(prev) -> return true
-    if cur == 13 || cur == 10 || is_control(cur) -> return true
-    // GB6-8 Hangul
-    if is_l(prev) && (is_l(cur) || is_v(cur) || is_lv(cur) || is_lvt(cur)) -> return false
-    if (is_lv(prev) || is_v(prev)) && (is_v(cur) || is_t(cur)) -> return false
-    if (is_lvt(prev) || is_t(prev)) && is_t(cur) -> return false
-    // GB9 Extend / ZWJ
-    if is_extend(cur) || cur == 0x200D -> return false
-    // GB9a SpacingMark (approx: Mc)
-    if cur >= 0x0903 && cur <= 0x0903 -> return false
-    // GB12/13 RI × RI
-    if is_ri(prev) && is_ri(cur) -> return false
+// Rust Text.rs:416-427 GB3-GB9b/GB999 over pinned Grapheme_Cluster_Break tags:
+// 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark,
+// 9 L, 10 V, 11 T, 12 LV, 13 LVT.
+fn grapheme_break_classes(pc: Int, cc: Int) -> Bool {
+    if pc == 1 && cc == 2 -> return false
+    if pc == 1 || pc == 2 || pc == 3 -> return true
+    if cc == 1 || cc == 2 || cc == 3 -> return true
+    if pc == 9 && (cc == 9 || cc == 10 || cc == 12 || cc == 13) -> return false
+    if (pc == 12 || pc == 10) && (cc == 10 || cc == 11) -> return false
+    if (pc == 13 || pc == 11) && cc == 11 -> return false
+    if cc == 4 || cc == 5 -> return false
+    if cc == 8 -> return false
+    if pc == 7 -> return false
     true
 }
-fn has_emoji_zwj_prefix(cluster: [Int]) -> Bool {
-    i := cluster.len() - 2
-    loop i >= 0 {
-        cp :: cluster[i]
-        if cp == 0x200D -> return false
-        if !is_extend(cp) -> return is_emoji(cp)
-        i = i - 1
-    }
-    false
+
+
+// Rust Text.rs:393 Indic_Conjunct_Break: 0 None, 1 Linker, 2 Consonant, 3 Extend.
+fn incb_class(cp: Int) -> Int {
+    text_unicode_assets.asset_tag(text_incb.UNICODE_INCB, cp, 0)
 }
-
-
-fn is_control(cp: Int) -> Bool { (cp < 32 && cp != 9 && cp != 10 && cp != 13) || (cp >= 127 && cp <= 159) }
-fn is_l(cp: Int) -> Bool { cp >= C_LBASE && cp < C_LBASE + C_LCOUNT }
-fn is_v(cp: Int) -> Bool { cp >= C_VBASE && cp < C_VBASE + C_VCOUNT }
-fn is_t(cp: Int) -> Bool { cp >= C_TBASE + 1 && cp < C_TBASE + C_TCOUNT }
-fn is_lv(cp: Int) -> Bool {
-    s :: cp - C_SBASE
-    s >= 0 && s < C_SCOUNT && s % C_TCOUNT == 0
+fn grapheme_class(cp: Int) -> Int {
+    text_unicode_assets.asset_tag(text_grapheme.UNICODE_GRAPHEME_BREAK, cp, 0)
 }
-fn is_lvt(cp: Int) -> Bool {
-    s :: cp - C_SBASE
-    s >= 0 && s < C_SCOUNT && s % C_TCOUNT != 0
-}
-fn is_ri(cp: Int) -> Bool { cp >= 127462 && cp <= 127487 }
-fn is_emoji(cp: Int) -> Bool { (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) }
-
-fn split_words(text: String) -> [String] {
-    out := [String]{}
-    cur := [Int]{}
-    loop cp in decode_scalars(text) {
-        if is_alpha_cp(cp) || is_digit_cp(cp) || cp == 95 {
-            &cur.push(cp)
-            next
-        }
-        if cp == 39 && cur.len() > 0 {
-            &cur.push(cp)
-            next
-        }
-        if cur.len() > 0 {
-            &out.push(encode_cps(cur))
-            cur = [Int]{}
-        }
-    }
-    if cur.len() > 0 -> &out.push(encode_cps(cur))
-    out
-}
-
-fn is_word_cp(cp: Int) -> Bool { is_alpha_cp(cp) || is_digit_cp(cp) || cp == 95 || cp == 39 }
-
-fn split_sentences(text: String) -> [String] {
-    out := [String]{}
-    cur := [Int]{}
-    loop cp in decode_scalars(text) {
-        &cur.push(cp)
-        if cp == 46 || cp == 33 || cp == 63 || cp == 0x3002 || cp == 0xFF01 || cp == 0xFF1F {
-            sentence :: trim(encode_cps(cur))
-            if sentence.bytes().len() > 0 -> &out.push(sentence)
-            cur = [Int]{}
-        }
-    }
-    if cur.len() > 0 {
-        sentence :: trim(encode_cps(cur))
-        if sentence.bytes().len() > 0 -> &out.push(sentence)
-    }
-    out
+fn is_ri(cp: Int) -> Bool { grapheme_class(cp) == 6 }
+fn is_extended_pictographic(cp: Int) -> Bool {
+    text_unicode_assets.asset_contains(text_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC, cp)
 }
 
 fn split_lines(text: String) -> [String] {
@@ -962,40 +667,38 @@ fn split_lines(text: String) -> [String] {
     out
 }
 
+// Rust Text.rs:887-914 portable-default grapheme width. Emoji is not the
+// Extended_Pictographic property used by GB11, and VS16 alone is not wide.
 fn cluster_width(cps: [Int]) -> Int {
     if cps.len() == 0 -> return 0
-    wide := false
-    pictographic := false
-    keycap := false
-    visible := false
+    category_asset :: text_category.UNICODE_GENERAL_CATEGORY
+    if text_unicode_assets.asset_tag(category_asset, cps[0], 8) == 0 -> return 0
+    keycap_base :: (cps[0] >= 48 && cps[0] <= 57) || cps[0] == 35 || cps[0] == 42
+    keycap :: keycap_base && ((cps.len() == 2 && cps[1] == 0x20E3) ||
+        (cps.len() == 3 && cps[1] == 0xFE0F && cps[2] == 0x20E3))
+    if keycap -> return 2
+    if cps.len() >= 2 && is_ri(cps[0]) && is_ri(cps[1]) -> return 2
+    eaw_asset :: text_eaw.UNICODE_EAST_ASIAN_WIDTH
+    emoji_asset :: text_emoji.UNICODE_EMOJI
+    presentation_asset :: text_emoji_presentation.UNICODE_EMOJI_PRESENTATION
+    ignorable_asset :: text_ignorable.UNICODE_DEFAULT_IGNORABLE
     variation := false
+    emoji := false
+    visible := false
     loop cp in cps {
-        if cp == 0x20E3 -> keycap = true
         if cp == 0xFE0F -> variation = true
-        if is_emoji(cp) -> pictographic = true
-        w :: east_asian_width(cp)
-        if w > 1 -> wide = true
-        if w > 0 && !is_extend(cp) -> visible = true
+        if text_unicode_assets.asset_contains(emoji_asset, cp) -> emoji = true
+        if text_unicode_assets.asset_tag(eaw_asset, cp, 0) == 2 ||
+            text_unicode_assets.asset_contains(presentation_asset, cp) -> return 2
+        category :: text_unicode_assets.asset_tag(category_asset, cp, 8)
+        if category != 2 && category != 3 &&
+            !text_unicode_assets.asset_contains(ignorable_asset, cp) -> visible = true
     }
-    if keycap || wide || pictographic || (variation && visible) -> return 2
+    if variation && emoji -> return 2
     if !visible -> return 0
     1
 }
 
-fn east_asian_width(cp: Int) -> Int {
-    if combining_class(cp) != 0 -> return 0
-    if cp < 32 || (cp >= 127 && cp <= 159) -> return 0
-    if (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2329 && cp <= 0x232A) -> return 2
-    if (cp >= 0x2E80 && cp <= 0xA4CF) && cp != 0x303F -> return 2
-    if cp >= 0xAC00 && cp <= 0xD7A3 -> return 2
-    if cp >= 0xF900 && cp <= 0xFAFF -> return 2
-    if cp >= 0xFE10 && cp <= 0xFE19 -> return 2
-    if cp >= 0xFE30 && cp <= 0xFE6F -> return 2
-    if cp >= 0xFF00 && cp <= 0xFF60 -> return 2
-    if cp >= 0xFFE0 && cp <= 0xFFE6 -> return 2
-    if cp >= 0x1F300 && cp <= 0x1FAFF -> return 2
-    1
-}
 
 fn hex_cp(cp: Int) -> String {
     hex := "0123456789ABCDEF"

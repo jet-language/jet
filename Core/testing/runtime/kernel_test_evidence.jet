@@ -1,0 +1,342 @@
+// PORT-PENDING 0159 crates-jet-codegen-src-prelude-core-receipt-module-group: crates/jet-codegen/src/Prelude/Core/TestEvidence.rs:1-338
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-CLAIM1 / D-TEST-EVIDENCE1: one typed test-evidence boundary for every
+//RS // execution tier. Foundation owns the jet.evidence/v1 record and report shape;
+//RS // this file owns only test meaning and validation. Hosts provide execution and
+//RS // I/O, then hand the typed values here.
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum TestEvidenceError {
+//RS     SchemaConflict { expected: u16, found: u16 },
+//RS     ProducerConflict {
+//RS         expected: EvidenceProducerKind,
+//RS         found: EvidenceProducerKind,
+//RS     },
+//RS     EmptyReportId,
+//RS     EmptyClaimId,
+//RS     EmptyEvidenceId,
+//RS     InvalidOutcome { outcome: EvidenceOutcome },
+//RS     InvalidExpectation {
+//RS         expectation: EvidenceExpectation,
+//RS         outcome: EvidenceOutcome,
+//RS     },
+//RS     IdentityConflict {
+//RS         field: &'static str,
+//RS         expected: String,
+//RS         found: String,
+//RS     },
+//RS     Io {
+//RS         operation: String,
+//RS         path: String,
+//RS         message: String,
+//RS     },
+//RS     GoldenMissing { path: String },
+//RS     GoldenUnreadable { path: String },
+//RS     GoldenMismatch { path: String, diff: String },
+//RS     FixtureMissing { path: String },
+//RS     FixtureUnreadable { path: String },
+//RS     ContradictoryOutcome {
+//RS         claim_id: String,
+//RS         existing: EvidenceOutcome,
+//RS         found: EvidenceOutcome,
+//RS     },
+//RS     Foundation(EvidenceMergeError),
+//RS }
+//RS 
+//RS impl TestEvidenceError {
+//RS     pub fn io(
+//RS         operation: impl Into<String>,
+//RS         path: impl Into<String>,
+//RS         message: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self::Io {
+//RS             operation: operation.into(),
+//RS             path: path.into(),
+//RS             message: message.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Split a typed test-evidence failure into the message and detail slots
+//RS     /// consumed by the canonical runtime-stop renderer.
+//RS     pub fn report_parts(&self) -> (String, String) {
+//RS         let rendered = self.to_string();
+//RS         rendered
+//RS             .split_once('\n')
+//RS             .map(|(message, detail)| (message.to_string(), detail.to_string()))
+//RS             .unwrap_or((rendered, String::new()))
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for TestEvidenceError {
+//RS     fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         match self {
+//RS             Self::SchemaConflict { expected, found } => write!(
+//RS                 output,
+//RS                 "test evidence requires jet.evidence/v{expected}, found v{found}"
+//RS             ),
+//RS             Self::ProducerConflict { expected, found } => write!(
+//RS                 output,
+//RS                 "test evidence producer must be {}, found {}",
+//RS                 expected.as_str(),
+//RS                 found.as_str()
+//RS             ),
+//RS             Self::EmptyReportId => output.write_str("test evidence report id must not be empty"),
+//RS             Self::EmptyClaimId => output.write_str("test evidence claim id must not be empty"),
+//RS             Self::EmptyEvidenceId => output.write_str("test evidence evidence id must not be empty"),
+//RS             Self::IdentityConflict {
+//RS                 field,
+//RS                 expected,
+//RS                 found,
+//RS             } => write!(
+//RS                 output,
+//RS                 "test evidence identity conflict for {field}: {expected} versus {found}"
+//RS             ),
+//RS             Self::InvalidOutcome { outcome } => write!(
+//RS                 output,
+//RS                 "test evidence outcome {} is not a terminal test outcome",
+//RS                 outcome.as_str()
+//RS             ),
+//RS             Self::InvalidExpectation {
+//RS                 expectation,
+//RS                 outcome,
+//RS             } => write!(
+//RS                 output,
+//RS                 "test evidence expectation {} cannot describe outcome {}",
+//RS                 expectation.as_str(),
+//RS                 outcome.as_str()
+//RS             ),
+//RS             Self::Io {
+//RS                 operation,
+//RS                 path,
+//RS                 message,
+//RS             } => write!(
+//RS                 output,
+//RS                 "test evidence {operation} failed for {path}: {message}"
+//RS             ),
+//RS             Self::GoldenMissing { path } => {
+//RS                 write!(output, "golden file is missing: {path}\npath: {path}")
+//RS             }
+//RS             Self::GoldenUnreadable { path } => {
+//RS                 write!(output, "golden file cannot be read: {path}\npath: {path}")
+//RS             }
+//RS             Self::GoldenMismatch { path, diff } => {
+//RS                 write!(output, "golden file differs: {path}\npath: {path}\n{diff}")
+//RS             }
+//RS             Self::FixtureMissing { path } => {
+//RS                 write!(output, "fixture is missing: {path}\npath: {path}")
+//RS             }
+//RS             Self::FixtureUnreadable { path } => {
+//RS                 write!(output, "fixture cannot be read: {path}\npath: {path}")
+//RS             }
+//RS             Self::ContradictoryOutcome {
+//RS                 claim_id,
+//RS                 existing,
+//RS                 found,
+//RS             } => write!(
+//RS                 output,
+//RS                 "test claim {claim_id} has contradictory terminal outcomes: {} versus {}",
+//RS                 existing.as_str(),
+//RS                 found.as_str()
+//RS             ),
+//RS             Self::Foundation(error) => error.fmt(output),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for TestEvidenceError {}
+//RS 
+//RS impl From<EvidenceMergeError> for TestEvidenceError {
+//RS     fn from(error: EvidenceMergeError) -> Self {
+//RS         Self::Foundation(error)
+//RS     }
+//RS }
+//RS impl From<EvidenceExpectationError> for TestEvidenceError {
+//RS     fn from(error: EvidenceExpectationError) -> Self {
+//RS         match error {
+//RS             EvidenceExpectationError::InvalidOutcome {
+//RS                 expectation,
+//RS                 outcome,
+//RS             } => Self::InvalidExpectation {
+//RS                 expectation,
+//RS                 outcome,
+//RS             },
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn validate_test_report(report: &EvidenceReport) -> Result<(), TestEvidenceError> {
+//RS     if report.schema_version != EVIDENCE_REPORT_VERSION {
+//RS         return Err(TestEvidenceError::SchemaConflict {
+//RS             expected: EVIDENCE_REPORT_VERSION,
+//RS             found: report.schema_version,
+//RS         });
+//RS     }
+//RS     if report.producer != EvidenceProducerKind::Test {
+//RS         return Err(TestEvidenceError::ProducerConflict {
+//RS             expected: EvidenceProducerKind::Test,
+//RS             found: report.producer,
+//RS         });
+//RS     }
+//RS     if report.identity.report_id.is_empty() {
+//RS         return Err(TestEvidenceError::EmptyReportId);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS // Property passes and producer-unavailable outcomes are terminal wire records
+//RS // for a test run even though they do not count as ordinary example passes.
+//RS fn is_terminal_test_outcome(outcome: EvidenceOutcome) -> bool {
+//RS     matches!(
+//RS         outcome,
+//RS         EvidenceOutcome::Generated
+//RS             | EvidenceOutcome::Passed
+//RS             | EvidenceOutcome::Failed
+//RS             | EvidenceOutcome::Skipped
+//RS             | EvidenceOutcome::Unavailable
+//RS             | EvidenceOutcome::Error
+//RS     )
+//RS }
+//RS 
+//RS fn validate_test_record(
+//RS     report: &EvidenceReport,
+//RS     record: &EvidenceRecord,
+//RS ) -> Result<(), TestEvidenceError> {
+//RS     if record.producer != EvidenceProducerKind::Test {
+//RS         return Err(TestEvidenceError::ProducerConflict {
+//RS             expected: EvidenceProducerKind::Test,
+//RS             found: record.producer,
+//RS         });
+//RS     }
+//RS     if record.identity.report_id != report.identity.report_id {
+//RS         return Err(TestEvidenceError::IdentityConflict {
+//RS             field: "report_id",
+//RS             expected: report.identity.report_id.clone(),
+//RS             found: record.identity.report_id.clone(),
+//RS         });
+//RS     }
+//RS     if record.identity.claim_id.is_empty() {
+//RS         return Err(TestEvidenceError::EmptyClaimId);
+//RS     }
+//RS     if record.identity.evidence_id.is_empty() {
+//RS         return Err(TestEvidenceError::EmptyEvidenceId);
+//RS     }
+//RS     if !is_terminal_test_outcome(record.outcome) {
+//RS         return Err(TestEvidenceError::InvalidOutcome {
+//RS             outcome: record.outcome,
+//RS         });
+//RS     }
+//RS     record.validate().map_err(TestEvidenceError::from)?;
+//RS     if !report.identity.claim_id.is_empty()
+//RS         && report.identity.claim_id != record.identity.claim_id
+//RS     {
+//RS         return Err(TestEvidenceError::IdentityConflict {
+//RS             field: "claim_id",
+//RS             expected: report.identity.claim_id.clone(),
+//RS             found: record.identity.claim_id.clone(),
+//RS         });
+//RS     }
+//RS     if !report.identity.evidence_id.is_empty()
+//RS         && report.identity.evidence_id != record.identity.evidence_id
+//RS     {
+//RS         return Err(TestEvidenceError::IdentityConflict {
+//RS             field: "evidence_id",
+//RS             expected: report.identity.evidence_id.clone(),
+//RS             found: record.identity.evidence_id.clone(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_test_records(report: &EvidenceReport) -> Result<(), TestEvidenceError> {
+//RS     let mut outcomes = std::collections::BTreeMap::<&str, EvidenceOutcome>::new();
+//RS     let mut evidence = std::collections::BTreeMap::<&str, &EvidenceRecord>::new();
+//RS     for record in &report.records {
+//RS         validate_test_record(report, record)?;
+//RS         if let Some(existing) = outcomes.get(record.identity.claim_id.as_str()) {
+//RS             if *existing != record.outcome {
+//RS                 return Err(TestEvidenceError::ContradictoryOutcome {
+//RS                     claim_id: record.identity.claim_id.clone(),
+//RS                     existing: *existing,
+//RS                     found: record.outcome,
+//RS                 });
+//RS             }
+//RS         } else {
+//RS             outcomes.insert(record.identity.claim_id.as_str(), record.outcome);
+//RS         }
+//RS         if let Some(existing) = evidence.get(record.identity.evidence_id.as_str()) {
+//RS             if *existing != record {
+//RS                 return Err(TestEvidenceError::Foundation(
+//RS                     EvidenceMergeError::RecordConflict {
+//RS                         evidence_id: record.identity.evidence_id.clone(),
+//RS                     },
+//RS                 ));
+//RS             }
+//RS         } else {
+//RS             evidence.insert(record.identity.evidence_id.as_str(), record);
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Add one test case without re-encoding or rewriting its identity, source,
+//RS /// build/revision provenance, attachments, completeness, diagnostics, or chain.
+//RS /// Equal duplicate records are idempotent; a claim cannot finish twice with
+//RS /// different terminal outcomes.
+//RS pub fn record_test_case(
+//RS     report: &mut EvidenceReport,
+//RS     record: EvidenceRecord,
+//RS ) -> Result<(), TestEvidenceError> {
+//RS     validate_test_report(report)?;
+//RS     validate_test_record(report, &record)?;
+//RS     if let Some(existing) = report
+//RS         .records
+//RS         .iter()
+//RS         .find(|existing| existing.identity.claim_id == record.identity.claim_id)
+//RS     {
+//RS         if existing.outcome != record.outcome {
+//RS             return Err(TestEvidenceError::ContradictoryOutcome {
+//RS                 claim_id: record.identity.claim_id.clone(),
+//RS                 existing: existing.outcome,
+//RS                 found: record.outcome,
+//RS             });
+//RS         }
+//RS     }
+//RS     let result = if record.derivation.is_some() {
+//RS         report.add_record(record)
+//RS     } else {
+//RS         let derivation = record.checked_derivation();
+//RS         report.add_record_with_derivation(record, derivation)
+//RS     };
+//RS     result.map_err(TestEvidenceError::Foundation)
+//RS }
+//RS 
+//RS /// Validate and canonicalize a test report. Re-adding through Foundation's
+//RS /// typed insertion path deduplicates equal records, rejects conflicting IDs,
+//RS /// merges completeness, and applies its deterministic record order. Report
+//RS /// attachments, diagnostics, root provenance, and every record link remain
+//RS /// untouched.
+//RS pub fn finalize_test_report(
+//RS     mut report: EvidenceReport,
+//RS ) -> Result<EvidenceReport, TestEvidenceError> {
+//RS     validate_test_report(&report)?;
+//RS     validate_test_records(&report)?;
+//RS     let records = std::mem::take(&mut report.records);
+//RS     for record in records {
+//RS         record_test_case(&mut report, record)?;
+//RS     }
+//RS     Ok(report)
+//RS }
+//RS 
+//RS /// Validate the typed test report and return Foundation's deterministic
+//RS /// projection. No terminal text or JSON is parsed and no host policy is applied.
+//RS pub fn query_test_evidence(
+//RS     report: &EvidenceReport,
+//RS     claim_id: Option<&str>,
+//RS ) -> Result<Vec<EvidenceProjection>, TestEvidenceError> {
+//RS     validate_test_report(report)?;
+//RS     validate_test_records(report)?;
+//RS     Ok(report.query(claim_id))
+//RS }
+// END-PORT-PENDING 0159 crates/jet-codegen/src/Prelude/Core/TestEvidence.rs:1-338
+

@@ -1,0 +1,683 @@
+// PORT-PENDING 0129 crates-jet-codegen-src-prelude-corelib-top-encodingcodecs-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:1-679
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.crypto.uuid ───────
+//RS // Pure std implementations; zero external crates (I6); memory-safe (I1).
+//RS 
+//RS fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
+//RS     jet_std_b64_decode_opts(text, false, false)
+//RS }
+//RS 
+//RS fn jet_std_b64_decode_opts(
+//RS     text: &String,
+//RS     allow_whitespace: bool,
+//RS     allow_missing_padding: bool,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     if __JET_PACKAGE_EDITION >= 2027 {
+//RS         jet_base_encoding_strict::decode_base64(text, allow_whitespace, allow_missing_padding)
+//RS     } else {
+//RS         jet_xml_pull::base_encoding_2026::decode_base64(text)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_std_b64_decodebytes(text: &String) -> Result<Vec<u8>, String> {
+//RS     jet_std_b64_decode_opts(text, true, false)
+//RS }
+//RS 
+//RS fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
+//RS     jet_std_b64url_decode_opts(text, false, false)
+//RS }
+//RS 
+//RS fn jet_std_b64url_decode_opts(
+//RS     text: &String,
+//RS     allow_whitespace: bool,
+//RS     allow_padding: bool,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     if __JET_PACKAGE_EDITION >= 2027 {
+//RS         jet_base_encoding_strict::decode_base64url(text, allow_whitespace, allow_padding)
+//RS     } else {
+//RS         jet_xml_pull::base_encoding_2026::decode_base64url(text)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
+//RS     jet_std_base32_decode_opts(text, false, false, false)
+//RS }
+//RS fn jet_std_base32hex_decode(text: &String) -> Result<Vec<u8>, String> {
+//RS     const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+//RS     let mut canonical = String::with_capacity(text.len());
+//RS     for ch in text.chars() {
+//RS         let mapped = match ch {
+//RS             '0'..='9' => STANDARD[(ch as u8 - b'0') as usize],
+//RS             'A'..='V' => STANDARD[(ch as u8 - b'A' + 10) as usize],
+//RS             '=' => b'=',
+//RS             _ => return Err("invalid Base32hex character".to_string()),
+//RS         };
+//RS         canonical.push(mapped as char);
+//RS     }
+//RS     jet_std_base32_decode(&canonical)
+//RS }
+//RS 
+//RS fn jet_std_base32_decode_opts(
+//RS     text: &String,
+//RS     allow_whitespace: bool,
+//RS     allow_missing_padding: bool,
+//RS     allow_lowercase: bool,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     if __JET_PACKAGE_EDITION >= 2027 {
+//RS         jet_base_encoding_strict::decode_base32(
+//RS             text,
+//RS             allow_whitespace,
+//RS             allow_missing_padding,
+//RS             allow_lowercase,
+//RS         )
+//RS     } else {
+//RS         jet_xml_pull::base_encoding_2026::decode_base32(text)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
+//RS     match value {
+//RS         crate::jet_xml_pull::Value::Null => jet_std::DataTree::Null,
+//RS         crate::jet_xml_pull::Value::Bool(value) => jet_std::DataTree::Bool(value),
+//RS         crate::jet_xml_pull::Value::Int(value) => jet_std::DataTree::Int(value),
+//RS         crate::jet_xml_pull::Value::Text(value) => jet_std::DataTree::Text(value),
+//RS         crate::jet_xml_pull::Value::Array(values) => jet_std::DataTree::Array(
+//RS             values.into_iter().map(jet_xml_to_data_tree).collect(),
+//RS         ),
+//RS         crate::jet_xml_pull::Value::Object(entries) => jet_std::DataTree::Object(
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|(key, value)| (key, jet_xml_to_data_tree(value)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pull::Value, String> {
+//RS     match value {
+//RS         jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
+//RS         jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
+//RS         jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+//RS         jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+//RS             Err("internal JSON carrier escaped typed decode".to_string())
+//RS         }
+//RS         jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
+//RS         jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
+//RS             values
+//RS                 .iter()
+//RS                 .map(jet_xml_from_data_tree)
+//RS                 .collect::<Result<Vec<_>, _>>()?,
+//RS         )),
+//RS         jet_std::DataTree::Object(entries) => Ok(crate::jet_xml_pull::Value::Object(
+//RS             entries
+//RS                 .iter()
+//RS                 .map(|(key, value)| Ok((key.clone(), jet_xml_from_data_tree(value)?)))
+//RS                 .collect::<Result<Vec<_>, String>>()?,
+//RS         )),
+//RS         jet_std::DataTree::Float(_) | jet_std::DataTree::Bytes(_) => {
+//RS             Err("XML tree cannot contain Float or Bytes values".to_string())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_reason(reason: crate::jet_xml_pull::Reason) -> jet_std::XMLReason {
+//RS     use crate::jet_xml_pull::Reason as Source;
+//RS     match reason {
+//RS         Source::InvalidEncoding => jet_std::XMLReason::InvalidEncoding,
+//RS         Source::Malformed => jet_std::XMLReason::Malformed,
+//RS         Source::MismatchedTag => jet_std::XMLReason::MismatchedTag,
+//RS         Source::InvalidName => jet_std::XMLReason::InvalidName,
+//RS         Source::Namespace => jet_std::XMLReason::Namespace,
+//RS         Source::DuplicateAttribute => jet_std::XMLReason::DuplicateAttribute,
+//RS         Source::Entity => jet_std::XMLReason::Entity,
+//RS         Source::EntityCycle => jet_std::XMLReason::EntityCycle,
+//RS         Source::Limit => jet_std::XMLReason::Limit,
+//RS         Source::Canonicalization => jet_std::XMLReason::Canonicalization,
+//RS         Source::Shape => jet_std::XMLReason::Shape,
+//RS         Source::Unsupported => jet_std::XMLReason::Unsupported,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
+//RS     jet_std::XMLError {
+//RS         kind: jet_xml_reason(error.kind),
+//RS         byte_offset: jet_outcome_of(Some(error.offset as i64)),
+//RS         line: jet_outcome_of(error.line.map(|value| value as i64)),
+//RS         column: jet_outcome_of(error.column.map(|value| value as i64)),
+//RS         path: error.path,
+//RS         reason: error.reason,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_shape_error(reason: String) -> jet_std::XMLError {
+//RS     jet_std::XMLError {
+//RS         kind: jet_std::XMLReason::Shape,
+//RS         byte_offset: jet_outcome_of(Some(0)),
+//RS         line: Err(JetAbsent),
+//RS         column: Err(JetAbsent),
+//RS         path: String::new(),
+//RS         reason,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
+//RS     let number = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
+//RS     let entities = match &options.entities {
+//RS         jet_std::XMLEntityPolicy::Preserve => crate::jet_xml_pull::EntityPolicy::Preserve,
+//RS         jet_std::XMLEntityPolicy::Reject => crate::jet_xml_pull::EntityPolicy::Reject,
+//RS         jet_std::XMLEntityPolicy::Resolve(values) => {
+//RS             crate::jet_xml_pull::EntityPolicy::Resolve(values.clone())
+//RS         }
+//RS     };
+//RS     crate::jet_xml_pull::ParseOptions {
+//RS         entities,
+//RS         limits: crate::jet_xml_pull::Limits {
+//RS             max_depth: number(options.limits.max_depth),
+//RS             max_nodes: number(options.limits.max_nodes),
+//RS             max_attributes_per_element: number(options.limits.max_attributes_per_element),
+//RS             max_name_bytes: number(options.limits.max_name_bytes),
+//RS             max_text_bytes: number(options.limits.max_text_bytes),
+//RS             max_entity_declarations: number(options.limits.max_entity_declarations),
+//RS             max_entity_depth: number(options.limits.max_entity_depth),
+//RS             max_entity_replacement_bytes: number(options.limits.max_entity_replacement_bytes),
+//RS         },
+//RS     }
+//RS }
+//RS fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::XMLError> {
+//RS     crate::jet_xml_kernel::parse_document(text)
+//RS         .map(jet_xml_to_data_tree)
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_parse_with(
+//RS     text: &String,
+//RS     options: &jet_std::XMLParseOptions,
+//RS ) -> Result<jet_std::DataTree, jet_std::XMLError> {
+//RS     crate::jet_xml_kernel::parse_document_with(text, &jet_xml_options(options))
+//RS         .map(jet_xml_to_data_tree)
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_parse_bytes(
+//RS     bytes: &Vec<u8>,
+//RS     options: jet_std::XMLParseOptions,
+//RS ) -> Result<jet_std::DataTree, jet_std::XMLError> {
+//RS     crate::jet_xml_kernel::parse_document_bytes_with(bytes, &jet_xml_options(&options))
+//RS         .map(jet_xml_to_data_tree)
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_render(
+//RS     d: &jet_std::DataTree,
+//RS ) -> Result<String, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::render_document(&value).map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_to_bytes(
+//RS     d: &jet_std::DataTree,
+//RS     options: jet_std::XMLRenderOptions,
+//RS ) -> Result<Vec<u8>, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::render_document_bytes(
+//RS         &value,
+//RS         jet_xml_render_encoding(&options.encoding),
+//RS         jet_xml_lexical_policy(&options.lexical),
+//RS     )
+//RS     .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_canonical(
+//RS     d: &jet_std::DataTree,
+//RS     options: &jet_std::XMLCanonical,
+//RS ) -> Result<String, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
+//RS     let mode = match options.mode {
+//RS         jet_std::XMLCanonicalMode::Inclusive11 => crate::jet_xml_pull::CanonicalMode::Inclusive11,
+//RS         jet_std::XMLCanonicalMode::Exclusive10 => crate::jet_xml_pull::CanonicalMode::Exclusive10,
+//RS     };
+//RS     crate::jet_xml_kernel::canonical_document(
+//RS         &value,
+//RS         &crate::jet_xml_pull::CanonicalOptions {
+//RS             mode,
+//RS             comments: options.comments,
+//RS             inclusive_prefixes: options.inclusive_prefixes.clone(),
+//RS         },
+//RS     )
+//RS     .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS // D-ENCXML-PROJECTION1=A: focused helpers + typed decode over the closed tree.
+//RS fn jet_std_xml_root(
+//RS     document: &jet_std::DataTree,
+//RS ) -> Result<jet_std::DataTree, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(document).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::document_root(&value)
+//RS         .map(jet_xml_to_data_tree)
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_expanded_name(
+//RS     node: &jet_std::DataTree,
+//RS ) -> Result<
+//RS     (
+//RS         String,
+//RS         JetOutcome<String, JetAbsent>,
+//RS         String,
+//RS         JetOutcome<String, JetAbsent>,
+//RS     ),
+//RS     jet_std::XMLError,
+//RS > {
+//RS     let value = jet_xml_from_data_tree(node).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::expanded_name_parts(&value)
+//RS         .map(|(raw, prefix, local, uri)| {
+//RS             (raw, jet_outcome_of(prefix), local, jet_outcome_of(uri))
+//RS         })
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_attribute(
+//RS     element: &jet_std::DataTree,
+//RS     name: &String,
+//RS ) -> Result<JetOutcome<String, JetAbsent>, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::lookup_attribute(&value, name)
+//RS         .map(jet_outcome_of)
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS fn jet_std_xml_content(
+//RS     element: &jet_std::DataTree,
+//RS ) -> Result<Vec<jet_std::DataTree>, jet_std::XMLError> {
+//RS     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
+//RS     crate::jet_xml_kernel::element_content(&value)
+//RS         .map(|nodes| nodes.into_iter().map(jet_xml_to_data_tree).collect())
+//RS         .map_err(jet_xml_error)
+//RS }
+//RS 
+//RS 
+//RS fn jet_decode_path(path: &str) -> String {
+//RS     if path == "$" {
+//RS         String::new()
+//RS     } else if let Some(path) = path.strip_prefix("$.") {
+//RS         path.to_string()
+//RS     } else {
+//RS         path.strip_prefix('$').unwrap_or(path).to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_xml_field_error(error: jet_std::XMLError) -> Vec<jet_std::FieldError> {
+//RS     let mut location = format!(
+//RS         " at byte {}",
+//RS         error.byte_offset.as_ref().ok().copied().unwrap_or(0)
+//RS     );
+//RS     match (
+//RS         error.line.as_ref().ok().copied(),
+//RS         error.column.as_ref().ok().copied(),
+//RS     ) {
+//RS         (Some(line), Some(column)) => {
+//RS             location.push_str(&format!(" (line {line}, column {column})"));
+//RS         }
+//RS         (Some(line), None) => {
+//RS             location.push_str(&format!(" (line {line})"));
+//RS         }
+//RS         (None, Some(column)) => {
+//RS             location.push_str(&format!(" (column {column})"));
+//RS         }
+//RS         (None, None) => {}
+//RS     }
+//RS     jet_std::FieldError::at(
+//RS         jet_decode_path(&error.path),
+//RS         format!("XML {:?}{location}: {}", error.kind, error.reason),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_xml_decode_source_error(error: crate::jet_xml_pull::Error) -> Vec<jet_std::FieldError> {
+//RS     jet_xml_field_error(jet_xml_error(error))
+//RS }
+//RS 
+//RS fn jet_xml_decode_value_error(error: jet_std::XMLError) -> Vec<jet_std::FieldError> {
+//RS     jet_xml_field_error(error)
+//RS }
+//RS 
+//RS fn jet_xml_decode_shape_error(reason: String) -> Vec<jet_std::FieldError> {
+//RS     jet_std::FieldError::one(reason)
+//RS }
+//RS 
+//RS fn jet_enc_xml_decode<T: __jet_Decode>(
+//RS     text: &String,
+//RS     options: jet_std::XMLParseOptions,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let document = jet_std_xml_parse_with(text, &options).map_err(jet_xml_decode_value_error)?;
+//RS     let value = jet_xml_from_data_tree(&document).map_err(jet_xml_decode_shape_error)?;
+//RS     let projected = crate::jet_xml_kernel::project_document_for_decode(&value)
+//RS         .map_err(jet_xml_decode_source_error)?;
+//RS     T::jet_decode(&jet_xml_to_data_tree(projected))
+//RS }
+//RS 
+//RS fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
+//RS     bytes: &Vec<u8>,
+//RS     options: jet_std::XMLParseOptions,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let document = jet_std_xml_parse_bytes(bytes, options).map_err(jet_xml_decode_value_error)?;
+//RS     let value = jet_xml_from_data_tree(&document).map_err(jet_xml_decode_shape_error)?;
+//RS     let projected = crate::jet_xml_kernel::project_document_for_decode(&value)
+//RS         .map_err(jet_xml_decode_source_error)?;
+//RS     T::jet_decode(&jet_xml_to_data_tree(projected))
+//RS }
+//RS 
+//RS fn jet_cbor_value_error(
+//RS     path: &str,
+//RS     reason: impl Into<String>,
+//RS ) -> jet_std::EncodingError {
+//RS     jet_std::EncodingError::new(
+//RS         jet_std::EncodingFormat::CBOR,
+//RS         jet_std::EncodingErrorKind::Unsupported,
+//RS         0,
+//RS         Err(JetAbsent),
+//RS         Err(JetAbsent),
+//RS         path,
+//RS         reason,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_cbor_value_at(
+//RS     value: &jet_std::DataTree,
+//RS     path: &str,
+//RS ) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
+//RS     match value {
+//RS         jet_std::DataTree::Null => Ok(crate::jet_cbor_kernel::Value::Null),
+//RS         jet_std::DataTree::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
+//RS         jet_std::DataTree::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
+//RS         jet_std::DataTree::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
+//RS         jet_std::DataTree::Number(text) => Err(jet_cbor_value_error(
+//RS             path,
+//RS             format!("JSON number carrier {text:?} is not a CBOR value"),
+//RS         )),
+//RS         jet_std::DataTree::TypedText(text) => Err(jet_cbor_value_error(
+//RS             path,
+//RS             format!("typed text carrier {text:?} is not a CBOR value"),
+//RS         )),
+//RS         jet_std::DataTree::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
+//RS         jet_std::DataTree::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
+//RS         jet_std::DataTree::Array(values) => {
+//RS             let mut output = Vec::with_capacity(values.len());
+//RS             for (index, value) in values.iter().enumerate() {
+//RS                 let child_path = format!("{path}[{index}]");
+//RS                 output.push(jet_cbor_value_at(value, &child_path)?);
+//RS             }
+//RS             Ok(crate::jet_cbor_kernel::Value::Array(output))
+//RS         }
+//RS         jet_std::DataTree::Object(entries) => {
+//RS             let mut output = Vec::with_capacity(entries.len());
+//RS             for (key, value) in entries {
+//RS                 let child_path = format!("{path}[{key:?}]");
+//RS                 output.push((key.clone(), jet_cbor_value_at(value, &child_path)?));
+//RS             }
+//RS             Ok(crate::jet_cbor_kernel::Value::Object(output))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_cbor_value(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
+//RS     jet_cbor_value_at(value, "$")
+//RS }
+//RS 
+//RS fn jet_cbor_tree(value: crate::jet_cbor_kernel::Value) -> jet_std::DataTree {
+//RS     match value {
+//RS         crate::jet_cbor_kernel::Value::Null => jet_std::DataTree::Null,
+//RS         crate::jet_cbor_kernel::Value::Bool(value) => jet_std::DataTree::Bool(value),
+//RS         crate::jet_cbor_kernel::Value::Int(value) => jet_std::DataTree::Int(value),
+//RS         crate::jet_cbor_kernel::Value::Float(value) => jet_std::DataTree::Float(value),
+//RS         crate::jet_cbor_kernel::Value::Text(value) => jet_std::DataTree::Text(value),
+//RS         crate::jet_cbor_kernel::Value::Bytes(value) => jet_std::DataTree::Bytes(value),
+//RS         crate::jet_cbor_kernel::Value::Array(values) => {
+//RS             jet_std::DataTree::Array(values.into_iter().map(jet_cbor_tree).collect())
+//RS         }
+//RS         crate::jet_cbor_kernel::Value::Object(entries) => jet_std::DataTree::Object(
+//RS             entries
+//RS                 .into_iter()
+//RS                 .map(|(key, value)| (key, jet_cbor_tree(value)))
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_cbor_options(options: &jet_std::CBOROptions) -> crate::jet_cbor_kernel::Options {
+//RS     crate::jet_cbor_kernel::Options {
+//RS         max_depth: options.max_depth,
+//RS         max_items: options.max_items,
+//RS         max_bytes: options.max_bytes,
+//RS         require_canonical: options.require_canonical,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::EncodingError {
+//RS     let crate::jet_cbor_kernel::Error {
+//RS         kind,
+//RS         byte_offset,
+//RS         path,
+//RS         reason,
+//RS     } = error;
+//RS     let kind = match kind {
+//RS         crate::jet_cbor_kernel::ErrorKind::Syntax => jet_std::EncodingErrorKind::Syntax,
+//RS         crate::jet_cbor_kernel::ErrorKind::Truncated => jet_std::EncodingErrorKind::Truncated,
+//RS         crate::jet_cbor_kernel::ErrorKind::Unsupported
+//RS         | crate::jet_cbor_kernel::ErrorKind::TypeMismatch
+//RS         | crate::jet_cbor_kernel::ErrorKind::NonCanonical => {
+//RS             jet_std::EncodingErrorKind::Unsupported
+//RS         }
+//RS         crate::jet_cbor_kernel::ErrorKind::Limit => jet_std::EncodingErrorKind::Limit,
+//RS         crate::jet_cbor_kernel::ErrorKind::TrailingData => jet_std::EncodingErrorKind::Syntax,
+//RS     };
+//RS     jet_std::EncodingError::new(
+//RS         jet_std::EncodingFormat::CBOR,
+//RS         kind,
+//RS         byte_offset as i64,
+//RS         Err(JetAbsent),
+//RS         Err(JetAbsent),
+//RS         path,
+//RS         reason,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_cbor_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+//RS     jet_std::FieldError::at(
+//RS         jet_decode_path(&error.path),
+//RS         format!(
+//RS             "CBOR {:?} at byte {}: {}",
+//RS             error.kind, error.byte_offset, error.reason
+//RS         ),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
+//RS     value: &T,
+//RS ) -> Result<Vec<u8>, jet_std::EncodingError> {
+//RS     let tree = value.jet_encode();
+//RS     let value = jet_cbor_value(&tree)?;
+//RS     crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_error)
+//RS }
+//RS 
+//RS fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
+//RS     value: &T,
+//RS ) -> Result<Vec<u8>, jet_std::EncodingError> {
+//RS     let tree = value.jet_encode();
+//RS     let value = jet_cbor_value(&tree)?;
+//RS     crate::jet_cbor_kernel::encode(&value, true).map_err(jet_cbor_error)
+//RS }
+//RS 
+//RS fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
+//RS     jet_enc_cbor_to_bytes(value).unwrap_or_else(|error| {
+//RS         let message = format!("cbor.encode failed: {}", error.reason);
+//RS         jet_runtime_stop("E3001", "", 0, &message)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_enc_cbor_decode_legacy(bytes: &Vec<u8>) -> Result<jet_std::DataTree, String> {
+//RS     jet_enc_cbor_parse(bytes, jet_std::CBOROptions::safe()).map_err(|error| error.reason)
+//RS }
+//RS 
+//RS fn jet_enc_cbor_parse_with(
+//RS     bytes: &Vec<u8>,
+//RS     options: jet_std::CBOROptions,
+//RS     allow_bytes: bool,
+//RS ) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options), allow_bytes)
+//RS         .map(jet_cbor_tree)
+//RS         .map_err(jet_cbor_error)
+//RS }
+//RS 
+//RS fn jet_enc_cbor_parse(
+//RS     bytes: &Vec<u8>,
+//RS     options: jet_std::CBOROptions,
+//RS ) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     jet_enc_cbor_parse_with(bytes, options, false)
+//RS }
+//RS 
+//RS fn jet_cbor_decode_source_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+//RS     jet_cbor_field_error(error)
+//RS }
+//RS 
+//RS fn jet_enc_cbor_decode<T: __jet_Decode>(
+//RS     bytes: &Vec<u8>,
+//RS     options: jet_std::CBOROptions,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let tree = jet_enc_cbor_parse_with(bytes, options, true)
+//RS         .map_err(jet_cbor_decode_source_error)?;
+//RS     T::jet_decode(&tree)
+//RS }
+//RS 
+//RS fn jet_uuid_format(b: &[u8; 16]) -> String {
+//RS     format!(
+//RS         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-\
+//RS          {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+//RS         b[0],
+//RS         b[1],
+//RS         b[2],
+//RS         b[3],
+//RS         b[4],
+//RS         b[5],
+//RS         b[6],
+//RS         b[7],
+//RS         b[8],
+//RS         b[9],
+//RS         b[10],
+//RS         b[11],
+//RS         b[12],
+//RS         b[13],
+//RS         b[14],
+//RS         b[15]
+//RS     )
+//RS }
+//RS 
+//RS // #1481 core.crypto.uuid: parse a hyphenated UUID string into its 16 raw bytes,
+//RS // rejecting anything that is not exactly 8-4-4-4-12 hex digits.
+//RS fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
+//RS     let hex: String = s.chars().filter(|c| *c != '-').collect();
+//RS     if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+//RS         return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+//RS     }
+//RS     let groups: Vec<usize> = s.match_indices('-').map(|(i, _)| i).collect();
+//RS     if groups != [8, 13, 18, 23] {
+//RS         return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+//RS     }
+//RS     let mut bytes = [0u8; 16];
+//RS     for (i, byte) in bytes.iter_mut().enumerate() {
+//RS         *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| {
+//RS             format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)")
+//RS         })?;
+//RS     }
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS // #1481 core.crypto.uuid: validate and normalize (lowercase) a UUID string — the
+//RS // String representation stays canonical (D-CORE-TREE1 area; no new UUID type).
+//RS fn jet_std_uuid_parse(s: &String) -> Result<String, String> {
+//RS     jet_uuid_bytes(s).map(|bytes| jet_uuid_format(&bytes))
+//RS }
+//RS 
+//RS // #1481 core.crypto.uuid: RFC 4122 SHA-1 (version 5) — deterministic, no CSPRNG.
+//RS // Pure std, zero deps (I6); this is the one extra hash function UUID v5
+//RS // needs and is not reused elsewhere, so it stays local instead of a shared
+//RS // crypto primitive.
+//RS fn jet_uuid_sha1(data: &[u8]) -> [u8; 20] {
+//RS     let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+//RS     let bit_len = (data.len() as u64) * 8;
+//RS     let mut msg = data.to_vec();
+//RS     msg.push(0x80);
+//RS     while msg.len() % 64 != 56 {
+//RS         msg.push(0);
+//RS     }
+//RS     msg.extend_from_slice(&bit_len.to_be_bytes());
+//RS     for chunk in msg.chunks_exact(64) {
+//RS         let mut w = [0u32; 80];
+//RS         for (i, word) in w.iter_mut().take(16).enumerate() {
+//RS             *word = u32::from_be_bytes([
+//RS                 chunk[i * 4],
+//RS                 chunk[i * 4 + 1],
+//RS                 chunk[i * 4 + 2],
+//RS                 chunk[i * 4 + 3],
+//RS             ]);
+//RS         }
+//RS         for i in 16..80 {
+//RS             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+//RS         }
+//RS         let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+//RS         for (i, word) in w.iter().enumerate() {
+//RS             let (f, k) = match i {
+//RS                 0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
+//RS                 20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
+//RS                 40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
+//RS                 _ => (b ^ c ^ d, 0xCA62C1D6),
+//RS             };
+//RS             let temp = a
+//RS                 .rotate_left(5)
+//RS                 .wrapping_add(f)
+//RS                 .wrapping_add(e)
+//RS                 .wrapping_add(k)
+//RS                 .wrapping_add(*word);
+//RS             e = d;
+//RS             d = c;
+//RS             c = b.rotate_left(30);
+//RS             b = a;
+//RS             a = temp;
+//RS         }
+//RS         h[0] = h[0].wrapping_add(a);
+//RS         h[1] = h[1].wrapping_add(b);
+//RS         h[2] = h[2].wrapping_add(c);
+//RS         h[3] = h[3].wrapping_add(d);
+//RS         h[4] = h[4].wrapping_add(e);
+//RS     }
+//RS     let mut out = [0u8; 20];
+//RS     for (i, word) in h.iter().enumerate() {
+//RS         out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS // #1481 core.crypto.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
+//RS // the already-shipped v4 (random) and v7 (time-ordered).
+//RS fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> {
+//RS     let ns = jet_uuid_bytes(namespace)?;
+//RS     let mut input = ns.to_vec();
+//RS     input.extend_from_slice(name.as_bytes());
+//RS     let digest = jet_uuid_sha1(&input);
+//RS     let mut bytes = [0u8; 16];
+//RS     bytes.copy_from_slice(&digest[..16]);
+//RS     bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+//RS     bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+//RS     Ok(jet_uuid_format(&bytes))
+//RS }
+//RS 
+//RS fn jet_std_uuid_v4() -> String {
+//RS     jet_crypto_uuid_v4()
+//RS }
+//RS 
+//RS fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
+//RS     jet_crypto_uuid_v7(clock.now())
+//RS }
+// END-PORT-PENDING 0129 crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:1-679
+

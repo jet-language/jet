@@ -1,0 +1,206 @@
+// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:1-202
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── core.mem.scope.guard ─────────────────────────────────────────────────────────
+//RS // A ScopeGuard stores a zero-argument closure and runs it in Drop — on every
+//RS // exit path (normal fall-through, early `return`, `?` propagation).
+//RS // LIFO ordering is guaranteed by Rust's reverse-declaration drop order.
+//RS // Generic over F: avoids boxing and allows non-'static captures. Purely safe.
+//RS struct JetScopeGuard<F: FnOnce()> {
+//RS     f: Option<F>,
+//RS }
+//RS fn jet_scope_guard<F: FnOnce()>(f: F) -> JetScopeGuard<F> {
+//RS     JetScopeGuard { f: Some(f) }
+//RS }
+//RS impl<F: FnOnce()> Drop for JetScopeGuard<F> {
+//RS     fn drop(&mut self) {
+//RS         if let Some(f) = self.f.take() {
+//RS             f();
+//RS         }
+//RS     }
+//RS }
+//RS // ── #Transact transaction blocks ─────────────────────────────────────────────────
+//RS // A `#Transact(tx) { … }` block lowers to:
+//RS //   { let mut tx = jet_transaction(); <body>; tx.commit(); }
+//RS //
+//RS // Three Drop-backed hook stacks, each LIFO (mirroring scope-guard drop order):
+//RS //   • commit hooks   (`tx.on_commit(() => …)`, D-TXN3) — run only if `commit()` ran.
+//RS //   • rollback hooks (`tx.on_rollback(() => …)`, D-TXN-ROLLBACK layer 3) — run only
+//RS //     if `commit()` did NOT run (a `?`-failure / early return undoes the block).
+//RS //   • auto-snapshots (D-TXN-ROLLBACK layer 1) — restore closures captured at the
+//RS //     point of mutation; run only if `commit()` did NOT run, restoring the pre-state.
+//RS //
+//RS // A `?`-failure (or any early return) inside the block skips `commit()`, so on Drop:
+//RS //   committed   → commit hooks fire LIFO; rollback hooks + snapshots are dropped un-run.
+//RS //   uncommitted → snapshots restore (LIFO) then rollback hooks fire (LIFO); commit
+//RS //                 hooks are dropped un-run.
+//RS // Purely safe std Rust; no runtime effect machinery (I3).
+//RS struct JetTransaction {
+//RS     hooks: Vec<Box<dyn FnOnce()>>,
+//RS     rollback_hooks: Vec<Box<dyn FnOnce()>>,
+//RS     snapshots: Vec<Box<dyn FnOnce()>>,
+//RS     committed: bool,
+//RS }
+//RS fn jet_transaction() -> JetTransaction {
+//RS     JetTransaction {
+//RS         hooks: Vec::new(),
+//RS         rollback_hooks: Vec::new(),
+//RS         snapshots: Vec::new(),
+//RS         committed: false,
+//RS     }
+//RS }
+//RS impl JetTransaction {
+//RS     fn on_commit(&mut self, f: Box<dyn FnOnce()>) {
+//RS         self.hooks.push(f);
+//RS     }
+//RS     fn on_rollback(&mut self, f: Box<dyn FnOnce()>) {
+//RS         self.rollback_hooks.push(f);
+//RS     }
+//RS     fn on_snapshot(&mut self, f: Box<dyn FnOnce()>) {
+//RS         self.snapshots.push(f);
+//RS     }
+//RS     fn commit(&mut self) {
+//RS         self.committed = true;
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical MIR route for a checked transaction commit hook. The generated
+//RS /// adapters select this row; they do not reopen the private transaction method.
+//RS fn jet_transaction_on_commit(transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>) {
+//RS     transaction.on_commit(callback);
+//RS }
+//RS 
+//RS /// Canonical MIR route for a checked transaction rollback hook.
+//RS fn jet_transaction_on_rollback(transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>) {
+//RS     transaction.on_rollback(callback);
+//RS }
+//RS /// Canonical MIR route for the lexical transaction commit boundary.
+//RS fn jet_transaction_commit(transaction: &mut JetTransaction) {
+//RS     transaction.commit();
+//RS }
+//RS impl Drop for JetTransaction {
+//RS     fn drop(&mut self) {
+//RS         if self.committed {
+//RS             // Clean commit: run commit hooks LIFO; rollback stacks are dropped un-run.
+//RS             while let Some(f) = self.hooks.pop() {
+//RS                 f();
+//RS             }
+//RS         } else {
+//RS             // Rollback path (`?`-failure / early return): restore auto-snapshots
+//RS             // first, then run explicit rollback hooks; both stacks are LIFO.
+//RS             while let Some(f) = self.snapshots.pop() {
+//RS                 f();
+//RS             }
+//RS             while let Some(f) = self.rollback_hooks.pop() {
+//RS                 f();
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS // D-TXN-ROLLBACK layer 1 (auto-snapshot): the snapshot/restore mechanism lives in a
+//RS // vetted prelude module, mirroring `jet_mem`. `jet_txn_snapshot` clones the
+//RS // pre-mutation state of a place and registers a Drop-backed restore on the
+//RS // transaction's snapshot stack; on a `?`-failure the guard's Drop writes the clone
+//RS // back before explicit rollback hooks run.
+//RS // The raw-pointer writeback is sound because the transaction guard is declared after
+//RS // the place and dropped before it (LIFO scope teardown), so the place is always live
+//RS // when restore runs. The compiler picks WHICH places to snapshot (I3); this module is
+//RS // just the dumb runtime. Stripped from the golden memory-safety check like `jet_mem`.
+//RS mod jet_txn {
+//RS     use super::JetTransaction;
+//RS     /// Snapshot `*place` (a `Clone` of its pre-mutation state) and register a
+//RS     /// Drop-backed restore on `tx`'s snapshot stack. Restores on rollback; dropped
+//RS     /// un-run on commit.
+//RS     pub(crate) fn snapshot<T: Clone + 'static>(tx: &mut JetTransaction, place: &mut T) {
+//RS         let saved = place.clone();
+//RS         let raw: *mut T = place;
+//RS         tx.on_snapshot(Box::new(move || {
+//RS             // `raw` points at a local that outlives the transaction guard; the
+//RS             // guard's Drop (the caller) runs before that local is dropped.
+//RS             let slot: &mut T = unsafe { &mut *raw };
+//RS             *slot = saved;
+//RS         }));
+//RS     }
+//RS     /// D-TXN-ROLLBACK layer 2: snapshot a value via its `Rollback` impl instead of
+//RS     /// a full `Clone`. The caller captures the snap by calling `place.snapshot()` and
+//RS     /// passes it together with the type-erased `restore` function pointer. Sound for
+//RS     /// the same reason as `snapshot`: the place outlives the transaction guard (LIFO).
+//RS     pub(crate) fn snapshot_custom<T: 'static, S: 'static>(
+//RS         tx: &mut JetTransaction,
+//RS         place: &mut T,
+//RS         snap: S,
+//RS         restore: fn(&mut T, S),
+//RS     ) {
+//RS         let raw: *mut T = place;
+//RS         tx.on_snapshot(Box::new(move || {
+//RS             let slot: &mut T = unsafe { &mut *raw };
+//RS             restore(slot, snap);
+//RS         }));
+//RS     }
+//RS }
+//RS // ── D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of #Transact ──
+//RS // `#Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
+//RS //   { let mut tx = jet_transaction();
+//RS //     let mut __jet_stm = jet_stm::begin();
+//RS //     from.edit_txn(&mut __jet_stm, move |b| …);
+//RS //     to.edit_txn(&mut __jet_stm, move |b| …);
+//RS //     __jet_stm.commit(); tx.commit(); }
+//RS //
+//RS // Each `edit_txn` defers its payload closure onto the explicit transaction
+//RS // guard. The shared Prelude owns participant identity, lock ordering, commit,
+//RS // and rollback; this generated module only preserves the emitter's existing
+//RS // `jet_stm::begin()` spelling.
+//RS mod jet_stm {
+//RS     pub(crate) type Guard = crate::JetSharedTransaction;
+//RS 
+//RS     pub(crate) fn begin() -> Guard {
+//RS         crate::jet_shared_transaction_begin()
+//RS     }
+//RS }
+//RS trait __jet_Serialize {
+//RS     fn to_json(&self) -> String;
+//RS }
+//RS 
+//RS // ── D-TERM1 (ratified 2026-06-22): terminal direct-input rendering ────────────
+//RS // The key kernel itself — `JetKey`, the per-platform byte decoders and the
+//RS // `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatchers — lives in
+//RS // `Prelude/Core/TermKey.rs`. The TIR evaluator and resident JIT call the one
+//RS // in-process `jet_codegen::terminal_runtime` instance; AOT embeds this source
+//RS // in its generated program (I9).
+//RS //
+//RS // The user-facing rendering projections stay here with the generated program's
+//RS // show surface; resident tiers marshal the value through their own carriers.
+//RS // ──────────────────────────────────────────────────────────────────────────────
+//RS 
+//RS impl JetShow for JetKey {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             JetKey::Char(c) => format!("Char({:?})", c),
+//RS             JetKey::Enter => "Enter".to_string(),
+//RS             JetKey::Escape => "Escape".to_string(),
+//RS             JetKey::Backspace => "Backspace".to_string(),
+//RS             JetKey::Tab => "Tab".to_string(),
+//RS             JetKey::Delete => "Delete".to_string(),
+//RS             JetKey::Up => "Up".to_string(),
+//RS             JetKey::Down => "Down".to_string(),
+//RS             JetKey::Left => "Left".to_string(),
+//RS             JetKey::Right => "Right".to_string(),
+//RS             JetKey::F(n) => format!("F({})", n),
+//RS             JetKey::Ctrl(c) => format!("Ctrl({:?})", c),
+//RS             JetKey::Unknown => "Unknown".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetKey {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetKey {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:1-202
+

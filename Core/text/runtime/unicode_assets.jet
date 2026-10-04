@@ -1,0 +1,121 @@
+// JUCD schema 1: Unicode 17.0.0 immutable byte assets shared with Foundation.
+// No casts, decoded table allocation, decompression, or platform-endian fields.
+// Callers retain the original asset owner; record/pool views never copy bytes.
+// #4318: bootstrap static-list emission must retain these owners instead of
+// cloning each constant mention. This decoder does not hide that compiler gate.
+// #4392: bootstrap must emit the `from asset` lifetime on both borrowed returns;
+// missing Rust lifetime emission is not permission to materialize owned tables.
+
+pub fn uint(bytes: View<U8>, at: Int, width: Int) -> Int Never! {
+    assert(at >= 0 && width >= 1 && width <= 4 && at + width <= bytes.len())
+    value := 0
+    loop i in 0..<width -> value = value | (Int.from_u8(bytes[at + i]) << (i * 8))
+    value
+}
+
+pub fn valid(asset: [U8], kind: Int, stride: Int) -> Bool Never! {
+    if asset.len() < 40 || stride <= 0 -> return false
+    bytes :: asset[0..<asset.len()]
+    if bytes[0] != (U8{74}) || bytes[1] != (U8{85}) || bytes[2] != (U8{67}) || bytes[3] != (U8{68}) -> return false
+    if uint(bytes, 4, 2) != 1 || uint(bytes, 6, 2) != 0 -> return false
+    if uint(bytes, 8, 3) != 17 || bytes[11] != (U8{0}) -> return false
+    if uint(bytes, 12, 4) != kind || uint(bytes, 20, 4) != stride -> return false
+    count :: uint(bytes, 16, 4)
+    records :: uint(bytes, 24, 4)
+    pool :: uint(bytes, 28, 4)
+    pool_bytes :: uint(bytes, 32, 4)
+    total :: uint(bytes, 36, 4)
+    records == 40 && pool == records + count * stride && total == asset.len() && pool <= total && pool_bytes == total - pool
+}
+
+pub fn records(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
+    assert(valid(asset, kind, stride), "invalid Unicode asset schema/version/extent")
+    bytes :: asset[0..<asset.len()]
+    asset[40..<uint(bytes, 28, 4)]
+}
+
+pub fn pool(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
+    assert(valid(asset, kind, stride), "invalid Unicode asset schema/version/extent")
+    bytes :: asset[0..<asset.len()]
+    asset[uint(bytes, 28, 4)..<asset.len()]
+}
+
+// Rust UnicodeString.rs:18-30 jet_unicode_contains; shared range/tag lookup.
+pub fn range_row(table: View<U8>, cp: Int, stride: Int) -> Int? {
+    if cp < 0 || cp > 1114111 || stride < 6 || table.len() % stride != 0 -> return None
+    low := 0
+    high := table.len() /% stride
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * stride
+        start :: uint(table, row, 3)
+        end :: uint(table, row + 3, 3)
+        if start > end || end > 1114111 -> return None
+        if {
+            cp < start -> high = mid
+            cp > end -> low = mid + 1
+            else -> return Val(row)
+        }
+    }
+    None
+}
+
+pub fn contains(table: View<U8>, cp: Int) -> Bool Never! {
+    if range_row(table, cp, 6) == .Val(_) -> return true
+    false
+}
+
+pub fn tag(table: View<U8>, cp: Int, fallback: Int) -> Int Never! {
+    if range_row(table, cp, 7) == .Val(row) -> return uint(table, row + 6, 1)
+    fallback
+}
+
+// Scalar-only lookup keeps the borrowed record extent inside the asset scope.
+// Unlike records/tag composition, no borrowed result crosses the #4392 gate.
+pub fn asset_contains(asset: [U8], cp: Int) -> Bool Never! {
+    assert(valid(asset, 2, 6), "invalid Unicode asset schema/version/extent")
+    bytes :: asset[0..<asset.len()]
+    table :: asset[40..<uint(bytes, 28, 4)]
+    contains(table, cp)
+}
+
+pub fn asset_tag(asset: [U8], cp: Int, fallback: Int) -> Int Never! {
+    assert(valid(asset, 3, 7), "invalid Unicode asset schema/version/extent")
+    bytes :: asset[0..<asset.len()]
+    table :: asset[40..<uint(bytes, 28, 4)]
+    tag(table, cp, fallback)
+}
+
+// Rust UnicodeString.rs:32-40 jet_unicode_mapping; return only an index extent.
+// Mapping scalars remain borrowed from the independent scalar-pool asset.
+pub fn mapping_row(index: View<U8>, cp: Int, stride: Int) -> Int? {
+    if cp < 0 || cp > 1114111 || stride < 3 || index.len() % stride != 0 -> return None
+    low := 0
+    high := index.len() /% stride
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * stride
+        code :: uint(index, row, 3)
+        if code > 1114111 -> return None
+        if {
+            cp < code -> high = mid
+            cp > code -> low = mid + 1
+            else -> return Val(row)
+        }
+    }
+    None
+}
+
+pub fn mapping(index: View<U8>, scalars: View<U8>, cp: Int) -> (start: Int, length: Int)? {
+    row :: mapping_row(index, cp, 11) ?? return None
+    start :: uint(index, row + 3, 4)
+    length :: uint(index, row + 7, 4)
+    assert(length > 0 && scalars.len() % 3 == 0 && start + length <= scalars.len() /% 3, "invalid Unicode mapping extent")
+    Val((start: start, length: length))
+}
+
+pub fn scalar(table: View<U8>, index: Int) -> Int Never! {
+    value :: uint(table, index * 3, 3)
+    assert(value <= 1114111 && (value < 55296 || value > 57343), "invalid Unicode mapping scalar")
+    value
+}

@@ -1,0 +1,50 @@
+use kernel_storage_leaves as storage_uninit_leaf
+
+// Rust Prelude/Uninit.rs:5–7, jet_uninit_bitmap. One exact-size allocation;
+// only readiness bytes are initialized, never the typed payload bytes.
+pub fn jet_uninit_bitmap(length: Int) -> [Bool] Never! {
+    bitmap := storage_uninit_leaf.jet_storage_list_with_capacity<Bool>(length)
+    loop _ in 0..<length -> &bitmap.push(false)
+    bitmap
+}
+
+// Rust Prelude/Uninit.rs:10–13, JetUninitAccessError.
+#Error
+pub enum JetUninitAccessError {
+    OutOfBounds
+    Uninitialized
+}
+
+// Rust Prelude/Uninit.rs:15–25, jet_uninit_write.
+// R0 adapters supply machine-size indices as exact nonnegative Int values.
+// This transition is bitmap policy only: it does not initialize payload bytes.
+// #4388: direct ViewMut writes are blocked in the reference MIR emitter;
+// retain the slice ABI instead of substituting an owning List bitmap.
+pub fn jet_uninit_write(bitmap: ViewMut<Bool>, index: Int) -> (index: Int, replaced: Bool) JetUninitAccessError! {
+    if index < 0 || index >= bitmap.len() -> return Err(JetUninitAccessError.OutOfBounds)
+    replaced :: ~bitmap[index]
+    bitmap[index] = true
+    (index: index, replaced: replaced)
+}
+
+// Rust Prelude/Uninit.rs:27–38, jet_uninit_read.
+pub fn jet_uninit_read(bitmap: View<Bool>, index: Int) -> Int JetUninitAccessError! {
+    if index < 0 || index >= bitmap.len() -> return Err(JetUninitAccessError.OutOfBounds)
+    if !bitmap[index] -> return Err(JetUninitAccessError.Uninitialized)
+    index
+}
+
+// Rust Prelude/Uninit.rs:40–46, jet_uninit_all. Empty storage is all-ready.
+pub fn jet_uninit_all(bitmap: View<Bool>) JetUninitAccessError! {
+    loop index in 0..<bitmap.len() {
+        if !bitmap[index] -> return Err(JetUninitAccessError.Uninitialized)
+    }
+}
+
+// Typed payload storage is deliberately not represented by a safe [T], T?,
+// zeroed T, or an erased runtime value. Uninit.rs:48–198 require the R0
+// MaybeUninit layout, checked borrow/move and drop leaves.
+// In particular replacement must clear readiness BEFORE drop, into_array must
+// clear each bit BEFORE move, and as_array/as_array_mut must borrow the original
+// fixed storage without allocation. Rust fixed-storage drop walks 0..N (not
+// reverse order); its native stop/unwind rail must preserve that source order.

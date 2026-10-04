@@ -1,0 +1,148 @@
+// PORT-PENDING 0177 crates-jet-codegen-src-prelude-envinit-module-group: crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:1-144
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-CONFIG-ENV1 / I9: the source-order, prefix, allowlist, dotenv, and error
+//RS // framing rules are shared by every execution tier. Each engine supplies its
+//RS // logical environment snapshot and marshals these entries into its existing
+//RS // DataTree carrier.
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct JetEnvConfigEntry {
+//RS     pub(crate) name: String,
+//RS     pub(crate) value: String,
+//RS     pub(crate) segments: Vec<String>,
+//RS }
+//RS 
+//RS pub(crate) fn jet_env_config_file_is_project_relative(file: &str) -> bool {
+//RS     let path = std::path::Path::new(file);
+//RS     !path.is_absolute()
+//RS         && !path
+//RS             .components()
+//RS             .any(|part| matches!(part, std::path::Component::ParentDir))
+//RS }
+//RS 
+//RS /// Collect one config namespace from dotenv text and a process snapshot.
+//RS ///
+//RS /// Environment field segments are folded to lowercase before they enter the
+//RS /// existing decoder. This is the case-insensitive env-to-field rule: ordinary
+//RS /// Jet record fields use their canonical lowercase spelling, while the source
+//RS /// key may use any ASCII case. The prefix is folded the same way. Process
+//RS /// values replace dotenv values by the case-folded environment name.
+//RS pub(crate) fn jet_env_config_entries(
+//RS     prefix: &str,
+//RS     dotenv: Option<&str>,
+//RS     allow: &[String],
+//RS     process: impl IntoIterator<Item = (String, String)>,
+//RS ) -> Result<Vec<JetEnvConfigEntry>, String> {
+//RS     let allowed = |name: &str| {
+//RS         allow.is_empty()
+//RS             || allow
+//RS                 .iter()
+//RS                 .any(|candidate| candidate.eq_ignore_ascii_case(name))
+//RS     };
+//RS     let mut values = std::collections::BTreeMap::<String, (String, String)>::new();
+//RS     if let Some(text) = dotenv {
+//RS         for (line_index, line) in text.lines().enumerate() {
+//RS             let line = line.trim();
+//RS             if line.is_empty() || line.starts_with('#') {
+//RS                 continue;
+//RS             }
+//RS             let line = line.strip_prefix("export ").unwrap_or(line);
+//RS             let Some((raw_name, raw_value)) = line.split_once('=') else {
+//RS                 return Err(format!("invalid .env line {}", line_index + 1));
+//RS             };
+//RS             let name = raw_name.trim();
+//RS             if !jet_env_config_name_is_valid(name) || !allowed(name) {
+//RS                 continue;
+//RS             }
+//RS             values.insert(
+//RS                 name.to_ascii_uppercase(),
+//RS                 (name.to_string(), jet_env_config_dotenv_value(raw_value.trim())),
+//RS             );
+//RS         }
+//RS     }
+//RS     for (name, value) in process {
+//RS         if jet_env_config_name_is_valid(&name) && allowed(&name) {
+//RS             values.insert(name.to_ascii_uppercase(), (name, value));
+//RS         }
+//RS     }
+//RS 
+//RS     let mut entries = Vec::new();
+//RS     for (_, (name, value)) in values {
+//RS         let Some(rest) = name
+//RS             .get(prefix.len()..)
+//RS             .filter(|_| name[..prefix.len()].eq_ignore_ascii_case(prefix))
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         if rest.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let segments: Vec<String> = rest
+//RS             .split("__")
+//RS             .map(|segment| segment.to_ascii_lowercase())
+//RS             .filter(|segment| !segment.is_empty())
+//RS             .collect();
+//RS         if segments.is_empty() {
+//RS             continue;
+//RS         }
+//RS         entries.push(JetEnvConfigEntry {
+//RS             name,
+//RS             value,
+//RS             segments,
+//RS         });
+//RS     }
+//RS     Ok(entries)
+//RS }
+//RS 
+//RS /// Frame one existing codec error with its source environment variable.
+//RS ///
+//RS /// The decoder remains the sole validator. This helper only adds provenance
+//RS /// and applies the shared secret-path redaction rule before an engine renders
+//RS /// the error in its own result carrier.
+//RS pub(crate) fn jet_env_config_error_reason(
+//RS     path: &str,
+//RS     reason: &str,
+//RS     origins: &[(String, String)],
+//RS ) -> String {
+//RS     let reason = if jet_env_config_secret_path(path) {
+//RS         "secret value rejected"
+//RS     } else {
+//RS         reason
+//RS     };
+//RS     let origin = origins
+//RS         .iter()
+//RS         .find(|(_, mapped)| mapped.eq_ignore_ascii_case(path))
+//RS         .map(|(name, _)| name.as_str());
+//RS     match origin {
+//RS         Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
+//RS         None => format!("E2416: config field {path}: {reason}"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_env_config_secret_path(path: &str) -> bool {
+//RS     path.split(['.', '[', ']']).any(|segment| {
+//RS         matches!(
+//RS             segment.to_ascii_lowercase().as_str(),
+//RS             "secret" | "password" | "token" | "key"
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_env_config_name_is_valid(name: &str) -> bool {
+//RS     !name.is_empty() && !name.contains('=') && !name.contains('\0')
+//RS }
+//RS 
+//RS fn jet_env_config_dotenv_value(value: &str) -> String {
+//RS     let value = value.trim();
+//RS     if value.len() >= 2
+//RS         && ((value.starts_with('"') && value.ends_with('"'))
+//RS             || (value.starts_with('\'') && value.ends_with('\'')))
+//RS     {
+//RS         return value[1..value.len() - 1].to_string();
+//RS     }
+//RS     value
+//RS         .split_once(" #")
+//RS         .map_or_else(|| value.to_string(), |(value, _)| value.trim_end().to_string())
+//RS }
+// END-PORT-PENDING 0177 crates/jet-codegen/src/Prelude/Core/EnvConfig.rs:1-144
+

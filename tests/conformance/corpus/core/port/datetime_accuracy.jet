@@ -1,0 +1,1093 @@
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/datetime_accuracy.rs:1-268
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #2288: permanent differential coverage for the core.time kernel.
+//RS //!
+//RS //! The TSV is the committed Python-oracle result.  This test only executes
+//RS //! Jet: it validates the table shape, checks each checked-in golden against its
+//RS //! rows, and runs every bounded witness through default and release.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::collections::HashSet;
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS const VECTOR_TABLE: &str = include_str!("fixtures/datetime_accuracy.tsv");
+//RS 
+//RS const BATCHES: [(&str, &str, &str); 3] = [
+//RS     (
+//RS         "epoch_parse",
+//RS         "Examples/features/time/datetime_accuracy_epoch_parse.jet",
+//RS         "Examples/features/expected/time/datetime_accuracy_epoch_parse.out",
+//RS     ),
+//RS     (
+//RS         "civil_arithmetic",
+//RS         "Examples/features/time/datetime_accuracy_civil_arithmetic.jet",
+//RS         "Examples/features/expected/time/datetime_accuracy_civil_arithmetic.out",
+//RS     ),
+//RS     (
+//RS         "zones",
+//RS         "Examples/features/time/datetime_accuracy_zones.jet",
+//RS         "Examples/features/expected/time/datetime_accuracy_zones.out",
+//RS     ),
+//RS ];
+//RS 
+//RS #[derive(Debug)]
+//RS struct Vector {
+//RS     batch: String,
+//RS     family: String,
+//RS     ident: String,
+//RS     operation: String,
+//RS     metadata: String,
+//RS     oracle: String,
+//RS }
+//RS 
+//RS fn vectors() -> Vec<Vector> {
+//RS     assert!(VECTOR_TABLE.starts_with("# datetime-accuracy-v1\n"));
+//RS     let mut rows = Vec::new();
+//RS     let mut keys = HashSet::new();
+//RS     for (line_index, line) in VECTOR_TABLE.lines().enumerate() {
+//RS         if line.is_empty() || line.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         let fields: Vec<_> = line.split('\t').collect();
+//RS         assert_eq!(
+//RS             fields.len(),
+//RS             6,
+//RS             "datetime accuracy vector line {} must have six TSV fields: {line:?}",
+//RS             line_index + 1
+//RS         );
+//RS         assert!(
+//RS             BATCHES.iter().any(|(batch, _, _)| *batch == fields[0]),
+//RS             "unknown datetime accuracy batch on line {}: {}",
+//RS             line_index + 1,
+//RS             fields[0]
+//RS         );
+//RS         for field in &fields {
+//RS             assert!(!field.is_empty(), "empty vector field on line {}", line_index + 1);
+//RS         }
+//RS         let key = (fields[0], fields[1], fields[2], fields[3]);
+//RS         assert!(keys.insert(key), "duplicate datetime accuracy vector key: {key:?}");
+//RS         rows.push(Vector {
+//RS             batch: fields[0].to_string(),
+//RS             family: fields[1].to_string(),
+//RS             ident: fields[2].to_string(),
+//RS             operation: fields[3].to_string(),
+//RS             metadata: fields[4].to_string(),
+//RS             oracle: fields[5].to_string(),
+//RS         });
+//RS     }
+//RS     assert!(!rows.is_empty(), "datetime accuracy vector table is empty");
+//RS     rows
+//RS }
+//RS 
+//RS fn assert_corpus_shape(rows: &[Vector]) {
+//RS     for (batch, _, _) in BATCHES {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.batch == batch),
+//RS             "datetime accuracy batch has no vectors: {batch}"
+//RS         );
+//RS     }
+//RS     for family in ["CAL", "F1", "F2", "F3", "F4", "F5", "F6", "PROP"] {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.family == family),
+//RS             "datetime accuracy family has no vectors: {family}"
+//RS         );
+//RS     }
+//RS     for id in ["f2_000", "f2_001", "f2_002", "f2_003"] {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.ident == id),
+//RS             "missing century/leap edge vector: {id}"
+//RS         );
+//RS     }
+//RS     for id in [
+//RS         "f1_edge_1900_feb28",
+//RS         "f1_edge_1900_mar01",
+//RS         "f1_edge_2000_feb28",
+//RS         "f1_edge_2000_feb29",
+//RS         "f1_edge_2000_mar01",
+//RS         "f1_edge_2100_feb28",
+//RS         "f1_edge_2100_mar01",
+//RS         "f1_edge_2400_feb28",
+//RS         "f1_edge_2400_feb29",
+//RS         "f1_edge_2400_mar01",
+//RS     ] {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.ident == id),
+//RS             "missing epoch century/leap edge vector: {id}"
+//RS         );
+//RS     }
+//RS     for operation in [
+//RS         "parse_format_round_trip",
+//RS         "diff_days_antisymmetry",
+//RS         "add_days_composition",
+//RS         "add_months_clamping",
+//RS     ] {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.operation == operation),
+//RS             "missing datetime property law: {operation}"
+//RS         );
+//RS     }
+//RS     for id in [
+//RS         "f5_malformed_leap_second",
+//RS         "f5_malformed_hour_24",
+//RS         "f5_malformed_offset_plus_24",
+//RS     ] {
+//RS         assert!(
+//RS             rows.iter().any(|row| row.ident == id),
+//RS             "missing malformed RFC3339 vector: {id}"
+//RS         );
+//RS     }
+//RS     for zone in [
+//RS         "Australia/Lord_Howe",
+//RS         "Asia/Kathmandu",
+//RS         "Pacific/Apia",
+//RS         "Pacific/Chatham",
+//RS         "Africa/Casablanca",
+//RS         "America/Sao_Paulo",
+//RS         "Asia/Tehran",
+//RS         "Europe/London",
+//RS         "America/New_York",
+//RS         "UTC",
+//RS     ] {
+//RS         assert!(
+//RS             rows.iter()
+//RS                 .any(|row| row.metadata.contains(&format!("zone={zone}"))),
+//RS             "missing hostile-DST zone vector: {zone}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS fn expected_output(rows: &[Vector], batch: &str) -> Vec<u8> {
+//RS     let mut output = String::new();
+//RS     for row in rows.iter().filter(|row| row.batch == batch) {
+//RS         output.push_str("CASE\t");
+//RS         output.push_str(&row.ident);
+//RS         output.push('\t');
+//RS         output.push_str(&row.operation);
+//RS         output.push('\t');
+//RS         output.push_str(&row.oracle);
+//RS         output.push('\n');
+//RS     }
+//RS     output.into_bytes()
+//RS }
+//RS 
+//RS fn assert_output(batch: &str, tier: &str, actual: &[u8], expected: &[u8]) {
+//RS     let actual = std::str::from_utf8(actual)
+//RS         .unwrap_or_else(|error| panic!("{tier} datetime accuracy output is not UTF-8: {error}"));
+//RS     let expected = std::str::from_utf8(expected)
+//RS         .expect("generated datetime accuracy oracle must be UTF-8");
+//RS     let actual_lines: Vec<_> = actual.split('\n').collect();
+//RS     let expected_lines: Vec<_> = expected.split('\n').collect();
+//RS     assert_eq!(
+//RS         actual_lines.len(),
+//RS         expected_lines.len(),
+//RS         "{tier} datetime accuracy line count differs for {batch}: expected {}, got {}",
+//RS         expected_lines.len().saturating_sub(1),
+//RS         actual_lines.len().saturating_sub(1)
+//RS     );
+//RS     for (index, (actual_line, expected_line)) in
+//RS         actual_lines.iter().zip(&expected_lines).enumerate()
+//RS     {
+//RS         if actual_line != expected_line {
+//RS             let vector = expected_line.split('\t').nth(1).unwrap_or("unknown");
+//RS             panic!(
+//RS                 "{tier} datetime accuracy mismatch for {batch}, line {}, vector {vector}:\nexpected: {expected_line:?}\nactual:   {actual_line:?}",
+//RS                 index + 1
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn run_witness(
+//RS     root: &Path,
+//RS     scratch: &Path,
+//RS     source: &Path,
+//RS     release: bool,
+//RS ) -> std::process::Output {
+//RS     let mode = if release { "release" } else { "default" };
+//RS     let cache = scratch.join(mode);
+//RS     fs::create_dir_all(&cache).unwrap();
+//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+//RS     command.arg("run");
+//RS     if release {
+//RS         command.arg("--release");
+//RS     }
+//RS     command
+//RS         .arg(source)
+//RS         .current_dir(root)
+//RS         .env("JET_STORE_DIR", cache.join("build"))
+//RS         .env("JET_RUN_CACHE_DIR", cache.join("run"))
+//RS         .env("JET_TZDB_DIR", root.join("Core/time/tzdb"))
+//RS         .env("JETPACK_ENV", "1")
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap_or_else(|error| panic!("spawn datetime accuracy {mode} witness: {error}"))
+//RS }
+//RS 
+//RS #[test]
+//RS fn datetime_accuracy_differential_and_properties() {
+//RS     let rows = vectors();
+//RS     assert_corpus_shape(&rows);
+//RS 
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let scratch =
+//RS         common::test_scratch_root(&format!("datetime_accuracy_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS     fs::create_dir_all(&scratch).unwrap();
+//RS 
+//RS     for (batch, source_name, golden_name) in BATCHES {
+//RS         let source = root.join(source_name);
+//RS         let golden = root.join(golden_name);
+//RS         assert!(source.is_file(), "missing datetime accuracy witness: {source_name}");
+//RS         let expected = expected_output(&rows, batch);
+//RS         assert_eq!(
+//RS             fs::read(&golden).unwrap_or_else(|error| panic!("read {golden_name}: {error}")),
+//RS             expected,
+//RS             "datetime accuracy golden disagrees with committed oracle rows for {batch}"
+//RS         );
+//RS 
+//RS         let default = run_witness(&root, &scratch.join(batch), &source, false);
+//RS         assert!(
+//RS             default.status.success(),
+//RS             "default datetime accuracy witness failed for {batch}:\n{}",
+//RS             String::from_utf8_lossy(&default.stderr)
+//RS         );
+//RS         assert_output(batch, "default", &default.stdout, &expected);
+//RS 
+//RS         let release = run_witness(&root, &scratch.join(batch), &source, true);
+//RS         assert!(
+//RS             release.status.success(),
+//RS             "release datetime accuracy witness failed for {batch}:\n{}",
+//RS             String::from_utf8_lossy(&release.stderr)
+//RS         );
+//RS         assert_output(batch, "release", &release.stdout, &expected);
+//RS         assert_output(batch, "default-vs-release", &release.stdout, &default.stdout);
+//RS     }
+//RS 
+//RS     let _ = fs::remove_dir_all(&scratch);
+//RS }
+// END-PORT-PENDING 1028 tests/datetime_accuracy.rs:1-268
+
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/deadline_and_crypto_text_single_home.rs:1-84
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #1660 (D-ONCE-*): the E3003 deadline-exceeded text was hand-typed in
+//RS //! four places (`Prelude/TaskGroup.rs`, `Prelude/CoreLib/Top/MathRandomTime.rs`,
+//RS //! `SchedulerHost.rs` test, `jet-jit/Concurrency.rs`) with two incompatible
+//RS //! `Why:`/`Fix:` spacings. All three tiers now materialize the
+//RS //! E3003 row from the one renderer, `TaskGroup::JetTaskDeadline::render`
+//RS //! (`jet_task_deadline(wait_kind).render()`), and both codes share the same
+//RS //! ` Why: … / Fix: …` spacing.
+//RS //!
+//RS //! Two guards:
+//RS //!   - `e3003_why_text_lives_only_in_the_one_renderer`: fails if the E3003
+//RS //!     `why` sentence reappears hand-typed anywhere under `crates/` outside
+//RS //!     `Prelude/TaskGroup.rs`.
+//RS //!   - the entry codegen has no retired CryptoError-specific arm.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS fn root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS const E3003_HOME: &str = "crates/jet-codegen/src/Prelude/TaskGroup.rs";
+//RS const E3003_WHY: &str = "this wait point observed the task context deadline";
+//RS 
+//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+//RS     let Ok(entries) = fs::read_dir(dir) else {
+//RS         return;
+//RS     };
+//RS     for entry in entries.flatten() {
+//RS         let path = entry.path();
+//RS         if path.is_dir() {
+//RS             collect_rs_files(&path, out);
+//RS         } else if path.extension().is_some_and(|e| e == "rs") {
+//RS             out.push(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn e3003_why_text_lives_only_in_the_one_renderer() {
+//RS     let root = root();
+//RS     let mut files = Vec::new();
+//RS     collect_rs_files(&root.join("crates"), &mut files);
+//RS 
+//RS     let mut homes = Vec::new();
+//RS     for file in &files {
+//RS         let text = fs::read_to_string(file).unwrap_or_default();
+//RS         if text.contains(E3003_WHY) {
+//RS             homes.push(
+//RS                 file.strip_prefix(&root)
+//RS                     .unwrap_or(file)
+//RS                     .display()
+//RS                     .to_string(),
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         homes,
+//RS         vec![E3003_HOME.to_string()],
+//RS         "E3003 'why' text must live only in {E3003_HOME}, found in: {homes:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn e3003_spacing_survives_and_entry_crypto_arm_is_gone() {
+//RS     let root = root();
+//RS 
+//RS     let task_group = fs::read_to_string(root.join(E3003_HOME)).unwrap();
+//RS     assert!(
+//RS         task_group.contains("\\n Why: {}\\n Fix: {}"),
+//RS         "E3003 renderer must use ' Why: … / Fix: …' spacing (one leading space): {task_group}"
+//RS     );
+//RS 
+//RS     let items_rs =
+//RS         fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/Items.rs")).unwrap();
+//RS     assert!(
+//RS         !items_rs.contains("handle the CryptoError")
+//RS             && !items_rs.contains("unhandled cryptographic error"),
+//RS         "entry codegen must not retain the retired CryptoError-specific arm"
+//RS     );
+//RS }
+// END-PORT-PENDING 1028 tests/deadline_and_crypto_text_single_home.rs:1-84
+
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/decimal_fast_path.rs:1-54
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS const SOURCE: &str = r#"
+//RS fn run() {
+//RS     small_left :: Decimal("1.20")
+//RS     small_right :: Decimal("2.30")
+//RS     print(small_left + small_right)
+//RS     print(small_right - small_left)
+//RS     print(Decimal("-1.20") + Decimal("0.20"))
+//RS     print(Decimal("9.5") * Decimal("2.0"))
+//RS 
+//RS     equal_left :: Decimal("1.0")
+//RS     equal_right :: Decimal("1.00")
+//RS     print(equal_left == equal_right)
+//RS     zero_left :: Decimal("0.00")
+//RS     zero_right :: Decimal("-0.0")
+//RS     print(zero_left == zero_right)
+//RS 
+//RS     print(Decimal("12.00").div(Decimal("4.00")))
+//RS     print(Decimal("1.00").div(Decimal("8.00")))
+//RS 
+//RS     big :: Decimal("170141183460469231731687303715884105727")
+//RS     print(big + Decimal("1"))
+//RS     print(big * Decimal("2"))
+//RS     print(Decimal("12345678901234567890123456789012345678901234567890.00"))
+//RS     big_scale_left :: Decimal("12345678901234567890123456789012345678901234567890.00")
+//RS     big_scale_right :: Decimal("12345678901234567890123456789012345678901234567890.0")
+//RS     print(big_scale_left == big_scale_right)
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn decimal_small_and_big_paths_keep_exact_tier_behavior() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "decimal_fast_path",
+//RS         SOURCE,
+//RS         concat!(
+//RS             "3.50\n",
+//RS             "1.10\n",
+//RS             "-1.00\n",
+//RS             "19.0\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "3\n",
+//RS             "0.125\n",
+//RS             "170141183460469231731687303715884105728\n",
+//RS             "340282366920938463463374607431768211454\n",
+//RS             "12345678901234567890123456789012345678901234567890.00\n",
+//RS             "true\n",
+//RS         ),
+//RS     );
+//RS }
+//RS 
+// END-PORT-PENDING 1028 tests/decimal_fast_path.rs:1-54
+
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/dom_runtime_parity.rs:1-133
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS // Card #1658: DomRuntime.js is claimed to be a faithful line-by-line port of
+//RS // the Rust `JetBackend` pipeline (Ui.rs), but nothing checked that. This
+//RS // structural-diff guard extracts the measure/layout/paint/on_event stage
+//RS // names, in order, from both sides and asserts they match. It fails if a
+//RS // stage is renamed or added on only one side.
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS /// The canonical pipeline stage order, as declared by the Rust
+//RS /// `JetBackend` trait (the single source of truth both hosts must port).
+//RS fn rust_backend_stage_order(ui_rs: &str) -> Vec<String> {
+//RS     let start = ui_rs
+//RS         .find("pub trait JetBackend")
+//RS         .expect("Ui.rs must declare `pub trait JetBackend`");
+//RS     let body_start = ui_rs[start..].find('{').expect("trait body") + start;
+//RS     let body_end = ui_rs[body_start..].find('}').expect("trait body end") + body_start;
+//RS     let body = &ui_rs[body_start..body_end];
+//RS 
+//RS     let mut stages = Vec::new();
+//RS     let mut rest = body;
+//RS     while let Some(fn_at) = rest.find("fn ") {
+//RS         rest = &rest[fn_at + 3..];
+//RS         let name: String = rest
+//RS             .chars()
+//RS             .take_while(|c| c.is_alphanumeric() || *c == '_')
+//RS             .collect();
+//RS         stages.push(name);
+//RS     }
+//RS     stages
+//RS }
+//RS 
+//RS /// Rust `snake_case` stage name -> the DomRuntime.js `camelCase` export name
+//RS /// that ports it. `paint`/`measure`/`layout` are already identical.
+//RS fn js_export_name(rust_stage: &str) -> String {
+//RS     match rust_stage {
+//RS         "on_event" => "onEvent".to_string(),
+//RS         other => other.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// Every top-level `export function NAME(` in DomRuntime.js, in file order.
+//RS fn js_export_order(js: &str) -> Vec<String> {
+//RS     js.lines()
+//RS         .filter_map(|line| {
+//RS             let line = line.trim_start();
+//RS             let rest = line.strip_prefix("export function ")?;
+//RS             let name: String = rest
+//RS                 .chars()
+//RS                 .take_while(|c| c.is_alphanumeric() || *c == '_')
+//RS                 .collect();
+//RS             Some(name)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn dom_runtime_ports_the_same_pipeline_stages_in_the_same_order() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ui_rs =
+//RS         fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs");
+//RS     let dom_js = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js"))
+//RS         .expect("read DomRuntime.js");
+//RS 
+//RS     let rust_stages = rust_backend_stage_order(&ui_rs);
+//RS     assert!(
+//RS         !rust_stages.is_empty(),
+//RS         "expected `JetBackend` to declare at least one stage"
+//RS     );
+//RS 
+//RS     let js_exports = js_export_order(&dom_js);
+//RS 
+//RS     // The JS pipeline stages, filtered down to only the names that port a
+//RS     // Rust `JetBackend` stage, must appear in the same relative order as
+//RS     // the Rust trait declares them — with none missing and none renamed.
+//RS     let expected: Vec<String> = rust_stages.iter().map(|s| js_export_name(s)).collect();
+//RS     let js_stage_names: Vec<&String> = js_exports
+//RS         .iter()
+//RS         .filter(|name| expected.contains(name))
+//RS         .collect();
+//RS     let actual: Vec<String> = js_stage_names.into_iter().cloned().collect();
+//RS 
+//RS     assert_eq!(
+//RS         actual, expected,
+//RS         "DomRuntime.js must export exactly the JetBackend pipeline stages \
+//RS          {expected:?}, in that order (Ui.rs is the source of truth) — found \
+//RS          {actual:?} instead. Rename or reorder drift means DomRuntime.js is \
+//RS          no longer a faithful port of Ui.rs."
+//RS     );
+//RS }
+//RS 
+//RS /// Card #1658: DEFAULT_MOUNT_COLS/ROWS is declared once in Ui.rs and once
+//RS /// (necessarily, since JS can't `include!` Rust) in DomRuntime.js. Nothing
+//RS /// stops the two literals from drifting apart, so read both and compare
+//RS /// the numbers directly.
+//RS #[test]
+//RS fn dom_runtime_default_mount_matches_ui_rs() {
+//RS     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ui_rs =
+//RS         fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs");
+//RS     let dom_js = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js"))
+//RS         .expect("read DomRuntime.js");
+//RS 
+//RS     fn number_after(source: &str, needle: &str) -> f64 {
+//RS         let at = source
+//RS             .find(needle)
+//RS             .unwrap_or_else(|| panic!("expected `{needle}` in source"));
+//RS         let rest = &source[at + needle.len()..];
+//RS         let digits: String = rest
+//RS             .chars()
+//RS             .take_while(|c| c.is_ascii_digit() || *c == '.')
+//RS             .collect();
+//RS         digits
+//RS             .parse()
+//RS             .unwrap_or_else(|e| panic!("parse number after `{needle}`: {e} ({digits:?})"))
+//RS     }
+//RS 
+//RS     let rust_cols = number_after(&ui_rs, "pub const DEFAULT_MOUNT_COLS: f64 = ");
+//RS     let rust_rows = number_after(&ui_rs, "pub const DEFAULT_MOUNT_ROWS: f64 = ");
+//RS     let js_cols = number_after(&dom_js, "export const DEFAULT_MOUNT_COLS = ");
+//RS     let js_rows = number_after(&dom_js, "export const DEFAULT_MOUNT_ROWS = ");
+//RS 
+//RS     assert_eq!(
+//RS         rust_cols, js_cols,
+//RS         "Ui.rs DEFAULT_MOUNT_COLS ({rust_cols}) drifted from DomRuntime.js ({js_cols})"
+//RS     );
+//RS     assert_eq!(
+//RS         rust_rows, js_rows,
+//RS         "Ui.rs DEFAULT_MOUNT_ROWS ({rust_rows}) drifted from DomRuntime.js ({js_rows})"
+//RS     );
+//RS }
+// END-PORT-PENDING 1028 tests/dom_runtime_parity.rs:1-133
+
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/duration_runtime.rs:1-61
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS mod tir_support;
+//RS 
+//RS 
+//RS #[test]
+//RS fn checked_duration_constructors_preserve_units_across_tiers() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     fractional :: Duration.seconds(1.5) ?? panic("fractional duration")
+//RS     whole :: Duration.milliseconds(1500) ?? panic("whole duration")
+//RS     exact :: Duration.nanoseconds(4611686018427387904) ?? panic("exact duration")
+//RS     print(fractional.in(.Milliseconds) ?? panic("fractional read"))
+//RS     print(whole.in(.Seconds) ?? panic("whole read"))
+//RS     print(exact.in(.Nanoseconds) ?? panic("exact read"))
+//RS     _overflow :: Duration.hours(9223372036854775807) ?? {
+//RS         print("overflow")
+//RS         return
+//RS     }
+//RS     print("unexpected duration")
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "duration_checked_constructors",
+//RS         source,
+//RS         "1500\n1\n4611686018427387904\noverflow\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn retired_duration_aliases_are_not_callable() {
+//RS     for source in [
+//RS         "use core.time as time\nfn run() { _ :: time.seconds(1) }",
+//RS         "fn run() { d :: Duration.seconds(1) ?? panic(\"duration\")\n_ :: d.millis() }",
+//RS     ] {
+//RS         assert!(
+//RS             jet::compile(source).is_err(),
+//RS             "retired duration alias compiled: {source}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_duration_binding_shadows_builtin_without_reaching_codegen() {
+//RS     let source = "fn run() {\nDuration :: 1\n_ :: Duration.seconds(1)\n}";
+//RS     let diagnostics = jet::compile(source).expect_err("shadowed Duration should fail in sema");
+//RS     let rendered = jet::render_diagnostics("shadow.jet", source, &diagnostics);
+//RS     assert!(
+//RS         rendered.contains("[E0311]"),
+//RS         "{rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn formatter_preserves_duration_unit_calls() {
+//RS     let source = "fn run(){d::Duration.seconds(1)??panic(\"duration\")\nprint(d.in(.Milliseconds)??panic(\"read\"))}";
+//RS     let once = jet::format_source(source).expect("duration source should format");
+//RS     let twice = jet::format_source(&once).expect("formatted duration source should parse");
+//RS     assert_eq!(once, twice);
+//RS     assert!(once.contains("Duration.seconds(1)"));
+//RS     assert!(once.contains("d.in(.Milliseconds)"));
+//RS }
+// END-PORT-PENDING 1028 tests/duration_runtime.rs:1-61
+
+// PORT-PENDING 1028 tests-datetime-accuracy-module-group: tests/encoding_corpus.rs:1-469
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Card #714: encoding corpora manifests, provenance, and non-vacuous vector checks.
+//RS 
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::Command;
+//RS 
+//RS use jet_foundation::XmlPull::base_encoding_2026;
+//RS 
+//RS mod common;
+//RS 
+//RS fn fixtures_encoding() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/encoding")
+//RS }
+//RS 
+//RS fn sha256_hex(bytes: &[u8]) -> String {
+//RS     jet::SHA256::sha256_hex(bytes)
+//RS }
+//RS 
+//RS fn verify_manifest(root: &Path) -> usize {
+//RS     let manifest = fs::read_to_string(root.join("MANIFEST.tsv"))
+//RS         .unwrap_or_else(|_| panic!("missing MANIFEST.tsv under {}", root.display()));
+//RS     let mut count = 0;
+//RS     for line in manifest
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS     {
+//RS         let fields = line.split('\t').collect::<Vec<_>>();
+//RS         assert!(
+//RS             fields.len() >= 4,
+//RS             "bad manifest row in {}: {line}",
+//RS             root.display()
+//RS         );
+//RS         let bytes = fs::read(root.join(fields[0]))
+//RS             .unwrap_or_else(|_| panic!("manifest file missing: {}/{}", root.display(), fields[0]));
+//RS         assert_eq!(
+//RS             sha256_hex(&bytes),
+//RS             fields[1],
+//RS             "hash drift in {}: {}",
+//RS             root.display(),
+//RS             fields[0]
+//RS         );
+//RS         assert!(
+//RS             fields[2].starts_with("https://") || fields[2] == "local",
+//RS             "bad source URL in {}: {}",
+//RS             root.display(),
+//RS             fields[2]
+//RS         );
+//RS         assert!(
+//RS             !fields[3].is_empty(),
+//RS             "missing license in {}",
+//RS             root.display()
+//RS         );
+//RS         count += 1;
+//RS     }
+//RS     count
+//RS }
+//RS 
+//RS fn jet_string_literal(text: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for ch in text.chars() {
+//RS         match ch {
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '"' => out.push_str("\\\""),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '{' => out.push_str("{{"),
+//RS             '}' => out.push_str("}}"),
+//RS             c => out.push(c),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_json_literal(json: &str) -> String {
+//RS     if json.starts_with('{') && json.ends_with('}') {
+//RS         let body = &json[1..json.len() - 1];
+//RS         let escaped = body.replace('\\', "\\\\").replace('"', "\\\"");
+//RS         let mut out = String::from("\"{{");
+//RS         out.push_str(&escaped);
+//RS         out.push_str("}}\"");
+//RS         out
+//RS     } else {
+//RS         jet_string_literal(json)
+//RS     }
+//RS }
+//RS 
+//RS fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let out = Command::new(&bin).current_dir(dir).output().unwrap();
+//RS     (
+//RS         out.status.code().unwrap_or(0),
+//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn every_encoding_corpus_manifest_verifies_before_use() {
+//RS     let root = fixtures_encoding();
+//RS     let mut manifests = 0;
+//RS     for entry in fs::read_dir(&root).unwrap().flatten() {
+//RS         let path = entry.path();
+//RS         if path.join("MANIFEST.tsv").is_file() {
+//RS             manifests += verify_manifest(&path);
+//RS             continue;
+//RS         }
+//RS         if path.is_dir() {
+//RS             for nested in fs::read_dir(&path).unwrap().flatten() {
+//RS                 let nested_path = nested.path();
+//RS                 if nested_path.join("MANIFEST.tsv").is_file() {
+//RS                     manifests += verify_manifest(&nested_path);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         manifests >= 14,
+//RS         "expected every encoding corpus manifest row to verify; got {manifests}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rfc4648_vectors_decode_with_strict_2027_surface() {
+//RS     verify_manifest(&fixtures_encoding().join("rfc4648"));
+//RS     let corpus = fs::read_to_string(fixtures_encoding().join("rfc4648/vectors.tsv")).unwrap();
+//RS     for line in corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS     {
+//RS         let fields = line.split('\t').collect::<Vec<_>>();
+//RS         assert_eq!(fields.len(), 4, "bad RFC 4648 row: {line}");
+//RS         let (plain_text, base64, base64url, base32) = (fields[0], fields[1], fields[2], fields[3]);
+//RS         let plain = if let Some(hex) = plain_text.strip_prefix("HEX:") {
+//RS             (0..hex.len())
+//RS                 .step_by(2)
+//RS                 .map(|idx| u8::from_str_radix(&hex[idx..idx + 2], 16).unwrap())
+//RS                 .collect::<Vec<_>>()
+//RS         } else {
+//RS             plain_text.as_bytes().to_vec()
+//RS         };
+//RS         assert_eq!(base_encoding_2026::decode_base64(base64).unwrap(), plain);
+//RS         assert_eq!(
+//RS             base_encoding_2026::decode_base64url(base64url).unwrap(),
+//RS             plain
+//RS         );
+//RS         assert_eq!(base_encoding_2026::decode_base32(base32).unwrap(), plain);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn rfc4180_cases_parse_through_csv_whole_value_api() {
+//RS     common::have_rustc();
+//RS     verify_manifest(&fixtures_encoding().join("rfc4180"));
+//RS     let corpus = fs::read_to_string(fixtures_encoding().join("rfc4180/cases.tsv")).unwrap();
+//RS     let dir = common::unique_tmp("jet_enc_rfc4180");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let mut checks = String::new();
+//RS     for (idx, line) in corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS         .enumerate()
+//RS     {
+//RS         let (csv, _expected) = line.split_once('\t').unwrap();
+//RS         let escaped = jet_string_literal(csv);
+//RS         checks.push_str(&format!(
+//RS             "    rows{idx} := csv.parse({escaped}) ?? panic(\"parse\")\n    print(rows{idx}.len() > 0)\n"
+//RS         ));
+//RS     }
+//RS     let source = format!("use core.encoding.csv as csv\n\nfn run() {{\n{checks}}}\n");
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "rfc4180", &source);
+//RS     assert_eq!(code, 0, "RFC 4180 corpus failed: {stderr}");
+//RS     for line in stdout.lines() {
+//RS         assert_eq!(line, "true", "RFC 4180 row mismatch: {stdout}");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rfc8259_accept_cases_parse_through_json_whole_value_api() {
+//RS     common::have_rustc();
+//RS     verify_manifest(&fixtures_encoding().join("rfc8259"));
+//RS     let corpus = fs::read_to_string(fixtures_encoding().join("rfc8259/accept.tsv")).unwrap();
+//RS     let dir = common::unique_tmp("jet_enc_rfc8259");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let mut checks = String::new();
+//RS     for (idx, line) in corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS         .enumerate()
+//RS     {
+//RS         let json = line.trim();
+//RS         let escaped = jet_json_literal(json);
+//RS         checks.push_str(&format!(
+//RS             "    parsed{idx} := json.parse({escaped}) ?? panic(\"parse\")\n    print(true)\n"
+//RS         ));
+//RS     }
+//RS     let source = format!("use core.encoding.json as json\n\nfn run() {{\n{checks}}}\n");
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "rfc8259", &source);
+//RS     assert_eq!(code, 0, "RFC 8259 corpus failed: {stderr}");
+//RS     let case_count = corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS         .count();
+//RS     assert_eq!(stdout.matches("true\n").count(), case_count, "{stdout}");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn exact_typed_json_numbers() {
+//RS     common::have_rustc();
+//RS     let dir = common::unique_tmp("jet_enc_exact_json_numbers");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.json as json
+//RS use core.data as data
+//RS 
+//RS #Codable
+//RS struct ExactNumbers {
+//RS     amount: Decimal
+//RS     exponent: Decimal
+//RS     whole: Decimal
+//RS     tenth: Decimal
+//RS     tenth_with_zero: Decimal
+//RS     scientific_tenth: Decimal
+//RS     adjacent_lo: Int
+//RS     adjacent_hi: Int
+//RS     large: Int
+//RS     large_exp: Int
+//RS }
+//RS 
+//RS #Codable
+//RS struct SmallI64 {
+//RS     value: I64
+//RS }
+//RS 
+//RS #Codable
+//RS struct ExactIntRow {
+//RS     adjacent_hi: Int
+//RS     large: Int
+//RS }
+//RS 
+//RS LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
+//RS 
+//RS fn run() {
+//RS     raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"
+//RS     value :: json.decode<ExactNumbers>(raw) ?? panic("whole decode")
+//RS     print(value.amount.to_string())
+//RS     print(value.exponent.to_string())
+//RS     print(value.whole.to_string())
+//RS     print(value.tenth.to_string())
+//RS     print(value.tenth_with_zero.to_string())
+//RS     print(value.scientific_tenth.to_string())
+//RS     print(value.adjacent_lo.to_string())
+//RS     print(value.adjacent_hi.to_string())
+//RS     print(value.large.to_string())
+//RS     print(value.large_exp.to_string())
+//RS 
+//RS     stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+//RS     rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+//RS     loop row in rows {
+//RS         print(row.adjacent_hi.to_string())
+//RS         print(row.large.to_string())
+//RS     }
+//RS 
+//RS     overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
+//RS     if overflow == {
+//RS         .Err(_) -> { print("i64-overflow") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     print(json.decode<U64>("18446744073709551615") ?? panic("u64 maximum"))
+//RS     if json.decode<U64>("18446744073709551616") == {
+//RS         .Err(_) -> print("u64-overflow")
+//RS         else -> print("accepted")
+//RS     }
+//RS     if json.decode<U64>("-1") == {
+//RS         .Err(_) -> print("u64-negative")
+//RS         else -> print("accepted")
+//RS     }
+//RS     if json.decode<Int>("\"123\"") == {
+//RS         .Err(_) -> print("quoted-int")
+//RS         else -> print("accepted")
+//RS     }
+//RS     nonfinite :: json.decode<Float>("1e400")
+//RS     if nonfinite == {
+//RS         .Err(_) -> { print("nonfinite") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     invalid_nan :: json.decode<Decimal>("NaN")
+//RS     if invalid_nan == {
+//RS         .Err(_) -> { print("nan-rejected") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     invalid_infinity :: json.decode<Decimal>("Infinity")
+//RS     if invalid_infinity == {
+//RS         .Err(_) -> { print("infinity-rejected") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     fractional_integer :: json.decode<Int>("1.5")
+//RS     if fractional_integer == {
+//RS         .Err(_) -> { print("fractional-rejected") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     exponent_limited :: json.decode<Decimal>("1e1000001")
+//RS     if exponent_limited == {
+//RS         .Err(_) -> { print("exponent-limit") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+//RS     mismatch :: json.decode<ExactNumbers>(mismatch_raw)
+//RS     if mismatch == {
+//RS         .Err(_) -> { print("mismatch") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
+//RS     if stream_mismatch == {
+//RS         .Err(_) -> { print("stream-mismatch") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     string_mismatch :: json.decode<String>("123")
+//RS     if string_mismatch == {
+//RS         .Err(_) -> { print("string-mismatch") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS     limited :: json.decode<Decimal>(@limited_text)
+//RS     if limited == {
+//RS         .Err(_) -> { print("limit") }
+//RS         else -> { print("accepted") }
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "exact_typed_json_numbers", source);
+//RS     assert_eq!(code, 0, "exact JSON fixture failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         concat!(
+//RS             "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n",
+//RS             "9007199254740992\n9007199254740993\n",
+//RS             "12345678901234567890123456789012345678901234567890\n",
+//RS             "1000000000000000000000000000000\n",
+//RS             "9007199254740993\n",
+//RS             "12345678901234567890123456789012345678901234567890\n",
+//RS             "i64-overflow\n18446744073709551615\nu64-overflow\nu64-negative\nquoted-int\n",
+//RS             "nonfinite\nnan-rejected\ninfinity-rejected\n",
+//RS             "fractional-rejected\nexponent-limit\nmismatch\nstream-mismatch\n",
+//RS             "string-mismatch\nlimit\n",
+//RS         )
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rfc8949_wire_cases_match_cbor_parse_expectations() {
+//RS     common::have_rustc();
+//RS     verify_manifest(&fixtures_encoding().join("rfc8949"));
+//RS     let corpus = fs::read_to_string(fixtures_encoding().join("rfc8949/wire.tsv")).unwrap();
+//RS     let dir = common::unique_tmp("jet_enc_rfc8949");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let mut checks = String::new();
+//RS     for (idx, line) in corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS         .enumerate()
+//RS     {
+//RS         let (wire_hex, accept) = line.split_once('\t').unwrap();
+//RS         let bytes = (0..wire_hex.len())
+//RS             .step_by(2)
+//RS             .map(|idx| u8::from_str_radix(&wire_hex[idx..idx + 2], 16).unwrap())
+//RS             .collect::<Vec<_>>();
+//RS         let literal = bytes
+//RS             .iter()
+//RS             .map(|byte| byte.to_string())
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         if accept == "true" {
+//RS             checks.push_str(&format!(
+//RS                 "    cbor{idx} := cbor.parse([{literal}]) ?? panic(\"appendix A accept {wire_hex}\")\n    print(true)\n"
+//RS             ));
+//RS         } else {
+//RS             checks.push_str(&format!(
+//RS                 "    if cbor.parse([{literal}]) == {{\n        .Ok(_) -> print(false)\n        .Err(_) -> print(true)\n    }}\n"
+//RS             ));
+//RS         }
+//RS     }
+//RS     let source = format!("use core.encoding.cbor as cbor\n\nfn run() {{\n{checks}}}\n");
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "rfc8949", &source);
+//RS     assert_eq!(code, 0, "RFC 8949 corpus failed: {stderr}");
+//RS     for line in stdout.lines() {
+//RS         assert_eq!(line, "true", "RFC 8949 row mismatch: {stdout}");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn w3c_c14n_inclusive11_vector_matches_xml_canonical_output() {
+//RS     common::have_rustc();
+//RS     let root = fixtures_encoding().join("xml/w3c-c14n");
+//RS     verify_manifest(&root);
+//RS     let input = fs::read_to_string(root.join("inclusive11-input.xml")).unwrap();
+//RS     let expected = fs::read_to_string(root.join("inclusive11-output.txt")).unwrap();
+//RS     let dir = common::unique_tmp("jet_enc_xml_c14n");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let input_path = dir.join("inclusive11-input.xml");
+//RS     fs::write(&input_path, &input).unwrap();
+//RS     let shown = input_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding.xml as xml
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     text := files.read("{shown}") ?? panic("read")
+//RS     tree := xml.parse(text) ?? panic("parse")
+//RS     options := xml.XMLCanonical{{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }}
+//RS     print(xml.canonical(tree, options) ?? panic("canonical"))
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_c14n", &source);
+//RS     assert_eq!(code, 0, "W3C C14N corpus failed: {stderr}");
+//RS     assert_eq!(stdout.trim(), expected.trim(), "C14N byte mismatch");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn local_cbor_hostile_oracle_case_count_is_pinned() {
+//RS     let root = fixtures_encoding().join("local/cbor-hostile");
+//RS     verify_manifest(&root);
+//RS     let count = fs::read_to_string(root.join("case-count.txt"))
+//RS         .unwrap()
+//RS         .trim()
+//RS         .parse::<usize>()
+//RS         .unwrap();
+//RS     assert_eq!(count, 40, "local CBOR hostile oracle case count drifted");
+//RS }
+// END-PORT-PENDING 1028 tests/encoding_corpus.rs:1-469
+

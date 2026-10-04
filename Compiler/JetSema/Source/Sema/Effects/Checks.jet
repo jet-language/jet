@@ -11,6 +11,7 @@
 // for denial/reachability facts but are deny-only and never become positive
 // grants.
 use jet_foundation.[
+    sema_effect_covers,
     Diagnostic,
     EffectRowEntry,
     Func,
@@ -378,11 +379,6 @@ fn sema_effect_set_union(target: &[String], values: [String]) -> Bool Never! {
     changed
 }
 
-pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool Never! {
-    if bound == effect_name -> return true
-    prefix :: "{bound}."
-    effect_name.starts_with(prefix)
-}
 
 pub fn sema_effect_parse_name(name: String) -> String? {
     if name == "" || name.starts_with("..") -> return None

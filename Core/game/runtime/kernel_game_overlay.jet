@@ -1,0 +1,527 @@
+// GameOverlay.rs:1-1127: deterministic typed console/overlay kernel only.
+// No renderer, native provider, clock, command execution, or devtools envelope.
+// #4392/#4318: canonical utf8_bytes currently materializes upstream; retained
+// UTF-8 and escaping field/view loans must land before allocation parity proof.
+use core.game.runtime.kernel_game_frame_profiler as overlay_frame
+use core.text.runtime.kernel_unicode_string as overlay_text
+
+pub JET_GAME_OVERLAY_MAX_COMMANDS :: 256
+pub JET_GAME_OVERLAY_MAX_HISTORY :: 256
+pub JET_GAME_OVERLAY_MAX_TRANSITIONS :: 256
+pub JET_GAME_OVERLAY_MAX_SELECTED_METRICS :: 8
+pub JET_GAME_OVERLAY_MAX_METRIC_VALUES :: 16
+pub JET_GAME_OVERLAY_MAX_TEXT_BYTES :: 16384
+pub JET_GAME_OVERLAY_MAX_AUTOCOMPLETE_RESULTS :: 64
+
+pub struct JetGameOverlayAutocompleteFact {
+    pub query: String
+    pub matches: [String]
+    pub fn new(query: ^String, matches: ^[String]) -> JetGameOverlayAutocompleteFact JetGameOverlayError! {
+        jet_game_overlay_validate_text(query, "autocomplete query", false) ?? return Err(err)
+        // In-place stable unique compaction retains the supplied allocation.
+        // Compare against the last retained item, not a swapped-out duplicate.
+        ordered := ^matches
+        &ordered.sort()
+        write := 0
+        loop read in 0..<ordered.len() {
+            if write > 0 && ordered[read] == ordered[write - 1] -> next
+            if write == JET_GAME_OVERLAY_MAX_AUTOCOMPLETE_RESULTS -> break
+            if read != write -> &ordered.swap(read, write)
+            write += 1
+        }
+        loop ordered.len() > write -> _ :: &ordered.pop()
+        loop command in ordered -> jet_game_overlay_validate_text(command, "autocomplete command", true) ?? return Err(err)
+        Ok(JetGameOverlayAutocompleteFact{query: ^query, matches: ^ordered})
+    }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        overlay_append(&out, "{{\"query\":")
+        overlay_quote(&out, self.query)
+        overlay_append(&out, ",\"matches\":[")
+        loop i in 0..<self.matches.len() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_quote(&out, self.matches[i])
+        }
+        overlay_append(&out, "]}")
+        overlay_finish(^out)
+    }
+}
+pub enum JetGameOverlayOutputCategory {
+    Console
+    Info
+    Debug
+    Warning
+    Error
+    Stat
+    pub fn as_str(self) -> String Never! {
+        if self == { .Console -> "console", .Info -> "info", .Debug -> "debug", .Warning -> "warning", .Error -> "error", .Stat -> "stat" }
+    }
+    pub fn all() -> [JetGameOverlayOutputCategory] Never! { [.Console, .Info, .Debug, .Warning, .Error, .Stat] }
+}
+pub enum JetGameOverlayFilter {
+    All
+    Category(JetGameOverlayOutputCategory)
+    pub fn matches(self, category: JetGameOverlayOutputCategory) -> Bool Never! {
+        if self == { .All -> true, .Category(selected) -> selected == category }
+    }
+    pub fn as_str(self) -> String Never! { if self == { .All -> "all", .Category(category) -> category.as_str() } }
+}
+pub enum JetGameOverlayInputCapture {
+    None
+    Overlay
+    pub fn as_str(self) -> String Never! { if self == { .None -> "none", .Overlay -> "overlay" } }
+    pub fn captures_input(self) -> Bool Never! { self == .Overlay }
+}
+pub struct JetGameOverlayVisibility {
+    pub visible: Bool
+    pub input_capture: JetGameOverlayInputCapture
+    pub fn hidden() -> JetGameOverlayVisibility Never! { JetGameOverlayVisibility{visible: false, input_capture: .None} }
+    pub fn shown() -> JetGameOverlayVisibility Never! { JetGameOverlayVisibility{visible: true, input_capture: .Overlay} }
+}
+pub enum JetGameOverlayRunState {
+    Running
+    Paused
+    ErrorPaused
+    pub fn as_str(self) -> String Never! { if self == { .Running -> "running", .Paused -> "paused", .ErrorPaused -> "error_paused" } }
+}
+pub enum JetGameOverlayMetric {
+    Fps
+    FrameTime
+    GameTime
+    GpuTime
+    DrawCalls
+    Entities
+    SceneAssetBytes
+    MemoryHighWater
+    Unit
+    pub fn as_str(self) -> String Never! {
+        if self == { .Fps -> "Fps", .FrameTime -> "FrameTime", .GameTime -> "GameTime", .GpuTime -> "GpuTime", .DrawCalls -> "DrawCalls", .Entities -> "Entities", .SceneAssetBytes -> "SceneAssetBytes", .MemoryHighWater -> "MemoryHighWater", .Unit -> "Unit" }
+    }
+    pub fn all() -> [JetGameOverlayMetric] Never! { [.Fps, .FrameTime, .GameTime, .GpuTime, .DrawCalls, .Entities, .SceneAssetBytes, .MemoryHighWater, .Unit] }
+}
+pub struct JetGameOverlayMetricValue {
+    pub metric: JetGameOverlayMetric
+    pub value: I64
+    pub sampled_at_ns: U64
+    pub fn new(metric: JetGameOverlayMetric, value: I64, sampled_at_ns: U64) -> JetGameOverlayMetricValue Never! { JetGameOverlayMetricValue{metric, value, sampled_at_ns} }
+    pub fn render_json(self) -> String Never! { "{{\"metric\":{jet_game_overlay_json_string(self.metric.as_str())},\"value\":{self.value},\"sampled_at_ns\":{self.sampled_at_ns}}}" }
+}
+pub enum JetGameOverlayError {
+    EmptyText(field: String)
+    EmptyIdentity(field: String)
+    TextTooLong(field: String, max: Int, actual: Int)
+    ControlIdentity(field: String)
+    MetricCapacity(max: Int)
+    pub fn message(self) -> String Never! {
+        if self == {
+            .EmptyText(field) -> "game overlay {field} must not be empty"
+            .EmptyIdentity(field) -> "game overlay {field} identity must not be empty"
+            .TextTooLong(field, max, actual) -> "game overlay {field} is {actual} bytes; maximum is {max} bytes"
+            .ControlIdentity(field) -> "game overlay {field} identity contains a control character"
+            .MetricCapacity(max) -> "game overlay selected metric limit is {max}"
+        }
+    }
+}
+fn jet_game_overlay_validate_text(value: String, field: String, require_nonempty: Bool) JetGameOverlayError! {
+    if require_nonempty && value.is_empty() -> return Err(JetGameOverlayError.EmptyText(~field))
+    bytes :: value.count_bytes()
+    if bytes > JET_GAME_OVERLAY_MAX_TEXT_BYTES -> return Err(JetGameOverlayError.TextTooLong(~field, JET_GAME_OVERLAY_MAX_TEXT_BYTES, bytes))
+    Ok()
+}
+fn jet_game_overlay_validate_identity(value: String, field: String) JetGameOverlayError! {
+    if value.is_empty() -> return Err(JetGameOverlayError.EmptyIdentity(~field))
+    jet_game_overlay_validate_text(value, field, true) ?? return Err(err)
+    raw :: overlay_text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        cp :: overlay_text.scalar_at(raw, at)
+        // Rust char::is_control is Unicode Cc: U+0000..001F/U+007F..009F.
+        if cp < 32 || (cp >= 127 && cp <= 159) -> return Err(JetGameOverlayError.ControlIdentity(~field))
+        at += overlay_text.utf8_width_at(raw, at)
+    }
+    Ok()
+}
+pub struct JetGameOverlayErrorPause {
+    pub source_id: String
+    pub trace_id: String
+    pub fn new(source_id: ^String, trace_id: ^String) -> JetGameOverlayErrorPause JetGameOverlayError! {
+        jet_game_overlay_validate_identity(source_id, "source_id") ?? return Err(err)
+        jet_game_overlay_validate_identity(trace_id, "trace_id") ?? return Err(err)
+        Ok(JetGameOverlayErrorPause{source_id: ^source_id, trace_id: ^trace_id})
+    }
+    pub fn render_json(self) -> String Never! { "{{\"source_id\":{jet_game_overlay_json_string(self.source_id)},\"trace_id\":{jet_game_overlay_json_string(self.trace_id)}}}" }
+}
+pub struct JetGameOverlayCommandRow {
+    pub id: U64
+    pub timestamp_ns: U64
+    pub text: String
+    pub fn new(timestamp_ns: U64, text: ^String) -> JetGameOverlayCommandRow JetGameOverlayError! {
+        jet_game_overlay_validate_text(text, "command", true) ?? return Err(err)
+        Ok(JetGameOverlayCommandRow{id: U64{0}, timestamp_ns, text: ^text})
+    }
+    pub fn render_json(self) -> String Never! { "{{\"id\":{self.id},\"timestamp_ns\":{self.timestamp_ns},\"text\":{jet_game_overlay_json_string(self.text)}}}" }
+}
+pub struct JetGameOverlayOutputRow {
+    pub id: U64
+    pub timestamp_ns: U64
+    pub category: JetGameOverlayOutputCategory
+    pub message: String
+    pub source_id: String?
+    pub trace_id: String?
+    published_text_value: String?
+    pub fn new(timestamp_ns: U64, category: JetGameOverlayOutputCategory, message: ^String) -> JetGameOverlayOutputRow JetGameOverlayError! {
+        jet_game_overlay_validate_text(message, "message", false) ?? return Err(err)
+        Ok(JetGameOverlayOutputRow{id: U64{0}, timestamp_ns, category, message: ^message, source_id: None, trace_id: None, published_text_value: None})
+    }
+    pub fn with_identity(^self, source_id: ^String, trace_id: ^String) -> JetGameOverlayOutputRow JetGameOverlayError! {
+        identity :: JetGameOverlayErrorPause.new(^source_id, ^trace_id) ?? return Err(err)
+        row := ^self
+        row.source_id = Val(^identity.source_id)
+        row.trace_id = Val(^identity.trace_id)
+        Ok(row)
+    }
+    pub fn publish_text(^self, text: ^String) -> JetGameOverlayOutputRow JetGameOverlayError! {
+        jet_game_overlay_validate_text(text, "published_text", false) ?? return Err(err)
+        row := ^self
+        row.published_text_value = Val(^text)
+        Ok(row)
+    }
+    pub fn published_text(self) -> View<str>? from self {
+        if self.published_text_value == .Val(text) -> return Val(text.slice(0, text.len()))
+        None
+    }
+    pub fn payload_json(self) -> String? Never! {
+        if self.published_text_value == .Val(text) -> return Val(jet_game_overlay_json_string(text))
+        None
+    }
+    pub fn render_json(self) -> String Never! {
+        "{{\"id\":{self.id},\"timestamp_ns\":{self.timestamp_ns},\"category\":{jet_game_overlay_json_string(self.category.as_str())},\"message\":{jet_game_overlay_json_string(self.message)},\"source_id\":{overlay_optional_text(self.source_id)},\"trace_id\":{overlay_optional_text(self.trace_id)},\"payload\":{overlay_optional_text(self.published_text_value)}}}"
+    }
+}
+pub enum JetGameOverlayTransitionKind {
+    VisibilityChanged
+    InputCaptureChanged
+    FilterChanged
+    Paused
+    Resumed
+    ErrorPauseChanged
+    ErrorPaused
+    MetricSelected
+    MetricDeselected
+    pub fn as_str(self) -> String Never! {
+        if self == { .VisibilityChanged -> "visibility_changed", .InputCaptureChanged -> "input_capture_changed", .FilterChanged -> "filter_changed", .Paused -> "paused", .Resumed -> "resumed", .ErrorPauseChanged -> "error_pause_changed", .ErrorPaused -> "error_paused", .MetricSelected -> "metric_selected", .MetricDeselected -> "metric_deselected" }
+    }
+}
+pub struct JetGameOverlayTransitionFact {
+    pub sequence: U64
+    pub kind: JetGameOverlayTransitionKind
+    pub before: JetGameOverlayRunState
+    pub after: JetGameOverlayRunState
+    pub visibility: JetGameOverlayVisibility
+    pub filter: JetGameOverlayFilter
+    pub metric: JetGameOverlayMetric?
+    pub error_pause_enabled: Bool
+    pub error_pause: JetGameOverlayErrorPause?
+    pub frame: overlay_frame.JetGameFrameIdentity?
+    pub fn render_json(self) -> String Never! {
+        metric := "null"
+        if self.metric == .Val(value) -> metric = jet_game_overlay_json_string(value.as_str())
+        "{{\"sequence\":{self.sequence},\"kind\":{jet_game_overlay_json_string(self.kind.as_str())},\"before\":{jet_game_overlay_json_string(self.before.as_str())},\"after\":{jet_game_overlay_json_string(self.after.as_str())},\"visible\":{self.visibility.visible},\"input_capture\":{jet_game_overlay_json_string(self.visibility.input_capture.as_str())},\"filter\":{jet_game_overlay_json_string(self.filter.as_str())},\"metric\":{metric},\"error_pause_enabled\":{self.error_pause_enabled},\"error_pause\":{overlay_optional_pause(self.error_pause)},\"frame\":{overlay_optional_frame(self.frame)}}}"
+    }
+}
+// The VecDeque read projection retains two contiguous owner loans. No snapshot
+// allocation, front-shift, or row clone. next() returns a one-element loan.
+pub struct JetGameOverlayRows<T> {
+    first: View<T>
+    second: View<T>
+    at: Int
+    pub fn next(&self) -> View<T>? from self {
+        if self.at >= self.first.len() + self.second.len() -> return None
+        index :: self.at
+        self.at += 1
+        if index < self.first.len() -> return Val(self.first[index..<index + 1])
+        offset :: index - self.first.len()
+        Val(self.second[offset..<offset + 1])
+    }
+}
+pub struct JetGameOverlayVisibleHistory {
+    rows: JetGameOverlayRows<JetGameOverlayOutputRow>
+    filter: JetGameOverlayFilter
+    pub fn next(&self) -> View<JetGameOverlayOutputRow>? from self {
+        loop {
+            row := &self.rows.next() ?? return None
+            if self.filter.matches(row[0].category) -> return Val(row)
+        }
+    }
+}
+pub struct JetGameOverlaySelectedMetricValues {
+    selected: View<JetGameOverlayMetric>
+    values: View<JetGameOverlayMetricValue>
+    at: Int
+    pub fn next(&self) -> View<JetGameOverlayMetricValue>? from self {
+        loop self.at < self.selected.len() {
+            metric :: self.selected[self.at]
+            self.at += 1
+            loop i in 0..<self.values.len() -> if self.values[i].metric == metric -> return Val(self.values[i..<i + 1])
+        }
+        None
+    }
+}
+pub struct JetGameOverlayState {
+    visible: Bool
+    capture: JetGameOverlayInputCapture
+    current_filter: JetGameOverlayFilter
+    current_run_state: JetGameOverlayRunState
+    pause_enabled: Bool
+    current_error_pause: JetGameOverlayErrorPause?
+    current_frame: overlay_frame.JetGameFrameIdentity?
+    metrics: [JetGameOverlayMetric]
+    samples: [JetGameOverlayMetricValue]
+    command_slots: [JetGameOverlayCommandRow]
+    history_slots: [JetGameOverlayOutputRow]
+    transition_slots: [JetGameOverlayTransitionFact]
+    command_head: Int
+    history_head: Int
+    transition_head: Int
+    next_command_id: U64
+    next_history_id: U64
+    next_transition_sequence: U64
+    pub fn default() -> JetGameOverlayState Never! { JetGameOverlayState.new() }
+    pub fn new() -> JetGameOverlayState Never! {
+        JetGameOverlayState{visible: false, capture: .None, current_filter: .All, current_run_state: .Running, pause_enabled: false, current_error_pause: None, current_frame: None, metrics: [JetGameOverlayMetric]{}, samples: [JetGameOverlayMetricValue]{}, command_slots: [JetGameOverlayCommandRow]{}, history_slots: [JetGameOverlayOutputRow]{}, transition_slots: [JetGameOverlayTransitionFact]{}, command_head: 0, history_head: 0, transition_head: 0, next_command_id: U64{1}, next_history_id: U64{1}, next_transition_sequence: U64{1}}
+    }
+    pub fn visibility(self) -> JetGameOverlayVisibility Never! { JetGameOverlayVisibility{visible: self.visible, input_capture: self.capture} }
+    pub fn is_visible(self) -> Bool Never! { self.visible }
+    pub fn input_capture(self) -> JetGameOverlayInputCapture Never! { self.capture }
+    pub fn captures_input(self) -> Bool Never! { self.capture.captures_input() }
+    pub fn filter(self) -> JetGameOverlayFilter Never! { self.current_filter }
+    pub fn run_state(self) -> JetGameOverlayRunState Never! { self.current_run_state }
+    pub fn active_error_pause(self) -> &(JetGameOverlayErrorPause?) from self { &self.current_error_pause }
+    pub fn error_pause_enabled(self) -> Bool Never! { self.pause_enabled }
+    pub fn frame_identity(self) -> &(overlay_frame.JetGameFrameIdentity?) from self { &self.current_frame }
+    pub fn set_frame_identity(&self, frame: ^overlay_frame.JetGameFrameIdentity) Never! { self.current_frame = Val(^frame) }
+    pub fn selected_metrics(self) -> View<JetGameOverlayMetric> from self { self.metrics[0..<self.metrics.len()] }
+    pub fn metric_values(self) -> View<JetGameOverlayMetricValue> from self { self.samples[0..<self.samples.len()] }
+    pub fn selected_metric_values(self) -> JetGameOverlaySelectedMetricValues from self {
+        JetGameOverlaySelectedMetricValues{selected: self.selected_metrics(), values: self.metric_values(), at: 0}
+    }
+    pub fn metric_value(self, metric: JetGameOverlayMetric) -> View<JetGameOverlayMetricValue>? from self {
+        loop i in 0..<self.samples.len() -> if self.samples[i].metric == metric -> return Val(self.samples[i..<i + 1])
+        None
+    }
+    pub fn is_metric_selected(self, metric: JetGameOverlayMetric) -> Bool Never! {
+        loop selected in self.metrics -> if selected == metric -> return true
+        false
+    }
+    pub fn commands(self) -> JetGameOverlayRows<JetGameOverlayCommandRow> from self {
+        JetGameOverlayRows<JetGameOverlayCommandRow>{first: self.command_slots[self.command_head..<self.command_slots.len()], second: self.command_slots[0..<self.command_head], at: 0}
+    }
+    pub fn history(self) -> JetGameOverlayRows<JetGameOverlayOutputRow> from self {
+        JetGameOverlayRows<JetGameOverlayOutputRow>{first: self.history_slots[self.history_head..<self.history_slots.len()], second: self.history_slots[0..<self.history_head], at: 0}
+    }
+    pub fn visible_history(self) -> JetGameOverlayVisibleHistory from self { JetGameOverlayVisibleHistory{rows: self.history(), filter: self.current_filter} }
+    pub fn transitions(self) -> JetGameOverlayRows<JetGameOverlayTransitionFact> from self {
+        JetGameOverlayRows<JetGameOverlayTransitionFact>{first: self.transition_slots[self.transition_head..<self.transition_slots.len()], second: self.transition_slots[0..<self.transition_head], at: 0}
+    }
+    pub fn command_count(self) -> Int Never! { self.command_slots.len() }
+    pub fn history_count(self) -> Int Never! { self.history_slots.len() }
+    pub fn transition_count(self) -> Int Never! { self.transition_slots.len() }
+    pub fn toggle(&self) -> JetGameOverlayTransitionFact Never! { &self.set_visible(!self.visible) }
+    pub fn set_visible(&self, visible: Bool) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        self.visible = visible
+        self.capture = if visible -> JetGameOverlayInputCapture.Overlay else -> JetGameOverlayInputCapture.None
+        &self.push_transition(.VisibilityChanged, before, None)
+    }
+    pub fn set_input_capture(&self, capture: Bool) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        self.capture = if self.visible && capture -> JetGameOverlayInputCapture.Overlay else -> JetGameOverlayInputCapture.None
+        &self.push_transition(.InputCaptureChanged, before, None)
+    }
+    pub fn set_filter(&self, filter: JetGameOverlayFilter) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        self.current_filter = filter
+        &self.push_transition(.FilterChanged, before, None)
+    }
+    pub fn toggle_filter(&self, category: JetGameOverlayOutputCategory) -> JetGameOverlayTransitionFact Never! {
+        filter :: if self.current_filter == JetGameOverlayFilter.Category(category) -> JetGameOverlayFilter.All else -> JetGameOverlayFilter.Category(category)
+        &self.set_filter(filter)
+    }
+    pub fn pause(&self) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        if self.current_run_state == .Running -> self.current_run_state = .Paused
+        &self.push_transition(.Paused, before, None)
+    }
+    pub fn resume(&self) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        self.current_run_state = .Running
+        self.current_error_pause = None
+        &self.push_transition(.Resumed, before, None)
+    }
+    pub fn set_error_pause_enabled(&self, enabled: Bool) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        self.pause_enabled = enabled
+        &self.push_transition(.ErrorPauseChanged, before, None)
+    }
+    pub fn error_pause(&self, source_id: ^String, trace_id: ^String) -> JetGameOverlayTransitionFact JetGameOverlayError! {
+        pause :: JetGameOverlayErrorPause.new(^source_id, ^trace_id) ?? return Err(err)
+        before :: self.current_run_state
+        self.current_run_state = .ErrorPaused
+        self.current_error_pause = Val(^pause)
+        Ok(&self.push_transition(.ErrorPaused, before, None))
+    }
+    pub fn select_metric(&self, metric: JetGameOverlayMetric) -> JetGameOverlayTransitionFact JetGameOverlayError! {
+        before :: self.current_run_state
+        if !self.is_metric_selected(metric) {
+            if self.metrics.len() == JET_GAME_OVERLAY_MAX_SELECTED_METRICS -> return Err(JetGameOverlayError.MetricCapacity(JET_GAME_OVERLAY_MAX_SELECTED_METRICS))
+            &self.metrics.push(metric)
+        }
+        Ok(&self.push_transition(.MetricSelected, before, Val(metric)))
+    }
+    pub fn deselect_metric(&self, metric: JetGameOverlayMetric) -> JetGameOverlayTransitionFact Never! {
+        before :: self.current_run_state
+        i := 0
+        loop i < self.metrics.len() {
+            if self.metrics[i] == metric -> _ :: &self.metrics.remove(i)
+            else -> i += 1
+        }
+        &self.push_transition(.MetricDeselected, before, Val(metric))
+    }
+    pub fn toggle_metric(&self, metric: JetGameOverlayMetric) -> JetGameOverlayTransitionFact JetGameOverlayError! {
+        if self.is_metric_selected(metric) -> return Ok(&self.deselect_metric(metric))
+        &self.select_metric(metric)
+    }
+    pub fn observe_metric(&self, metric: JetGameOverlayMetric, value: I64, sampled_at_ns: U64) Never! {
+        sample :: JetGameOverlayMetricValue.new(metric, value, sampled_at_ns)
+        loop i in 0..<self.samples.len() {
+            if self.samples[i].metric == metric { self.samples[i] = sample; return }
+        }
+        if self.samples.len() < JET_GAME_OVERLAY_MAX_METRIC_VALUES -> &self.samples.push(sample)
+    }
+    pub fn autocomplete(self, query: ^String, commands: [String]) -> JetGameOverlayAutocompleteFact JetGameOverlayError! {
+        jet_game_overlay_validate_text(query, "autocomplete query", false) ?? return Err(err)
+        matches := [String]{}
+        loop command in commands -> if command.starts_with(query) -> &matches.push(~command)
+        JetGameOverlayAutocompleteFact.new(^query, ^matches)
+    }
+    pub fn record_command(&self, timestamp_ns: U64, text: ^String) -> U64 JetGameOverlayError! {
+        row := JetGameOverlayCommandRow.new(timestamp_ns, ^text) ?? return Err(err)
+        row.id = self.next_command_id
+        self.next_command_id = overlay_increment(self.next_command_id)
+        id :: row.id
+        if self.command_slots.len() == JET_GAME_OVERLAY_MAX_COMMANDS {
+            self.command_slots[self.command_head] = ^row
+            self.command_head = (self.command_head + 1) % JET_GAME_OVERLAY_MAX_COMMANDS
+        } else -> &self.command_slots.push(^row)
+        Ok(id)
+    }
+    pub fn record_output(&self, row: ^JetGameOverlayOutputRow) -> U64 JetGameOverlayError! {
+        jet_game_overlay_validate_text(row.message, "message", false) ?? return Err(err)
+        if row.source_id == .Val(source) {
+            trace := row.trace_id ?? return Err(JetGameOverlayError.EmptyIdentity("source_id/trace_id"))
+            jet_game_overlay_validate_identity(source, "source_id") ?? return Err(err)
+            jet_game_overlay_validate_identity(trace, "trace_id") ?? return Err(err)
+        } else -> if row.trace_id != None -> return Err(JetGameOverlayError.EmptyIdentity("source_id/trace_id"))
+        if row.published_text_value == .Val(payload) -> jet_game_overlay_validate_text(payload, "published_text", false) ?? return Err(err)
+        owned := ^row
+        owned.id = self.next_history_id
+        self.next_history_id = overlay_increment(self.next_history_id)
+        id :: owned.id
+        if self.history_slots.len() == JET_GAME_OVERLAY_MAX_HISTORY {
+            self.history_slots[self.history_head] = ^owned
+            self.history_head = (self.history_head + 1) % JET_GAME_OVERLAY_MAX_HISTORY
+        } else -> &self.history_slots.push(^owned)
+        Ok(id)
+    }
+    pub fn output(&self, timestamp_ns: U64, category: JetGameOverlayOutputCategory, message: ^String) -> U64 JetGameOverlayError! {
+        row :: JetGameOverlayOutputRow.new(timestamp_ns, category, ^message) ?? return Err(err)
+        &self.record_output(^row)
+    }
+    pub fn publish_output(&self, timestamp_ns: U64, category: JetGameOverlayOutputCategory, message: ^String, published_text: ^String) -> U64 JetGameOverlayError! {
+        row :: JetGameOverlayOutputRow.new(timestamp_ns, category, ^message) ?? return Err(err)
+        published :: ^row.publish_text(^published_text) ?? return Err(err)
+        &self.record_output(^published)
+    }
+    fn push_transition(&self, kind: JetGameOverlayTransitionKind, before: JetGameOverlayRunState, metric: JetGameOverlayMetric?) -> JetGameOverlayTransitionFact Never! {
+        // These copies are required: state, retained history, and returned receipt
+        // have independent lifetimes, exactly as Rust's explicit clones.
+        fact :: JetGameOverlayTransitionFact{sequence: self.next_transition_sequence, kind, before, after: self.current_run_state, visibility: self.visibility(), filter: self.current_filter, metric, error_pause_enabled: self.pause_enabled, error_pause: ~self.current_error_pause, frame: ~self.current_frame}
+        self.next_transition_sequence = overlay_increment(self.next_transition_sequence)
+        if self.transition_slots.len() == JET_GAME_OVERLAY_MAX_TRANSITIONS {
+            self.transition_slots[self.transition_head] = ~fact
+            self.transition_head = (self.transition_head + 1) % JET_GAME_OVERLAY_MAX_TRANSITIONS
+        } else -> &self.transition_slots.push(~fact)
+        fact
+    }
+    pub fn render_json(self) -> String Never! {
+        out := [U8]{}
+        overlay_append(&out, "{{\"visible\":{self.visible},\"input_capture\":{jet_game_overlay_json_string(self.capture.as_str())},\"filter\":{jet_game_overlay_json_string(self.current_filter.as_str())},\"run_state\":{jet_game_overlay_json_string(self.current_run_state.as_str())},\"error_pause_enabled\":{self.pause_enabled},\"error_pause\":{overlay_optional_pause(self.current_error_pause)},\"frame\":{overlay_optional_frame(self.current_frame)},\"selected_metrics\":[")
+        loop i in 0..<self.metrics.len() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_quote(&out, self.metrics[i].as_str())
+        }
+        overlay_append(&out, "],\"metric_values\":[")
+        loop i in 0..<self.samples.len() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_append(&out, self.samples[i].render_json())
+        }
+        overlay_append(&out, "],\"commands\":[")
+        loop i in 0..<self.command_count() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_append(&out, self.command_slots[(self.command_head + i) % self.command_count()].render_json())
+        }
+        overlay_append(&out, "],\"history\":[")
+        loop i in 0..<self.history_count() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_append(&out, self.history_slots[(self.history_head + i) % self.history_count()].render_json())
+        }
+        overlay_append(&out, "],\"transitions\":[")
+        loop i in 0..<self.transition_count() {
+            if i > 0 -> overlay_append(&out, ",")
+            overlay_append(&out, self.transition_slots[(self.transition_head + i) % self.transition_count()].render_json())
+        }
+        overlay_append(&out, "]}")
+        overlay_finish(^out)
+    }
+}
+fn overlay_increment(value: U64) -> U64 Never! { if value == (U64{18446744073709551615}) -> value else -> value + U64{1} }
+fn overlay_optional_text(value: String?) -> String Never! { if value == { .None -> "null", .Val(text) -> jet_game_overlay_json_string(text) } }
+fn overlay_optional_pause(value: JetGameOverlayErrorPause?) -> String Never! { if value == { .None -> "null", .Val(pause) -> pause.render_json() } }
+fn overlay_optional_frame(value: overlay_frame.JetGameFrameIdentity?) -> String Never! { if value == { .None -> "null", .Val(frame) -> jet_game_overlay_frame_json(frame) } }
+fn jet_game_overlay_frame_json(frame: overlay_frame.JetGameFrameIdentity) -> String Never! {
+    "{{\"frame_id\":{frame.frame_id},\"scene\":{jet_game_overlay_json_string(frame.scene)},\"frame_index\":{frame.frame_index},\"build\":{jet_game_overlay_json_string(frame.build)},\"revision\":{jet_game_overlay_json_string(frame.revision)},\"trace_id\":{jet_game_overlay_json_string(frame.trace_id)}}}"
+}
+fn overlay_append(out: &[U8], value: String) Never! { loop byte in overlay_text.utf8_bytes(value) -> &out.push(byte) }
+fn overlay_finish(out: ^[U8]) -> String Never! { String.from_bytes(^out) ?? panic("game overlay rendered invalid UTF-8") }
+fn overlay_quote(out: &[U8], value: String) Never! {
+    &out.push(U8{34})
+    raw :: overlay_text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        cp :: overlay_text.scalar_at(raw, at)
+        if {
+            cp == 34 -> overlay_append(&out, "\\\"")
+            cp == 92 -> overlay_append(&out, "\\\\")
+            cp == 10 -> overlay_append(&out, "\\n")
+            cp == 13 -> overlay_append(&out, "\\r")
+            cp == 9 -> overlay_append(&out, "\\t")
+            cp == 8 -> overlay_append(&out, "\\b")
+            cp == 12 -> overlay_append(&out, "\\f")
+            cp < 32 || (cp >= 127 && cp <= 159) -> {
+                overlay_append(&out, "\\u")
+                loop shift in [Int]{12, 8, 4, 0} {
+                    digit :: (cp >> shift) & 15
+                    &out.push(U8{if digit < 10 -> digit + 48 else -> digit + 87})
+                }
+            }
+            else -> overlay_text.append_cp(&out, cp)
+        }
+        at += overlay_text.utf8_width_at(raw, at)
+    }
+    &out.push(U8{34})
+}
+fn jet_game_overlay_json_string(value: String) -> String Never! {
+    out := [U8]{}
+    overlay_quote(&out, value)
+    overlay_finish(^out)
+}

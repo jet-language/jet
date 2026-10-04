@@ -1,0 +1,170 @@
+// PORT-PENDING 0140 crates-jet-codegen-src-prelude-core-argsprojection-module-group: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:1-166
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SHAPE-PROJECT1: host-neutral argument projection helpers. The parser and
+//RS // checked shape map stay shared; hosts only choose how to marshal this tree.
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) enum JetArgsShapeValue {
+//RS     Bool(bool),
+//RS     Int(i64),
+//RS     Float(f64),
+//RS     Text(String),
+//RS     Array(Vec<JetArgsShapeValue>),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct JetArgsShapeError {
+//RS     pub(crate) path: String,
+//RS     pub(crate) reason: String,
+//RS }
+//RS 
+//RS fn jet_args_projection_name(names: &[(&str, &str)], source: &str) -> String {
+//RS     names
+//RS         .iter()
+//RS         .find(|(field, _)| *field == source)
+//RS         .map(|(_, key)| (*key).to_string())
+//RS         .unwrap_or_else(|| source.to_string())
+//RS }
+//RS 
+//RS /// Build one canonical argument tree from the already parsed builder result.
+//RS /// No host-specific value carrier or decoder policy belongs here.
+//RS fn jet_args_shape_tree_values(
+//RS     spec: &JetArgsSpec,
+//RS     parsed: &JetParsedArgs,
+//RS     projection: &[(&str, &str)],
+//RS ) -> Result<Vec<(String, JetArgsShapeValue)>, Vec<JetArgsShapeError>> {
+//RS     let mut fields = Vec::new();
+//RS     let mut seen = std::collections::BTreeSet::new();
+//RS     for entry in jet_args_all_entries(spec) {
+//RS         match entry {
+//RS             JetArgKind::Flag { name, .. } => {
+//RS                 let output_name = jet_args_projection_name(projection, name);
+//RS                 if !seen.insert(output_name.clone()) {
+//RS                     return Err(vec![JetArgsShapeError {
+//RS                         path: output_name,
+//RS                         reason: "ambiguous duplicate argument shape field".to_string(),
+//RS                     }]);
+//RS                 }
+//RS                 fields.push((
+//RS                     output_name,
+//RS                     JetArgsShapeValue::Bool(*parsed.flags.get(name).unwrap_or(&false)),
+//RS                 ));
+//RS             }
+//RS             JetArgKind::Option {
+//RS                 name,
+//RS                 repeat,
+//RS                 value,
+//RS                 ..
+//RS             } => {
+//RS                 let output_name = jet_args_projection_name(projection, name);
+//RS                 if !seen.insert(output_name.clone()) {
+//RS                     return Err(vec![JetArgsShapeError {
+//RS                         path: output_name,
+//RS                         reason: "ambiguous duplicate argument shape field".to_string(),
+//RS                     }]);
+//RS                 }
+//RS                 let Some(values) = parsed.options.get(name) else {
+//RS                     continue;
+//RS                 };
+//RS                 let values = values
+//RS                     .iter()
+//RS                     .map(|raw| jet_args_shape_value(value, raw, &output_name))
+//RS                     .collect::<Result<Vec<_>, _>>()?;
+//RS                 let value = if *repeat {
+//RS                     JetArgsShapeValue::Array(values)
+//RS                 } else {
+//RS                     values
+//RS                         .into_iter()
+//RS                         .last()
+//RS                         .unwrap_or_else(|| JetArgsShapeValue::Text(String::new()))
+//RS                 };
+//RS                 fields.push((output_name, value));
+//RS             }
+//RS             JetArgKind::Positional { name, .. } => {
+//RS                 // A named positional and option share one canonical field.
+//RS                 let output_name = jet_args_projection_name(projection, name);
+//RS                 if !seen.insert(output_name.clone()) {
+//RS                     continue;
+//RS                 }
+//RS                 let Some(value) = parsed.options.get(name).and_then(|values| values.last()) else {
+//RS                     continue;
+//RS                 };
+//RS                 fields.push((
+//RS                     output_name,
+//RS                     JetArgsShapeValue::Text(value.clone()),
+//RS                 ));
+//RS             }
+//RS             JetArgKind::Subcommand { .. } => {
+//RS                 // A subcommand selects a nested spec; it is not a field in the
+//RS                 // decoded record and must not be invented as one.
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(fields)
+//RS }
+//RS 
+//RS fn jet_args_shape_value(
+//RS     kind: &JetArgValueKind,
+//RS     value: &str,
+//RS     name: &str,
+//RS ) -> Result<JetArgsShapeValue, Vec<JetArgsShapeError>> {
+//RS     match kind {
+//RS         JetArgValueKind::String | JetArgValueKind::Choice(_) => {
+//RS             Ok(JetArgsShapeValue::Text(value.to_string()))
+//RS         }
+//RS         JetArgValueKind::Int => value
+//RS             .parse::<i64>()
+//RS             .map(JetArgsShapeValue::Int)
+//RS             .map_err(|_| {
+//RS                 vec![JetArgsShapeError {
+//RS                     path: name.to_string(),
+//RS                     reason: format!("expected Int, found {value:?}"),
+//RS                 }]
+//RS             }),
+//RS         JetArgValueKind::Float => value
+//RS             .parse::<f64>()
+//RS             .map(JetArgsShapeValue::Float)
+//RS             .map_err(|_| {
+//RS                 vec![JetArgsShapeError {
+//RS                     path: name.to_string(),
+//RS                     reason: format!("expected Float, found {value:?}"),
+//RS                 }]
+//RS             }),
+//RS     }
+//RS }
+//RS 
+//RS /// Merge the two already decoded layers using the parser's explicit-presence
+//RS /// set. The value type is supplied by the host, so this remains the one shared
+//RS /// merge policy without coupling the helper to a runtime carrier.
+//RS fn jet_args_merge_fields<T>(
+//RS     spec: &JetArgsSpec,
+//RS     argv: &Vec<String>,
+//RS     names: &[(&str, &str)],
+//RS     flag_fields: Vec<(String, T)>,
+//RS     mut settings_fields: Vec<(String, T)>,
+//RS ) -> Result<Vec<(String, T)>, Vec<JetArgsShapeError>> {
+//RS     let parsed = jet_args_parse_guided(spec, argv).map_err(|message| {
+//RS         vec![JetArgsShapeError {
+//RS             path: String::new(),
+//RS             reason: message,
+//RS         }]
+//RS     })?;
+//RS     let explicit = parsed
+//RS         .explicit_flags
+//RS         .iter()
+//RS         .chain(parsed.explicit_options.iter())
+//RS         .map(|name| jet_args_projection_name(names, name))
+//RS         .collect::<std::collections::BTreeSet<String>>();
+//RS     for (name, value) in flag_fields {
+//RS         if !explicit.contains(&name) {
+//RS             continue;
+//RS         }
+//RS         match settings_fields.iter_mut().find(|(existing, _)| *existing == name) {
+//RS             Some(slot) => slot.1 = value,
+//RS             None => settings_fields.push((name, value)),
+//RS         }
+//RS     }
+//RS     Ok(settings_fields)
+//RS }
+// END-PORT-PENDING 0140 crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:1-166
+

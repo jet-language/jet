@@ -1,0 +1,1802 @@
+// PORT-PENDING 0201 crates-jet-jit-src-collections-slice-9095: crates/jet-jit/src/Collections.rs:9095-10892
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_set_union(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let left_values = set_string_values(rt, &left);
+//RS             let right_values = set_string_values(rt, &right);
+//RS             let out_values = set_semantics::jet_set_union(&left_values, &right_values);
+//RS             return set_handle(
+//RS                 rt,
+//RS                 out_values
+//RS                     .into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         set_handle(rt, set_semantics::jet_set_union(&left, &right), false)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_intersection(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let out = set_semantics::jet_set_intersection(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             );
+//RS             return set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         set_handle(
+//RS             rt,
+//RS             set_semantics::jet_set_intersection(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_difference(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = string_ids(rt, &left);
+//RS             let out = set_semantics::jet_set_difference(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             );
+//RS             return set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         set_handle(rt, set_semantics::jet_set_difference(&left, &right), false)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_symmetric_difference(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let out = set_semantics::jet_set_symmetric_difference(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             );
+//RS             return set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         set_handle(
+//RS             rt,
+//RS             set_semantics::jet_set_symmetric_difference(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_is_subset(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return i8::from(left.is_empty());
+//RS         };
+//RS         if set_is_string(rt, a) || set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_set_is_subset(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_set_is_subset(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_is_superset(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return i8::from(
+//RS                 rt.sets
+//RS                     .get((b as usize).wrapping_sub(1))
+//RS                     .is_some_and(HashSet::is_empty),
+//RS             );
+//RS         };
+//RS         let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         if set_is_string(rt, a) || set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_set_is_superset(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_set_is_superset(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_set_is_disjoint(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         if set_is_string(rt, a) || set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_set_is_disjoint(
+//RS                 &set_string_values(rt, &left),
+//RS                 &set_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_set_is_disjoint(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| deque_handle(rt, VecDeque::new()))
+//RS }
+//RS 
+//RS fn jet_jit_deque_push_front(dq: i64, v: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+//RS             collection_semantics::deque_push_front(d, v);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_deque_push_back(dq: i64, v: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+//RS             collection_semantics::deque_push_back(d, v);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Packed Option: 0 = None, else value+1 (Int elems).
+//RS fn jet_jit_deque_pop_front(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match rt
+//RS             .deques
+//RS             .get_mut((dq as usize).wrapping_sub(1))
+//RS             .and_then(collection_semantics::deque_pop_front)
+//RS         {
+//RS             Some(v) => v + 1,
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_pop_back(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match rt
+//RS             .deques
+//RS             .get_mut((dq as usize).wrapping_sub(1))
+//RS             .and_then(collection_semantics::deque_pop_back)
+//RS         {
+//RS             Some(v) => v + 1,
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_peek_front(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match rt
+//RS             .deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .and_then(|d| d.front().copied())
+//RS         {
+//RS             Some(v) => v + 1,
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_peek_back(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         match rt
+//RS             .deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .and_then(|d| d.back().copied())
+//RS         {
+//RS             Some(v) => v + 1,
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_len(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .map(|d| d.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_capacity(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .map(|d| d.capacity() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_contains(dq: i64, v: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.deques
+//RS                 .get((dq as usize).wrapping_sub(1))
+//RS                 .is_some_and(|d| d.contains(&v)),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_get(dq: i64, idx: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if idx < 0 {
+//RS             return 0;
+//RS         }
+//RS         match rt
+//RS             .deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .and_then(|d| d.get(idx as usize).copied())
+//RS         {
+//RS             Some(v) => v + 1,
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_delete(dq: i64, v: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+//RS             collection_semantics::deque_delete(d, v);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_deque_to_list(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs: Vec<i64> = rt
+//RS             .deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .map(|d| d.iter().copied().collect())
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_int_list(xs)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_join(dq: i64, sep_id: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(xs) = rt
+//RS             .deques
+//RS             .get((dq as usize).wrapping_sub(1))
+//RS             .map(|d| d.iter().copied().collect::<Vec<_>>())
+//RS         else {
+//RS             jet_foundation::ice!(None, "deque join received an invalid deque");
+//RS         };
+//RS         let Some(sep) = rt.heap.clone_string(sep_id) else {
+//RS             jet_foundation::ice!(None, "deque join received an invalid separator");
+//RS         };
+//RS         let parts: Vec<String> = xs.iter().map(|id| id.to_string()).collect();
+//RS         let joined = parts.join(&sep);
+//RS         rt.heap.alloc_string(joined)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_reverse(dq: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+//RS             collection_semantics::deque_reverse(d);
+//RS         }
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_split(dq: i64, idx: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) else {
+//RS             return 0;
+//RS         };
+//RS         let rest = collection_semantics::deque_split(d, idx);
+//RS         deque_handle(rt, rest)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_deque_from(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS         deque_handle(rt, xs.into_iter().collect())
+//RS     })
+//RS }
+//RS 
+//RS fn bag_handle(rt: &mut crate::JitRuntime, bag: HashMap<i64, usize>) -> i64 {
+//RS     rt.bags.push(bag);
+//RS     rt.bags.len() as i64
+//RS }
+//RS 
+//RS fn jet_jit_bag_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| bag_handle(rt, HashMap::new()))
+//RS }
+//RS 
+//RS fn jet_jit_bag_add(bag: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(bag) = rt.bags.get_mut((bag as usize).wrapping_sub(1)) else {
+//RS             return 0;
+//RS         };
+//RS         *bag.entry(value).or_insert(0) += 1;
+//RS         1
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bag_remove(bag: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(bag) = rt.bags.get_mut((bag as usize).wrapping_sub(1)) else {
+//RS             return;
+//RS         };
+//RS         let remove = match bag.get_mut(&value) {
+//RS             Some(count) if *count > 1 => {
+//RS                 *count -= 1;
+//RS                 false
+//RS             }
+//RS             Some(_) => true,
+//RS             None => false,
+//RS         };
+//RS         if remove {
+//RS             bag.remove(&value);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_bag_has(bag: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.bags
+//RS                 .get((bag as usize).wrapping_sub(1))
+//RS                 .and_then(|bag| bag.get(&value))
+//RS                 .copied()
+//RS                 .unwrap_or(0)
+//RS                 > 0,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bag_count(bag: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bags
+//RS             .get((bag as usize).wrapping_sub(1))
+//RS             .and_then(|bag| bag.get(&value))
+//RS             .copied()
+//RS             .unwrap_or(0) as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bag_len(bag: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bags
+//RS             .get((bag as usize).wrapping_sub(1))
+//RS             .map(|bag| bag.values().sum::<usize>() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) struct LruState {
+//RS     capacity: usize,
+//RS     entries: VecDeque<(String, i64)>,
+//RS }
+//RS 
+//RS fn copy_list(rt: &mut crate::JitRuntime, values: impl IntoIterator<Item = i64>) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for value in values {
+//RS         let _ = rt.heap.list_push_int(list, value);
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_new(string_kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| sorted_set_handle(rt, BTreeSet::new(), string_kind != 0))
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_len(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.sorted_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|s| s.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_has(handle: i64, v: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sorted_sets.get(idx) else {
+//RS             return 0;
+//RS         };
+//RS         if sorted_set_is_string(rt, handle) {
+//RS             let needle = rt.heap.clone_string(v).unwrap_or_default();
+//RS             return i8::from(
+//RS                 existing
+//RS                     .iter()
+//RS                     .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str())),
+//RS             );
+//RS         }
+//RS         i8::from(existing.contains(&v))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_from(list: i64, string_kind: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+//RS         let string_kind = string_kind != 0;
+//RS         let set = if string_kind {
+//RS             canonical_sorted_string_set(rt, xs)
+//RS         } else {
+//RS             xs.into_iter().collect()
+//RS         };
+//RS         sorted_set_handle(rt, set, string_kind)
+//RS     })
+//RS }
+//RS fn jet_jit_sorted_set_from_int(list: i64) -> i64 {
+//RS     jet_jit_sorted_set_from(list, 0)
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_sorted_set_insert(handle: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         let string_kind = sorted_set_is_string(rt, handle);
+//RS         let Some(existing) = rt.sorted_sets.get(idx).cloned() else {
+//RS             return 0;
+//RS         };
+//RS         if string_kind {
+//RS             let needle = rt.heap.clone_string(value).unwrap_or_default();
+//RS             if existing
+//RS                 .iter()
+//RS                 .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+//RS             {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         i8::from(rt.sorted_sets[idx].insert(value))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_remove(handle: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         let Some(existing) = rt.sorted_sets.get(idx).cloned() else {
+//RS             return;
+//RS         };
+//RS         let id = if sorted_set_is_string(rt, handle) {
+//RS             let needle = rt.heap.clone_string(value).unwrap_or_default();
+//RS             existing
+//RS                 .iter()
+//RS                 .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+//RS                 .copied()
+//RS         } else {
+//RS             Some(value)
+//RS         };
+//RS         if let Some(id) = id {
+//RS             rt.sorted_sets[idx].remove(&id);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_to_list(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .sorted_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|set| {
+//RS                 if sorted_set_is_string(rt, handle) {
+//RS                     let mut values = sorted_string_ids(rt, set).into_iter().collect::<Vec<_>>();
+//RS                     values.sort_by(|(left, _), (right, _)| left.cmp(right));
+//RS                     values.into_iter().map(|(_, id)| id).collect()
+//RS                 } else {
+//RS                     set.iter().copied().collect::<Vec<_>>()
+//RS                 }
+//RS             })
+//RS             .unwrap_or_default();
+//RS         copy_list(rt, values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_first(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt
+//RS             .sorted_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .and_then(|set| {
+//RS                 if sorted_set_is_string(rt, handle) {
+//RS                     sorted_string_ids(rt, set)
+//RS                         .into_iter()
+//RS                         .min_by(|left, right| left.0.cmp(&right.0))
+//RS                         .map(|(_, id)| id)
+//RS                 } else {
+//RS                     set.first().copied()
+//RS                 }
+//RS             });
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_last(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt
+//RS             .sorted_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .and_then(|set| {
+//RS                 if sorted_set_is_string(rt, handle) {
+//RS                     sorted_string_ids(rt, set)
+//RS                         .into_iter()
+//RS                         .max_by(|left, right| left.0.cmp(&right.0))
+//RS                         .map(|(_, id)| id)
+//RS                 } else {
+//RS                     set.last().copied()
+//RS                 }
+//RS             });
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_union(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sorted_sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sorted_sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = sorted_string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(sorted_string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let out = set_semantics::jet_sorted_set_union(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             );
+//RS             return sorted_set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         sorted_set_handle(
+//RS             rt,
+//RS             set_semantics::jet_sorted_set_union(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_intersection(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sorted_sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sorted_sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = sorted_string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(sorted_string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let out = set_semantics::jet_sorted_set_intersection(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             );
+//RS             return sorted_set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         sorted_set_handle(
+//RS             rt,
+//RS             set_semantics::jet_sorted_set_intersection(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_difference(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sorted_sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sorted_sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = sorted_string_ids(rt, &left);
+//RS             let out = set_semantics::jet_sorted_set_difference(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             );
+//RS             return sorted_set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         sorted_set_handle(
+//RS             rt,
+//RS             set_semantics::jet_sorted_set_difference(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_symmetric_difference(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = rt
+//RS             .sorted_sets
+//RS             .get((a as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let right = rt
+//RS             .sorted_sets
+//RS             .get((b as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
+//RS         if string_kind {
+//RS             let ids = sorted_string_ids(rt, &left)
+//RS                 .into_iter()
+//RS                 .chain(sorted_string_ids(rt, &right))
+//RS                 .collect::<HashMap<_, _>>();
+//RS             let out = set_semantics::jet_sorted_set_symmetric_difference(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             );
+//RS             return sorted_set_handle(
+//RS                 rt,
+//RS                 out.into_iter()
+//RS                     .filter_map(|value| ids.get(&value).copied())
+//RS                     .collect(),
+//RS                 true,
+//RS             );
+//RS         }
+//RS         sorted_set_handle(
+//RS             rt,
+//RS             set_semantics::jet_sorted_set_symmetric_difference(&left, &right),
+//RS             false,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_is_subset(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return i8::from(left.is_empty());
+//RS         };
+//RS         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_sorted_set_is_subset(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_sorted_set_is_subset(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_is_superset(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return i8::from(
+//RS                 rt.sorted_sets
+//RS                     .get((b as usize).wrapping_sub(1))
+//RS                     .is_some_and(std::collections::BTreeSet::is_empty),
+//RS             );
+//RS         };
+//RS         let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_sorted_set_is_superset(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_sorted_set_is_superset(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sorted_set_is_disjoint(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = rt.sorted_sets.get((a as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         let Some(right) = rt.sorted_sets.get((b as usize).wrapping_sub(1)).cloned() else {
+//RS             return 1;
+//RS         };
+//RS         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
+//RS             return i8::from(set_semantics::jet_sorted_set_is_disjoint(
+//RS                 &sorted_string_values(rt, &left),
+//RS                 &sorted_string_values(rt, &right),
+//RS             ));
+//RS         }
+//RS         i8::from(set_semantics::jet_sorted_set_is_disjoint(&left, &right))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_hyper_log_log_add(handle: i64, value: i64) {
+//RS     let item = crate::Marshal::clone_string(value);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         if let crate::Sketch::SketchSlot::Hll(sketch) = slot {
+//RS             sketch.add(&item);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_hyper_log_log_count(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         match slot {
+//RS             crate::Sketch::SketchSlot::Hll(sketch) => sketch.count(),
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_tdigest_add(handle: i64, value: f64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         if let crate::Sketch::SketchSlot::TDigest(sketch) = slot {
+//RS             sketch.add(value);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_tdigest_quantile(handle: i64, quantile: f64) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         match slot {
+//RS             crate::Sketch::SketchSlot::TDigest(sketch) => sketch.quantile(quantile),
+//RS             _ => 0.0,
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_count_min_sketch_add(handle: i64, value: i64) {
+//RS     let item = crate::Marshal::clone_string(value);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         if let crate::Sketch::SketchSlot::Cms(sketch) = slot {
+//RS             sketch.add(&item);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_count_min_sketch_count(handle: i64, value: i64) -> i64 {
+//RS     let item = crate::Marshal::clone_string(value);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         match slot {
+//RS             crate::Sketch::SketchSlot::Cms(sketch) => sketch.count(&item),
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_reservoir_add(handle: i64, value: i64) {
+//RS     let item = crate::Marshal::clone_string(value);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         if let crate::Sketch::SketchSlot::Reservoir(sketch) = slot {
+//RS             sketch.add(item);
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_reservoir_sample(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let items = {
+//RS             let slot = rt
+//RS                 .sketches
+//RS                 .get_mut(handle.saturating_sub(1) as usize)
+//RS                 .expect("jit sketch: bad handle");
+//RS             match slot {
+//RS                 crate::Sketch::SketchSlot::Reservoir(sketch) => sketch.sample(),
+//RS                 _ => Vec::new(),
+//RS             }
+//RS         };
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for item in items {
+//RS             let item_handle = rt.heap.alloc_string(item);
+//RS             rt.heap.list_push_int(list, item_handle).expect("jit sketch list");
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_priority_queue_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.priority_queues.push(BinaryHeap::new());
+//RS         rt.priority_queues.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_len(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.priority_queues
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|heap| heap.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_from(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let heap = BinaryHeap::from(rt.heap.clone_int_list(list).unwrap_or_default());
+//RS         rt.priority_queues.push(heap);
+//RS         rt.priority_queues.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_push(handle: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(heap) = rt
+//RS             .priority_queues
+//RS             .get_mut((handle as usize).wrapping_sub(1))
+//RS         {
+//RS             heap.push(value);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_peek(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt
+//RS             .priority_queues
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .and_then(|heap| heap.peek().copied());
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_pop(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt
+//RS             .priority_queues
+//RS             .get_mut((handle as usize).wrapping_sub(1))
+//RS             .and_then(collection_semantics::priority_queue_pop);
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_to_sorted_list(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .priority_queues
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|heap| {
+//RS                 heap.clone()
+//RS                     .into_sorted_vec()
+//RS                     .into_iter()
+//RS                     .rev()
+//RS                     .collect::<Vec<_>>()
+//RS             })
+//RS             .unwrap_or_default();
+//RS         copy_list(rt, values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_remove_value(handle: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let removed = match rt
+//RS             .priority_queues
+//RS             .get_mut((handle as usize).wrapping_sub(1))
+//RS         {
+//RS             Some(heap) => collection_semantics::priority_queue_remove_value(heap, value).ok(),
+//RS             None => None,
+//RS         };
+//RS         option_i64(rt, removed)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_priority_queue_remove_slot(handle: i64, index: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let removed = match rt
+//RS             .priority_queues
+//RS             .get_mut((handle as usize).wrapping_sub(1))
+//RS         {
+//RS             Some(heap) => {
+//RS                 match collection_semantics::priority_queue_remove_slot(heap, index, "<jit>", line) {
+//RS                     Ok(value) => value.ok(),
+//RS                     Err(message) => {
+//RS                         rt.set_runtime_stop("E3010", line, &message);
+//RS                         None
+//RS                     }
+//RS                 }
+//RS             }
+//RS             None => None,
+//RS         };
+//RS         option_i64(rt, removed)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_new(capacity: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.lrus.push(LruState {
+//RS             capacity: capacity.max(0) as usize,
+//RS             entries: VecDeque::new(),
+//RS         });
+//RS         rt.lrus.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_put(handle: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(key) = rt.heap.clone_string(key) else {
+//RS             return option_i64(rt, None);
+//RS         };
+//RS         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             return option_i64(rt, None);
+//RS         };
+//RS         if let Some(index) = lru
+//RS             .entries
+//RS             .iter()
+//RS             .position(|(existing, _)| existing == &key)
+//RS         {
+//RS             let (_, old) = lru.entries.remove(index).expect("lru position");
+//RS             lru.entries.push_front((key, value));
+//RS             return option_i64(rt, Some(old));
+//RS         }
+//RS         lru.entries.push_front((key, value));
+//RS         if lru.entries.len() > lru.capacity {
+//RS             let evicted = lru.entries.pop_back().map(|(_, old)| old);
+//RS             return option_i64(rt, evicted);
+//RS         }
+//RS         option_i64(rt, None)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_get(handle: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(key) = rt.heap.clone_string(key) else {
+//RS             return option_i64(rt, None);
+//RS         };
+//RS         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             return option_i64(rt, None);
+//RS         };
+//RS         let Some(index) = lru
+//RS             .entries
+//RS             .iter()
+//RS             .position(|(existing, _)| existing == &key)
+//RS         else {
+//RS             return option_i64(rt, None);
+//RS         };
+//RS         let entry = lru.entries.remove(index).expect("lru position");
+//RS         let value = entry.1;
+//RS         lru.entries.push_front(entry);
+//RS         option_i64(rt, Some(value))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_has(handle: i64, key: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(key) = rt.heap.clone_string(key) else {
+//RS             return 0;
+//RS         };
+//RS         i8::from(
+//RS             rt.lrus
+//RS                 .get((handle as usize).wrapping_sub(1))
+//RS                 .is_some_and(|lru| lru.entries.iter().any(|(existing, _)| existing == &key)),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_lru_keys(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let keys = rt
+//RS             .lrus
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|lru| {
+//RS                 lru.entries
+//RS                     .iter()
+//RS                     .map(|(key, _)| key.clone())
+//RS                     .collect::<Vec<_>>()
+//RS             })
+//RS             .unwrap_or_default();
+//RS         let ids = keys
+//RS             .into_iter()
+//RS             .map(|key| rt.heap.alloc_string(key))
+//RS             .collect::<Vec<_>>();
+//RS         copy_list(rt, ids)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bit_sets.push(BTreeSet::new());
+//RS         rt.bit_sets.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_add(handle: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.bit_sets
+//RS                 .get_mut((handle as usize).wrapping_sub(1))
+//RS                 .is_some_and(|set| set.insert(value)),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_remove(handle: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(set) = rt.bit_sets.get_mut((handle as usize).wrapping_sub(1)) {
+//RS             set.remove(&value);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_has(handle: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(
+//RS             rt.bit_sets
+//RS                 .get((handle as usize).wrapping_sub(1))
+//RS                 .is_some_and(|set| collection_semantics::bit_set_has(set, value)),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_to_list(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .bit_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|set| set.iter().copied().collect::<Vec<_>>())
+//RS             .unwrap_or_default();
+//RS         copy_list(rt, values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_copy(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .bit_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         rt.bit_sets
+//RS             .push(collection_semantics::bit_set_copy(&values));
+//RS         rt.bit_sets.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_len(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bit_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .and_then(|set| set.iter().next_back().copied())
+//RS             .map(|last| last.saturating_add(1))
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_bit_set_count(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bit_sets
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|set| set.len() as i64)
+//RS             .unwrap_or(0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.byte_buffers
+//RS             .push(byte_buffer_semantics::JetByteBuffer::new());
+//RS         rt.byte_buffers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_with_capacity(n: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.byte_buffers
+//RS             .push(byte_buffer_semantics::JetByteBuffer::with_capacity(n));
+//RS         rt.byte_buffers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_from(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let bytes = rt
+//RS             .heap
+//RS             .clone_int_list(list)
+//RS             .unwrap_or_default()
+//RS             .into_iter()
+//RS             .map(|byte| byte as u8)
+//RS             .collect::<Vec<_>>();
+//RS         rt.byte_buffers
+//RS             .push(byte_buffer_semantics::JetByteBuffer::from(&bytes));
+//RS         rt.byte_buffers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_write(handle: i64, value: i64, method: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list_bytes = if matches!(method, 7 | 9) {
+//RS             Some(
+//RS                 rt.heap
+//RS                     .clone_int_list(value)
+//RS                     .unwrap_or_default()
+//RS                     .into_iter()
+//RS                     .map(|byte| byte as u8)
+//RS                     .collect::<Vec<_>>(),
+//RS             )
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let Some(buffer) = rt.byte_buffers.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             return;
+//RS         };
+//RS         match method {
+//RS             0 => buffer.write_u8(value as u8),
+//RS             8 => buffer.write_byte(value as u8),
+//RS             1 => buffer.write_u16_le(value as u16),
+//RS             2 => buffer.write_u16_be(value as u16),
+//RS             3 => buffer.write_u32_le(value as u32),
+//RS             4 => buffer.write_u32_be(value as u32),
+//RS             5 => buffer.write_u64_le(value as u64),
+//RS             6 => buffer.write_u64_be(value as u64),
+//RS             10 => buffer.write_i8(value as i8),
+//RS             11 => buffer.write_i16_le(value as i16),
+//RS             12 => buffer.write_i16_be(value as i16),
+//RS             13 => buffer.write_i32_le(value as i32),
+//RS             14 => buffer.write_i32_be(value as i32),
+//RS             15 => buffer.write_i64_le(value),
+//RS             16 => buffer.write_i64_be(value),
+//RS             17 => buffer.write_f32_le(f64::from_bits(value as u64) as f32),
+//RS             18 => buffer.write_f32_be(f64::from_bits(value as u64) as f32),
+//RS             19 => buffer.write_f64_le(f64::from_bits(value as u64)),
+//RS             20 => buffer.write_f64_be(f64::from_bits(value as u64)),
+//RS             7 => {
+//RS                 if let Some(bytes) = list_bytes {
+//RS                     buffer.write_bytes(&bytes);
+//RS                 }
+//RS             }
+//RS             9 => {
+//RS                 if let Some(bytes) = list_bytes {
+//RS                     buffer.write(&bytes);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_to_bytes(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = rt
+//RS             .byte_buffers
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|b| b.to_bytes())
+//RS             .unwrap_or_default()
+//RS             .into_iter()
+//RS             .map(i64::from)
+//RS             .collect::<Vec<_>>();
+//RS         copy_list(rt, values)
+//RS     })
+//RS }
+//RS 
+//RS /// method codes for ByteBufferMethod / cursor+string-like surface.
+//RS /// Returns packed values: bool as 0/1 in low byte when ret_kind=0;
+//RS /// i64 when ret_kind=1; option i64 (0=None else v+1) when ret_kind=2;
+//RS /// string handle when ret_kind=3; new Bytes handle when ret_kind=4;
+//RS /// list-of-string handle when ret_kind=5; unit 0 when ret_kind=6.
+//RS fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = (handle as usize).wrapping_sub(1);
+//RS         match method {
+//RS             // 0-arg reads / transforms
+//RS             0 => rt.byte_buffers.get(idx).map(|b| b.len()).unwrap_or(0),
+//RS             1 => i64::from(rt.byte_buffers.get(idx).is_some_and(|b| b.is_empty())),
+//RS             2 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.clear();
+//RS                 }
+//RS                 0
+//RS             }
+//RS             3 => rt.byte_buffers.get(idx).map(|b| b.capacity()).unwrap_or(0),
+//RS             4 => rt.byte_buffers.get(idx).map(|b| b.position()).unwrap_or(0),
+//RS             5 => i64::from(rt.byte_buffers.get(idx).is_some_and(|b| b.eof())),
+//RS             6 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.rewind();
+//RS                 }
+//RS                 0
+//RS             }
+//RS             7 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.flush();
+//RS                 }
+//RS                 0
+//RS             }
+//RS             8 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.close();
+//RS                 }
+//RS                 0
+//RS             }
+//RS             9 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.shutdown();
+//RS                 }
+//RS                 0
+//RS             }
+//RS             10 | 11 | 12 => {
+//RS                 let bytes = rt
+//RS                     .byte_buffers
+//RS                     .get(idx)
+//RS                     .map(|b| match method {
+//RS                         10 => b.to_bytes(),
+//RS                         11 => b.get_buffer(),
+//RS                         _ => b.buffer(),
+//RS                     })
+//RS                     .unwrap_or_default()
+//RS                     .into_iter()
+//RS                     .map(i64::from)
+//RS                     .collect::<Vec<_>>();
+//RS                 copy_list(rt, bytes)
+//RS             }
+//RS             13 | 14 => {
+//RS                 let s = rt
+//RS                     .byte_buffers
+//RS                     .get(idx)
+//RS                     .map(|b| {
+//RS                         if method == 13 {
+//RS                             b.to_string()
+//RS                         } else {
+//RS                             b.string()
+//RS                         }
+//RS                     })
+//RS                     .unwrap_or_default();
+//RS                 rt.heap.alloc_string(s)
+//RS             }
+//RS             15..=21 => {
+//RS                 let out = rt.byte_buffers.get(idx).map(|b| match method {
+//RS                     15 => b.trim(),
+//RS                     16 => b.trim_start(),
+//RS                     17 => b.trim_end(),
+//RS                     18 => b.to_lower(),
+//RS                     19 => b.to_upper(),
+//RS                     20 => b.to_title(),
+//RS                     _ => b.title(),
+//RS                 });
+//RS                 match out {
+//RS                     Some(buf) => {
+//RS                         rt.byte_buffers.push(buf);
+//RS                         rt.byte_buffers.len() as i64
+//RS                     }
+//RS                     None => 0,
+//RS                 }
+//RS             }
+//RS             22 | 23 => {
+//RS                 let out = rt.byte_buffers.get(idx).map(|b| b.copy());
+//RS                 match out {
+//RS                     Some(buf) => {
+//RS                         rt.byte_buffers.push(buf);
+//RS                         rt.byte_buffers.len() as i64
+//RS                     }
+//RS                     None => 0,
+//RS                 }
+//RS             }
+//RS             24 => {
+//RS                 let lines = rt
+//RS                     .byte_buffers
+//RS                     .get(idx)
+//RS                     .map(|b| b.lines())
+//RS                     .unwrap_or_default();
+//RS                 let ids = lines
+//RS                     .into_iter()
+//RS                     .map(|s| rt.heap.alloc_string(s))
+//RS                     .collect::<Vec<_>>();
+//RS                 copy_list(rt, ids)
+//RS             }
+//RS             25 => option_i64(
+//RS                 rt,
+//RS                 rt.byte_buffers
+//RS                     .get(idx)
+//RS                     .and_then(|b| b.first().ok())
+//RS                     .map(|b| b as i64),
+//RS             ),
+//RS             26 | 27 => {
+//RS                 let byte = rt.byte_buffers.get_mut(idx).and_then(|b| {
+//RS                     if method == 26 {
+//RS                         b.next().ok()
+//RS                     } else {
+//RS                         b.read_byte().ok()
+//RS                     }
+//RS                 });
+//RS                 option_i64(rt, byte.map(|b| b as i64))
+//RS             }
+//RS             28 => {
+//RS                 let out = rt.byte_buffers.get_mut(idx).and_then(|b| b.read().ok());
+//RS                 let Some(bytes) = out else {
+//RS                     return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS                 };
+//RS                 let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
+//RS                 let list = copy_list(rt, values);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS             }
+//RS             29 => i64::from(rt.byte_buffers.get(idx).is_some_and(|b| b.is_ascii())),
+//RS             30 => {
+//RS                 let text = rt
+//RS                     .byte_buffers
+//RS                     .get(idx)
+//RS                     .map(|b| b.to_string())
+//RS                     .unwrap_or_default();
+//RS                 match rt.heap.int_from_str(text.trim()) {
+//RS                     Ok(n) => {
+//RS                         // Result packed: positive = Ok(n+1) won't work for negatives.
+//RS                         // Store ok as string/int via existing result helpers if any —
+//RS                         // for the example, return n directly when ok and use trap on err.
+//RS                         n
+//RS                     }
+//RS                     Err(_) => {
+//RS                         rt.set_trap_message(format!("cannot parse `{text}` as an integer"));
+//RS                         0
+//RS                     }
+//RS                 }
+//RS             }
+//RS             // 1-arg
+//RS             40 => option_i64(
+//RS                 rt,
+//RS                 rt.byte_buffers
+//RS                     .get(idx)
+//RS                     .and_then(|b| b.get(arg0).ok())
+//RS                     .map(|b| b as i64),
+//RS             ),
+//RS             41 => {
+//RS                 if let Some(b) = rt.byte_buffers.get_mut(idx) {
+//RS                     b.seek(arg0);
+//RS                 }
+//RS                 0
+//RS             }
+//RS             42 => {
+//RS                 let out = rt
+//RS                     .byte_buffers
+//RS                     .get_mut(idx)
+//RS                     .and_then(|b| b.read_bytes(arg0).ok());
+//RS                 let Some(bytes) = out else {
+//RS                     return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS                 };
+//RS                 let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
+//RS                 let list = copy_list(rt, values);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS             }
+//RS             43 => {
+//RS                 let out = rt
+//RS                     .byte_buffers
+//RS                     .get_mut(idx)
+//RS                     .and_then(|b| b.read_string(arg0).ok());
+//RS                 match out {
+//RS                     Some(s) => {
+//RS                         let string = rt.heap.alloc_string(s);
+//RS                         crate::runtime_host::alloc_jit_result(rt, true, string as u64)
+//RS                     }
+//RS                     None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS                 }
+//RS             }
+//RS             44 | 45 | 46 => {
+//RS                 let Some(needle) = rt.heap.clone_string(arg0) else {
+//RS                     return 0;
+//RS                 };
+//RS                 i64::from(rt.byte_buffers.get(idx).is_some_and(|b| match method {
+//RS                     44 => b.contains(&needle),
+//RS                     45 => b.starts_with(&needle),
+//RS                     _ => b.ends_with(&needle),
+//RS                 }))
+//RS             }
+//RS             47 | 48 => {
+//RS                 let Some(needle) = rt.heap.clone_string(arg0) else {
+//RS                     return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS                 };
+//RS                 option_i64(rt, rt.byte_buffers.get(idx).and_then(|b| {
+//RS                     if method == 47 {
+//RS                         b.index_of(&needle).ok()
+//RS                     } else {
+//RS                         b.last_index_of(&needle).ok()
+//RS                     }
+//RS                 }))
+//RS             }
+//RS             49 => {
+//RS                 let Some(sep) = rt.heap.clone_string(arg0) else {
+//RS                     return 0;
+//RS                 };
+//RS                 let parts = rt
+//RS                     .byte_buffers
+//RS                     .get(idx)
+//RS                     .map(|b| b.split(&sep))
+//RS                     .unwrap_or_default();
+//RS                 let ids = parts
+//RS                     .into_iter()
+//RS                     .map(|s| rt.heap.alloc_string(s))
+//RS                     .collect::<Vec<_>>();
+//RS                 copy_list(rt, ids)
+//RS             }
+//RS             50 => {
+//RS                 let parts = rt
+//RS                     .heap
+//RS                     .clone_int_list(arg0)
+//RS                     .unwrap_or_default()
+//RS                     .into_iter()
+//RS                     .filter_map(|id| rt.heap.clone_string(id))
+//RS                     .collect::<Vec<_>>();
+//RS                 let out = rt.byte_buffers.get(idx).map(|b| b.join(&parts));
+//RS                 match out {
+//RS                     Some(buf) => {
+//RS                         rt.byte_buffers.push(buf);
+//RS                         rt.byte_buffers.len() as i64
+//RS                     }
+//RS                     None => 0,
+//RS                 }
+//RS             }
+//RS             55 => {
+//RS                 let separator = rt
+//RS                     .byte_buffers
+//RS                     .get((arg0 as usize).wrapping_sub(1))
+//RS                     .cloned();
+//RS                 let Some(separator) = separator else {
+//RS                     return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS                 };
+//RS                 match rt.byte_buffers.get(idx).map(|b| b.partition(&separator)) {
+//RS                     Some(Ok(parts)) => {
+//RS                         let mut handles = Vec::with_capacity(parts.len());
+//RS                         for part in parts {
+//RS                             rt.byte_buffers.push(part);
+//RS                             handles.push(rt.byte_buffers.len() as i64);
+//RS                         }
+//RS                         let list = copy_list(rt, handles);
+//RS                         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS                     }
+//RS                     Some(Err(message)) => {
+//RS                         rt.set_trap_message(message);
+//RS                         crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS                     }
+//RS                     None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS                 }
+//RS             }
+//RS             51 | 52 => {
+//RS                 let other_idx = (arg0 as usize).wrapping_sub(1);
+//RS                 let other = rt.byte_buffers.get(other_idx).cloned();
+//RS                 match (rt.byte_buffers.get(idx), other) {
+//RS                     (Some(a), Some(b)) => {
+//RS                         if method == 51 {
+//RS                             i64::from(a.equal(&b))
+//RS                         } else {
+//RS                             a.compare(&b)
+//RS                         }
+//RS                     }
+//RS                     _ => 0,
+//RS                 }
+//RS             }
+//RS             53 | 54 => {
+//RS                 let other_idx = (arg0 as usize).wrapping_sub(1);
+//RS                 if idx == other_idx {
+//RS                     return 0;
+//RS                 }
+//RS                 // split borrows: clone source first
+//RS                 let src = rt.byte_buffers.get(idx).cloned();
+//RS                 if let (Some(src), Some(dst)) = (src, rt.byte_buffers.get_mut(other_idx)) {
+//RS                     if method == 53 {
+//RS                         src.copy_to(dst);
+//RS                     } else {
+//RS                         let mut src = src;
+//RS                         src.write_to(dst);
+//RS                     }
+//RS                 }
+//RS                 0
+//RS             }
+//RS             // replace (2-arg)
+//RS             60 => {
+//RS                 let Some(from) = rt.heap.clone_string(arg0) else {
+//RS                     return 0;
+//RS                 };
+//RS                 let Some(to) = rt.heap.clone_string(arg1) else {
+//RS                     return 0;
+//RS                 };
+//RS                 let out = rt.byte_buffers.get(idx).map(|b| b.replace(&from, &to));
+//RS                 match out {
+//RS                     Some(buf) => {
+//RS                         rt.byte_buffers.push(buf);
+//RS                         rt.byte_buffers.len() as i64
+//RS                     }
+//RS                     None => 0,
+//RS                 }
+//RS             }
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_byte_buffer_capacity(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 3, 0, 0)
+//RS }
+//RS fn jet_jit_byte_buffer_len(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 0, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_is_empty(handle: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 1, 0, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_clear(handle: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 2, 0, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_position(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 4, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_eof(handle: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 5, 0, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_rewind(handle: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 6, 0, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_flush(handle: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 7, 0, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_close(handle: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 8, 0, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_shutdown(handle: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 9, 0, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_get_buffer(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 11, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_buffer(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 12, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_to_string(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 13, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_string(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 14, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_trim(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 15, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_trim_start(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 16, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_trim_end(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 17, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_to_lower(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 18, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_to_upper(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 19, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_to_title(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 20, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_title(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 21, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_clone(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 22, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_copy(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 23, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_lines(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 24, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_first(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 25, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_next(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 26, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_read_byte(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 27, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_read(handle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 28, 0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_is_ascii(handle: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 29, 0, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_get(handle: i64, index: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 40, index, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_seek(handle: i64, index: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 41, index, 0);
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_read_bytes(handle: i64, n: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 42, n, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_read_string(handle: i64, n: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 43, n, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_contains(handle: i64, needle: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 44, needle, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_starts_with(handle: i64, prefix: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 45, prefix, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_ends_with(handle: i64, suffix: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 46, suffix, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_index_of(handle: i64, needle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 47, needle, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_last_index_of(handle: i64, needle: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 48, needle, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_split(handle: i64, separator: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 49, separator, 0)
+//RS }
+//RS fn jet_jit_byte_buffer_partition(handle: i64, separator: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 55, separator, 0)
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_byte_buffer_join(handle: i64, parts: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 50, parts, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_equal(handle: i64, other: i64) -> i8 {
+//RS     jet_jit_byte_buffer_method(handle, 51, other, 0) as i8
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_compare(handle: i64, other: i64) -> i64 {
+//RS     jet_jit_byte_buffer_method(handle, 52, other, 0)
+//RS }
+//RS 
+//RS fn jet_jit_byte_buffer_copy_to(handle: i64, other: i64) {
+//RS     let _ = jet_jit_byte_buffer_method(handle, 53, other, 0);
+//RS }
+//RS 
+// END-PORT-PENDING 0201 crates/jet-jit/src/Collections.rs:9095-10892
+

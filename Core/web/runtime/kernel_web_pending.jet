@@ -1,0 +1,939 @@
+// WebPending.rs:1-2145 — backend-neutral typed streaming/hydration kernel.
+// Private generated-App owner: core.web.runtime.kernel_web_pending, not core.web.
+// Publication: module runtime in web.jet; module kernel_web_pending in runtime.
+// #4500: retaining Queue/map element loans and borrowed String byte ingress.
+// #4494: the process-global LazyLock<Mutex<registry>> and poison recovery have
+// no published native ABI. The registry below is the SAME guarded data model;
+// methods port the bodies inside the original lock, NOT a host/global provider.
+// No lock/global function is fabricated. Native integration must acquire that
+// single process-static guard, recover the poisoned guard, call these methods,
+// and release on EVERY success/error rail (Rust:1808-1814,1865-2081).
+use core.text.runtime.kernel_unicode_string as text
+
+// Rust:11-16. Fixed policy capacities, independent of selected pointer width.
+pub JET_WEB_PENDING_MAX_CHUNKS :: 64
+pub JET_WEB_PENDING_MAX_BUFFER_BYTES :: 1048576
+pub JET_WEB_PENDING_MAX_FACTS :: 256
+pub JET_WEB_PENDING_MAX_IDENTITY_BYTES :: 1024
+pub JET_WEB_PENDING_MAX_BOUNDARY_BYTES :: 256
+pub JET_WEB_STREAM_REGISTRY_MAX :: 256
+
+#[Equatable, Comparable]
+pub enum JetWebPendingState { Pending; Ready; Failed }
+impl JetWebPendingState {
+    pub fn default() -> JetWebPendingState Never! { .Pending }
+    pub fn as_str(self) -> String Never! { if self == { .Pending -> "pending"; .Ready -> "ready"; .Failed -> "failed" } }
+    pub fn is_pending(self) -> Bool Never! { self == .Pending }
+    pub fn is_ready(self) -> Bool Never! { self == .Ready }
+    pub fn is_failed(self) -> Bool Never! { self == .Failed }
+}
+#[Equatable, Comparable]
+pub enum JetWebPendingBackpressureDimension { Chunks; Bytes }
+impl JetWebPendingBackpressureDimension {
+    pub fn as_str(self) -> String Never! { if self == { .Chunks -> "chunks"; .Bytes -> "bytes" } }
+}
+#[Equatable, Comparable]
+pub enum JetWebPendingProjectionTarget { Server; Client }
+impl JetWebPendingProjectionTarget {
+    pub fn as_str(self) -> String Never! { if self == { .Server -> "server"; .Client -> "client" } }
+}
+#[Equatable, Comparable]
+pub enum JetWebPendingTransactionKind {
+    Begin
+    Chunk
+    Commit
+    Fail
+    Cancel
+    Rollback
+    HydrationStart
+    HydrationComplete
+    Reject
+}
+impl JetWebPendingTransactionKind {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Begin -> "begin"
+            .Chunk -> "chunk"
+            .Commit -> "commit"
+            .Fail -> "fail"
+            .Cancel -> "cancel"
+            .Rollback -> "rollback"
+            .HydrationStart -> "hydration_start"
+            .HydrationComplete -> "hydration_complete"
+            .Reject -> "reject"
+        }
+    }
+}
+// Rust:110-236,615-623. Error payloads, precedence, codes and Display preserved.
+#Error
+#[Equatable]
+pub enum JetWebPendingError {
+    InvalidIdentity(field: String)
+    InvalidBoundary(field: String)
+    InvalidLimit(field: String, actual: Int, maximum: Int)
+    IdentityMismatch(expected: JetWebIslandIdentity, actual: JetWebIslandIdentity)
+    InvalidChunkSequence(expected: U64, actual: U64)
+    Backpressure(dimension: JetWebPendingBackpressureDimension, limit: Int, buffered: Int, incoming: Int)
+    ContentTooLarge(limit: Int, actual: Int)
+    InvalidLifecycle(state: JetWebPendingState, operation: String)
+    MissingFinalChunk
+    InvalidHydrationTiming(started_at_ns: U64, completed_at_ns: U64)
+    HydrationIdentityMismatch(expected: JetWebIslandIdentity, actual: JetWebIslandIdentity)
+    NonMonotonicTimestamp(previous: U64, actual: U64)
+    SequenceExhausted(kind: String)
+    StreamIdentityMismatch(expected: JetWebStreamId, actual: JetWebStreamId)
+}
+impl JetWebPendingError {
+    pub fn code(self) -> String Never! {
+        if self == {
+            .InvalidIdentity(_) -> "invalid_identity"
+            .InvalidBoundary(_) -> "invalid_boundary"
+            .InvalidLimit(_, _, _) -> "invalid_limit"
+            .IdentityMismatch(_, _) -> "identity_mismatch"
+            .InvalidChunkSequence(_, _) -> "invalid_chunk_sequence"
+            .Backpressure(_, _, _, _) -> "backpressure"
+            .ContentTooLarge(_, _) -> "content_too_large"
+            .InvalidLifecycle(_, _) -> "invalid_lifecycle"
+            .MissingFinalChunk -> "missing_final_chunk"
+            .InvalidHydrationTiming(_, _) -> "invalid_hydration_timing"
+            .HydrationIdentityMismatch(_, _) -> "hydration_identity_mismatch"
+            .NonMonotonicTimestamp(_, _) -> "non_monotonic_timestamp"
+            .SequenceExhausted(_) -> "sequence_exhausted"
+            .StreamIdentityMismatch(_, _) -> "stream_identity_mismatch"
+        }
+    }
+    pub fn message(self) -> String Never! {
+        if self == {
+            .InvalidIdentity(field) -> "web pending {field} identity is empty, oversized, or contains control text"
+            .InvalidBoundary(field) -> "web pending boundary {field} is empty, oversized, or contains control text"
+            .InvalidLimit(field, actual, maximum) -> "web pending {field} limit {actual} is outside 1..={maximum}"
+            .IdentityMismatch(expected, actual) -> "web pending identity mismatch: expected {expected.compact()}, got {actual.compact()}"
+            .InvalidChunkSequence(expected, actual) -> "web pending chunk sequence is out of order: expected {expected}, got {actual}"
+            .Backpressure(dimension, limit, buffered, incoming) -> "web pending {dimension.as_str()} backpressure: limit {limit}, buffered {buffered}, incoming {incoming}"
+            .ContentTooLarge(limit, actual) -> "web pending content is {actual} bytes; maximum is {limit}"
+            .InvalidLifecycle(state, operation) -> "web pending cannot perform {operation} while state is {state.as_str()}"
+            .MissingFinalChunk -> "web pending cannot commit before the final chunk"
+            .InvalidHydrationTiming(started_at_ns, completed_at_ns) -> "web hydration completed at {completed_at_ns} before it started at {started_at_ns}"
+            .HydrationIdentityMismatch(expected, actual) -> "web hydration identity mismatch: expected {expected.compact()}, got {actual.compact()}"
+            .NonMonotonicTimestamp(previous, actual) -> "web pending timestamp moved backward from {previous} to {actual}"
+            .SequenceExhausted(kind) -> "web pending {kind} sequence is exhausted"
+            .StreamIdentityMismatch(expected, actual) -> "web stream identity mismatch: expected {expected.compact()}, got {actual.compact()}"
+        }
+    }
+    pub fn show(self) -> String Never! { self.message() }
+    pub fn render_json(self) -> String Never! {
+        "{{\"code\":{jet_web_pending_json_string(self.code())},\"message\":{jet_web_pending_json_string(self.message())}}}"
+    }
+}
+// Rust:242-289. Exact string equality/order; never a concatenated map key.
+#[Equatable, Comparable]
+pub struct JetWebIslandIdentity {
+    pub island_id: String
+    pub source_id: String
+    pub build_id: String
+    pub revision: String
+}
+impl JetWebIslandIdentity {
+    pub fn new(island_id: ^String, source_id: ^String, build_id: ^String, revision: ^String) -> JetWebIslandIdentity JetWebPendingError! {
+        identity :: JetWebIslandIdentity{island_id: ^island_id, source_id: ^source_id, build_id: ^build_id, revision: ^revision}
+        identity.validate() ?? return Err(err)
+        Ok(^identity)
+    }
+    pub fn validate(self) JetWebPendingError! {
+        jet_web_pending_validate_identity(self.island_id, "island_id") ?? return Err(err)
+        jet_web_pending_validate_identity(self.source_id, "source_id") ?? return Err(err)
+        jet_web_pending_validate_identity(self.build_id, "build_id") ?? return Err(err)
+        jet_web_pending_validate_identity(self.revision, "revision")
+    }
+    pub fn compact(self) -> String Never! { "{self.island_id}@{self.source_id}:{self.build_id}:{self.revision}" }
+    pub fn render_json(self) -> String Never! {
+        "{{\"island_id\":{jet_web_pending_json_string(self.island_id)},\"source_id\":{jet_web_pending_json_string(self.source_id)},\"build_id\":{jet_web_pending_json_string(self.build_id)},\"revision\":{jet_web_pending_json_string(self.revision)}}}"
+    }
+}
+// Rust:297-317. The constructor is the only boundary-string ingress.
+#[Equatable, Comparable]
+pub struct JetWebBoundaryId { value: String }
+impl JetWebBoundaryId {
+    pub fn new(value: ^String) -> JetWebBoundaryId JetWebPendingError! {
+        jet_web_pending_validate_boundary(value, "boundary_id") ?? return Err(err)
+        Ok(JetWebBoundaryId{value: ^value})
+    }
+    pub fn as_str(self) -> @String Never! from self { @self.value }
+    pub fn compact(self) -> @String Never! from self { @self.value }
+    pub fn render_json(self) -> String Never! { jet_web_pending_json_string(self.value) }
+}
+// Rust:322-381. Opaque generation identity, not just a boundary name.
+#[Equatable, Comparable]
+pub struct JetWebStreamId {
+    boundary_id_value: JetWebBoundaryId
+    generation_value: U64
+    identity_value: JetWebIslandIdentity
+}
+impl JetWebStreamId {
+    fn new(boundary_id: ^JetWebBoundaryId, generation: U64, identity: ^JetWebIslandIdentity) -> JetWebStreamId Never! {
+        JetWebStreamId{boundary_id_value: ^boundary_id, generation_value: generation, identity_value: ^identity}
+    }
+    pub fn from_parts(boundary_id: ^JetWebBoundaryId, generation: U64, identity: ^JetWebIslandIdentity) -> JetWebStreamId JetWebPendingError! {
+        identity.validate() ?? return Err(err)
+        Ok(JetWebStreamId.new(^boundary_id, generation, ^identity))
+    }
+    pub fn boundary_id(self) -> @JetWebBoundaryId Never! from self { @self.boundary_id_value }
+    pub fn generation(self) -> U64 Never! { self.generation_value }
+    pub fn identity(self) -> @JetWebIslandIdentity Never! from self { @self.identity_value }
+    pub fn compact(self) -> String Never! { "{self.boundary_id_value.compact()}#{self.generation_value}@{self.identity_value.compact()}" }
+    pub fn render_json(self) -> String Never! {
+        "{{\"boundary_id\":{self.boundary_id_value.render_json()},\"generation\":{self.generation_value},\"identity\":{self.identity_value.render_json()}}}"
+    }
+}
+#[Equatable, Comparable]
+pub enum JetWebHydrationTrigger { Immediate; Load; Idle; Visible; Manual }
+impl JetWebHydrationTrigger {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Immediate -> "immediate"; .Load -> "client-load"; .Idle -> "client-idle"; .Visible -> "client-visible"; .Manual -> "manual" }
+    }
+    pub fn parse(value: String) -> JetWebHydrationTrigger? Never! {
+        if value == { "immediate" -> Val(.Immediate); "client-load" -> Val(.Load); "client-idle" -> Val(.Idle); "client-visible" -> Val(.Visible); "manual" -> Val(.Manual); else -> None }
+    }
+}
+// Rust:419-521. No Int/floating timestamp conversion.
+#[Equatable]
+pub struct JetWebHydrationTiming {
+    pub trigger: JetWebHydrationTrigger
+    pub started_at_ns: U64
+    pub completed_at_ns: U64?
+}
+impl JetWebHydrationTiming {
+    pub fn started(started_at_ns: U64) -> JetWebHydrationTiming Never! { JetWebHydrationTiming.started_with_trigger(.Manual, started_at_ns) }
+    pub fn started_with_trigger(trigger: JetWebHydrationTrigger, started_at_ns: U64) -> JetWebHydrationTiming Never! {
+        JetWebHydrationTiming{trigger: trigger, started_at_ns: started_at_ns, completed_at_ns: None}
+    }
+    pub fn new(started_at_ns: U64, completed_at_ns: U64?) -> JetWebHydrationTiming JetWebPendingError! { JetWebHydrationTiming.new_with_trigger(.Manual, started_at_ns, completed_at_ns) }
+    pub fn new_with_trigger(trigger: JetWebHydrationTrigger, started_at_ns: U64, completed_at_ns: U64?) -> JetWebHydrationTiming JetWebPendingError! {
+        timing :: JetWebHydrationTiming{trigger: trigger, started_at_ns: started_at_ns, completed_at_ns: completed_at_ns}
+        timing.validate() ?? return Err(err)
+        Ok(timing)
+    }
+    pub fn complete(&self, completed_at_ns: U64) JetWebPendingError! {
+        if completed_at_ns < self.started_at_ns -> return Err(.InvalidHydrationTiming(self.started_at_ns, completed_at_ns))
+        if self.completed_at_ns != None -> return Err(.InvalidLifecycle(.Ready, "hydration_complete"))
+        self.completed_at_ns = Val(completed_at_ns)
+        Ok()
+    }
+    pub fn validate(self) JetWebPendingError! {
+        if self.completed_at_ns == .Val(completed) {
+            if completed < self.started_at_ns -> return Err(.InvalidHydrationTiming(self.started_at_ns, completed))
+        }
+        Ok()
+    }
+    pub fn is_complete(self) -> Bool Never! { self.completed_at_ns != None }
+    pub fn duration_ns(self) -> U64? Never! {
+        if self.completed_at_ns == .Val(completed) -> return Val(completed - self.started_at_ns)
+        None
+    }
+    pub fn render_json(self) -> String Never! {
+        "{{\"started_at_ns\":{self.started_at_ns},\"completed_at_ns\":{optional_u64_json(self.completed_at_ns)},\"duration_ns\":{optional_u64_json(self.duration_ns())},\"trigger\":{jet_web_pending_json_string(self.trigger.as_str())}}}"
+    }
+}
+// Rust:526-574.
+#[Equatable]
+pub struct JetWebPendingChunk {
+    pub sequence: U64
+    pub content: String
+    pub is_final: Bool
+    pub identity: JetWebIslandIdentity
+}
+impl JetWebPendingChunk {
+    pub fn new(sequence: U64, content: ^String, is_final: Bool, identity: ^JetWebIslandIdentity) -> JetWebPendingChunk JetWebPendingError! {
+        chunk :: JetWebPendingChunk{sequence: sequence, content: ^content, is_final: is_final, identity: ^identity}
+        chunk.validate() ?? return Err(err)
+        Ok(^chunk)
+    }
+    pub fn validate(self) JetWebPendingError! {
+        self.identity.validate() ?? return Err(err)
+        actual :: self.byte_len()
+        if actual > JET_WEB_PENDING_MAX_BUFFER_BYTES -> return Err(.ContentTooLarge(JET_WEB_PENDING_MAX_BUFFER_BYTES, actual))
+        Ok()
+    }
+    pub fn byte_len(self) -> Int Never! { text.utf8_bytes(self.content).len() }
+    pub fn render_json(self) -> String Never! {
+        "{{\"sequence\":{self.sequence},\"content\":{jet_web_pending_json_string(self.content)},\"is_final\":{self.is_final},\"identity\":{self.identity.render_json()}}}"
+    }
+}
+// Rust:579-613.
+#[Equatable]
+pub struct JetWebPendingTransaction {
+    pub sequence: U64
+    pub boundary_id: String
+    pub kind: JetWebPendingTransactionKind
+    pub at_ns: U64
+    pub state: JetWebPendingState
+    pub identity: JetWebIslandIdentity
+    pub chunk_sequence: U64?
+    pub error: JetWebPendingError?
+}
+impl JetWebPendingTransaction {
+    pub fn render_json(self) -> String Never! {
+        "{{\"sequence\":{self.sequence},\"boundary_id\":{jet_web_pending_json_string(self.boundary_id)},\"kind\":{jet_web_pending_json_string(self.kind.as_str())},\"at_ns\":{self.at_ns},\"state\":{jet_web_pending_json_string(self.state.as_str())},\"identity\":{self.identity.render_json()},\"chunk_sequence\":{optional_u64_json(self.chunk_sequence)},\"error\":{optional_error_json(self.error)}}}"
+    }
+}
+// Rust:627-658.
+#[Equatable]
+pub struct JetWebPendingFact {
+    pub transaction: JetWebPendingTransaction
+    pub buffered_chunks: Int
+    pub buffered_bytes: Int
+    pub committed_chunks: Int
+    pub committed_bytes: Int
+    pub expected_chunk_sequence: U64
+    pub final_chunk_seen: Bool
+    pub truncated: Bool
+    pub backpressure: Bool
+    pub cancelled: Bool
+    pub rolled_back: Bool
+}
+impl JetWebPendingFact {
+    pub fn render_json(self) -> String Never! {
+        "{{\"transaction\":{self.transaction.render_json()},\"buffered_chunks\":{self.buffered_chunks},\"buffered_bytes\":{self.buffered_bytes},\"committed_chunks\":{self.committed_chunks},\"committed_bytes\":{self.committed_bytes},\"expected_chunk_sequence\":{self.expected_chunk_sequence},\"final_chunk_seen\":{self.final_chunk_seen},\"truncated\":{self.truncated},\"backpressure\":{self.backpressure},\"cancelled\":{self.cancelled},\"rolled_back\":{self.rolled_back}}}"
+    }
+}
+// Rust:663-748. Receipts deliberately OWN snapshot content and errors.
+#[Equatable]
+pub struct JetWebPendingReceipt {
+    pub transaction_sequence: U64
+    pub boundary_id: String
+    pub operation: JetWebPendingTransactionKind
+    pub state: JetWebPendingState
+    pub at_ns: U64
+    pub identity: JetWebIslandIdentity
+    pub chunk_sequence: U64?
+    pub expected_chunk_sequence: U64
+    pub buffered_chunks: Int
+    pub buffered_bytes: Int
+    pub committed_chunks: Int
+    pub committed_bytes: Int
+    pub final_chunk_seen: Bool
+    pub content: String
+    pub stream_content: String
+    pub hydration: JetWebHydrationTiming?
+    pub failure: JetWebPendingError?
+    pub truncated: Bool
+    pub backpressure: Bool
+    pub cancelled: Bool
+    pub rolled_back: Bool
+}
+impl JetWebPendingReceipt {
+    pub fn is_pending(self) -> Bool Never! { self.state.is_pending() }
+    pub fn is_ready(self) -> Bool Never! { self.state.is_ready() }
+    pub fn is_failed(self) -> Bool Never! { self.state.is_failed() }
+    pub fn is_cancelled(self) -> Bool Never! { self.cancelled }
+    pub fn was_rolled_back(self) -> Bool Never! { self.rolled_back }
+    pub fn render_json(self) -> String Never! {
+        "{{\"transaction_sequence\":{self.transaction_sequence},\"boundary_id\":{jet_web_pending_json_string(self.boundary_id)},\"operation\":{jet_web_pending_json_string(self.operation.as_str())},\"state\":{jet_web_pending_json_string(self.state.as_str())},\"at_ns\":{self.at_ns},\"identity\":{self.identity.render_json()},\"chunk_sequence\":{optional_u64_json(self.chunk_sequence)},\"expected_chunk_sequence\":{self.expected_chunk_sequence},\"buffered_chunks\":{self.buffered_chunks},\"buffered_bytes\":{self.buffered_bytes},\"committed_chunks\":{self.committed_chunks},\"committed_bytes\":{self.committed_bytes},\"final_chunk_seen\":{self.final_chunk_seen},\"content\":{jet_web_pending_json_string(self.content)},\"stream_content\":{jet_web_pending_json_string(self.stream_content)},\"hydration\":{optional_hydration_json(self.hydration)},\"failure\":{optional_error_json(self.failure)},\"truncated\":{self.truncated},\"backpressure\":{self.backpressure},\"cancelled\":{self.cancelled},\"rolled_back\":{self.rolled_back}}}"
+    }
+}
+// Rust:754-813. Target changes no world/content facts.
+#[Equatable]
+pub struct JetWebPendingProjection {
+    pub target: JetWebPendingProjectionTarget
+    pub boundary_id: String
+    pub identity: JetWebIslandIdentity
+    pub state: JetWebPendingState
+    pub committed_content: String
+    pub stream_content: String
+    pub buffered_chunks: Int
+    pub buffered_bytes: Int
+    pub committed_chunks: Int
+    pub committed_bytes: Int
+    pub expected_chunk_sequence: U64
+    pub final_chunk_seen: Bool
+    pub hydration: JetWebHydrationTiming?
+    pub failure: JetWebPendingError?
+    pub truncated: Bool
+    pub backpressure: Bool
+    pub cancelled: Bool
+    pub rolled_back: Bool
+}
+impl JetWebPendingProjection {
+    pub fn content(self) -> @String Never! from self { @self.committed_content }
+    pub fn render_json(self) -> String Never! {
+        "{{\"target\":{jet_web_pending_json_string(self.target.as_str())},\"boundary_id\":{jet_web_pending_json_string(self.boundary_id)},\"identity\":{self.identity.render_json()},\"state\":{jet_web_pending_json_string(self.state.as_str())},\"committed_content\":{jet_web_pending_json_string(self.committed_content)},\"stream_content\":{jet_web_pending_json_string(self.stream_content)},\"buffered_chunks\":{self.buffered_chunks},\"buffered_bytes\":{self.buffered_bytes},\"committed_chunks\":{self.committed_chunks},\"committed_bytes\":{self.committed_bytes},\"expected_chunk_sequence\":{self.expected_chunk_sequence},\"final_chunk_seen\":{self.final_chunk_seen},\"hydration\":{optional_hydration_json(self.hydration)},\"failure\":{optional_error_json(self.failure)},\"truncated\":{self.truncated},\"backpressure\":{self.backpressure},\"cancelled\":{self.cancelled},\"rolled_back\":{self.rolled_back}}}"
+    }
+}
+// Rust:818-847. Queue preserves O(1) oldest-fact eviction, not array shifting.
+#[Equatable]
+pub struct JetWebStreamingBoundary {
+    boundary_id_value: String
+    identity_value: JetWebIslandIdentity
+    state_value: JetWebPendingState
+    committed_content_value: String
+    staged_content: String
+    committed_chunks_value: Int
+    committed_bytes_value: Int
+    staged_chunks: Int
+    staged_bytes: Int
+    expected_chunk_sequence_value: U64
+    final_chunk_seen_value: Bool
+    has_committed_content: Bool
+    committed_hydration_identity: JetWebIslandIdentity?
+    committed_hydration: JetWebHydrationTiming?
+    hydration_identity: JetWebIslandIdentity?
+    hydration_value: JetWebHydrationTiming?
+    last_error_value: JetWebPendingError?
+    last_operation: JetWebPendingTransactionKind
+    last_at_ns: U64
+    last_cancelled: Bool
+    last_rolled_back: Bool
+    last_backpressure: Bool
+    max_chunks_value: Int
+    max_buffer_bytes_value: Int
+    max_facts: Int
+    retained_facts: Queue<JetWebPendingFact>
+    history_truncated_value: Bool
+    next_transaction_sequence: U64
+}
+impl JetWebStreamingBoundary {
+    // Rust:850-928. Boundary, identity, chunk, byte, fact validation order.
+    pub fn new(boundary_id: ^String, identity: ^JetWebIslandIdentity) -> JetWebStreamingBoundary JetWebPendingError! {
+        JetWebStreamingBoundary.with_limits(^boundary_id, ^identity, JET_WEB_PENDING_MAX_CHUNKS, JET_WEB_PENDING_MAX_BUFFER_BYTES)
+    }
+    pub fn with_limits(boundary_id: ^String, identity: ^JetWebIslandIdentity, max_chunks: Int, max_buffer_bytes: Int) -> JetWebStreamingBoundary JetWebPendingError! {
+        JetWebStreamingBoundary.with_capacities(^boundary_id, ^identity, max_chunks, max_buffer_bytes, JET_WEB_PENDING_MAX_FACTS)
+    }
+    pub fn with_capacities(boundary_id: ^String, identity: ^JetWebIslandIdentity, max_chunks: Int, max_buffer_bytes: Int, max_facts: Int) -> JetWebStreamingBoundary JetWebPendingError! {
+        jet_web_pending_validate_boundary(boundary_id, "boundary_id") ?? return Err(err)
+        identity.validate() ?? return Err(err)
+        jet_web_pending_validate_limit(max_chunks, JET_WEB_PENDING_MAX_CHUNKS, "chunk") ?? return Err(err)
+        jet_web_pending_validate_limit(max_buffer_bytes, JET_WEB_PENDING_MAX_BUFFER_BYTES, "buffer byte") ?? return Err(err)
+        jet_web_pending_validate_limit(max_facts, JET_WEB_PENDING_MAX_FACTS, "fact") ?? return Err(err)
+        Ok(JetWebStreamingBoundary{
+            boundary_id_value: ^boundary_id, identity_value: ^identity, state_value: .Pending,
+            committed_content_value: "", staged_content: "", committed_chunks_value: 0, committed_bytes_value: 0,
+            staged_chunks: 0, staged_bytes: 0, expected_chunk_sequence_value: U64{0}, final_chunk_seen_value: false,
+            has_committed_content: false, committed_hydration_identity: None, committed_hydration: None,
+            hydration_identity: None, hydration_value: None, last_error_value: None, last_operation: .Begin,
+            last_at_ns: U64{0}, last_cancelled: false, last_rolled_back: false, last_backpressure: false,
+            max_chunks_value: max_chunks, max_buffer_bytes_value: max_buffer_bytes, max_facts: max_facts,
+            retained_facts: Queue.new<JetWebPendingFact>(), history_truncated_value: false, next_transaction_sequence: U64{1}
+        })
+    }
+    // Rust:930-1028. Read loans never clone the whole boundary.
+    pub fn boundary_id(self) -> @String Never! from self { @self.boundary_id_value }
+    pub fn identity(self) -> @JetWebIslandIdentity Never! from self { @self.identity_value }
+    pub fn state(self) -> JetWebPendingState Never! { self.state_value }
+    pub fn is_pending(self) -> Bool Never! { self.state_value.is_pending() }
+    pub fn is_ready(self) -> Bool Never! { self.state_value.is_ready() }
+    pub fn is_failed(self) -> Bool Never! { self.state_value.is_failed() }
+    pub fn content(self) -> @String Never! from self { @self.committed_content_value }
+    pub fn committed_content(self) -> @String Never! from self { @self.committed_content_value }
+    pub fn stream_content(self) -> @String Never! from self { @self.staged_content }
+    pub fn buffered_chunks(self) -> Int Never! { self.staged_chunks }
+    pub fn buffered_bytes(self) -> Int Never! { self.staged_bytes }
+    pub fn committed_chunks(self) -> Int Never! { self.committed_chunks_value }
+    pub fn committed_bytes(self) -> Int Never! { self.committed_bytes_value }
+    pub fn expected_chunk_sequence(self) -> U64 Never! { self.expected_chunk_sequence_value }
+    pub fn final_chunk_seen(self) -> Bool Never! { self.final_chunk_seen_value }
+    pub fn max_chunks(self) -> Int Never! { self.max_chunks_value }
+    pub fn max_buffer_bytes(self) -> Int Never! { self.max_buffer_bytes_value }
+    pub fn history_truncated(self) -> Bool Never! { self.history_truncated_value }
+    pub fn facts(self) -> [JetWebPendingFact] Never! {
+        out := [JetWebPendingFact]{}
+        loop fact in self.retained_facts -> &out.push(~fact) // #4500 Queue read loan
+        ^out
+    }
+    pub fn transactions(self) -> [JetWebPendingTransaction] Never! {
+        out := [JetWebPendingTransaction]{}
+        loop fact in self.retained_facts -> &out.push(~fact.transaction) // #4500
+        ^out
+    }
+    pub fn fact_count(self) -> Int Never! { self.retained_facts.len() }
+    pub fn last_error(self) -> (@JetWebPendingError)? Never! from self {
+        if self.last_error_value == .Val(error) -> return Val(@error)
+        None
+    }
+    pub fn hydration(self) -> JetWebHydrationTiming? Never! { self.hydration_value }
+    pub fn hydration_trigger(self) -> JetWebHydrationTrigger? Never! {
+        if self.hydration_value == .Val(timing) -> return Val(timing.trigger)
+        None
+    }
+    pub fn receipt(self) -> JetWebPendingReceipt Never! {
+        self.snapshot(self.last_operation, self.last_at_ns, None, self.last_cancelled, self.last_rolled_back, self.last_backpressure)
+    }
+    // Rust:1043-1095.
+    pub fn begin(&self, identity: ^JetWebIslandIdentity, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.check_timestamp(at_ns) ?? return Err(err)
+        if identity != self.identity_value -> return &self.reject(.IdentityMismatch(~self.identity_value, ^identity), at_ns)
+        if self.is_pending() && (self.staged_chunks != 0 || self.staged_content != "") -> return &self.reject(.InvalidLifecycle(self.state_value, "begin"), at_ns)
+        &self.begin_locked(at_ns)
+        &self.record(.Begin, at_ns, None, None, false, false)
+    }
+    pub fn begin_at(&self, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! { &self.begin(~self.identity_value, at_ns) }
+    fn begin_locked(&self, at_ns: U64) Never! {
+        self.state_value = .Pending
+        self.staged_content = ""
+        self.staged_chunks = 0
+        self.staged_bytes = 0
+        self.expected_chunk_sequence_value = U64{0}
+        self.final_chunk_seen_value = false
+        self.hydration_identity = None
+        self.hydration_value = None
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = false
+        self.last_backpressure = false
+        self.last_at_ns = at_ns
+    }
+    // Rust:1097-1184. Validation is before append; exhaustion is AFTER append.
+    pub fn push_chunk_at(&self, chunk: ^JetWebPendingChunk, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.check_timestamp(at_ns) ?? return Err(err)
+        if !self.is_pending() -> return &self.reject(.InvalidLifecycle(self.state_value, "chunk"), at_ns)
+        if chunk.identity != self.identity_value -> return &self.reject(.IdentityMismatch(~self.identity_value, ~chunk.identity), at_ns)
+        chunk.validate() ?? return &self.reject(err, at_ns)
+        if chunk.sequence != self.expected_chunk_sequence_value -> return &self.reject(.InvalidChunkSequence(self.expected_chunk_sequence_value, chunk.sequence), at_ns)
+        if self.final_chunk_seen_value -> return &self.reject(.InvalidLifecycle(self.state_value, "chunk_after_final"), at_ns)
+        if self.staged_chunks >= self.max_chunks_value -> return &self.reject_with_backpressure(.Backpressure(.Chunks, self.max_chunks_value, self.staged_chunks, 1), at_ns)
+        incoming :: chunk.byte_len()
+        available :: if self.staged_bytes >= self.max_buffer_bytes_value -> 0 else -> self.max_buffer_bytes_value - self.staged_bytes
+        if incoming > available -> return &self.reject_with_backpressure(.Backpressure(.Bytes, self.max_buffer_bytes_value, self.staged_bytes, incoming), at_ns)
+        // Canonical amortized String append, never interpolation of accumulated data.
+        &self.staged_content.try_push(chunk.content) ?? panic("web pending content allocation failed")
+        self.staged_chunks += 1
+        self.staged_bytes += incoming
+        if self.expected_chunk_sequence_value == (U64{18446744073709551615}) -> return &self.reject(.SequenceExhausted("chunk"), at_ns)
+        self.expected_chunk_sequence_value += U64{1}
+        self.final_chunk_seen_value = chunk.is_final
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = false
+        self.last_backpressure = false
+        self.last_at_ns = at_ns
+        &self.record(.Chunk, at_ns, Val(chunk.sequence), None, false, false)
+    }
+    pub fn append(&self, sequence: U64, content: ^String, is_final: Bool, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        chunk :: JetWebPendingChunk.new(sequence, ^content, is_final, ~self.identity_value) ?? return Err(err)
+        &self.push_chunk_at(^chunk, at_ns)
+    }
+    // Rust:1197-1233. Preserve staged content after commit for both projections.
+    pub fn commit(&self, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.check_timestamp(at_ns) ?? return Err(err)
+        if !self.is_pending() -> return &self.reject(.InvalidLifecycle(self.state_value, "commit"), at_ns)
+        if !self.final_chunk_seen_value -> return &self.reject(.MissingFinalChunk, at_ns)
+        self.committed_content_value = ~self.staged_content
+        self.committed_chunks_value = self.staged_chunks
+        self.committed_bytes_value = self.staged_bytes
+        self.has_committed_content = true
+        self.committed_hydration_identity = None
+        self.committed_hydration = None
+        self.state_value = .Ready
+        self.hydration_identity = None
+        self.hydration_value = None
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = false
+        self.last_backpressure = false
+        self.last_at_ns = at_ns
+        &self.record(.Commit, at_ns, None, None, false, false)
+    }
+    // Rust:1236-1251. fail_locked's false rollback flag intentionally differs
+    // from the durable Fail record's true flag, exactly as the original.
+    pub fn fail(&self, error: ^JetWebPendingError, at_ns: U64) -> JetWebPendingReceipt Never! {
+        at :: self.monotonic_timestamp(at_ns)
+        &self.fail_locked(~error, at, false, false)
+        &self.record_unchecked(.Fail, at, None, Val(^error), false, true)
+    }
+    // Rust:1255-1331. Non-pending cancel/rollback produces a Failed receipt.
+    pub fn cancel(&self, at_ns: U64) -> JetWebPendingReceipt Never! {
+        at :: self.monotonic_timestamp(at_ns)
+        if !self.is_pending() {
+            error :: JetWebPendingError.InvalidLifecycle(self.state_value, "cancel")
+            &self.fail_locked(~error, at, true, true)
+            return &self.record_unchecked(.Cancel, at, None, Val(^error), true, true)
+        }
+        &self.rollback_locked()
+        self.state_value = if self.has_committed_content -> .Ready else -> .Pending
+        self.last_error_value = None
+        self.last_cancelled = true
+        self.last_rolled_back = true
+        self.last_backpressure = false
+        self.last_at_ns = at
+        &self.record_unchecked(.Cancel, at, None, None, true, true)
+    }
+    pub fn rollback(&self, at_ns: U64) -> JetWebPendingReceipt Never! {
+        at :: self.monotonic_timestamp(at_ns)
+        if !self.is_pending() {
+            error :: JetWebPendingError.InvalidLifecycle(self.state_value, "rollback")
+            &self.fail_locked(~error, at, false, true)
+            return &self.record_unchecked(.Rollback, at, None, Val(^error), false, true)
+        }
+        &self.rollback_locked()
+        self.state_value = if self.has_committed_content -> .Ready else -> .Pending
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = true
+        self.last_backpressure = false
+        self.last_at_ns = at
+        &self.record_unchecked(.Rollback, at, None, None, false, true)
+    }
+    // Rust:1333-1373. Identity refusal here does NOT mutate the boundary.
+    pub fn fail_for(&self, identity: JetWebIslandIdentity, error: ^JetWebPendingError, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_identity(identity) ?? return Err(err)
+        Ok(&self.fail(^error, at_ns))
+    }
+    pub fn cancel_for(&self, identity: JetWebIslandIdentity, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_identity(identity) ?? return Err(err)
+        Ok(&self.cancel(at_ns))
+    }
+    pub fn rollback_for(&self, identity: JetWebIslandIdentity, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_identity(identity) ?? return Err(err)
+        Ok(&self.rollback(at_ns))
+    }
+    fn require_identity(self, identity: JetWebIslandIdentity) JetWebPendingError! {
+        if identity != self.identity_value -> return Err(.IdentityMismatch(~self.identity_value, ~identity))
+        Ok()
+    }
+    // Rust:1375-1439.
+    pub fn hydration_start(&self, identity: ^JetWebIslandIdentity, started_at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.hydration_start_with_trigger(^identity, .Manual, started_at_ns)
+    }
+    pub fn hydration_start_with_trigger(&self, identity: ^JetWebIslandIdentity, trigger: JetWebHydrationTrigger, started_at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.check_timestamp(started_at_ns) ?? return Err(err)
+        if identity != self.identity_value -> return &self.reject(.HydrationIdentityMismatch(~self.identity_value, ^identity), started_at_ns)
+        if !self.is_ready() -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_start"), started_at_ns)
+        if self.hydration_value != None -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_start_twice"), started_at_ns)
+        self.hydration_identity = Val(^identity)
+        self.hydration_value = Val(JetWebHydrationTiming.started_with_trigger(trigger, started_at_ns))
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = false
+        self.last_backpressure = false
+        self.last_at_ns = started_at_ns
+        &self.record(.HydrationStart, started_at_ns, None, None, false, false)
+    }
+    // Rust:1441-1502. Completion validation precedes committing hydration.
+    pub fn hydration_complete(&self, identity: ^JetWebIslandIdentity, completed_at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.check_timestamp(completed_at_ns) ?? return Err(err)
+        if identity != self.identity_value -> return &self.reject(.HydrationIdentityMismatch(~self.identity_value, ^identity), completed_at_ns)
+        if !self.is_ready() -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete"), completed_at_ns)
+        if self.hydration_identity != Val(identity) -> return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete_without_start"), completed_at_ns)
+        timing := self.hydration_value ?? return &self.reject(.InvalidLifecycle(self.state_value, "hydration_complete_without_start"), completed_at_ns)
+        &timing.complete(completed_at_ns) ?? return &self.reject(err, completed_at_ns)
+        self.hydration_value = Val(timing)
+        self.committed_hydration_identity = Val(^identity)
+        self.committed_hydration = Val(timing)
+        self.last_error_value = None
+        self.last_cancelled = false
+        self.last_rolled_back = false
+        self.last_backpressure = false
+        self.last_at_ns = completed_at_ns
+        &self.record(.HydrationComplete, completed_at_ns, None, None, false, false)
+    }
+    // Rust:1504-1533. Owned projections require only the original snapshot copies.
+    pub fn project(self, target: JetWebPendingProjectionTarget) -> JetWebPendingProjection Never! {
+        JetWebPendingProjection{
+            target: target, boundary_id: ~self.boundary_id_value, identity: ~self.identity_value, state: self.state_value,
+            committed_content: ~self.committed_content_value, stream_content: ~self.staged_content,
+            buffered_chunks: self.staged_chunks, buffered_bytes: self.staged_bytes,
+            committed_chunks: self.committed_chunks_value, committed_bytes: self.committed_bytes_value,
+            expected_chunk_sequence: self.expected_chunk_sequence_value, final_chunk_seen: self.final_chunk_seen_value,
+            hydration: self.hydration_value, failure: ~self.last_error_value, truncated: self.history_truncated_value,
+            backpressure: self.last_backpressure, cancelled: self.last_cancelled, rolled_back: self.last_rolled_back
+        }
+    }
+    pub fn server_projection(self) -> JetWebPendingProjection Never! { self.project(.Server) }
+    pub fn client_projection(self) -> JetWebPendingProjection Never! { self.project(.Client) }
+    pub fn render_json(self) -> String Never! {
+        facts := [String]{}
+        loop fact in self.retained_facts -> &facts.push(fact.render_json()) // #4500
+        "{{\"boundary_id\":{jet_web_pending_json_string(self.boundary_id_value)},\"identity\":{self.identity_value.render_json()},\"state\":{jet_web_pending_json_string(self.state_value.as_str())},\"content\":{jet_web_pending_json_string(self.committed_content_value)},\"stream_content\":{jet_web_pending_json_string(self.staged_content)},\"buffered_chunks\":{self.staged_chunks},\"buffered_bytes\":{self.staged_bytes},\"committed_chunks\":{self.committed_chunks_value},\"committed_bytes\":{self.committed_bytes_value},\"expected_chunk_sequence\":{self.expected_chunk_sequence_value},\"final_chunk_seen\":{self.final_chunk_seen_value},\"hydration\":{optional_hydration_json(self.hydration_value)},\"failure\":{optional_error_json(self.last_error_value)},\"truncated\":{self.history_truncated_value},\"backpressure\":{self.last_backpressure},\"cancelled\":{self.last_cancelled},\"rolled_back\":{self.last_rolled_back},\"facts\":[{facts.join(",")}]}}"
+    }
+    // Rust:1571-1585. Backward time fails/rolls back WITHOUT a recorded fact.
+    fn monotonic_timestamp(self, at_ns: U64) -> U64 Never! { if at_ns > self.last_at_ns -> at_ns else -> self.last_at_ns }
+    fn check_timestamp(&self, at_ns: U64) JetWebPendingError! {
+        if at_ns < self.last_at_ns {
+            error :: JetWebPendingError.NonMonotonicTimestamp(self.last_at_ns, at_ns)
+            &self.fail_locked(~error, self.last_at_ns, false, true)
+            return Err(^error)
+        }
+        Ok()
+    }
+    // Rust:1587-1611. Rollback restores committed hydration as well as content.
+    fn rollback_locked(&self) Never! {
+        self.staged_content = ~self.committed_content_value
+        self.staged_chunks = self.committed_chunks_value
+        self.staged_bytes = self.committed_bytes_value
+        self.expected_chunk_sequence_value = U64{self.committed_chunks_value}
+        self.final_chunk_seen_value = self.has_committed_content
+        self.hydration_identity = ~self.committed_hydration_identity
+        self.hydration_value = self.committed_hydration
+    }
+    fn fail_locked(&self, error: ^JetWebPendingError, at_ns: U64, cancelled: Bool, rolled_back: Bool) Never! {
+        &self.rollback_locked()
+        self.state_value = .Failed
+        self.last_error_value = Val(^error)
+        self.last_cancelled = cancelled
+        self.last_rolled_back = rolled_back
+        self.last_backpressure = false
+        self.last_at_ns = self.monotonic_timestamp(at_ns)
+    }
+    // Rust:1613-1648. Durable Reject fact is kept even though caller gets Err.
+    fn reject(&self, error: ^JetWebPendingError, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.fail_locked(~error, at_ns, false, true)
+        _ :: &self.record_unchecked(.Reject, self.last_at_ns, None, Val(~error), false, true)
+        Err(^error)
+    }
+    fn reject_with_backpressure(&self, error: ^JetWebPendingError, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        &self.fail_locked(~error, at_ns, false, true)
+        self.last_backpressure = true
+        _ :: &self.record_unchecked(.Reject, self.last_at_ns, None, Val(~error), false, true)
+        Err(^error)
+    }
+    // Rust:1650-1674. Exhausted transaction sequence fails AFTER state mutation.
+    fn record(&self, kind: JetWebPendingTransactionKind, at_ns: U64, chunk_sequence: U64?, error: ^JetWebPendingError?, cancelled: Bool, rolled_back: Bool) -> JetWebPendingReceipt JetWebPendingError! {
+        if self.next_transaction_sequence == (U64{18446744073709551615}) {
+            exhaustion :: JetWebPendingError.SequenceExhausted("transaction")
+            &self.fail_locked(~exhaustion, at_ns, false, true)
+            return Err(^exhaustion)
+        }
+        Ok(&self.record_unchecked(kind, at_ns, chunk_sequence, ^error, cancelled, rolled_back))
+    }
+    // Rust:1676-1729. Unchecked failure/cancellation facts saturate at U64_MAX.
+    fn record_unchecked(&self, kind: JetWebPendingTransactionKind, at_ns: U64, chunk_sequence: U64?, error: ^JetWebPendingError?, cancelled: Bool, rolled_back: Bool) -> JetWebPendingReceipt Never! {
+        at :: self.monotonic_timestamp(at_ns)
+        sequence :: self.next_transaction_sequence
+        if self.next_transaction_sequence != (U64{18446744073709551615}) -> self.next_transaction_sequence += U64{1}
+        transaction :: JetWebPendingTransaction{sequence: sequence, boundary_id: ~self.boundary_id_value, kind: kind, at_ns: at, state: self.state_value, identity: ~self.identity_value, chunk_sequence: chunk_sequence, error: ~error}
+        if self.retained_facts.len() == self.max_facts {
+            _ :: &self.retained_facts.pop_front()
+            self.history_truncated_value = true
+        }
+        fact :: JetWebPendingFact{transaction: ^transaction, buffered_chunks: self.staged_chunks, buffered_bytes: self.staged_bytes, committed_chunks: self.committed_chunks_value, committed_bytes: self.committed_bytes_value, expected_chunk_sequence: self.expected_chunk_sequence_value, final_chunk_seen: self.final_chunk_seen_value, truncated: self.history_truncated_value, backpressure: self.last_backpressure, cancelled: cancelled, rolled_back: rolled_back}
+        &self.retained_facts.push_back(^fact)
+        self.last_operation = kind
+        self.last_at_ns = at
+        self.last_cancelled = cancelled
+        self.last_rolled_back = rolled_back
+        self.last_error_value = ^error
+        self.snapshot(kind, at, chunk_sequence, cancelled, rolled_back, self.last_backpressure)
+    }
+    fn snapshot(self, operation: JetWebPendingTransactionKind, at_ns: U64, chunk_sequence: U64?, cancelled: Bool, rolled_back: Bool, backpressure: Bool) -> JetWebPendingReceipt Never! {
+        sequence :: if self.next_transaction_sequence == (U64{0}) -> U64{0} else -> self.next_transaction_sequence - U64{1}
+        JetWebPendingReceipt{
+            transaction_sequence: sequence, boundary_id: ~self.boundary_id_value, operation: operation, state: self.state_value,
+            at_ns: at_ns, identity: ~self.identity_value, chunk_sequence: chunk_sequence, expected_chunk_sequence: self.expected_chunk_sequence_value,
+            buffered_chunks: self.staged_chunks, buffered_bytes: self.staged_bytes, committed_chunks: self.committed_chunks_value,
+            committed_bytes: self.committed_bytes_value, final_chunk_seen: self.final_chunk_seen_value, content: ~self.committed_content_value,
+            stream_content: ~self.staged_content, hydration: self.hydration_value, failure: ~self.last_error_value,
+            truncated: self.history_truncated_value, backpressure: backpressure, cancelled: cancelled, rolled_back: rolled_back
+        }
+    }
+    // Rust:1767-1775.
+    pub fn default() -> JetWebStreamingBoundary Never! {
+        identity :: JetWebIslandIdentity{island_id: "default", source_id: "default", build_id: "default", revision: "default"}
+        JetWebStreamingBoundary.new("default", ^identity) ?? panic("default web pending identity is valid")
+    }
+}
+// Rust:1778-1803.
+struct JetWebStreamingRegistryEntry {
+    boundary: JetWebStreamingBoundary
+    next_generation: U64
+    active_stream: JetWebStreamId?
+    committed_stream: JetWebStreamId?
+}
+impl JetWebStreamingRegistryEntry {
+    fn new(boundary: ^JetWebStreamingBoundary) -> JetWebStreamingRegistryEntry Never! {
+        JetWebStreamingRegistryEntry{boundary: ^boundary, next_generation: U64{1}, active_stream: None, committed_stream: None}
+    }
+    fn reclaimable(self) -> Bool Never! {
+        if self.active_stream != None -> return false
+        if self.boundary.is_failed() -> return true
+        if self.boundary.hydration() == .Val(timing) -> return timing.is_complete()
+        false
+    }
+    // Rust:1827-1851. Read loan from active/committed optional; no entry clone.
+    fn validate_id(self, stream_id: JetWebStreamId, committed: Bool, operation: String) JetWebPendingError! {
+        if committed {
+            expected :: self.committed_stream ?? return Err(.InvalidLifecycle(self.boundary.state(), operation))
+            if expected != stream_id -> return Err(.StreamIdentityMismatch(~expected, ~stream_id))
+        } else {
+            expected :: self.active_stream ?? return Err(.InvalidLifecycle(self.boundary.state(), operation))
+            if expected != stream_id -> return Err(.StreamIdentityMismatch(~expected, ~stream_id))
+        }
+        Ok()
+    }
+}
+// Rust:1805. Canonical Map<String,Entry> is ordered; composite map keys unused.
+// PRIVATE lock-held fragment. Not an alternative public registry/host API.
+struct JetWebStreamingRegistry { entries: [String:JetWebStreamingRegistryEntry] }
+impl JetWebStreamingRegistry {
+    fn new() -> JetWebStreamingRegistry Never! { JetWebStreamingRegistry{entries: [String:JetWebStreamingRegistryEntry]{}} }
+    // Rust:1816-1825 fused into indexed callers to retain the mutable element.
+    fn require_entry(self, boundary_id: JetWebBoundaryId) JetWebPendingError! {
+        if !self.entries.has_key(boundary_id.as_str()) -> return Err(.InvalidBoundary("registered boundary"))
+        Ok()
+    }
+    // Rust:1853-1855. Single O(n) pass, no sort/repeated whole-map traversal.
+    fn cleanup(&self) Never! {
+        keys := [String]{}
+        loop key in self.entries.keys() {
+            if self.entries[key].reclaimable() -> &keys.push(~key)
+        }
+        loop key in keys -> _ :: &self.entries.remove(key)
+    }
+    // Rust:1861-1894. Original jet_web_stream_register lock-held body.
+    fn register(&self, boundary_id: ^String, identity: ^JetWebIslandIdentity) -> JetWebBoundaryId JetWebPendingError! {
+        id :: JetWebBoundaryId.new(^boundary_id) ?? return Err(err)
+        key :: id.as_str()
+        if self.entries.has_key(key) {
+            if self.entries[key].boundary.identity() != identity -> return Err(.IdentityMismatch(~self.entries[key].boundary.identity(), ^identity))
+            return Ok(^id)
+        }
+        if self.entries.len() >= JET_WEB_STREAM_REGISTRY_MAX -> &self.cleanup()
+        if self.entries.len() >= JET_WEB_STREAM_REGISTRY_MAX -> return Err(.InvalidLimit("stream registry", self.entries.len(), JET_WEB_STREAM_REGISTRY_MAX))
+        boundary :: JetWebStreamingBoundary.new(~key, ^identity) ?? return Err(err)
+        self.entries[~key] = JetWebStreamingRegistryEntry.new(^boundary)
+        Ok(^id)
+    }
+    // Rust:1897-1918. Stream sequence check precedes begin; generation bumps only
+    // after begin succeeds, even if that boundary operation recorded an error.
+    fn begin(&self, boundary_id: JetWebBoundaryId, identity: ^JetWebIslandIdentity, at_ns: U64) -> JetWebStreamId JetWebPendingError! {
+        self.require_entry(boundary_id) ?? return Err(err)
+        key :: boundary_id.as_str()
+        if self.entries[key].next_generation == (U64{18446744073709551615}) -> return Err(.SequenceExhausted("stream"))
+        _ :: &self.entries[key].boundary.begin(~identity, at_ns) ?? return Err(err) // #4500
+        id :: JetWebStreamId.new(~boundary_id, self.entries[key].next_generation, ^identity)
+        self.entries[key].next_generation += U64{1}
+        self.entries[key].active_stream = Val(~id)
+        Ok(^id)
+    }
+    // Rust:1921-1940.
+    fn chunk(&self, stream_id: JetWebStreamId, sequence: U64, content: ^String, is_final: Bool, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, false, "chunk") ?? return Err(err)
+        chunk :: JetWebPendingChunk.new(sequence, ^content, is_final, ~stream_id.identity()) ?? return Err(err)
+        &self.entries[key].boundary.push_chunk_at(^chunk, at_ns)
+    }
+    // Rust:1943-1955. Move the active ID only after successful commit.
+    fn commit(&self, stream_id: JetWebStreamId, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, false, "commit") ?? return Err(err)
+        receipt :: &self.entries[key].boundary.commit(at_ns) ?? return Err(err)
+        self.entries[key].committed_stream = ^self.entries[key].active_stream
+        self.entries[key].active_stream = None
+        Ok(^receipt)
+    }
+    // Rust:1958-1976. Errors do not evict; success does, including old content.
+    fn fail(&self, stream_id: JetWebStreamId, error: ^JetWebPendingError, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, false, "fail") ?? return Err(err)
+        receipt :: &self.entries[key].boundary.fail_for(stream_id.identity(), ^error, at_ns) ?? return Err(err)
+        self.entries[key].active_stream = None
+        _ :: &self.entries.remove(key)
+        Ok(^receipt)
+    }
+    // Rust:1980-2021. Never let stale work cancel/rollback a newer generation.
+    fn cancel(&self, stream_id: JetWebStreamId, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, false, "cancel") ?? return Err(err)
+        receipt :: &self.entries[key].boundary.cancel_for(stream_id.identity(), at_ns) ?? return Err(err)
+        self.entries[key].active_stream = None
+        _ :: &self.entries.remove(key)
+        Ok(^receipt)
+    }
+    fn rollback(&self, stream_id: JetWebStreamId, at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, false, "rollback") ?? return Err(err)
+        receipt :: &self.entries[key].boundary.rollback_for(stream_id.identity(), at_ns) ?? return Err(err)
+        self.entries[key].active_stream = None
+        _ :: &self.entries.remove(key)
+        Ok(^receipt)
+    }
+    // Rust:2024-2059. Hydration uses COMMITTED, not active, stream identity.
+    fn hydration_start(&self, stream_id: JetWebStreamId, trigger: JetWebHydrationTrigger, started_at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, true, "hydration_start") ?? return Err(err)
+        &self.entries[key].boundary.hydration_start_with_trigger(~stream_id.identity(), trigger, started_at_ns)
+    }
+    fn hydration_complete(&self, stream_id: JetWebStreamId, completed_at_ns: U64) -> JetWebPendingReceipt JetWebPendingError! {
+        self.require_entry(stream_id.boundary_id()) ?? return Err(err)
+        key :: stream_id.boundary_id().as_str()
+        self.entries[key].validate_id(stream_id, true, "hydration_complete") ?? return Err(err)
+        receipt :: &self.entries[key].boundary.hydration_complete(~stream_id.identity(), completed_at_ns) ?? return Err(err)
+        _ :: &self.entries.remove(key)
+        Ok(^receipt)
+    }
+    // Rust:2062-2082. Deterministic JSON; no additional host rendering layer.
+    fn receipt_json(self, boundary_id: JetWebBoundaryId) -> String JetWebPendingError! {
+        self.require_entry(boundary_id) ?? return Err(err)
+        Ok(self.entries[boundary_id.as_str()].boundary.receipt().render_json())
+    }
+    fn projection_json(self, boundary_id: JetWebBoundaryId, target: JetWebPendingProjectionTarget) -> String JetWebPendingError! {
+        self.require_entry(boundary_id) ?? return Err(err)
+        Ok(self.entries[boundary_id.as_str()].boundary.project(target).render_json())
+    }
+}
+// Rust:2084-2123. Rust char::is_control is exactly Unicode Cc, U+0000..001F
+// and U+007F..009F; not whitespace or arbitrary category-C scalars.
+fn contains_control(value: String) -> Bool Never! {
+    raw :: text.utf8_bytes(value) // #4500 borrowed UTF8 producer required
+    at := 0
+    loop at < raw.len() {
+        cp :: text.scalar_at(raw, at)
+        if cp < 32 || (cp >= 127 && cp <= 159) -> return true
+        at += text.utf8_width_at(raw, at)
+    }
+    false
+}
+fn jet_web_pending_validate_identity(value: String, field: String) JetWebPendingError! {
+    size :: text.utf8_bytes(value).len()
+    if size == 0 || size > JET_WEB_PENDING_MAX_IDENTITY_BYTES || contains_control(value) -> return Err(.InvalidIdentity(field))
+    Ok()
+}
+fn jet_web_pending_validate_boundary(value: String, field: String) JetWebPendingError! {
+    size :: text.utf8_bytes(value).len()
+    if size == 0 || size > JET_WEB_PENDING_MAX_BOUNDARY_BYTES || contains_control(value) -> return Err(.InvalidBoundary(field))
+    Ok()
+}
+fn jet_web_pending_validate_limit(actual: Int, maximum: Int, field: String) JetWebPendingError! {
+    // Negative Int is outside Rust's usize domain; counts never narrow a U64.
+    if actual <= 0 || actual > maximum -> return Err(.InvalidLimit(field, actual, maximum))
+    Ok()
+}
+fn optional_u64_json(value: U64?) -> String Never! { if value == .Val(n) -> return "{n}"; "null" }
+fn optional_error_json(value: JetWebPendingError?) -> String Never! { if value == .Val(error) -> return error.render_json(); "null" }
+fn optional_hydration_json(value: JetWebHydrationTiming?) -> String Never! { if value == .Val(timing) -> return timing.render_json(); "null" }
+// Rust:2125-2145. Exact compact byte-preserving JSON (including C1 controls,
+// backspace and formfeed); a general JSON codec has different escaping law.
+fn jet_web_pending_json_string(value: String) -> String Never! {
+    out := [U8]{U8{34}}
+    raw :: text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        cp :: text.scalar_at(raw, at)
+        width :: text.utf8_width_at(raw, at)
+        if {
+            cp == 34 -> { &out.push(U8{92}); &out.push(U8{34}) }
+            cp == 92 -> { &out.push(U8{92}); &out.push(U8{92}) }
+            cp == 10 -> { &out.push(U8{92}); &out.push(U8{110}) }
+            cp == 13 -> { &out.push(U8{92}); &out.push(U8{114}) }
+            cp == 9 -> { &out.push(U8{92}); &out.push(U8{116}) }
+            cp == 8 -> { &out.push(U8{92}); &out.push(U8{98}) }
+            cp == 12 -> { &out.push(U8{92}); &out.push(U8{102}) }
+            cp < 32 || (cp >= 127 && cp <= 159) -> {
+                &out.push(U8{92}); &out.push(U8{117})
+                loop shift in [Int]{12, 8, 4, 0} {
+                    digit :: (cp >> shift) & 15
+                    &out.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+                }
+            }
+            else -> loop i in at..<(at + width) -> &out.push(raw[i])
+        }
+        at += width
+    }
+    &out.push(U8{34})
+    String.from_bytes(^out) ?? panic("web pending JSON produced invalid UTF-8")
+}

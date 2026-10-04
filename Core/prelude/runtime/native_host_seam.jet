@@ -1,0 +1,265 @@
+// PORT-PENDING 0242 crates-jet-jit-src-host-seam-module-group: crates/jet-jit/src/host_seam.rs:1-261
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-JITUNWIND1 (#1995 / #1997): the generated no-unwind boundary.
+//RS //!
+//RS //! # The rule
+//RS //!
+//RS //! No Rust panic may be raised while a Cranelift frame is on the stack, and no
+//RS //! `extern "C"` frame this crate exposes to generated code may be reached by an
+//RS //! unwind. Every host symbol therefore catches inside its own C frame and
+//RS //! converts onto the tier's existing status channel
+//RS //! (`Concurrency::deliver_caught_unwind`); generated code then leaves through
+//RS //! Cranelift control flow at its next `emit_trap_check`, exactly as it already
+//RS //! does for a trap.
+//RS //!
+//RS //! # Why a *generated* boundary and not a reviewed one
+//RS //!
+//RS //! Two mechanisms were on the table (#1997):
+//RS //!
+//RS //! 1. Register unwind information for JIT'd code — call
+//RS //!    `compiled_code.create_unwind_info(isa)` and register an FDE per compiled
+//RS //!    function. Rejected: it makes unwinding a *supported* path through
+//RS //!    generated machine code, which is a far larger semantic commitment than it
+//RS //!    looks. It is platform-specific frame registration, and it writes Rust
+//RS //!    panic propagation into the contract of Jet-generated code.
+//RS //! 2. Convert at the boundary — every host seam turns a panic into a status
+//RS //!    *before* returning into JIT'd code, so no unwind ever begins with JIT
+//RS //!    frames below it. **Chosen.** It matches how the tiers already talk:
+//RS //!    `#Shield` delivers a deferred cancel as a status rather than an unwind
+//RS //!    (`Prelude/Scheduler.rs::jet_scheduler_shield_leave_status`), and
+//RS //!    `jet_deopt_call` already carried exactly this conversion by hand.
+//RS //!
+//RS //! **The recorded cost of (2) is that the guarantee has to hold across every
+//RS //! one of the ~1.7k `host_fns!` entries, so it needs a mechanical check rather
+//RS //! than review discipline.** That cost is the centre of the design, not an
+//RS //! afterthought, and it is paid three ways:
+//RS //!
+//RS //! * A host seam is an ordinary Rust `fn`, never an `extern "C" fn`. This is
+//RS //!   not cosmetic and it is the part that makes the rest work: rustc gives an
+//RS //!   `extern "C"` **body** an abort-on-unwind shim, so a panic raised inside
+//RS //!   one dies as `thread caused non-unwinding panic` at that body's own edge —
+//RS //!   *before* any wrapper above it could catch. A boundary can only be added by
+//RS //!   replacing the C frame, never by wrapping one.
+//RS //! * `host_fns!` (`lib.rs`) registers [`guarded`]`($host_fn)`, not
+//RS //!   `$host_fn as *const u8`. [`guarded`] returns the address of a generated
+//RS //!   `extern "C"` shim with the seam's exact C signature whose body runs the
+//RS //!   seam inside [`guard_seam`]. So the one canonical per-symbol declaration
+//RS //!   card #1633 established is also the boundary's generator, and a new host
+//RS //!   symbol cannot be declared without one. A callback handed to a *foreign*
+//RS //!   library rather than to generated code takes the same route by hand —
+//RS //!   `Ffi.rs` gives the bridge `guarded(ffi_reporter)`, never an `extern "C"`
+//RS //!   body of its own.
+//RS //! * `tests/jit_no_unwind_boundary.rs` is the mechanical check, and it is a rule
+//RS //!   about frames rather than about names: **no `extern` fn may be defined in
+//RS //!   this crate at all**, whatever its ABI or its name, except the shim below.
+//RS //!   Every seam named by `host_fns!` must exist, no host address may escape
+//RS //!   except through [`guarded_addr`], and the macro itself must still emit the
+//RS //!   guard. A guarantee that depends on someone remembering is not a guarantee —
+//RS //!   and neither is one that depends on a name prefix: the check's first form
+//RS //!   banned `extern "C" fn jet_*`, and `Ffi.rs`'s `jit_ffi_reporter` sat outside
+//RS //!   that family until the rule stopped being a name (#1995).
+//RS //! * The rule is also unfilable. Every ratcheted section of
+//RS //!   `tests/jit_corpus_gate.txt` is shrink-only, so a stem recorded there is one
+//RS //!   the example-corpus gate has agreed never to fail on again — and an abort
+//RS //!   recorded there would be an abort under permanent protection. So
+//RS //!   `corpus_gate_refuse_abort` (`tests/dev_parts/support.rs`) reads the AOT
+//RS //!   oracle, the default `jet run` and the forced interpreter, and any abort
+//RS //!   marker in stderr fails the stem outright rather than becoming a row.
+//RS //!   `streams/generators` is why: it raised a second time from drop glue, died
+//RS //!   as `panic in a destructor during cleanup`, and a classifier that only read
+//RS //!   the exit code filed it as the benign `AOT exit 1`. The marker list lives
+//RS //!   once, in `tests/common`, so the two checks cannot drift.
+//RS //! * The one carve-out is a process signal handler (`CoreHost.rs`), which the
+//RS //!   kernel enters on a borrowed stack that may have a JIT frame under it.
+//RS //!   [`guard_seam`] is the wrong tool there — it reaches
+//RS //!   `jet_scheduler_install_panic_hook`, which takes the process panic-hook lock
+//RS //!   and allocates on first call, so catching inside a handler would trade an
+//RS //!   unreachable panic for a reachable deadlock. Such a handler must be
+//RS //!   panic-free instead, and the check pins the statements its body may contain.
+//RS //!
+//RS //! # The two aborts this replaces, which are not the same abort
+//RS //!
+//RS //! * `fatal runtime error: failed to initiate panic, error 5` is phase 1
+//RS //!   finding *nothing*: `_URC_END_OF_STACK` from libgcc's phase-1 walk running
+//RS //!   off the top of the stack without seeing a handler, because
+//RS //!   `cranelift-jit` 0.112.3 registers no unwind information for the code it
+//RS //!   emits. It is **not** stack exhaustion, so raising
+//RS //!   `jet_foundation::CompilerStack::COMPILER_STACK_SIZE` cannot move it. Real
+//RS //!   exhaustion prints a textually distinct pair instead: `has overflowed its
+//RS //!   stack` followed by `fatal runtime error: stack overflow`.
+//RS //! * `thread caused non-unwinding panic` is a *different* abort, and it is the
+//RS //!   one `extern "C"` produces by itself: rustc gives an `extern "C"` body an
+//RS //!   empty-filter landing pad, so a panic raised in one *is* found in phase 1
+//RS //!   and then dies in phase 2. Catching inside the C frame avoids both.
+//RS //!
+//RS //! Neither is ever a user-facing outcome. A program-side stop renders through
+//RS //! the shared report boundary and exits `ExitCodes::RUNTIME_PANIC` (70); a Jet
+//RS //! defect takes the branded ICE rail and exits `ExitCodes::ICE` (101) with no
+//RS //! Rust payload in the report (I2).
+//RS 
+//RS use jet_codegen::scheduler::jet_scheduler_catch_foreign_boundary;
+//RS 
+//RS /// A value a guarded seam can return after it converted an unwind.
+//RS ///
+//RS /// Generated code never consumes this value for meaning: the conversion has
+//RS /// already put the real outcome on the runtime's status channel, and the next
+//RS /// `emit_trap_check` reads that channel and leaves the function. The value only
+//RS /// has to be a well-formed word of the right ABI type so the return itself is
+//RS /// not UB.
+//RS pub(crate) trait SeamAbi: Copy {
+//RS     const FAULTED: Self;
+//RS }
+//RS 
+//RS macro_rules! seam_abi {
+//RS     ($( $ty:ty = $zero:expr ),* $(,)?) => {
+//RS         $(
+//RS             impl SeamAbi for $ty {
+//RS                 const FAULTED: Self = $zero;
+//RS             }
+//RS         )*
+//RS     };
+//RS }
+//RS 
+//RS seam_abi! {
+//RS     () = (),
+//RS     i8 = 0,
+//RS     i16 = 0,
+//RS     i32 = 0,
+//RS     i64 = 0,
+//RS     isize = 0,
+//RS     u8 = 0,
+//RS     u16 = 0,
+//RS     u32 = 0,
+//RS     u64 = 0,
+//RS     usize = 0,
+//RS     f32 = 0.0,
+//RS     f64 = 0.0,
+//RS     bool = false,
+//RS }
+//RS 
+//RS /// Run one host seam body with the no-unwind boundary in place.
+//RS ///
+//RS /// Always returns normally. A caught control transfer is delivered to the
+//RS /// tier's existing status channel by `Concurrency::deliver_caught_unwind` — the
+//RS /// same channel `#Shield` and the deopt boundary already use — and never to a
+//RS /// second error channel of this module's own (I8).
+//RS pub(crate) fn guard_seam<R: SeamAbi>(call: impl FnOnce() -> R) -> R {
+//RS     match jet_scheduler_catch_foreign_boundary(call) {
+//RS         Ok(value) => value,
+//RS         Err(payload) => {
+//RS             crate::Concurrency::deliver_caught_unwind(payload);
+//RS             R::FAULTED
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Recover a zero-sized `fn` item from its type alone.
+//RS ///
+//RS /// A plain `fn` item type is zero-sized and names exactly one function, so the
+//RS /// type parameter carries the whole callee. That is what lets the shim below be
+//RS /// an ordinary generic function instead of 1.7k hand-written wrappers.
+//RS fn zero_sized_callee<F: Copy + 'static>() -> F {
+//RS     debug_assert_eq!(
+//RS         std::mem::size_of::<F>(),
+//RS         0,
+//RS         "a guarded host seam must be a zero-sized `fn` item",
+//RS     );
+//RS     // SAFETY: `F` is zero-sized. `HostSeam::guarded_ptr` asserts that before it
+//RS     // ever hands out the shim's address, and the shim's address is the only way
+//RS     // to reach this function, so the precondition holds at every call. A
+//RS     // zero-sized value occupies no bytes, so producing it reads nothing.
+//RS     unsafe { std::mem::MaybeUninit::<F>::uninit().assume_init() }
+//RS }
+//RS 
+//RS /// A host `fn` item that can be exposed to generated code behind the boundary.
+//RS ///
+//RS /// `Marker` carries the return type and the parameter types so one blanket impl
+//RS /// per arity stays coherent; it is always inferred from the `fn` item and never
+//RS /// written at a call site.
+//RS pub(crate) trait HostSeam<Marker>: Copy + 'static {
+//RS     /// The address of a generated `extern "C"` shim whose C signature is
+//RS     /// `self`'s and whose body runs `self` inside [`guard_seam`]. That shim,
+//RS     /// never `self`, is what generated code calls: a boundary can only be added
+//RS     /// by *replacing* the C frame, because rustc aborts an unwind at an
+//RS     /// `extern "C"` body's own edge before any wrapper above it could catch.
+//RS     fn guarded_ptr(self) -> *const u8;
+//RS }
+//RS 
+//RS macro_rules! host_seam_arity {
+//RS     ($( $ty:ident $val:ident ),* $(,)?) => {
+//RS         impl<Ret, $($ty,)* F> HostSeam<(Ret, $($ty,)*)> for F
+//RS         where
+//RS             F: Fn($($ty),*) -> Ret + Copy + 'static,
+//RS             Ret: SeamAbi,
+//RS         {
+//RS             fn guarded_ptr(self) -> *const u8 {
+//RS                 assert_eq!(
+//RS                     std::mem::size_of::<F>(),
+//RS                     0,
+//RS                     "a JIT host seam must be a plain `fn` item, \
+//RS                      not a closure carrying captures",
+//RS                 );
+//RS                 #[allow(improper_ctypes_definitions)]
+//RS                 extern "C" fn shim<Ret, $($ty,)* F>($($val: $ty),*) -> Ret
+//RS                 where
+//RS                     F: Fn($($ty),*) -> Ret + Copy + 'static,
+//RS                     Ret: SeamAbi,
+//RS                 {
+//RS                     guard_seam(move || zero_sized_callee::<F>()($($val),*))
+//RS                 }
+//RS                 shim::<Ret, $($ty,)* F> as *const u8
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS // Arities 0..=32 cover every host symbol this crate declares; the direct SIMD
+//RS // constructors are the widest. Every width still receives the same generated
+//RS // guarded C shim, so a new wide host cannot bypass the no-unwind boundary.
+//RS host_seam_arity!();
+//RS host_seam_arity!(A a);
+//RS host_seam_arity!(A a, B b);
+//RS host_seam_arity!(A a, B b, C c);
+//RS host_seam_arity!(A a, B b, C c, D d);
+//RS host_seam_arity!(A a, B b, C c, D d, E e);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae, AF af);
+//RS host_seam_arity!(A a, B b, C c, D d, E e, G g, H h, I i, J j, K k, L l, M m, N n, O o, P p, Q q, R r, S s, T t, U u, V v, W w, X x, Y y, Z z, AA aa, AB ab, AC ac, AD ad, AE ae, AF af, AG ag);
+//RS /// The pointer `host_fns!` registers with `JITBuilder::symbol`.
+//RS pub(crate) fn guarded<Marker, F: HostSeam<Marker>>(host_fn: F) -> *const u8 {
+//RS     host_fn.guarded_ptr()
+//RS }
+//RS 
+//RS /// The same boundary for a seam handed to generated code as a plain callable
+//RS /// address rather than as a named import (`core.compute`'s transform adapters).
+//RS /// A raw `host_fn as usize` there would be an unguarded boundary, which is what
+//RS /// `tests/jit_no_unwind_boundary.rs` scans for.
+//RS pub(crate) fn guarded_addr<Marker, F: HostSeam<Marker>>(host_fn: F) -> usize {
+//RS     host_fn.guarded_ptr() as usize
+//RS }
+// END-PORT-PENDING 0242 crates/jet-jit/src/host_seam.rs:1-261
+

@@ -1,0 +1,1761 @@
+// PORT-PENDING 0256 crates-jet-codegen-src-prelude-corelib-top-compute-slice-5457: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5457-7213
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_compute_place(
+//RS     requested: JetComputeDevice,
+//RS ) -> Result<JetComputePlacementReceipt, JetComputeError> {
+//RS     jet_compute_place_with_profile(requested, CPU_ORACLE_F64_PROFILE)
+//RS }
+//RS 
+//RS fn jet_compute_inherit_placement(mut tensor: JetTensor, source: &JetTensor) -> JetTensor {
+//RS     tensor.device = source.device;
+//RS     tensor.last_placement = source.last_placement.clone();
+//RS     tensor.last_transfer = None;
+//RS     tensor
+//RS }
+//RS 
+//RS fn jet_compute_tensor_from_shape_like(
+//RS     source: &JetTensor,
+//RS     shape: Vec<i64>,
+//RS     fill: f64,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     Ok(jet_compute_inherit_placement(
+//RS         jet_compute_tensor_from_shape(shape, fill, JetComputeDevice::Cpu)?,
+//RS         source,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_metal_values(
+//RS     tensor: &JetTensor,
+//RS     context: &str,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if tensor.device != JetComputeDevice::Metal {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{context} requires a Metal Tensor"
+//RS         )));
+//RS     }
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(format!(
+//RS             "Metal {context} supports only F32Strict+Reproducible"
+//RS         )));
+//RS     }
+//RS     if !jet_compute_metal::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "Metal device was lost before launch".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, context))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_compute_metal_result_like(
+//RS     source: &JetTensor,
+//RS     shape: Vec<i64>,
+//RS     values: Vec<f32>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let expected = jet_compute_storage_len(&shape)?;
+//RS     if values.len() != expected {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal kernel returned the wrong storage length".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut output = jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?;
+//RS     output.strides = jet_compute_row_major_strides(&shape)?;
+//RS     output.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS     jet_compute_validate_tensor(&output)?;
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn jet_compute_metal_binary_values(
+//RS     op: &str,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "add" => 0,
+//RS         "mul" => 1,
+//RS         "sub" => 2,
+//RS         "div" => 3,
+//RS         "maximum" => 4,
+//RS         "minimum" => 5,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported Metal binary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_metal::binary(op, left, right)
+//RS }
+//RS 
+//RS fn jet_compute_metal_unary_values(
+//RS     op: &str,
+//RS     values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "negate" => 0,
+//RS         "abs" => 1,
+//RS         "exp" => 2,
+//RS         "log" => 3,
+//RS         "sqrt" => 4,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported Metal unary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_metal::unary(op, values)
+//RS }
+//RS 
+//RS fn jet_compute_is_accelerator(device: JetComputeDevice) -> bool {
+//RS     matches!(
+//RS         device,
+//RS         JetComputeDevice::Metal
+//RS             | JetComputeDevice::Cuda
+//RS             | JetComputeDevice::Vulkan
+//RS             | JetComputeDevice::WebGpu
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_cuda_values(
+//RS     tensor: &JetTensor,
+//RS     context: &str,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if tensor.device != JetComputeDevice::Cuda {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{context} requires a CUDA Tensor"
+//RS         )));
+//RS     }
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(format!(
+//RS             "CUDA {context} supports only F32Strict+Reproducible"
+//RS         )));
+//RS     }
+//RS     if !jet_compute_cuda::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "CUDA device was lost before launch".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, context))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_compute_cuda_result_like(
+//RS     source: &JetTensor,
+//RS     shape: Vec<i64>,
+//RS     values: Vec<f32>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let expected = jet_compute_storage_len(&shape)?;
+//RS     if values.len() != expected {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "CUDA kernel returned the wrong storage length".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut output = jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?;
+//RS     output.strides = jet_compute_row_major_strides(&shape)?;
+//RS     output.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS     jet_compute_validate_tensor(&output)?;
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn jet_compute_cuda_binary_values(
+//RS     op: &str,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "add" => 0,
+//RS         "mul" => 1,
+//RS         "sub" => 2,
+//RS         "div" => 3,
+//RS         "maximum" => 4,
+//RS         "minimum" => 5,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported CUDA binary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_cuda::binary(op, left, right)
+//RS }
+//RS 
+//RS fn jet_compute_cuda_unary_values(
+//RS     op: &str,
+//RS     values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "negate" => 0,
+//RS         "abs" => 1,
+//RS         "exp" => 2,
+//RS         "log" => 3,
+//RS         "sqrt" => 4,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported CUDA unary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_cuda::unary(op, values)
+//RS }
+//RS 
+//RS fn jet_compute_vulkan_values(
+//RS     tensor: &JetTensor,
+//RS     context: &str,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if tensor.device != JetComputeDevice::Vulkan {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{context} requires a Vulkan Tensor"
+//RS         )));
+//RS     }
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(format!(
+//RS             "Vulkan {context} supports only F32Strict+Reproducible"
+//RS         )));
+//RS     }
+//RS     if !jet_compute_vulkan::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "Vulkan device was lost before launch".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, context))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_compute_vulkan_result_like(
+//RS     source: &JetTensor,
+//RS     shape: Vec<i64>,
+//RS     values: Vec<f32>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let expected = jet_compute_storage_len(&shape)?;
+//RS     if values.len() != expected {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Vulkan kernel returned the wrong storage length".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut output = jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?;
+//RS     output.strides = jet_compute_row_major_strides(&shape)?;
+//RS     output.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS     jet_compute_validate_tensor(&output)?;
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn jet_compute_vulkan_binary_values(
+//RS     op: &str,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "add" => 0,
+//RS         "mul" => 1,
+//RS         "sub" => 2,
+//RS         "div" => 3,
+//RS         "maximum" => 4,
+//RS         "minimum" => 5,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported Vulkan binary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_vulkan::binary(op, left, right)
+//RS }
+//RS 
+//RS fn jet_compute_vulkan_unary_values(
+//RS     op: &str,
+//RS     values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let op = match op {
+//RS         "negate" => 0,
+//RS         "abs" => 1,
+//RS         "exp" => 2,
+//RS         "log" => 3,
+//RS         "sqrt" => 4,
+//RS         _ => {
+//RS             return Err(JetComputeError::Unsupported(format!(
+//RS                 "unsupported Vulkan unary operation `{op}`"
+//RS             )))
+//RS         }
+//RS     };
+//RS     jet_compute_vulkan::unary(op, values)
+//RS }
+//RS 
+//RS fn jet_compute_webgpu_values(
+//RS     tensor: &JetTensor,
+//RS     context: &str,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if tensor.device != JetComputeDevice::WebGpu {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{context} requires a WebGPU Tensor"
+//RS         )));
+//RS     }
+//RS     Err(JetComputeError::Unsupported(
+//RS         "WebGPU backend requires a browser WebGPU host".to_string(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_webgpu_result_like(
+//RS     _source: &JetTensor,
+//RS     _shape: Vec<i64>,
+//RS     _values: Vec<f32>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     Err(JetComputeError::Unsupported(
+//RS         "WebGPU backend requires a browser WebGPU host".to_string(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_webgpu_binary_values(
+//RS     _op: &str,
+//RS     _left: &[f32],
+//RS     _right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     Err(JetComputeError::Unsupported(
+//RS         "WebGPU backend requires a browser WebGPU host".to_string(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_webgpu_unary_values(
+//RS     _op: &str,
+//RS     _values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     Err(JetComputeError::Unsupported(
+//RS         "WebGPU backend requires a browser WebGPU host".to_string(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_values(
+//RS     tensor: &JetTensor,
+//RS     context: &str,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match tensor.device {
+//RS         JetComputeDevice::Metal => jet_compute_metal_values(tensor, context),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda_values(tensor, context),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan_values(tensor, context),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu_values(tensor, context),
+//RS         _ => Err(JetComputeError::Device(format!(
+//RS             "{context} requires an accelerator Tensor"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_result_like(
+//RS     source: &JetTensor,
+//RS     shape: Vec<i64>,
+//RS     values: Vec<f32>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     match source.device {
+//RS         JetComputeDevice::Metal => jet_compute_metal_result_like(source, shape, values),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda_result_like(source, shape, values),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan_result_like(source, shape, values),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu_result_like(source, shape, values),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator result requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_binary_values(
+//RS     device: JetComputeDevice,
+//RS     op: &str,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal_binary_values(op, left, right),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda_binary_values(op, left, right),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan_binary_values(op, left, right),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu_binary_values(op, left, right),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator binary operation requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_unary_values(
+//RS     device: JetComputeDevice,
+//RS     op: &str,
+//RS     values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal_unary_values(op, values),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda_unary_values(op, values),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan_unary_values(op, values),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu_unary_values(op, values),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator unary operation requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_sum(
+//RS     device: JetComputeDevice,
+//RS     values: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::sum(values),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::sum(values),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::sum(values),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::sum(values),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator sum requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_mse(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::mse(left, right),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::mse(left, right),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::mse(left, right),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::mse(left, right),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_mse_grad(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     cot: &[f32],
+//RS     positive: bool,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::mse_grad(left, right, cot, positive),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE gradient requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_mse_jvp(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     left_tangent: &[f32],
+//RS     right_tangent: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => {
+//RS             jet_compute_metal::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::Cuda => {
+//RS             jet_compute_cuda::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::Vulkan => {
+//RS             jet_compute_vulkan::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::WebGpu => {
+//RS             jet_compute_webgpu::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE JVP requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_sgd(
+//RS     device: JetComputeDevice,
+//RS     parameter: &[f32],
+//RS     gradient: &[f32],
+//RS     learning_rate: f32,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::sgd(parameter, gradient, learning_rate),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator SGD requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_accelerator_scale(
+//RS     device: JetComputeDevice,
+//RS     values: &[f32],
+//RS     scalar: f32,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::scale(values, scalar),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::scale(values, scalar),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::scale(values, scalar),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::scale(values, scalar),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator scaling requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_require_same_contract(
+//RS     left: &JetTensor,
+//RS     right: &JetTensor,
+//RS     operation: &str,
+//RS ) -> Result<(), JetComputeError> {
+//RS     if left.device != right.device {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{operation} tensors must use the same device"
+//RS         )));
+//RS     }
+//RS     if left.last_placement.profile != right.last_placement.profile {
+//RS         return Err(JetComputeError::Device(format!(
+//RS             "{operation} tensors must use the same precision profile"
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_compute_tensor_from_shape(
+//RS     shape: Vec<i64>,
+//RS     fill: f64,
+//RS     requested: JetComputeDevice,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     if !fill.is_finite() {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "Tensor values must be finite".to_string(),
+//RS         ));
+//RS     }
+//RS     let strides = jet_compute_row_major_strides(&shape)?;
+//RS     let n = jet_compute_storage_len(&shape)?;
+//RS     let receipt = jet_compute_place(requested)?;
+//RS     Ok(JetTensor {
+//RS         shape,
+//RS         strides,
+//RS         data: std::sync::Arc::new(vec![fill; n]),
+//RS         device: receipt.selected,
+//RS         last_placement: receipt,
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_compute_zeros(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice::Auto)
+//RS }
+//RS 
+//RS fn jet_compute_ones(shape: &Vec<i64>) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice::Auto)
+//RS }
+//RS 
+//RS fn jet_compute_full(shape: &Vec<i64>, value: f64) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice::Auto)
+//RS }
+//RS 
+//RS fn jet_compute_from_list(values: &Vec<f64>) -> Result<JetTensor, JetComputeError> {
+//RS     if values.iter().any(|value| !value.is_finite()) {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "Tensor values must be finite".to_string(),
+//RS         ));
+//RS     }
+//RS     let len = i64::try_from(values.len()).map_err(|_| {
+//RS         JetComputeError::InvalidShape("Tensor list is too long".to_string())
+//RS     })?;
+//RS     let shape = vec![len];
+//RS     let strides = jet_compute_row_major_strides(&shape)?;
+//RS     let storage_len = jet_compute_storage_len(&shape)?;
+//RS     let receipt = jet_compute_place(JetComputeDevice::Auto)?;
+//RS     Ok(JetTensor {
+//RS         shape,
+//RS         strides,
+//RS         data: std::sync::Arc::new(values[..storage_len].to_vec()),
+//RS         device: receipt.selected,
+//RS         last_placement: receipt,
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_compute_copy_checked(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let shape = tensor.shape.clone();
+//RS     let copy = JetTensor {
+//RS         strides: jet_compute_row_major_strides(&shape)?,
+//RS         data: std::sync::Arc::new(jet_compute_tensor_values(tensor)),
+//RS         shape,
+//RS         device: tensor.device,
+//RS         last_placement: tensor.last_placement.clone(),
+//RS         last_transfer: tensor.last_transfer.clone(),
+//RS         trace: tensor.trace.clone(),
+//RS     };
+//RS     jet_compute_validate_tensor(&copy)?;
+//RS     Ok(copy)
+//RS }
+//RS 
+//RS /// Replace the ambient list projection after a mutable view write-back. The
+//RS /// adapter supplies only the already-marshalled values; storage exclusivity,
+//RS /// mutation policy, and the resulting canonical row-major metadata remain in
+//RS /// the shared Prelude.
+//RS fn jet_compute_replace_data_checked(
+//RS     tensor: &mut JetTensor,
+//RS     values: Vec<f64>,
+//RS ) -> Result<(), JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+//RS         ));
+//RS     }
+//RS     let expected = jet_compute_storage_len(&tensor.shape)?;
+//RS     if values.len() != expected {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Tensor write-back length does not match its shape".to_string(),
+//RS         ));
+//RS     }
+//RS     let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor mutable view requires exclusive backing storage".to_string(),
+//RS         ));
+//RS     };
+//RS     *data = values;
+//RS     tensor.strides = jet_compute_row_major_strides(&tensor.shape)?;
+//RS     jet_compute_validate_tensor(tensor)
+//RS }
+//RS 
+//RS fn jet_compute_copy(tensor: &JetTensor) -> JetTensor {
+//RS     match jet_compute_copy_checked(tensor) {
+//RS         Ok(copy) => copy,
+//RS         Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS /// Return the flat storage range selected by a bracket range.  A Tensor range
+//RS /// selects rows on its first axis, so a rank-2 matrix window keeps complete
+//RS /// rows and a higher-rank window keeps complete first-axis slabs.  This is the
+//RS /// one-dimensional bracket surface ratified by D-SHAPE-PLACE1; the inner axes
+//RS /// remain part of the same contiguous storage projection.
+//RS fn jet_compute_window_bounds(
+//RS     tensor: &JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS ) -> Result<std::ops::Range<usize>, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let (strides, offset) = jet_compute_view_metadata(tensor)?;
+//RS     let expected_strides = jet_compute_row_major_strides(&tensor.shape)?;
+//RS     if strides != expected_strides {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor window is non-contiguous; use the strided View projection".to_string(),
+//RS         ));
+//RS     }
+//RS     let axis_len = tensor.shape.first().copied().ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+//RS     })?;
+//RS     let Some((axis_start, axis_end)) = jet_range_bounds(start, end, exclusive, axis_len) else {
+//RS         return Err(JetComputeError::OutOfBounds(format!(
+//RS             "Tensor range {}{}{} is outside first axis of extent {}",
+//RS             start,
+//RS             if exclusive { "..<" } else { ".." },
+//RS             end,
+//RS             axis_len
+//RS         )));
+//RS     };
+//RS     // In row-major storage the first stride is the number of scalar values in
+//RS     // one first-axis slab.  For an empty first axis the selected range is also
+//RS     // empty, so the stride is still safe to use.
+//RS     let slab = strides.first().copied().ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("Tensor is missing its first-axis stride".to_string())
+//RS     })?;
+//RS     let flat_start = axis_start.checked_mul(slab).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("Tensor view start overflows storage".to_string())
+//RS     })?;
+//RS     let flat_end = axis_end.checked_mul(slab).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("Tensor view end overflows storage".to_string())
+//RS     })?;
+//RS     let start = usize::try_from(flat_start).map_err(|_| {
+//RS         JetComputeError::OutOfBounds("Tensor view start is outside storage".to_string())
+//RS     })?;
+//RS     let end = usize::try_from(flat_end).map_err(|_| {
+//RS         JetComputeError::OutOfBounds("Tensor view end is outside storage".to_string())
+//RS     })?;
+//RS     let start = offset.checked_add(start).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("Tensor view start overflows storage".to_string())
+//RS     })?;
+//RS     let end = offset.checked_add(end).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("Tensor view end overflows storage".to_string())
+//RS     })?;
+//RS     if end > tensor.data.len() || start > end {
+//RS         return Err(JetComputeError::OutOfBounds(
+//RS             "Tensor view is outside storage".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(start..end)
+//RS }
+//RS 
+//RS fn jet_compute_slice_checked(
+//RS     tensor: &JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor views are not differentiable; reshape or copy before transforming".to_string(),
+//RS         ));
+//RS     }
+//RS     let axis_len = tensor.shape.first().copied().ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+//RS     })?;
+//RS     let Some((axis_start, axis_end)) = jet_range_bounds(start, end, exclusive, axis_len) else {
+//RS         return Err(JetComputeError::OutOfBounds(format!(
+//RS             "Tensor range {}{}{} is outside first axis of extent {}",
+//RS             start,
+//RS             if exclusive { "..<" } else { ".." },
+//RS             end,
+//RS             axis_len
+//RS         )));
+//RS     };
+//RS     let mut shape = tensor.shape.clone();
+//RS     shape[0] = axis_end.checked_sub(axis_start).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("Tensor slice has a negative extent".to_string())
+//RS     })?;
+//RS     let (source_strides, base_offset) = jet_compute_view_metadata(tensor)?;
+//RS     let first_stride = source_strides.first().copied().ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("Tensor is missing its first-axis stride".to_string())
+//RS     })?;
+//RS     let first_stride = usize::try_from(first_stride).map_err(|_| {
+//RS         JetComputeError::InvalidShape("Tensor view stride is not representable".to_string())
+//RS     })?;
+//RS     let axis_start = usize::try_from(axis_start).map_err(|_| {
+//RS         JetComputeError::OutOfBounds("Tensor slice start is not representable".to_string())
+//RS     })?;
+//RS     let start_offset = base_offset
+//RS         .checked_add(axis_start.checked_mul(first_stride).ok_or_else(|| {
+//RS             JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string())
+//RS         })?)
+//RS         .ok_or_else(|| JetComputeError::OutOfBounds("Tensor slice start overflows storage".to_string()))?;
+//RS     let mut view_strides = source_strides.to_vec();
+//RS     if start_offset != 0 {
+//RS         view_strides.push(i64::try_from(start_offset).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
+//RS         })?);
+//RS     }
+//RS     // An owned bracket slice is an ownership conversion, not another view.
+//RS     // Read the selected logical values once, then give the result independent
+//RS     // row-major storage. Read-only and mutable view helpers above retain their
+//RS     // zero-copy backing; only this owned path detaches it.
+//RS     let view = JetTensor {
+//RS         shape,
+//RS         strides: view_strides,
+//RS         data: tensor.data.clone(),
+//RS         device: tensor.device,
+//RS         last_placement: tensor.last_placement.clone(),
+//RS         last_transfer: tensor.last_transfer.clone(),
+//RS         trace: tensor.trace.clone(),
+//RS     };
+//RS     let slice = JetTensor {
+//RS         shape: view.shape.clone(),
+//RS         strides: jet_compute_row_major_strides(&view.shape)?,
+//RS         data: std::sync::Arc::new(jet_compute_tensor_values(&view)),
+//RS         device: view.device,
+//RS         last_placement: view.last_placement.clone(),
+//RS         last_transfer: view.last_transfer.clone(),
+//RS         trace: view.trace.clone(),
+//RS     };
+//RS     jet_compute_validate_tensor(&slice)?;
+//RS     Ok(slice)
+//RS }
+//RS 
+//RS fn jet_compute_slice(
+//RS     tensor: &JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     file: &str,
+//RS     line: u32,
+//RS ) -> JetTensor {
+//RS     match jet_compute_slice_checked(tensor, start, end, exclusive) {
+//RS         Ok(slice) => slice,
+//RS         Err(error) => jet_panic(file, line, &error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_slice_range(
+//RS     tensor: &JetTensor,
+//RS     range: &JetRange,
+//RS     file: &str,
+//RS     line: u32,
+//RS ) -> JetTensor {
+//RS     jet_compute_slice(tensor, range.start, range.end, range.exclusive, file, line)
+//RS }
+//RS 
+//RS fn jet_compute_view_checked<'a>(
+//RS     tensor: &'a JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS ) -> Result<&'a [f64], JetComputeError> {
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor views are not differentiable; reshape or copy before transforming".to_string(),
+//RS         ));
+//RS     }
+//RS     let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)?;
+//RS     Ok(&tensor.data[bounds])
+//RS }
+//RS 
+//RS fn jet_compute_view<'a>(
+//RS     tensor: &'a JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     file: &str,
+//RS     line: u32,
+//RS ) -> &'a [f64] {
+//RS     match jet_compute_view_checked(tensor, start, end, exclusive) {
+//RS         Ok(view) => view,
+//RS         Err(error) => jet_panic(file, line, &error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_view_mut_checked<'a>(
+//RS     tensor: &'a mut JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS ) -> Result<JetComputeViewMut<'a>, JetComputeError> {
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_window_bounds(tensor, start, end, exclusive)?;
+//RS     if std::sync::Arc::get_mut(&mut tensor.data).is_none() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor mutable view requires exclusive backing storage".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(JetComputeViewMut {
+//RS         tensor,
+//RS         start,
+//RS         end,
+//RS         exclusive,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_compute_view_mut<'a>(
+//RS     tensor: &'a mut JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     file: &str,
+//RS     line: u32,
+//RS ) -> JetComputeViewMut<'a> {
+//RS     match jet_compute_view_mut_checked(tensor, start, end, exclusive) {
+//RS         Ok(view) => view,
+//RS         Err(error) => jet_panic(file, line, &error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS impl<'a> JetComputeViewMut<'a> {
+//RS     fn len(&self) -> i64 {
+//RS         match jet_compute_window_bounds(self.tensor, self.start, self.end, self.exclusive) {
+//RS             Ok(bounds) => i64::try_from(bounds.len()).unwrap_or(i64::MAX),
+//RS             Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+//RS         }
+//RS     }
+//RS 
+//RS     fn is_empty(&self) -> bool {
+//RS         self.len() == 0
+//RS     }
+//RS 
+//RS     fn to_vec(&self) -> Vec<f64> {
+//RS         match jet_compute_view_checked(self.tensor, self.start, self.end, self.exclusive) {
+//RS             Ok(view) => view.to_vec(),
+//RS             Err(error) => jet_panic("Compute.rs", line!(), &error.jet_show()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The one mutable Tensor-window write seam. Every engine supplies the Tensor
+//RS /// handle, the original window bounds, and the logical element coordinate;
+//RS /// this Prelude operation owns trace policy, exclusive backing storage,
+//RS /// window bounds, element addressing, finite-value validation, mutation, and
+//RS /// their canonical errors.
+//RS fn jet_compute_window_set(
+//RS     tensor: &mut JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     index: i64,
+//RS     value: f64,
+//RS ) -> Result<(), String> {
+//RS     if tensor.trace.is_some() {
+//RS         return Err("Tensor mutation is not differentiable; use a pure Tensor function".to_string());
+//RS     }
+//RS     if !value.is_finite() {
+//RS         return Err("Tensor values must be finite".to_string());
+//RS     }
+//RS     jet_compute_validate_profile_value(
+//RS         &tensor.last_placement.profile,
+//RS         value,
+//RS         "Tensor write value",
+//RS     )
+//RS     .map_err(|error| error.jet_show())?;
+//RS     let bounds = jet_compute_window_bounds(tensor, start, end, exclusive)
+//RS         .map_err(|error| error.jet_show())?;
+//RS     // Validate the logical element before exclusivity. A valid empty window is
+//RS     // still a view; an attempted element write must therefore report the
+//RS     // canonical element-bounds error even when the owner has another handle.
+//RS     let relative = jet_view_address(bounds.len(), index)?;
+//RS     let Some(data) = std::sync::Arc::get_mut(&mut tensor.data) else {
+//RS         return Err("Tensor mutable view requires exclusive backing storage".to_string());
+//RS     };
+//RS     let offset = bounds
+//RS         .start
+//RS         .checked_add(relative)
+//RS         .ok_or_else(|| "Tensor view index is outside storage".to_string())?;
+//RS     let Some(slot) = data.get_mut(offset) else {
+//RS         return Err("Tensor view index is outside storage".to_string());
+//RS     };
+//RS     *slot = value;
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// The matching checked read for a Tensor window. It keeps element addressing
+//RS /// (including empty-window rejection) beside the mutable write seam.
+//RS fn jet_compute_window_get(
+//RS     tensor: &JetTensor,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     index: i64,
+//RS ) -> Result<f64, String> {
+//RS     let view = jet_compute_view_checked(tensor, start, end, exclusive)
+//RS         .map_err(|error| error.jet_show())?;
+//RS     jet_view_get_checked(view, index)
+//RS }
+//RS 
+//RS fn jet_compute_tensor_shape(tensor: &JetTensor) -> Vec<i64> {
+//RS     tensor.shape.clone()
+//RS }
+//RS 
+//RS fn jet_compute_tensor_rank(tensor: &JetTensor) -> i64 {
+//RS     i64::try_from(tensor.shape.len()).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS fn jet_compute_tensor_numel(tensor: &JetTensor) -> i64 {
+//RS     jet_compute_numel(&tensor.shape).unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_compute_tensor_device(tensor: &JetTensor) -> String {
+//RS     tensor.device.jet_show()
+//RS }
+//RS 
+//RS fn jet_compute_tensor_placement(tensor: &JetTensor) -> String {
+//RS     tensor.last_placement.jet_show()
+//RS }
+//RS 
+//RS fn jet_compute_tensor_to_list(tensor: &JetTensor) -> Vec<f64> {
+//RS     if tensor.trace.is_some() {
+//RS         jet_panic(
+//RS             "Compute.rs",
+//RS             line!(),
+//RS             "Tensor value reads have no registered autodiff rule",
+//RS         );
+//RS     }
+//RS     jet_compute_tensor_values(tensor)
+//RS }
+//RS 
+//RS // Kernels validate their immutable inputs once before traversing them. Keep
+//RS // scalar addressing bounded by rank rather than rescanning the whole tensor.
+//RS fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetComputeError> {
+//RS     if indices.len() != tensor.shape.len() {
+//RS         return Err(JetComputeError::RankMismatch(format!(
+//RS             "expected {} indices, got {}",
+//RS             tensor.shape.len(),
+//RS             indices.len()
+//RS         )));
+//RS     }
+//RS     let (strides, base_offset) = jet_compute_view_metadata(tensor)?;
+//RS     let mut relative_offset = 0i64;
+//RS     for (i, (&idx, (&dim, &stride))) in indices
+//RS         .iter()
+//RS         .zip(tensor.shape.iter().zip(strides.iter()))
+//RS         .enumerate()
+//RS     {
+//RS         if idx < 0 || idx >= dim {
+//RS             return Err(JetComputeError::OutOfBounds(format!(
+//RS                 "index {} out of range for axis {} of extent {}",
+//RS                 idx, i, dim
+//RS             )));
+//RS         }
+//RS         let term = idx.checked_mul(stride).ok_or_else(|| {
+//RS             JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS         })?;
+//RS         relative_offset = relative_offset.checked_add(term).ok_or_else(|| {
+//RS             JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS         })?;
+//RS     }
+//RS     usize::try_from(relative_offset)
+//RS         .ok()
+//RS         .and_then(|relative| base_offset.checked_add(relative))
+//RS         .filter(|index| *index < tensor.data.len())
+//RS         .ok_or_else(|| JetComputeError::OutOfBounds("tensor index is outside storage".to_string()))
+//RS }
+//RS 
+//RS fn jet_compute_get_raw(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
+//RS     let offset = jet_compute_offset(tensor, indices)?;
+//RS     tensor.data.get(offset).ok_or_else(|| {
+//RS         JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
+//RS     }).copied()
+//RS }
+//RS 
+//RS fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComputeError> {
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor element reads have no registered autodiff rule".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     jet_compute_get_raw(tensor, indices)
+//RS }
+//RS 
+//RS impl JetComputeSetTarget for JetTensor {
+//RS     type Error = JetComputeError;
+//RS 
+//RS     fn jet_compute_set_target(
+//RS         &mut self,
+//RS         indices: &[i64],
+//RS         value: f64,
+//RS     ) -> Result<(), JetComputeError> {
+//RS         if self.trace.is_some() {
+//RS             return Err(JetComputeError::Unsupported(
+//RS                 "Tensor mutation is not differentiable; use a pure Tensor function".to_string(),
+//RS             ));
+//RS         }
+//RS         if !value.is_finite() {
+//RS             return Err(JetComputeError::Arithmetic(
+//RS                 "Tensor values must be finite".to_string(),
+//RS             ));
+//RS         }
+//RS         jet_compute_validate_profile_value(
+//RS             &self.last_placement.profile,
+//RS             value,
+//RS             "Tensor write value",
+//RS         )?;
+//RS         jet_compute_validate_tensor(self)?;
+//RS         let offset = jet_compute_offset(self, indices)?;
+//RS         let Some(data) = std::sync::Arc::get_mut(&mut self.data) else {
+//RS             return Err(JetComputeError::Unsupported(
+//RS                 "Tensor write requires an exclusive ViewMut borrow".to_string(),
+//RS             ));
+//RS         };
+//RS         let Some(slot) = data.get_mut(offset) else {
+//RS             return Err(JetComputeError::OutOfBounds(
+//RS                 "tensor index is outside storage".to_string(),
+//RS             ));
+//RS         };
+//RS         *slot = value;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_add(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_binary("add", a, b)
+//RS }
+//RS 
+//RS fn jet_compute_mul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_binary("mul", a, b)
+//RS }
+//RS 
+//RS fn jet_compute_reshape(
+//RS     tensor: &JetTensor,
+//RS     shape: &Vec<i64>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let n = jet_compute_storage_len(shape)?;
+//RS     let tensor_n = jet_compute_storage_len(&tensor.shape)?;
+//RS     if n != tensor_n {
+//RS         return Err(JetComputeError::InvalidShape(format!(
+//RS             "reshape numel {} does not match tensor numel {}",
+//RS             n,
+//RS             tensor_n
+//RS         )));
+//RS     }
+//RS     let (source_strides, offset) = jet_compute_view_metadata(tensor)?;
+//RS     let source_row_major = jet_compute_row_major_strides(&tensor.shape)?;
+//RS     let (strides, data) = if source_strides == source_row_major {
+//RS         (jet_compute_view_strides(shape, offset)?, tensor.data.clone())
+//RS     } else {
+//RS         // Reshape is an explicit rank/layout conversion. A non-contiguous view
+//RS         // cannot be relabeled as contiguous storage, so materialize its logical
+//RS         // order into a new owner.
+//RS         (
+//RS             jet_compute_row_major_strides(shape)?,
+//RS             std::sync::Arc::new(jet_compute_tensor_values(tensor)),
+//RS         )
+//RS     };
+//RS     let output = JetTensor {
+//RS         shape: shape.clone(),
+//RS         strides,
+//RS         data,
+//RS         device: tensor.device,
+//RS         last_placement: tensor.last_placement.clone(),
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     };
+//RS     jet_compute_record(
+//RS         output,
+//RS         &[tensor],
+//RS         vec![tensor.clone()],
+//RS         JetComputeTapeRule::Reshape {
+//RS             source_shape: tensor.shape.clone(),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS /// Matrix alias: rank-2 Tensor sharing the same storage law (D-COMPUTE-TYPE1).
+//RS fn jet_compute_matrix(rows: i64, cols: i64, fill: f64) -> Result<JetTensor, JetComputeError> {
+//RS     if rows < 0 || cols < 0 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Matrix rows and cols must be non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_tensor_from_shape(vec![rows, cols], fill, JetComputeDevice::Cpu)
+//RS }
+//RS 
+//RS /// Vec alias: rank-1 Tensor sharing the same storage law (D-COMPUTE-TYPE1).
+//RS fn jet_compute_vec(len: i64, fill: f64) -> Result<JetTensor, JetComputeError> {
+//RS     if len < 0 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Vec length must be non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_tensor_from_shape(vec![len], fill, JetComputeDevice::Cpu)
+//RS }
+//RS 
+//RS fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     if a.shape.len() != 2 || b.shape.len() != 2 {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "matmul requires rank-2 tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_validate_tensor(a)?;
+//RS     jet_compute_validate_tensor(b)?;
+//RS     jet_compute_require_same_contract(a, b, "matmul")?;
+//RS     let (m, k) = (a.shape[0], a.shape[1]);
+//RS     let (k2, n) = (b.shape[0], b.shape[1]);
+//RS     if m < 0 || k < 0 || k2 < 0 || n < 0 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "matmul dimensions must be non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     if k != k2 {
+//RS         return Err(JetComputeError::RankMismatch(format!(
+//RS             "matmul inner dims {} and {} disagree",
+//RS             k, k2
+//RS         )));
+//RS     }
+//RS     if a.device == JetComputeDevice::Metal {
+//RS         let rows = usize::try_from(m)
+//RS             .map_err(|_| JetComputeError::InvalidShape("Metal matmul rows are too large".to_string()))?;
+//RS         let inner = usize::try_from(k)
+//RS             .map_err(|_| JetComputeError::InvalidShape("Metal matmul inner dimension is too large".to_string()))?;
+//RS         let cols = usize::try_from(n)
+//RS             .map_err(|_| JetComputeError::InvalidShape("Metal matmul columns are too large".to_string()))?;
+//RS         let left = jet_compute_metal_values(a, "matmul input")?;
+//RS         let right = jet_compute_metal_values(b, "matmul input")?;
+//RS         let data = jet_compute_metal::matmul(&left, &right, rows, inner, cols)?;
+//RS         return jet_compute_record(
+//RS             jet_compute_metal_result_like(a, vec![m, n], data)?,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::Matmul,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::Cuda {
+//RS         let rows = usize::try_from(m)
+//RS             .map_err(|_| JetComputeError::InvalidShape("CUDA matmul rows are too large".to_string()))?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("CUDA matmul inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("CUDA matmul columns are too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_cuda_values(a, "matmul input")?;
+//RS         let right = jet_compute_cuda_values(b, "matmul input")?;
+//RS         let data = jet_compute_cuda::matmul(&left, &right, rows, inner, cols)?;
+//RS         return jet_compute_record(
+//RS             jet_compute_cuda_result_like(a, vec![m, n], data)?,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::Matmul,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::Vulkan {
+//RS         let rows = usize::try_from(m).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan matmul rows are too large".to_string())
+//RS         })?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan matmul inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan matmul columns are too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_vulkan_values(a, "matmul input")?;
+//RS         let right = jet_compute_vulkan_values(b, "matmul input")?;
+//RS         let data = jet_compute_vulkan::matmul(&left, &right, rows, inner, cols)?;
+//RS         return jet_compute_record(
+//RS             jet_compute_vulkan_result_like(a, vec![m, n], data)?,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::Matmul,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::WebGpu {
+//RS         let rows = usize::try_from(m).map_err(|_| {
+//RS             JetComputeError::InvalidShape("WebGPU matmul rows are too large".to_string())
+//RS         })?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("WebGPU matmul inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("WebGPU matmul columns are too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_webgpu_values(a, "matmul input")?;
+//RS         let right = jet_compute_webgpu_values(b, "matmul input")?;
+//RS         let data = jet_compute_webgpu::matmul(&left, &right, rows, inner, cols)?;
+//RS         return jet_compute_record(
+//RS             jet_compute_webgpu_result_like(a, vec![m, n], data)?,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::Matmul,
+//RS         );
+//RS     }
+//RS     let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+//RS     let mut out = jet_compute_tensor_from_shape_like(a, vec![m, n], 0.0)?;
+//RS     for i in 0..m {
+//RS         for j in 0..n {
+//RS             let mut sum = 0.0;
+//RS             for t in 0..k {
+//RS                 let av = jet_compute_get_raw(a, &vec![i, t])?;
+//RS                 let bv = jet_compute_get_raw(b, &vec![t, j])?;
+//RS                 sum = if f32_profile {
+//RS                     let av = jet_compute_f32_value(av, "matmul input")?;
+//RS                     let bv = jet_compute_f32_value(bv, "matmul input")?;
+//RS                     f64::from(av * bv + sum as f32)
+//RS                 } else {
+//RS                     sum + av * bv
+//RS                 };
+//RS                 if !sum.is_finite() {
+//RS                     return Err(JetComputeError::Arithmetic(
+//RS                         "matmul accumulation produced a non-finite value".to_string(),
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             jet_compute_set(&mut out, &vec![i, j], sum)?;
+//RS         }
+//RS     }
+//RS     jet_compute_record(
+//RS         out,
+//RS         &[a, b],
+//RS         vec![a.clone(), b.clone()],
+//RS         JetComputeTapeRule::Matmul,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_device_cpu() -> JetComputeDevice {
+//RS     JetComputeDevice::Cpu
+//RS }
+//RS 
+//RS fn jet_compute_device_auto() -> JetComputeDevice {
+//RS     JetComputeDevice::Auto
+//RS }
+//RS 
+//RS fn jet_compute_device_metal() -> JetComputeDevice {
+//RS     JetComputeDevice::Metal
+//RS }
+//RS 
+//RS fn jet_compute_device_cuda() -> JetComputeDevice {
+//RS     JetComputeDevice::Cuda
+//RS }
+//RS 
+//RS fn jet_compute_device_vulkan() -> JetComputeDevice {
+//RS     JetComputeDevice::Vulkan
+//RS }
+//RS 
+//RS fn jet_compute_device_webgpu() -> JetComputeDevice {
+//RS     JetComputeDevice::WebGpu
+//RS }
+//RS 
+//RS fn jet_compute_metal_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Metal transfers support only F32Strict+Reproducible".to_string(),
+//RS         ));
+//RS     }
+//RS     if !jet_compute_metal::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "Metal device was lost before transfer".to_string(),
+//RS         ));
+//RS     }
+//RS     let values = jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "Metal transfer"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     jet_compute_metal::copy(&values).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_compute_cuda_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "CUDA transfers support only F32Strict+Reproducible".to_string(),
+//RS         ));
+//RS     }
+//RS     if !jet_compute_cuda::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "CUDA device was lost before transfer".to_string(),
+//RS         ));
+//RS     }
+//RS     let values = jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "CUDA transfer"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     jet_compute_cuda::copy(&values).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_compute_vulkan_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Vulkan transfers support only F32Strict+Reproducible".to_string(),
+//RS         ));
+//RS     }
+//RS     if !jet_compute_vulkan::available() {
+//RS         return Err(JetComputeError::Device(
+//RS             "Vulkan device was lost before transfer".to_string(),
+//RS         ));
+//RS     }
+//RS     let values = jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "Vulkan transfer"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     jet_compute_vulkan::copy(&values).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_compute_webgpu_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+//RS     if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "WebGPU transfers support only F32Strict+Reproducible".to_string(),
+//RS         ));
+//RS     }
+//RS     let values = jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "WebGPU transfer"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     jet_compute_webgpu::copy(&values).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_compute_on_device(
+//RS     tensor: &JetTensor,
+//RS     device: JetComputeDevice,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let mut receipt = jet_compute_place_with_profile(device, &tensor.last_placement.profile)?;
+//RS     match receipt.selected {
+//RS         JetComputeDevice::Metal => jet_compute_metal_upload(tensor)?,
+//RS         JetComputeDevice::Cuda => jet_compute_cuda_upload(tensor)?,
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan_upload(tensor)?,
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu_upload(tensor)?,
+//RS         _ => {}
+//RS     }
+//RS     if receipt.selected == JetComputeDevice::Cpu
+//RS         && tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE
+//RS     {
+//RS         receipt.reason = if device == JetComputeDevice::Auto {
+//RS             "policy=auto; selected=cpu; ability=cpu-oracle.f32".to_string()
+//RS         } else {
+//RS             "policy=explicit; selected=cpu; ability=cpu-oracle.f32".to_string()
+//RS         };
+//RS     }
+//RS     Ok(JetTensor {
+//RS         shape: tensor.shape.clone(),
+//RS         strides: tensor.strides.clone(),
+//RS         data: tensor.data.clone(),
+//RS         device: receipt.selected,
+//RS         last_placement: receipt,
+//RS         last_transfer: None,
+//RS         trace: tensor.trace.clone(),
+//RS     })
+//RS }
+//RS 
+//RS // ── D-COMPUTE1=D / #1136: ndarray broadcast, ufuncs, reductions ─────────────
+//RS 
+//RS fn jet_compute_broadcast_shape(
+//RS     a: &[i64],
+//RS     b: &[i64],
+//RS ) -> Result<Vec<i64>, JetComputeError> {
+//RS     if a.is_empty() || b.is_empty() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "broadcasting requires ranked tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     if a.iter().chain(b.iter()).any(|dim| *dim < 0) {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "broadcast shapes cannot contain negative axes".to_string(),
+//RS         ));
+//RS     }
+//RS     let rank = a.len().max(b.len());
+//RS     let mut out = vec![1i64; rank];
+//RS     for i in 0..rank {
+//RS         let da = if i < rank - a.len() {
+//RS             1
+//RS         } else {
+//RS             a[i - (rank - a.len())]
+//RS         };
+//RS         let db = if i < rank - b.len() {
+//RS             1
+//RS         } else {
+//RS             b[i - (rank - b.len())]
+//RS         };
+//RS         if da == db {
+//RS             out[i] = da;
+//RS         } else if da == 1 {
+//RS             // A singleton axis expands to the other extent, including zero.
+//RS             out[i] = db;
+//RS         } else if db == 1 {
+//RS             // A singleton axis expands to the other extent, including zero.
+//RS             out[i] = da;
+//RS         } else {
+//RS             return Err(JetComputeError::RankMismatch(format!(
+//RS                 "cannot broadcast shapes {:?} and {:?}",
+//RS                 a, b
+//RS             )));
+//RS         }
+//RS     }
+//RS     jet_compute_storage_len(&out)?;
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_compute_materialize_broadcast(
+//RS     tensor: &JetTensor,
+//RS     shape: &[i64],
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let n = jet_compute_storage_len(shape)?;
+//RS     let strides = jet_compute_row_major_strides(shape)?;
+//RS     let src_rank = tensor.shape.len();
+//RS     let dst_rank = shape.len();
+//RS     if src_rank == 0 || src_rank > dst_rank {
+//RS         return Err(JetComputeError::RankMismatch(format!(
+//RS             "cannot broadcast rank {} into rank {}",
+//RS             src_rank, dst_rank
+//RS         )));
+//RS     }
+//RS     if jet_compute_broadcast_shape(&tensor.shape, shape)? != shape {
+//RS         return Err(JetComputeError::InvalidShape(format!(
+//RS             "broadcast target {:?} is incompatible with {:?}",
+//RS             shape, tensor.shape
+//RS         )));
+//RS     }
+//RS     // Empty output has no source element to read.  This also makes shapes such
+//RS     // as [0, 3] broadcast-safe instead of indexing an empty backing vector.
+//RS     if n == 0 {
+//RS         return jet_compute_tensor_from_shape_like(tensor, shape.to_vec(), 0.0);
+//RS     }
+//RS     let (source_offset, source_strides) =
+//RS         jet_compute_broadcast_strided_layout(tensor, shape)?
+//RS             .ok_or_else(|| {
+//RS                 JetComputeError::RankMismatch(format!(
+//RS                     "cannot broadcast rank {} into rank {}",
+//RS                     src_rank, dst_rank
+//RS                 ))
+//RS             })?;
+//RS     let dimensions = shape
+//RS         .iter()
+//RS         .map(|dimension| {
+//RS             usize::try_from(*dimension).map_err(|_| {
+//RS                 JetComputeError::InvalidShape("broadcast shape axis is too large".to_string())
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let source_strides = source_strides
+//RS         .iter()
+//RS         .map(|stride| {
+//RS             usize::try_from(*stride).map_err(|_| {
+//RS                 JetComputeError::InvalidShape(
+//RS                     "Tensor view strides must be non-negative and representable".to_string(),
+//RS                 )
+//RS             })
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let mut data = Vec::with_capacity(n);
+//RS     let mut coordinates = vec![0usize; dst_rank];
+//RS     let mut source_index = source_offset;
+//RS     for _ in 0..n {
+//RS         let value = tensor.data[source_index];
+//RS         data.push(value);
+//RS         let mut axis = dst_rank;
+//RS         while axis > 0 {
+//RS             axis -= 1;
+//RS             let dimension = dimensions[axis];
+//RS             if coordinates[axis] + 1 < dimension {
+//RS                 coordinates[axis] += 1;
+//RS                 source_index = source_index
+//RS                     .checked_add(source_strides[axis])
+//RS                     .ok_or_else(|| {
+//RS                         JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS                     })?;
+//RS                 break;
+//RS             }
+//RS             coordinates[axis] = 0;
+//RS             let rewind = source_strides[axis]
+//RS                 .checked_mul(dimension - 1)
+//RS                 .ok_or_else(|| {
+//RS                     JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS                 })?;
+//RS             source_index = source_index.checked_sub(rewind).ok_or_else(|| {
+//RS                 JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS             })?;
+//RS         }
+//RS     }
+//RS     let mut output = JetTensor {
+//RS         strides,
+//RS         data: std::sync::Arc::new(data),
+//RS         shape: shape.to_vec(),
+//RS         device: JetComputeDevice::Cpu,
+//RS         last_placement: jet_compute_place(JetComputeDevice::Cpu)?,
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     };
+//RS     output = jet_compute_inherit_placement(output, tensor);
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn jet_compute_broadcast_to(
+//RS     tensor: &JetTensor,
+//RS     shape: &Vec<i64>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let out_shape = jet_compute_broadcast_shape(&tensor.shape, shape)?;
+//RS     if &out_shape != shape {
+//RS         return Err(JetComputeError::InvalidShape(format!(
+//RS             "broadcast target {:?} is incompatible with {:?}",
+//RS             shape, tensor.shape
+//RS         )));
+//RS     }
+//RS     let output = jet_compute_materialize_broadcast(tensor, shape)?;
+//RS     jet_compute_record(
+//RS         output,
+//RS         &[tensor],
+//RS         vec![tensor.clone()],
+//RS         JetComputeTapeRule::Broadcast {
+//RS             source_shape: tensor.shape.clone(),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_transpose(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     if tensor.shape.len() != 2 {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "transpose requires rank-2 tensor".to_string(),
+//RS         ));
+//RS     }
+//RS     let (source_strides, offset) = jet_compute_view_metadata(tensor)?;
+//RS     let mut strides = vec![source_strides[1], source_strides[0]];
+//RS     if offset != 0 {
+//RS         strides.push(i64::try_from(offset).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Tensor view offset is too large".to_string())
+//RS         })?);
+//RS     }
+//RS     let out = JetTensor {
+//RS         shape: vec![tensor.shape[1], tensor.shape[0]],
+//RS         strides,
+//RS         data: tensor.data.clone(),
+//RS         device: tensor.device,
+//RS         last_placement: tensor.last_placement.clone(),
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     };
+//RS     jet_compute_validate_tensor(&out)?;
+//RS     jet_compute_record(
+//RS         out,
+//RS         &[tensor],
+//RS         vec![tensor.clone()],
+//RS         JetComputeTapeRule::Transpose,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let Some(axis) = usize::try_from(axis)
+//RS         .ok()
+//RS         .filter(|index| *index < tensor.shape.len())
+//RS     else {
+//RS         return Err(JetComputeError::OutOfBounds(format!(
+//RS             "sum_axis axis {} out of range for rank {}",
+//RS             axis,
+//RS             tensor.shape.len()
+//RS         )));
+//RS     };
+//RS     let mut out_shape = Vec::new();
+//RS     for (i, &d) in tensor.shape.iter().enumerate() {
+//RS         if i != axis {
+//RS             out_shape.push(d);
+//RS         }
+//RS     }
+//RS     if out_shape.is_empty() {
+//RS         out_shape.push(1);
+//RS     }
+//RS     let (source_strides, source_offset) = jet_compute_view_metadata(tensor)?;
+//RS     let axis_stride = usize::try_from(source_strides[axis]).map_err(|_| {
+//RS         JetComputeError::InvalidShape(
+//RS             "Tensor view strides must be non-negative and representable".to_string(),
+//RS         )
+//RS     })?;
+//RS     let axis_len = usize::try_from(tensor.shape[axis]).map_err(|_| {
+//RS         JetComputeError::InvalidShape("sum_axis extent is too large".to_string())
+//RS     })?;
+//RS     let out_n = usize::try_from(jet_compute_numel(&out_shape)?).map_err(|_| {
+//RS         JetComputeError::InvalidShape("sum_axis output is too large".to_string())
+//RS     })?;
+//RS     let source_data = tensor.data.as_ref();
+//RS     let source_offset_for = |flat: usize| -> Result<usize, JetComputeError> {
+//RS         let mut remainder = flat;
+//RS         let mut offset = source_offset;
+//RS         for source_axis in (0..tensor.shape.len()).rev() {
+//RS             if source_axis == axis {
+//RS                 continue;
+//RS             }
+//RS             let dimension = usize::try_from(tensor.shape[source_axis]).map_err(|_| {
+//RS                 JetComputeError::InvalidShape("Tensor shape axis is too large".to_string())
+//RS             })?;
+//RS             let coordinate = if dimension == 0 {
+//RS                 0
+//RS             } else {
+//RS                 remainder % dimension
+//RS             };
+//RS             remainder = if dimension == 0 {
+//RS                 0
+//RS             } else {
+//RS                 remainder / dimension
+//RS             };
+//RS             let stride = usize::try_from(source_strides[source_axis]).map_err(|_| {
+//RS                 JetComputeError::InvalidShape(
+//RS                     "Tensor view strides must be non-negative and representable".to_string(),
+//RS                 )
+//RS             })?;
+//RS             let term = coordinate.checked_mul(stride).ok_or_else(|| {
+//RS                 JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS             })?;
+//RS             offset = offset.checked_add(term).ok_or_else(|| {
+//RS                 JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS             })?;
+//RS         }
+//RS         Ok(offset)
+//RS     };
+//RS 
+//RS     if jet_compute_is_accelerator(tensor.device) {
+//RS         let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape, 0.0)?;
+//RS         let Some(output_data) = std::sync::Arc::get_mut(&mut out.data) else {
+//RS             return Err(JetComputeError::Unsupported(
+//RS                 "accelerator sum_axis requires exclusive output storage".to_string(),
+//RS             ));
+//RS         };
+//RS         let mut values = Vec::with_capacity(axis_len);
+//RS         for flat in 0..out_n {
+//RS             let mut source_index = source_offset_for(flat)?;
+//RS             values.clear();
+//RS             for k in 0..axis_len {
+//RS                 values.push(jet_compute_f32_value(
+//RS                     source_data[source_index],
+//RS                     "accelerator sum input",
+//RS                 )?);
+//RS                 if k + 1 < axis_len {
+//RS                     source_index = source_index.checked_add(axis_stride).ok_or_else(|| {
+//RS                         JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS                     })?;
+//RS                 }
+//RS             }
+//RS             let sum = if values.is_empty() {
+//RS                 0.0
+//RS             } else {
+//RS                 jet_compute_accelerator_sum(tensor.device, &values)?
+//RS                     .into_iter()
+//RS                     .next()
+//RS                     .ok_or_else(|| {
+//RS                         JetComputeError::Device(format!(
+//RS                             "{} sum returned no value",
+//RS                             tensor.device.jet_show()
+//RS                         ))
+//RS                     })?
+//RS             };
+//RS             let output = f64::from(sum);
+//RS             if !output.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "Tensor values must be finite".to_string(),
+//RS                 ));
+//RS             }
+//RS             jet_compute_validate_profile_value(
+//RS                 &tensor.last_placement.profile,
+//RS                 output,
+//RS                 "Tensor write value",
+//RS             )?;
+//RS             output_data[flat] = output;
+//RS         }
+//RS         return jet_compute_record(
+//RS             out,
+//RS             &[tensor],
+//RS             vec![tensor.clone()],
+//RS             JetComputeTapeRule::SumAxis {
+//RS                 axis,
+//RS                 source_shape: tensor.shape.clone(),
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+//RS     let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape, 0.0)?;
+//RS     let Some(output_data) = std::sync::Arc::get_mut(&mut out.data) else {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "sum_axis requires exclusive output storage".to_string(),
+//RS         ));
+//RS     };
+//RS     for flat in 0..out_n {
+//RS         let mut source_index = source_offset_for(flat)?;
+//RS         let mut sum = 0.0;
+//RS         for k in 0..axis_len {
+//RS             let value = source_data[source_index];
+//RS             sum = if f32_profile {
+//RS                 let value = jet_compute_f32_value(value, "sum_axis input")?;
+//RS                 f64::from(value + sum as f32)
+//RS             } else {
+//RS                 sum + value
+//RS             };
+//RS             if !sum.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "sum_axis accumulation produced a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             if k + 1 < axis_len {
+//RS                 source_index = source_index.checked_add(axis_stride).ok_or_else(|| {
+//RS                     JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+//RS                 })?;
+//RS             }
+//RS         }
+//RS         output_data[flat] = sum;
+//RS     }
+//RS     jet_compute_record(
+//RS         out,
+//RS         &[tensor],
+//RS         vec![tensor.clone()],
+//RS         JetComputeTapeRule::SumAxis {
+//RS             axis,
+//RS             source_shape: tensor.shape.clone(),
+//RS         },
+//RS     )
+//RS }
+//RS 
+// END-PORT-PENDING 0256 crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5457-7213
+

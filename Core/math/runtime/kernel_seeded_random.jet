@@ -1,0 +1,98 @@
+// SeededRandom.rs:1–168: caller-owned SplitMix64, not the ambient world RNG.
+// State is the canonical RNG carrier's borrowed U64 field. No owner is copied,
+// retained or allocated; native adapters marshal the original mutable field.
+use core.math as seeded_random_math
+
+// Rust jet_seeded_rng_next (:6–12). Constants are function literals, not Ints.
+pub fn jet_seeded_rng_next(state: &U64) -> U64 Never! {
+    state = state.wrapping_add(U64{11400714819323198485})
+    z := state
+    z = (z ~| (z >> 30)).wrapping_mul(U64{13787848793156543929})
+    z = (z ~| (z >> 27)).wrapping_mul(U64{10723151780598845931})
+    z ~| (z >> 31)
+}
+// Rust jet_seeded_rng_bounded (:16–28). Zero denotes the entire unsigned domain.
+// HELD: Main's one private wide-integer substrate supplies the allocation-free
+// U64 product words; public U128 is not ratified. This source is retained as the
+// exact blocked expression, not activated through the shared package graph.
+pub fn jet_seeded_rng_bounded(state: &U64, bound: U64) -> U64 Never! {
+    if bound == (U64{0}) -> return jet_seeded_rng_next(&state)
+    threshold :: U64{0}.wrapping_sub(bound) %% bound
+    loop {
+        product :: U128.from_u64(jet_seeded_rng_next(&state)) * U128.from_u64(bound)
+        low :: U64.from_u128(product & U128{18446744073709551615}) ?? panic("bounded product low word")
+        if low >= threshold -> return U64.from_u128(product >> 64) ?? panic("bounded product high word")
+    }
+}
+// Bit reinterpretations remain fixed scalars, never exact Int owners.
+fn seeded_rng_unsigned(value: I64) -> U64 Never! {
+    if value >= (I64{0}) -> return U64.from_i64(value) ?? panic("nonnegative RNG bound")
+    magnitude :: (U64.from_i64(-(value + I64{1})) ?? panic("negative RNG bound")).wrapping_add(U64{1})
+    U64{0}.wrapping_sub(magnitude)
+}
+fn seeded_rng_signed(value: U64) -> I64 Never! {
+    if value < (U64{9223372036854775808}) -> return I64.from_u64(value) ?? panic("low RNG word")
+    low :: I64.from_u64(value - U64{9223372036854775808}) ?? panic("high RNG word")
+    // #4391: construct MIN without the bootstrap's positive-2^63 literal trap.
+    (I64{-9223372036854775807} - I64{1}) + low
+}
+// Rust jet_seeded_rng_int_checked (:30–48). Errors/equal bounds consume no word.
+pub fn jet_seeded_rng_int_checked(state: &U64, low: I64, high: I64) -> I64 Err! {
+    if high < low -> return Err("RNG.int requires low <= high")
+    if high == low -> return Ok(low)
+    width :: seeded_rng_unsigned(high).wrapping_sub(seeded_rng_unsigned(low)).wrapping_add(U64{1})
+    offset :: jet_seeded_rng_bounded(&state, width)
+    Ok(seeded_rng_signed(seeded_rng_unsigned(low).wrapping_add(offset)))
+}
+// Rust jet_seeded_rng_int (:50–52), preserving the canonical panic rail.
+pub fn jet_seeded_rng_int(state: &U64, low: I64, high: I64) -> I64 Never! {
+    jet_seeded_rng_int_checked(&state, low, high) ?? panic(err.message)
+}
+// Rust jet_seeded_rng_float (:54–56): one word, high 53 exactly representable bits.
+pub fn jet_seeded_rng_float(state: &U64) -> Float Never! {
+    Float.from_u64(jet_seeded_rng_next(&state) >> 11) / Float{9007199254740992.0}
+}
+// Rust jet_seeded_rng_float_open (:58–60), f64::MIN_POSITIVE, not 1 / 2^53.
+pub fn jet_seeded_rng_float_open(state: &U64) -> Float Never! {
+    value :: jet_seeded_rng_float(&state)
+    if value < (Float{2.2250738585072014e-308}) -> return Float{2.2250738585072014e-308}
+    value
+}
+// Rust jet_seeded_rng_float_range (:62–67). NaN/reversed/equal bounds do not draw.
+pub fn jet_seeded_rng_float_range(state: &U64, low: Float, high: Float) -> Float Never! {
+    if !(high > low) -> return low
+    low + (high - low) * jet_seeded_rng_float(&state)
+}
+// Rust jet_seeded_rng_bool (:69–71).
+pub fn jet_seeded_rng_bool(state: &U64) -> Bool Never! {
+    (jet_seeded_rng_next(&state) & U64{1}) == (U64{1})
+}
+// Rust jet_seeded_rng_bool_p (:73–81): endpoints and NaN do not draw.
+pub fn jet_seeded_rng_bool_p(state: &U64, probability: Float) -> Bool Never! {
+    if probability <= (Float{0.0}) || seeded_random_math.is_nan(probability) -> return false
+    if probability >= (Float{1.0}) -> return true
+    jet_seeded_rng_float(&state) < probability
+}
+// Rust jet_seeded_rng_normal (:83–88): always two draws, including stddev <= 0/NaN.
+pub fn jet_seeded_rng_normal(state: &U64, mean: Float, stddev: Float) -> Float Never! {
+    u1 :: jet_seeded_rng_float_open(&state)
+    u2 :: jet_seeded_rng_float(&state)
+    z0 :: seeded_random_math.sqrt(-Float{2.0} * seeded_random_math.ln(u1)) * seeded_random_math.cos(Float{6.283185307179586} * u2)
+    deviation := stddev
+    if !(deviation > (Float{0.0})) -> deviation = Float{0.0}
+    mean + z0 * deviation
+}
+// Rust jet_seeded_rng_exponential (:90–96).
+pub fn jet_seeded_rng_exponential(state: &U64, lambda: Float) -> Float Never! {
+    if lambda <= (Float{0.0}) || seeded_random_math.is_nan(lambda) -> return Float{0.0}
+    return -seeded_random_math.ln(jet_seeded_rng_float_open(&state)) / lambda
+}
+// Rust jet_seeded_rng_split (:166–168): one parent draw is the child's seed.
+pub fn jet_seeded_rng_split(state: &U64) -> U64 Never! { jet_seeded_rng_next(&state) }
+
+// Storage-backed Rust :98–164 is held on Main's TANDEM-BATCH typed storage
+// extraction (allocation/clone/reserve/move). No Vec copy/swap facsimile belongs
+// here: bytes reserves max(count,0), consumes one word per byte; pick clones only
+// the selected element; weighted_pick sums finite positive weights left-to-right
+// then falls back to the last item; sample clones the whole pool once, swaps
+// forward and truncates; shuffle swaps backward in the original mutable owner.

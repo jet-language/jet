@@ -1,0 +1,16 @@
+// FloatOrdering.rs:6–13, jet_float_sort_cmp, D-FLOATSORT1.
+// Private runtime policy code only; no new Ordering carrier or public API.
+// Main's original std::cmp::Ordering adapter maps -1/0/+1 to Less/Equal/Greater.
+// HELD #4262: native adapter/collection caller cutover and shared-runtime link.
+// Ordinary Float operators keep their original IEEE partial-order meaning.
+pub fn jet_float_sort_cmp_code(left: Float, right: Float) -> I64 Never! {
+    if left < right -> return I64{-1}
+    if left > right -> return I64{1}
+    if left == right -> return I64{0}
+    // An unordered pair contains at least one NaN; x != x detects only NaN.
+    if left != left {
+        if right != right -> return I64{0}
+        return I64{1}
+    }
+    I64{-1}
+}

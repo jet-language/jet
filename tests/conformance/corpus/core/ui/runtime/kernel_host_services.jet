@@ -1,0 +1,316 @@
+// HostServices.rs has no inline/included tests. These are faithful positive
+// and rejection controls for its portable branches, not native-provider proof.
+// Native shaping/TLS/Web journeys remain #4494/#4483; ordered registry #4499;
+// UINode attachment journeys belong to packet0192. Main owns exercising them.
+use core.ui.runtime.kernel_host_services as host
+use core.ui.host as values
+use core.ui.host.ime as ime
+use core.ui.host.drag_drop as drag
+use core.files.runtime.kernel_path_components as paths
+use core.font as font
+
+#Test("host capability bitset has stable order and exact denied payload") {
+    facts := host.capabilities_empty()
+    ordered :: host.capabilities_ordered()
+    names :: [String]{"UI.FileDialog", "UI.Clipboard", "UI.IME", "UI.DragDrop", "UI.Shortcuts", "UI.Accessibility", "UI.FontShaping"}
+    loop i in 0..<ordered.len() {
+        assert(host.capability_name(ordered[i]) == names[i])
+        assert(!host.capabilities_contains(facts, ordered[i]))
+        host.capabilities_grant(&facts, ordered[i])
+        assert(host.capabilities_contains(facts, ordered[i]))
+    }
+    assert(facts.bits == (U8{127}))
+    rows :: host.capabilities_to_facts(facts)
+    assert(rows.len() == 7)
+    loop i in 0..<rows.len() -> assert(rows[i].capability == ordered[i] && rows[i].granted)
+    host.capabilities_revoke(&facts, .Clipboard)
+    assert(!host.capabilities_contains(facts, .Clipboard) && host.capabilities_contains(facts, .IME))
+    if host.capabilities_require(facts, .Clipboard) == {
+        .Ok(_) -> panic("revoked clipboard accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .Clipboard), else -> panic("wrong denial payload") }
+    }
+    restored :: host.capabilities_with(facts, .Clipboard)
+    host.capabilities_require(restored, .Clipboard) ?? panic("restored clipboard denied")
+    assert(host.capabilities_all().bits == restored.bits)
+}
+
+#Test("font headers and script classifications preserve every inclusive boundary") {
+    assert(host.font_bytes_are_vetted([U8]{U8{0}, U8{1}, U8{0}, U8{0}}))
+    loop header in [String]{"OTTO", "true", "typ1", "wOFF", "wOF2"} -> assert(host.font_bytes_are_vetted(header.bytes()))
+    assert(!host.font_bytes_are_vetted([U8]{U8{0}, U8{1}, U8{0}}))
+    assert(!host.font_bytes_are_vetted("wOF3".bytes()))
+    arabic :: [Int]{0x0600, 0x06ff, 0x0750, 0x077f, 0x08a0, 0x08ff, 0xfb50, 0xfdff, 0xfe70, 0xfeff, 0x1ee00, 0x1eeff}
+    loop cp in arabic -> assert(host.font_is_arabic(cp))
+    loop cp in [Int]{0x05ff, 0x0700, 0x074f, 0x0780, 0x089f, 0x0900, 0xfb4f, 0xfe00, 0xfe6f, 0xff00, 0x1edff, 0x1ef00} -> assert(!host.font_is_arabic(cp))
+    loop cp in [Int]{0x1f000, 0x1faff, 0x2300, 0x23ff, 0x2500, 0x27ff, 0x2b00, 0x2bff} -> assert(host.font_is_symbol_or_emoji(cp))
+    loop cp in [Int]{0x1efff, 0x1fb00, 0x22ff, 0x2400, 0x24ff, 0x2800, 0x2aff, 0x2c00} -> assert(!host.font_is_symbol_or_emoji(cp))
+    loop cp in [Int]{0x0300, 0x036f, 0x1ab0, 0x1aff, 0x1dc0, 0x1dff, 0x20d0, 0x20ff, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0x1f3fb, 0x1f3ff, 0xe0020, 0xe007f, 0x200c, 0x200d} -> assert(host.font_is_extend(cp))
+    loop cp in [Int]{0x02ff, 0x0370, 0x1aaf, 0x1b00, 0x1dbf, 0x1e00, 0x20cf, 0x2100, 0xfdff, 0xfe10, 0xe00ff, 0xe01f0, 0x1f3fa, 0x1f400, 0xe001f, 0xe0080, 0x200b, 0x200e} -> assert(!host.font_is_extend(cp))
+    assert(host.font_system(.Body).size == 14.0)
+    assert(host.font_system(.Title).size == 24.0)
+    assert(host.font_system(.Monospace).family == "monospace")
+    // Reuse the existing exact explicit fallback owner, not a second shaper.
+    fallback :: font.shape_with(host.font_system(.Body), "Aé\n😀")
+    assert(fallback.shaper == .HeadlessFallback && fallback.deterministic && fallback.approximate)
+    assert(fallback.glyphs.len() == 4)
+    assert(fallback.glyphs[0].cluster == 0 && fallback.glyphs[1].cluster == 1)
+    assert(fallback.glyphs[2].cluster == 3 && fallback.glyphs[3].cluster == 4)
+    assert(fallback.glyphs[2].advance_x == 0.0 && fallback.advance_y == 0.0)
+    empty :: font.shape_with(host.font_system(.Body), "")
+    assert(empty.glyphs.len() == 0 && empty.advance_x == 0.0)
+}
+
+#Test("node identities and text ranges validate emptiness not whitespace") {
+    node :: host.node_id(" ") ?? panic("space identity refused")
+    assert(node.value == " ")
+    if host.node_id("") == {
+        .Ok(_) -> panic("empty identity accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "UI node identity must not be empty"), else -> panic("wrong identity error") }
+    }
+    range :: host.text_range(2, 5) ?? panic("range refused")
+    assert(host.text_range_len(range) == 3)
+    assert(host.text_range_len(host.text_range(5, 5) ?? panic("empty range refused")) == 0)
+    if host.text_range(5, 2) == {
+        .Ok(_) -> panic("reversed range accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "text range start must not exceed end"), else -> panic("wrong range error") }
+    }
+    cancelled :: host.ime_cancel(host.node_id("edit") ?? panic("identity"))
+    assert(cancelled.target.value == "edit" && cancelled.phase == .Cancel && cancelled.composition == None)
+}
+
+#Test("filesystem rights mask unknown bits and empty rights remain constructible") {
+    loop bits in 0..<256 {
+        rights :: host.fs_rights_from_bits(U8{bits})
+        assert(host.fs_rights_bits(rights) == (U8{bits & 3}))
+        assert(host.fs_rights_allows(rights, .Read) == ((bits & 1) != 0))
+        assert(host.fs_rights_allows(rights, .Write) == ((bits & 2) != 0))
+    }
+    assert(host.fs_rights_bits(host.fs_rights_none()) == (U8{0}))
+    assert(host.fs_rights_bits(host.fs_rights_read()) == (U8{1}))
+    assert(host.fs_rights_bits(host.fs_rights_write()) == (U8{2}))
+    assert(host.fs_rights_bits(host.fs_rights_read_write()) == (U8{3}))
+    grant :: host.fs_grant(".", host.fs_rights_none(), .Unix) ?? panic("empty rights grant refused")
+    assert(grant.root == ".")
+    if host.grant_scope(grant, "../escape", .Read, .Unix) == {
+        .Ok(_) -> panic("ungranted read accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == ". grant does not allow Read"), else -> panic("lexical validation preceded rights") }
+    }
+}
+
+#Test("grant normalization reuses selected-platform components and component containment") {
+    unix :: host.normalize_path("/root/a/../b/./", .Unix) ?? panic("unix normalize")
+    assert(host.path_text(unix) == "/root/b")
+    dot :: host.normalize_path(".", .Unix) ?? panic("dot normalize")
+    assert(dot.encoded.len() == 0 && host.path_text(dot) == ".")
+    windows :: host.normalize_path("C:\\root\\a\\..\\b", .Windows) ?? panic("windows normalize")
+    assert(host.path_text(windows) == "C:\\root\\b")
+    root :: host.normalize_path("/", .Unix) ?? panic("root normalize")
+    assert(host.path_text(root) == "/")
+    if host.normalize_path("a/../../b", .Unix) == {
+        .Ok(_) -> panic("parent escape accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == "path `a/../../b` escapes its lexical root"), else -> panic("wrong lexical escape") }
+    }
+    if host.normalize_path("  ", .Unix) == {
+        .Ok(_) -> panic("blank path accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "filesystem grant path must not be empty"), else -> panic("wrong empty path") }
+    }
+    grant :: host.fs_grant("/root", host.fs_rights_read_write(), .Unix) ?? panic("grant")
+    file :: host.grant_scope(grant, "child/../file", .Read, .Unix) ?? panic("scoped path")
+    assert(file.path == "/root/file" && file.grant_root == "/root" && file.access == .Read)
+    assert((host.grant_scope(grant, "", .Read, .Unix) ?? panic("empty relative path")).path == "/root")
+    if host.grant_scope(grant, "/rooted/file", .Read, .Unix) == {
+        .Ok(_) -> panic("string-prefix escape accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == "path `/rooted/file` escapes grant `/root`"), else -> panic("wrong containment error") }
+    }
+    win_grant :: host.fs_grant("C:\\root", host.fs_rights_read(), .Windows) ?? panic("windows grant")
+    win_file :: host.grant_scope(win_grant, "child\\file", .Read, .Windows) ?? panic("windows scope")
+    assert(win_file.path == "C:\\root\\child\\file")
+}
+
+#Test("file filters preserve exact error precedence and standard text defaults") {
+    text :: host.file_filter_text()
+    assert(text.label == "Text" && text.extensions[0] == "txt" && text.mime_types[0] == "text/plain")
+    _ :: host.file_filter("Label", [String]{}, [String]{}) ?? panic("label-only filter refused")
+    if host.file_filter("", [String]{}, [String]{}) == {
+        .Ok(_) -> panic("empty filter accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "file filter must name an extension, media type, or label"), else -> panic("wrong filter error") }
+    }
+    if host.file_filter("", [String]{""}, [String]{""}) == {
+        .Ok(_) -> panic("empty extension accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "file filter extensions must not be empty"), else -> panic("mime error preceded extension") }
+    }
+    if host.file_filter("", [String]{"txt"}, [String]{""}) == {
+        .Ok(_) -> panic("empty mime accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "file filter media types must not be empty"), else -> panic("wrong mime error") }
+    }
+}
+
+#Test("dialog validation and headless cancellation retain distinct typed outcomes") {
+    grant := host.fs_grant("/root", host.fs_rights_read_write(), .Unix) ?? panic("grant")
+    opened := host.open_request(~grant)
+    assert(opened.title == "Open File" && opened.kind == .Open && !opened.allow_multiple)
+    host.validate_request(opened) ?? panic("open request validation")
+    saved := host.save_request(~grant)
+    assert(saved.title == "Save File" && saved.kind == .Save && saved.initial_directory == None && saved.filters.len() == 0)
+    saved.allow_multiple = true
+    if host.validate_request(saved) == {
+        .Ok(_) -> panic("multiple-save accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "save dialogs cannot select multiple files"), else -> panic("wrong multiple-save error") }
+    }
+    saved.initial_directory = Val(values.UIGrantedPath{path: "/other", grant_root: "/other", access: .Write})
+    if host.validate_request(saved) == {
+        .Ok(_) -> panic("outside initial directory accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == "initial directory is outside the dialog grant"), else -> panic("multiple-save preceded directory validation") }
+    }
+    saved.grant.rights = host.fs_rights_read()
+    if host.validate_request(saved) == {
+        .Ok(_) -> panic("write without grant accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == "dialog Save requires Write access"), else -> panic("directory preceded rights validation") }
+    }
+    if host.headless_open_file(host.capabilities_empty(), saved) == {
+        .Ok(_) -> panic("ungranted dialog accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .FileDialog), else -> panic("request validation preceded capability") }
+    }
+    if host.headless_open_file(host.capabilities_all(), saved) == {
+        .Ok(_) -> panic("save request accepted by open")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "open_file requires an open dialog request"), else -> panic("wrong kind validation") }
+    }
+    if host.headless_open_file(host.capabilities_all(), opened) == {
+        .Ok(_) -> panic("headless dialog unexpectedly completed")
+        .Err(error) -> if error == { .Cancelled(reason) -> assert(reason == .Headless), else -> panic("cancellation collapsed to failure") }
+    }
+    if host.selection_new([values.UIGrantedPath]{}) == {
+        .Ok(_) -> panic("empty completed selection accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "a completed file dialog must select at least one file"), else -> panic("wrong selection error") }
+    }
+    selected :: host.selection_one(host.grant_scope(grant, "file", .Read, .Unix) ?? panic("selected file"))
+    assert(selected.files.len() == 1 && selected.files[0].path == "/root/file")
+}
+
+#Test("shortcut masks keep Meta separate from logical Command and use full lowercase") {
+    loop bits in 0..<256 -> assert(host.modifiers_bits(host.modifiers_from_bits(U8{bits})) == (U8{bits & 31}))
+    command :: host.modifiers_command()
+    assert(host.modifiers_contains(command, .Command) && !host.modifiers_contains(command, .Meta))
+    both :: host.modifiers_with(command, .Meta)
+    assert(both.bits == (U8{24}) && host.modifiers_contains(both, .Meta))
+    key := host.shortcut("  SAVE  ", command) ?? panic("shortcut")
+    assert(key.key == "save")
+    unicode :: host.shortcut("ΟΣ", host.modifiers_none()) ?? panic("unicode shortcut")
+    assert(unicode.key == "ος")
+    if host.shortcut("  ", command) == {
+        .Ok(_) -> panic("empty shortcut accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "shortcut key must not be empty"), else -> panic("wrong shortcut error") }
+    }
+    _ :: host.shortcut_binding(~key, " ", None) ?? panic("space action refused")
+    if host.shortcut_binding(^key, "", None) == {
+        .Ok(_) -> panic("empty action accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "shortcut action must not be empty"), else -> panic("wrong action error") }
+    }
+    assert(host.shortcut_cmd("Save").modifiers.bits == (U8{16}))
+}
+
+#Test("accessibility keeps optional metadata distinct from empty text") {
+    empty := host.accessibility_new(None, None) ?? panic("empty optional metadata refused")
+    assert(empty.name == None && empty.description == None && empty.states.len() == 0)
+    if host.accessibility_new(Val(""), None) == {
+        .Ok(_) -> panic("present empty metadata accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "accessibility name and description must not be empty"), else -> panic("wrong metadata error") }
+    }
+    metadata :: host.accessibility_with_state(^empty, .Disabled)
+    assert(metadata.states.len() == 1)
+    spaces :: host.accessibility_new(Val(" "), Val(" ")) ?? panic("whitespace metadata refused")
+    assert(spaces.name == Val(" "))
+    // No fake UINode/test-only storage provider: attachment proof is packet0192.
+}
+
+#Test("headless event queues retain FIFO capacity and denial-before-full precedence") {
+    facts :: host.capabilities_all()
+    events := Queue.new<ime.UIIMEEvent>()
+    loop i in 0..<256 -> host.queue_ime_event(facts, &events, host.ime_cancel(host.node_id("node-{i}") ?? panic("node"))) ?? panic("event queue")
+    if host.queue_ime_event(facts, &events, host.ime_cancel(host.node_id("overflow") ?? panic("node"))) == {
+        .Ok(_) -> panic("257th event accepted")
+        .Err(error) -> if error == { .QueueFull(service) -> assert(service == "IME"), else -> panic("wrong full queue error") }
+    }
+    if host.queue_ime_event(host.capabilities_empty(), &events, host.ime_cancel(host.node_id("denied") ?? panic("node"))) == {
+        .Ok(_) -> panic("ungranted event accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .IME), else -> panic("full queue preceded capability") }
+    }
+    assert(events.len() == 256)
+    loop i in 0..<256 {
+        event :: (host.poll_ime_event(facts, &events) ?? panic("poll error")) ?? panic("missing event")
+        assert(event.target.value == "node-{i}")
+    }
+    assert((host.poll_ime_event(facts, &events) ?? panic("poll empty")) == None)
+    host.queue_ime_event(facts, &events, host.ime_cancel(host.node_id("restored") ?? panic("node"))) ?? panic("queue not restored")
+    drags := Queue.new<drag.UIDragEvent>()
+    loop i in 0..<256 -> host.queue_drag_event(facts, &drags, drag.UIDragEvent{target: host.node_id("drag-{i}") ?? panic("node"), phase: .Enter, operation: .Copy, items: [drag.UIDropItem]{}}) ?? panic("drag queue")
+    if host.queue_drag_event(facts, &drags, drag.UIDragEvent{target: host.node_id("overflow") ?? panic("node"), phase: .Enter, operation: .Copy, items: [drag.UIDropItem]{}}) == {
+        .Ok(_) -> panic("257th drag accepted")
+        .Err(error) -> if error == { .QueueFull(service) -> assert(service == "drag/drop"), else -> panic("wrong drag queue error") }
+    }
+    first :: (host.poll_drag_event(facts, &drags) ?? panic("drag poll")) ?? panic("missing drag")
+    assert(first.target.value == "drag-0")
+}
+
+#Test("headless clipboard counts Unicode scalars and rejected writes leave state intact") {
+    clipboard := "old"
+    receipt :: host.headless_write_clipboard(host.capabilities_all(), &clipboard, "aé😀") ?? panic("clipboard write")
+    assert(receipt.characters == 3 && clipboard == "aé😀")
+    read :: host.headless_read_clipboard(host.capabilities_all(), clipboard) ?? panic("clipboard read")
+    assert(read.text == "aé😀" && read.selection == None)
+    if host.headless_write_clipboard(host.capabilities_empty(), &clipboard, "replace") == {
+        .Ok(_) -> panic("ungranted write accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .Clipboard), else -> panic("wrong clipboard denial") }
+    }
+    assert(clipboard == "aé😀")
+    empty :: host.headless_write_clipboard(host.capabilities_all(), &clipboard, "") ?? panic("clear")
+    assert(empty.characters == 0 && clipboard == "")
+}
+
+#Test("save-dialog headless cancellation and wrong-kind rejection match open precedence") {
+    grant := host.fs_grant("/root", host.fs_rights_read_write(), .Unix) ?? panic("grant")
+    request :: host.save_request(^grant)
+    if host.headless_save_file(host.capabilities_all(), request) == {
+        .Ok(_) -> panic("headless save unexpectedly completed")
+        .Err(error) -> if error == { .Cancelled(reason) -> assert(reason == .Headless), else -> panic("save cancellation collapsed") }
+    }
+    grant2 := host.fs_grant("/root", host.fs_rights_read(), .Unix) ?? panic("grant")
+    opened :: host.open_request(^grant2)
+    if host.headless_save_file(host.capabilities_all(), opened) == {
+        .Ok(_) -> panic("open request accepted by save")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "save_file requires a save dialog request"), else -> panic("save kind check changed") }
+    }
+    read_only := host.save_request(host.fs_grant("/root", host.fs_rights_read(), .Unix) ?? panic("grant"))
+    if host.validate_request(read_only) == {
+        .Ok(_) -> panic("read-only save accepted")
+        .Err(error) -> if error == { .ResourceDenied(message) -> assert(message == "dialog Save requires Write access"), else -> panic("save rights changed") }
+    }
+}
+
+#Test("denied polls do not consume queued events and denied clipboard read stays typed") {
+    events := Queue.new<ime.UIIMEEvent>()
+    host.queue_ime_event(host.capabilities_all(), &events, host.ime_cancel(host.node_id("retained") ?? panic("node"))) ?? panic("queue")
+    if host.poll_ime_event(host.capabilities_empty(), &events) == {
+        .Ok(_) -> panic("ungranted poll accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .IME), else -> panic("wrong poll error") }
+    }
+    assert(events.len() == 1)
+    restored :: (host.poll_ime_event(host.capabilities_all(), &events) ?? panic("restored poll")) ?? panic("event was consumed on denial")
+    assert(restored.target.value == "retained")
+    if host.headless_read_clipboard(host.capabilities_empty(), "secret") == {
+        .Ok(_) -> panic("ungranted clipboard read accepted")
+        .Err(error) -> if error == { .CapabilityDenied(capability) -> assert(capability == .Clipboard), else -> panic("wrong read error") }
+    }
+}
+
+#Test("portable constructors preserve whitespace and exact modifier bits") {
+    assert(host.modifiers_control().bits == (U8{1}))
+    assert(host.modifiers_alt().bits == (U8{2}))
+    assert(host.modifiers_shift().bits == (U8{4}))
+    assert(host.modifiers_none().bits == (U8{0}))
+    _ :: host.file_filter(" ", [String]{" "}, [String]{" "}) ?? panic("whitespace filter refused")
+    if host.accessibility_new(None, Val("")) == {
+        .Ok(_) -> panic("present empty description accepted")
+        .Err(error) -> if error == { .InvalidRequest(message) -> assert(message == "accessibility name and description must not be empty"), else -> panic("wrong description error") }
+    }
+}

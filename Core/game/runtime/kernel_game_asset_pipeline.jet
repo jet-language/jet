@@ -1,0 +1,1097 @@
+// GameAssetPipeline.rs:1-2351. Pure declared-root/import/reload facts: no host scan
+// or importer. Publication belongs to Main; this private kernel is not a new API.
+// #4499: coalescing/graph use real typed map keys, never encoded key substitutes.
+// #4494/#4500: Rust :1808-2245 Store/ReloadTransaction require ONE shared native
+// Arc<RwLock<State>> owner, poison-recovering borrowed guards, atomic publication
+// and cleanup. No equivalent canonical provider is published: no stubs here.
+// #4392: text.utf8_bytes is the sole borrowed-byte seam; its current bootstrap
+// materialization is NOT allocation parity for Rust's borrowed str/as_bytes.
+use core.text.runtime.kernel_unicode_string as asset_text
+use core.crypto.runtime.kernel_sha256 as asset_sha256
+
+pub JET_GAME_ASSET_MAX_ROOTS :: 64
+pub JET_GAME_ASSET_MAX_PATH_BYTES :: 4096
+pub JET_GAME_ASSET_MAX_ID_BYTES :: 256
+pub JET_GAME_ASSET_MAX_METADATA_BYTES :: 4096
+pub JET_GAME_ASSET_MAX_DEPENDENCIES :: 256
+pub JET_GAME_ASSET_MAX_EVENTS :: 1024
+pub JET_GAME_ASSET_MAX_SKIPPED :: 4096
+pub JET_GAME_ASSET_MAX_DIAGNOSTICS :: 64
+pub JET_GAME_ASSET_MAX_OUTPUTS :: 64
+pub JET_GAME_ASSET_MAX_TRANSACTION_ITEMS :: 128
+pub JET_GAME_ASSET_MAX_READY_ARTIFACTS :: 4096
+
+// Rust :24-129. Payloads remain typed, including otherwise-unused variants.
+#Error
+pub enum JetGameAssetPipelineError {
+    EmptyIdentity(field: String)
+    IdentityTooLong(field: String)
+    ControlIdentity(field: String)
+    InvalidPath(path: String)
+    PathEscape(path: String)
+    UndeclaredPath(path: String)
+    DuplicateRoot(value: String)
+    RootNotDeclared(id: String)
+    RootMismatch(expected: String, actual: String)
+    TooManyRoots
+    TooManyDependencies
+    TooManyEvents
+    TooManyDiagnostics
+    TooManyOutputs
+    TooManyTransactionItems
+    EmptyHash(field: String)
+    DuplicateDependency(dependency: String)
+    DependencyCycle(chain: [String])
+    MissingArtifact(source: String)
+    ArtifactMismatch(field: String)
+    OutcomeSourceMismatch
+    OutcomeDependencyMismatch
+    FailedImportWithoutDiagnostic
+    TransactionClosed
+    StaleTransaction(expected: U64, actual: U64)
+    RejectedTransaction(reason: String)
+    ReadyArtifactLimit
+}
+impl JetGameAssetPipelineError {
+    pub fn text(self) -> String Never! {
+        if self == {
+            .EmptyIdentity(field) -> return "game asset {field} must not be empty"
+            .IdentityTooLong(field) -> return "game asset {field} exceeds the Prelude identity limit"
+            .ControlIdentity(field) -> return "game asset {field} contains a control character"
+            .InvalidPath(path) -> return "invalid game asset path `{path}`"
+            .PathEscape(path) -> return "game asset path escapes its declared root: `{path}`"
+            .UndeclaredPath(path) -> return "game asset path is not under a declared root: `{path}`"
+            .DuplicateRoot(value) -> return "game asset root `{value}` is declared more than once"
+            .RootNotDeclared(id) -> return "game asset root `{id}` is not declared"
+            .RootMismatch(expected, actual) -> return "game asset root mismatch: expected `{expected}`, got `{actual}`"
+            .TooManyRoots -> return "game asset root limit exceeded"
+            .TooManyDependencies -> return "game asset dependency limit exceeded"
+            .TooManyEvents -> return "game asset watch event limit exceeded"
+            .TooManyDiagnostics -> return "game asset diagnostic limit exceeded"
+            .TooManyOutputs -> return "game asset output limit exceeded"
+            .TooManyTransactionItems -> return "game asset reload transaction limit exceeded"
+            .EmptyHash(field) -> return "game asset {field} hash must not be empty"
+            .DuplicateDependency(dependency) -> return "game asset dependency `{dependency}` is duplicated"
+            .DependencyCycle(chain) -> return "game asset dependency cycle: {chain.join(" -> ")}"
+            .MissingArtifact(source) -> return "game asset import returned no artifact for `{source}`"
+            .ArtifactMismatch(field) -> return "game asset artifact does not match plan {field}"
+            .OutcomeSourceMismatch -> return "game asset import outcome source does not match plan"
+            .OutcomeDependencyMismatch -> return "game asset import outcome dependencies do not match plan"
+            .FailedImportWithoutDiagnostic -> return "failed game asset import has no source-linked diagnostic"
+            .TransactionClosed -> return "game asset reload transaction is closed"
+            .StaleTransaction(expected, actual) -> return "stale game asset reload transaction: expected revision {expected}, current revision {actual}"
+            .RejectedTransaction(reason) -> return "game asset reload transaction rejected: {reason}"
+            .ReadyArtifactLimit -> return "ready game asset artifact limit exceeded"
+        }
+    }
+}
+
+fn has_control(value: String) -> Bool Never! { !asset_text.isprintable(value) }
+// :131-177. Trim precedes size and Cc rejection; metadata is NOT trimmed.
+pub fn jet_game_asset_text(value: String, field: String) -> String JetGameAssetPipelineError! {
+    trimmed := value.trim() // #4303
+    if trimmed.is_empty() -> return Err(.EmptyIdentity(field))
+    if trimmed.count_bytes() > JET_GAME_ASSET_MAX_ID_BYTES -> return Err(.IdentityTooLong(field))
+    if has_control(trimmed) -> return Err(.ControlIdentity(field))
+    trimmed
+}
+pub fn jet_game_asset_metadata(value: String) -> String JetGameAssetPipelineError! {
+    if value.count_bytes() > JET_GAME_ASSET_MAX_METADATA_BYTES -> return Err(.IdentityTooLong("runtime metadata"))
+    if has_control(value) -> return Err(.ControlIdentity("runtime metadata"))
+    value
+}
+fn jet_game_asset_path_text(value: String) -> String JetGameAssetPipelineError! {
+    trimmed := value.trim() // #4303
+    if trimmed.is_empty() -> return Err(.InvalidPath(value))
+    if trimmed.count_bytes() > JET_GAME_ASSET_MAX_PATH_BYTES -> return Err(.IdentityTooLong("path"))
+    if has_control(trimmed) -> return Err(.ControlIdentity("path"))
+    trimmed.replace("\\", "/")
+}
+fn drive_prefix(path: String) -> Bool Never! {
+    if path.count_bytes() < 3 -> return false
+    first := path.slice(0, 1) // #4303
+    tail := path.slice(1, 3) // #4303
+    first.count_bytes() == 1 && tail == ":/"
+}
+// :182-254. Components are views; one stack and one final join, no loop concat.
+pub fn jet_game_asset_normalize_path(value: String) -> String JetGameAssetPipelineError! {
+    path := jet_game_asset_path_text(value) ?? return Err(err)
+    absolute :: path.starts_with("/")
+    drive :: drive_prefix(path)
+    prefix_len :: if absolute -> 1 else -> if drive -> 3 else -> 0
+    prefix := path.slice(0, prefix_len) // #4303
+    suffix := path.slice(prefix_len, path.len()) // #4303: slice counts scalars.
+    components := [String]{}
+    loop component in suffix.split("/") {
+        if component == "" || component == "." -> next
+        if component == ".." {
+            if components.is_empty() -> return Err(.PathEscape(value))
+            _ :: &components.pop()
+        } else {
+            &components.push(component)
+        }
+    }
+    if components.is_empty() {
+        if absolute || drive -> return prefix
+        return "."
+    }
+    "{prefix}{components.join("/")}"
+}
+pub fn jet_game_asset_normalize_logical_path(value: String) -> String JetGameAssetPipelineError! {
+    path := jet_game_asset_path_text(value) ?? return Err(err)
+    if path.starts_with("/") || drive_prefix(path) -> return Err(.InvalidPath(value))
+    components := [String]{}
+    loop component in path.split("/") {
+        if component == "" || component == "." -> next
+        if component == ".." {
+            if components.is_empty() -> return Err(.PathEscape(value))
+            _ :: &components.pop()
+        } else {
+            &components.push(component)
+        }
+    }
+    if components.is_empty() -> return Err(.InvalidPath(value))
+    components.join("/")
+}
+pub fn jet_game_asset_relative_path(root: String, path: String) -> String? Never! {
+    if root == "." {
+        if path.starts_with("/") || drive_prefix(path) || path == "." -> return None
+        return Val(path)
+    }
+    if root == "/" {
+        if !path.starts_with("/") || path.count_bytes() <= 1 -> return None
+        relative := path.slice(1, path.len()) // #4303
+        return Val(relative)
+    }
+    prefix :: "{root}/"
+    if !path.starts_with(prefix) || path.count_bytes() == prefix.count_bytes() -> return None
+    relative := path.slice(prefix.len(), path.len()) // #4303
+    Val(relative)
+}
+pub fn jet_game_asset_path_key(root: String, logical_path: String) -> String Never! {
+    "{root.count_bytes()}:{root}:{logical_path}"
+}
+fn append_text(out: &[U8], value: String) Never! {
+    loop byte in asset_text.utf8_bytes(value) -> &out.push(byte)
+}
+// :278-296. This wire law differs from general JSON: Cc includes DEL and C1,
+// and backspace/formfeed use lowercase \\u0008/\\u000c, never \\b/\\f.
+pub fn jet_game_asset_json_string(value: String) -> String Never! {
+    raw :: asset_text.utf8_bytes(value)
+    out := [U8]{U8{34}}
+    at := 0
+    loop at < raw.len() {
+        cp :: asset_text.scalar_at(raw, at)
+        width :: asset_text.utf8_width_at(raw, at)
+        if cp == 34 {
+            append_text(&out, "\\\"")
+        } else if cp == 92 {
+            append_text(&out, "\\\\")
+        } else if cp == 10 {
+            append_text(&out, "\\n")
+        } else if cp == 13 {
+            append_text(&out, "\\r")
+        } else if cp == 9 {
+            append_text(&out, "\\t")
+        } else if cp < 32 || (cp >= 127 && cp <= 159) {
+            append_text(&out, "\\u00")
+            &out.push(hex_digit(cp >> 4))
+            &out.push(hex_digit(cp & 15))
+        } else {
+            loop i in at..<(at + width) -> &out.push(raw[i])
+        }
+        at += width
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? panic("game asset JSON emitted invalid UTF-8")
+}
+fn hex_digit(n: Int) -> U8 Never! { if n < 10 -> U8{48 + n} else -> U8{87 + n} }
+// :2247-2351 reuses the sole Core SHA-256 implementation, not a second digest.
+pub fn jet_game_asset_hash_bytes(bytes: [U8]) -> String Never! {
+    digest :: asset_sha256.sha256_bytes(bytes)
+    out := [U8]{}
+    append_text(&out, "sha256-")
+    loop byte in digest {
+        n :: Int.from_u8(byte)
+        &out.push(hex_digit(n >> 4))
+        &out.push(hex_digit(n & 15))
+    }
+    String.from_bytes(out) ?? panic("game asset hash emitted invalid UTF-8")
+}
+
+pub struct JetGameAssetRootIdentity {
+    pub id: String
+    pub path: String
+}
+impl JetGameAssetRootIdentity {
+    pub fn new(id: String, path: String) -> JetGameAssetRootIdentity JetGameAssetPipelineError! {
+        normalized_id :: jet_game_asset_text(id, "root id") ?? return Err(err)
+        normalized_path :: jet_game_asset_normalize_path(path) ?? return Err(err)
+        {id: normalized_id, path: normalized_path}
+    }
+    pub fn validate(self) JetGameAssetPipelineError! {
+        expected :: JetGameAssetRootIdentity.new(self.id, self.path) ?? return Err(err)
+        if self != expected -> return Err(.InvalidPath(self.path))
+    }
+    pub fn render_json(self) -> String Never! { "{{\"id\":{jet_game_asset_json_string(self.id)},\"path\":{jet_game_asset_json_string(self.path)}}}" }
+}
+fn root_order(left: JetGameAssetRootIdentity, right: JetGameAssetRootIdentity) -> Ordering Never! {
+    order :: left.id <=> right.id
+    if order != Ordering.Equal -> return order
+    left.path <=> right.path
+}
+pub struct JetGameAssetRootSet { roots_value: [JetGameAssetRootIdentity] }
+impl JetGameAssetRootSet {
+    pub fn new(roots: [JetGameAssetRootIdentity]) -> JetGameAssetRootSet JetGameAssetPipelineError! {
+        set := JetGameAssetRootSet{roots_value: [JetGameAssetRootIdentity]{}}
+        loop root in roots -> &set.declare(root) ?? return Err(err)
+        set
+    }
+    pub fn declare(&self, root: JetGameAssetRootIdentity) JetGameAssetPipelineError! {
+        root.validate() ?? return Err(err)
+        if self.roots_value.len() >= JET_GAME_ASSET_MAX_ROOTS -> return Err(.TooManyRoots)
+        loop current in self.roots_value {
+            if current.id == root.id || current.path == root.path -> return Err(.DuplicateRoot(root.id))
+        }
+        &self.roots_value.push(root)
+        &self.roots_value.sort_by((a: JetGameAssetRootIdentity, b: JetGameAssetRootIdentity) -> root_order(a, b))
+    }
+    pub fn roots(self) -> [JetGameAssetRootIdentity] Never! { self.roots_value }
+    pub fn root(self, id: String) -> JetGameAssetRootIdentity? Never! {
+        loop root in self.roots_value -> if root.id == id -> return Val(root)
+        None
+    }
+    pub fn resolve(self, path: String) -> JetGameAssetResolvedPath JetGameAssetPipelineError! {
+        normalized :: jet_game_asset_normalize_path(path) ?? return Err(err)
+        best := JetGameAssetResolvedPath?{None}
+        depth := -1
+        // Rust sorts all matches; selecting its minimum retains its exact tie
+        // rule while avoiding match-table copies and an unnecessary sort.
+        loop root in self.roots_value {
+            relative :: jet_game_asset_relative_path(root.path, normalized) ?? next
+            current_depth :: root.path.split("/").len()
+            take := current_depth > depth
+            if current_depth == depth {
+                if best == .Val(previous) -> take = root.id < previous.root.id
+            }
+            if take {
+                best = Val(JetGameAssetResolvedPath{root: root, logical_path: relative})
+                depth = current_depth
+            }
+        }
+        best ?? return Err(.UndeclaredPath(path))
+    }
+    pub fn contains_root(self, root: JetGameAssetRootIdentity) -> Bool Never! {
+        loop declared in self.roots_value -> if declared == root -> return true
+        false
+    }
+    pub fn render_json(self) -> String Never! {
+        rows := [String]{}
+        loop root in self.roots_value -> &rows.push(root.render_json())
+        "[{rows.join(",")}]"
+    }
+}
+pub struct JetGameAssetResolvedPath {
+    pub root: JetGameAssetRootIdentity
+    pub logical_path: String
+}
+impl JetGameAssetResolvedPath {
+    pub fn node(self) -> JetGameAssetNodeIdentity Never! { {root_id: self.root.id, logical_path: self.logical_path} }
+}
+pub struct JetGameAssetSourceIdentity {
+    pub root: JetGameAssetRootIdentity
+    pub logical_path: String
+    pub content_hash: String
+}
+impl JetGameAssetSourceIdentity {
+    pub fn new(root: JetGameAssetRootIdentity, logical_path: String, content_hash: String) -> JetGameAssetSourceIdentity JetGameAssetPipelineError! {
+        root.validate() ?? return Err(err)
+        path :: jet_game_asset_normalize_logical_path(logical_path) ?? return Err(err)
+        hash :: jet_game_asset_text(content_hash, "source hash") ?? return Err(err)
+        {root: root, logical_path: path, content_hash: hash}
+    }
+    pub fn from_bytes(root: JetGameAssetRootIdentity, logical_path: String, bytes: [U8]) -> JetGameAssetSourceIdentity JetGameAssetPipelineError! {
+        JetGameAssetSourceIdentity.new(root, logical_path, jet_game_asset_hash_bytes(bytes))
+    }
+    pub fn node(self) -> JetGameAssetNodeIdentity Never! { {root_id: self.root.id, logical_path: self.logical_path} }
+    pub fn absolute_path(self) -> String Never! {
+        if self.root.path == "." -> return self.logical_path
+        if self.root.path == "/" -> return "/{self.logical_path}"
+        "{self.root.path}/{self.logical_path}"
+    }
+    pub fn render_json(self) -> String Never! { "{{\"root\":{self.root.render_json()},\"logical_path\":{jet_game_asset_json_string(self.logical_path)},\"content_hash\":{jet_game_asset_json_string(self.content_hash)}}}" }
+}
+pub struct JetGameAssetNodeIdentity {
+    pub root_id: String
+    pub logical_path: String
+}
+impl JetGameAssetNodeIdentity {
+    pub fn new(root_id: String, logical_path: String) -> JetGameAssetNodeIdentity JetGameAssetPipelineError! {
+        root :: jet_game_asset_text(root_id, "root id") ?? return Err(err)
+        path :: jet_game_asset_normalize_logical_path(logical_path) ?? return Err(err)
+        {root_id: root, logical_path: path}
+    }
+    pub fn from_source(source: JetGameAssetSourceIdentity) -> JetGameAssetNodeIdentity Never! { source.node() }
+    pub fn key(self) -> String Never! { jet_game_asset_path_key(self.root_id, self.logical_path) }
+    pub fn render_json(self) -> String Never! { "{{\"root_id\":{jet_game_asset_json_string(self.root_id)},\"logical_path\":{jet_game_asset_json_string(self.logical_path)}}}" }
+}
+fn node_order(left: JetGameAssetNodeIdentity, right: JetGameAssetNodeIdentity) -> Ordering Never! {
+    order :: left.root_id <=> right.root_id
+    if order != Ordering.Equal -> return order
+    left.logical_path <=> right.logical_path
+}
+pub struct JetGameAssetDependencyIdentity {
+    pub root_id: String
+    pub logical_path: String
+}
+impl JetGameAssetDependencyIdentity {
+    pub fn new(root_id: String, logical_path: String) -> JetGameAssetDependencyIdentity JetGameAssetPipelineError! {
+        root :: jet_game_asset_text(root_id, "dependency root id") ?? return Err(err)
+        path :: jet_game_asset_normalize_logical_path(logical_path) ?? return Err(err)
+        {root_id: root, logical_path: path}
+    }
+    pub fn from_root(root: JetGameAssetRootIdentity, logical_path: String) -> JetGameAssetDependencyIdentity JetGameAssetPipelineError! { JetGameAssetDependencyIdentity.new(root.id, logical_path) }
+    pub fn node(self) -> JetGameAssetNodeIdentity Never! { {root_id: self.root_id, logical_path: self.logical_path} }
+    pub fn key(self) -> String Never! { jet_game_asset_path_key(self.root_id, self.logical_path) }
+    pub fn render_json(self) -> String Never! { "{{\"root_id\":{jet_game_asset_json_string(self.root_id)},\"logical_path\":{jet_game_asset_json_string(self.logical_path)}}}" }
+}
+pub struct JetGameAssetRecipeIdentity {
+    pub name: String
+    pub version: String
+}
+impl JetGameAssetRecipeIdentity {
+    pub fn new(name: String, version: String) -> JetGameAssetRecipeIdentity JetGameAssetPipelineError! {
+        n :: jet_game_asset_text(name, "recipe name") ?? return Err(err)
+        v :: jet_game_asset_text(version, "recipe version") ?? return Err(err)
+        {name: n, version: v}
+    }
+    pub fn render_json(self) -> String Never! { "{{\"name\":{jet_game_asset_json_string(self.name)},\"version\":{jet_game_asset_json_string(self.version)}}}" }
+}
+pub struct JetGameAssetToolIdentity {
+    pub name: String
+    pub version: String
+}
+impl JetGameAssetToolIdentity {
+    pub fn new(name: String, version: String) -> JetGameAssetToolIdentity JetGameAssetPipelineError! {
+        n :: jet_game_asset_text(name, "tool name") ?? return Err(err)
+        v :: jet_game_asset_text(version, "tool version") ?? return Err(err)
+        {name: n, version: v}
+    }
+    pub fn render_json(self) -> String Never! { "{{\"name\":{jet_game_asset_json_string(self.name)},\"version\":{jet_game_asset_json_string(self.version)}}}" }
+}
+pub struct JetGameAssetVersionIdentity { pub value: String }
+impl JetGameAssetVersionIdentity {
+    pub fn new(value: String) -> JetGameAssetVersionIdentity JetGameAssetPipelineError! {
+        v :: jet_game_asset_text(value, "version") ?? return Err(err)
+        {value: v}
+    }
+    pub fn numeric(value: U64) -> JetGameAssetVersionIdentity Never! { {value: "{value}"} }
+    pub fn render_json(self) -> String Never! { jet_game_asset_json_string(self.value) }
+}
+
+pub enum JetGameAssetWatchEventKind {
+    Created
+    Changed
+    Deleted
+}
+impl JetGameAssetWatchEventKind {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Created -> return "created"
+            .Changed -> return "changed"
+            .Deleted -> return "deleted"
+        }
+    }
+}
+pub struct JetGameAssetWatchEvent {
+    pub root: JetGameAssetRootIdentity
+    pub logical_path: String
+    pub kind: JetGameAssetWatchEventKind
+}
+impl JetGameAssetWatchEvent {
+    pub fn new(root: JetGameAssetRootIdentity, logical_path: String, kind: JetGameAssetWatchEventKind) -> JetGameAssetWatchEvent JetGameAssetPipelineError! {
+        root.validate() ?? return Err(err)
+        path :: jet_game_asset_normalize_logical_path(logical_path) ?? return Err(err)
+        {root: root, logical_path: path, kind: kind}
+    }
+    pub fn from_path(roots: JetGameAssetRootSet, path: String, kind: JetGameAssetWatchEventKind) -> JetGameAssetWatchEvent JetGameAssetPipelineError! {
+        resolved :: roots.resolve(path) ?? return Err(err)
+        JetGameAssetWatchEvent.new(resolved.root, resolved.logical_path, kind)
+    }
+    pub fn node(self) -> JetGameAssetNodeIdentity Never! { {root_id: self.root.id, logical_path: self.logical_path} }
+    pub fn render_json(self) -> String Never! { "{{\"root\":{self.root.render_json()},\"logical_path\":{jet_game_asset_json_string(self.logical_path)},\"kind\":{jet_game_asset_json_string(self.kind.as_str())}}}" }
+}
+pub fn jet_game_asset_net_event_kind(first: JetGameAssetWatchEventKind, last: JetGameAssetWatchEventKind) -> JetGameAssetWatchEventKind? Never! {
+    if first == .Created && last == .Deleted -> return None
+    if first == .Deleted && last == .Created -> return Val(.Changed)
+    if first == .Created -> return Val(.Created)
+    if last == .Deleted -> return Val(.Deleted)
+    Val(.Changed)
+}
+fn unique_nodes(values: ^[JetGameAssetNodeIdentity]) -> [JetGameAssetNodeIdentity] Never! {
+    out := ^values
+    &out.sort_by((a: JetGameAssetNodeIdentity, b: JetGameAssetNodeIdentity) -> node_order(a, b))
+    write := 0
+    loop read in 0..<out.len() {
+        if write == 0 || out[read] != out[write - 1] {
+            if read != write -> out[write] = ~out[read]
+            write += 1
+        }
+    }
+    loop out.len() > write -> _ :: &out.pop()
+    out
+}
+fn unique_dependencies(values: ^[JetGameAssetDependencyIdentity]) -> [JetGameAssetDependencyIdentity] Never! {
+    out := ^values
+    &out.sort_by((a: JetGameAssetDependencyIdentity, b: JetGameAssetDependencyIdentity) -> dependency_order(a, b))
+    write := 0
+    loop read in 0..<out.len() {
+        if write == 0 || out[read] != out[write - 1] {
+            if read != write -> out[write] = ~out[read]
+            write += 1
+        }
+    }
+    loop out.len() > write -> _ :: &out.pop()
+    out
+}
+fn nodes_json(values: [JetGameAssetNodeIdentity]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push(value.render_json())
+    rows.join(",")
+}
+fn dependencies_json(values: [JetGameAssetDependencyIdentity]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push(value.render_json())
+    rows.join(",")
+}
+pub struct JetGameAssetWatchFacts {
+    pub events: [JetGameAssetWatchEvent]
+    pub created: [JetGameAssetNodeIdentity]
+    pub changed: [JetGameAssetNodeIdentity]
+    pub deleted: [JetGameAssetNodeIdentity]
+    pub skipped_count: Int
+}
+impl JetGameAssetWatchFacts {
+    pub fn imported_nodes(self) -> [JetGameAssetNodeIdentity] Never! {
+        nodes := ~self.created
+        loop node in self.changed -> &nodes.push(~node)
+        unique_nodes(^nodes)
+    }
+    pub fn render_json(self) -> String Never! {
+        events := [String]{}
+        loop event in self.events -> &events.push(event.render_json())
+        "{{\"events\":[{events.join(",")}],\"created\":[{nodes_json(self.created)}],\"changed\":[{nodes_json(self.changed)}],\"deleted\":[{nodes_json(self.deleted)}],\"skipped_count\":{self.skipped_count}}}"
+    }
+}
+
+// :1073-1221. Lengths in cache material are UTF-8 byte counts, not scalars.
+pub struct JetGameAssetImportPlan {
+    pub source: JetGameAssetSourceIdentity
+    pub recipe: JetGameAssetRecipeIdentity
+    pub tool: JetGameAssetToolIdentity
+    pub version: JetGameAssetVersionIdentity
+    pub dependencies: [JetGameAssetDependencyIdentity]
+    pub cache_key: String
+}
+impl JetGameAssetImportPlan {
+    pub fn new(source: JetGameAssetSourceIdentity, recipe: JetGameAssetRecipeIdentity, tool: JetGameAssetToolIdentity, version: JetGameAssetVersionIdentity) -> JetGameAssetImportPlan JetGameAssetPipelineError! {
+        plan := JetGameAssetImportPlan{source: source, recipe: recipe, tool: tool, version: version, dependencies: [JetGameAssetDependencyIdentity]{}, cache_key: ""}
+        plan.cache_key = plan.compute_cache_key()
+        plan.validate() ?? return Err(err)
+        plan
+    }
+    pub fn from_source(source: JetGameAssetSourceIdentity, recipe: JetGameAssetRecipeIdentity, tool: JetGameAssetToolIdentity, version: JetGameAssetVersionIdentity) -> JetGameAssetImportPlan JetGameAssetPipelineError! {
+        JetGameAssetImportPlan.new(source, recipe, tool, version)
+    }
+    pub fn with_dependencies(^self, dependencies: ^[JetGameAssetDependencyIdentity]) -> JetGameAssetImportPlan JetGameAssetPipelineError! {
+        plan := ^self
+        plan.dependencies = jet_game_asset_normalize_dependency_list(^dependencies) ?? return Err(err)
+        plan.cache_key = plan.compute_cache_key()
+        plan.validate() ?? return Err(err)
+        plan
+    }
+    pub fn compute_cache_key(self) -> String Never! {
+        jet_game_asset_import_cache_key(self.source.content_hash, self.recipe, self.tool, self.version, self.dependencies)
+    }
+    pub fn validate(self) JetGameAssetPipelineError! {
+        self.source.root.validate() ?? return Err(err)
+        _ :: jet_game_asset_normalize_logical_path(self.source.logical_path) ?? return Err(err)
+        hash := self.source.content_hash.trim() // #4303
+        if hash.is_empty() -> return Err(.EmptyHash("source"))
+        if self.dependencies.len() > JET_GAME_ASSET_MAX_DEPENDENCIES -> return Err(.TooManyDependencies)
+        if self.cache_key != self.compute_cache_key() -> return Err(.ArtifactMismatch("cache key"))
+    }
+    pub fn node(self) -> JetGameAssetNodeIdentity Never! { self.source.node() }
+    pub fn render_json(self) -> String Never! { "{{\"source\":{self.source.render_json()},\"recipe\":{self.recipe.render_json()},\"tool\":{self.tool.render_json()},\"version\":{self.version.render_json()},\"dependencies\":[{dependencies_json(self.dependencies)}],\"cache_key\":{jet_game_asset_json_string(self.cache_key)}}}" }
+}
+pub fn jet_game_asset_normalize_dependency_list(dependencies: ^[JetGameAssetDependencyIdentity]) -> [JetGameAssetDependencyIdentity] JetGameAssetPipelineError! {
+    normalized := ^dependencies
+    if normalized.len() > JET_GAME_ASSET_MAX_DEPENDENCIES -> return Err(.TooManyDependencies)
+    loop i in 0..<normalized.len() {
+        normalized[i].root_id = jet_game_asset_text(normalized[i].root_id, "dependency root id") ?? return Err(err)
+        normalized[i].logical_path = jet_game_asset_normalize_logical_path(normalized[i].logical_path) ?? return Err(err)
+    }
+    unique_dependencies(^normalized)
+}
+fn jet_game_asset_cache_component(value: String, output: &[U8]) Never! {
+    append_text(&output, "{value.count_bytes()}:")
+    append_text(&output, value)
+    &output.push(U8{59})
+}
+pub fn jet_game_asset_import_cache_key(source_hash: String, recipe: JetGameAssetRecipeIdentity, tool: JetGameAssetToolIdentity, version: JetGameAssetVersionIdentity, dependencies: [JetGameAssetDependencyIdentity]) -> String Never! {
+    material := [U8]{}
+    append_text(&material, "jet-game-asset-cache-v1;")
+    jet_game_asset_cache_component(source_hash, &material)
+    jet_game_asset_cache_component(recipe.name, &material)
+    jet_game_asset_cache_component(recipe.version, &material)
+    jet_game_asset_cache_component(tool.name, &material)
+    jet_game_asset_cache_component(tool.version, &material)
+    jet_game_asset_cache_component(version.value, &material)
+    // Preserve caller order/ownership. Sort indices, not whole identities.
+    indices := [Int]{}
+    loop i in 0..<dependencies.len() -> &indices.push(i)
+    &indices.sort_by((a: Int, b: Int) -> dependency_order(dependencies[a], dependencies[b]))
+    previous := -1
+    loop i in indices {
+        if previous >= 0 && dependencies[i] == dependencies[previous] -> next
+        jet_game_asset_cache_component(dependencies[i].root_id, &material)
+        jet_game_asset_cache_component(dependencies[i].logical_path, &material)
+        previous = i
+    }
+    jet_game_asset_hash_bytes(material)
+}
+
+pub enum JetGameAssetImportStatus {
+    Ready
+    Failed
+}
+impl JetGameAssetImportStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Ready -> return "ready"
+            .Failed -> return "failed"
+        }
+    }
+}
+pub enum JetGameAssetDiagnosticSeverity {
+    Info
+    Warning
+    Error
+}
+impl JetGameAssetDiagnosticSeverity {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Info -> return "info"
+            .Warning -> return "warning"
+            .Error -> return "error"
+        }
+    }
+}
+pub struct JetGameAssetImportDiagnostic {
+    pub severity: JetGameAssetDiagnosticSeverity
+    pub code: String
+    pub message: String
+    pub source: JetGameAssetSourceIdentity
+    pub dependency: JetGameAssetDependencyIdentity?
+}
+impl JetGameAssetImportDiagnostic {
+    pub fn new(severity: JetGameAssetDiagnosticSeverity, source: JetGameAssetSourceIdentity, code: String, message: String) -> JetGameAssetImportDiagnostic JetGameAssetPipelineError! {
+        c :: jet_game_asset_text(code, "diagnostic code") ?? return Err(err)
+        m :: jet_game_asset_text(message, "diagnostic message") ?? return Err(err)
+        {severity: severity, source: source, code: c, message: m, dependency: None}
+    }
+    pub fn error(source: JetGameAssetSourceIdentity, code: String, message: String) -> JetGameAssetImportDiagnostic JetGameAssetPipelineError! {
+        JetGameAssetImportDiagnostic.new(.Error, source, code, message)
+    }
+    pub fn with_dependency(^self, dependency: JetGameAssetDependencyIdentity) -> JetGameAssetImportDiagnostic JetGameAssetPipelineError! {
+        diagnostic := ^self
+        diagnostic.dependency = Val(dependency)
+        diagnostic
+    }
+    pub fn render_json(self) -> String Never! {
+        dependency := "null"
+        if self.dependency == .Val(value) -> dependency = value.render_json()
+        "{{\"severity\":{jet_game_asset_json_string(self.severity.as_str())},\"code\":{jet_game_asset_json_string(self.code)},\"message\":{jet_game_asset_json_string(self.message)},\"source\":{self.source.render_json()},\"dependency\":{dependency}}}"
+    }
+}
+fn diagnostics_json(values: [JetGameAssetImportDiagnostic]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push(value.render_json())
+    rows.join(",")
+}
+pub struct JetGameAssetArtifactIdentity {
+    pub cache_key: String
+    pub source: JetGameAssetSourceIdentity
+    pub recipe: JetGameAssetRecipeIdentity
+    pub tool: JetGameAssetToolIdentity
+    pub version: JetGameAssetVersionIdentity
+    pub output_hash: String
+}
+impl JetGameAssetArtifactIdentity {
+    pub fn new(plan: JetGameAssetImportPlan, output_hash: String) -> JetGameAssetArtifactIdentity JetGameAssetPipelineError! {
+        plan.validate() ?? return Err(err)
+        hash :: jet_game_asset_text(output_hash, "output hash") ?? return Err(err)
+        {cache_key: ~plan.cache_key, source: ~plan.source, recipe: ~plan.recipe, tool: ~plan.tool, version: ~plan.version, output_hash: hash}
+    }
+    pub fn compatible_with(self, plan: JetGameAssetImportPlan) JetGameAssetPipelineError! {
+        if self.cache_key != plan.cache_key -> return Err(.ArtifactMismatch("cache key"))
+        if self.source != plan.source -> return Err(.ArtifactMismatch("source"))
+        if self.recipe != plan.recipe -> return Err(.ArtifactMismatch("recipe"))
+        if self.tool != plan.tool -> return Err(.ArtifactMismatch("tool"))
+        if self.version != plan.version -> return Err(.ArtifactMismatch("version"))
+    }
+    pub fn render_json(self) -> String Never! {
+        "{{\"cache_key\":{jet_game_asset_json_string(self.cache_key)},\"source\":{self.source.render_json()},\"recipe\":{self.recipe.render_json()},\"tool\":{self.tool.render_json()},\"version\":{self.version.render_json()},\"output_hash\":{jet_game_asset_json_string(self.output_hash)}}}"
+    }
+}
+fn artifacts_json(values: [JetGameAssetArtifactIdentity]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push(value.render_json())
+    rows.join(",")
+}
+pub struct JetGameAssetRuntimeFact {
+    pub artifact: JetGameAssetArtifactIdentity
+    pub bytes: [U8]
+    pub metadata: String
+}
+impl JetGameAssetRuntimeFact {
+    pub fn new(artifact: JetGameAssetArtifactIdentity, bytes: ^[U8], metadata: String) -> JetGameAssetRuntimeFact JetGameAssetPipelineError! {
+        meta :: jet_game_asset_metadata(metadata) ?? return Err(err)
+        {artifact: artifact, bytes: ^bytes, metadata: meta}
+    }
+    pub fn from_ready(plan: JetGameAssetImportPlan, outcome: JetGameAssetImportOutcome, bytes: ^[U8], metadata: String) -> JetGameAssetRuntimeFact JetGameAssetPipelineError! {
+        outcome.validate_against(plan) ?? return Err(err)
+        artifact :: outcome.artifact() ?? return Err(.MissingArtifact(plan.source.logical_path))
+        JetGameAssetRuntimeFact.new(~artifact, ^bytes, metadata)
+    }
+    pub fn validate_against(self, plan: JetGameAssetImportPlan, outcome: JetGameAssetImportOutcome) JetGameAssetPipelineError! {
+        outcome.validate_against(plan) ?? return Err(err)
+        self.artifact.compatible_with(plan) ?? return Err(err)
+        _ :: jet_game_asset_metadata(self.metadata) ?? return Err(err)
+        if outcome.artifact() != Val(self.artifact) -> return Err(.ArtifactMismatch("runtime fact"))
+    }
+    pub fn byte_len(self) -> U64 Never! { U64{self.bytes.len()} }
+    pub fn render_json(self) -> String Never! {
+        "{{\"artifact\":{self.artifact.render_json()},\"byte_len\":{self.byte_len()},\"metadata\":{jet_game_asset_json_string(self.metadata)}}}"
+    }
+}
+pub struct JetGameAssetImportOutcome {
+    pub status: JetGameAssetImportStatus
+    pub source: JetGameAssetSourceIdentity
+    pub artifacts: [JetGameAssetArtifactIdentity]
+    pub dependencies: [JetGameAssetDependencyIdentity]
+    pub diagnostics: [JetGameAssetImportDiagnostic]
+}
+// Compare normalized dependency sets via sorted indices. No identity-table
+// copies and no quadratic membership scans; duplicates are ignored as in Rust.
+fn dependency_set_equal(left: [JetGameAssetDependencyIdentity], right: [JetGameAssetDependencyIdentity]) -> Bool Never! {
+    li := [Int]{}
+    ri := [Int]{}
+    loop i in 0..<left.len() -> &li.push(i)
+    loop i in 0..<right.len() -> &ri.push(i)
+    &li.sort_by((a: Int, b: Int) -> dependency_order(left[a], left[b]))
+    &ri.sort_by((a: Int, b: Int) -> dependency_order(right[a], right[b]))
+    l := 0
+    r := 0
+    loop l < li.len() && r < ri.len() {
+        if left[li[l]] != right[ri[r]] -> return false
+        before_l :: l
+        before_r :: r
+        l += 1
+        r += 1
+        loop l < li.len() && left[li[l]] == left[li[before_l]] -> l += 1
+        loop r < ri.len() && right[ri[r]] == right[ri[before_r]] -> r += 1
+    }
+    l == li.len() && r == ri.len()
+}
+impl JetGameAssetImportOutcome {
+    pub fn ready(plan: JetGameAssetImportPlan, output_hash: String) -> JetGameAssetImportOutcome JetGameAssetPipelineError! {
+        artifact :: JetGameAssetArtifactIdentity.new(plan, output_hash) ?? return Err(err)
+        {status: .Ready, source: ~plan.source, artifacts: [JetGameAssetArtifactIdentity]{artifact}, dependencies: ~plan.dependencies, diagnostics: [JetGameAssetImportDiagnostic]{}}
+    }
+    pub fn failed(plan: JetGameAssetImportPlan, code: String, message: String) -> JetGameAssetImportOutcome JetGameAssetPipelineError! {
+        diagnostic :: JetGameAssetImportDiagnostic.error(~plan.source, code, message) ?? return Err(err)
+        {status: .Failed, source: ~plan.source, artifacts: [JetGameAssetArtifactIdentity]{}, dependencies: ~plan.dependencies, diagnostics: [JetGameAssetImportDiagnostic]{diagnostic}}
+    }
+    pub fn validate_against(self, plan: JetGameAssetImportPlan) JetGameAssetPipelineError! {
+        plan.validate() ?? return Err(err)
+        if self.source != plan.source -> return Err(.OutcomeSourceMismatch)
+        if !dependency_set_equal(plan.dependencies, self.dependencies) -> return Err(.OutcomeDependencyMismatch)
+        if self.diagnostics.len() > JET_GAME_ASSET_MAX_DIAGNOSTICS -> return Err(.TooManyDiagnostics)
+        if self.artifacts.len() > JET_GAME_ASSET_MAX_OUTPUTS -> return Err(.TooManyOutputs)
+        if self.status == .Ready {
+            if self.artifacts.is_empty() -> return Err(.MissingArtifact(self.source.logical_path))
+            loop artifact in self.artifacts -> artifact.compatible_with(plan) ?? return Err(err)
+            hash := self.artifacts[0].output_hash.trim() // #4303
+            if hash.is_empty() -> return Err(.EmptyHash("output"))
+        } else {
+            if !self.artifacts.is_empty() -> return Err(.ArtifactMismatch("failed outcome output"))
+            linked := false
+            loop diagnostic in self.diagnostics {
+                if diagnostic.source == self.source && diagnostic.severity == .Error {
+                    linked = true
+                    break
+                }
+            }
+            if !linked -> return Err(.FailedImportWithoutDiagnostic)
+        }
+    }
+    pub fn artifact(self) -> JetGameAssetArtifactIdentity? Never! {
+        if self.artifacts.is_empty() -> return None
+        Val(self.artifacts[0])
+    }
+    pub fn is_ready(self) -> Bool Never! { self.status == .Ready }
+    pub fn render_json(self) -> String Never! {
+        "{{\"status\":{jet_game_asset_json_string(self.status.as_str())},\"source\":{self.source.render_json()},\"artifacts\":[{artifacts_json(self.artifacts)}],\"dependencies\":[{dependencies_json(self.dependencies)}],\"diagnostics\":[{diagnostics_json(self.diagnostics)}]}}"
+    }
+}
+pub struct JetGameAssetImportReport {
+    pub imported: [JetGameAssetNodeIdentity]
+    pub dependencies: [JetGameAssetDependencyIdentity]
+    pub created: [JetGameAssetNodeIdentity]
+    pub deleted: [JetGameAssetNodeIdentity]
+    pub skipped: [JetGameAssetNodeIdentity]
+    pub skipped_count: Int
+    pub diagnostics: [JetGameAssetImportDiagnostic]
+}
+impl JetGameAssetImportReport {
+    pub fn from_watch(facts: JetGameAssetWatchFacts) -> JetGameAssetImportReport Never! {
+        report := JetGameAssetImportReport{imported: facts.imported_nodes(), dependencies: [JetGameAssetDependencyIdentity]{}, created: ~facts.created, deleted: ~facts.deleted, skipped: [JetGameAssetNodeIdentity]{}, skipped_count: facts.skipped_count, diagnostics: [JetGameAssetImportDiagnostic]{}}
+        &report.sort_and_dedup()
+        report
+    }
+    pub fn record_dependency(&self, dependency: JetGameAssetDependencyIdentity) Never! {
+        if self.dependencies.len() < JET_GAME_ASSET_MAX_DEPENDENCIES {
+            &self.dependencies.push(dependency)
+            self.dependencies = unique_dependencies(^self.dependencies)
+        }
+    }
+    pub fn record_skipped(&self, node: JetGameAssetNodeIdentity) Never! {
+        if self.skipped.len() < JET_GAME_ASSET_MAX_EVENTS {
+            &self.skipped.push(node)
+            self.skipped = unique_nodes(^self.skipped)
+        }
+    }
+    pub fn record_diagnostic(&self, diagnostic: JetGameAssetImportDiagnostic) JetGameAssetPipelineError! {
+        if self.diagnostics.len() >= JET_GAME_ASSET_MAX_DIAGNOSTICS -> return Err(.TooManyDiagnostics)
+        &self.diagnostics.push(diagnostic)
+        &self.diagnostics.sort_by((a: JetGameAssetImportDiagnostic, b: JetGameAssetImportDiagnostic) -> diagnostic_order(a, b))
+    }
+    pub fn sort_and_dedup(&self) Never! {
+        self.imported = unique_nodes(^self.imported)
+        self.created = unique_nodes(^self.created)
+        self.deleted = unique_nodes(^self.deleted)
+        self.skipped = unique_nodes(^self.skipped)
+        self.dependencies = unique_dependencies(^self.dependencies)
+    }
+    pub fn render_json(self) -> String Never! {
+        "{{\"imported\":[{nodes_json(self.imported)}],\"dependencies\":[{dependencies_json(self.dependencies)}],\"created\":[{nodes_json(self.created)}],\"deleted\":[{nodes_json(self.deleted)}],\"skipped\":[{nodes_json(self.skipped)}],\"skipped_count\":{self.skipped_count},\"diagnostics\":[{diagnostics_json(self.diagnostics)}]}}"
+    }
+}
+fn diagnostic_order(left: JetGameAssetImportDiagnostic, right: JetGameAssetImportDiagnostic) -> Ordering Never! {
+    roots :: left.source.root.id <=> right.source.root.id
+    if roots != Ordering.Equal -> return roots
+    order :: left.source.logical_path <=> right.source.logical_path
+    if order != Ordering.Equal -> return order
+    left.code <=> right.code
+}
+pub enum JetGameAssetReloadStatus {
+    Applied
+    Unchanged
+    Failed
+    RolledBack
+    Rejected
+}
+impl JetGameAssetReloadStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Applied -> return "applied"
+            .Unchanged -> return "unchanged"
+            .Failed -> return "failed"
+            .RolledBack -> return "rolled_back"
+            .Rejected -> return "rejected"
+        }
+    }
+}
+pub enum JetGameAssetTransactionStatus {
+    Committed
+    RolledBack
+    Rejected
+}
+impl JetGameAssetTransactionStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Committed -> return "committed"
+            .RolledBack -> return "rolled_back"
+            .Rejected -> return "rejected"
+        }
+    }
+}
+pub struct JetGameAssetReloadReceipt {
+    pub transaction_id: U64
+    pub source: JetGameAssetSourceIdentity
+    pub status: JetGameAssetReloadStatus
+    pub artifact: JetGameAssetArtifactIdentity?
+    pub diagnostics: [JetGameAssetImportDiagnostic]
+    pub preserved: Bool
+    pub revision_before: U64
+    pub revision_after: U64
+}
+impl JetGameAssetReloadReceipt {
+    pub fn render_json(self) -> String Never! {
+        artifact := "null"
+        if self.artifact == .Val(value) -> artifact = value.render_json()
+        "{{\"transaction_id\":{self.transaction_id},\"source\":{self.source.render_json()},\"status\":{jet_game_asset_json_string(self.status.as_str())},\"artifact\":{artifact},\"diagnostics\":[{diagnostics_json(self.diagnostics)}],\"preserved\":{self.preserved},\"revision_before\":{self.revision_before},\"revision_after\":{self.revision_after}}}"
+    }
+}
+pub struct JetGameAssetTransactionReceipt {
+    pub transaction_id: U64
+    pub status: JetGameAssetTransactionStatus
+    pub revision_before: U64
+    pub revision_after: U64
+    pub entries: [JetGameAssetReloadReceipt]
+    pub reason: String?
+}
+impl JetGameAssetTransactionReceipt {
+    pub fn is_committed(self) -> Bool Never! { self.status == .Committed }
+    pub fn render_json(self) -> String Never! {
+        entries := [String]{}
+        loop entry in self.entries -> &entries.push(entry.render_json())
+        reason := "null"
+        if self.reason == .Val(value) -> reason = jet_game_asset_json_string(value)
+        "{{\"transaction_id\":{self.transaction_id},\"status\":{jet_game_asset_json_string(self.status.as_str())},\"revision_before\":{self.revision_before},\"revision_after\":{self.revision_after},\"entries\":[{entries.join(",")}],\"reason\":{reason}}}"
+    }
+}
+
+// :749-819. Actual typed Node keys preserve the Rust tuple's field equality;
+// #4499 remains an activation gate, not a string-key workaround.
+struct WatchBucket {
+    event: JetGameAssetWatchEvent
+    first: JetGameAssetWatchEventKind
+}
+impl JetGameAssetWatchFacts {
+    pub fn coalesce(roots: JetGameAssetRootSet, events: [JetGameAssetWatchEvent]) -> JetGameAssetWatchFacts JetGameAssetPipelineError! {
+        JetGameAssetWatchFacts.coalesce_with_skipped(roots, events, 0)
+    }
+    pub fn coalesce_with_skipped(roots: JetGameAssetRootSet, events: [JetGameAssetWatchEvent], skipped_count: Int) -> JetGameAssetWatchFacts JetGameAssetPipelineError! {
+        if events.len() > JET_GAME_ASSET_MAX_EVENTS || skipped_count > JET_GAME_ASSET_MAX_SKIPPED -> return Err(.TooManyEvents)
+        buckets := [JetGameAssetNodeIdentity: WatchBucket]{}
+        loop event in events {
+            declared :: roots.root(event.root.id) ?? return Err(.RootNotDeclared(event.root.id))
+            if declared != event.root -> return Err(.RootMismatch(declared.path, event.root.path))
+            normalized :: JetGameAssetWatchEvent.new(event.root, event.logical_path, event.kind) ?? return Err(err)
+            key :: normalized.node()
+            if buckets.get(key) == .Val(current) {
+                kind :: jet_game_asset_net_event_kind(current.first, normalized.kind)
+                if kind == .Val(net) {
+                    buckets[key].event.kind = net
+                } else {
+                    _ :: &buckets.remove(key)
+                }
+            } else {
+                buckets[key] = WatchBucket{event: normalized, first: normalized.kind}
+            }
+        }
+        facts := JetGameAssetWatchFacts{events: [JetGameAssetWatchEvent]{}, created: [JetGameAssetNodeIdentity]{}, changed: [JetGameAssetNodeIdentity]{}, deleted: [JetGameAssetNodeIdentity]{}, skipped_count: skipped_count}
+        keys := buckets.keys().to_list()
+        &keys.sort_by((a: JetGameAssetNodeIdentity, b: JetGameAssetNodeIdentity) -> node_order(a, b))
+        loop key in keys {
+            event :: buckets[key].event
+            if event.kind == {
+                .Created -> &facts.created.push(event.node())
+                .Changed -> &facts.changed.push(event.node())
+                .Deleted -> &facts.deleted.push(event.node())
+            }
+            &facts.events.push(event)
+        }
+        // Node order is not event order: Rust events derive Ord over physical
+        // root (id, path), logical path, then kind. Preserve the physical tie.
+        &facts.events.sort_by((a: JetGameAssetWatchEvent, b: JetGameAssetWatchEvent) -> event_order(a, b))
+        facts
+    }
+}
+fn event_order(left: JetGameAssetWatchEvent, right: JetGameAssetWatchEvent) -> Ordering Never! {
+    roots :: root_order(left.root, right.root)
+    if roots != Ordering.Equal -> return roots
+    paths :: left.logical_path <=> right.logical_path
+    if paths != Ordering.Equal -> return paths
+    event_rank(left.kind) <=> event_rank(right.kind)
+}
+fn event_rank(kind: JetGameAssetWatchEventKind) -> Int Never! {
+    if kind == {
+        .Created -> return 0
+        .Changed -> return 1
+        .Deleted -> return 2
+    }
+}
+
+// :871-1071. #4499 typed-key map equality/hashing remains a real capability
+// gate. Sources, edges and reverse edges are never serialized as keys.
+pub struct JetGameAssetDependencyGraph {
+    roots_value: JetGameAssetRootSet
+    sources: [JetGameAssetNodeIdentity: JetGameAssetSourceIdentity]
+    edges: [JetGameAssetNodeIdentity: [JetGameAssetDependencyIdentity]]
+}
+impl JetGameAssetDependencyGraph {
+    pub fn new(roots: JetGameAssetRootSet) -> JetGameAssetDependencyGraph Never! {
+        {roots_value: roots, sources: [JetGameAssetNodeIdentity: JetGameAssetSourceIdentity]{}, edges: [JetGameAssetNodeIdentity: [JetGameAssetDependencyIdentity]]{}}
+    }
+    pub fn roots(self) -> JetGameAssetRootSet Never! { self.roots_value }
+    pub fn add_source(&self, source: JetGameAssetSourceIdentity) -> JetGameAssetNodeIdentity JetGameAssetPipelineError! {
+        self.validate_source(source) ?? return Err(err)
+        node :: source.node()
+        self.sources[node] = source
+        if !self.edges.has_key(node) -> self.edges[node] = [JetGameAssetDependencyIdentity]{}
+        node
+    }
+    pub fn set_dependencies(&self, source: JetGameAssetSourceIdentity, dependencies: ^[JetGameAssetDependencyIdentity]) JetGameAssetPipelineError! {
+        self.validate_source(source) ?? return Err(err)
+        node :: source.node()
+        normalized :: self.normalize_dependencies(^dependencies) ?? return Err(err)
+        // Validate an overlay rather than clone the whole graph for one edge.
+        // No source/edge mutation occurs before cycle validation succeeds.
+        _ :: graph_order_overlay(self.edges, Val(node), normalized) ?? return Err(err)
+        self.sources[node] = ~source
+        self.edges[node] = normalized
+    }
+    pub fn add_dependency(&self, source: JetGameAssetSourceIdentity, dependency: JetGameAssetDependencyIdentity) JetGameAssetPipelineError! {
+        dependencies := self.dependencies_for(source.node())
+        &dependencies.push(dependency)
+        &self.set_dependencies(source, ^dependencies)
+    }
+    pub fn dependencies_for(self, source: JetGameAssetNodeIdentity) -> [JetGameAssetDependencyIdentity] Never! {
+        if self.edges.get(source) == .Val(values) -> return ~values
+        [JetGameAssetDependencyIdentity]{}
+    }
+    pub fn source(self, node: JetGameAssetNodeIdentity) -> JetGameAssetSourceIdentity? Never! { self.sources.get(node) }
+    pub fn nodes(self) -> [JetGameAssetNodeIdentity] Never! {
+        keys := self.edges.keys().to_list()
+        &keys.sort_by((a: JetGameAssetNodeIdentity, b: JetGameAssetNodeIdentity) -> node_order(a, b))
+        keys
+    }
+    pub fn render_json(self) -> String Never! {
+        rows := [String]{}
+        loop node in self.nodes() -> &rows.push("{{\"node\":{node.render_json()},\"dependencies\":[{dependencies_json(self.edges[node])}]}}")
+        "[{rows.join(",")}]"
+    }
+    fn validate_source(self, source: JetGameAssetSourceIdentity) JetGameAssetPipelineError! {
+        if self.roots_value.contains_root(source.root) -> return
+        if self.roots_value.root(source.root.id) == .Val(root) -> return Err(.RootMismatch(root.path, source.root.path))
+        return Err(.RootNotDeclared(source.root.id))
+    }
+    fn normalize_dependencies(self, dependencies: ^[JetGameAssetDependencyIdentity]) -> [JetGameAssetDependencyIdentity] JetGameAssetPipelineError! {
+        normalized := ^dependencies
+        if normalized.len() > JET_GAME_ASSET_MAX_DEPENDENCIES -> return Err(.TooManyDependencies)
+        loop i in 0..<normalized.len() {
+            root :: self.roots_value.root(normalized[i].root_id) ?? return Err(.RootNotDeclared(normalized[i].root_id))
+            path :: jet_game_asset_normalize_logical_path(normalized[i].logical_path) ?? return Err(err)
+            if root.id.is_empty() -> return Err(.RootNotDeclared(root.id))
+            normalized[i] = JetGameAssetDependencyIdentity{root_id: root.id, logical_path: path}
+        }
+        unique_dependencies(^normalized)
+    }
+}
+pub fn jet_game_asset_graph_order(edges: [JetGameAssetNodeIdentity: [JetGameAssetDependencyIdentity]]) -> [JetGameAssetNodeIdentity] JetGameAssetPipelineError! {
+    graph_order_overlay(edges, None, [JetGameAssetDependencyIdentity]{})
+}
+fn graph_order_overlay(edges: [JetGameAssetNodeIdentity: [JetGameAssetDependencyIdentity]], replacement: JetGameAssetNodeIdentity?, dependencies: [JetGameAssetDependencyIdentity]) -> [JetGameAssetNodeIdentity] JetGameAssetPipelineError! {
+    nodes := [JetGameAssetNodeIdentity: Bool]{}
+    indegree := [JetGameAssetNodeIdentity: Int]{}
+    reverse := [JetGameAssetNodeIdentity: [JetGameAssetNodeIdentity: Bool]]{}
+    loop node in edges.keys() {
+        if replacement == Val(node) -> next
+        graph_order_edges(node, edges[node], &nodes, &indegree, &reverse)
+    }
+    if replacement == .Val(node) -> graph_order_edges(node, dependencies, &nodes, &indegree, &reverse)
+    ordered := nodes.keys().to_list()
+    &ordered.sort_by((a: JetGameAssetNodeIdentity, b: JetGameAssetNodeIdentity) -> node_order(a, b))
+    ranks := [JetGameAssetNodeIdentity: Int]{}
+    ready := [Int]{}
+    loop i in 0..<ordered.len() {
+        ranks[ordered[i]] = i
+        if (indegree.get(ordered[i]) ?? 0) == 0 -> graph_ready_push(&ready, i)
+    }
+    order := [JetGameAssetNodeIdentity]{}
+    loop !ready.is_empty() {
+        rank :: graph_ready_pop(&ready)
+        node :: ordered[rank]
+        &order.push(~node)
+        if reverse.get(node) == .Val(dependents) {
+            loop dependent in dependents.keys() {
+                count :: indegree[dependent] - 1
+                indegree[dependent] = count
+                if count == 0 -> graph_ready_push(&ready, ranks[dependent])
+            }
+        }
+    }
+    if order.len() == ordered.len() -> return order
+    chain := [String]{}
+    // Indegree > 0 is precisely Rust's un-emitted nodes, including downstream
+    // blocked nodes. Avoid Rust's per-node order.contains quadratic scan.
+    loop node in ordered -> if (indegree.get(node) ?? 0) > 0 -> &chain.push(node.key())
+    Err(.DependencyCycle(chain))
+}
+fn graph_order_edges(node: JetGameAssetNodeIdentity, dependencies: [JetGameAssetDependencyIdentity], nodes: &[JetGameAssetNodeIdentity: Bool], indegree: &[JetGameAssetNodeIdentity: Int], reverse: &[JetGameAssetNodeIdentity: [JetGameAssetNodeIdentity: Bool]]) Never! {
+    nodes[node] = true
+    loop dependency in dependencies {
+        edge :: dependency.node()
+        nodes[edge] = true
+        indegree[node] = (indegree.get(node) ?? 0) + 1
+        if !reverse.has_key(edge) -> reverse[edge] = [JetGameAssetNodeIdentity: Bool]{}
+        reverse[edge][node] = true
+    }
+}
+// A rank heap is specific to deterministic Kahn scheduling. Core collections'
+// value-returning heappush/heappop copy their complete heap; those cannot meet
+// this graph's O((V+E)log V) work and O(V+E) storage contract.
+fn graph_ready_push(ready: &[Int], rank: Int) Never! {
+    &ready.push(rank)
+    at := ready.len() - 1
+    loop at > 0 {
+        parent :: (at - 1) /% 2
+        if ready[parent] <= rank -> break
+        ready[at] = ready[parent]
+        at = parent
+    }
+    ready[at] = rank
+}
+fn graph_ready_pop(ready: &[Int]) -> Int Never! {
+    rank :: ready[0]
+    last :: ready[ready.len() - 1]
+    _ :: &ready.pop()
+    if ready.is_empty() -> return rank
+    at := 0
+    loop at * 2 + 1 < ready.len() {
+        child := at * 2 + 1
+        if child + 1 < ready.len() && ready[child + 1] < ready[child] -> child += 1
+        if last <= ready[child] -> break
+        ready[at] = ready[child]
+        at = child
+    }
+    ready[at] = last
+    rank
+}
+
+// Derived Rust Default anchors :338,737,873,1586 use the same constructors.
+impl JetGameAssetRootSet {
+    pub fn default() -> JetGameAssetRootSet Never! { {roots_value: [JetGameAssetRootIdentity]{}} }
+}
+impl JetGameAssetWatchFacts {
+    pub fn default() -> JetGameAssetWatchFacts Never! {
+        {events: [JetGameAssetWatchEvent]{}, created: [JetGameAssetNodeIdentity]{}, changed: [JetGameAssetNodeIdentity]{}, deleted: [JetGameAssetNodeIdentity]{}, skipped_count: 0}
+    }
+}
+impl JetGameAssetDependencyGraph {
+    pub fn default() -> JetGameAssetDependencyGraph Never! { JetGameAssetDependencyGraph.new(JetGameAssetRootSet.default()) }
+}
+impl JetGameAssetImportReport {
+    pub fn default() -> JetGameAssetImportReport Never! {
+        {imported: [JetGameAssetNodeIdentity]{}, dependencies: [JetGameAssetDependencyIdentity]{}, created: [JetGameAssetNodeIdentity]{}, deleted: [JetGameAssetNodeIdentity]{}, skipped: [JetGameAssetNodeIdentity]{}, skipped_count: 0, diagnostics: [JetGameAssetImportDiagnostic]{}}
+    }
+}
+
+fn dependency_order(left: JetGameAssetDependencyIdentity, right: JetGameAssetDependencyIdentity) -> Ordering Never! {
+    order :: left.root_id <=> right.root_id
+    if order != Ordering.Equal -> return order
+    left.logical_path <=> right.logical_path
+}

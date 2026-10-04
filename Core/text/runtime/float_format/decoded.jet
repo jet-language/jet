@@ -1,0 +1,72 @@
+// Pinned Rust core num/imp/{diy_float.rs,flt2dec/{decoder,estimator,mod}.rs}.
+// All mantissas/products are fixed words. Int is used only for bounded indices
+// and exponents, never as digit-generation arithmetic.
+pub struct Decoded {
+    pub mant: U64
+    pub minus: U64
+    pub plus: U64
+    pub exp: Int
+    pub inclusive: Bool
+}
+pub fn finite(bits: U64) -> Decoded Never! {
+    fraction :: bits & U64{0xfffffffffffff}
+    exponent :: Int.from_u64((bits >> 52) & U64{0x7ff})
+    if exponent == 0 -> return Decoded{mant: fraction << 1, minus: U64{1}, plus: U64{1}, exp: -1075, inclusive: true}
+    mant :: fraction | U64{0x10000000000000}
+    even :: (mant & U64{1}) == (U64{0})
+    if fraction == (U64{0}) -> return Decoded{mant: mant << 2, minus: U64{1}, plus: U64{2}, exp: exponent - 1077, inclusive: even}
+    Decoded{mant: mant << 1, minus: U64{1}, plus: U64{1}, exp: exponent - 1076, inclusive: even}
+}
+pub fn leading_zeros(word: U64) -> Int Never! {
+    n := 0
+    value := word
+    if value == (U64{0}) -> return 64
+    if value < (U64{1} << 32) { value = value << 32; n += 32 }
+    if value < (U64{1} << 48) { value = value << 16; n += 16 }
+    if value < (U64{1} << 56) { value = value << 8; n += 8 }
+    if value < (U64{1} << 60) { value = value << 4; n += 4 }
+    if value < (U64{1} << 62) { value = value << 2; n += 2 }
+    if value < (U64{1} << 63) -> n += 1
+    n
+}
+pub fn estimate(mant: U64, exp: Int) -> Int Never! {
+    nbits :: 64 - leading_zeros(mant - U64{1})
+    // Arithmetic shift exactly matches signed i64 source estimator.
+    product :: (I64.from_int(nbits + exp) ?? panic("float exponent")) * I64{1292913986}
+    Int.from_i64(product >> 32)
+}
+pub struct Fp { pub f: U64; pub e: Int }
+pub fn normalize(f: U64, e: Int) -> Fp Never! {
+    n :: leading_zeros(f)
+    Fp{f: f << n, e: e - n}
+}
+pub fn product(a: Fp, b: Fp) -> Fp Never! {
+    // 32-bit decomposition of carrying_mul; no U128 or exact Int scratch.
+    mask :: U64{0xffffffff}
+    a0 :: a.f & mask
+    a1 :: a.f >> 32
+    b0 :: b.f & mask
+    b1 :: b.f >> 32
+    p0 :: a0 * b0
+    p1 :: a1 * b0 + (p0 >> 32)
+    p2 :: a0 * b1 + (p1 & mask)
+    hi :: a1 * b1 + (p1 >> 32) + (p2 >> 32)
+    Fp{f: hi + ((p2 & mask) >> 31), e: a.e + b.e + 64}
+}
+// flt2dec::round_up. Carry returns the additional byte, not a new allocation.
+pub fn round_up(buf: &[U8#N], len: Int) -> U8? Never! {
+    i := len
+    loop i > 0 {
+        i -= 1
+        if buf[i] != (U8{57}) {
+            buf[i] += U8{1}
+            loop j in (i + 1)..<len -> buf[j] = U8{48}
+            return None
+        }
+    }
+    if len == 0 -> return Val(U8{49})
+    buf[0] = U8{49}
+    loop j in 1..<len -> buf[j] = U8{48}
+    Val(U8{48})
+}
+pub struct Digits { pub len: Int; pub exp: Int }

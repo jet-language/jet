@@ -1,0 +1,49 @@
+// PORT-PENDING 0141 crates-jet-codegen-src-prelude-core-authority-module-group: crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:1-45
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetTempDirOwner {
+//RS     pub(crate) path: String,
+//RS     cleanup: std::rc::Rc<()>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetTempFileOwner {
+//RS     pub(crate) path: String,
+//RS     cleanup: std::rc::Rc<()>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetFileLockOwner {
+//RS     pub(crate) path: String,
+//RS     cleanup: std::rc::Rc<()>,
+//RS }
+//RS 
+//RS fn jet_fs_drop_owned_path(path: &str, cleanup: &std::rc::Rc<()>, is_dir: bool) {
+//RS     if std::rc::Rc::strong_count(cleanup) == 1 {
+//RS         if is_dir {
+//RS             let _ = std::fs::remove_dir_all(path);
+//RS         } else {
+//RS             let _ = std::fs::remove_file(path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetTempDirOwner {
+//RS     fn drop(&mut self) {
+//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, true);
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetTempFileOwner {
+//RS     fn drop(&mut self) {
+//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, false);
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetFileLockOwner {
+//RS     fn drop(&mut self) {
+//RS         jet_fs_drop_owned_path(&self.path, &self.cleanup, false);
+//RS     }
+//RS }
+// END-PORT-PENDING 0141 crates/jet-codegen/src/Prelude/Core/FileHandleOwners.rs:1-45
+

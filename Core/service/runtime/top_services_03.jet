@@ -1,0 +1,1818 @@
+// PORT-PENDING 0304 crates-jet-codegen-src-prelude-corelib-top-services-slice-3747: crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3747-5560
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_services_rollout_path(
+//RS     authority: &JetServiceStateAuthority,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let path = format!("{}.rollout", authority.store);
+//RS     service_authority_validate_text(
+//RS         &path,
+//RS         "service rollout journal",
+//RS         MAX_SERVICE_STATE_STORE,
+//RS         false,
+//RS     )?;
+//RS     jet_services_state_validate_path(std::path::Path::new(&path))?;
+//RS     Ok(path)
+//RS }
+//RS 
+//RS fn jet_services_rollout_operation_lock(
+//RS     tree: &JetServiceTree,
+//RS ) -> Result<Option<ServiceAuthorityFileLock>, JetServiceError> {
+//RS     let Some(authority) = tree.state_authority.as_ref() else {
+//RS         return Ok(None);
+//RS     };
+//RS     service_authority_file_lock(&authority.store, "rollout-operation").map(Some)
+//RS }
+//RS 
+//RS fn jet_services_rollout_store_assert_current(
+//RS     tree: &JetServiceTree,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let Some(persisted) = jet_services_rollout_store_load(tree)? else {
+//RS         return Ok(());
+//RS     };
+//RS     if persisted != jet_services_rollout_snapshot(tree) {
+//RS         return Err(JetServiceError::Stale(
+//RS             "service rollout state changed since this controller started".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_rollback_store_path(
+//RS     authority: &JetServiceStateAuthority,
+//RS     generation: i64,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let path = format!("{}.rollback-g{}", authority.store, generation);
+//RS     service_authority_validate_text(
+//RS         &path,
+//RS         "service rollback store",
+//RS         MAX_SERVICE_STATE_STORE,
+//RS         false,
+//RS     )?;
+//RS     Ok(path)
+//RS }
+//RS 
+//RS fn jet_services_rollout_store_load(
+//RS     tree: &JetServiceTree,
+//RS ) -> Result<Option<JetServiceRolloutState>, JetServiceError> {
+//RS     let Some(authority) = tree.state_authority.as_ref() else {
+//RS         return Ok(None);
+//RS     };
+//RS     let path = jet_services_rollout_path(authority)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| jet_services_state_error("service rollout lock is poisoned"))?;
+//RS     let _file_lock = service_authority_file_lock(&path, "rollout")?;
+//RS     let rollout_path = std::path::Path::new(&path);
+//RS     if !rollout_path.exists() {
+//RS         return Ok(None);
+//RS     }
+//RS     let metadata = std::fs::metadata(rollout_path).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot inspect service rollout journal: {error}"))
+//RS     })?;
+//RS     if metadata.len() > MAX_SERVICE_ROLLOUT_BYTES as u64 {
+//RS         return Err(jet_services_state_error(
+//RS             "service rollout journal exceeds its byte limit",
+//RS         ));
+//RS     }
+//RS     let mut file = std::fs::File::open(rollout_path).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot open service rollout journal: {error}"))
+//RS     })?;
+//RS     let mut bytes = Vec::new();
+//RS     std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot read service rollout journal: {error}"))
+//RS     })?;
+//RS     jet_services_rollout_decode(&tree.name, &bytes).map(Some)
+//RS }
+//RS 
+//RS fn jet_services_rollout_store_write(tree: &JetServiceTree) -> Result<(), JetServiceError> {
+//RS     let Some(authority) = tree.state_authority.as_ref() else {
+//RS         return Ok(());
+//RS     };
+//RS     let path = jet_services_rollout_path(authority)?;
+//RS     let bytes = jet_services_rollout_encode(&tree.name, &jet_services_rollout_snapshot(tree))?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| jet_services_state_error("service rollout lock is poisoned"))?;
+//RS     let _file_lock = service_authority_file_lock(&path, "rollout")?;
+//RS     let rollout_path = std::path::Path::new(&path);
+//RS     if let Some(parent) = rollout_path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS     {
+//RS         std::fs::create_dir_all(parent).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot create service rollout directory: {error}"))
+//RS         })?;
+//RS     }
+//RS     jet_services_state_validate_path(rollout_path)?;
+//RS     let temporary = std::path::PathBuf::from(format!(
+//RS         "{}.jet-rollout-{}-{}-{}",
+//RS         path,
+//RS         std::process::id(),
+//RS         service_authority_now(),
+//RS         service_state_temp_sequence(),
+//RS     ));
+//RS     let result = (|| {
+//RS         let mut options = std::fs::OpenOptions::new();
+//RS         options.write(true).create_new(true);
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::OpenOptionsExt;
+//RS             options.mode(0o600);
+//RS         }
+//RS         let mut file = options.open(&temporary).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot create temporary rollout journal: {error}"))
+//RS         })?;
+//RS         std::io::Write::write_all(&mut file, &bytes).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot write service rollout journal: {error}"))
+//RS         })?;
+//RS         std::io::Write::flush(&mut file).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot flush service rollout journal: {error}"))
+//RS         })?;
+//RS         file.sync_all().map_err(|error| {
+//RS             jet_services_state_error(format!("cannot sync service rollout journal: {error}"))
+//RS         })?;
+//RS         std::fs::rename(&temporary, rollout_path).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot publish service rollout journal: {error}"))
+//RS         })?;
+//RS         Ok(())
+//RS     })();
+//RS     if result.is_err() {
+//RS         let _ = std::fs::remove_file(&temporary);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn jet_services_restore_rollout_state(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+//RS     let Some(state) = jet_services_rollout_store_load(tree)? else {
+//RS         return Ok(());
+//RS     };
+//RS     if state.workers.len() != tree.workers.len() {
+//RS         return Err(jet_services_state_error(
+//RS             "rollout journal worker topology does not match the service declaration",
+//RS         ));
+//RS     }
+//RS     let receipt = state.last_upgrade.clone();
+//RS     if let Some(receipt) = &receipt {
+//RS         if receipt.rollback_available {
+//RS             let authority = tree.state_authority.as_ref().ok_or_else(|| {
+//RS                 jet_services_state_error("rollout receipt has no state authority")
+//RS             })?;
+//RS             let expected_store =
+//RS                 jet_services_rollback_store_path(authority, receipt.from_generation)?;
+//RS             if receipt.rollback_store != expected_store {
+//RS                 return Err(jet_services_state_error(
+//RS                     "rollout receipt names a rollback store outside its state authority",
+//RS                 ));
+//RS             }
+//RS             jet_services_state_validate_path(std::path::Path::new(&receipt.rollback_store))?;
+//RS             if !std::path::Path::new(&receipt.rollback_store).is_file() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "rollout receipt names a missing rollback store",
+//RS                 ));
+//RS             }
+//RS             let rollback_authority = JetServiceStateAuthority {
+//RS                 store: receipt.rollback_store.clone(),
+//RS                 ..authority.clone()
+//RS             };
+//RS             let _ = jet_services_state_store_load(&rollback_authority, &tree.state_adapter)?;
+//RS         }
+//RS     }
+//RS     let mut worker_generations = Vec::with_capacity(tree.workers.len());
+//RS     for worker in &tree.workers {
+//RS         let (_, generation) = state
+//RS             .workers
+//RS             .iter()
+//RS             .find(|(name, _)| name == &worker.name)
+//RS             .ok_or_else(|| {
+//RS                 jet_services_state_error(format!(
+//RS                     "rollout journal is missing worker {}",
+//RS                     worker.name
+//RS                 ))
+//RS             })?;
+//RS         worker_generations.push(*generation);
+//RS     }
+//RS     let mut restored_directory = Vec::with_capacity(state.directory.len());
+//RS     for (name, worker_name, generation) in &state.directory {
+//RS         let worker_generation = state
+//RS             .workers
+//RS             .iter()
+//RS             .find(|(candidate, _)| candidate == worker_name)
+//RS             .map(|(_, generation)| *generation)
+//RS             .ok_or_else(|| {
+//RS                 jet_services_state_error(format!(
+//RS                     "rollout journal directory entry {} names an unknown worker",
+//RS                     name
+//RS                 ))
+//RS             })?;
+//RS         if worker_generation != *generation {
+//RS             return Err(jet_services_state_error(
+//RS                 "rollout journal directory generation is inconsistent",
+//RS             ));
+//RS         }
+//RS         let _worker = tree
+//RS             .workers
+//RS             .iter()
+//RS             .find(|worker| &worker.name == worker_name)
+//RS             .ok_or_else(|| {
+//RS                 jet_services_state_error(format!(
+//RS                     "rollout journal directory entry {} names an unknown worker",
+//RS                     name
+//RS                 ))
+//RS             })?;
+//RS         restored_directory.push((name.clone(), worker_name.clone(), *generation));
+//RS     }
+//RS     tree.generation = state.generation;
+//RS     tree.previous_generation = state.previous_generation;
+//RS     tree.last_upgrade = receipt;
+//RS     tree.draining = state.draining;
+//RS     tree.partitioned = state.partitioned;
+//RS     for (worker, generation) in tree.workers.iter_mut().zip(worker_generations) {
+//RS         worker.endpoint.generation = generation;
+//RS         worker.mailbox.endpoint = worker.endpoint.clone();
+//RS         service_authority_register(&worker.endpoint, false)?;
+//RS         jet_services_authority_update_partitioned(
+//RS             &worker.endpoint,
+//RS             tree.partitioned.iter().any(|name| name == &worker.name),
+//RS         )?;
+//RS         jet_services_authority_update_draining(
+//RS             &worker.endpoint,
+//RS             tree.draining.iter().any(|name| name == &worker.name),
+//RS         )?;
+//RS     }
+//RS     tree.directory.clear();
+//RS     for (name, worker_name, generation) in restored_directory {
+//RS         let worker = tree
+//RS             .workers
+//RS             .iter()
+//RS             .find(|worker| worker.name == worker_name)
+//RS             .ok_or_else(|| JetServiceError::Unknown("restored directory worker disappeared".to_string()))?;
+//RS         if worker.endpoint.generation != generation {
+//RS             return Err(jet_services_state_error(
+//RS                 "rollout journal directory generation does not match its worker",
+//RS             ));
+//RS         }
+//RS         let endpoint = worker.endpoint.clone();
+//RS         let signature =
+//RS             service_authority_sign_directory(&tree.authority, &tree.name, &name, &endpoint)?;
+//RS         tree.directory.push((name, endpoint, signature));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_state_read_line(
+//RS     bytes: &[u8],
+//RS     offset: &mut usize,
+//RS     label: &str,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let rest = bytes
+//RS         .get(*offset..)
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} is truncated")))?;
+//RS     let end = rest
+//RS         .iter()
+//RS         .position(|byte| *byte == b'\n')
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} is truncated")))?;
+//RS     let line = std::str::from_utf8(&rest[..end])
+//RS         .map_err(|_| jet_services_state_error(format!("{label} is not valid UTF-8")))?;
+//RS     *offset = offset.saturating_add(end + 1);
+//RS     Ok(line.to_string())
+//RS }
+//RS 
+//RS fn jet_services_state_read_frame(
+//RS     bytes: &[u8],
+//RS     offset: &mut usize,
+//RS     label: &str,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let start = *offset;
+//RS     let rest = bytes
+//RS         .get(start..)
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} is truncated")))?;
+//RS     let colon = rest
+//RS         .iter()
+//RS         .position(|byte| *byte == b':')
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} length is missing")))?;
+//RS     let length = std::str::from_utf8(&rest[..colon])
+//RS         .ok()
+//RS         .and_then(|text| text.parse::<usize>().ok())
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} length is invalid")))?;
+//RS     if length > MAX_SERVICE_MESSAGE {
+//RS         return Err(jet_services_state_error(format!(
+//RS             "{label} exceeds the state record limit"
+//RS         )));
+//RS     }
+//RS     let payload_start = start
+//RS         .checked_add(colon + 1)
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} offset overflow")))?;
+//RS     let payload_end = payload_start
+//RS         .checked_add(length)
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} length overflows the store")))?;
+//RS     let payload = bytes
+//RS         .get(payload_start..payload_end)
+//RS         .ok_or_else(|| jet_services_state_error(format!("{label} is truncated")))?;
+//RS     let value = std::str::from_utf8(payload)
+//RS         .map_err(|_| jet_services_state_error(format!("{label} is not valid UTF-8")))?;
+//RS     *offset = payload_end;
+//RS     Ok(value.to_string())
+//RS }
+//RS 
+//RS fn jet_services_state_encode(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS     records: &[String],
+//RS ) -> Result<Vec<u8>, JetServiceError> {
+//RS     if records.len() > MAX_SERVICE_STATE_RECORDS
+//RS         || matches!(adapter, JetServiceStateAdapter::Snapshot) && records.len() > 1
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service state record limit exceeded".to_string(),
+//RS         ));
+//RS     }
+//RS     let prefix = format!("v{}:", authority.version);
+//RS     let mut bytes = jet_services_state_header(authority, adapter);
+//RS     for record in records {
+//RS         jet_services_read_state_record(&prefix, record)?;
+//RS         if record.len() > MAX_SERVICE_MESSAGE || record.chars().any(char::is_control) {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "service state record contains invalid bytes".to_string(),
+//RS             ));
+//RS         }
+//RS         bytes.extend_from_slice(&jet_services_state_frame(record));
+//RS         if bytes.len() > MAX_SERVICE_STATE_BYTES {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "service state store exceeds its byte limit".to_string(),
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS fn jet_services_state_decode(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS     bytes: &[u8],
+//RS ) -> Result<Vec<String>, JetServiceError> {
+//RS     if bytes.len() > MAX_SERVICE_STATE_BYTES {
+//RS         return Err(jet_services_state_error(
+//RS             "service state store exceeds its byte limit",
+//RS         ));
+//RS     }
+//RS     let mut offset = 0;
+//RS     if jet_services_state_read_line(bytes, &mut offset, "state magic")?
+//RS         != "JET-SERVICE-STATE/1"
+//RS     {
+//RS         return Err(jet_services_state_error("service state magic is invalid"));
+//RS     }
+//RS     let expected_adapter = format!("adapter:{}", jet_services_state_adapter_name(adapter));
+//RS     if jet_services_state_read_line(bytes, &mut offset, "state adapter")? != expected_adapter {
+//RS         return Err(jet_services_state_error(
+//RS             "service state adapter does not match the declared adapter",
+//RS         ));
+//RS     }
+//RS     let schema_line = jet_services_state_read_line(bytes, &mut offset, "state schema")?;
+//RS     let schema_prefix = "schema:";
+//RS     let schema_meta = schema_line.strip_prefix(schema_prefix).ok_or_else(|| {
+//RS         jet_services_state_error("service state schema header is invalid")
+//RS     })?;
+//RS     let (schema_len_text, schema) = schema_meta
+//RS         .split_once(':')
+//RS         .ok_or_else(|| jet_services_state_error("service state schema length is invalid"))?;
+//RS     let schema_len = schema_len_text
+//RS         .parse::<usize>()
+//RS         .map_err(|_| jet_services_state_error("service state schema length is invalid"))?;
+//RS     if schema_len != schema.len()
+//RS         || schema_len != authority.schema.len()
+//RS         || schema_len > MAX_SERVICE_STATE_SCHEMA
+//RS     {
+//RS         return Err(jet_services_state_error(
+//RS             "service state schema length does not match the authority",
+//RS         ));
+//RS     }
+//RS     if schema != authority.schema {
+//RS         return Err(jet_services_state_error(
+//RS             "service state schema does not match the authority",
+//RS         ));
+//RS     }
+//RS     let version_line = jet_services_state_read_line(bytes, &mut offset, "state version")?;
+//RS     let version = version_line
+//RS         .strip_prefix("version:")
+//RS         .and_then(|text| text.parse::<i64>().ok())
+//RS         .ok_or_else(|| jet_services_state_error("service state version is invalid"))?;
+//RS     if version != authority.version {
+//RS         return Err(jet_services_state_error(format!(
+//RS             "service state version {version} does not match authority version {}",
+//RS             authority.version
+//RS         )));
+//RS     }
+//RS     let migration_line = jet_services_state_read_line(bytes, &mut offset, "state migration")?;
+//RS     let migration_meta = migration_line.strip_prefix("migration:").ok_or_else(|| {
+//RS         jet_services_state_error("state migration header is invalid")
+//RS     })?;
+//RS     let (migration_len_text, migration) = migration_meta
+//RS         .split_once(':')
+//RS         .ok_or_else(|| jet_services_state_error("state migration length is invalid"))?;
+//RS     let migration_len = migration_len_text
+//RS         .parse::<usize>()
+//RS         .map_err(|_| jet_services_state_error("state migration length is invalid"))?;
+//RS     if migration_len != migration.len() || migration_len > 32 {
+//RS         return Err(jet_services_state_error(
+//RS             "state migration length does not match the authority",
+//RS         ));
+//RS     }
+//RS     if migration != authority.migration {
+//RS         return Err(jet_services_state_error(
+//RS             "state migration policy does not match the authority",
+//RS         ));
+//RS     }
+//RS     let prefix = format!("v{}:", authority.version);
+//RS     let mut records = Vec::new();
+//RS     while offset < bytes.len() {
+//RS         if records.len() >= MAX_SERVICE_STATE_RECORDS {
+//RS             return Err(jet_services_state_error(
+//RS                 "service state record limit exceeded",
+//RS             ));
+//RS         }
+//RS         let record = jet_services_state_read_frame(bytes, &mut offset, "state record")?;
+//RS         jet_services_read_state_record(&prefix, &record)?;
+//RS         records.push(record);
+//RS     }
+//RS     if matches!(adapter, JetServiceStateAdapter::Snapshot) && records.len() > 1 {
+//RS         return Err(jet_services_state_error(
+//RS             "snapshot store contains more than one record",
+//RS         ));
+//RS     }
+//RS     Ok(records)
+//RS }
+//RS 
+//RS fn jet_services_state_store_read_unlocked(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS ) -> Result<Vec<String>, JetServiceError> {
+//RS     let path = std::path::Path::new(&authority.store);
+//RS     jet_services_state_validate_path(path)?;
+//RS     if !path.exists() {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let metadata = std::fs::metadata(path).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot inspect service state store: {error}"))
+//RS     })?;
+//RS     if metadata.len() > MAX_SERVICE_STATE_BYTES as u64 {
+//RS         return Err(jet_services_state_error(
+//RS             "service state store exceeds its byte limit",
+//RS         ));
+//RS     }
+//RS     let mut file = std::fs::File::open(path).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot open service state store: {error}"))
+//RS     })?;
+//RS     let mut bytes = Vec::new();
+//RS     std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|error| {
+//RS         jet_services_state_error(format!("cannot read service state store: {error}"))
+//RS     })?;
+//RS     jet_services_state_decode(authority, adapter, &bytes)
+//RS }
+//RS 
+//RS fn jet_services_state_store_read(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS ) -> Result<Vec<String>, JetServiceError> {
+//RS     let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+//RS     jet_services_state_store_read_unlocked(authority, adapter)
+//RS }
+//RS 
+//RS fn jet_services_state_store_load(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS ) -> Result<Vec<String>, JetServiceError> {
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
+//RS     jet_services_state_store_read(authority, adapter)
+//RS }
+//RS 
+//RS fn jet_services_state_store_write_unlocked(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS     records: &[String],
+//RS ) -> Result<(), JetServiceError> {
+//RS     let bytes = jet_services_state_encode(authority, adapter, records)?;
+//RS     let path = std::path::Path::new(&authority.store);
+//RS     jet_services_state_validate_path(path)?;
+//RS     if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+//RS         std::fs::create_dir_all(parent).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot create service state directory: {error}"))
+//RS         })?;
+//RS     }
+//RS     // Check again after creating missing directories.  This closes the common
+//RS     // symlink-parent mistake without pretending to provide a cross-process
+//RS     // filesystem lock.
+//RS     jet_services_state_validate_path(path)?;
+//RS     let temporary = std::path::PathBuf::from(format!(
+//RS         "{}.jet-state-{}-{}-{}",
+//RS         authority.store,
+//RS         std::process::id(),
+//RS         service_authority_now(),
+//RS         service_state_temp_sequence(),
+//RS     ));
+//RS     let result = (|| {
+//RS         let mut options = std::fs::OpenOptions::new();
+//RS         options.write(true).create_new(true);
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::OpenOptionsExt;
+//RS             options.mode(0o600);
+//RS         }
+//RS         let mut file = options.open(&temporary)
+//RS             .map_err(|error| {
+//RS                 jet_services_state_error(format!("cannot create temporary state store: {error}"))
+//RS             })?;
+//RS         std::io::Write::write_all(&mut file, &bytes).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot write service state store: {error}"))
+//RS         })?;
+//RS         std::io::Write::flush(&mut file).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot flush service state store: {error}"))
+//RS         })?;
+//RS         file.sync_all().map_err(|error| {
+//RS             jet_services_state_error(format!("cannot sync service state store: {error}"))
+//RS         })?;
+//RS         std::fs::rename(&temporary, path).map_err(|error| {
+//RS             jet_services_state_error(format!("cannot publish service state store: {error}"))
+//RS         })?;
+//RS         Ok(())
+//RS     })();
+//RS     if result.is_err() {
+//RS         let _ = std::fs::remove_file(&temporary);
+//RS     }
+//RS     result
+//RS }
+//RS 
+//RS fn jet_services_state_store_write(
+//RS     authority: &JetServiceStateAuthority,
+//RS     adapter: &JetServiceStateAdapter,
+//RS     records: &[String],
+//RS ) -> Result<(), JetServiceError> {
+//RS     let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+//RS     jet_services_state_store_write_unlocked(authority, adapter, records)
+//RS }
+//RS 
+//RS fn jet_services_state_validate_path(path: &std::path::Path) -> Result<(), JetServiceError> {
+//RS     match std::fs::symlink_metadata(path) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() => {
+//RS             return Err(jet_services_state_error(
+//RS                 "service state store must not be a symlink",
+//RS             ));
+//RS         }
+//RS         Ok(metadata) if !metadata.is_file() => {
+//RS             return Err(jet_services_state_error(
+//RS                 "service state store is not a regular file",
+//RS             ));
+//RS         }
+//RS         Ok(_) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Err(error) => {
+//RS             return Err(jet_services_state_error(format!(
+//RS                 "cannot inspect service state store: {error}"
+//RS             )));
+//RS         }
+//RS     }
+//RS     let Some(parent) = path.parent() else {
+//RS         return Ok(());
+//RS     };
+//RS     let mut current = parent.to_path_buf();
+//RS     loop {
+//RS         match std::fs::symlink_metadata(&current) {
+//RS             Ok(metadata) if metadata.file_type().is_symlink() => {
+//RS                 return Err(jet_services_state_error(format!(
+//RS                     "service state parent is a symlink: {}",
+//RS                     current.display()
+//RS                 )))
+//RS             }
+//RS             Ok(metadata) if !metadata.is_dir() => {
+//RS                 return Err(jet_services_state_error(format!(
+//RS                     "service state parent is not a directory: {}",
+//RS                     current.display()
+//RS                 )))
+//RS             }
+//RS             Ok(_) => {}
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS             Err(error) => {
+//RS                 return Err(jet_services_state_error(format!(
+//RS                     "cannot inspect service state parent: {error}"
+//RS                 )));
+//RS             }
+//RS         }
+//RS         let Some(next) = current.parent() else {
+//RS             break;
+//RS         };
+//RS         if next == current {
+//RS             break;
+//RS         }
+//RS         current = next.to_path_buf();
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS static SERVICE_STATE_TEMP_SEQUENCE: std::sync::OnceLock<std::sync::atomic::AtomicU64> =
+//RS     std::sync::OnceLock::new();
+//RS 
+//RS fn service_state_temp_sequence() -> u64 {
+//RS     SERVICE_STATE_TEMP_SEQUENCE
+//RS         .get_or_init(|| std::sync::atomic::AtomicU64::new(0))
+//RS         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+//RS }
+//RS 
+//RS fn jet_services_state_store_append(
+//RS     authority: &JetServiceStateAuthority,
+//RS     record: &str,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let adapter = JetServiceStateAdapter::EventLog;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
+//RS     let _file_lock = service_authority_file_lock(&authority.store, "state")?;
+//RS     let records = jet_services_state_store_read_unlocked(authority, &adapter)?;
+//RS     if records.len() >= MAX_SERVICE_STATE_RECORDS {
+//RS         return Err(JetServiceError::Policy(
+//RS             "event-log record limit exceeded".to_string(),
+//RS         ));
+//RS     }
+//RS     let path = std::path::Path::new(&authority.store);
+//RS     if !path.exists() {
+//RS         return jet_services_state_store_write_unlocked(authority, &adapter, &[record.to_string()]);
+//RS     }
+//RS     let frame = jet_services_state_frame(record);
+//RS     let current_size = path.metadata().map_err(|error| {
+//RS         jet_services_state_error(format!("cannot inspect service state store before append: {error}"))
+//RS     })?.len();
+//RS     if current_size
+//RS         .checked_add(frame.len() as u64)
+//RS         .is_none_or(|size| size > MAX_SERVICE_STATE_BYTES as u64)
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service state store exceeds its byte limit".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut options = std::fs::OpenOptions::new();
+//RS     options.append(true);
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt;
+//RS         options.mode(0o600);
+//RS     }
+//RS     let mut file = options
+//RS         .open(path)
+//RS         .map_err(|error| jet_services_state_error(format!("cannot append state store: {error}")))?;
+//RS     std::io::Write::write_all(&mut file, &frame)
+//RS         .map_err(|error| jet_services_state_error(format!("cannot append state event: {error}")))?;
+//RS     std::io::Write::flush(&mut file)
+//RS         .map_err(|error| jet_services_state_error(format!("cannot flush state event: {error}")))?;
+//RS     file.sync_all()
+//RS         .map_err(|error| jet_services_state_error(format!("cannot sync state event: {error}")))
+//RS }
+//RS 
+//RS fn jet_services_read_state_record<'a>(
+//RS     prefix: &str,
+//RS     record: &'a str,
+//RS ) -> Result<&'a str, JetServiceError> {
+//RS     let body = record.strip_prefix(prefix).ok_or_else(|| {
+//RS         JetServiceError::Policy("state record schema is incompatible".to_string())
+//RS     })?;
+//RS     let (length, payload) = body.split_once(':').ok_or_else(|| {
+//RS         JetServiceError::Policy("state record is truncated".to_string())
+//RS     })?;
+//RS     let expected = length.parse::<usize>().map_err(|_| {
+//RS         JetServiceError::Policy("state record length is invalid".to_string())
+//RS     })?;
+//RS     if expected != payload.len() {
+//RS         return Err(JetServiceError::Policy(
+//RS             "state record length does not match payload".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(payload)
+//RS }
+//RS 
+//RS fn jet_services_commit_snapshot(
+//RS     tree: &mut JetServiceTree,
+//RS     payload: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if !tree.started {
+//RS         return Err(JetServiceError::NotStarted(
+//RS             "service tree is not started".to_string(),
+//RS         ));
+//RS     }
+//RS     if tree.state_adapter != JetServiceStateAdapter::Snapshot {
+//RS         return Err(JetServiceError::Policy(
+//RS             "commit_snapshot requires Snapshot state adapter".to_string(),
+//RS         ));
+//RS     }
+//RS     let authority = tree.state_authority.as_ref().ok_or_else(|| {
+//RS         JetServiceError::Policy("Snapshot state has no injected authority".to_string())
+//RS     })?;
+//RS     if payload.len() > MAX_SERVICE_MESSAGE || payload.chars().any(char::is_control) {
+//RS         return Err(JetServiceError::Policy(
+//RS             "snapshot record exceeds the state record limit".to_string(),
+//RS         ));
+//RS     }
+//RS     let record = jet_services_state_record(&format!("v{}:", authority.version), &payload);
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
+//RS     jet_services_state_store_write(authority, &JetServiceStateAdapter::Snapshot, &[record.clone()])?;
+//RS     tree.snapshot = Some(record);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_restore_snapshot(tree: &JetServiceTree) -> Result<String, JetServiceError> {
+//RS     let authority = tree.state_authority.as_ref().ok_or_else(|| {
+//RS         JetServiceError::Policy("Snapshot state has no injected authority".to_string())
+//RS     })?;
+//RS     match jet_services_state_store_load(authority, &JetServiceStateAdapter::Snapshot)?
+//RS         .into_iter()
+//RS         .next()
+//RS     {
+//RS         Some(s) => Ok(jet_services_read_state_record(
+//RS             &format!("v{}:", authority.version),
+//RS             &s,
+//RS         )?
+//RS         .to_string()),
+//RS         None => Err(JetServiceError::Policy(
+//RS             "no snapshot committed".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_services_append_event(
+//RS     tree: &mut JetServiceTree,
+//RS     event: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if !tree.started {
+//RS         return Err(JetServiceError::NotStarted(
+//RS             "service tree is not started".to_string(),
+//RS         ));
+//RS     }
+//RS     if tree.state_adapter != JetServiceStateAdapter::EventLog {
+//RS         return Err(JetServiceError::Policy(
+//RS             "append_event requires EventLog state adapter".to_string(),
+//RS         ));
+//RS     }
+//RS     let authority = tree.state_authority.as_ref().ok_or_else(|| {
+//RS         JetServiceError::Policy("EventLog state has no injected authority".to_string())
+//RS     })?;
+//RS     if event.len() > MAX_SERVICE_MESSAGE || event.chars().any(char::is_control) {
+//RS         return Err(JetServiceError::Policy(
+//RS             "event record exceeds the state record limit".to_string(),
+//RS         ));
+//RS     }
+//RS     if tree.event_log.len() >= MAX_SERVICE_STATE_RECORDS {
+//RS         return Err(JetServiceError::Policy(
+//RS             "event-log record limit exceeded".to_string(),
+//RS         ));
+//RS     }
+//RS     let record = jet_services_state_record(&format!("v{}:", authority.version), &event);
+//RS     jet_services_state_store_append(authority, &record)?;
+//RS     tree.event_log.push(record);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_event_count(tree: &JetServiceTree) -> i64 {
+//RS     tree.event_log.len() as i64
+//RS }
+//RS 
+//RS fn jet_services_replay_events(tree: &JetServiceTree) -> String {
+//RS     let prefix = tree
+//RS         .state_authority
+//RS         .as_ref()
+//RS         .map(|authority| format!("v{}:", authority.version))
+//RS         .unwrap_or_else(|| "v1:".to_string());
+//RS     let mut events = Vec::with_capacity(tree.event_log.len());
+//RS     for record in &tree.event_log {
+//RS         match jet_services_read_state_record(&prefix, record) {
+//RS             Ok(event) => events.push(event),
+//RS             Err(_) => return "StateReplayError(invalid_record)".to_string(),
+//RS         }
+//RS     }
+//RS     events.join("|")
+//RS }
+//RS 
+//RS /// The durable delivery log lives beside the state store, never inside it.
+//RS /// Both are append-only files with different framing, so one path cannot serve
+//RS /// both without the typed state read failing on the other's records.
+//RS fn jet_services_delivery_store(state_store: &str) -> String {
+//RS     format!("{state_store}.delivery")
+//RS }
+//RS 
+//RS fn jet_services_bind_delivery_endpoint(
+//RS     delivery: &JetServiceDelivery,
+//RS     state_authority: Option<&JetServiceStateAuthority>,
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if *delivery != JetServiceDelivery::DurableAtLeastOnce {
+//RS         return Ok(());
+//RS     }
+//RS     let authority = state_authority.ok_or_else(|| {
+//RS         JetServiceError::Policy(
+//RS             "durable service delivery needs its injected authority".to_string(),
+//RS         )
+//RS     })?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: jet_services_delivery_store(&authority.store),
+//RS         retention_ms: 0,
+//RS     };
+//RS     service_authority_bind_store(&runtime, endpoint).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_services_workflow_authority(
+//RS     tree: &JetServiceTree,
+//RS ) -> Result<JetServiceStateAuthority, JetServiceError> {
+//RS     let authority = tree.state_authority.as_ref().ok_or_else(|| {
+//RS         JetServiceError::Policy(
+//RS             "durable workflow history needs the injected service state authority".to_string(),
+//RS         )
+//RS     })?;
+//RS     let store = format!("{}.workflows", authority.store);
+//RS     service_authority_validate_text(
+//RS         &store,
+//RS         "service workflow store",
+//RS         MAX_SERVICE_STATE_STORE,
+//RS         false,
+//RS     )?;
+//RS     Ok(JetServiceStateAuthority {
+//RS         store,
+//RS         schema: authority.schema.clone(),
+//RS         version: authority.version,
+//RS         migration: authority.migration.clone(),
+//RS         adapter: JetServiceStateAdapter::EventLog,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_services_workflow_handle(
+//RS     tree: &JetServiceTree,
+//RS     run_id: i64,
+//RS ) -> Result<JetWorkflowHandle, JetServiceError> {
+//RS     let authority = jet_services_workflow_authority(tree)?;
+//RS     let workflow = tree
+//RS         .workflows
+//RS         .iter()
+//RS         .find(|workflow| workflow.run_id == run_id)
+//RS         .cloned()
+//RS         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
+//RS     Ok(JetWorkflowHandle {
+//RS         authority,
+//RS         state: std::sync::Arc::new(std::sync::Mutex::new(workflow)),
+//RS     })
+//RS }
+//RS 
+//RS trait JetWorkflowRunId {
+//RS     fn jet_workflow_run_id(&self) -> i64;
+//RS }
+//RS 
+//RS impl JetWorkflowRunId for i64 {
+//RS     fn jet_workflow_run_id(&self) -> i64 {
+//RS         *self
+//RS     }
+//RS }
+//RS 
+//RS impl JetWorkflowRunId for JetWorkflowHandle {
+//RS     fn jet_workflow_run_id(&self) -> i64 {
+//RS         self.state
+//RS             .lock()
+//RS             .map(|workflow| workflow.run_id)
+//RS             .unwrap_or_default()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_services_workflow_run_id<R: JetWorkflowRunId>(run_id: &R) -> i64 {
+//RS     run_id.jet_workflow_run_id()
+//RS }
+//RS 
+//RS fn jet_services_workflow_sync_tree(
+//RS     tree: &mut JetServiceTree,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let cursors: std::collections::HashMap<i64, usize> = tree
+//RS         .workflows
+//RS         .iter()
+//RS         .map(|workflow| (workflow.run_id, workflow.replay_cursor))
+//RS         .collect();
+//RS     let mut workflows = jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?;
+//RS     for workflow in &mut workflows {
+//RS         workflow.replay_cursor = cursors.get(&workflow.run_id).copied().unwrap_or(0);
+//RS     }
+//RS     tree.workflows = workflows;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_workflow_field<'a>(
+//RS     input: &'a str,
+//RS     label: &str,
+//RS ) -> Result<&'a str, JetServiceError> {
+//RS     let (length_text, value) = input.split_once(':').ok_or_else(|| {
+//RS         jet_services_state_error(format!("workflow {label} length is missing"))
+//RS     })?;
+//RS     let length = length_text.parse::<usize>().map_err(|_| {
+//RS         jet_services_state_error(format!("workflow {label} length is invalid"))
+//RS     })?;
+//RS     if length != value.len() || value.chars().any(char::is_control) {
+//RS         return Err(jet_services_state_error(format!(
+//RS             "workflow {label} length or contents are invalid"
+//RS         )));
+//RS     }
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn jet_services_workflow_frame(value: &str) -> String {
+//RS     format!("{}:{value}", value.len())
+//RS }
+//RS 
+//RS fn jet_services_workflow_take_field<'a>(
+//RS     input: &'a str,
+//RS     label: &str,
+//RS ) -> Result<(&'a str, &'a str), JetServiceError> {
+//RS     let (length_text, value) = input.split_once(':').ok_or_else(|| {
+//RS         jet_services_state_error(format!("workflow {label} length is missing"))
+//RS     })?;
+//RS     let length = length_text.parse::<usize>().map_err(|_| {
+//RS         jet_services_state_error(format!("workflow {label} length is invalid"))
+//RS     })?;
+//RS     let value = value.get(..length).ok_or_else(|| {
+//RS         jet_services_state_error(format!("workflow {label} length is not a character boundary"))
+//RS     })?;
+//RS     let rest = input
+//RS         .split_once(':')
+//RS         .map(|(_, tail)| tail)
+//RS         .and_then(|tail| tail.get(length..))
+//RS         .ok_or_else(|| jet_services_state_error(format!("workflow {label} length is invalid")))?;
+//RS     if value.chars().any(char::is_control) {
+//RS         return Err(jet_services_state_error(format!(
+//RS             "workflow {label} contains control characters"
+//RS         )));
+//RS     }
+//RS     Ok((value, rest))
+//RS }
+//RS 
+//RS fn jet_services_workflow_token(
+//RS     value: &str,
+//RS     label: &str,
+//RS     max: usize,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if value.trim().is_empty()
+//RS         || value.len() > max
+//RS         || value.chars().any(char::is_control)
+//RS         || value.contains(':')
+//RS     {
+//RS         return Err(JetServiceError::Policy(format!(
+//RS             "workflow {label} must be non-empty, visible, bounded, and contain no `:`"
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_workflow_activity_step(
+//RS     activity: &str,
+//RS     key: &str,
+//RS     attempt: i64,
+//RS     max_attempts: i64,
+//RS ) -> String {
+//RS     format!("activity:{activity}:{key}:{attempt}:{max_attempts}")
+//RS }
+//RS 
+//RS fn jet_services_workflow_activity_parts(
+//RS     step: &str,
+//RS ) -> Option<(&str, &str, i64, i64)> {
+//RS     let mut parts = step.split(':');
+//RS     if parts.next()? != "activity" {
+//RS         return None;
+//RS     }
+//RS     let activity = parts.next()?;
+//RS     let key = parts.next()?;
+//RS     let attempt = parts.next()?.parse::<i64>().ok()?;
+//RS     let max_attempts = parts.next()?.parse::<i64>().ok()?;
+//RS     if parts.next().is_some() {
+//RS         return None;
+//RS     }
+//RS     Some((activity, key, attempt, max_attempts))
+//RS }
+//RS 
+//RS fn jet_services_workflow_activity_index(
+//RS     workflow: &JetServiceWorkflow,
+//RS     key: &str,
+//RS ) -> Option<(usize, String, i64, i64)> {
+//RS     workflow
+//RS         .steps
+//RS         .iter()
+//RS         .enumerate()
+//RS         .find_map(|(index, step)| {
+//RS             let (activity, existing_key, attempt, max_attempts) =
+//RS                 jet_services_workflow_activity_parts(step)?;
+//RS             (existing_key == key).then_some((index, activity.to_string(), attempt, max_attempts))
+//RS         })
+//RS }
+//RS 
+//RS fn jet_services_workflow_activity_outcome<'a>(
+//RS     workflow: &'a JetServiceWorkflow,
+//RS     key: &str,
+//RS ) -> Option<&'a JetTaskOutcome> {
+//RS     workflow
+//RS         .activity_outcomes
+//RS         .iter()
+//RS         .find(|(existing_key, _)| existing_key == key)
+//RS         .map(|(_, outcome)| outcome)
+//RS }
+//RS 
+//RS fn jet_services_workflow_refresh_outcome(workflow: &mut JetServiceWorkflow) {
+//RS     let activities = workflow
+//RS         .steps
+//RS         .iter()
+//RS         .filter_map(|step| jet_services_workflow_activity_parts(step).map(|(_, key, _, _)| key));
+//RS     let keys: Vec<&str> = activities.collect();
+//RS     if keys.is_empty() || keys.iter().any(|key| {
+//RS         !workflow
+//RS             .activity_outcomes
+//RS             .iter()
+//RS             .any(|(done_key, _)| done_key == key)
+//RS     }) {
+//RS         workflow.outcome = None;
+//RS         return;
+//RS     }
+//RS     workflow.outcome = Some(
+//RS         workflow
+//RS             .activity_outcomes
+//RS             .iter()
+//RS             .find_map(|(_, outcome)| outcome.is_retryable_failure().then_some(outcome.clone()))
+//RS             .unwrap_or(JetTaskOutcome::Finished),
+//RS     );
+//RS }
+//RS 
+//RS fn jet_services_workflow_replay(
+//RS     authority: &JetServiceStateAuthority,
+//RS ) -> Result<Vec<JetServiceWorkflow>, JetServiceError> {
+//RS     let records = jet_services_state_store_load(authority, &JetServiceStateAdapter::EventLog)?;
+//RS     let prefix = format!("v{}:", authority.version);
+//RS     let mut workflows = Vec::new();
+//RS     for record in records {
+//RS         let payload = jet_services_read_state_record(&prefix, &record)?;
+//RS         jet_services_workflow_apply(&mut workflows, payload)?;
+//RS     }
+//RS     if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS {
+//RS         return Err(jet_services_state_error("workflow run limit exceeded"));
+//RS     }
+//RS     Ok(workflows)
+//RS }
+//RS 
+//RS fn jet_services_workflow_validate_step(step: &str) -> Result<(), JetServiceError> {
+//RS     if step.trim().is_empty()
+//RS         || step.len() > MAX_SERVICE_MESSAGE
+//RS         || step.chars().any(char::is_control)
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow step must be non-empty and visible".to_string(),
+//RS         ));
+//RS     }
+//RS     let nondeterministic_markers = [
+//RS         "time.",
+//RS         "random",
+//RS         "rand.",
+//RS         "io.",
+//RS         "channel",
+//RS         "spawn",
+//RS         "service.connect",
+//RS     ];
+//RS     if nondeterministic_markers.iter().any(|marker| step.contains(marker)) {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow step reaches a non-deterministic effect; use a recorded activity"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Consume one recorded decision. A replay mismatch is a safety error, not a
+//RS /// new history entry: appending it would make the run look deterministic while
+//RS /// changing the branch the workflow took.
+//RS fn jet_services_workflow_replay_event(
+//RS     workflow: &mut JetServiceWorkflow,
+//RS     expected: &str,
+//RS ) -> Result<bool, JetServiceError> {
+//RS     if workflow.replay_cursor == 0 {
+//RS         return Ok(false);
+//RS     }
+//RS     match workflow.history.get(workflow.replay_cursor) {
+//RS         Some(actual) if actual == expected => {
+//RS             workflow.replay_cursor += 1;
+//RS             Ok(true)
+//RS         }
+//RS         Some(actual) => Err(JetServiceError::Policy(format!(
+//RS             "workflow replay diverged: expected `{actual}`, got `{expected}`"
+//RS         ))),
+//RS         None => Ok(false),
+//RS     }
+//RS }
+//RS 
+//RS /// Retry records include the attempt number assigned by the durable log. On a
+//RS /// replay the materialized activity already contains that newest attempt, so
+//RS /// the caller must consume the recorded number instead of deriving a new one
+//RS /// from the materialized state.
+//RS fn jet_services_workflow_replay_retry(
+//RS     workflow: &mut JetServiceWorkflow,
+//RS     key: &str,
+//RS     max_attempts: i64,
+//RS     outcome: &JetTaskOutcome,
+//RS ) -> Result<bool, JetServiceError> {
+//RS     if workflow.replay_cursor == 0 {
+//RS         return Ok(false);
+//RS     }
+//RS     let Some(actual) = workflow.history.get(workflow.replay_cursor) else {
+//RS         return Ok(false);
+//RS     };
+//RS     let prefix = format!("activity-retry:{key}@");
+//RS     let suffix = format!(":{}", outcome.jet_show());
+//RS     if !actual.starts_with(&prefix) || !actual.ends_with(&suffix) {
+//RS         return Err(JetServiceError::Policy(format!(
+//RS             "workflow replay diverged: expected retry for `{key}`, got `{actual}`"
+//RS         )));
+//RS     }
+//RS     let range = &actual[prefix.len()..actual.len() - suffix.len()];
+//RS     let (attempt_text, recorded_max_text) = range.split_once('/').ok_or_else(|| {
+//RS         JetServiceError::Policy(format!(
+//RS             "workflow replay has an invalid retry decision for `{key}`"
+//RS         ))
+//RS     })?;
+//RS     let attempt = attempt_text.parse::<i64>().map_err(|_| {
+//RS         JetServiceError::Policy(format!(
+//RS             "workflow replay has an invalid retry attempt for `{key}`"
+//RS         ))
+//RS     })?;
+//RS     let recorded_max_attempts = recorded_max_text.parse::<i64>().map_err(|_| {
+//RS         JetServiceError::Policy(format!(
+//RS             "workflow replay has an invalid retry limit for `{key}`"
+//RS         ))
+//RS     })?;
+//RS     if attempt < 2 || attempt > max_attempts || recorded_max_attempts != max_attempts {
+//RS         return Err(JetServiceError::Policy(format!(
+//RS             "workflow replay retry definition for `{key}` changed"
+//RS         )));
+//RS     }
+//RS     workflow.replay_cursor += 1;
+//RS     Ok(true)
+//RS }
+//RS 
+//RS /// The one reader of a workflow record.  Writers reach the in-memory history
+//RS /// only through this function, so a record that cannot be replayed can never
+//RS /// be written, and a replayed history cannot drift from the one the writer
+//RS /// built.
+//RS fn jet_services_workflow_apply(
+//RS     workflows: &mut Vec<JetServiceWorkflow>,
+//RS     payload: &str,
+//RS ) -> Result<(), JetServiceError> {
+//RS     {
+//RS         if let Some(fields) = payload.strip_prefix("workflow-start:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow start run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow start run id is invalid")
+//RS             })?;
+//RS             let (version_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow start version is missing")
+//RS             })?;
+//RS             let version = version_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow start version is invalid")
+//RS             })?;
+//RS             let id = jet_services_workflow_field(fields, "id")?.to_string();
+//RS             if run_id <= 0 || version < 1 || id.trim().is_empty() || id.len() > MAX_SERVICE_NAME {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow start contains invalid identity",
+//RS                 ));
+//RS             }
+//RS             if workflows.iter().any(|workflow: &JetServiceWorkflow| {
+//RS                 workflow.run_id == run_id
+//RS                     || (workflow.id == id && workflow.version == version)
+//RS             }) {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow log contains a duplicate start record",
+//RS                 ));
+//RS             }
+//RS             workflows.push(JetServiceWorkflow {
+//RS                 id,
+//RS                 run_id,
+//RS                 version,
+//RS                 steps: Vec::new(),
+//RS                 history: vec![format!("start@v{version}")],
+//RS                 replay_cursor: 0,
+//RS                 status: JetTaskStatus::Running,
+//RS                 activity_outcomes: Vec::new(),
+//RS                 outcome: None,
+//RS             });
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-step:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow step run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow step run id is invalid")
+//RS             })?;
+//RS             let step = jet_services_workflow_field(fields, "step")?.to_string();
+//RS             jet_services_workflow_validate_step(&step).map_err(|_| {
+//RS                 jet_services_state_error("workflow step contains invalid contents")
+//RS             })?;
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow step has no start record"))?;
+//RS             if workflow.outcome.is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow step follows a terminal workflow outcome",
+//RS                 ));
+//RS             }
+//RS             if workflow.steps.len() >= MAX_SERVICE_WORKFLOW_STEPS {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow step history limit exceeded",
+//RS                 ));
+//RS             }
+//RS             workflow.steps.push(step.clone());
+//RS             workflow.history.push(format!("step:{step}"));
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep:") {
+//RS             let (run_id_text, nanos_text) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow sleep run id or duration is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow sleep run id is invalid")
+//RS             })?;
+//RS             let nanos = nanos_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow sleep duration is invalid")
+//RS             })?;
+//RS             if run_id < 1 {
+//RS                 return Err(jet_services_state_error("workflow sleep run id is invalid"));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow sleep has no start record"))?;
+//RS             if workflow.outcome.is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow sleep follows a terminal workflow outcome",
+//RS                 ));
+//RS             }
+//RS             workflow.history.push(format!("sleep:{nanos}"));
+//RS             workflow.status = JetTaskStatus::Running;
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep-cancelled:") {
+//RS             let run_id = fields.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow cancelled sleep run id is invalid")
+//RS             })?;
+//RS             if run_id < 1 {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow cancelled sleep run id is invalid",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| {
+//RS                     jet_services_state_error("workflow cancelled sleep has no start record")
+//RS                 })?;
+//RS             if workflow.outcome.is_some()
+//RS                 || !workflow.history.last().is_some_and(|entry| entry.starts_with("sleep:"))
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow cancelled sleep is out of order",
+//RS                 ));
+//RS             }
+//RS             workflow.history.push("sleep-cancelled".to_string());
+//RS             workflow.status = JetTaskStatus::CancelRequested;
+//RS             workflow.outcome = Some(JetTaskOutcome::Cancelled);
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep-deadline:") {
+//RS             let run_id = fields.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow deadline sleep run id is invalid")
+//RS             })?;
+//RS             if run_id < 1 {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow deadline sleep run id is invalid",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| {
+//RS                     jet_services_state_error("workflow deadline sleep has no start record")
+//RS                 })?;
+//RS             if workflow.outcome.is_some()
+//RS                 || !workflow.history.last().is_some_and(|entry| entry.starts_with("sleep:"))
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow deadline sleep is out of order",
+//RS                 ));
+//RS             }
+//RS             workflow.history.push("sleep-deadline".to_string());
+//RS             workflow.status = JetTaskStatus::Paused;
+//RS             workflow.outcome = Some(JetTaskOutcome::DeadlineBlown);
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-wait-activity:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity wait run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity wait run id is invalid")
+//RS             })?;
+//RS             let (activity, rest) = jet_services_workflow_take_field(fields, "wait activity")?;
+//RS             let (argument, rest) = jet_services_workflow_take_field(rest, "wait argument")?;
+//RS             if run_id < 1
+//RS                 || rest != ""
+//RS                 || jet_services_workflow_token(activity, "activity", MAX_SERVICE_NAME).is_err()
+//RS                 || argument.len() > MAX_SERVICE_MESSAGE
+//RS                 || argument.chars().any(char::is_control)
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity wait contains invalid fields",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| {
+//RS                     jet_services_state_error("workflow activity wait has no start record")
+//RS                 })?;
+//RS             if workflow.outcome.is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity wait follows a terminal workflow outcome",
+//RS                 ));
+//RS             }
+//RS             workflow
+//RS                 .history
+//RS                 .push(format!("activity:{activity}:{argument}"));
+//RS             workflow.status = JetTaskStatus::Running;
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-wait-all:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow all wait run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow all wait run id is invalid")
+//RS             })?;
+//RS             let (count_text, mut rest) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow all wait count is missing")
+//RS             })?;
+//RS             let count = count_text.parse::<usize>().map_err(|_| {
+//RS                 jet_services_state_error("workflow all wait count is invalid")
+//RS             })?;
+//RS             if run_id < 1 || count > MAX_SERVICE_WORKFLOW_STEPS {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow all wait count is outside the bounded range",
+//RS                 ));
+//RS             }
+//RS             let mut values = Vec::with_capacity(count);
+//RS             for _ in 0..count {
+//RS                 let (value, next) = jet_services_workflow_take_field(rest, "all wait value")?;
+//RS                 if value.len() > MAX_SERVICE_MESSAGE {
+//RS                     return Err(jet_services_state_error("workflow all wait value is too large"));
+//RS                 }
+//RS                 values.push(value.to_string());
+//RS                 rest = next;
+//RS             }
+//RS             if !rest.is_empty() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow all wait contains trailing fields",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow all wait has no start record"))?;
+//RS             if workflow.outcome.is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow all wait follows a terminal workflow outcome",
+//RS                 ));
+//RS             }
+//RS             workflow.history.push(format!("all:{}", values.join(",")));
+//RS             workflow.status = JetTaskStatus::Running;
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-activity:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity run id is invalid")
+//RS             })?;
+//RS             let (attempt_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity attempt is missing")
+//RS             })?;
+//RS             let attempt = attempt_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity attempt is invalid")
+//RS             })?;
+//RS             let (max_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity retry limit is missing")
+//RS             })?;
+//RS             let max_attempts = max_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity retry limit is invalid")
+//RS             })?;
+//RS             let (activity, rest) = jet_services_workflow_take_field(fields, "activity")?;
+//RS             let (key, rest) = jet_services_workflow_take_field(rest, "idempotency key")?;
+//RS             if jet_services_workflow_token(activity, "activity", MAX_SERVICE_NAME).is_err()
+//RS                 || jet_services_workflow_token(key, "idempotency key", MAX_SERVICE_NAME).is_err()
+//RS                 || run_id < 1
+//RS                 || attempt != 1
+//RS                 || max_attempts < 1
+//RS                 || max_attempts > MAX_SERVICE_ACTIVITY_ATTEMPTS
+//RS                 || !rest.is_empty()
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity start contains invalid fields",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow activity has no start record"))?;
+//RS             if workflow.outcome.is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity follows a terminal workflow outcome",
+//RS                 ));
+//RS             }
+//RS             if jet_services_workflow_activity_index(workflow, key).is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow log contains a duplicate activity key",
+//RS                 ));
+//RS             }
+//RS             workflow.steps.push(jet_services_workflow_activity_step(
+//RS                 activity,
+//RS                 key,
+//RS                 attempt,
+//RS                 max_attempts,
+//RS             ));
+//RS             workflow
+//RS                 .history
+//RS                 .push(format!("activity:{activity}:{key}@{attempt}/{max_attempts}"));
+//RS             workflow.status = JetTaskStatus::Running;
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-activity-retry:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity retry run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity retry run id is invalid")
+//RS             })?;
+//RS             let (attempt_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity retry attempt is missing")
+//RS             })?;
+//RS             let attempt = attempt_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity retry attempt is invalid")
+//RS             })?;
+//RS             let (key, rest) = jet_services_workflow_take_field(fields, "idempotency key")?;
+//RS             let (outcome_wire, rest) =
+//RS                 jet_services_workflow_take_field(rest, "activity attempt outcome")?;
+//RS             let outcome = JetTaskOutcome::from_wire(outcome_wire)?;
+//RS             if run_id < 1
+//RS                 || attempt < 2
+//RS                 || attempt > MAX_SERVICE_ACTIVITY_ATTEMPTS
+//RS                 || !rest.is_empty()
+//RS                 || !outcome.is_retryable_failure()
+//RS                 || jet_services_workflow_token(key, "idempotency key", MAX_SERVICE_NAME).is_err()
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity retry contains invalid fields",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow retry has no start record"))?;
+//RS             if workflow.outcome.is_some()
+//RS                 || jet_services_workflow_activity_outcome(workflow, key).is_some()
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow retry follows a terminal activity",
+//RS                 ));
+//RS             }
+//RS             let (index, activity, current_attempt, max_attempts) =
+//RS                 jet_services_workflow_activity_index(workflow, key)
+//RS                     .ok_or_else(|| jet_services_state_error("workflow retry has no activity"))?;
+//RS             if attempt != current_attempt + 1 || attempt > max_attempts {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity retry is out of order or exceeds its limit",
+//RS                 ));
+//RS             }
+//RS             workflow.steps[index] = jet_services_workflow_activity_step(
+//RS                 &activity,
+//RS                 key,
+//RS                 attempt,
+//RS                 max_attempts,
+//RS             );
+//RS             workflow
+//RS                 .history
+//RS                 .push(format!(
+//RS                     "activity-retry:{key}@{attempt}/{max_attempts}:{}",
+//RS                     outcome.jet_show()
+//RS                 ));
+//RS             workflow.status = JetTaskStatus::Paused;
+//RS         } else if let Some(fields) = payload.strip_prefix("workflow-activity-done:") {
+//RS             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+//RS                 jet_services_state_error("workflow activity completion run id is missing")
+//RS             })?;
+//RS             let run_id = run_id_text.parse::<i64>().map_err(|_| {
+//RS                 jet_services_state_error("workflow activity completion run id is invalid")
+//RS             })?;
+//RS             let (key, rest) = jet_services_workflow_take_field(fields, "idempotency key")?;
+//RS             let (outcome_wire, rest) = jet_services_workflow_take_field(rest, "activity outcome")?;
+//RS             let outcome = JetTaskOutcome::from_wire(outcome_wire)?;
+//RS             if run_id < 1
+//RS                 || !rest.is_empty()
+//RS                 || jet_services_workflow_token(key, "idempotency key", MAX_SERVICE_NAME).is_err()
+//RS             {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow activity completion contains invalid fields",
+//RS                 ));
+//RS             }
+//RS             let workflow = workflows
+//RS                 .iter_mut()
+//RS                 .find(|workflow| workflow.run_id == run_id)
+//RS                 .ok_or_else(|| jet_services_state_error("workflow completion has no start record"))?;
+//RS             if jet_services_workflow_activity_index(workflow, key).is_none() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow completion has no activity record",
+//RS                 ));
+//RS             }
+//RS             if jet_services_workflow_activity_outcome(workflow, key).is_some() {
+//RS                 return Err(jet_services_state_error(
+//RS                     "workflow log contains a duplicate activity completion",
+//RS                 ));
+//RS             }
+//RS             let marker = format!("activity-done:{key}");
+//RS             workflow.history.push(marker);
+//RS             workflow
+//RS                 .history
+//RS                 .push(format!("activity-result:{}", outcome.jet_show()));
+//RS             workflow
+//RS                 .activity_outcomes
+//RS                 .push((key.to_string(), outcome));
+//RS             jet_services_workflow_refresh_outcome(workflow);
+//RS         } else {
+//RS             return Err(jet_services_state_error(
+//RS                 "workflow log contains an unknown record",
+//RS             ));
+//RS         }
+//RS     }
+//RS     // One bound for every record kind.  `history` carries the start entry and
+//RS     // an activity's retries on top of `steps`, so bounding `steps` alone lets
+//RS     // a legal run grow a history the tree validator then rejects.
+//RS     if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS
+//RS         || workflows.iter().any(|workflow| {
+//RS             workflow.steps.len() > MAX_SERVICE_WORKFLOW_STEPS
+//RS                 || workflow.history.len() > MAX_SERVICE_WORKFLOW_STEPS
+//RS         })
+//RS     {
+//RS         return Err(jet_services_state_error("workflow history limit exceeded"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Append one workflow record and advance the in-memory history by replaying
+//RS /// it.  The record is applied to the replayed durable log first, so a payload
+//RS /// the reader would reject never reaches the store, and a history that has
+//RS /// drifted from the store is reported instead of extended.  The extra read
+//RS /// costs one more pass over a store the append already re-reads.
+//RS ///
+//RS /// The workflow file lock orders writers across processes. The state append
+//RS /// below also takes the shared process lock before it publishes the record.
+//RS fn jet_services_workflow_append(
+//RS     tree: &mut JetServiceTree,
+//RS     payload: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let authority = jet_services_workflow_authority(tree)?;
+//RS     let _workflow_lock = service_authority_file_lock(&authority.store, "workflow")?;
+//RS     let mut applied = jet_services_workflow_replay(&authority)?;
+//RS     for durable in &mut applied {
+//RS         if let Some(current) = tree
+//RS             .workflows
+//RS             .iter()
+//RS             .find(|workflow| workflow.run_id == durable.run_id)
+//RS         {
+//RS             durable.replay_cursor = current.replay_cursor;
+//RS         }
+//RS     }
+//RS     if applied != tree.workflows {
+//RS         return Err(jet_services_state_error(
+//RS             "in-memory workflow history does not match the durable workflow log",
+//RS         ));
+//RS     }
+//RS     jet_services_workflow_apply(&mut applied, &payload)?;
+//RS     if applied.len() > MAX_SERVICE_WORKFLOW_STEPS {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow run limit exceeded".to_string(),
+//RS         ));
+//RS     }
+//RS     let record = jet_services_state_record(&format!("v{}:", authority.version), &payload);
+//RS     jet_services_state_store_append(&authority, &record)?;
+//RS     tree.workflows = applied;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_workflow_append_handle(
+//RS     handle: &JetWorkflowHandle,
+//RS     payload: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let _workflow_lock = service_authority_file_lock(&handle.authority.store, "workflow")?;
+//RS     let mut applied = jet_services_workflow_replay(&handle.authority)?;
+//RS     let mut state = handle
+//RS         .state
+//RS         .lock()
+//RS         .map_err(|_| JetServiceError::Policy("workflow handle state lock is poisoned".to_string()))?;
+//RS     let run_id = state.run_id;
+//RS     let index = applied
+//RS         .iter()
+//RS         .position(|workflow| workflow.run_id == run_id)
+//RS         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
+//RS     applied[index].replay_cursor = state.replay_cursor;
+//RS     if applied[index] != *state {
+//RS         return Err(jet_services_state_error(
+//RS             "workflow handle history does not match the durable workflow log",
+//RS         ));
+//RS     }
+//RS     jet_services_workflow_apply(&mut applied, &payload)?;
+//RS     let record = jet_services_state_record(&format!("v{}:", handle.authority.version), &payload);
+//RS     jet_services_state_store_append(&handle.authority, &record)?;
+//RS     *state = applied
+//RS         .into_iter()
+//RS         .find(|workflow| workflow.run_id == run_id)
+//RS         .ok_or_else(|| jet_services_state_error("workflow handle disappeared after append"))?;
+//RS     state.replay_cursor = state.history.len();
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_services_workflow_store_load(
+//RS     tree: &JetServiceTree,
+//RS ) -> Result<Vec<JetServiceWorkflow>, JetServiceError> {
+//RS     let authority = jet_services_workflow_authority(tree)?;
+//RS     jet_services_workflow_replay(&authority)
+//RS }
+//RS 
+//RS fn jet_services_workflow_start_id(
+//RS     tree: &mut JetServiceTree,
+//RS     id: String,
+//RS     version: i64,
+//RS ) -> Result<i64, JetServiceError> {
+//RS     if !tree.started {
+//RS         return Err(JetServiceError::NotStarted(
+//RS             "service tree is not started".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_services_workflow_sync_tree(tree)?;
+//RS     if id.trim().is_empty()
+//RS         || id.chars().any(char::is_control)
+//RS         || id.len() > MAX_SERVICE_NAME
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow id must be non-empty and visible".to_string(),
+//RS         ));
+//RS     }
+//RS     if version < 1 {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow version must be >= 1".to_string(),
+//RS         ));
+//RS     }
+//RS     if let Some(existing) = tree
+//RS         .workflows
+//RS         .iter_mut()
+//RS         .find(|workflow| workflow.id == id && workflow.version == version)
+//RS     {
+//RS         // Starting an existing version begins one deterministic replay pass.
+//RS         // New decisions can still append after the recorded history ends.
+//RS         existing.replay_cursor = 1;
+//RS         return Ok(existing.run_id);
+//RS     }
+//RS     if tree.workflows.iter().any(|workflow| {
+//RS         workflow.id == id && workflow.version != version && workflow.outcome.is_none()
+//RS     }) {
+//RS         return Err(JetServiceError::Policy(format!(
+//RS             "workflow `{id}` already has a different active version"
+//RS         )));
+//RS     }
+//RS     let run_id = tree
+//RS         .workflows
+//RS         .iter()
+//RS         .map(|workflow| workflow.run_id)
+//RS         .max()
+//RS         .unwrap_or(0)
+//RS         .checked_add(1)
+//RS         .ok_or_else(|| JetServiceError::Policy("workflow run id exhausted".to_string()))?;
+//RS     jet_services_workflow_append(
+//RS         tree,
+//RS         format!(
+//RS             "workflow-start:{run_id}:{version}:{}",
+//RS             jet_services_workflow_frame(&id)
+//RS         ),
+//RS     )?;
+//RS     if let Some(workflow) = tree.workflows.iter_mut().find(|workflow| workflow.run_id == run_id) {
+//RS         workflow.replay_cursor = 1;
+//RS     }
+//RS     Ok(run_id)
+//RS }
+//RS 
+//RS fn jet_services_workflow_start(
+//RS     tree: &mut JetServiceTree,
+//RS     id: String,
+//RS     version: i64,
+//RS ) -> Result<JetWorkflowHandle, JetServiceError> {
+//RS     let run_id = jet_services_workflow_start_id(tree, id, version)?;
+//RS     jet_services_workflow_handle(tree, run_id)
+//RS }
+//RS 
+//RS fn jet_services_workflow_sleep(
+//RS     handle: &JetWorkflowHandle,
+//RS     nanos: i64,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let expected = format!("sleep:{nanos}");
+//RS     {
+//RS         let mut workflow = handle.state.lock().map_err(|_| {
+//RS             JetServiceError::Policy("workflow handle state lock is poisoned".to_string())
+//RS         })?;
+//RS         if workflow.replay_cursor != 0 {
+//RS             if jet_services_workflow_replay_event(&mut workflow, &expected)? {
+//RS                 match workflow.history.get(workflow.replay_cursor).map(String::as_str) {
+//RS                     Some("sleep-cancelled") => {
+//RS                         workflow.replay_cursor += 1;
+//RS                         workflow.status = JetTaskStatus::CancelRequested;
+//RS                         workflow.outcome = Some(JetTaskOutcome::Cancelled);
+//RS                         return Err(JetServiceError::Policy(
+//RS                             "workflow sleep was cancelled".to_string(),
+//RS                         ));
+//RS                     }
+//RS                     Some("sleep-deadline") => {
+//RS                         workflow.replay_cursor += 1;
+//RS                         workflow.status = JetTaskStatus::Paused;
+//RS                         workflow.outcome = Some(JetTaskOutcome::DeadlineBlown);
+//RS                         return Err(JetServiceError::Policy(
+//RS                             "workflow sleep deadline expired".to_string(),
+//RS                         ));
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS                 return Ok(());
+//RS             }
+//RS         } else {
+//RS             workflow.replay_cursor = workflow.history.len();
+//RS         }
+//RS     }
+//RS     jet_services_workflow_append_handle(
+//RS         handle,
+//RS         format!("workflow-wait-sleep:{}:{nanos}", jet_services_workflow_run_id(handle)),
+//RS     )?;
+//RS     match jet_services_workflow_sleep_wait(nanos) {
+//RS         JetServiceWorkflowWait::Ready(()) => Ok(()),
+//RS         JetServiceWorkflowWait::Cancelled => {
+//RS             jet_services_workflow_append_handle(
+//RS                 handle,
+//RS                 format!(
+//RS                     "workflow-wait-sleep-cancelled:{}",
+//RS                     jet_services_workflow_run_id(handle)
+//RS                 ),
+//RS             )?;
+//RS             Err(JetServiceError::Policy(
+//RS                 "workflow sleep was cancelled".to_string(),
+//RS             ))
+//RS         }
+//RS         JetServiceWorkflowWait::Deadline(_) => {
+//RS             jet_services_workflow_append_handle(
+//RS                 handle,
+//RS                 format!(
+//RS                     "workflow-wait-sleep-deadline:{}",
+//RS                     jet_services_workflow_run_id(handle)
+//RS                 ),
+//RS             )?;
+//RS             Err(JetServiceError::Policy(
+//RS                 "workflow sleep deadline expired".to_string(),
+//RS             ))
+//RS         }
+//RS         JetServiceWorkflowWait::Panicked(reason) => Err(JetServiceError::Policy(format!(
+//RS             "workflow sleep failed: {reason}"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_services_workflow_activity_wait(
+//RS     handle: &JetWorkflowHandle,
+//RS     activity: String,
+//RS     argument: String,
+//RS ) -> Result<String, JetServiceError> {
+//RS     jet_services_workflow_token(&activity, "activity", MAX_SERVICE_NAME)?;
+//RS     if argument.len() > MAX_SERVICE_MESSAGE || argument.chars().any(char::is_control) {
+//RS         return Err(JetServiceError::Policy(
+//RS             "workflow activity argument is outside the bounded visible range".to_string(),
+//RS         ));
+//RS     }
+//RS     let expected = format!("activity:{activity}:{argument}");
+//RS     {
+//RS         let mut workflow = handle.state.lock().map_err(|_| {
+//RS             JetServiceError::Policy("workflow handle state lock is poisoned".to_string())
+//RS         })?;
+//RS         if workflow.replay_cursor != 0 {
+//RS             if jet_services_workflow_replay_event(&mut workflow, &expected)? {
+//RS                 return Ok(argument);
+//RS             }
+//RS         } else {
+//RS             workflow.replay_cursor = workflow.history.len();
+//RS         }
+//RS     }
+//RS     jet_services_workflow_append_handle(
+//RS         handle,
+//RS         format!(
+//RS             "workflow-wait-activity:{}:{}{}",
+//RS             jet_services_workflow_run_id(handle),
+//RS             jet_services_workflow_frame(&activity),
+//RS             jet_services_workflow_frame(&argument)
+//RS         ),
+//RS     )?;
+//RS     Ok(argument)
+//RS }
+//RS 
+// END-PORT-PENDING 0304 crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3747-5560
+

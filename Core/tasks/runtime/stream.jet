@@ -1,0 +1,365 @@
+// PORT-PENDING 0189 crates-jet-codegen-src-prelude-stream-module-group: crates/jet-codegen/src/Prelude/Stream.rs:1-361
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-CONC-STREAM1=A / D-CANCELMODEL1=C: one pull-gated Stream protocol for
+//RS // emitted programs and the resident JIT adapter. This file is included by
+//RS // both scheduler substrates so suspension, cancellation, cleanup, and
+//RS // completion cannot drift by tier.
+//RS 
+//RS pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
+//RS     let values = JetSchedulerChannel::new();
+//RS     let acknowledgements = JetSchedulerChannel::new();
+//RS     let completion = JetSchedulerChannel::<JetStreamCompletion>::new();
+//RS     let failure_report = std::sync::Arc::new(std::sync::Mutex::new(None));
+//RS     let value_tx = values.sender();
+//RS     let acknowledgement_tx = acknowledgements.sender();
+//RS     let completion_tx = completion.sender();
+//RS     (
+//RS         JetStreamSender {
+//RS             values: value_tx,
+//RS             acknowledgements,
+//RS             completion: completion_tx,
+//RS             failed: std::sync::atomic::AtomicBool::new(false),
+//RS             failure_report: failure_report.clone(),
+//RS             cancel_shielded: std::sync::atomic::AtomicBool::new(false),
+//RS         },
+//RS         JetStream {
+//RS             values: Some(values),
+//RS             acknowledgements: Some(acknowledgement_tx),
+//RS             completion: Some(completion),
+//RS             pending: false,
+//RS             failed: false,
+//RS             failure_report,
+//RS             producer_task: None,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS /// Start a generator as a child task of its stream. The stream owns the task
+//RS /// handle; dropping the consumer therefore uses the same cancellation and
+//RS /// wait-point unwind as every other task.
+//RS pub fn jet_stream_task<T, F>(producer: F) -> JetStream<T>
+//RS where
+//RS     T: Send + 'static,
+//RS     F: FnOnce(&JetStreamSender<T>) + Send + 'static,
+//RS {
+//RS     let (sender, mut stream) = jet_stream();
+//RS     let control = JetTaskControl::new();
+//RS     let join = jet_scheduler_spawn_with_control(
+//RS         move || {
+//RS             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS                 producer(&sender);
+//RS                 // A producer that took its cancel edge ran its cleanup inside
+//RS                 // `#Shield`; leaving it now delivers the deferred cancel, so
+//RS                 // the task still reports `Cancelled`.
+//RS                 sender.leave_cancel_shield();
+//RS             }));
+//RS             if let Err(payload) = result {
+//RS                 // A cancel is not a producer failure, so it never sets the
+//RS                 // failure flag — but it still resumes, so the task reports
+//RS                 // `Cancelled` and `sender`'s Drop still signals completion on
+//RS                 // the way out. Dropping `sender` during that unwind is safe:
+//RS                 // its completion send is a wait point reached from cleanup, and
+//RS                 // the cleanup rule in `Prelude/Scheduler.rs` defers the cancel
+//RS                 // there instead of raising a second time (#2007, #2019).
+//RS                 if !jet_scheduler_is_cancel_unwind(payload.as_ref()) {
+//RS                     sender.fail();
+//RS                 }
+//RS                 std::panic::resume_unwind(payload);
+//RS             }
+//RS         },
+//RS         control.clone(),
+//RS     );
+//RS     stream.attach_task(control, join);
+//RS     stream
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetStreamCompletion {
+//RS     Completed,
+//RS     Failed(Option<String>),
+//RS }
+//RS 
+//RS pub struct JetStream<T> {
+//RS     values: Option<JetSchedulerChannel<T>>,
+//RS     acknowledgements: Option<JetSchedulerSender<()>>,
+//RS     completion: Option<JetSchedulerChannel<JetStreamCompletion>>,
+//RS     pending: bool,
+//RS     failed: bool,
+//RS     failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+//RS     producer_task: Option<JetStreamTask>,
+//RS }
+//RS 
+//RS struct JetStreamTask {
+//RS     control: std::sync::Arc<JetTaskControl>,
+//RS     drain: Option<Box<dyn FnOnce() + Send>>,
+//RS }
+//RS 
+//RS impl JetStreamTask {
+//RS     fn new<T: Send + 'static>(
+//RS         control: std::sync::Arc<JetTaskControl>,
+//RS         join: JetSchedulerJoin<T>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             control,
+//RS             drain: Some(Box::new(move || join.drain())),
+//RS         }
+//RS     }
+//RS 
+//RS     fn cancel(&self) {
+//RS         self.control.cancel();
+//RS     }
+//RS 
+//RS     fn drain(mut self) {
+//RS         if let Some(drain) = self.drain.take() {
+//RS             drain();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> JetStream<T> {
+//RS     /// Attach the scheduler child that produces this stream. Runtime adapters
+//RS     /// use this after their ABI handle has been created.
+//RS     pub fn attach_task<J: Send + 'static>(
+//RS         &mut self,
+//RS         control: std::sync::Arc<JetTaskControl>,
+//RS         join: JetSchedulerJoin<J>,
+//RS     ) {
+//RS         self.producer_task = Some(JetStreamTask::new(control, join));
+//RS     }
+//RS 
+//RS     /// Pull one value. The acknowledgement for the preceding value is sent
+//RS     /// first, which is the exact suspension boundary after `yield`.
+//RS     pub fn pull(&mut self) -> Option<T> {
+//RS         if self.pending {
+//RS             let acknowledgement = self.acknowledgements.as_ref()?;
+//RS             if !acknowledgement.send(()) {
+//RS                 self.observe_completion();
+//RS                 return None;
+//RS             }
+//RS             self.pending = false;
+//RS         }
+//RS         let Some(values) = self.values.as_ref() else {
+//RS             return None;
+//RS         };
+//RS         let Some(value) = values.receive() else {
+//RS             self.observe_completion();
+//RS             return None;
+//RS         };
+//RS         self.pending = true;
+//RS         Some(value)
+//RS     }
+//RS 
+//RS     /// Pull one value and preserve the producer-failure contract for lazy
+//RS     /// stream views.  Adapters that wrap a `JetStream` use this instead of
+//RS     /// reimplementing the terminal failure check owned by the base stream.
+//RS     pub fn pull_checked(&mut self) -> Option<T> {
+//RS         let value = self.pull();
+//RS         if value.is_none() && self.failed() {
+//RS             if let Some(report) = self.failure_report() {
+//RS                 jet_scheduler_runtime_stop_with_report(report);
+//RS             }
+//RS             jet_scheduler_runtime_stop("stream producer failed");
+//RS         }
+//RS         value
+//RS     }
+//RS 
+//RS     fn observe_completion(&mut self) {
+//RS         let Some(completion) = self.completion.take() else {
+//RS             return;
+//RS         };
+//RS         match completion.receive() {
+//RS             Some(JetStreamCompletion::Failed(report)) => {
+//RS                 self.failed = true;
+//RS                 if let Some(report) = report {
+//RS                     *self
+//RS                         .failure_report
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+//RS                 }
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn failed(&self) -> bool {
+//RS         self.failed
+//RS     }
+//RS 
+//RS     pub fn failure_report(&self) -> Option<String> {
+//RS         self.failure_report
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .clone()
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetStreamIter<T> {
+//RS     stream: JetStream<T>,
+//RS }
+//RS 
+//RS impl<T: Send> Iterator for JetStreamIter<T> {
+//RS     type Item = T;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         self.stream.pull_checked()
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> IntoIterator for JetStream<T> {
+//RS     type Item = T;
+//RS     type IntoIter = JetStreamIter<T>;
+//RS 
+//RS     fn into_iter(self) -> Self::IntoIter {
+//RS         JetStreamIter { stream: self }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Drop for JetStream<T> {
+//RS     fn drop(&mut self) {
+//RS         // D-CONC-STREAM1=A: dropping the iterator cancels its producer, which
+//RS         // is an ordinary scheduler child, and the shared task wait point
+//RS         // performs the unwind — so every producer cleanup runs before the
+//RS         // consumer endpoints disappear. There is no stream-local shutdown to
+//RS         // fall back to: a stream with no attached child has no producer to
+//RS         // stop, and its cancellation fact is that child's `JetTaskControl`.
+//RS         //
+//RS         // Cancel, then close, then join. The order is the whole law:
+//RS         //   * cancel first sets the fact before the producer can resume, so a
+//RS         //     producer parked at `yield` unwinds there and never runs the code
+//RS         //     after it;
+//RS         //   * closing the consumer endpoints releases a producer inside
+//RS         //     `#Shield`, which parks on the real event only and ignores the
+//RS         //     cancel wake (`Prelude/Scheduler.rs::jet_scheduler_yield`). It
+//RS         //     finishes its critical section and unwinds at the shield's exit,
+//RS         //     exactly as a shielded task cancelled at any other wait point
+//RS         //     does. Joining before the close would wait on a producer that is
+//RS         //     waiting on us;
+//RS         //   * the join then observes the child's outcome, and the completion
+//RS         //     receive picks up the notification its sender sent while
+//RS         //     unwinding.
+//RS         let producer = self.producer_task.take();
+//RS         if let Some(task) = &producer {
+//RS             task.cancel();
+//RS         }
+//RS         let _ = self.acknowledgements.take();
+//RS         let _ = self.values.take();
+//RS         if let Some(task) = producer {
+//RS             task.drain();
+//RS         }
+//RS         // Join already waited for the producer. After drain the completion
+//RS         // word is queued if sender Drop ran; do not park if it did not.
+//RS         if let Some(completion) = self.completion.take() {
+//RS             let _ = completion.try_receive();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetStreamSender<T> {
+//RS     values: JetSchedulerSender<T>,
+//RS     acknowledgements: JetSchedulerChannel<()>,
+//RS     completion: JetSchedulerSender<JetStreamCompletion>,
+//RS     failed: std::sync::atomic::AtomicBool,
+//RS     failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+//RS     cancel_shielded: std::sync::atomic::AtomicBool,
+//RS }
+//RS 
+//RS impl<T: Send> JetStreamSender<T> {
+//RS     /// Send one value and wait for the next consumer pull. A dropped consumer
+//RS     /// closes the acknowledgement channel and returns `false`.
+//RS     pub fn send_stream(&self, value: T) -> bool {
+//RS         self.values.send(value) && self.acknowledgements.receive().is_some()
+//RS     }
+//RS 
+//RS     /// Generator `yield`: send one value and wait for the next pull. Returns
+//RS     /// `false` when the consumer stopped pulling, so the generator takes its
+//RS     /// MIR cancel edge and runs its lexical cleanup instead of unwinding past
+//RS     /// it. That cleanup runs while the producer is still cancelled, so it runs
+//RS     /// inside `#Shield`: its own wait points complete, and `jet_stream_task`
+//RS     /// delivers the deferred cancel when the producer returns
+//RS     /// (D-CANCELMODEL1=C).
+//RS     pub fn yield_value(&self, value: T) -> bool {
+//RS         let sent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             self.send_stream(value)
+//RS         }));
+//RS         match sent {
+//RS             Ok(true) => true,
+//RS             Ok(false) => {
+//RS                 self.enter_cancel_shield();
+//RS                 false
+//RS             }
+//RS             Err(payload) if jet_scheduler_is_cancel_unwind(payload.as_ref()) => {
+//RS                 self.enter_cancel_shield();
+//RS                 false
+//RS             }
+//RS             Err(payload) => std::panic::resume_unwind(payload),
+//RS         }
+//RS     }
+//RS 
+//RS     fn enter_cancel_shield(&self) {
+//RS         if !self
+//RS             .cancel_shielded
+//RS             .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS         {
+//RS             jet_scheduler_shield_enter();
+//RS         }
+//RS     }
+//RS 
+//RS     fn leave_cancel_shield(&self) {
+//RS         if self
+//RS             .cancel_shielded
+//RS             .swap(false, std::sync::atomic::Ordering::AcqRel)
+//RS         {
+//RS             jet_scheduler_shield_leave();
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn fail(&self) {
+//RS         self.failed
+//RS             .store(true, std::sync::atomic::Ordering::Release);
+//RS     }
+//RS 
+//RS     pub fn fail_with(&self, report: String) {
+//RS         *self
+//RS             .failure_report
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+//RS         self.fail();
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Drop for JetStreamSender<T> {
+//RS     fn drop(&mut self) {
+//RS         // Completion is signalled after the generator's lexical cleanup has
+//RS         // finished, so a dropped consumer can wait for the cleanup boundary.
+//RS         // The send below is a wait point running inside drop glue: when the
+//RS         // producer is cancelled, the cleanup rule in `Prelude/Scheduler.rs`
+//RS         // defers that cancel so this notification is delivered rather than
+//RS         // traded for a second unwind (#2007).
+//RS         let completion = if self
+//RS             .failed
+//RS             .load(std::sync::atomic::Ordering::Acquire)
+//RS         {
+//RS             let mut failure_report = self
+//RS                 .failure_report
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             if failure_report.is_none() {
+//RS                 *failure_report = jet_stream_take_failure_report();
+//RS             }
+//RS             let report = failure_report.clone();
+//RS             JetStreamCompletion::Failed(report)
+//RS         } else {
+//RS             JetStreamCompletion::Completed
+//RS         };
+//RS 
+//RS         // Drop glue, including JIT's converted cancel path: the producer is still
+//RS         // marked cancelled but is no longer panicking, so an interruptible send
+//RS         // would raise again and skip this notification. Shield so the consumer
+//RS         // join can observe completion (#2007).
+//RS         jet_scheduler_shield_enter();
+//RS         let _ = self.completion.send(completion);
+//RS         let _ = jet_scheduler_shield_leave_status();
+//RS     }
+//RS }
+// END-PORT-PENDING 0189 crates/jet-codegen/src/Prelude/Stream.rs:1-361
+

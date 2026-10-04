@@ -1,0 +1,2453 @@
+// PORT-PENDING 0160 crates-jet-codegen-src-prelude-corelib-jetstd-dbpluginwire: crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1-2449
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── core.db: the tagged SQL parameter/column value (D-DBDRIVER1) ───────────
+//RS // `DBValue` mirrors `JSON`'s dynamic-value construction mechanism
+//RS // (`DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Blob(bytes)` /
+//RS // `.Null`) but is SQL-shaped: `Int` keeps the full 64-bit width SQLite integers
+//RS // carry (never routed through `f64`, which would lose precision above 2^53).
+//RS // `Blob` carries an exact `[U8]` sequence. A `Row` is `Map<String, DBValue>` —
+//RS // the built-in `Map` type already gives `.get`/`.keys`/`.values`, so no separate
+//RS // nominal `Row` type is needed (I8). Keep the Rust carrier behind one adapter
+//RS // alias so generated callers never depend on the backing map implementation.
+//RS pub(super) type JetDBRow = super::JetMap<String, DBValue>;
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum DBValue {
+//RS     Null,
+//RS     Int(i64),
+//RS     Float(f64),
+//RS     Text(String),
+//RS     Bool(bool),
+//RS     Blob(Vec<u8>),
+//RS }
+//RS 
+//RS /// D-TYPEDSQL-SINK1=A: checked SQL is one value containing template text and
+//RS /// ordered database bindings. Sinks receive this alias, not separate text and
+//RS /// parameter arguments.
+//RS pub type SQL = (String, Vec<DBValue>);
+//RS 
+//RS impl super::JetShow for DBValue {
+//RS     fn jet_show(&self) -> String {
+//RS         render_db_value(self)
+//RS     }
+//RS }
+//RS 
+//RS impl super::JetDisplay for DBValue {
+//RS     fn jet_display(&self) -> String {
+//RS         render_db_value(self)
+//RS     }
+//RS }
+//RS 
+//RS fn render_db_value(v: &DBValue) -> String {
+//RS     match v {
+//RS         DBValue::Null => "null".to_string(),
+//RS         DBValue::Int(n) => n.to_string(),
+//RS         DBValue::Float(f) => f.to_string(),
+//RS         DBValue::Text(s) => s.clone(),
+//RS         DBValue::Bool(b) => b.to_string(),
+//RS         DBValue::Blob(bytes) => format!("{bytes:?}"),
+//RS     }
+//RS }
+//RS 
+//RS impl DBValue {
+//RS     pub fn is_null(&self) -> bool {
+//RS         matches!(self, DBValue::Null)
+//RS     }
+//RS     pub fn int(&self) -> Result<i64, String> {
+//RS         match self {
+//RS             DBValue::Int(n) => Ok(*n),
+//RS             _ => Err(format!("expected an int, got {}", render_db_value(self))),
+//RS         }
+//RS     }
+//RS     pub fn float(&self) -> Result<f64, String> {
+//RS         match self {
+//RS             DBValue::Float(f) => Ok(*f),
+//RS             DBValue::Int(n) => Ok(*n as f64),
+//RS             _ => Err(format!("expected a float, got {}", render_db_value(self))),
+//RS         }
+//RS     }
+//RS     pub fn text(&self) -> Result<String, String> {
+//RS         match self {
+//RS             DBValue::Text(s) => Ok(s.clone()),
+//RS             _ => Err(format!("expected text, got {}", render_db_value(self))),
+//RS         }
+//RS     }
+//RS     pub fn bool(&self) -> Result<bool, String> {
+//RS         match self {
+//RS             DBValue::Bool(b) => Ok(*b),
+//RS             // SQLite BOOLEAN is INTEGER 0/1; query results keep that affinity.
+//RS             DBValue::Int(0) => Ok(false),
+//RS             DBValue::Int(1) => Ok(true),
+//RS             _ => Err(format!("expected a bool, got {}", render_db_value(self))),
+//RS         }
+//RS     }
+//RS     pub fn blob(&self) -> Result<Vec<u8>, String> {
+//RS         match self {
+//RS             DBValue::Blob(bytes) => Ok(bytes.clone()),
+//RS             _ => Err(format!("expected a blob, got {}", render_db_value(self))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // D-DBPOLICY1: row reads report on `core.db`'s one failure domain, `DBError`.
+//RS pub fn jet_db_row_value(row: &JetDBRow, key: &String) -> Result<DBValue, DBError> {
+//RS     row.get(key).cloned().ok_or_else(|| DBError {
+//RS         message: format!("missing column `{}`", key),
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_db_row_int(row: &JetDBRow, key: &String) -> Result<i64, DBError> {
+//RS     jet_db_row_value(row, key).and_then(|v| v.int().map_err(|message| DBError { message }))
+//RS }
+//RS 
+//RS pub fn jet_db_row_float(row: &JetDBRow, key: &String) -> Result<f64, DBError> {
+//RS     jet_db_row_value(row, key).and_then(|v| v.float().map_err(|message| DBError { message }))
+//RS }
+//RS 
+//RS pub fn jet_db_row_text(row: &JetDBRow, key: &String) -> Result<String, DBError> {
+//RS     jet_db_row_value(row, key).and_then(|v| v.text().map_err(|message| DBError { message }))
+//RS }
+//RS 
+//RS pub fn jet_db_row_bool(row: &JetDBRow, key: &String) -> Result<bool, DBError> {
+//RS     jet_db_row_value(row, key).and_then(|v| v.bool().map_err(|message| DBError { message }))
+//RS }
+//RS /// D-SHAPE-ONE1=A: project checked DB column names into ordered entries for
+//RS /// the canonical DataTree adapter. The callback is supplied by each typed host
+//RS /// so this carrier remains usable by AOT, JIT, and interpreter modules without
+//RS /// defining a second decoder trait here.
+//RS pub fn jet_db_row_project<T, F>(
+//RS     row: &JetDBRow,
+//RS     names: &[(&str, &str)],
+//RS     mut convert: F,
+//RS ) -> Vec<(String, T)>
+//RS where
+//RS     F: FnMut(&DBValue) -> T,
+//RS {
+//RS     names
+//RS         .iter()
+//RS         .filter_map(|(db_name, json_name)| {
+//RS             row.get(*db_name)
+//RS                 .map(|value| ((*json_name).to_string(), convert(value)))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS /// D-DBDRIVER1: `.query`/`.query_one`/`.execute` fail with a `DBError`
+//RS /// carrying the driver's message (SQLite's error text) — never the raw SQL.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct DBError {
+//RS     pub message: String,
+//RS }
+//RS 
+//RS impl super::JetShow for DBError {
+//RS     fn jet_show(&self) -> String {
+//RS         self.message.clone()
+//RS     }
+//RS }
+//RS 
+//RS impl super::JetDebug for DBError {
+//RS     fn jet_debug(&self) -> String {
+//RS         <Self as super::JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS // D-FAIL-CONV2=A: one display hook backs both the shipped impl DBError -> Err
+//RS // and user interpolation.
+//RS impl super::JetDisplay for DBError {
+//RS     fn jet_display(&self) -> String {
+//RS         <Self as super::JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS /// Static relation facts checked from the SQL literal.  Runtime adapters
+//RS /// append observed counters and plans; they never infer a table from row
+//RS /// counts or result shape.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbTableFact {
+//RS     pub table_id: String,
+//RS     pub read: bool,
+//RS     pub write: bool,
+//RS }
+//RS 
+//RS /// Source identity and checked relation projection carried to a DB driver.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbQueryMetadata {
+//RS     pub source_id: String,
+//RS     pub source_file: String,
+//RS     pub source_start: u64,
+//RS     pub source_end: u64,
+//RS     pub statement_identity: String,
+//RS     pub table_facts: Vec<JetDbTableFact>,
+//RS }
+//RS 
+//RS /// One observed SQLite query-plan row, reduced to stable diagnostic facts.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbQueryPlanFact {
+//RS     pub ordinal: u64,
+//RS     pub parent: u64,
+//RS     pub operation: String,
+//RS     pub relation: Option<String>,
+//RS     pub index: Option<String>,
+//RS }
+//RS 
+//RS /// Runtime-only facts returned by the database driver.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbQueryRuntimeFacts {
+//RS     pub rows_returned: Option<u64>,
+//RS     pub rows_affected: Option<u64>,
+//RS     pub elapsed_ms: u64,
+//RS     pub plan: Vec<JetDbQueryPlanFact>,
+//RS }
+//RS 
+//RS /// Runtime facts returned by a bounded, read-only EXPLAIN operation.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbExplainRuntimeFacts {
+//RS     pub elapsed_ms: u64,
+//RS     pub plan: Vec<JetDbQueryPlanFact>,
+//RS     pub timed_out: bool,
+//RS     pub truncated: bool,
+//RS }
+//RS 
+//RS const DB_MAX_METADATA_BYTES: usize = 64 * 1024;
+//RS const DB_MAX_METADATA_TABLES: usize = 256;
+//RS const DB_MAX_PLAN_ROWS: usize = 256;
+//RS 
+//RS fn db_read_metadata_field(bytes: &[u8], pos: &mut usize) -> Result<String, DBError> {
+//RS     let len_start = *pos;
+//RS     while let Some(byte) = bytes.get(*pos) {
+//RS         if *byte == b':' {
+//RS             break;
+//RS         }
+//RS         if !byte.is_ascii_digit() {
+//RS             return Err(DBError {
+//RS                 message: "database metadata length is not decimal".to_string(),
+//RS             });
+//RS         }
+//RS         *pos += 1;
+//RS     }
+//RS     if *pos == len_start || bytes.get(*pos) != Some(&b':') {
+//RS         return Err(DBError {
+//RS             message: "database metadata has no field delimiter".to_string(),
+//RS         });
+//RS     }
+//RS     let length = std::str::from_utf8(&bytes[len_start..*pos])
+//RS         .ok()
+//RS         .and_then(|value| value.parse::<usize>().ok())
+//RS         .ok_or_else(|| DBError {
+//RS             message: "database metadata field length is invalid".to_string(),
+//RS         })?;
+//RS     *pos += 1;
+//RS     let end = (*pos).checked_add(length).ok_or_else(|| DBError {
+//RS         message: "database metadata field length overflow".to_string(),
+//RS     })?;
+//RS     let value = bytes.get(*pos..end).ok_or_else(|| DBError {
+//RS         message: "database metadata field is truncated".to_string(),
+//RS     })?;
+//RS     *pos = end;
+//RS     String::from_utf8(value.to_vec()).map_err(|_| DBError {
+//RS         message: "database metadata field is not UTF-8".to_string(),
+//RS     })
+//RS }
+//RS 
+//RS fn db_metadata_number(value: String, what: &str) -> Result<u64, DBError> {
+//RS     value.parse::<u64>().map_err(|_| DBError {
+//RS         message: format!("database metadata {what} is invalid"),
+//RS     })
+//RS }
+//RS 
+//RS impl JetDbQueryMetadata {
+//RS     pub fn from_wire(wire: &str) -> Result<Self, DBError> {
+//RS         if wire.len() > DB_MAX_METADATA_BYTES {
+//RS             return Err(DBError {
+//RS                 message: "database metadata exceeds the wire-size limit".to_string(),
+//RS             });
+//RS         }
+//RS         let bytes = wire.as_bytes();
+//RS         if !bytes.starts_with(b"JDB1:") {
+//RS             return Err(DBError {
+//RS                 message: "database metadata has an unknown version".to_string(),
+//RS             });
+//RS         }
+//RS         let mut pos = 5;
+//RS         let source_file = db_read_metadata_field(bytes, &mut pos)?;
+//RS         let source_id = db_read_metadata_field(bytes, &mut pos)?;
+//RS         let source_start = db_metadata_number(
+//RS             db_read_metadata_field(bytes, &mut pos)?,
+//RS             "source span start",
+//RS         )?;
+//RS         let source_end =
+//RS             db_metadata_number(db_read_metadata_field(bytes, &mut pos)?, "source span end")?;
+//RS         let statement_identity = db_read_metadata_field(bytes, &mut pos)?;
+//RS         let table_count = usize::try_from(db_metadata_number(
+//RS             db_read_metadata_field(bytes, &mut pos)?,
+//RS             "table count",
+//RS         )?)
+//RS         .map_err(|_| DBError {
+//RS             message: "database metadata table count overflows usize".to_string(),
+//RS         })?;
+//RS         if source_file.is_empty() || source_id.is_empty() || statement_identity.is_empty() {
+//RS             return Err(DBError {
+//RS                 message: "database metadata has an empty source or statement identity".to_string(),
+//RS             });
+//RS         }
+//RS         if source_end < source_start {
+//RS             return Err(DBError {
+//RS                 message: "database metadata source span is inverted".to_string(),
+//RS             });
+//RS         }
+//RS         if table_count > DB_MAX_METADATA_TABLES {
+//RS             return Err(DBError {
+//RS                 message: "database metadata table count exceeds the limit".to_string(),
+//RS             });
+//RS         }
+//RS         let mut table_facts = Vec::with_capacity(table_count);
+//RS         for _ in 0..table_count {
+//RS             let table_id = db_read_metadata_field(bytes, &mut pos)?;
+//RS             let read = match db_read_metadata_field(bytes, &mut pos)?.as_str() {
+//RS                 "1" => true,
+//RS                 "0" => false,
+//RS                 _ => {
+//RS                     return Err(DBError {
+//RS                         message: "database metadata read flag is invalid".to_string(),
+//RS                     })
+//RS                 }
+//RS             };
+//RS             let write = match db_read_metadata_field(bytes, &mut pos)?.as_str() {
+//RS                 "1" => true,
+//RS                 "0" => false,
+//RS                 _ => {
+//RS                     return Err(DBError {
+//RS                         message: "database metadata write flag is invalid".to_string(),
+//RS                     })
+//RS                 }
+//RS             };
+//RS             if table_id.is_empty() || (!read && !write) {
+//RS                 return Err(DBError {
+//RS                     message: "database metadata has an invalid table fact".to_string(),
+//RS                 });
+//RS             }
+//RS             if table_facts.iter().any(|fact: &JetDbTableFact| fact.table_id == table_id) {
+//RS                 return Err(DBError {
+//RS                     message: "database metadata repeats a table fact".to_string(),
+//RS                 });
+//RS             }
+//RS             table_facts.push(JetDbTableFact {
+//RS                 table_id,
+//RS                 read,
+//RS                 write,
+//RS             });
+//RS         }
+//RS         if pos != bytes.len() {
+//RS             return Err(DBError {
+//RS                 message: "database metadata has trailing bytes".to_string(),
+//RS             });
+//RS         }
+//RS         Ok(Self {
+//RS             source_id,
+//RS             source_file,
+//RS             source_start,
+//RS             source_end,
+//RS             statement_identity,
+//RS             table_facts,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// EXPLAIN is deliberately narrower than the normal DB sink: only one
+//RS /// SELECT statement is eligible.  CTEs and transaction/schema/mutation
+//RS /// statements are rejected before a driver sees them.
+//RS pub fn jet_db_validate_explain_sql(sql: &SQL) -> Result<(), DBError> {
+//RS     let text = sql.0.trim();
+//RS     if text.is_empty() || text.contains(';') || db_sql_contains_comment(text) {
+//RS         return Err(DBError {
+//RS             message: "database EXPLAIN accepts one comment-free SELECT".to_string(),
+//RS         });
+//RS     }
+//RS     let tokens = db_sql_tokens(text);
+//RS     if tokens.first().map(|(_, _, word)| word.as_str()) != Some("select") {
+//RS         return Err(DBError {
+//RS             message: "database EXPLAIN accepts read-only SELECT statements only".to_string(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// The transformer returns the proof together with the rewritten typed SQL.
+//RS /// A backend may marshal the two payload fields only at its final driver
+//RS /// boundary; it cannot get policy SQL without first receiving this proof-bearing
+//RS /// application.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDBPolicyProof {
+//RS     table: String,
+//RS     operation: String,
+//RS     predicate: String,
+//RS     user: String,
+//RS     user_bind_index: Option<usize>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDBPolicyApplication {
+//RS     pub sql: SQL,
+//RS     pub proof: JetDBPolicyProof,
+//RS }
+//RS 
+//RS impl JetDBPolicyApplication {
+//RS     pub fn into_sql(self) -> Result<SQL, DBError> {
+//RS         let row_filter_proved = self.proof.predicate == "true"
+//RS             || self.proof.operation.starts_with("migration-")
+//RS             || self.proof.user_bind_index.is_some_and(|index| {
+//RS                 self.sql
+//RS                     .1
+//RS                     .get(index)
+//RS                     == Some(&DBValue::Text(self.proof.user.clone()))
+//RS             });
+//RS         if !row_filter_proved {
+//RS             return Err(DBError {
+//RS                 message: "row policy proof does not match the rewritten SQL binds".to_string(),
+//RS             });
+//RS         }
+//RS         if self.proof.predicate == "true"
+//RS             || self.proof.operation.starts_with("migration-")
+//RS             || self.proof.operation == "insert"
+//RS             || self.sql.0.contains("owner = ?")
+//RS         {
+//RS             Ok(self.sql)
+//RS         } else {
+//RS             Err(DBError {
+//RS                 message: "row policy proof does not match the rewritten SQL predicate".to_string(),
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // The closed policy language lives in `RowPolicy.rs`, included beside this
+//RS // fragment on every tier. Public raw-text entry points compile once at the
+//RS // boundary; scoped entry points below receive the compiled enum directly.
+//RS 
+//RS fn db_sql_tokens(sql: &str) -> Vec<(usize, usize, String)> {
+//RS     let bytes = sql.as_bytes();
+//RS     let mut tokens = Vec::new();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         if bytes[i] == b'\'' {
+//RS             i += 1;
+//RS             while i < bytes.len() {
+//RS                 if bytes[i] == b'\'' {
+//RS                     if bytes.get(i + 1) == Some(&b'\'') {
+//RS                         i += 2;
+//RS                     } else {
+//RS                         i += 1;
+//RS                         break;
+//RS                     }
+//RS                 } else {
+//RS                     i += 1;
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
+//RS             let start = i;
+//RS             i += 1;
+//RS             while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+//RS                 i += 1;
+//RS             }
+//RS             tokens.push((start, i, sql[start..i].to_ascii_lowercase()));
+//RS         } else {
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS     tokens
+//RS }
+//RS 
+//RS /// Policy rewriting only accepts the small, closed SQL shape that the
+//RS /// transformer can prove safe. Comments are rejected instead of being
+//RS /// copied through: a trailing `--` can otherwise hide the predicate that
+//RS /// this function appends.
+//RS fn db_sql_contains_comment(sql: &str) -> bool {
+//RS     let bytes = sql.as_bytes();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         if bytes[i] == b'\'' {
+//RS             i += 1;
+//RS             while i < bytes.len() {
+//RS                 if bytes[i] == b'\'' {
+//RS                     if bytes.get(i + 1) == Some(&b'\'') {
+//RS                         i += 2;
+//RS                     } else {
+//RS                         i += 1;
+//RS                         break;
+//RS                     }
+//RS                 } else {
+//RS                     i += 1;
+//RS                 }
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if bytes.get(i..i + 2) == Some(b"--")
+//RS             || bytes.get(i..i + 2) == Some(b"/*")
+//RS             || bytes.get(i..i + 2) == Some(b"*/")
+//RS         {
+//RS             return true;
+//RS         }
+//RS         i += 1;
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS fn db_sql_target_index(tokens: &[(usize, usize, String)], kind: &str) -> Option<usize> {
+//RS     let keyword = match kind {
+//RS         "select" | "delete" => "from",
+//RS         "insert" => "into",
+//RS         _ => kind,
+//RS     };
+//RS     tokens
+//RS         .iter()
+//RS         .position(|(_, _, word)| word == keyword)
+//RS         .and_then(|index| index.checked_add(1))
+//RS }
+//RS 
+//RS fn db_sql_target_table(tokens: &[(usize, usize, String)], kind: &str) -> Option<String> {
+//RS     let index = db_sql_target_index(tokens, kind)?;
+//RS     tokens.get(index).map(|(_, _, word)| word.clone())
+//RS }
+//RS /// Return the deterministic table write set carried by one transaction.
+//RS ///
+//RS /// The policy checker already restricts ordinary scoped DML to one simple
+//RS /// target, so this helper only extracts the target from statements that can
+//RS /// change rows or schema.  It intentionally returns relation names rather
+//RS /// than effect labels: `app.live` records the same table footprint, while
+//RS /// `jet_app_transact_invalidate` performs the shared intersection check after
+//RS /// commit.
+//RS pub fn jet_db_write_set(steps: &Vec<SQL>) -> String {
+//RS     let mut tables = std::collections::BTreeSet::new();
+//RS     for sql in steps {
+//RS         let tokens = db_sql_tokens(sql.0.trim());
+//RS         let Some((_, _, kind)) = tokens.first() else {
+//RS             continue;
+//RS         };
+//RS         let table = match kind.as_str() {
+//RS             "insert" | "update" | "delete" => db_sql_target_table(&tokens, kind),
+//RS             "create" | "alter" | "drop" => {
+//RS                 let table_index = tokens
+//RS                     .iter()
+//RS                     .position(|(_, _, word)| word == "table")
+//RS                     .and_then(|index| index.checked_add(1));
+//RS                 table_index.and_then(|mut index| {
+//RS                     if matches!(kind.as_str(), "create" | "drop") {
+//RS                         while matches!(
+//RS                             tokens.get(index).map(|(_, _, word)| word.as_str()),
+//RS                             Some("if" | "not" | "exists")
+//RS                         ) {
+//RS                             index = index.checked_add(1)?;
+//RS                         }
+//RS                     }
+//RS                     tokens.get(index).map(|(_, _, word)| word.clone())
+//RS                 })
+//RS             }
+//RS             _ => None,
+//RS         };
+//RS         if let Some(table) = table {
+//RS             tables.insert(table);
+//RS         }
+//RS     }
+//RS     tables.into_iter().collect::<Vec<_>>().join(",")
+//RS }
+//RS 
+//RS /// Reject joins, aliases, subqueries, and other shapes for which adding a
+//RS /// bare `owner = ?` predicate is not a proof of row isolation. A policy
+//RS /// scope fails closed rather than guessing which relation an unqualified
+//RS /// owner column belongs to.
+//RS fn db_sql_simple_target(sql: &str, tokens: &[(usize, usize, String)], kind: &str) -> bool {
+//RS     let count = |word: &str| tokens.iter().filter(|(_, _, token)| token == word).count();
+//RS     if count("join") > 0
+//RS         || count("union") > 0
+//RS         || count("with") > 0
+//RS         || count("except") > 0
+//RS         || count("intersect") > 0
+//RS         || count("conflict") > 0
+//RS         || count("upsert") > 0
+//RS         || count("replace") > 0
+//RS         || count("select") > if kind == "select" { 1 } else { 0 }
+//RS         || count("from")
+//RS             > if matches!(kind, "select" | "delete") {
+//RS                 1
+//RS             } else {
+//RS                 0
+//RS             }
+//RS     {
+//RS         return false;
+//RS     }
+//RS     let Some(target) = db_sql_target_index(tokens, kind) else {
+//RS         return false;
+//RS     };
+//RS     let Some((_, target_end, _)) = tokens.get(target) else {
+//RS         return false;
+//RS     };
+//RS     match kind {
+//RS         "select" | "delete" => {
+//RS             let clause = tokens
+//RS                 .iter()
+//RS                 .skip(target + 1)
+//RS                 .find(|(_, _, word)| {
+//RS                     matches!(
+//RS                         word.as_str(),
+//RS                         "where" | "order" | "group" | "limit" | "offset" | "returning"
+//RS                     )
+//RS                 })
+//RS                 .map(|(start, _, _)| *start)
+//RS                 .unwrap_or(sql.len());
+//RS             sql[*target_end..clause].trim().is_empty()
+//RS         }
+//RS         "update" => {
+//RS             let Some((set_index, (set_start, _, _))) = tokens
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .skip(target + 1)
+//RS                 .find(|(_, (_, _, word))| word == "set")
+//RS             else {
+//RS                 return false;
+//RS             };
+//RS             let _ = set_index;
+//RS             sql[*target_end..*set_start].trim().is_empty()
+//RS         }
+//RS         "insert" => count("values") == 1 && count("select") == 0,
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn db_sql_insert_columns_and_values(
+//RS     sql: &str,
+//RS     tokens: &[(usize, usize, String)],
+//RS ) -> Option<(Vec<String>, usize)> {
+//RS     let into = tokens.iter().position(|(_, _, word)| word == "into")?;
+//RS     let table_end = tokens.get(into.checked_add(1)?)?.1;
+//RS     let values = tokens.iter().position(|(_, _, word)| word == "values")?;
+//RS     let column_start = sql[table_end..].find('(')?.checked_add(table_end)?;
+//RS     let column_end = sql[column_start..].find(')')?.checked_add(column_start)?;
+//RS     let value_start = sql[tokens.get(values)?.1..]
+//RS         .find('(')?
+//RS         .checked_add(tokens.get(values)?.1)?;
+//RS     let value_end = sql[value_start..].find(')')?.checked_add(value_start)?;
+//RS     let columns = sql[column_start + 1..column_end]
+//RS         .split(',')
+//RS         .map(str::trim)
+//RS         .collect::<Vec<_>>();
+//RS     let values = sql[value_start + 1..value_end]
+//RS         .split(',')
+//RS         .map(str::trim)
+//RS         .collect::<Vec<_>>();
+//RS     if columns.is_empty()
+//RS         || columns.len() != values.len()
+//RS         || columns.iter().any(|column| {
+//RS             column.is_empty()
+//RS                 || !column
+//RS                     .chars()
+//RS                     .all(|c| c.is_ascii_alphanumeric() || c == '_')
+//RS         })
+//RS         || values.iter().any(|value| *value != "?")
+//RS     {
+//RS         return None;
+//RS     }
+//RS     let owner = columns
+//RS         .iter()
+//RS         .position(|column| column.eq_ignore_ascii_case("owner"))?;
+//RS     Some((
+//RS         columns.into_iter().map(str::to_ascii_lowercase).collect(),
+//RS         owner,
+//RS     ))
+//RS }
+//RS 
+//RS fn db_sql_clause_start(tokens: &[(usize, usize, String)], after: usize) -> Option<usize> {
+//RS     tokens
+//RS         .iter()
+//RS         .filter(|(_, _, word)| {
+//RS             matches!(
+//RS                 word.as_str(),
+//RS                 "order" | "group" | "limit" | "offset" | "returning"
+//RS             )
+//RS         })
+//RS         .find(|(start, _, _)| *start > after)
+//RS         .map(|(start, _, _)| *start)
+//RS }
+//RS 
+//RS fn db_sql_placeholder_count(sql: &str) -> usize {
+//RS     let bytes = sql.as_bytes();
+//RS     let mut count = 0;
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         let quote = match bytes[i] {
+//RS             b'\'' | b'"' | b'`' => Some(bytes[i]),
+//RS             b'[' => {
+//RS                 i += 1;
+//RS                 while i < bytes.len() && bytes[i] != b']' {
+//RS                     i += 1;
+//RS                 }
+//RS                 if i < bytes.len() {
+//RS                     i += 1;
+//RS                 }
+//RS                 None
+//RS             }
+//RS             b'?' => {
+//RS                 count += 1;
+//RS                 i += 1;
+//RS                 None
+//RS             }
+//RS             _ => {
+//RS                 i += 1;
+//RS                 None
+//RS             }
+//RS         };
+//RS         let Some(quote) = quote else {
+//RS             continue;
+//RS         };
+//RS         i += 1;
+//RS         while i < bytes.len() {
+//RS             if bytes[i] == quote {
+//RS                 if bytes.get(i + 1) == Some(&quote) {
+//RS                     i += 2;
+//RS                 } else {
+//RS                     i += 1;
+//RS                     break;
+//RS                 }
+//RS             } else {
+//RS                 i += 1;
+//RS             }
+//RS         }
+//RS     }
+//RS     count
+//RS }
+//RS 
+//RS fn db_sql_update_mutates_owner(tokens: &[(usize, usize, String)]) -> bool {
+//RS     let Some(set_index) = tokens.iter().position(|(_, _, word)| word == "set") else {
+//RS         return false;
+//RS     };
+//RS     let end_index = tokens
+//RS         .iter()
+//RS         .enumerate()
+//RS         .skip(set_index + 1)
+//RS         .find(|(_, (_, _, word))| {
+//RS             matches!(
+//RS                 word.as_str(),
+//RS                 "where" | "order" | "group" | "limit" | "offset" | "returning"
+//RS             )
+//RS         })
+//RS         .map(|(index, _)| index)
+//RS         .unwrap_or(tokens.len());
+//RS     tokens[set_index + 1..end_index]
+//RS         .iter()
+//RS         .any(|(_, _, word)| word == "owner")
+//RS }
+//RS 
+//RS fn db_sql_is_migration_metadata(sql: &str) -> bool {
+//RS     let normalized = sql
+//RS         .split_whitespace()
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ")
+//RS         .to_ascii_lowercase();
+//RS     normalized.starts_with("create table if not exists __jet_migrations")
+//RS         || normalized.starts_with("create table __jet_migrations")
+//RS         || normalized.starts_with("pragma table_info(__jet_migrations")
+//RS         || normalized.starts_with("select ")
+//RS             && normalized.contains(" from __jet_migrations")
+//RS         || normalized.starts_with("insert into __jet_migrations")
+//RS }
+//RS 
+//RS /// Apply the closed owner policy to one typed SQL operation. Unsupported SQL
+//RS /// is rejected, never passed through unscoped. The returned SQL still carries
+//RS /// the user as a bind, so the policy value cannot become SQL text.
+//RS pub fn jet_db_apply_policy(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     expression: &str,
+//RS     user: &str,
+//RS ) -> Result<SQL, DBError> {
+//RS     let (table, compiled) =
+//RS         jet_db_policy_compile(table, expression).map_err(|message| DBError { message })?;
+//RS     jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, user)
+//RS         .and_then(JetDBPolicyApplication::into_sql)
+//RS }
+//RS 
+//RS /// Apply an already compiled policy. Scope carriers use this path so a later
+//RS /// operation cannot re-parse or replace the policy's source text.
+//RS pub fn jet_db_apply_compiled_policy(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     user: &str,
+//RS ) -> Result<SQL, DBError> {
+//RS     jet_db_apply_compiled_policy_with_proof(sql, table, compiled, user)
+//RS         .and_then(JetDBPolicyApplication::into_sql)
+//RS }
+//RS 
+//RS /// Apply a compiled policy and retain the enforcement proof until the caller
+//RS /// has selected its execution path. All scoped query, mutation, transaction,
+//RS /// and live adapters use this entry point.
+//RS pub fn jet_db_apply_compiled_policy_with_proof(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     user: &str,
+//RS ) -> Result<JetDBPolicyApplication, DBError> {
+//RS     jet_db_apply_policy_inner(sql, table, compiled, user, false)
+//RS }
+//RS 
+//RS /// Apply a policy while executing an explicit `db.migrate` step. Schema
+//RS /// statements are an authority of migration, but row statements still use the
+//RS /// same table/predicate/bind transformation as ordinary scope calls.
+//RS pub fn jet_db_apply_migration_policy(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     expression: &str,
+//RS     user: &str,
+//RS ) -> Result<SQL, DBError> {
+//RS     let (table, compiled) =
+//RS         jet_db_policy_compile(table, expression).map_err(|message| DBError { message })?;
+//RS     jet_db_apply_compiled_migration_policy_with_proof(sql, &table, compiled, user)
+//RS         .and_then(JetDBPolicyApplication::into_sql)
+//RS }
+//RS 
+//RS /// Migration form of [`jet_db_apply_compiled_policy`]. Schema statements
+//RS /// remain the only extra authority granted by migration.
+//RS pub fn jet_db_apply_compiled_migration_policy(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     user: &str,
+//RS ) -> Result<SQL, DBError> {
+//RS     jet_db_apply_compiled_migration_policy_with_proof(sql, table, compiled, user)
+//RS         .and_then(JetDBPolicyApplication::into_sql)
+//RS }
+//RS 
+//RS pub fn jet_db_apply_compiled_migration_policy_with_proof(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     user: &str,
+//RS ) -> Result<JetDBPolicyApplication, DBError> {
+//RS     jet_db_apply_policy_inner(sql, table, compiled, user, true)
+//RS }
+//RS 
+//RS fn jet_db_policy_application(
+//RS     sql: SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     operation: &str,
+//RS     user: &str,
+//RS     user_bind_index: Option<usize>,
+//RS ) -> JetDBPolicyApplication {
+//RS     JetDBPolicyApplication {
+//RS         sql,
+//RS         proof: JetDBPolicyProof {
+//RS             table: table.to_string(),
+//RS             operation: operation.to_string(),
+//RS             predicate: compiled.sql_predicate().to_string(),
+//RS             user: user.to_string(),
+//RS             user_bind_index,
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn jet_db_apply_policy_inner(
+//RS     sql: &SQL,
+//RS     table: &str,
+//RS     compiled: JetRowPolicyExpr,
+//RS     user: &str,
+//RS     allow_schema: bool,
+//RS ) -> Result<JetDBPolicyApplication, DBError> {
+//RS     let policy_table = table;
+//RS     let sql_text = &sql.0;
+//RS     let params = &sql.1;
+//RS     if sql_text.len() > 1024 * 1024
+//RS         || sql_text
+//RS             .chars()
+//RS             .any(|c| c == ';' || c == '\0' || (c.is_control() && !c.is_whitespace()))
+//RS     {
+//RS         return Err(DBError {
+//RS             message: "policy-scoped SQL must be one statement without control characters"
+//RS                 .to_string(),
+//RS         });
+//RS     }
+//RS     if db_sql_contains_comment(sql_text) {
+//RS         return Err(DBError {
+//RS             message: "policy-scoped SQL cannot contain comments".to_string(),
+//RS         });
+//RS     }
+//RS     if user.trim().is_empty() || user.len() > 1024 * 1024 || user.chars().any(char::is_control) {
+//RS         return Err(DBError {
+//RS             message: "policy user identity is empty, too long, or contains control characters"
+//RS                 .to_string(),
+//RS         });
+//RS     }
+//RS     let tokens = db_sql_tokens(sql_text);
+//RS     let Some((_, _, first)) = tokens.first() else {
+//RS         return Err(DBError {
+//RS             message: "policy-scoped SQL is empty".to_string(),
+//RS         });
+//RS     };
+//RS     if db_sql_is_migration_metadata(sql_text) {
+//RS         if !allow_schema {
+//RS             return Err(DBError {
+//RS                 message: "migration metadata is managed only by db.migrate".to_string(),
+//RS             });
+//RS         }
+//RS         return Ok(jet_db_policy_application(
+//RS             sql.clone(),
+//RS             policy_table,
+//RS             compiled,
+//RS             "migration-metadata",
+//RS             user,
+//RS             None,
+//RS         ));
+//RS     }
+//RS     let kind = first.as_str();
+//RS     if !matches!(kind, "select" | "update" | "delete" | "insert") {
+//RS         if matches!(
+//RS             kind,
+//RS             "create" | "alter" | "drop" | "pragma" | "begin" | "commit" | "rollback"
+//RS         ) {
+//RS             if allow_schema {
+//RS                 return Ok(jet_db_policy_application(
+//RS                     sql.clone(),
+//RS                     policy_table,
+//RS                     compiled,
+//RS                     "migration-schema",
+//RS                     user,
+//RS                     None,
+//RS                 ));
+//RS             }
+//RS             return Err(DBError {
+//RS                 message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls".to_string(),
+//RS             });
+//RS         }
+//RS         return Err(DBError {
+//RS             message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only".to_string(),
+//RS         });
+//RS     }
+//RS     let expected_table = policy_table.to_ascii_lowercase();
+//RS     if db_sql_target_table(&tokens, kind).as_deref() != Some(expected_table.as_str()) {
+//RS         return Err(DBError {
+//RS             message: format!("policy scope targets table `{policy_table}`"),
+//RS         });
+//RS     }
+//RS     if !db_sql_simple_target(sql_text, &tokens, kind) {
+//RS         return Err(DBError {
+//RS             message:
+//RS                 "policy-scoped SQL must name one simple target table without joins or subqueries"
+//RS                     .to_string(),
+//RS         });
+//RS     }
+//RS     if !compiled.requires_owner_filter() {
+//RS         return Ok(jet_db_policy_application(
+//RS             sql.clone(),
+//RS             policy_table,
+//RS             compiled,
+//RS             kind,
+//RS             user,
+//RS             None,
+//RS         ));
+//RS     }
+//RS     if kind == "insert" {
+//RS         let Some((columns, owner_index)) = db_sql_insert_columns_and_values(sql_text, &tokens)
+//RS         else {
+//RS             return Err(DBError {
+//RS                 message: "owner policy requires INSERT columns and `?` values with an owner column"
+//RS                     .to_string(),
+//RS             });
+//RS         };
+//RS         if columns.len() != params.len() {
+//RS             return Err(DBError {
+//RS                 message: "owner policy INSERT bind count does not match its columns".to_string(),
+//RS             });
+//RS         }
+//RS         let mut scoped_params = params.clone();
+//RS         scoped_params[owner_index] = DBValue::Text(user.to_string());
+//RS         return Ok(jet_db_policy_application(
+//RS             (sql_text.to_string(), scoped_params),
+//RS             policy_table,
+//RS             compiled,
+//RS             kind,
+//RS             user,
+//RS             Some(owner_index),
+//RS         ));
+//RS     }
+//RS     if kind == "update" && db_sql_update_mutates_owner(&tokens) {
+//RS         return Err(DBError {
+//RS             message: "owner policy does not allow changing the owner column".to_string(),
+//RS         });
+//RS     }
+//RS     let where_token = tokens
+//RS         .iter()
+//RS         .find(|(_, _, word)| word == "where")
+//RS         .map(|(start, end, _)| (*start, *end));
+//RS     let insertion = where_token
+//RS         .and_then(|(_, end)| db_sql_clause_start(&tokens, end))
+//RS         .or_else(|| db_sql_clause_start(&tokens, 0))
+//RS         .unwrap_or_else(|| sql_text.len());
+//RS     let user_index = db_sql_placeholder_count(&sql_text[..insertion]);
+//RS     if user_index > params.len() {
+//RS         return Err(DBError {
+//RS             message: "policy-scoped SQL bind count does not match its placeholders".to_string(),
+//RS         });
+//RS     }
+//RS     let mut scoped_params = params.clone();
+//RS     scoped_params.insert(user_index, DBValue::Text(user.to_string()));
+//RS     let (head, tail) = sql_text.split_at(insertion);
+//RS     let suffix = if tail.trim().is_empty() {
+//RS         String::new()
+//RS     } else {
+//RS         format!(" {}", tail.trim_start())
+//RS     };
+//RS     let scoped_sql = if let Some((where_start, where_end)) = where_token {
+//RS         let condition = sql_text[where_end..insertion].trim();
+//RS         if condition.is_empty() {
+//RS             return Err(DBError {
+//RS                 message: "policy-scoped SQL has an empty WHERE clause".to_string(),
+//RS             });
+//RS         }
+//RS         format!(
+//RS             "{}WHERE ({}) AND owner = ?{}",
+//RS             &sql_text[..where_start],
+//RS             condition,
+//RS             suffix,
+//RS         )
+//RS     } else {
+//RS         format!("{} WHERE owner = ?{}", head.trim_end(), suffix)
+//RS     };
+//RS     Ok(jet_db_policy_application(
+//RS         (scoped_sql, scoped_params),
+//RS         policy_table,
+//RS         compiled,
+//RS         kind,
+//RS         user,
+//RS         Some(user_index),
+//RS     ))
+//RS }
+//RS 
+//RS // ── core.db wire codec ──────────────────────────────────────────────────────
+//RS // The FFI bridge crate (built only when a program uses `core.db`, Source/FFI.rs)
+//RS // and this always-compiled prelude are two independently built Rust crates —
+//RS // they can't share types, so bind params and result rows cross that boundary as
+//RS // plain `String`s in a small tagged-length wire format (mirrored byte-for-byte
+//RS // in Source/Prelude/DB.rs). A value is `<tag><decimal-length>:<payload-bytes>`;
+//RS // a list is a decimal item count + `:` + that many back-to-back items. Every
+//RS // length is a byte count, so arbitrary text — including an "injection-looking"
+//RS // literal — round-trips exactly with no escaping. `Blob` payloads use an ASCII
+//RS // hexadecimal envelope so arbitrary bytes remain lossless across the String
+//RS // boundary.
+//RS // parity: guard tests/corelib.rs::core_db_implements_driver_trait
+//RS fn db_encode_tagged(tag: char, payload: &str) -> String {
+//RS     format!("{tag}{}:{payload}", payload.len())
+//RS }
+//RS 
+//RS fn db_hex_encode(bytes: &[u8]) -> String {
+//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
+//RS     let mut out = String::with_capacity(bytes.len() * 2);
+//RS     for byte in bytes {
+//RS         out.push(HEX[(byte >> 4) as usize] as char);
+//RS         out.push(HEX[(byte & 0x0f) as usize] as char);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub fn jet_db_encode_params(params: &Vec<DBValue>) -> String {
+//RS     let mut out = String::new();
+//RS     out.push_str(&params.len().to_string());
+//RS     out.push(':');
+//RS     for p in params {
+//RS         out.push_str(&match p {
+//RS             DBValue::Null => db_encode_tagged('N', ""),
+//RS             DBValue::Int(n) => db_encode_tagged('I', &n.to_string()),
+//RS             DBValue::Float(f) => db_encode_tagged('F', &f.to_string()),
+//RS             DBValue::Text(s) => db_encode_tagged('T', s),
+//RS             DBValue::Bool(b) => db_encode_tagged('B', if *b { "1" } else { "0" }),
+//RS             DBValue::Blob(bytes) => db_encode_tagged('X', &db_hex_encode(bytes)),
+//RS         });
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS const DB_MAX_WIRE_BYTES: usize = 64 * 1024 * 1024;
+//RS const DB_MAX_ROWS: usize = 1_000_000;
+//RS const DB_MAX_COLUMNS: usize = 100_000;
+//RS 
+//RS fn db_read_tagged(bytes: &[u8], pos: &mut usize) -> Result<(char, String), String> {
+//RS     let tag = *bytes
+//RS         .get(*pos)
+//RS         .ok_or_else(|| "database wire ended before a value tag".to_string())? as char;
+//RS     *pos += 1;
+//RS     let len_start = *pos;
+//RS     while let Some(byte) = bytes.get(*pos) {
+//RS         if *byte == b':' {
+//RS             break;
+//RS         }
+//RS         if !byte.is_ascii_digit() {
+//RS             return Err("database wire length is not decimal".to_string());
+//RS         }
+//RS         *pos += 1;
+//RS     }
+//RS     if *pos == len_start || bytes.get(*pos) != Some(&b':') {
+//RS         return Err("database wire has no value length delimiter".to_string());
+//RS     }
+//RS     let len: usize = std::str::from_utf8(&bytes[len_start..*pos])
+//RS         .map_err(|_| "database wire length is not UTF-8".to_string())?
+//RS         .parse()
+//RS         .map_err(|_| "database wire value length overflows usize".to_string())?;
+//RS     *pos += 1; // skip ':'
+//RS     let end = (*pos)
+//RS         .checked_add(len)
+//RS         .ok_or_else(|| "database wire value length overflows the input".to_string())?;
+//RS     let payload = std::str::from_utf8(
+//RS         bytes
+//RS             .get(*pos..end)
+//RS             .ok_or_else(|| "database wire value is truncated".to_string())?,
+//RS     )
+//RS     .map_err(|_| "database wire value is not UTF-8".to_string())?
+//RS     .to_string();
+//RS     *pos = end;
+//RS     Ok((tag, payload))
+//RS }
+//RS fn db_runtime_number(payload: &str, what: &str) -> Result<u64, DBError> {
+//RS     payload.parse::<u64>().map_err(|_| DBError {
+//RS         message: format!("database runtime {what} is invalid"),
+//RS     })
+//RS }
+//RS 
+//RS fn db_runtime_bool(payload: &str, what: &str) -> Result<bool, DBError> {
+//RS     match payload {
+//RS         "0" => Ok(false),
+//RS         "1" => Ok(true),
+//RS         _ => Err(DBError {
+//RS             message: format!("database runtime {what} is invalid"),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn db_decode_plan(payload: &str) -> Result<Vec<JetDbQueryPlanFact>, DBError> {
+//RS     let bytes = payload.as_bytes();
+//RS     let Some(colon) = bytes.iter().position(|byte| *byte == b':') else {
+//RS         return Err(DBError {
+//RS             message: "database runtime plan is missing its row-count delimiter".to_string(),
+//RS         });
+//RS     };
+//RS     let count = std::str::from_utf8(&bytes[..colon])
+//RS         .ok()
+//RS         .and_then(|value| value.parse::<usize>().ok())
+//RS         .ok_or_else(|| DBError {
+//RS             message: "database runtime plan row count is invalid".to_string(),
+//RS         })?;
+//RS     if count > DB_MAX_PLAN_ROWS {
+//RS         return Err(DBError {
+//RS             message: "database runtime plan row count exceeds the limit".to_string(),
+//RS         });
+//RS     }
+//RS     let mut pos = colon + 1;
+//RS     let mut plan = Vec::with_capacity(count);
+//RS     for _ in 0..count {
+//RS         let mut ordinal = None;
+//RS         let mut parent = None;
+//RS         let mut operation = None;
+//RS         let mut relation = None;
+//RS         let mut index = None;
+//RS         for _ in 0..5 {
+//RS             let (tag, value) =
+//RS                 db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS             match tag {
+//RS                 'I' if ordinal.is_none() => {
+//RS                     ordinal = Some(db_runtime_number(&value, "plan ordinal")?)
+//RS                 }
+//RS                 'P' if parent.is_none() => {
+//RS                     parent = Some(db_runtime_number(&value, "plan parent")?)
+//RS                 }
+//RS                 'O' if operation.is_none() && !value.is_empty() => operation = Some(value),
+//RS                 'T' if relation.is_none() => relation = (!value.is_empty()).then_some(value),
+//RS                 'X' if index.is_none() => index = (!value.is_empty()).then_some(value),
+//RS                 _ => {
+//RS                     return Err(DBError {
+//RS                         message:
+//RS                             "database runtime plan has an invalid or duplicate field".to_string(),
+//RS                     })
+//RS                 }
+//RS             }
+//RS         }
+//RS         plan.push(JetDbQueryPlanFact {
+//RS             ordinal: ordinal.ok_or_else(|| DBError {
+//RS                 message: "database runtime plan has no ordinal".to_string(),
+//RS             })?,
+//RS             parent: parent.ok_or_else(|| DBError {
+//RS                 message: "database runtime plan has no parent".to_string(),
+//RS             })?,
+//RS             operation: operation.ok_or_else(|| DBError {
+//RS                 message: "database runtime plan has no operation".to_string(),
+//RS             })?,
+//RS             relation,
+//RS             index,
+//RS         });
+//RS     }
+//RS     if pos != bytes.len() {
+//RS         return Err(DBError {
+//RS             message: "database runtime plan has trailing bytes".to_string(),
+//RS         });
+//RS     }
+//RS     Ok(plan)
+//RS }
+//RS 
+//RS fn db_observed_error(wire: &str) -> Option<DBError> {
+//RS     wire.strip_prefix("E:").map(|message| DBError {
+//RS         message: message.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS /// Decode the observed query envelope returned by a database driver.
+//RS pub fn jet_db_decode_observed_query_result(
+//RS     wire: &str,
+//RS ) -> Result<(Vec<JetDBRow>, JetDbQueryRuntimeFacts), DBError> {
+//RS     if wire.len() > DB_MAX_WIRE_BYTES {
+//RS         return Err(DBError {
+//RS             message: "database observed query exceeds the wire-size limit".to_string(),
+//RS         });
+//RS     }
+//RS     if let Some(error) = db_observed_error(wire) {
+//RS         return Err(error);
+//RS     }
+//RS     let Some(body) = wire.strip_prefix("Q:") else {
+//RS         return Err(DBError {
+//RS             message: "database observed query has an unknown envelope".to_string(),
+//RS         });
+//RS     };
+//RS     let bytes = body.as_bytes();
+//RS     let mut pos = 0;
+//RS     let mut rows_wire = None;
+//RS     let mut row_count = None;
+//RS     let mut elapsed_ms = None;
+//RS     let mut plan_wire = None;
+//RS     while pos < bytes.len() {
+//RS         let (tag, payload) =
+//RS             db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS         match tag {
+//RS             'R' if rows_wire.is_none() => rows_wire = Some(payload),
+//RS             'N' if row_count.is_none() => {
+//RS                 row_count = Some(db_runtime_number(&payload, "row count")?)
+//RS             }
+//RS             'D' if elapsed_ms.is_none() => {
+//RS                 elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+//RS             }
+//RS             'P' if plan_wire.is_none() => plan_wire = Some(payload),
+//RS             _ => {
+//RS                 return Err(DBError {
+//RS                     message:
+//RS                         "database observed query has an invalid or duplicate field".to_string(),
+//RS                 })
+//RS             }
+//RS         }
+//RS     }
+//RS     let rows_wire = rows_wire.ok_or_else(|| DBError {
+//RS         message: "database observed query has no rows".to_string(),
+//RS     })?;
+//RS     let rows = jet_db_decode_query_result(&format!("O:{rows_wire}"))?;
+//RS     let actual_count = row_count.ok_or_else(|| DBError {
+//RS         message: "database observed query has no row count".to_string(),
+//RS     })?;
+//RS     if actual_count != rows.len() as u64 {
+//RS         return Err(DBError {
+//RS             message: "database observed query row count does not match its rows".to_string(),
+//RS         });
+//RS     }
+//RS     let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+//RS         message: "database observed query has no elapsed time".to_string(),
+//RS     })?;
+//RS     let plan_wire = plan_wire.ok_or_else(|| DBError {
+//RS         message: "database observed query has no plan".to_string(),
+//RS     })?;
+//RS     Ok((
+//RS         rows,
+//RS         JetDbQueryRuntimeFacts {
+//RS             rows_returned: Some(actual_count),
+//RS             rows_affected: None,
+//RS             elapsed_ms,
+//RS             plan: db_decode_plan(&plan_wire)?,
+//RS         },
+//RS     ))
+//RS }
+//RS 
+//RS /// Decode the observed execute envelope returned by a database driver.
+//RS pub fn jet_db_decode_observed_execute_result(
+//RS     wire: &str,
+//RS ) -> Result<(i64, JetDbQueryRuntimeFacts), DBError> {
+//RS     if wire.len() > DB_MAX_WIRE_BYTES {
+//RS         return Err(DBError {
+//RS             message: "database observed execute exceeds the wire-size limit".to_string(),
+//RS         });
+//RS     }
+//RS     if let Some(error) = db_observed_error(wire) {
+//RS         return Err(error);
+//RS     }
+//RS     let Some(body) = wire.strip_prefix("X:") else {
+//RS         return Err(DBError {
+//RS             message: "database observed execute has an unknown envelope".to_string(),
+//RS         });
+//RS     };
+//RS     let bytes = body.as_bytes();
+//RS     let mut pos = 0;
+//RS     let mut affected = None;
+//RS     let mut elapsed_ms = None;
+//RS     let mut plan_wire = None;
+//RS     while pos < bytes.len() {
+//RS         let (tag, payload) =
+//RS             db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS         match tag {
+//RS             'A' if affected.is_none() => {
+//RS                 affected = Some(payload.parse::<i64>().map_err(|_| DBError {
+//RS                     message: "database runtime affected row count is invalid".to_string(),
+//RS                 })?);
+//RS             }
+//RS             'D' if elapsed_ms.is_none() => {
+//RS                 elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+//RS             }
+//RS             'P' if plan_wire.is_none() => plan_wire = Some(payload),
+//RS             _ => {
+//RS                 return Err(DBError {
+//RS                     message:
+//RS                         "database observed execute has an invalid or duplicate field".to_string(),
+//RS                 })
+//RS             }
+//RS         }
+//RS     }
+//RS     let affected = affected.ok_or_else(|| DBError {
+//RS         message: "database observed execute has no affected row count".to_string(),
+//RS     })?;
+//RS     let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+//RS         message: "database observed execute has no elapsed time".to_string(),
+//RS     })?;
+//RS     let plan_wire = plan_wire.ok_or_else(|| DBError {
+//RS         message: "database observed execute has no plan".to_string(),
+//RS     })?;
+//RS     let affected = u64::try_from(affected).map_err(|_| DBError {
+//RS         message: "database runtime affected row count is negative".to_string(),
+//RS     })?;
+//RS     Ok((
+//RS         i64::try_from(affected).unwrap_or(i64::MAX),
+//RS         JetDbQueryRuntimeFacts {
+//RS             rows_returned: None,
+//RS             rows_affected: Some(affected),
+//RS             elapsed_ms,
+//RS             plan: db_decode_plan(&plan_wire)?,
+//RS         },
+//RS     ))
+//RS }
+//RS /// Decode the bounded EXPLAIN envelope returned by a database driver.
+//RS pub fn jet_db_decode_explain_result(
+//RS     wire: &str,
+//RS ) -> Result<JetDbExplainRuntimeFacts, DBError> {
+//RS     if wire.len() > DB_MAX_WIRE_BYTES {
+//RS         return Err(DBError {
+//RS             message: "database EXPLAIN exceeds the wire-size limit".to_string(),
+//RS         });
+//RS     }
+//RS     if let Some(error) = db_observed_error(wire) {
+//RS         return Err(error);
+//RS     }
+//RS     let Some(body) = wire.strip_prefix("Y:") else {
+//RS         return Err(DBError {
+//RS             message: "database EXPLAIN has an unknown envelope".to_string(),
+//RS         });
+//RS     };
+//RS     let bytes = body.as_bytes();
+//RS     let mut pos = 0;
+//RS     let mut elapsed_ms = None;
+//RS     let mut timed_out = None;
+//RS     let mut truncated = None;
+//RS     let mut plan_wire = None;
+//RS     while pos < bytes.len() {
+//RS         let (tag, payload) =
+//RS             db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS         match tag {
+//RS             'D' if elapsed_ms.is_none() => {
+//RS                 elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+//RS             }
+//RS             'T' if timed_out.is_none() => {
+//RS                 timed_out = Some(db_runtime_bool(&payload, "timeout flag")?)
+//RS             }
+//RS             'L' if truncated.is_none() => {
+//RS                 truncated = Some(db_runtime_bool(&payload, "truncation flag")?)
+//RS             }
+//RS             'P' if plan_wire.is_none() => plan_wire = Some(payload),
+//RS             _ => {
+//RS                 return Err(DBError {
+//RS                     message: "database EXPLAIN has an invalid or duplicate field".to_string(),
+//RS                 })
+//RS             }
+//RS         }
+//RS     }
+//RS     let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+//RS         message: "database EXPLAIN has no elapsed time".to_string(),
+//RS     })?;
+//RS     let timed_out = timed_out.ok_or_else(|| DBError {
+//RS         message: "database EXPLAIN has no timeout flag".to_string(),
+//RS     })?;
+//RS     let truncated = truncated.ok_or_else(|| DBError {
+//RS         message: "database EXPLAIN has no truncation flag".to_string(),
+//RS     })?;
+//RS     let plan_wire = plan_wire.ok_or_else(|| DBError {
+//RS         message: "database EXPLAIN has no plan".to_string(),
+//RS     })?;
+//RS     Ok(JetDbExplainRuntimeFacts {
+//RS         elapsed_ms,
+//RS         plan: db_decode_plan(&plan_wire)?,
+//RS         timed_out,
+//RS         truncated,
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn db_hex_decode(payload: &str) -> Result<Vec<u8>, String> {
+//RS     if payload.len() % 2 != 0 {
+//RS         return Err("database blob value has odd hexadecimal length".to_string());
+//RS     }
+//RS     let mut bytes = Vec::with_capacity(payload.len() / 2);
+//RS     for pair in payload.as_bytes().chunks_exact(2) {
+//RS         let high = (pair[0] as char)
+//RS             .to_digit(16)
+//RS             .ok_or_else(|| "database blob value is not hexadecimal".to_string())?;
+//RS         let low = (pair[1] as char)
+//RS             .to_digit(16)
+//RS             .ok_or_else(|| "database blob value is not hexadecimal".to_string())?;
+//RS         bytes.push(((high << 4) | low) as u8);
+//RS     }
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS fn db_decode_value(tag: char, payload: &str) -> Result<DBValue, String> {
+//RS     match tag {
+//RS         'N' if payload.is_empty() => Ok(DBValue::Null),
+//RS         'I' => payload
+//RS             .parse()
+//RS             .map(DBValue::Int)
+//RS             .map_err(|_| "database integer value is invalid".to_string()),
+//RS         'F' => {
+//RS             let value: f64 = payload
+//RS                 .parse()
+//RS                 .map_err(|_| "database float value is invalid".to_string())?;
+//RS             if !value.is_finite() {
+//RS                 return Err("database float value is not finite".to_string());
+//RS             }
+//RS             Ok(DBValue::Float(value))
+//RS         }
+//RS         'T' => Ok(DBValue::Text(payload.to_string())),
+//RS         'B' => match payload {
+//RS             "0" => Ok(DBValue::Bool(false)),
+//RS             "1" => Ok(DBValue::Bool(true)),
+//RS             _ => Err("database boolean value is invalid".to_string()),
+//RS         },
+//RS         'X' => db_hex_decode(payload).map(DBValue::Blob),
+//RS         'N' => Err("database null value has a non-empty payload".to_string()),
+//RS         _ => Err("database wire contains an unknown value tag".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS /// Decode the `"O:" + rows`/`"E:" + message` wire produced by `jet_db_query`.
+//RS pub fn jet_db_decode_query_result(wire: &str) -> Result<Vec<JetDBRow>, DBError> {
+//RS     if wire.len() > DB_MAX_WIRE_BYTES {
+//RS         return Err(DBError {
+//RS             message: "database result exceeds the wire-size limit".to_string(),
+//RS         });
+//RS     }
+//RS     let Some(body) = wire.strip_prefix("O:") else {
+//RS         let msg = wire.strip_prefix("E:").unwrap_or(wire);
+//RS         return Err(DBError {
+//RS             message: msg.to_string(),
+//RS         });
+//RS     };
+//RS     let bytes = body.as_bytes();
+//RS     let Some(colon) = bytes.iter().position(|b| *b == b':') else {
+//RS         return Err(DBError {
+//RS             message: "database result is missing its row-count delimiter".to_string(),
+//RS         });
+//RS     };
+//RS     let row_count: usize = std::str::from_utf8(&bytes[..colon])
+//RS         .map_err(|_| DBError {
+//RS             message: "database row count is not UTF-8".to_string(),
+//RS         })?
+//RS         .parse()
+//RS         .map_err(|_| DBError {
+//RS             message: "database row count is invalid".to_string(),
+//RS         })?;
+//RS     if row_count > DB_MAX_ROWS {
+//RS         return Err(DBError {
+//RS             message: "database row count exceeds the wire limit".to_string(),
+//RS         });
+//RS     }
+//RS     let mut pos = colon + 1;
+//RS     let mut rows = Vec::with_capacity(row_count);
+//RS     for _ in 0..row_count {
+//RS         let row_start = pos;
+//RS         let Some(col_colon) = bytes
+//RS             .get(pos..)
+//RS             .and_then(|rest| rest.iter().position(|b| *b == b':'))
+//RS         else {
+//RS             return Err(DBError {
+//RS                 message: "database row is missing its column-count delimiter".to_string(),
+//RS             });
+//RS         };
+//RS         let col_count: usize = std::str::from_utf8(&bytes[pos..pos + col_colon])
+//RS             .map_err(|_| DBError {
+//RS                 message: "database column count is not UTF-8".to_string(),
+//RS             })?
+//RS             .parse()
+//RS             .map_err(|_| DBError {
+//RS                 message: "database column count is invalid".to_string(),
+//RS             })?;
+//RS         if col_count > DB_MAX_COLUMNS {
+//RS             return Err(DBError {
+//RS                 message: "database column count exceeds the wire limit".to_string(),
+//RS             });
+//RS         }
+//RS         pos += col_colon + 1;
+//RS         let mut row = JetDBRow::new();
+//RS         for _ in 0..col_count {
+//RS             let (tag, name) =
+//RS                 db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS             if tag != 'C' {
+//RS                 return Err(DBError {
+//RS                     message: "database row column has an invalid tag".to_string(),
+//RS                 });
+//RS             }
+//RS             let (vtag, vpayload) =
+//RS                 db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+//RS             let value = db_decode_value(vtag, &vpayload).map_err(|message| DBError { message })?;
+//RS             if row.insert(name, value).is_some() {
+//RS                 return Err(DBError {
+//RS                     message: "database row contains a duplicate column".to_string(),
+//RS                 });
+//RS             }
+//RS         }
+//RS         rows.push(row);
+//RS         if pos <= row_start {
+//RS             return Err(DBError {
+//RS                 message: "database row decoder made no progress".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     if pos != bytes.len() {
+//RS         return Err(DBError {
+//RS             message: "database result contains trailing wire bytes".to_string(),
+//RS         });
+//RS     }
+//RS     Ok(rows)
+//RS }
+//RS 
+//RS /// Map a query result to the canonical `query_one` outcome. Adapters only
+//RS /// marshal this outcome; first-row and absent-row meaning lives here.
+//RS pub fn jet_db_first_row(rows: Vec<JetDBRow>) -> JetOutcome<JetDBRow, JetAbsent> {
+//RS     jet_outcome_of(rows.into_iter().next())
+//RS }
+//RS 
+//RS /// Decode the `"O:" + count`/`"E:" + message` wire produced by `jet_db_execute`.
+//RS pub fn jet_db_decode_execute_result(wire: &str) -> Result<i64, DBError> {
+//RS     if wire.len() > DB_MAX_WIRE_BYTES {
+//RS         return Err(DBError {
+//RS             message: "database execute result exceeds the wire-size limit".to_string(),
+//RS         });
+//RS     }
+//RS     if let Some(n) = wire.strip_prefix("O:") {
+//RS         let count = n.parse::<i64>().map_err(|_| DBError {
+//RS             message: "database affected-row count is invalid".to_string(),
+//RS         })?;
+//RS         if count < 0 {
+//RS             return Err(DBError {
+//RS                 message: "database affected-row count is negative".to_string(),
+//RS             });
+//RS         }
+//RS         return Ok(count);
+//RS     }
+//RS     let msg = wire.strip_prefix("E:").unwrap_or(wire);
+//RS     if msg.is_empty() {
+//RS         return Err(DBError {
+//RS             message: "database execute result has no error message".to_string(),
+//RS         });
+//RS     }
+//RS     Err(DBError {
+//RS         message: msg.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS /// The migration ledger is a database-owned transition log.  These types are
+//RS /// deliberately independent of any CLI, filesystem, or tier adapter.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetMigrationLock {
+//RS     Shared,
+//RS     Exclusive,
+//RS }
+//RS 
+//RS impl JetMigrationLock {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Shared => "shared",
+//RS             Self::Exclusive => "exclusive",
+//RS         }
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Result<Self, DBError> {
+//RS         match value {
+//RS             "shared" => Ok(Self::Shared),
+//RS             "exclusive" => Ok(Self::Exclusive),
+//RS             _ => Err(DBError {
+//RS                 message: format!("unknown migration lock mode `{value}`"),
+//RS             }),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetMigrationOperation {
+//RS     Apply,
+//RS     Rollback,
+//RS     Direct,
+//RS }
+//RS 
+//RS impl JetMigrationOperation {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Apply => "apply",
+//RS             Self::Rollback => "rollback",
+//RS             Self::Direct => "direct",
+//RS         }
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Result<Self, DBError> {
+//RS         match value {
+//RS             "apply" => Ok(Self::Apply),
+//RS             "rollback" => Ok(Self::Rollback),
+//RS             "direct" => Ok(Self::Direct),
+//RS             _ => Err(DBError {
+//RS                 message: format!("unknown migration operation `{value}`"),
+//RS             }),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetMigrationSql {
+//RS     pub ordinal: u64,
+//RS     pub sql: SQL,
+//RS     pub inverse_sql: Option<SQL>,
+//RS     pub risk: String,
+//RS     pub lock: JetMigrationLock,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetMigrationRequest {
+//RS     pub operation: JetMigrationOperation,
+//RS     pub migration_key: String,
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub tool_identity: String,
+//RS     pub from_version: u64,
+//RS     pub to_version: u64,
+//RS     pub lock: JetMigrationLock,
+//RS     pub risk: String,
+//RS     pub steps: Vec<JetMigrationSql>,
+//RS }
+//RS 
+//RS impl JetMigrationRequest {
+//RS     pub fn direct(name: String, steps: Vec<SQL>) -> Self {
+//RS         Self {
+//RS             operation: JetMigrationOperation::Direct,
+//RS             migration_key: name,
+//RS             target: "direct".to_string(),
+//RS             target_identity: "direct".to_string(),
+//RS             database_identity: "runtime".to_string(),
+//RS             source_identity: "jet.db.runtime".to_string(),
+//RS             schema_identity: "jet.db.migration/v2".to_string(),
+//RS             tool_identity: "jet-runtime".to_string(),
+//RS             from_version: 0,
+//RS             to_version: 0,
+//RS             lock: JetMigrationLock::Exclusive,
+//RS             risk: "runtime migration".to_string(),
+//RS             steps: steps
+//RS                 .into_iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, sql)| JetMigrationSql {
+//RS                     ordinal: index as u64 + 1,
+//RS                     sql,
+//RS                     inverse_sql: None,
+//RS                     risk: "runtime migration".to_string(),
+//RS                     lock: JetMigrationLock::Exclusive,
+//RS                 })
+//RS                 .collect(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetMigrationOutcome {
+//RS     pub receipt_id: String,
+//RS     pub operation: String,
+//RS     pub status: String,
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub database_identity: String,
+//RS     pub tool_identity: String,
+//RS     pub from_version: u64,
+//RS     pub to_version: u64,
+//RS     pub step_count: usize,
+//RS     pub step_ids: Vec<String>,
+//RS     pub checksum: String,
+//RS     pub lock: JetMigrationLock,
+//RS     pub risk: String,
+//RS     pub started_unix_ms: u128,
+//RS     pub finished_unix_ms: u128,
+//RS     pub error: Option<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetMigrationStateRequest {
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetMigrationState {
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub current_version: u64,
+//RS     pub checksum: String,
+//RS     pub receipts: Vec<JetMigrationOutcome>,
+//RS     pub drift: Vec<String>,
+//RS }
+//RS 
+//RS fn db_hash_field(hash: &mut u64, value: &str) {
+//RS     for byte in (value.len() as u64).to_le_bytes() {
+//RS         *hash ^= u64::from(byte);
+//RS         *hash = hash.wrapping_mul(0x100000001b3);
+//RS     }
+//RS     for byte in value.as_bytes() {
+//RS         *hash ^= u64::from(*byte);
+//RS         *hash = hash.wrapping_mul(0x100000001b3);
+//RS     }
+//RS     *hash ^= 0xff;
+//RS     *hash = hash.wrapping_mul(0x100000001b3);
+//RS }
+//RS 
+//RS fn db_hash_value(hash: &mut u64, value: &DBValue) {
+//RS     match value {
+//RS         DBValue::Null => db_hash_field(hash, "N"),
+//RS         DBValue::Int(value) => {
+//RS             db_hash_field(hash, "I");
+//RS             db_hash_field(hash, &value.to_string());
+//RS         }
+//RS         DBValue::Float(value) => {
+//RS             db_hash_field(hash, "F");
+//RS             db_hash_field(hash, &value.to_bits().to_string());
+//RS         }
+//RS         DBValue::Text(value) => {
+//RS             db_hash_field(hash, "T");
+//RS             db_hash_field(hash, value);
+//RS         }
+//RS         DBValue::Bool(value) => db_hash_field(hash, if *value { "B1" } else { "B0" }),
+//RS         DBValue::Blob(value) => {
+//RS             db_hash_field(hash, "X");
+//RS             for byte in value {
+//RS                 *hash ^= u64::from(*byte);
+//RS                 *hash = hash.wrapping_mul(0x100000001b3);
+//RS             }
+//RS             *hash ^= 0xff;
+//RS             *hash = hash.wrapping_mul(0x100000001b3);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn db_hash_sql(hash: &mut u64, sql: &SQL) {
+//RS     db_hash_field(hash, &sql.0);
+//RS     db_hash_field(hash, &(sql.1.len() as u64).to_string());
+//RS     for value in &sql.1 {
+//RS         db_hash_value(hash, value);
+//RS     }
+//RS }
+//RS 
+//RS /// D-TYPEDSQL-SINK1=A: this checksum remains the compatibility identity for
+//RS /// the public `db.migrate(name, steps)` operation.  The typed CLI request
+//RS /// checksum below additionally covers target, source, lock, and version facts.
+//RS pub fn jet_db_migration_checksum(steps: &Vec<SQL>) -> String {
+//RS     let mut hash: u64 = 0xcbf29ce484222325;
+//RS     for sql in steps {
+//RS         for b in sql.0.as_bytes() {
+//RS             hash ^= *b as u64;
+//RS             hash = hash.wrapping_mul(0x100000001b3);
+//RS         }
+//RS         hash ^= 0xfe;
+//RS         hash = hash.wrapping_mul(0x100000001b3);
+//RS         for param in &sql.1 {
+//RS             let encoded = match param {
+//RS                 DBValue::Null => "N".to_string(),
+//RS                 DBValue::Int(value) => format!("I{value}"),
+//RS                 DBValue::Float(value) => format!("F{value}"),
+//RS                 DBValue::Text(value) => format!("T{value}"),
+//RS                 DBValue::Bool(value) => format!("B{}", if *value { 1 } else { 0 }),
+//RS                 DBValue::Blob(value) => format!("X{}", db_hex_encode(value)),
+//RS             };
+//RS             for b in encoded.as_bytes() {
+//RS                 hash ^= *b as u64;
+//RS                 hash = hash.wrapping_mul(0x100000001b3);
+//RS             }
+//RS             hash ^= 0xfd;
+//RS             hash = hash.wrapping_mul(0x100000001b3);
+//RS         }
+//RS         hash ^= 0xff;
+//RS         hash = hash.wrapping_mul(0x100000001b3);
+//RS     }
+//RS     format!("{hash:016x}")
+//RS }
+//RS 
+//RS pub fn jet_db_migration_request_checksum(request: &JetMigrationRequest) -> String {
+//RS     if matches!(request.operation, JetMigrationOperation::Direct) {
+//RS         let steps = request
+//RS             .steps
+//RS             .iter()
+//RS             .map(|step| step.sql.clone())
+//RS             .collect::<Vec<_>>();
+//RS         return jet_db_migration_checksum(&steps);
+//RS     }
+//RS     let mut hash = 0xcbf29ce484222325;
+//RS     db_hash_field(&mut hash, "jet.db.migration/v2");
+//RS     db_hash_field(&mut hash, request.operation.as_str());
+//RS     db_hash_field(&mut hash, &request.migration_key);
+//RS     db_hash_field(&mut hash, &request.target);
+//RS     db_hash_field(&mut hash, &request.target_identity);
+//RS     db_hash_field(&mut hash, &request.database_identity);
+//RS     db_hash_field(&mut hash, &request.source_identity);
+//RS     db_hash_field(&mut hash, &request.schema_identity);
+//RS     db_hash_field(&mut hash, &request.tool_identity);
+//RS     db_hash_field(&mut hash, &request.from_version.to_string());
+//RS     db_hash_field(&mut hash, &request.to_version.to_string());
+//RS     db_hash_field(&mut hash, request.lock.as_str());
+//RS     db_hash_field(&mut hash, &request.risk);
+//RS     db_hash_field(&mut hash, &(request.steps.len() as u64).to_string());
+//RS     for step in &request.steps {
+//RS         db_hash_field(&mut hash, &step.ordinal.to_string());
+//RS         db_hash_field(&mut hash, step.lock.as_str());
+//RS         db_hash_field(&mut hash, &step.risk);
+//RS         db_hash_sql(&mut hash, &step.sql);
+//RS         if let Some(inverse) = &step.inverse_sql {
+//RS             db_hash_field(&mut hash, "inverse");
+//RS             db_hash_sql(&mut hash, inverse);
+//RS         } else {
+//RS             db_hash_field(&mut hash, "no-inverse");
+//RS         }
+//RS     }
+//RS     format!("migration-v2:{hash:016x}")
+//RS }
+//RS 
+//RS fn db_migration_step_id(step: &JetMigrationSql) -> String {
+//RS     let mut hash = 0xcbf29ce484222325;
+//RS     db_hash_field(&mut hash, &step.ordinal.to_string());
+//RS     db_hash_field(&mut hash, step.lock.as_str());
+//RS     db_hash_field(&mut hash, &step.risk);
+//RS     db_hash_sql(&mut hash, &step.sql);
+//RS     format!("step:{hash:016x}")
+//RS }
+//RS 
+//RS fn db_migration_transition_key(
+//RS     request: &JetMigrationRequest,
+//RS     checksum: &str,
+//RS     predecessor: Option<&str>,
+//RS ) -> String {
+//RS     let mut hash = 0xcbf29ce484222325;
+//RS     db_hash_field(&mut hash, "transition");
+//RS     db_hash_field(&mut hash, request.operation.as_str());
+//RS     db_hash_field(&mut hash, &request.migration_key);
+//RS     db_hash_field(&mut hash, &request.target_identity);
+//RS     db_hash_field(&mut hash, checksum);
+//RS     db_hash_field(&mut hash, predecessor.unwrap_or(""));
+//RS     format!("transition:{hash:016x}")
+//RS }
+//RS 
+//RS fn db_migration_now_ms() -> u128 {
+//RS     u128::try_from(super::jet_std_time_now()).unwrap_or(0)
+//RS }
+//RS 
+//RS fn db_migration_validate_request(request: &JetMigrationRequest) -> Result<(), DBError> {
+//RS     for (name, value) in [
+//RS         ("migration key", request.migration_key.as_str()),
+//RS         ("target", request.target.as_str()),
+//RS         ("target identity", request.target_identity.as_str()),
+//RS         ("database identity", request.database_identity.as_str()),
+//RS         ("source identity", request.source_identity.as_str()),
+//RS         ("schema identity", request.schema_identity.as_str()),
+//RS         ("tool identity", request.tool_identity.as_str()),
+//RS         ("risk", request.risk.as_str()),
+//RS     ] {
+//RS         if value.is_empty() || value.chars().any(char::is_control) {
+//RS             return Err(DBError {
+//RS                 message: format!("migration {name} is empty or contains control characters"),
+//RS             });
+//RS         }
+//RS     }
+//RS     if matches!(request.operation, JetMigrationOperation::Apply)
+//RS         && request.to_version <= request.from_version
+//RS     {
+//RS         return Err(DBError {
+//RS             message: "migration apply target version must be ahead of its source".to_string(),
+//RS         });
+//RS     }
+//RS     if matches!(request.operation, JetMigrationOperation::Rollback)
+//RS         && request.to_version >= request.from_version
+//RS     {
+//RS         return Err(DBError {
+//RS             message: "migration rollback target version must be below its source".to_string(),
+//RS         });
+//RS     }
+//RS     if request.steps.len() > i64::MAX as usize
+//RS         || request.from_version > i64::MAX as u64
+//RS         || request.to_version > i64::MAX as u64
+//RS     {
+//RS         return Err(DBError {
+//RS             message: "migration request exceeds the SQLite integer range".to_string(),
+//RS         });
+//RS     }
+//RS     let mut previous = 0;
+//RS     for step in &request.steps {
+//RS         if step.ordinal == 0 || step.ordinal <= previous {
+//RS             return Err(DBError {
+//RS                 message: "migration step ordinals must be positive and increasing".to_string(),
+//RS             });
+//RS         }
+//RS         previous = step.ordinal;
+//RS         if step.sql.0.trim().is_empty()
+//RS             || step.sql.0.contains('\0')
+//RS             || step.sql.0.chars().any(char::is_control)
+//RS             || step.risk.is_empty()
+//RS             || step.risk.chars().any(char::is_control)
+//RS         {
+//RS             return Err(DBError {
+//RS                 message: "migration step contains empty or invalid SQL metadata".to_string(),
+//RS             });
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS __jet_migrations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, transition_key TEXT NOT NULL UNIQUE, migration_key TEXT NOT NULL, target TEXT NOT NULL, target_identity TEXT NOT NULL, database_identity TEXT NOT NULL, source_identity TEXT NOT NULL, schema_identity TEXT NOT NULL, tool_identity TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, step_count INTEGER NOT NULL, step_ids TEXT NOT NULL, checksum TEXT NOT NULL, lock_mode TEXT NOT NULL, risk TEXT NOT NULL, started_unix_ms INTEGER NOT NULL, finished_unix_ms INTEGER NOT NULL, error TEXT)";
+//RS 
+//RS fn db_migration_ensure_schema<B: JetDBBackend>(backend: &mut B) -> Result<(), DBError> {
+//RS     backend.execute(&(MIGRATION_LEDGER_SCHEMA.to_string(), Vec::new()), true)?;
+//RS     let columns = backend.query(
+//RS         &(
+//RS             "PRAGMA table_info(__jet_migrations)".to_string(),
+//RS             Vec::new(),
+//RS         ),
+//RS         true,
+//RS     )?;
+//RS     let canonical = [
+//RS         "sequence",
+//RS         "transition_key",
+//RS         "migration_key",
+//RS         "target",
+//RS         "target_identity",
+//RS         "database_identity",
+//RS         "source_identity",
+//RS         "schema_identity",
+//RS         "tool_identity",
+//RS         "operation",
+//RS         "status",
+//RS         "from_version",
+//RS         "to_version",
+//RS         "step_count",
+//RS         "step_ids",
+//RS         "checksum",
+//RS         "lock_mode",
+//RS         "risk",
+//RS         "started_unix_ms",
+//RS         "finished_unix_ms",
+//RS         "error",
+//RS     ];
+//RS     if columns.len() != canonical.len()
+//RS         || columns.iter().zip(canonical).any(|(row, expected)| {
+//RS             !row
+//RS                 .get("name")
+//RS                 .and_then(|value| value.text().ok())
+//RS                 .is_some_and(|name| name == expected)
+//RS         })
+//RS     {
+//RS         return Err(DBError {
+//RS             message: "migration ledger uses a non-canonical schema".to_string(),
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS struct JetMigrationLedgerRow {
+//RS     transition_key: String,
+//RS     migration_key: String,
+//RS     outcome: JetMigrationOutcome,
+//RS }
+//RS 
+//RS fn db_migration_row_text(row: &JetDBRow, key: &str) -> Result<String, DBError> {
+//RS     row.get(key)
+//RS         .ok_or_else(|| DBError {
+//RS             message: format!("migration ledger row has no `{key}` field"),
+//RS         })?
+//RS         .text()
+//RS         .map_err(|message| DBError { message })
+//RS }
+//RS 
+//RS fn db_migration_row_u64(row: &JetDBRow, key: &str) -> Result<u64, DBError> {
+//RS     let value = row
+//RS         .get(key)
+//RS         .ok_or_else(|| DBError {
+//RS             message: format!("migration ledger row has no `{key}` field"),
+//RS         })?
+//RS         .int()
+//RS         .map_err(|message| DBError { message })?;
+//RS     u64::try_from(value).map_err(|_| DBError {
+//RS         message: format!("migration ledger `{key}` is negative"),
+//RS     })
+//RS }
+//RS 
+//RS fn db_migration_row_optional_text(
+//RS     row: &JetDBRow,
+//RS     key: &str,
+//RS ) -> Result<Option<String>, DBError> {
+//RS     let value = row.get(key).ok_or_else(|| DBError {
+//RS         message: format!("migration ledger row has no `{key}` field"),
+//RS     })?;
+//RS     if value.is_null() {
+//RS         Ok(None)
+//RS     } else {
+//RS         value
+//RS             .text()
+//RS             .map(Some)
+//RS             .map_err(|message| DBError { message })
+//RS     }
+//RS }
+//RS 
+//RS fn db_migration_parse_row(row: &JetDBRow) -> Result<JetMigrationLedgerRow, DBError> {
+//RS     let transition_key = db_migration_row_text(row, "transition_key")?;
+//RS     let migration_key = db_migration_row_text(row, "migration_key")?;
+//RS     let operation = db_migration_row_text(row, "operation")?;
+//RS     let status = db_migration_row_text(row, "status")?;
+//RS     let step_ids = db_migration_row_text(row, "step_ids")?;
+//RS     let step_ids = if step_ids.is_empty() {
+//RS         Vec::new()
+//RS     } else {
+//RS         step_ids.split('\n').map(str::to_string).collect()
+//RS     };
+//RS     let step_count = usize::try_from(db_migration_row_u64(row, "step_count")?).map_err(|_| DBError {
+//RS         message: "migration ledger step count is outside the host range".to_string(),
+//RS     })?;
+//RS     let started_unix_ms = u128::from(db_migration_row_u64(row, "started_unix_ms")?);
+//RS     let finished_unix_ms = u128::from(db_migration_row_u64(row, "finished_unix_ms")?);
+//RS     let lock = JetMigrationLock::parse(&db_migration_row_text(row, "lock_mode")?)?;
+//RS     let outcome = JetMigrationOutcome {
+//RS         receipt_id: transition_key.clone(),
+//RS         operation,
+//RS         status,
+//RS         target: db_migration_row_text(row, "target")?,
+//RS         target_identity: db_migration_row_text(row, "target_identity")?,
+//RS         source_identity: db_migration_row_text(row, "source_identity")?,
+//RS         schema_identity: db_migration_row_text(row, "schema_identity")?,
+//RS         database_identity: db_migration_row_text(row, "database_identity")?,
+//RS         tool_identity: db_migration_row_text(row, "tool_identity")?,
+//RS         from_version: db_migration_row_u64(row, "from_version")?,
+//RS         to_version: db_migration_row_u64(row, "to_version")?,
+//RS         step_count,
+//RS         step_ids,
+//RS         checksum: db_migration_row_text(row, "checksum")?,
+//RS         lock,
+//RS         risk: db_migration_row_text(row, "risk")?,
+//RS         started_unix_ms,
+//RS         finished_unix_ms,
+//RS         error: db_migration_row_optional_text(row, "error")?,
+//RS     };
+//RS     Ok(JetMigrationLedgerRow {
+//RS         transition_key,
+//RS         migration_key,
+//RS         outcome,
+//RS     })
+//RS }
+//RS 
+//RS fn db_migration_rows<B: JetDBBackend>(backend: &mut B) -> Result<Vec<JetMigrationLedgerRow>, DBError> {
+//RS     let rows = backend.query(
+//RS         &(
+//RS             "SELECT transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error FROM __jet_migrations ORDER BY sequence"
+//RS                 .to_string(),
+//RS             Vec::new(),
+//RS         ),
+//RS         true,
+//RS     )?;
+//RS     rows.iter().map(db_migration_parse_row).collect()
+//RS }
+//RS 
+//RS fn db_migration_state_from_rows(
+//RS     query: &JetMigrationStateRequest,
+//RS     rows: &[JetMigrationLedgerRow],
+//RS ) -> Result<JetMigrationState, DBError> {
+//RS     let mut current_version = 0;
+//RS     let mut receipts = Vec::new();
+//RS     let mut drift = Vec::new();
+//RS     let mut hash = 0xcbf29ce484222325;
+//RS     db_hash_field(&mut hash, &query.target);
+//RS     db_hash_field(&mut hash, &query.target_identity);
+//RS     db_hash_field(&mut hash, &query.database_identity);
+//RS     db_hash_field(&mut hash, &query.source_identity);
+//RS     for row in rows {
+//RS         let receipt = &row.outcome;
+//RS         if receipt.target != query.target {
+//RS             continue;
+//RS         }
+//RS         receipts.push(receipt.clone());
+//RS         db_hash_field(&mut hash, &row.transition_key);
+//RS         db_hash_field(&mut hash, &receipt.checksum);
+//RS         if receipt.target_identity != query.target_identity {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` has a foreign target identity",
+//RS                 row.transition_key
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if receipt.database_identity != query.database_identity {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` has a foreign database identity",
+//RS                 row.transition_key
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if receipt.source_identity != query.source_identity {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` was created from a different migration catalog",
+//RS                 row.transition_key
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if receipt.schema_identity != query.schema_identity {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` has a mismatched schema identity",
+//RS                 row.transition_key
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if receipt.step_count != receipt.step_ids.len() {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` has an invalid step count",
+//RS                 row.transition_key
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         if receipt.status != "applied" {
+//RS             drift.push(format!(
+//RS                 "migration transition `{}` has unresolved status `{}`",
+//RS                 row.transition_key, receipt.status
+//RS             ));
+//RS             continue;
+//RS         }
+//RS         match JetMigrationOperation::parse(&receipt.operation) {
+//RS             Ok(JetMigrationOperation::Direct) => {}
+//RS             Ok(JetMigrationOperation::Apply | JetMigrationOperation::Rollback) => {
+//RS                 if receipt.from_version != current_version {
+//RS                     drift.push(format!(
+//RS                         "migration transition `{}` starts at {}, but canonical state is at {}",
+//RS                         row.transition_key, receipt.from_version, current_version
+//RS                     ));
+//RS                     continue;
+//RS                 }
+//RS                 current_version = receipt.to_version;
+//RS             }
+//RS             Err(_) => drift.push(format!(
+//RS                 "migration transition `{}` has unknown operation `{}`",
+//RS                 row.transition_key, receipt.operation
+//RS             )),
+//RS         }
+//RS     }
+//RS     Ok(JetMigrationState {
+//RS         target: query.target.clone(),
+//RS         target_identity: query.target_identity.clone(),
+//RS         database_identity: query.database_identity.clone(),
+//RS         source_identity: query.source_identity.clone(),
+//RS         schema_identity: query.schema_identity.clone(),
+//RS         current_version,
+//RS         checksum: format!("migration-state:{hash:016x}"),
+//RS         receipts,
+//RS         drift,
+//RS     })
+//RS }
+//RS 
+//RS fn db_migration_error(message: impl Into<String>) -> DBError {
+//RS     DBError {
+//RS         message: message.into(),
+//RS     }
+//RS }
+//RS 
+//RS fn db_migration_insert_values(outcome: &JetMigrationOutcome, migration_key: &str) -> SQL {
+//RS     let step_ids = outcome.step_ids.join("\n");
+//RS     (
+//RS         "INSERT INTO __jet_migrations (transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+//RS             .to_string(),
+//RS         vec![
+//RS             DBValue::Text(outcome.receipt_id.clone()),
+//RS             DBValue::Text(migration_key.to_string()),
+//RS             DBValue::Text(outcome.target.clone()),
+//RS             DBValue::Text(outcome.target_identity.clone()),
+//RS             DBValue::Text(outcome.database_identity.clone()),
+//RS             DBValue::Text(outcome.source_identity.clone()),
+//RS             DBValue::Text(outcome.schema_identity.clone()),
+//RS             DBValue::Text(outcome.tool_identity.clone()),
+//RS             DBValue::Text(outcome.operation.clone()),
+//RS             DBValue::Text(outcome.status.clone()),
+//RS             DBValue::Int(outcome.from_version as i64),
+//RS             DBValue::Int(outcome.to_version as i64),
+//RS             DBValue::Int(outcome.step_count as i64),
+//RS             DBValue::Text(step_ids),
+//RS             DBValue::Text(outcome.checksum.clone()),
+//RS             DBValue::Text(outcome.lock.as_str().to_string()),
+//RS             DBValue::Text(outcome.risk.clone()),
+//RS             DBValue::Int(outcome.started_unix_ms as i64),
+//RS             DBValue::Int(outcome.finished_unix_ms as i64),
+//RS             outcome
+//RS                 .error
+//RS                 .as_ref()
+//RS                 .map(|value| DBValue::Text(value.clone()))
+//RS                 .unwrap_or(DBValue::Null),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_db_migration_state<B: JetDBBackend>(
+//RS     backend: &mut B,
+//RS     query: &JetMigrationStateRequest,
+//RS ) -> Result<JetMigrationState, DBError> {
+//RS     if query.target.is_empty()
+//RS         || query.target_identity.is_empty()
+//RS         || query.database_identity.is_empty()
+//RS         || query.source_identity.is_empty()
+//RS         || query.schema_identity.is_empty()
+//RS     {
+//RS         return Err(db_migration_error("migration state query has incomplete identity"));
+//RS     }
+//RS     // Schema bootstrap/upgrade writes the ledger, so acquire SQLite's
+//RS     // authoritative write lock even for the read-facing state operation.
+//RS     if !backend.begin_with_lock(JetMigrationLock::Exclusive) {
+//RS         return Err(db_migration_error("could not begin migration state read"));
+//RS     }
+//RS     if let Err(error) = db_migration_ensure_schema(backend) {
+//RS         backend.rollback();
+//RS         return Err(error);
+//RS     }
+//RS     let rows = match db_migration_rows(backend) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => {
+//RS             backend.rollback();
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let state = match db_migration_state_from_rows(query, &rows) {
+//RS         Ok(state) => state,
+//RS         Err(error) => {
+//RS             backend.rollback();
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     if backend.commit() {
+//RS         Ok(state)
+//RS     } else {
+//RS         backend.rollback();
+//RS         Err(db_migration_error("could not commit migration state read"))
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_db_migration_request<B: JetDBBackend>(
+//RS     backend: &mut B,
+//RS     request: &JetMigrationRequest,
+//RS ) -> Result<JetMigrationOutcome, DBError> {
+//RS     db_migration_validate_request(request)?;
+//RS     if !backend.begin_with_lock(request.lock) {
+//RS         return Err(db_migration_error(format!(
+//RS             "could not begin migration `{}`",
+//RS             request.migration_key
+//RS         )));
+//RS     }
+//RS     if let Err(error) = db_migration_ensure_schema(backend) {
+//RS         backend.rollback();
+//RS         return Err(error);
+//RS     }
+//RS     let rows = match db_migration_rows(backend) {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => {
+//RS             backend.rollback();
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let query = JetMigrationStateRequest {
+//RS         target: request.target.clone(),
+//RS         target_identity: request.target_identity.clone(),
+//RS         database_identity: request.database_identity.clone(),
+//RS         source_identity: request.source_identity.clone(),
+//RS         schema_identity: request.schema_identity.clone(),
+//RS     };
+//RS     let state = match db_migration_state_from_rows(&query, &rows) {
+//RS         Ok(state) => state,
+//RS         Err(error) => {
+//RS             backend.rollback();
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     if state.drift.len() > 0 {
+//RS         backend.rollback();
+//RS         return Err(db_migration_error(format!(
+//RS             "migration target `{}` has unreconciled state: {}",
+//RS             request.target,
+//RS             state.drift.join("; ")
+//RS         )));
+//RS     }
+//RS     let checksum = jet_db_migration_request_checksum(request);
+//RS     let latest = rows
+//RS         .iter()
+//RS         .filter(|row| row.migration_key == request.migration_key && row.outcome.target == request.target)
+//RS         .next_back();
+//RS     if let Some(previous) = latest {
+//RS         if previous.outcome.status == "applied"
+//RS             && previous.outcome.operation == request.operation.as_str()
+//RS         {
+//RS             if previous.outcome.checksum == checksum {
+//RS                 if backend.commit() {
+//RS                     let mut outcome = previous.outcome.clone();
+//RS                     // Steps applied *this call*. Idempotent replay applies none.
+//RS                     outcome.step_count = 0;
+//RS                     outcome.step_ids.clear();
+//RS                     return Ok(outcome);
+//RS                 }
+//RS                 backend.rollback();
+//RS                 return Err(db_migration_error("could not commit idempotent migration read"));
+//RS             }
+//RS             backend.rollback();
+//RS             return Err(db_migration_error(format!(
+//RS                 "migration `{}` checksum changed",
+//RS                 request.migration_key
+//RS             )));
+//RS         }
+//RS     }
+//RS     if !matches!(request.operation, JetMigrationOperation::Direct)
+//RS         && request.from_version != state.current_version
+//RS     {
+//RS         backend.rollback();
+//RS         return Err(db_migration_error(format!(
+//RS             "migration target `{}` is at version {}, not {}",
+//RS             request.target, state.current_version, request.from_version
+//RS         )));
+//RS     }
+//RS     let predecessor = latest.map(|row| row.transition_key.as_str());
+//RS     let transition_key = db_migration_transition_key(request, &checksum, predecessor);
+//RS     let started = db_migration_now_ms();
+//RS     for step in &request.steps {
+//RS         if let Err(error) = backend.execute(&step.sql, true) {
+//RS             backend.rollback();
+//RS             return Err(error);
+//RS         }
+//RS     }
+//RS     let finished = db_migration_now_ms();
+//RS     let outcome = JetMigrationOutcome {
+//RS         receipt_id: transition_key,
+//RS         operation: request.operation.as_str().to_string(),
+//RS         status: "applied".to_string(),
+//RS         target: request.target.clone(),
+//RS         target_identity: request.target_identity.clone(),
+//RS         source_identity: request.source_identity.clone(),
+//RS         schema_identity: request.schema_identity.clone(),
+//RS         database_identity: request.database_identity.clone(),
+//RS         tool_identity: request.tool_identity.clone(),
+//RS         from_version: request.from_version,
+//RS         to_version: request.to_version,
+//RS         step_count: request.steps.len(),
+//RS         step_ids: request.steps.iter().map(db_migration_step_id).collect(),
+//RS         checksum,
+//RS         lock: request.lock,
+//RS         risk: request.risk.clone(),
+//RS         started_unix_ms: started,
+//RS         finished_unix_ms: finished,
+//RS         error: None,
+//RS     };
+//RS     if let Err(error) = backend.execute(
+//RS         &db_migration_insert_values(&outcome, &request.migration_key),
+//RS         true,
+//RS     ) {
+//RS         backend.rollback();
+//RS         return Err(error);
+//RS     }
+//RS     if backend.commit() {
+//RS         Ok(outcome)
+//RS     } else {
+//RS         backend.rollback();
+//RS         Err(db_migration_error(format!(
+//RS             "could not commit migration `{}`",
+//RS             request.migration_key
+//RS         )))
+//RS     }
+//RS }
+//RS 
+//RS /// One transaction state machine for ordinary `db.transaction` calls.
+//RS pub trait JetDBBackend {
+//RS     fn begin(&mut self) -> bool;
+//RS     fn begin_with_lock(&mut self, _lock: JetMigrationLock) -> bool {
+//RS         self.begin()
+//RS     }
+//RS     fn commit(&mut self) -> bool;
+//RS     fn rollback(&mut self);
+//RS     fn execute(&mut self, sql: &SQL, allow_schema: bool) -> Result<i64, DBError>;
+//RS     fn query(
+//RS         &mut self,
+//RS         sql: &SQL,
+//RS         allow_schema: bool,
+//RS     ) -> Result<Vec<JetDBRow>, DBError>;
+//RS }
+//RS 
+//RS pub fn jet_db_transaction<B: JetDBBackend>(
+//RS     backend: &mut B,
+//RS     label: &String,
+//RS     steps: &Vec<SQL>,
+//RS ) -> Result<i64, DBError> {
+//RS     if !backend.begin() {
+//RS         return Err(DBError {
+//RS             message: format!("could not begin transaction: {label}"),
+//RS         });
+//RS     }
+//RS     let mut done = 0;
+//RS     for sql in steps {
+//RS         match backend.execute(sql, false) {
+//RS             Ok(_) => done += 1,
+//RS             Err(error) => {
+//RS                 backend.rollback();
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     if backend.commit() {
+//RS         Ok(done)
+//RS     } else {
+//RS         backend.rollback();
+//RS         Err(DBError {
+//RS             message: "could not commit transaction".to_string(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_db_migrate<B: JetDBBackend>(
+//RS     backend: &mut B,
+//RS     name: &String,
+//RS     steps: &Vec<SQL>,
+//RS ) -> Result<i64, DBError> {
+//RS     let request = JetMigrationRequest::direct(name.clone(), steps.clone());
+//RS     jet_db_migration_request(backend, &request).map(|outcome| outcome.step_count as i64)
+//RS }
+//RS 
+// END-PORT-PENDING 0160 crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs:1-2449
+

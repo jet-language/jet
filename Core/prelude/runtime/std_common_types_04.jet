@@ -1,0 +1,915 @@
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug]
+use core.prelude.runtime.std_common_types.[ProcessResourceLimit, ProcessResult, ProcessSpec, ProcessPlan, ProcessChild, DirEntry, Stat, WalkEntry, LogField, WatchEvent, TempDir, TempFile, FileLock, Stopwatch, Clock, Rng, Fake, Solver, Duration, EnvError, UTF8Error, RangeError, TextError]
+use core.prelude.runtime.std_common_types_02.[JetBigInt, BI_BASE, jet_decimal_power10_limbs, jet_ratio_limbs_to_f64]
+use core.prelude.runtime.std_common_types_03.[JetFraction, jet_int_value, jet_int_pack]
+use core.prelude.runtime.std_open.[IOContext, IOOperation, IOError]
+use jet_foundation.Numeric.[CtBigInt, CtDecimal, CtFraction, JetInt]
+use jet_codegen.[jet_arithmetic_stop, jet_debug_record, jet_debug_variant, jet_show_io_error, jet_show_process_resource_limit, jet_duration_kernel_show]
+use jet_json_number.[json_decimal_small, json_decimal_lexeme]
+use std.cmp.[Ordering]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5384
+pub fn jet_int_exact_div_rem(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
+    match jet_exact_numeric.div_rem(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
+        .Some((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("div")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5406
+pub fn jet_int_exact_div_rem_euclid(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
+    match jet_exact_numeric.div_rem_euclid(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
+        .Some((quotient, remainder)) => (jet_std_exact_to_raw(quotient), jet_std_exact_to_raw(remainder)),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("div_euclid")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5428
+pub fn jet_int_exact_floor_div(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
+    match jet_exact_numeric.floor_div(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
+        .Some(value) => jet_std_exact_to_raw(value),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("floor_div")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5447
+pub fn jet_int_exact_mod(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
+    match jet_exact_numeric.modulo(jet_std_raw_to_exact(value), jet_std_raw_to_exact(divisor)) {
+        .Some(value) => jet_std_exact_to_raw(value),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("mod")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5466
+pub fn jet_int_exact_pow(value: I64, exponent: I64, file: String, line: U32) -> I64 Never! {
+    match jet_exact_numeric.pow(jet_std_raw_to_exact(value), jet_std_raw_to_exact(exponent)) {
+        .Some(value) => jet_std_exact_to_raw(value),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("pow")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5485
+pub fn jet_int_exact_checked_pow(left: I64, right: I64) -> I64? Never! {
+    jet_exact_numeric.pow(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right)).map(jet_std_exact_to_raw)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5493
+pub fn jet_int_exact_div_mod(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
+    left := jet_std_raw_to_exact(value)
+    right := jet_std_raw_to_exact(divisor)
+    quotient := jet_exact_numeric.floor_div(left, right).map(jet_std_exact_to_raw).unwrap_or_else(fn() {
+        jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("floor_div"))
+    })
+    remainder := jet_exact_numeric.modulo(left, right).map(jet_std_exact_to_raw).unwrap_or_else(fn() {
+        jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("mod"))
+    })
+    (quotient, remainder)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5522
+pub fn jet_int_exact_shl(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
+    match jet_exact_numeric.shl(jet_std_raw_to_exact(value), jet_std_raw_to_exact(count)) {
+        .Some(value) => jet_std_exact_to_raw(value),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("shl")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5541
+pub fn jet_int_exact_shr(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
+    match jet_exact_numeric.shr(jet_std_raw_to_exact(value), jet_std_raw_to_exact(count)) {
+        .Some(value) => jet_std_exact_to_raw(value),
+        .None => jet_arithmetic_stop(file, line, jet_exact_numeric.failure_message("shr")),
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5560
+pub fn jet_std_raw_to_exact(value: I64) -> CtBigInt Never! {
+    value := jet_int_value(value)
+    CtBigInt{negative: value.negative, limbs: ^value.limbs}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5568
+pub fn jet_std_exact_to_raw(value: CtBigInt) -> I64 Never! { JetInt.from_big(^value).into_raw() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5574
+pub fn jet_std_decimal_to_exact(value: JetDecimal) -> CtDecimal Never! {
+    CtDecimal.from_str(value.to_string_rep()).expect("canonical Decimal carrier must parse")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5581
+pub fn jet_std_decimal_from_exact(value: CtDecimal) -> JetDecimal Never! {
+    JetDecimal.from_str(value.to_string_rep()).expect("canonical Decimal carrier must parse")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5588
+pub fn jet_std_fraction_to_exact(value: JetFraction) -> CtFraction Never! {
+    numerator := CtBigInt{negative: value.numerator.negative, limbs: value.numerator.limbs.clone()}
+    denominator := CtBigInt{negative: value.denominator.negative, limbs: value.denominator.limbs.clone()}
+    CtFraction.from_bigints(^numerator, ^denominator).expect("canonical Fraction carrier must have a nonzero denominator")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5603
+pub fn jet_std_fraction_from_exact(value: CtFraction) -> JetFraction Never! {
+    JetFraction{
+        numerator: JetBigInt{negative: value.numerator.negative, limbs: ^value.numerator.limbs},
+        denominator: JetBigInt{negative: value.denominator.negative, limbs: ^value.denominator.limbs},
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5618
+impl JetFraction.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5619
+    fn jet_show(self) -> String Never! { self.to_string_rep() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5624
+impl JetFraction.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5625
+    fn jet_display(self) -> String Never! { self.to_string_rep() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5632
+// Exact base-10 decimal: scaled integer and written scale.
+#Clone
+#Debug
+pub enum JetDecimalMagnitude { Small(I128), Big(JetBigInt) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5638
+fn jet_decimal_bigint_from_i128(value: I128) -> JetBigInt Never! {
+    negative := value < 0
+    magnitude :: if negative { value.wrapping_neg() as U128 } else { value as U128 }
+    if magnitude == 0 -> return JetBigInt.from_int(0)
+    limbs: [U32] :: []
+    while magnitude != 0 {
+        limbs.push((magnitude % (BI_BASE as U128)) as U32)
+        magnitude /= BI_BASE as U128
+    }
+    JetBigInt{negative: negative, limbs: ^limbs}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5656
+fn jet_decimal_mul_pow10(value: JetBigInt, places: U32) -> JetBigInt Never! {
+    if places == 0 || value.is_zero() -> return value.clone()
+    chunk_shift := (places / 9) as USize
+    remainder := places % 9
+    limbs: [U32] :: Array.with_capacity(value.limbs.len() + chunk_shift + (if remainder != 0 { 1 } else { 0 }))
+    limbs.resize(chunk_shift, 0)
+    if remainder == 0 { limbs.extend_from_slice(value.limbs) } else {
+        factor := U32(10).pow(remainder)
+        carry: U64 :: 0
+        for limb in value.limbs {
+            product := (limb as U64) * (factor as U64) + carry
+            limbs.push((product % BI_BASE) as U32)
+            carry = product / BI_BASE
+        }
+        if carry != 0 -> limbs.push(carry as U32)
+    }
+    JetBigInt{negative: value.negative, limbs: ^limbs}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5685
+fn jet_decimal_pow10(scale: U32) -> JetBigInt Never! {
+    chunk_shift := (scale / 9) as USize
+    remainder := scale % 9
+    limbs: [U32] :: Array.repeat(0, chunk_shift)
+    limbs.push(U32(10).pow(remainder))
+    JetBigInt{negative: false, limbs: ^limbs}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5696
+fn jet_decimal_strip_trailing_zeros(value: &JetBigInt, scale: &U32) Never! {
+    while scale > 0 && !value.is_zero() {
+        zero_chunks: USize :: 0
+        for limb in value.limbs {
+            if limb != 0 -> break
+            zero_chunks += 1
+        }
+        removable_chunks := zero_chunks.min((scale / 9) as USize)
+        if removable_chunks > 0 {
+            _ :: value.limbs.drain(0..removable_chunks)
+            scale -= (removable_chunks as U32) * 9
+            continue
+        }
+        low := value.limbs.first().unwrap_or(0)
+        zeros: U32 :: 0
+        factor: U32 :: 1
+        while zeros < 9 && low % (factor * 10) == 0 {
+            factor *= 10
+            zeros += 1
+        }
+        removable := zeros.min(scale)
+        if removable == 0 -> break
+        divisor := U32(10).pow(removable)
+        (next, remainder) := value.div_rem_small(divisor)
+        assert(remainder == 0)
+        value = ^next
+        scale -= removable
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5725
+fn jet_decimal_magnitude_from_digits(digits: [U8]) -> JetDecimalMagnitude Never! {
+    assert(!digits.is_empty())
+    if digits.len() <= 39 {
+        small: I128 :: 0
+        fits :: true
+        for digit in digits {
+            next := small.checked_mul(10).and_then(fn(value) { value.checked_add(digit as I128) })
+            match next {
+                .Some(value) => { small = value },
+                .None => { fits = false; break },
+            }
+        }
+        if fits -> return .Small(small)
+    }
+    chunk_count := digits.len().div_ceil(9)
+    first_chunk_len := if digits.len() % 9 == 0 { 9 } else { digits.len() % 9 }
+    limbs: [U32] :: Array.with_capacity(chunk_count)
+    offset: USize :: 0
+    chunk_len :: first_chunk_len
+    while offset < digits.len() {
+        chunk: U32 :: 0
+        for digit in digits[offset..offset + chunk_len] -> chunk = chunk * 10 + (digit as U32)
+        limbs.push(chunk)
+        offset += chunk_len
+        chunk_len = 9
+    }
+    limbs.reverse()
+    .Big(JetBigInt{negative: false, limbs: ^limbs})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5769
+fn jet_decimal_parse(s: String) -> (Bool, JetDecimalMagnitude, U32) Err! {
+    if let .Some((negative, value, scale)) = json_decimal_small(s)? -> return (negative, .Small(value), scale)
+    (negative, digits, scale) := json_decimal_lexeme(s)?
+    (negative, jet_decimal_magnitude_from_digits(digits), scale)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5782
+fn jet_decimal_small_to_f64(value: I128, scale: U32) -> F64 Never! {
+    assert(value >= 0)
+    if value == 0 -> return 0.0
+    if scale == 0 -> return value as F64
+    MAX_EXACT_F64_INTEGER: U128 := (U128(1) << 53) - 1
+    if scale <= 15 && (value as U128) <= MAX_EXACT_F64_INTEGER -> return (value as F64) / F64(10).powi(scale as I32)
+    magnitude :: value as U128
+    limbs: [U32; 5] :: [0; 5]
+    length: USize :: 0
+    while magnitude != 0 {
+        limbs[length] = (magnitude % (BI_BASE as U128)) as U32
+        magnitude /= BI_BASE as U128
+        length += 1
+    }
+    denominator := jet_decimal_power10_limbs(scale)
+    jet_ratio_limbs_to_f64(limbs[0..length], denominator, false)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5812
+#Clone
+#Debug
+pub struct JetDecimal { negative: Bool, magnitude: JetDecimalMagnitude, scale: U32 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5817
+impl JetDecimal.PartialEq {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5819
+    fn eq(self, other: JetDecimal) -> Bool Never! { self.equal(other) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5824
+impl JetDecimal.Eq {}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5825
+impl JetDecimal.PartialOrd {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5827
+    fn partial_cmp(self, other: JetDecimal) -> Ordering? Never! { .Some(self.compare_value(other)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5832
+impl JetDecimal.Ord {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5834
+    fn cmp(self, other: JetDecimal) -> Ordering Never! { self.compare_value(other) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5839
+impl JetDecimal {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5841
+    pub fn from_str(s: String) -> JetDecimal Err! {
+        (negative, magnitude, scale) := jet_decimal_parse(s)?
+        JetDecimal{negative: negative, magnitude: ^magnitude, scale: scale}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5852
+    pub fn from_json_number(s: String) -> JetDecimal Err! { JetDecimal.from_str(s) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5856
+    pub fn from_int(value: I64) -> JetDecimal Err! {
+        value := value as I128
+        negative := value < 0
+        magnitude := if negative { value.wrapping_neg() } else { value }
+        JetDecimal{negative: negative, magnitude: .Small(magnitude), scale: 0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5874
+    // Every binary denominator is a power of two; a power of five gives an exact decimal.
+    pub fn from_float(value: F64) -> JetDecimal? Never! {
+        if !value.is_finite() -> return .None
+        if value == 0.0 -> return .Some(JetDecimal.from_int(0).expect("zero is a valid Decimal"))
+        bits := value.to_bits()
+        negative := (bits >> 63) != 0
+        exponent := ((bits >> 52) & 0x7ff) as I32
+        fraction := bits & ((U64(1) << 52) - 1)
+        (significand, power) := if exponent == 0 { (fraction, -1074) } else { (fraction | (U64(1) << 52), exponent - 1023 - 52) }
+        numerator :: JetBigInt.from_u64(significand)
+        if power >= 0 {
+            for _ in 0..power -> numerator = numerator.mul(JetBigInt.from_int(2))
+            .Some(JetDecimal.from_bigint(^numerator, 0, negative))
+        } else {
+            scale := U32.try_from(-power).ok()?
+            for _ in 0..scale -> numerator = numerator.mul(JetBigInt.from_int(5))
+            .Some(JetDecimal.from_bigint(^numerator, scale, negative))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5905
+    fn is_zero(self) -> Bool Never! {
+        match self.magnitude { .Small(value) => value == 0, .Big(value) => value.is_zero() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5912
+    fn normalize(^self) -> JetDecimal Never! {
+        match &self.magnitude {
+            .Small(value) => {
+                while self.scale > 0 && value != 0 && value % 10 == 0 { value /= 10; self.scale -= 1 }
+            },
+            .Big(value) => jet_decimal_strip_trailing_zeros(&value, &self.scale),
+        }
+        if self.is_zero() { self.negative = false; self.scale = 0 }
+        ^self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5931
+    fn signed_small(self) -> I128? Never! {
+        match self.magnitude {
+            .Small(value) => if self.negative { value.checked_neg() } else { .Some(value) },
+            .Big(_) => .None,
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5942
+    fn scale_small(value: I128, places: U32) -> I128? Never! {
+        if value == 0 -> return .Some(0)
+        value.checked_mul(I128(10).checked_pow(places)?)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5949
+    fn small_fraction(numerator: I128, denominator: I128) -> JetFraction? Never! {
+        if denominator == 0 -> return .None
+        negative := numerator.is_negative() != denominator.is_negative()
+        numerator_abs := numerator.unsigned_abs()
+        denominator_abs := denominator.unsigned_abs()
+        left :: numerator_abs
+        right :: denominator_abs
+        while right != 0 { remainder := left % right; left = right; right = remainder }
+        numerator_abs := I128.try_from(numerator_abs / left).ok()?
+        denominator_abs := I128.try_from(denominator_abs / left).ok()?
+        numerator := if negative { numerator_abs.checked_neg()? } else { numerator_abs }
+        JetFraction.from_reduced_bigints(jet_decimal_bigint_from_i128(numerator), jet_decimal_bigint_from_i128(denominator_abs))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5978
+    fn compare_value(self, other: JetDecimal) -> Ordering Never! {
+        left_zero := self.is_zero()
+        right_zero := other.is_zero()
+        match (left_zero, right_zero) {
+            (true, true) => return .Equal,
+            (true, false) => return if other.negative { .Greater } else { .Less },
+            (false, true) => return if self.negative { .Less } else { .Greater },
+            (false, false) => {},
+        }
+        if self.negative != other.negative -> return if self.negative { .Less } else { .Greater }
+        scale := self.scale.max(other.scale)
+        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
+            if let (.Some(left), .Some(right)) = (JetDecimal.scale_small(left, scale - self.scale), JetDecimal.scale_small(right, scale - other.scale)) -> return left.cmp(right)
+        }
+        self.scaled_bigint(scale).compare(other.scaled_bigint(scale))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6019
+    pub fn equal(self, other: JetDecimal) -> Bool Never! { self.compare_value(other) == .Equal }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6023
+    fn from_signed_small_preserving_scale(value: I128, scale: U32) -> JetDecimal? Never! {
+        negative := value < 0
+        magnitude := if negative { value.checked_neg()? } else { value }
+        .Some(JetDecimal{negative: negative, magnitude: .Small(magnitude), scale: scale})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6037
+    fn magnitude_bigint(self) -> JetBigInt Never! {
+        match self.magnitude { .Small(value) => jet_decimal_bigint_from_i128(value), .Big(value) => value.clone() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6044
+    fn signed_bigint(self) -> JetBigInt Never! {
+        value :: self.magnitude_bigint()
+        if self.negative && !value.is_zero() -> value.negative = true
+        ^value
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6052
+    fn scaled_bigint(self, scale: U32) -> JetBigInt Never! { jet_decimal_mul_pow10(self.signed_bigint(), scale - self.scale) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6056
+    fn from_bigint_preserving_scale(value: JetBigInt, scale: U32, negative: Bool) -> JetDecimal Never! {
+        magnitude := value.abs()
+        negative := negative && !magnitude.is_zero()
+        magnitude := match magnitude.try_i128() { .Some(value) => JetDecimalMagnitude.Small(value), .None => JetDecimalMagnitude.Big(^magnitude) }
+        JetDecimal{negative: negative, magnitude: ^magnitude, scale: scale}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6075
+    fn from_bigint(value: JetBigInt, scale: U32, negative: Bool) -> JetDecimal Never! { JetDecimal.from_bigint_preserving_scale(^value, scale, negative).normalize() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6079
+    fn from_signed_bigint_preserving_scale(value: JetBigInt, scale: U32) -> JetDecimal Never! {
+        negative := value.negative
+        JetDecimal.from_bigint_preserving_scale(^value, scale, negative)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6084
+    fn try_add(self, other: JetDecimal, negate_other: Bool) -> JetDecimal? Never! {
+        scale := self.scale.max(other.scale)
+        left := JetDecimal.scale_small(self.signed_small()?, scale - self.scale)?
+        right :: JetDecimal.scale_small(other.signed_small()?, scale - other.scale)?
+        if negate_other -> right = right.checked_neg()?
+        JetDecimal.from_signed_small_preserving_scale(left.checked_add(right)?, scale)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6094
+    fn add_with_sign(self, other: JetDecimal, negate_other: Bool) -> JetDecimal Never! {
+        if let .Some(value) = self.try_add(other, negate_other) -> return ^value
+        scale := self.scale.max(other.scale)
+        left := self.scaled_bigint(scale)
+        right := other.scaled_bigint(scale)
+        right := if negate_other { right.neg() } else { ^right }
+        JetDecimal.from_signed_bigint_preserving_scale(left.add(right), scale)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6110
+    pub fn add(self, other: JetDecimal) -> JetDecimal Never! { self.add_with_sign(other, false) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6115
+    pub fn sub(self, other: JetDecimal) -> JetDecimal Never! { self.add_with_sign(other, true) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6120
+    pub fn mul(self, other: JetDecimal) -> JetDecimal Never! {
+        scale :: self.scale + other.scale
+        minimum_scale := self.scale.max(other.scale)
+        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
+            if let .Some(product_value) = left.checked_mul(right) {
+                product :: product_value
+                if product == 0 { scale = minimum_scale } else {
+                    while scale > minimum_scale && product % 10 == 0 { product /= 10; scale -= 1 }
+                }
+                if let .Some(value) = JetDecimal.from_signed_small_preserving_scale(product, scale) -> return ^value
+            }
+        }
+        product := self.signed_bigint().mul(other.signed_bigint())
+        negative := product.negative
+        magnitude :: product.abs()
+        removable_scale :: scale - minimum_scale
+        if magnitude.is_zero() { removable_scale = 0 } else { jet_decimal_strip_trailing_zeros(&magnitude, &removable_scale) }
+        JetDecimal.from_signed_bigint_preserving_scale(magnitude.with_sign(negative), minimum_scale + removable_scale)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6154
+    fn scale_factor(scale: U32) -> JetBigInt Never! { jet_decimal_pow10(scale) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6158
+    fn from_signed_bigint(value: JetBigInt, scale: U32) -> JetDecimal Never! {
+        negative := value.negative
+        JetDecimal.from_bigint(value.abs(), scale, negative)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6164
+    pub fn to_fraction(self) -> JetFraction? Never! {
+        if let .Some(value) = self.signed_small() {
+            if let .Some(denominator) = I128(10).checked_pow(self.scale) {
+                if let .Some(fraction) = JetDecimal.small_fraction(value, denominator) -> return .Some(^fraction)
+            }
+        }
+        JetFraction.from_bigints(self.signed_bigint(), JetDecimal.scale_factor(self.scale))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6176
+    pub fn to_float(self) -> F64 Never! {
+        magnitude := match self.magnitude {
+            .Small(value) => jet_decimal_small_to_f64(value, self.scale),
+            .Big(value) => value.scaled_to_f64(self.scale),
+        }
+        if self.negative { -magnitude } else { magnitude }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6188
+    pub fn div(self, other: JetDecimal) -> JetFraction? Never! {
+        if other.is_zero() -> return .None
+        if let (.Some(left), .Some(right)) = (self.signed_small(), other.signed_small()) {
+            numerator := I128(10).checked_pow(other.scale).and_then(fn(scale) { left.checked_mul(scale) })
+            denominator := I128(10).checked_pow(self.scale).and_then(fn(scale) { right.checked_mul(scale) })
+            if let (.Some(numerator), .Some(denominator)) = (numerator, denominator) {
+                if let .Some(fraction) = JetDecimal.small_fraction(numerator, denominator) -> return .Some(^fraction)
+            }
+        }
+        self.to_fraction()?.div(other.to_fraction()?)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6208
+    fn quotient_remainder(self) -> (JetBigInt, JetBigInt, JetBigInt) Never! {
+        denominator := JetDecimal.scale_factor(self.scale)
+        (quotient, remainder) := self.signed_bigint().div_rem(denominator).expect("Decimal scale denominator is nonzero")
+        (^quotient, ^remainder, ^denominator)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6217
+    pub fn to_int_exact(self) -> I64? Never! {
+        (quotient, remainder, _) := self.quotient_remainder()
+        if remainder.is_zero() { .Some(jet_int_pack(^quotient)) } else { .None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6222
+    fn floor_int(self) -> JetBigInt Never! {
+        (quotient, remainder, _) := self.quotient_remainder()
+        if self.negative && !remainder.is_zero() { quotient.sub(JetBigInt.from_int(1)) } else { ^quotient }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6231
+    fn ceil_int(self) -> JetBigInt Never! {
+        (quotient, remainder, _) := self.quotient_remainder()
+        if !self.negative && !remainder.is_zero() { quotient.add(JetBigInt.from_int(1)) } else { ^quotient }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6240
+    fn round_int(self) -> JetBigInt Never! {
+        (quotient, remainder, denominator) := self.quotient_remainder()
+        doubled := remainder.abs().mul(JetBigInt.from_int(2))
+        magnitude :: quotient.abs()
+        if doubled.compare(denominator) != .Less -> magnitude = magnitude.add(JetBigInt.from_int(1))
+        if self.negative { magnitude.neg() } else { ^magnitude }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6254
+    pub fn floor(self) -> JetDecimal Never! { JetDecimal.from_signed_bigint(self.floor_int(), 0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6258
+    pub fn ceil(self) -> JetDecimal Never! { JetDecimal.from_signed_bigint(self.ceil_int(), 0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6262
+    pub fn round(self) -> JetDecimal Never! { JetDecimal.from_signed_bigint(self.round_int(), 0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6268
+    // Repeating ratios remain Fractions; only finite base-10 expansions become Decimal.
+    pub fn from_fraction(fraction: JetFraction) -> JetDecimal? Never! {
+        factors :: fraction.denominator.clone()
+        twos: U32 :: 0
+        loop {
+            (quotient, remainder) := factors.div_rem_small(2)
+            if remainder != 0 -> break
+            factors = ^quotient
+            twos += 1
+        }
+        fives: U32 :: 0
+        loop {
+            (quotient, remainder) := factors.div_rem_small(5)
+            if remainder != 0 -> break
+            factors = ^quotient
+            fives += 1
+        }
+        if factors != JetBigInt.from_int(1) -> return .None
+        scale := twos.max(fives)
+        scaled := fraction.numerator.mul(JetDecimal.scale_factor(scale))
+        (digits, remainder) := scaled.div_rem(fraction.denominator)?
+        if !remainder.is_zero() -> return .None
+        .Some(JetDecimal.from_signed_bigint(^digits, scale))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6300
+    fn magnitude_len(self) -> USize Never! {
+        match self.magnitude {
+            .Small(value) => {
+                value :: value
+                digits: USize :: 1
+                while value >= 10 { value /= 10; digits += 1 }
+                digits
+            },
+            .Big(value) => value.decimal_digit_count(),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6315
+    fn write_u128_magnitude(out: &String, value: U128) Never! {
+        if value == 0 { out.push('0'); return }
+        value :: value
+        digits: [U8; 39] :: [0; 39]
+        len: USize :: 0
+        while value != 0 { digits[len] = (value % 10) as U8; value /= 10; len += 1 }
+        for digit in digits[0..len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6332
+    fn write_u32_padded9(out: &String, value: U32) Never! {
+        value :: value
+        divisor: U32 :: 100_000_000
+        loop {
+            out.push(Char.from(U8(48) + ((value / divisor) as U8)))
+            value %= divisor
+            if divisor == 1 -> break
+            divisor /= 10
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6344
+    fn write_magnitude(self, out: &String) Never! {
+        match self.magnitude {
+            .Small(value) => JetDecimal.write_u128_magnitude(&out, value as U128),
+            .Big(value) => {
+                top := value.limbs.last().unwrap_or(0)
+                JetDecimal.write_u128_magnitude(&out, top as U128)
+                for limb in value.limbs.iter().rev().skip(1) -> JetDecimal.write_u32_padded9(&out, limb)
+            },
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6359
+    fn write_u32_digits_with_split(out: &String, value: U32, width: USize, split: USize, written: &USize) Never! {
+        assert(width > 0)
+        value :: value
+        divisor :: U32(10).pow((width - 1) as U32)
+        for _ in 0..width {
+            out.push(Char.from(U8(48) + ((value / divisor) as U8)))
+            value %= divisor
+            written += 1
+            if written == split -> out.push('.')
+            if divisor > 1 -> divisor /= 10
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6381
+    fn write_magnitude_split(self, split: USize, out: &String) Never! {
+        match self.magnitude {
+            .Small(_) => { assert(false, "split writer requires a big magnitude"); return },
+            .Big(value) => {
+                top := value.limbs.last().unwrap_or(0)
+                top_width: USize :: 1
+                probe :: top
+                while probe >= 10 { probe /= 10; top_width += 1 }
+                written: USize :: 0
+                JetDecimal.write_u32_digits_with_split(&out, top, top_width, split, &written)
+                for limb in value.limbs.iter().rev().skip(1) -> JetDecimal.write_u32_digits_with_split(&out, limb, 9, split, &written)
+                assert(written == self.magnitude_len())
+            },
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6401
+    fn write_small_scaled(value: I128, fraction_len: USize, out: &String) Never! {
+        value :: value as U128
+        digits: [U8; 39] :: [0; 39]
+        digit_len: USize :: 0
+        while value != 0 { digits[digit_len] = (value % 10) as U8; value /= 10; digit_len += 1 }
+        if fraction_len == 0 {
+            for digit in digits[0..digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+            return
+        }
+        if digit_len <= fraction_len {
+            out.push('0')
+            out.push('.')
+            for _ in 0..fraction_len - digit_len -> out.push('0')
+            for digit in digits[0..digit_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+            return
+        }
+        for digit in digits[0..digit_len].iter().rev().take(digit_len - fraction_len) -> out.push(Char.from(U8(48) + digit))
+        out.push('.')
+        for digit in digits[0..fraction_len].iter().rev() -> out.push(Char.from(U8(48) + digit))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6435
+    pub fn to_string_rep(self) -> String Never! {
+        if self.is_zero() {
+            fraction_len := self.scale as USize
+            if fraction_len == 0 -> return "0"
+            out :: String.with_capacity(2 + fraction_len)
+            out.push_str("0.")
+            for _ in 0..fraction_len -> out.push('0')
+            return ^out
+        }
+        fraction_len := self.scale as USize
+        digit_len := self.magnitude_len()
+        capacity := digit_len.max(fraction_len.saturating_add(1)).saturating_add(if self.negative { 1 } else { 0 }).saturating_add(if fraction_len > 0 { 1 } else { 0 })
+        out :: String.with_capacity(capacity)
+        if self.negative -> out.push('-')
+        if let .Small(value) = self.magnitude {
+            JetDecimal.write_small_scaled(value, fraction_len, &out)
+            return ^out
+        }
+        if fraction_len == 0 { self.write_magnitude(&out); return ^out }
+        if digit_len <= fraction_len {
+            out.push('0')
+            out.push('.')
+            for _ in 0..fraction_len - digit_len -> out.push('0')
+            self.write_magnitude(&out)
+        } else { self.write_magnitude_split(digit_len - fraction_len, &out) }
+        ^out
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6477
+impl JetDecimal.Add {
+    type Output = JetDecimal
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6481
+    fn add(^self, rhs: JetDecimal) -> JetDecimal Never! { JetDecimal.add(self, rhs) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6486
+impl JetDecimal.Sub {
+    type Output = JetDecimal
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6490
+    fn sub(^self, rhs: JetDecimal) -> JetDecimal Never! { JetDecimal.sub(self, rhs) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6495
+impl JetDecimal.Mul {
+    type Output = JetDecimal
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6499
+    fn mul(^self, rhs: JetDecimal) -> JetDecimal Never! { JetDecimal.mul(self, rhs) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6504
+impl JetDecimal.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6505
+    fn jet_show(self) -> String Never! { self.to_string_rep() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6510
+impl JetDecimal.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6511
+    fn jet_display(self) -> String Never! { self.to_string_rep() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6516
+impl JetDecimal.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6517
+    fn jet_debug(self) -> String Never! { self.to_string_rep() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6524
+impl IOContext.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6525
+    fn jet_debug(self) -> String Never! {
+        operation := match self.operation {
+            .Read => "Read", .Write => "Write", .Flush => "Flush", .Connect => "Connect",
+            .Accept => "Accept", .Close => "Close", .Resolve => "Resolve", .Codec => "Codec",
+        }
+        jet_debug_record("IOContext", [("operation", operation), ("resource", self.resource.jet_debug()), ("os_code", self.os_code.jet_debug()), ("cause", self.cause.jet_debug())])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6557
+impl IOError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6558
+    fn jet_show(self) -> String Never! {
+        (variant, context) := match self {
+            .InvalidInput(context) => (0, context), .NotFound(context) => (1, context),
+            .PermissionDenied(context) => (2, context), .TimedOut(context) => (3, context),
+            .Cancelled(context) => (4, context), .Closed(context) => (5, context),
+            .Protocol(context) => (6, context), .Other(context) => (7, context),
+            .ResourceLimit(limit) => return "process resource limit exceeded: " + limit.jet_show(),
+        }
+        jet_show_io_error(variant, context.operation as I64, context.resource.as_ref().ok(), context.cause.as_ref().ok())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6580
+impl IOError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6581
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6585
+impl IOError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6586
+    fn jet_debug(self) -> String Never! {
+        (variant, context) := match self {
+            .InvalidInput(context) => ("InvalidInput", context), .NotFound(context) => ("NotFound", context),
+            .PermissionDenied(context) => ("PermissionDenied", context), .TimedOut(context) => ("TimedOut", context),
+            .Cancelled(context) => ("Cancelled", context), .Closed(context) => ("Closed", context),
+            .Protocol(context) => ("Protocol", context), .Other(context) => ("Other", context),
+            .ResourceLimit(limit) => return jet_debug_variant("ResourceLimit", .Some(limit.jet_debug())),
+        }
+        jet_debug_variant(variant, .Some(context.jet_debug()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6603
+impl ProcessResourceLimit.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6604
+    fn jet_show(self) -> String Never! {
+        variant := match self { .WallTime => 0, .CpuTime => 1, .Memory => 2, .OpenFiles => 3, .Output => 4 }
+        jet_show_process_resource_limit(variant)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6615
+impl ProcessResourceLimit.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6616
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6620
+impl ProcessResourceLimit.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6621
+    fn jet_debug(self) -> String Never! { match self { .WallTime => "WallTime", .CpuTime => "CpuTime", .Memory => "Memory", .OpenFiles => "OpenFiles", .Output => "Output" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6632
+impl EnvError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6633
+    fn jet_show(self) -> String Never! {
+        match self {
+            .InvalidName => "invalid environment variable name",
+            .InvalidValue => "invalid environment variable value",
+            .NonUnicode => "environment contains a name or value that is not valid Unicode",
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6643
+impl EnvError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6644
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6648
+impl UTF8Error.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6649
+    fn jet_show(self) -> String Never! { self.message.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6653
+impl UTF8Error.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6654
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6658
+impl RangeError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6659
+    fn jet_show(self) -> String Never! { self.reason.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6663
+impl RangeError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6664
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6668
+impl TextError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6669
+    fn jet_show(self) -> String Never! { self.message.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6673
+impl TextError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6674
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6679
+impl EnvError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6680
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6684
+impl UTF8Error.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6685
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6689
+impl RangeError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6690
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6694
+impl TextError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6695
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6699
+impl ProcessResult.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6700
+    fn jet_show(self) -> String Never! { self.debug() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6704
+impl ProcessSpec.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6705
+    fn jet_show(self) -> String Never! { "ProcessSpec(" + self.cmd.debug() + ")" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6709
+impl ProcessPlan.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6710
+    fn jet_show(self) -> String Never! { "ProcessPlan { executable: " + self.executable_identity.show() + ", backend: " + self.backend.show() + ", policy_digest: " + self.policy_digest.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6717
+impl ProcessChild.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6718
+    fn jet_show(self) -> String Never! { "ProcessChild" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6722
+impl DirEntry.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6723
+    fn jet_show(self) -> String Never! { "DirEntry { name: " + self.name.debug() + ", path: " + self.path.debug() + ", is_dir: " + self.is_dir.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6730
+impl Stat.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6731
+    fn jet_show(self) -> String Never! { "Stat { kind: " + self.kind.show() + ", size: " + self.size.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6735
+impl WalkEntry.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6736
+    fn jet_show(self) -> String Never! { "WalkEntry { path: " + self.path.debug() + ", depth: " + self.depth.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6746
+impl LogField.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6747
+    fn jet_show(self) -> String Never! { jet_debug_record("LogField", [("key", self.key.jet_show()), ("value", self.value.jet_show()), ("kind", self.kind.jet_show()), ("redacted", self.redacted.jet_show())]) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6759
+impl LogField.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6760
+    fn jet_debug(self) -> String Never! { jet_debug_record("LogField", [("key", self.key.jet_debug()), ("value", self.value.jet_debug()), ("kind", self.kind.jet_debug()), ("redacted", self.redacted.jet_debug())]) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6772
+impl WatchEvent.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6773
+    fn jet_show(self) -> String Never! { "WatchEvent { domain: " + self.domain.debug() + ", kind: " + self.kind.debug() + ", path: " + self.path.show() + ", detail: " + self.detail.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6780
+impl TempDir.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6781
+    fn jet_show(self) -> String Never! { self.path.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6785
+impl TempFile.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6786
+    fn jet_show(self) -> String Never! { self.path.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6790
+impl FileLock.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6791
+    fn jet_show(self) -> String Never! { self.path.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6795
+impl Stopwatch.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6796
+    fn jet_show(self) -> String Never! { self.start.debug() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6800
+impl Clock.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6801
+    fn jet_show(self) -> String Never! { "Clock { now: " + self.now().show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6805
+impl Clock.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6806
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6810
+impl Rng.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6811
+    fn jet_show(self) -> String Never! { "RNG { .. }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6815
+impl Fake.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6816
+    fn jet_show(self) -> String Never! { "Fake { locale: " + (if self.locale == 1 { "de" } else { "en" }) + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6824
+impl Solver.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6825
+    fn jet_show(self) -> String Never! { "Solver { seed: " + self.seed.show() + ", checked: " + self.checked.show() + ", failures: " + self.failures.show() + " }" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6832
+impl Duration.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6833
+    fn jet_show(self) -> String Never! { jet_duration_kernel_show(self.ns) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6837
+impl Duration.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:6838
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}

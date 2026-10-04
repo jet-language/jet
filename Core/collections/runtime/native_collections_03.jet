@@ -1,0 +1,1805 @@
+// PORT-PENDING 0198 crates-jet-jit-src-collections-slice-3703: crates/jet-jit/src/Collections.rs:3703-5503
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn checked_iter_flat_map_typed(source: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, source);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_flat_map(rt, source, slot)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_iter_filter_map_typed(source: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, source);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_filter_map(rt, source, slot)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_list_take_while_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("jit checked List take_while: bad sequence handle")
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let mut output = Vec::new();
+//RS     for value in values {
+//RS         let keep = invoke_closure_bool(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         if !keep {
+//RS             break;
+//RS         }
+//RS         output.push(value);
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &element))
+//RS }
+//RS 
+//RS fn checked_list_skip_while_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("jit checked List skip_while: bad sequence handle")
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let mut output = Vec::new();
+//RS     let mut skipping = true;
+//RS     for value in values {
+//RS         if skipping {
+//RS             skipping = invoke_closure_bool(slot, value);
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             if skipping {
+//RS                 continue;
+//RS             }
+//RS         }
+//RS         output.push(value);
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &element))
+//RS }
+//RS 
+//RS fn checked_iter_take_while_typed(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, list);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_take_while(rt, source, slot)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_iter_skip_while_typed(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, list);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_skip_while(rt, source, slot)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_iter_scan_typed(list: i64, init: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, list);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_scan(rt, source, init, slot)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_iter_zip_family_typed(
+//RS     left: i64,
+//RS     right: i64,
+//RS     callback: i64,
+//RS     mode: crate::runtime_host::JitZipMode,
+//RS     left_fill: Option<i64>,
+//RS     right_fill: Option<i64>,
+//RS     metadata: Option<(i64, i64, i64, i64, i64, i64, i64)>,
+//RS ) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let (policy, file, line, fn_name, source_line, col, caret_len) = match metadata {
+//RS         Some((policy, file, line, fn_name, source_line, col, caret_len)) => {
+//RS             let Ok(line) = u32::try_from(line) else {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.set_host_fault("JIT strict zip line metadata is invalid")
+//RS                 });
+//RS                 return 0;
+//RS             };
+//RS             let Ok(col) = u32::try_from(col) else {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.set_host_fault("JIT strict zip column metadata is invalid")
+//RS                 });
+//RS                 return 0;
+//RS             };
+//RS             let Ok(caret_len) = u32::try_from(caret_len) else {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.set_host_fault("JIT strict zip caret metadata is invalid")
+//RS                 });
+//RS                 return 0;
+//RS             };
+//RS             (policy, file, line, fn_name, source_line, col, caret_len)
+//RS         }
+//RS         None => (0, 0, 0, 0, 0, 0, 0),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = lazy_source_for(rt, left);
+//RS         if left == 0 {
+//RS             return 0;
+//RS         }
+//RS         let right = lazy_source_for(rt, right);
+//RS         if right == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_zip(
+//RS             rt,
+//RS             left,
+//RS             right,
+//RS             slot,
+//RS             mode,
+//RS             left_fill,
+//RS             right_fill,
+//RS             policy,
+//RS             file,
+//RS             line,
+//RS             fn_name,
+//RS             source_line,
+//RS             col,
+//RS             caret_len,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn checked_iter_zip_typed(left: i64, right: i64, callback: i64) -> i64 {
+//RS     checked_iter_zip_family_typed(
+//RS         left,
+//RS         right,
+//RS         callback,
+//RS         crate::runtime_host::JitZipMode::Short,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn checked_iter_zip_strict_typed(
+//RS     left: i64,
+//RS     right: i64,
+//RS     callback: i64,
+//RS     policy: i64,
+//RS     file: i64,
+//RS     line: i64,
+//RS     fn_name: i64,
+//RS     source_line: i64,
+//RS     col: i64,
+//RS     caret_len: i64,
+//RS ) -> i64 {
+//RS     checked_iter_zip_family_typed(
+//RS         left,
+//RS         right,
+//RS         callback,
+//RS         crate::runtime_host::JitZipMode::Strict,
+//RS         None,
+//RS         None,
+//RS         Some((policy, file, line, fn_name, source_line, col, caret_len)),
+//RS     )
+//RS }
+//RS 
+//RS fn checked_iter_zip_pad_typed(
+//RS     left: i64,
+//RS     right: i64,
+//RS     left_fill: i64,
+//RS     right_fill: i64,
+//RS     callback: i64,
+//RS ) -> i64 {
+//RS     checked_iter_zip_family_typed(
+//RS         left,
+//RS         right,
+//RS         callback,
+//RS         crate::runtime_host::JitZipMode::Pad,
+//RS         Some(left_fill),
+//RS         Some(right_fill),
+//RS         None,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_any(list: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     if is_lazy_sequence(list) {
+//RS         while let Some(value) = next_lazy_sequence(list) {
+//RS             if closure_trapped() {
+//RS                 return 1;
+//RS             }
+//RS             if invoke_closure_bool(slot, value) {
+//RS                 return 1;
+//RS             }
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         return 0;
+//RS     }
+//RS     let values = clone_list_ints(list);
+//RS     i8::from(collection_semantics::list_closure_any(values, |value| {
+//RS         if closure_trapped() {
+//RS             return true;
+//RS         }
+//RS         let matched = invoke_closure_bool(slot, *value);
+//RS         closure_trapped() || matched
+//RS     }))
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_all(list: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     if is_lazy_sequence(list) {
+//RS         while let Some(value) = next_lazy_sequence(list) {
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             if !invoke_closure_bool(slot, value) {
+//RS                 return 0;
+//RS             }
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         return 1;
+//RS     }
+//RS     let values = clone_list_ints(list);
+//RS     i8::from(collection_semantics::list_closure_all(values, |value| {
+//RS         if closure_trapped() {
+//RS             return false;
+//RS         }
+//RS         let matched = invoke_closure_bool(slot, *value);
+//RS         !closure_trapped() && matched
+//RS     }))
+//RS }
+//RS 
+//RS fn list_closure_map_i64(list: i64, callback: i64, mutable: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mapped = if mutable {
+//RS         collection_semantics::list_closure_map_mut(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 invoke_closure_i64(slot, *value)
+//RS             }
+//RS         })
+//RS     } else {
+//RS         collection_semantics::list_closure_map(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 invoke_closure_i64(slot, *value)
+//RS             }
+//RS         })
+//RS     };
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_closure_ints(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i64(list, callback, false)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_mut(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i64(list, callback, true)
+//RS }
+//RS 
+//RS fn run_closure_para_map<T, Invoke, Encode>(
+//RS     list: i64,
+//RS     callback: i64,
+//RS     limit: i64,
+//RS     invoke: Invoke,
+//RS     encode: Encode,
+//RS ) -> i64
+//RS where
+//RS     T: Default + Send,
+//RS     Invoke: Fn(JitCallableSlot, i64) -> T + Sync,
+//RS     Encode: Fn(Vec<T>) -> i64,
+//RS {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mapped = collection_semantics::list_closure_para_map(
+//RS         values,
+//RS         |value| {
+//RS             if closure_trapped() {
+//RS                 T::default()
+//RS             } else {
+//RS                 invoke(slot, *value)
+//RS             }
+//RS         },
+//RS         limit,
+//RS     );
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     encode(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_para_map(list: i64, callback: i64, limit: i64) -> i64 {
+//RS     run_closure_para_map(
+//RS         list,
+//RS         callback,
+//RS         limit,
+//RS         |slot, value| invoke_closure_i64(slot, value),
+//RS         alloc_closure_ints,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_para_map_i8(list: i64, callback: i64, limit: i64) -> i64 {
+//RS     run_closure_para_map(
+//RS         list,
+//RS         callback,
+//RS         limit,
+//RS         |slot, value| i64::from(invoke_closure_i8(slot, value)),
+//RS         alloc_closure_ints,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_para_map_i32(list: i64, callback: i64, limit: i64) -> i64 {
+//RS     run_closure_para_map(
+//RS         list,
+//RS         callback,
+//RS         limit,
+//RS         |slot, value| i64::from(invoke_closure_i32(slot, value)),
+//RS         alloc_closure_ints,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_para_map_f64(list: i64, callback: i64, limit: i64) -> i64 {
+//RS     run_closure_para_map(
+//RS         list,
+//RS         callback,
+//RS         limit,
+//RS         |slot, value| invoke_closure_f64(slot, value),
+//RS         alloc_closure_floats,
+//RS     )
+//RS }
+//RS 
+//RS fn list_closure_map_i8(list: i64, callback: i64, mutable: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mapped = if mutable {
+//RS         collection_semantics::list_closure_map_mut(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 i64::from(invoke_closure_i8(slot, *value))
+//RS             }
+//RS         })
+//RS     } else {
+//RS         collection_semantics::list_closure_map(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 i64::from(invoke_closure_i8(slot, *value))
+//RS             }
+//RS         })
+//RS     };
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_closure_ints(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_i8(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i8(list, callback, false)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_i8_mut(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i8(list, callback, true)
+//RS }
+//RS 
+//RS fn list_closure_map_i32(list: i64, callback: i64, mutable: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mapped = if mutable {
+//RS         collection_semantics::list_closure_map_mut(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 i64::from(invoke_closure_i32(slot, *value))
+//RS             }
+//RS         })
+//RS     } else {
+//RS         collection_semantics::list_closure_map(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0
+//RS             } else {
+//RS                 i64::from(invoke_closure_i32(slot, *value))
+//RS             }
+//RS         })
+//RS     };
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_closure_ints(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_i32(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i32(list, callback, false)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_i32_mut(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_i32(list, callback, true)
+//RS }
+//RS 
+//RS fn list_closure_map_f64(list: i64, callback: i64, mutable: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mapped = if mutable {
+//RS         collection_semantics::list_closure_map_f64_mut(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0.0
+//RS             } else {
+//RS                 invoke_closure_f64(slot, *value)
+//RS             }
+//RS         })
+//RS     } else {
+//RS         collection_semantics::list_closure_map_f64(values, |value| {
+//RS             if closure_trapped() {
+//RS                 0.0
+//RS             } else {
+//RS                 invoke_closure_f64(slot, *value)
+//RS             }
+//RS         })
+//RS     };
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_closure_floats(mapped)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_f64(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_f64(list, callback, false)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_map_f64_mut(list: i64, callback: i64) -> i64 {
+//RS     list_closure_map_f64(list, callback, true)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let filtered = collection_semantics::list_closure_filter(values, |value| {
+//RS         if closure_trapped() {
+//RS             false
+//RS         } else {
+//RS             (invoke_closure_bool(slot, *value)) && !closure_trapped()
+//RS         }
+//RS     });
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     alloc_closure_ints(filtered)
+//RS }
+//RS fn jet_jit_list_para_filter(list: i64, callback: i64) -> i64 {
+//RS     jet_jit_list_closure_filter(list, callback)
+//RS }
+//RS fn jet_jit_list_para_partition(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let (false_values, true_values) = collection_semantics::list_partition(values, |value| {
+//RS         if closure_trapped() {
+//RS             false
+//RS         } else {
+//RS             invoke_closure_bool(slot, *value) && !closure_trapped()
+//RS         }
+//RS     });
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let false_list = rt.heap.alloc_int_list(false_values);
+//RS         let true_list = rt.heap.alloc_int_list(true_values);
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(pair, 0, false_list);
+//RS         let _ = rt.heap.record_set_int(pair, 1, true_list);
+//RS         pair
+//RS     })
+//RS }
+//RS 
+//RS /// `xs.para_fold(seed, step, merge)`: the shared Prelude chunk plan and merge
+//RS /// tree (`jet_list_para_chunks_serial_kernel` / `jet_list_para_merge_tree`),
+//RS /// the same serial rail the interpreter walks. Cranelift callbacks must stay
+//RS /// on the runtime thread, so the chunks run in index order here; the chunk
+//RS /// boundaries and the merge association are identical to AOT's parallel run.
+//RS fn jet_jit_list_para_fold(list: i64, seed: i64, step: i64, merge: i64) -> i64 {
+//RS     let (Some(seed), Some(step), Some(merge)) = (
+//RS         closure_callback_slot(seed),
+//RS         closure_callback_slot(step),
+//RS         closure_callback_slot(merge),
+//RS     ) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     if values.is_empty() {
+//RS         return invoke_closure_i64_many(seed, &[]);
+//RS     }
+//RS     let partials = collection_semantics::jet_list_para_chunks_serial_kernel(values.len(), |range| {
+//RS         if closure_trapped() {
+//RS             return Err(());
+//RS         }
+//RS         let mut acc = invoke_closure_i64_many(seed, &[]);
+//RS         for &value in &values[range] {
+//RS             if closure_trapped() {
+//RS                 return Err(());
+//RS             }
+//RS             acc = invoke_closure_i64_pair(step, acc, value);
+//RS         }
+//RS         if closure_trapped() {
+//RS             Err(())
+//RS         } else {
+//RS             Ok(acc)
+//RS         }
+//RS     })
+//RS     .into_iter()
+//RS     .map(|(_, partial)| partial)
+//RS     .collect::<Result<Vec<_>, ()>>();
+//RS     let Ok(partials) = partials else {
+//RS         return 0;
+//RS     };
+//RS     collection_semantics::jet_list_para_merge_tree(partials, |left, right| {
+//RS         if closure_trapped() {
+//RS             return Err(());
+//RS         }
+//RS         let merged = invoke_closure_i64_pair(merge, left, right);
+//RS         if closure_trapped() {
+//RS             Err(())
+//RS         } else {
+//RS             Ok(merged)
+//RS         }
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     if is_lazy_sequence(list) {
+//RS         while let Some(value) = next_lazy_sequence(list) {
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             invoke_closure_unit(slot, value);
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         return 0;
+//RS     }
+//RS     let values = clone_list_ints(list);
+//RS     if mutable {
+//RS         collection_semantics::list_closure_each_mut(values, |value| {
+//RS             if !closure_trapped() {
+//RS                 invoke_closure_unit(slot, *value);
+//RS             }
+//RS         });
+//RS     } else {
+//RS         collection_semantics::list_closure_each(values, |value| {
+//RS             if !closure_trapped() {
+//RS                 invoke_closure_unit(slot, *value);
+//RS             }
+//RS         });
+//RS     }
+//RS 
+//RS     0
+//RS }
+//RS fn checked_list_try_map(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut output = Vec::new();
+//RS     for value in clone_list_ints(list) {
+//RS         let result = invoke_closure_i64(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let Some((ok, bits)) =
+//RS             Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, result))
+//RS         else {
+//RS             return 0;
+//RS         };
+//RS         if !ok {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, bits)
+//RS             });
+//RS         }
+//RS         output.push(bits as i64);
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_int_list(output);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_list_try_filter(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut output = Vec::new();
+//RS     for value in clone_list_ints(list) {
+//RS         let result = invoke_closure_i64(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let Some((ok, bits)) =
+//RS             Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, result))
+//RS         else {
+//RS             return 0;
+//RS         };
+//RS         if !ok {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, bits)
+//RS             });
+//RS         }
+//RS         if bits != 0 {
+//RS             output.push(value);
+//RS         }
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_int_list(output);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn checked_list_position(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     if is_lazy_sequence(list) {
+//RS         let mut index = 0_i64;
+//RS         while let Some(value) = next_lazy_sequence(list) {
+//RS             let matched = invoke_closure_bool(slot, value);
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             if matched {
+//RS                 return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(index)));
+//RS             }
+//RS             index = index.saturating_add(1);
+//RS         }
+//RS         return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+//RS     }
+//RS     let position = clone_list_ints(list)
+//RS         .into_iter()
+//RS         .position(|value| invoke_closure_bool(slot, value));
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, position.map(|index| index as i64)))
+//RS }
+//RS 
+//RS fn checked_list_flat_map(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(values) = checked_sequence_values(list) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("jit List flat_map: bad sequence handle")
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let mut output = Vec::new();
+//RS     for value in values {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let nested = invoke_closure_i64(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let Some(nested) = checked_sequence_values(nested) else {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_host_fault("jit List flat_map: callback returned a non-sequence handle")
+//RS             });
+//RS             return 0;
+//RS         };
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         output.extend(nested);
+//RS     }
+//RS     alloc_closure_ints(output)
+//RS }
+//RS 
+//RS fn checked_list_take_while(list: i64, callback: i64, skip: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     let mut output = Vec::new();
+//RS     let mut skipping = skip;
+//RS     for value in values {
+//RS         let keep = invoke_closure_bool(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         if skip {
+//RS             if skipping && keep {
+//RS                 continue;
+//RS             }
+//RS             skipping = false;
+//RS             output.push(value);
+//RS         } else if keep {
+//RS             output.push(value);
+//RS         } else {
+//RS             break;
+//RS         }
+//RS     }
+//RS     alloc_closure_ints(output)
+//RS }
+//RS 
+//RS fn checked_list_scan(list: i64, init: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut accumulator = init;
+//RS     let mut output = Vec::new();
+//RS     for value in clone_list_ints(list) {
+//RS         accumulator = invoke_closure_i64_pair(slot, accumulator, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         output.push(accumulator);
+//RS     }
+//RS     alloc_closure_ints(output)
+//RS }
+//RS 
+//RS fn checked_option_map(value: i64, callback: i64) -> i64 {
+//RS     if value == 0 {
+//RS         return 0;
+//RS     }
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mapped = invoke_closure_i64(slot, value.wrapping_sub(1));
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     mapped.wrapping_add(1)
+//RS }
+//RS 
+//RS fn checked_bag_any(bag: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let keys = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.bags
+//RS             .get((bag as usize).wrapping_sub(1))
+//RS             .map(|bag| bag.keys().copied().collect::<Vec<_>>())
+//RS             .unwrap_or_default()
+//RS     });
+//RS     for key in keys {
+//RS         if invoke_closure_bool(slot, key) {
+//RS             return 1;
+//RS         }
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     0
+//RS }
+//RS fn checked_list_find(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     if is_lazy_sequence(list) {
+//RS         while let Some(value) = next_lazy_sequence(list) {
+//RS             if invoke_closure_bool(slot, value) {
+//RS                 return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(value)));
+//RS             }
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS         }
+//RS         return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+//RS     }
+//RS     for value in clone_list_ints(list) {
+//RS         if invoke_closure_bool(slot, value) {
+//RS             return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(value)));
+//RS         }
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, None))
+//RS }
+//RS 
+//RS fn checked_list_by(list: i64, callback: i64, maximum: bool) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut best = None;
+//RS     let mut best_key: Option<jet_foundation::Numeric::JetInt> = None;
+//RS     for value in clone_list_ints(list) {
+//RS         let key_raw = invoke_closure_i64(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let key = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(key_raw) };
+//RS         let replace = match best_key.as_ref() {
+//RS             None => true,
+//RS             Some(best_key) => {
+//RS                 let order = key.cmp(best_key);
+//RS                 if maximum {
+//RS                     order != std::cmp::Ordering::Less
+//RS                 } else {
+//RS                     order != std::cmp::Ordering::Greater
+//RS                 }
+//RS             }
+//RS         };
+//RS         if replace {
+//RS             best = Some(value);
+//RS             best_key = Some(key);
+//RS         }
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, best))
+//RS }
+//RS 
+//RS fn checked_list_min_by(list: i64, callback: i64) -> i64 {
+//RS     checked_list_by(list, callback, false)
+//RS }
+//RS 
+//RS fn checked_list_max_by(list: i64, callback: i64) -> i64 {
+//RS     checked_list_by(list, callback, true)
+//RS }
+//RS 
+//RS fn checked_list_take(list: i64, callback: i64) -> i64 {
+//RS     checked_list_take_while(list, callback, false)
+//RS }
+//RS fn checked_list_count_by(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let map = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map());
+//RS     for value in clone_list_ints(list) {
+//RS         let key = invoke_closure_i64(slot, value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         jet_jit_map_increment(map, key);
+//RS     }
+//RS     map
+//RS }
+//RS 
+//RS fn checked_list_skip(list: i64, callback: i64) -> i64 {
+//RS     checked_list_take_while(list, callback, true)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_each(list: i64, callback: i64) -> i8 {
+//RS     list_closure_each(list, callback, false)
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_each_mut(list: i64, callback: i64) -> i8 {
+//RS     list_closure_each(list, callback, true)
+//RS }
+//RS 
+//RS /// Canonical `List.contains` route for integer-like list carriers.
+//RS fn jet_jit_list_contains(list: i64, needle: i64) -> i8 {
+//RS     let needle = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(needle) };
+//RS     let values = clone_list_ints(list)
+//RS         .into_iter()
+//RS         .map(|value| unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) })
+//RS         .collect::<Vec<_>>();
+//RS     collection_semantics::list_contains(&values, &needle) as i8
+//RS }
+//RS fn jet_jit_list_index_of(list: i64, needle: i64) -> i64 {
+//RS     let needle = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(needle) };
+//RS     let value = clone_list_ints(list)
+//RS         .into_iter()
+//RS         .map(|value| unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) })
+//RS         .position(|item| item == needle)
+//RS         .map(|index| index as i64);
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_index_of_f64(list: i64, needle: f64) -> i64 {
+//RS     let value = clone_list_floats(list)
+//RS         .into_iter()
+//RS         .position(|item| item == needle)
+//RS         .map(|index| index as i64);
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_index_of_str(list: i64, needle: i64) -> i64 {
+//RS     let needle = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_string(needle)
+//RS             .unwrap_or_default()
+//RS     });
+//RS     let value = clone_list_strings(list)
+//RS         .into_iter()
+//RS         .position(|item| item == needle)
+//RS         .map(|index| index as i64);
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
+//RS     let needle = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_string(needle)
+//RS             .or_else(|| crate::runtime_host::view_string(rt, needle))
+//RS             .unwrap_or_default()
+//RS     });
+//RS     collection_semantics::list_contains(&clone_list_strings(list), &needle) as i8
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Element-wise list equality for `[T]` / fixed lists (int/byte elements).
+//RS fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_equal(&clone_list_ints(a), &clone_list_ints(b)) as i8
+//RS }
+//RS 
+//RS /// Nested integer lists store inner list handles in the outer integer column.
+//RS /// Marshal those handles to the same Vec shape that AOT passes to the shared
+//RS /// Prelude equality kernel.
+//RS fn jet_jit_list_eq_nested(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_equal(&clone_nested_int_lists(a), &clone_nested_int_lists(b)) as i8
+//RS }
+//RS 
+//RS /// Typed list equality adapters preserve the element semantics of the shared
+//RS /// Prelude kernel. String elements are arena handles, so comparing raw IDs
+//RS /// would make equal independently-created lists unequal.
+//RS fn jet_jit_list_eq_str(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_equal(&clone_list_strings(a), &clone_list_strings(b)) as i8
+//RS }
+//RS 
+//RS fn jet_jit_list_eq_f64(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_equal(&clone_list_floats(a), &clone_list_floats(b)) as i8
+//RS }
+//RS fn jet_jit_list_eq_date(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = clone_list_dates_with_runtime(rt, a) else {
+//RS             return 0;
+//RS         };
+//RS         let Some(right) = clone_list_dates_with_runtime(rt, b) else {
+//RS             return 0;
+//RS         };
+//RS         collection_semantics::list_equal(&left, &right) as i8
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_order_date(a: i64, b: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(left) = clone_list_dates_with_runtime(rt, a) else {
+//RS             return 3;
+//RS         };
+//RS         let Some(right) = clone_list_dates_with_runtime(rt, b) else {
+//RS             return 3;
+//RS         };
+//RS         collection_semantics::list_order(&left, &right)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_order(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_order(&clone_list_ints(a), &clone_list_ints(b))
+//RS }
+//RS 
+//RS fn jet_jit_list_order_str(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_order(&clone_list_strings(a), &clone_list_strings(b))
+//RS }
+//RS 
+//RS fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
+//RS     collection_semantics::list_order(&clone_list_floats(a), &clone_list_floats(b))
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_f64(list: i64) {
+//RS     let mut values = clone_list_floats(list);
+//RS     values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*left, *right));
+//RS     // A range window view writes back into its owner at the window offset.
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_float(rt, list, index, value)
+//RS                 .expect("jit list sort_f64: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_f64_desc(list: i64) {
+//RS     let mut values = clone_list_floats(list);
+//RS     values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*right, *left));
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_float(rt, list, index, value)
+//RS                 .expect("jit list sort_f64_desc: set");
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_list_sort_datetime(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(mut pairs) = clone_list_ints_with_runtime(rt, list)
+//RS             .into_iter()
+//RS             .map(|handle| {
+//RS                 let index = usize::try_from(handle.checked_sub(1)?).ok()?;
+//RS                 let value = match rt.time_values.get(index)?.as_ref()? {
+//RS                     crate::Time::TimeValue::DateTime(value) => value.clone(),
+//RS                     _ => return None,
+//RS                 };
+//RS                 Some((value, handle))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             return;
+//RS         };
+//RS         pairs.sort_by(|left, right| left.0.cmp(&right.0));
+//RS         for (index, (_, handle)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, handle)
+//RS                 .expect("jit list sort_datetime: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_date(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(mut pairs) = clone_list_ints_with_runtime(rt, list)
+//RS             .into_iter()
+//RS             .map(|handle| {
+//RS                 let index = usize::try_from(handle.checked_sub(1)?).ok()?;
+//RS                 let value = match rt.time_values.get(index)?.as_ref()? {
+//RS                     crate::Time::TimeValue::Date(value) => value.clone(),
+//RS                     _ => return None,
+//RS                 };
+//RS                 Some((value, handle))
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             return;
+//RS         };
+//RS         pairs.sort_by(|left, right| left.0.cmp(&right.0));
+//RS         for (index, (_, handle)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, handle)
+//RS                 .expect("jit list sort_date: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
+//RS fn jet_jit_list_indexes(n: i64) -> i64 {
+//RS     let n = n.max(0);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for i in 0..n {
+//RS             rt.heap.list_push_int(list, i).expect("jit indexes push");
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_loop_stride_check(stride: i64) -> i64 {
+//RS     if stride <= 0 {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_runtime_stop(
+//RS                 "E3001",
+//RS                 0,
+//RS                 jet_foundation::Outcome::jet_loop_stride_message(),
+//RS             );
+//RS         });
+//RS     }
+//RS     stride
+//RS }
+//RS 
+//RS fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+//RS             rt.set_host_fault("jit list get: bad sequence handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(index) = usize::try_from(idx).ok() else {
+//RS             rt.set_runtime_stop(
+//RS                 "E3010",
+//RS                 line,
+//RS                 &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+//RS             );
+//RS             return 0;
+//RS         };
+//RS         if index >= len {
+//RS             rt.set_runtime_stop(
+//RS                 "E3010",
+//RS                 line,
+//RS                 &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+//RS             );
+//RS             return 0;
+//RS         }
+//RS         let Some(value) = crate::runtime_host::sequence_get_raw(rt, list, index) else {
+//RS             rt.set_host_fault("jit list get: sequence element has the wrong ABI");
+//RS             return 0;
+//RS         };
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS /// Return a stable dense integer-list buffer for the one native reduction loop
+//RS /// that proves the list is not mutated while it runs. The heap's dense carrier
+//RS /// needs no copy; older erased carriers get one resident snapshot instead.
+//RS fn jet_jit_list_int_ptr(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             rt.set_host_fault("jit integer-list view has no stable native pointer");
+//RS             return 0;
+//RS         }
+//RS         if let Some(ptr) = rt.heap.int_list_ptr(list) {
+//RS             return ptr as i64;
+//RS         }
+//RS         let Some(values) = rt.heap.clone_int_list(list) else {
+//RS             rt.set_host_fault("jit integer-list view: bad list carrier");
+//RS             return 0;
+//RS         };
+//RS         rt.int_list_views.push(values.into_boxed_slice());
+//RS         rt.int_list_views
+//RS             .last()
+//RS             .map_or(0, |values| values.as_ptr() as i64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
+//RS             return value;
+//RS         }
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+//RS                 rt.set_host_fault("jit list get f64: bad view handle");
+//RS                 return 0.0;
+//RS             };
+//RS             let Some(index) = usize::try_from(idx).ok() else {
+//RS                 rt.set_runtime_stop(
+//RS                     "E3010",
+//RS                     line,
+//RS                     &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+//RS                 );
+//RS                 return 0.0;
+//RS             };
+//RS             if index >= len {
+//RS                 rt.set_runtime_stop(
+//RS                     "E3010",
+//RS                     line,
+//RS                     &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+//RS                 );
+//RS                 return 0.0;
+//RS             }
+//RS             let Some(value) = crate::runtime_host::sequence_get_float(rt, list, index) else {
+//RS                 rt.set_host_fault("jit list get f64: sequence element has the wrong ABI");
+//RS                 return 0.0;
+//RS             };
+//RS             return value;
+//RS         }
+//RS         match rt.heap.list_get_float(list, idx) {
+//RS             Some(value) => value,
+//RS             None => {
+//RS                 if rt.heap.list_len(list).is_none() {
+//RS                     jet_foundation::ice!(None, "jit list get f64: bad handle");
+//RS                 }
+//RS                 rt.set_runtime_stop(
+//RS                     "E3010",
+//RS                     line,
+//RS                     &jet_foundation::Outcome::jet_list_bounds_message(
+//RS                         rt.heap.list_len(list).unwrap_or_default(),
+//RS                         idx,
+//RS                     ),
+//RS                 );
+//RS                 0.0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// D-SOA-TIER1=A / D-SOA1: THE read that pulls one record out of a
+//RS /// `#Layout(columnar)` list on the Cranelift tier.
+//RS ///
+//RS /// The tier holds a columnar list as its canonical logical rows. The arena owns
+//RS /// that row representation, so this host reads the selected row directly
+//RS /// instead of rebuilding a transient `JetColumns` store for every access. The
+//RS /// shared fixed-list helper still owns bounds selection and wording; this host
+//RS /// only maps its typed result onto the resident stop and record handle (I9).
+//RS ///
+//RS /// The cells remain in stored-field order, which is the same order the arena
+//RS /// uses for the record slots. A gathered row is therefore allocated slot for
+//RS /// slot, preserving the handle-generation and ownership behavior of the
+//RS /// previous column-store adapter (I8: one numbering).
+//RS ///
+//RS /// The canonical row invariant is equal, non-zero width for a non-empty
+//RS /// columnar record. Zero-width records retain the shared store's zero-row
+//RS /// bounds behavior.
+//RS ///
+//RS /// This is deliberately a read-only view over the arena rows: mutations update
+//RS /// those rows, and the next gather observes them without a second cache.
+//RS fn jet_jit_columnar_gather(list: i64, idx: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(rows) = rt.heap.record_rows(list) else {
+//RS             jet_foundation::ice!(None, "jit columnar gather: bad handle");
+//RS         };
+//RS         let width = rows.first().map_or(0, Vec::len);
+//RS         debug_assert!(
+//RS             rows.iter().all(|row| row.len() == width),
+//RS             "columnar rows must have one cell per stored field"
+//RS         );
+//RS         // A transient column store used to rebuild every column on each read.
+//RS         // The arena already owns the canonical row order, so keep the read on
+//RS         // that representation and apply the shared fixed-list bounds policy
+//RS         // directly. A zero-width record has no backing column and therefore
+//RS         // retains the old zero-row bounds semantics.
+//RS         let len = if width == 0 { 0 } else { rows.len() };
+//RS         match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |row| {
+//RS             rows[row][..width].to_vec()
+//RS         }) {
+//RS             Ok(cells) => rt.heap.alloc_record_cells(cells),
+//RS             Err(error) => {
+//RS                 rt.set_runtime_stop("E3010", line, &error.message());
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// Direct typed columnar field read for the resident numeric loop. The arena
+//RS /// keeps the logical list rows, but `JetArena` reaches the selected `Float`
+//RS /// field without cloning every row or allocating a record handle.
+//RS fn jet_jit_columnar_get_f64(list: i64, field: i64, idx: i64, line: u32) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list).and_then(|len| usize::try_from(len).ok()) else {
+//RS             jet_foundation::ice!(None, "jit columnar float read: bad handle");
+//RS         };
+//RS         match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |row| {
+//RS             rt.heap.list_record_get_float(list, row as i64, field)
+//RS         }) {
+//RS             Ok(Some(value)) => value,
+//RS             Ok(None) => {
+//RS                 rt.set_host_fault("jit columnar float read: field representation mismatch");
+//RS                 0.0
+//RS             }
+//RS             Err(error) => {
+//RS                 rt.set_runtime_stop("E3010", line, &error.message());
+//RS                 0.0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let view = crate::runtime_host::view_index(rt, list).is_some();
+//RS         let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+//RS             jet_foundation::ice!(None, "jit fixed-list read: bad sequence handle");
+//RS         };
+//RS         match jet_codegen::fixed_list::jet_fixed_list_index(len, idx, |index| {
+//RS             if view {
+//RS                 crate::runtime_host::sequence_get_int(rt, list, index)
+//RS             } else {
+//RS                 Some(rt.heap.list_get_int_proven(list, index as i64))
+//RS             }
+//RS         }) {
+//RS             Ok(Some(value)) => value,
+//RS             Ok(None) => {
+//RS                 rt.set_host_fault("jit fixed-list read: sequence element has the wrong ABI");
+//RS                 0
+//RS             }
+//RS             Err(error) => {
+//RS                 rt.set_runtime_stop("E3010", line, &error.message());
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             jet_foundation::ice!(None, "jit fixed-list float read: bad handle");
+//RS         };
+//RS         let Some(index) = usize::try_from(idx).ok() else {
+//RS             rt.set_runtime_stop(
+//RS                 "E3010",
+//RS                 line,
+//RS                 &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+//RS             );
+//RS             return 0.0;
+//RS         };
+//RS         if index >= len as usize {
+//RS             rt.set_runtime_stop(
+//RS                 "E3010",
+//RS                 line,
+//RS                 &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+//RS             );
+//RS             return 0.0;
+//RS         }
+//RS         rt.heap.list_get_float_proven(list, idx)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_get_range(list: i64, idx: i64, line: u32) -> (i64, i64, bool) {
+//RS     Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_range(list, idx) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             if rt.heap.list_len(list).is_none() {
+//RS                 jet_foundation::ice!(None, "jit list get Range: bad handle");
+//RS             }
+//RS             rt.set_runtime_stop(
+//RS                 "E3010",
+//RS                 line,
+//RS                 &jet_foundation::Outcome::jet_list_bounds_message(
+//RS                     rt.heap.list_len(list).unwrap_or_default(),
+//RS                     idx,
+//RS                 ),
+//RS             );
+//RS             (0, 0, false)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_get_range_start(list: i64, idx: i64, line: u32) -> i64 {
+//RS     jet_jit_list_get_range(list, idx, line).0
+//RS }
+//RS 
+//RS fn jet_jit_list_get_range_end(list: i64, idx: i64, line: u32) -> i64 {
+//RS     jet_jit_list_get_range(list, idx, line).1
+//RS }
+//RS 
+//RS fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -> i8 {
+//RS     i8::from(jet_jit_list_get_range(list, idx, line).2)
+//RS }
+//RS 
+//RS /// Result-arena Option carrier: a one-based `rt.results` handle carrying
+//RS /// `(ok, bits)`. The payload bits are the exact integer or floating-point
+//RS /// representation selected by the typed lowerer.
+//RS ///
+//RS /// `GetList` and list `Last` are both declared result-arena producers in
+//RS /// `LowerCtx::uses_result_option_abi`; using a packed `value + 1` word here
+//RS /// aliases `-1` and overflows at `i64::MAX`.
+//RS fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             let Some(index) = usize::try_from(idx).ok() else {
+//RS                 return option_i64(rt, None);
+//RS             };
+//RS             if let Some(value) = crate::runtime_host::sequence_get_int(rt, list, index) {
+//RS                 return option_i64(rt, Some(value));
+//RS             }
+//RS             if let Some(value) = crate::runtime_host::sequence_get_float(rt, list, index) {
+//RS                 return option_i64(rt, Some(value.to_bits() as i64));
+//RS             }
+//RS             let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+//RS                 rt.set_host_fault("jit list get_opt: bad view handle");
+//RS                 return option_i64(rt, None);
+//RS             };
+//RS             if index >= len {
+//RS                 return option_i64(rt, None);
+//RS             }
+//RS             rt.set_host_fault("jit list get_opt: sequence element has the wrong ABI");
+//RS             return option_i64(rt, None);
+//RS         }
+//RS         if rt.heap.list_len(list).is_none() {
+//RS             // An impossible handle is an engine fault, not a program stop.
+//RS             rt.set_host_fault("jit list get_opt: bad list handle");
+//RS             return option_i64(rt, None);
+//RS         }
+//RS         if let Some(value) = rt.heap.list_get_int(list, idx) {
+//RS             return option_i64(rt, Some(value));
+//RS         }
+//RS         if let Some(value) = rt.heap.list_get_float(list, idx) {
+//RS             return option_i64(rt, Some(value.to_bits() as i64));
+//RS         }
+//RS         option_i64(rt, None)
+//RS     })
+//RS }
+//RS fn jet_jit_list_first_opt(list: i64) -> i64 {
+//RS     jet_jit_list_get_opt(list, 0)
+//RS }
+//RS 
+//RS fn jet_jit_list_last_opt(list: i64) -> i64 {
+//RS     let len = jet_jit_list_len(list);
+//RS     if len <= 0 {
+//RS         return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+//RS     }
+//RS     jet_jit_list_get_opt(list, len - 1)
+//RS }
+//RS 
+//RS fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             let ok = usize::try_from(idx)
+//RS                 .ok()
+//RS                 .and_then(|index| crate::runtime_host::sequence_set_int(rt, list, index, v))
+//RS                 .is_some();
+//RS             if !ok {
+//RS                 trap_index(
+//RS                     i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+//RS                         .unwrap_or(i64::MAX),
+//RS                     idx,
+//RS                     line,
+//RS                 );
+//RS             }
+//RS             return;
+//RS         }
+//RS         if rt.heap.list_len(list).is_none() {
+//RS             jet_foundation::ice!(None, "jit list set: bad handle");
+//RS         }
+//RS         if rt.heap.list_set_int(list, idx, v).is_none() {
+//RS             trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, line: u32) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if crate::Compute::try_set_list_f64(rt, list, idx, v) {
+//RS             return;
+//RS         }
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             let ok = usize::try_from(idx)
+//RS                 .ok()
+//RS                 .and_then(|index| crate::runtime_host::sequence_set_float(rt, list, index, v))
+//RS                 .is_some();
+//RS             if !ok {
+//RS                 trap_index(
+//RS                     i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+//RS                         .unwrap_or(i64::MAX),
+//RS                     idx,
+//RS                     line,
+//RS                 );
+//RS             }
+//RS             return;
+//RS         }
+//RS         if rt.heap.list_len(list).is_none() {
+//RS             jet_foundation::ice!(None, "jit list set f64: bad handle");
+//RS         }
+//RS         if rt.heap.list_set_float(list, idx, v).is_none() {
+//RS             trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Checked index setter ABI for the canonical MIR route.  The file handle is
+//RS /// diagnostic metadata owned by the route; the arena setter only needs the
+//RS /// source line.  The value is an I64 word so one route carries both integer
+//RS /// and floating list elements without a second semantic dispatch.
+//RS fn jet_jit_index_vec_set(list: i64, idx: i64, value: i64, _file: i64, line: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let line = line.max(0) as u32;
+//RS         if crate::runtime_host::view_index(rt, list).is_some() {
+//RS             if let Some(index) = usize::try_from(idx).ok() {
+//RS                 if crate::runtime_host::sequence_set_float(
+//RS                     rt,
+//RS                     list,
+//RS                     index,
+//RS                     f64::from_bits(value as u64),
+//RS                 )
+//RS                 .is_some()
+//RS                     || crate::runtime_host::sequence_set_int(rt, list, index, value).is_some()
+//RS                 {
+//RS                     return;
+//RS                 }
+//RS             }
+//RS             trap_index(
+//RS                 i64::try_from(crate::runtime_host::sequence_len(rt, list).unwrap_or_default())
+//RS                     .unwrap_or(i64::MAX),
+//RS                 idx,
+//RS                 line,
+//RS             );
+//RS             return;
+//RS         }
+//RS         if rt.heap.list_len(list).is_none() {
+//RS             jet_foundation::ice!(None, "jit index vec set: bad handle");
+//RS         }
+//RS         if crate::Compute::try_set_list_f64(rt, list, idx, f64::from_bits(value as u64)) {
+//RS             return;
+//RS         }
+//RS         if rt
+//RS             .heap
+//RS             .list_set_float(list, idx, f64::from_bits(value as u64))
+//RS             .is_some()
+//RS         {
+//RS             return;
+//RS         }
+//RS         if rt.heap.list_set_int(list, idx, value).is_none() {
+//RS             trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_list_sort(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(window) = list_view_window(rt, list) {
+//RS             edit_window_words(rt, window, |values, unsigned| {
+//RS                 if unsigned {
+//RS                     values.sort_unstable_by_key(|value| *value as u64);
+//RS                 } else {
+//RS                     values.sort_unstable();
+//RS                 }
+//RS             });
+//RS             return;
+//RS         }
+//RS         rt.heap
+//RS             .list_sort_int(list)
+//RS             .expect("jit list sort: bad handle")
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_desc(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(window) = list_view_window(rt, list) {
+//RS             edit_window_words(rt, window, |values, unsigned| {
+//RS                 if unsigned {
+//RS                     values.sort_unstable_by(|left, right| (*right as u64).cmp(&(*left as u64)));
+//RS                 } else {
+//RS                     values.sort_unstable_by(|left, right| right.cmp(left));
+//RS                 }
+//RS             });
+//RS             return;
+//RS         }
+//RS         let mut values = rt
+//RS             .heap
+//RS             .clone_int_list(list)
+//RS             .expect("jit list sort_desc: bad handle");
+//RS         if matches!(rt.heap.int_cells(list), jet_rt::IntCells::Word { unsigned: true }) {
+//RS             values.sort_unstable_by(|left, right| (*right as u64).cmp(&(*left as u64)));
+//RS         } else {
+//RS             collection_semantics::list_sort_desc(&mut values);
+//RS         }
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             rt.heap
+//RS                 .list_set_int(list, index as i64, value)
+//RS                 .expect("jit list sort_desc: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS /// Lexicographic sort of a `[String]` list (handles are string arena ids).
+//RS fn jet_jit_list_sort_fraction(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let ids = clone_list_ints_with_runtime(rt, list);
+//RS         let mut pairs: Vec<(jet_foundation::Numeric::CtFraction, i64)> =
+//RS             Vec::with_capacity(ids.len());
+//RS         for id in ids {
+//RS             let index = id.saturating_sub(1) as usize;
+//RS             let Some(value) = rt.fraction_values.get(index).and_then(|slot| slot.clone()) else {
+//RS                 jet_foundation::ice!(None, "jit list sort_fraction: bad fraction handle");
+//RS             };
+//RS             pairs.push((value, id));
+//RS         }
+//RS         pairs.sort_by(|left, right| left.0.cmp(&right.0));
+//RS         for (index, (_, id)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, id)
+//RS                 .expect("jit list sort_fraction: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_str(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let ids = clone_list_ints_with_runtime(rt, list);
+//RS         let mut pairs: Vec<(String, i64)> = ids
+//RS             .into_iter()
+//RS             .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
+//RS             .collect();
+//RS         collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+//RS         for (i, (_, id)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, i, id)
+//RS                 .expect("jit list sort_str: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_sort_str_desc(list: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let ids = clone_list_ints_with_runtime(rt, list);
+//RS         let mut pairs: Vec<(String, i64)> = ids
+//RS             .into_iter()
+//RS             .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
+//RS             .collect();
+//RS         collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+//RS         for (index, (_, id)) in pairs.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, id)
+//RS                 .expect("jit list sort_str_desc: set");
+//RS         }
+//RS     });
+//RS }
+//RS fn jet_jit_list_sort_by_compare(list: i64, callback: i64) {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return;
+//RS     };
+//RS     let mut values = clone_list_ints(list);
+//RS     collection_semantics::list_sort_by_compare(&mut values, |left, right| {
+//RS         if closure_trapped() {
+//RS             return std::cmp::Ordering::Equal;
+//RS         }
+//RS         let tag = invoke_closure_i64_pair(slot, *left, *right);
+//RS         if closure_trapped() {
+//RS             return std::cmp::Ordering::Equal;
+//RS         }
+//RS         match tag {
+//RS             0 => std::cmp::Ordering::Less,
+//RS             1 => std::cmp::Ordering::Equal,
+//RS             2 => std::cmp::Ordering::Greater,
+//RS             _ => {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.set_host_fault("jit list sort_by_compare: invalid Ordering result")
+//RS                 });
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         }
+//RS     });
+//RS     if closure_trapped() {
+//RS         return;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             crate::runtime_host::sequence_set_int(rt, list, index, value)
+//RS                 .expect("jit list sort_by_compare: set");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_list_clone(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_list(list)
+//RS             .expect("jit list clone: bad handle")
+//RS     })
+//RS }
+//RS 
+//RS /// `.copy()` on the dense i64 carrier — `Int`/`IntN`/`Char` values, and the
+//RS /// string ids a `[String]` holds.
+//RS fn jet_jit_list_copy(list: i64) -> i64 {
+//RS     let values = clone_list_ints(list);
+//RS     let copy = collection_semantics::list_copy(&values);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list_like(list, copy))
+//RS }
+//RS 
+//RS /// `.copy()` on the boxed float carrier (`JetVal::List(Float…)`), which
+//RS /// `clone_list_ints` cannot read. Same kernel, read and republished as floats.
+//RS fn jet_jit_list_copy_f64(list: i64) -> i64 {
+//RS     let values = clone_list_floats(list);
+//RS     alloc_from_floats(&collection_semantics::list_copy(&values))
+//RS }
+//RS 
+//RS /// `.copy()` on a `[String]`, copying the text rather than the ids so the
+//RS /// result owns its elements exactly as the AOT `Vec<String>` clone does.
+//RS fn jet_jit_list_copy_str(list: i64) -> i64 {
+//RS     let values = clone_list_strings(list);
+//RS     alloc_from_strings(&collection_semantics::list_copy(&values))
+//RS }
+//RS 
+//RS fn jet_jit_list_count(list: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(values) = rt.heap.clone_int_list(list) else {
+//RS             jet_foundation::ice!(None, "jit list count: bad handle");
+//RS         };
+//RS         collection_semantics::list_count(&values, &value)
+//RS     })
+//RS }
+//RS fn jet_jit_list_count_f64(list: i64, value: f64) -> i64 {
+//RS     let values = clone_list_floats(list);
+//RS     collection_semantics::list_count(&values, &value)
+//RS }
+//RS 
+//RS fn jet_jit_list_count_str(list: i64, value: i64) -> i64 {
+//RS     let needle = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_string(value)
+//RS             .expect("jit string list count: bad value")
+//RS     });
+//RS     let values = clone_list_strings(list);
+//RS     collection_semantics::list_count(&values, &needle)
+//RS }
+//RS fn jet_jit_list_closure_count_where(list: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     collection_semantics::list_closure_count_where(values, |value| {
+//RS         if closure_trapped() {
+//RS             return false;
+//RS         }
+//RS         let matched = invoke_closure_bool(slot, *value);
+//RS         !closure_trapped() && matched
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_closure_update_first(list: i64, callback: i64, replacement: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut values = clone_list_ints(list);
+//RS     let changed = collection_semantics::list_closure_update_first(
+//RS         &mut values,
+//RS         |value| {
+//RS             if closure_trapped() {
+//RS                 return false;
+//RS             }
+//RS             let matched = invoke_closure_bool(slot, *value);
+//RS             !closure_trapped() && matched
+//RS         },
+//RS         replacement,
+//RS     );
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     if changed {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             if rt.heap.replace_int_list(list, values).is_none() {
+//RS                 jet_foundation::ice!(None, "jit list update_first: bad handle");
+//RS             }
+//RS         });
+//RS     }
+//RS     i8::from(changed)
+//RS }
+//RS 
+//RS fn jet_jit_list_counts(list: i64) -> i64 {
+//RS     alloc_map_pairs(&collection_semantics::list_counts_i64(clone_list_strings(
+//RS         list,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(xs) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit list remove value: bad handle");
+//RS         };
+//RS         match collection_semantics::list_remove_value(xs, jet_rt::JetVal::Int(value)) {
+//RS             Some(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+//RS             Some(_) | None => 0,
+//RS         }
+//RS     })
+//RS }
+// END-PORT-PENDING 0198 crates/jet-jit/src/Collections.rs:3703-5503
+

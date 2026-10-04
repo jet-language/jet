@@ -1,0 +1,1028 @@
+// PORT-PENDING 1128 tests-path-durability-module-group: tests/path_durability.rs:1-353
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS fn jet_string(path: &std::path::Path) -> String {
+//RS     path.to_string_lossy()
+//RS         .replace('\\', "\\\\")
+//RS         .replace('"', "\\\"")
+//RS }
+//RS 
+//RS fn unique_dir(name: &str) -> std::path::PathBuf {
+//RS     std::env::temp_dir().join(format!("jet-path-durability-{name}-{}", std::process::id()))
+//RS }
+//RS 
+//RS #[test]
+//RS fn normalize_is_lexical_rooted_and_platform_native() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let absolute = if cfg!(windows) {
+//RS         "C:/../../alpha/../beta"
+//RS     } else {
+//RS         "/../../alpha/../beta"
+//RS     };
+//RS     let root = if cfg!(windows) { "C:/" } else { "/" };
+//RS     let windows_cases = if cfg!(windows) {
+//RS         r#"
+//RS     print(Path.from("C:../../leaf").normalize().to_string())
+//RS     print(Path.from("//server/share/../../leaf").normalize().to_string())"#
+//RS     } else {
+//RS         ""
+//RS     };
+//RS     let src = format!(
+//RS         r#"
+//RS fn run() {{
+//RS     print(Path.from("../../alpha/./beta/../gamma").normalize().to_string())
+//RS     print(Path.from("{absolute}").normalize().to_string())
+//RS     print(Path.from("").normalize().to_string())
+//RS     print(Path.from("{root}").normalize().to_string()){windows_cases}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = common::build_and_run("jet_path_durability", "normalize", &src);
+//RS     assert_eq!(code, 0, "generated program failed: {stderr}");
+//RS     let sep = std::path::MAIN_SEPARATOR;
+//RS     let expected_relative = format!("..{sep}..{sep}alpha{sep}gamma");
+//RS     let expected_absolute = if cfg!(windows) {
+//RS         format!("C:{sep}beta")
+//RS     } else {
+//RS         format!("{sep}beta")
+//RS     };
+//RS     let expected_root = if cfg!(windows) {
+//RS         format!("C:{sep}")
+//RS     } else {
+//RS         sep.to_string()
+//RS     };
+//RS     let mut expected = vec![
+//RS         expected_relative,
+//RS         expected_absolute,
+//RS         String::new(),
+//RS         expected_root,
+//RS     ];
+//RS     if cfg!(windows) {
+//RS         expected.push(format!("C:..{sep}..{sep}leaf"));
+//RS         expected.push(format!(r"\\server{sep}share{sep}leaf"));
+//RS     }
+//RS     assert_eq!(stdout, format!("{}\n", expected.join("\n")));
+//RS }
+//RS 
+//RS #[test]
+//RS fn generated_normalizer_uses_platform_components() {
+//RS     let src = "fn run() { print(Path.from(\"a/../b\").normalize().to_string()) }\n";
+//RS     let out = jet::compile(src).expect("path normalize fixture should compile");
+//RS     assert!(out.rust.contains("std::path::Component::Prefix"));
+//RS     assert!(out.rust.contains("std::path::Component::RootDir"));
+//RS     assert!(out.rust.contains("std::path::PathBuf::new()"));
+//RS     assert!(!out.rust.contains("s.split('/')"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn generated_atomic_write_has_durable_replace_contract() {
+//RS     let src = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     bytes :: [U8]{ 1, 2, 3 }
+//RS     fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
+//RS }
+//RS "#;
+//RS     let out = jet::compile(src).expect("atomic-write fixture should compile");
+//RS     for required in [
+//RS         ".create_new(true)",
+//RS         ".write_all(content)",
+//RS         ".sync_all()",
+//RS         "struct JetAtomicTemp",
+//RS         "impl Drop for JetAtomicTemp",
+//RS         "jet_atomic_sync_parent",
+//RS         "ReplaceFileW",
+//RS         "MoveFileExW",
+//RS         "encode_wide()",
+//RS         "encoded.contains(&0)",
+//RS         "std::io::ErrorKind::InvalidInput",
+//RS     ] {
+//RS         assert!(
+//RS             out.rust.contains(required),
+//RS             "missing atomic-write contract: {required}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn relative_atomic_write_syncs_the_current_directory_and_reports_success() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     bytes :: [U8]{ 110, 101, 119 }
+//RS     fs.write_atomic("relative.bin", bytes) ?? panic("relative atomic write failed")
+//RS     written :: fs.read("relative.bin") ?? panic("relative read failed")
+//RS     fs.remove("relative.bin") ?? panic("relative cleanup failed")
+//RS     print(written)
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run_in_scratch("jet_path_durability", "atomic_relative", src);
+//RS     assert_eq!(code, 0, "relative atomic write failed: {stderr}");
+//RS     assert_eq!(stdout, "new\n");
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS #[test]
+//RS fn windows_atomic_replace_rejects_embedded_nul_without_touching_prefix_target() {
+//RS     use std::process::Command;
+//RS 
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.files as fs
+//RS 
+//RS fn run() {
+//RS     bytes :: [U8]{ 1 }
+//RS     fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
+//RS }
+//RS "#;
+//RS     let mut rust = jet::compile(src)
+//RS         .expect("atomic-write fixture should compile")
+//RS         .rust;
+//RS     rust = rust.replacen("fn main()", "fn jet_original_main()", 1);
+//RS     rust.push_str(
+//RS         r#"
+//RS fn main() {
+//RS     use std::os::windows::ffi::{OsStrExt, OsStringExt};
+//RS     let root = std::env::temp_dir().join(format!("jet-path-nul-{}", std::process::id()));
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let target = root.join("prefix-target.bin");
+//RS     let temp = root.join("temp.bin");
+//RS     std::fs::write(&target, b"old").unwrap();
+//RS     std::fs::write(&temp, b"new").unwrap();
+//RS 
+//RS     let invalid = |path: &std::path::Path| {
+//RS         let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
+//RS         units.push(0);
+//RS         units.extend("suffix".encode_utf16());
+//RS         std::path::PathBuf::from(std::ffi::OsString::from_wide(&units))
+//RS     };
+//RS     let target_error = jet_atomic_windows::replace(&temp, &invalid(&target)).unwrap_err();
+//RS     assert_eq!(target_error.kind(), std::io::ErrorKind::InvalidInput);
+//RS     assert_eq!(std::fs::read(&target).unwrap(), b"old");
+//RS     let temp_error = jet_atomic_windows::replace(&invalid(&temp), &target).unwrap_err();
+//RS     assert_eq!(temp_error.kind(), std::io::ErrorKind::InvalidInput);
+//RS     assert_eq!(std::fs::read(&target).unwrap(), b"old");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS "#,
+//RS     );
+//RS     let dir = unique_dir("windows-nul");
+//RS     let _ = std::fs::remove_dir_all(&dir);
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let rs = dir.join("main.rs");
+//RS     let bin = dir.join("main.exe");
+//RS     std::fs::write(&rs, rust).unwrap();
+//RS     let built = Command::new("rustc")
+//RS         .args([
+//RS             "--edition",
+//RS             "2021",
+//RS             rs.to_str().unwrap(),
+//RS             "-o",
+//RS             bin.to_str().unwrap(),
+//RS         ])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc failed: {}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let ran = Command::new(&bin).output().unwrap();
+//RS     assert!(
+//RS         ran.status.success(),
+//RS         "NUL regression failed: {}",
+//RS         String::from_utf8_lossy(&ran.stderr)
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn atomic_write_retries_collision_replaces_and_cleans_failed_temp() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let root = unique_dir("hostile");
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let target = root.join("target.bin");
+//RS     let blocked = root.join("blocked");
+//RS     std::fs::create_dir(&blocked).unwrap();
+//RS     std::fs::write(&target, b"old").unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+//RS     }
+//RS     let src = format!(
+//RS         r#"
+//RS use core.files as fs
+//RS use core.sys as os
+//RS fn run() {{
+//RS     root :: "{}"
+//RS     stale :: Path.from(root).join(".jet_tmp_{{os.pid()}}_0")
+//RS     fs.write(stale, "stale") ?? panic("stale setup failed")
+//RS     bytes :: [U8]{{ 110, 101, 119 }}
+//RS     fs.write_atomic("{}", bytes) ?? panic("replacement failed")
+//RS     fs.write_atomic("{}", bytes) ?? panic("expected replacement failure")
+//RS }}
+//RS "#,
+//RS         jet_string(&root),
+//RS         jet_string(&target),
+//RS         jet_string(&blocked),
+//RS     );
+//RS     let (code, _stdout, _stderr) =
+//RS         common::build_and_run("jet_path_durability", "atomic_hostile", &src);
+//RS     assert_eq!(
+//RS         code, 70,
+//RS         "directory replacement must fail through Jet panic"
+//RS     );
+//RS     assert_eq!(std::fs::read(&target).unwrap(), b"new");
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         assert_eq!(
+//RS             std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+//RS             0o640
+//RS         );
+//RS     }
+//RS     let debris: Vec<_> = std::fs::read_dir(&root)
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .filter(|entry| entry.file_name().to_string_lossy().starts_with(".jet_tmp_"))
+//RS         .collect();
+//RS     assert_eq!(
+//RS         debris.len(),
+//RS         1,
+//RS         "only the forced stale collision may remain"
+//RS     );
+//RS     assert_eq!(std::fs::read(debris[0].path()).unwrap(), b"stale");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn concurrent_atomic_writers_leave_one_whole_payload() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     let root = unique_dir("concurrent");
+//RS     let _ = std::fs::remove_dir_all(&root);
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let target = root.join("target.bin");
+//RS     std::fs::write(&target, b"old").unwrap();
+//RS     let a = vec![65u8; 257];
+//RS     let b = vec![66u8; 263];
+//RS     let a_text = "A".repeat(a.len());
+//RS     let b_text = "B".repeat(b.len());
+//RS     let list = |bytes: &[u8]| {
+//RS         bytes
+//RS             .iter()
+//RS             .map(u8::to_string)
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ")
+//RS     };
+//RS     let src = format!(
+//RS         r#"
+//RS use core.files as fs
+//RS 
+//RS fn write_a() -[IO]> Int {{
+//RS     bytes :: [U8]{{ {} }}
+//RS     loop _ in 1..25 {{
+//RS         fs.write_atomic("{}", bytes) ?? panic("writer a failed")
+//RS     }}
+//RS     return 1
+//RS }}
+//RS fn write_b() -[IO]> Int {{
+//RS     bytes :: [U8]{{ {} }}
+//RS     loop _ in 1..25 {{
+//RS         fs.write_atomic("{}", bytes) ?? panic("writer b failed")
+//RS     }}
+//RS     return 2
+//RS }}
+//RS fn observe() -[IO]> Int {{
+//RS     loop _ in 1..100 {{
+//RS         value :: fs.read("{}") ?? panic("observer read failed")
+//RS         if value != "old" && value != "{}" && value != "{}" {{
+//RS             panic("observer saw torn atomic-write payload")
+//RS         }}
+//RS     }}
+//RS     return 3
+//RS }}
+//RS fn run() {{
+//RS     task.group g {{
+//RS         a :: task write_a()
+//RS         b :: task write_b()
+//RS         observer :: task observe()
+//RS     }}
+//RS }}
+//RS "#,
+//RS         list(&a),
+//RS         jet_string(&target),
+//RS         list(&b),
+//RS         jet_string(&target),
+//RS         jet_string(&target),
+//RS         a_text,
+//RS         b_text,
+//RS     );
+//RS     let (code, _stdout, stderr) =
+//RS         common::build_and_run("jet_path_durability", "atomic_concurrent", &src);
+//RS     assert_eq!(code, 0, "concurrent atomic writers failed: {stderr}");
+//RS     let final_bytes = std::fs::read(&target).unwrap();
+//RS     assert!(
+//RS         final_bytes == a || final_bytes == b,
+//RS         "observed torn atomic-write payload"
+//RS     );
+//RS     let debris = std::fs::read_dir(&root)
+//RS         .unwrap()
+//RS         .filter_map(Result::ok)
+//RS         .any(|entry| entry.file_name().to_string_lossy().starts_with(".jet_tmp_"));
+//RS     assert!(
+//RS         !debris,
+//RS         "successful concurrent writes left temporary debris"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+// END-PORT-PENDING 1128 tests/path_durability.rs:1-353
+
+// PORT-PENDING 1128 tests-path-durability-module-group: tests/power_and_exclusive_or.rs:1-259
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-EXPOP1=A, D-EXPSEM1=A, D-XORSPELL1=A — the power operator `^`, its
+//RS //! grouping and result types, and the `~|` spelling exclusive-or moved to.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
+//RS 
+//RS /// Compile a snippet from a real path on disk — the front end resolves
+//RS /// imports against the file it is given, so an invented name fails E0603.
+//RS fn compile_snippet(name: &str, src: &str) -> Result<(), Vec<String>> {
+//RS     let dir = std::env::temp_dir().join(format!("jet_power_{}_{name}", std::process::id()));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     std::fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     match jet::compile_with_path(src, &shown) {
+//RS         Ok(_) => Ok(()),
+//RS         Err(diags) => Err(diags.iter().map(|d| d.code.to_string()).collect()),
+//RS     }
+//RS }
+//RS 
+//RS fn accepts(name: &str, src: &str) -> bool {
+//RS     match compile_snippet(name, src) {
+//RS         Ok(()) => true,
+//RS         Err(codes) => {
+//RS             eprintln!("rejected {name}: {codes:?}");
+//RS             false
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn diagnostic_codes(name: &str, src: &str) -> Vec<String> {
+//RS     compile_snippet(name, src).err().unwrap_or_default()
+//RS }
+//RS 
+//RS /// A power's inferred type is proved by the parameter it fits: `want_int`
+//RS /// takes a whole number, and `want_float` a Float. The exact Fraction case
+//RS /// is pinned through its `.numerator()` method.
+//RS const WANT: &str = "fn want_int(n: Int) { print(n) }\nfn want_float(n: Float) { print(n) }\n";
+//RS 
+//RS /// D-EXPSEM1=A: `^` groups to the right and binds tighter than a leading
+//RS /// minus. Evaluating the two shapes proves the grouping the parser built.
+//RS #[test]
+//RS fn power_groups_right_and_beats_unary_minus() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(2 ^ 3 ^ 2)
+//RS     print((2 ^ 3) ^ 2)
+//RS     print(-3 ^ 2)
+//RS     print((-3) ^ 2)
+//RS     print(2 * 3 ^ 2)
+//RS     print(2 ^ 3 * 2)
+//RS }
+//RS "#;
+//RS     let (code, out) = build_and_run("power_grouping", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "512\n64\n-9\n9\n18\n16\n", "{out}");
+//RS }
+//RS 
+//RS /// D-EXPSEM1=A / D-EXPNEG1=A: a whole number raised to a whole power stays
+//RS /// exact; a written negative exponent gives an exact Fraction. Any Float
+//RS /// operand makes the result a Float.
+//RS #[test]
+//RS fn power_result_types_follow_the_operands() {
+//RS     // A whole base and a non-negative whole exponent stay exact.
+//RS     assert!(accepts(
+//RS         "int_pow",
+//RS         &format!("{WANT}fn run() {{\n    want_int(2 ^ 10)\n}}\n")
+//RS     ));
+//RS     // A written negative exponent gives an exact Fraction.
+//RS     assert!(accepts(
+//RS         "neg_pow_fraction",
+//RS         &format!("{WANT}fn run() {{\n    print((2 ^ -1).numerator())\n}}\n")
+//RS     ));
+//RS     assert!(
+//RS         !diagnostic_codes(
+//RS             "neg_pow_float",
+//RS             &format!("{WANT}fn run() {{\n    want_float(2 ^ -1)\n}}\n")
+//RS         )
+//RS         .is_empty(),
+//RS         "a written negative exponent must not infer an approximate Float"
+//RS     );
+//RS     assert!(
+//RS         !diagnostic_codes(
+//RS             "neg_pow_int",
+//RS             &format!("{WANT}fn run() {{\n    want_int(2 ^ -1)\n}}\n")
+//RS         )
+//RS         .is_empty(),
+//RS         "a negative exponent must not infer a whole number"
+//RS     );
+//RS     // An explicit Float head makes the whole power a Float; an unheaded
+//RS     // decimal literal is the exact Decimal carrier under D-TYPE2-DEFAULT1.
+//RS     assert!(accepts(
+//RS         "float_operand",
+//RS         &format!("{WANT}fn run() {{\n    want_float(Float{{2.0}} ^ 10)\n}}\n")
+//RS     ));
+//RS     assert!(
+//RS         !diagnostic_codes(
+//RS             "float_operand_int",
+//RS             &format!("{WANT}fn run() {{\n    want_int(Float{{2.0}} ^ 10)\n}}\n")
+//RS         )
+//RS         .is_empty(),
+//RS         "a Float operand must not infer a whole number"
+//RS     );
+//RS }
+//RS 
+//RS /// D-TYPE2-NUM1: a whole-number power remains exact past the machine-word
+//RS /// fast path. The comptime and runtime expressions must agree on every tier.
+//RS #[test]
+//RS fn exact_int_power_stays_exact_across_tiers() {
+//RS     let src = r#"
+//RS FOLDED :: prep { 2 ^ 200 }
+//RS 
+//RS fn show_exact(value: Int) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn raise(base: Int, exponent: Int) -> Int {
+//RS     return base ^ exponent
+//RS }
+//RS 
+//RS fn run() {
+//RS     show_exact(raise(2, 200))
+//RS     show_exact(FOLDED)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "exact_int_power",
+//RS         src,
+//RS         "1606938044258990275541962092341162602522202993782792835301376\n1606938044258990275541962092341162602522202993782792835301376\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-EXPSEM1=A: `^=` raises a binding in place, on whole numbers and floats.
+//RS #[test]
+//RS fn power_assign_raises_in_place() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     growth := 2
+//RS     growth ^= 10
+//RS     print(growth)
+//RS     price := 1.5
+//RS     price ^= 2.0
+//RS     print(price)
+//RS }
+//RS "#;
+//RS     let (code, out) = build_and_run("power_assign", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "1024\n2.25\n", "{out}");
+//RS }
+//RS 
+//RS /// D-XORSPELL1=A: `~|` is exclusive-or and `~|=` is its compound.
+//RS #[test]
+//RS fn exclusive_or_uses_the_tilde_pipe_spelling() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(12 ~| 10)
+//RS     acc := 0
+//RS     loop byte in [17, 42, 99, 8] { acc ~|= byte }
+//RS     print(acc)
+//RS }
+//RS "#;
+//RS     let (code, out) = build_and_run("exclusive_or", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "6\n80\n", "{out}");
+//RS }
+//RS 
+//RS /// D-SG9: exclusive-or wants the same integer width on both sides.
+//RS #[test]
+//RS fn exclusive_or_needs_matching_integer_widths() {
+//RS     assert!(accepts(
+//RS         "xor_same_width",
+//RS         "fn run() {\n    a :: U8{12}\n    b :: U8{10}\n    print(a ~| b)\n}\n"
+//RS     ));
+//RS     // A pair with no common integer type reports the D-SG9 error, exactly as
+//RS     // it did under the old `^` spelling.
+//RS     let mixed = diagnostic_codes(
+//RS         "xor_mixed_width",
+//RS         "fn run() {\n    a :: U8{12}\n    b :: I8{10}\n    print(a ~| b)\n}\n",
+//RS     );
+//RS     assert!(
+//RS         mixed.iter().any(|code| code == "E0109"),
+//RS         "mixed widths must report E0109, got {mixed:?}"
+//RS     );
+//RS     let floats = diagnostic_codes("xor_floats", "fn run() {\n    print(1.5 ~| 2.5)\n}\n");
+//RS     assert!(
+//RS         floats.iter().any(|code| code == "E0109"),
+//RS         "exclusive-or on floats must report E0109, got {floats:?}"
+//RS     );
+//RS }
+//RS 
+//RS /// D-EXPOP1=A / D-SHAPE-COPY1=A: prefix `^` is still take and prefix `~` is
+//RS /// still copy. Position tells each apart from its infix neighbour.
+//RS #[test]
+//RS fn prefix_take_and_copy_survive_the_rebind() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Sword { power: Int }
+//RS 
+//RS fn melt(item: ^Sword) -> Int { return item.power }
+//RS 
+//RS fn run() {
+//RS     blade :: Sword{ power: 3 }
+//RS     print(melt(^blade))
+//RS     flags :: 12
+//RS     source :: 5
+//RS     print(flags ~| ~source)
+//RS     print(flags ^ 2)
+//RS }
+//RS "#;
+//RS     let (code, out) = build_and_run("prefix_sigils", src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "3\n9\n144\n", "{out}");
+//RS }
+//RS 
+//RS /// Greenfield: infix `^` never means exclusive-or again. `12 ^ 2` is a power,
+//RS /// so it must not produce the old exclusive-or answer of 14.
+//RS #[test]
+//RS fn infix_caret_never_means_exclusive_or() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let (code, out) = build_and_run("caret_is_power", "fn run() {\n    print(12 ^ 2)\n}\n");
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "144\n", "{out}");
+//RS }
+//RS 
+//RS /// I9 / #1485: powers above 2^53 stay exact on every native tier. The JS tier
+//RS /// is proved separately in `web_build` (needs node + wasm); here AOT and
+//RS /// `jet run` must agree on the answers that used to round when the JS helper
+//RS /// returned `Number(value)`.
+//RS #[test]
+//RS fn powers_above_two_to_the_fifty_three_stay_exact() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(2 ^ 60)
+//RS     print(3 ^ 39)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "power_above_53",
+//RS         src,
+//RS         "1152921504606846976\n4052555153018976267\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1128 tests/power_and_exclusive_or.rs:1-259
+
+// PORT-PENDING 1128 tests-path-durability-module-group: tests/record_conformance.rs:1-404
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #2517 S5a: the self-hosted record codec and package keys write the same
+//RS //! bytes as the Rust ones.
+//RS //!
+//RS //! `Compiler/JetFoundation/Source/Record/RecordCodec.jet` and
+//RS //! `PackageIdentity.jet` mirror `jet_foundation::RecordCodec` and
+//RS //! `jet_foundation::PackageIdentity`. This test renders one set of inputs as
+//RS //! Jet literals, runs the Jet implementation with the freshly built `jet`, and
+//RS //! compares every output line with the Rust result for the same input:
+//RS //! encoded record bytes, decode verdicts (including the exact rejection text
+//RS //! for malformed records), and package keys.
+//RS 
+//RS mod common;
+//RS use common::Scratch;
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::fmt::Write as _;
+//RS use std::fs;
+//RS use std::process::Command;
+//RS 
+//RS use jet_foundation::PackageIdentity::{package_check_key, source_digest, target_facts_digest};
+//RS use jet_foundation::RecordCodec::{decode_record, encode_record, RecordSection, RecordValue};
+//RS use jet_foundation::SHA256::sha256;
+//RS 
+//RS /// The Jet sources under test, in dependency order.
+//RS const JET_SOURCES: &[&str] = &[
+//RS     "Compiler/JetFoundation/Source/Hash/SHA256.jet",
+//RS     "Compiler/JetFoundation/Source/Record/RecordCodec.jet",
+//RS     "Compiler/JetFoundation/Source/Record/PackageIdentity.jet",
+//RS ];
+//RS 
+//RS /// Helpers the generated `run` calls; each prints one comparable line.
+//RS const JET_HARNESS: &str = r#"
+//RS fn conformance_encode(schema: String, sections: [RecordSection]) {
+//RS     encoded :: record_encode(schema, sections)
+//RS     bytes :: encoded.bytes ?? {
+//RS         print("encode problem: {encoded.problem ?? ""}")
+//RS         return
+//RS     }
+//RS     print("encode {mir_sha256_hex_bytes(bytes)}")
+//RS }
+//RS 
+//RS fn conformance_decode(bytes: [U8]) {
+//RS     decoded :: record_decode(bytes)
+//RS     record :: decoded.record ?? {
+//RS         print("decode {decoded.problem ?? ""}")
+//RS         return
+//RS     }
+//RS     again :: record_encode(record.schema, record.sections).bytes ?? [U8]{}
+//RS     print("decode ok {mir_sha256_hex_bytes(again)} {mir_sha256_hex_bytes(record.digest)}")
+//RS }
+//RS "#;
+//RS 
+//RS fn hex(bytes: &[u8]) -> String {
+//RS     bytes.iter().fold(String::new(), |mut out, byte| {
+//RS         let _ = write!(out, "{byte:02x}");
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn jet_string(value: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '{' => out.push_str("{{"),
+//RS             '}' => out.push_str("}}"),
+//RS             _ => out.push(ch),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_bytes(bytes: &[u8]) -> String {
+//RS     let items = bytes.iter().map(u8::to_string).collect::<Vec<_>>();
+//RS     format!("[U8]{{{}}}", items.join(", "))
+//RS }
+//RS 
+//RS fn jet_int(value: i64) -> String {
+//RS     if value >= 0 {
+//RS         value.to_string()
+//RS     } else {
+//RS         format!("(0 - {})", value.unsigned_abs())
+//RS     }
+//RS }
+//RS 
+//RS /// A Jet literal for `value`. Map fields are written in reverse order so the
+//RS /// Jet encoder's own canonical sort is exercised.
+//RS fn jet_value(value: &RecordValue) -> String {
+//RS     match value {
+//RS         RecordValue::Null => "RecordValue.Null".to_string(),
+//RS         RecordValue::Bool(flag) => format!("RecordValue.Bool{{value: {flag}}}"),
+//RS         RecordValue::Int(number) => format!("RecordValue.Int{{value: {}}}", jet_int(*number)),
+//RS         RecordValue::Str(text) => format!("RecordValue.Str{{value: {}}}", jet_string(text)),
+//RS         RecordValue::Bytes(bytes) => format!("RecordValue.Bytes{{value: {}}}", jet_bytes(bytes)),
+//RS         RecordValue::List(values) => format!(
+//RS             "RecordValue.List{{values: [RecordValue]{{{}}}}}",
+//RS             values.iter().map(jet_value).collect::<Vec<_>>().join(", ")
+//RS         ),
+//RS         RecordValue::Map(fields) => format!(
+//RS             "RecordValue.Map{{fields: [RecordField]{{{}}}}}",
+//RS             fields
+//RS                 .iter()
+//RS                 .rev()
+//RS                 .map(|(name, value)| format!("RecordField{{name: {}, value: {}}}", jet_string(name), jet_value(value)))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(", ")
+//RS         ),
+//RS         RecordValue::Digest(digest) => format!("RecordValue.Digest{{value: {}}}", jet_bytes(digest)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sections(sections: &[RecordSection]) -> String {
+//RS     let rendered = sections
+//RS         .iter()
+//RS         .map(|section| {
+//RS             format!(
+//RS                 "RecordSection{{id: {}, elements: [RecordValue]{{{}}}}}",
+//RS                 section.tag,
+//RS                 section.elements.iter().map(jet_value).collect::<Vec<_>>().join(", ")
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     format!("[RecordSection]{{{}}}", rendered.join(", "))
+//RS }
+//RS 
+//RS fn map(fields: &[(&str, RecordValue)]) -> RecordValue {
+//RS     RecordValue::Map(
+//RS         fields
+//RS             .iter()
+//RS             .map(|(name, value)| (name.to_string(), value.clone()))
+//RS             .collect::<BTreeMap<_, _>>(),
+//RS     )
+//RS }
+//RS 
+//RS /// Records both codecs must encode to identical bytes. Sections are listed
+//RS /// out of order on purpose; both encoders sort them.
+//RS fn record_fixtures() -> Vec<(&'static str, Vec<RecordSection>)> {
+//RS     let digest = std::array::from_fn::<u8, 32, _>(|index| (index * 7) as u8);
+//RS     let long_text = "é".repeat(90);
+//RS     vec![
+//RS         ("jet.program/v1", Vec::new()),
+//RS         (
+//RS             "jet.iface/v1",
+//RS             vec![
+//RS                 RecordSection::new(
+//RS                     9,
+//RS                     vec![RecordValue::Digest(digest), RecordValue::Bytes(vec![0, 255, 128]), RecordValue::Bytes(Vec::new())],
+//RS                 ),
+//RS                 RecordSection::new(
+//RS                     1,
+//RS                     vec![
+//RS                         map(&[
+//RS                             ("zeta", RecordValue::Int(-1)),
+//RS                             ("alpha", RecordValue::Str("héllo".to_string())),
+//RS                             (
+//RS                                 "mid",
+//RS                                 RecordValue::List(vec![
+//RS                                     RecordValue::Null,
+//RS                                     RecordValue::Bool(true),
+//RS                                     RecordValue::Bool(false),
+//RS                                     RecordValue::Str("alpha".to_string()),
+//RS                                 ]),
+//RS                             ),
+//RS                         ]),
+//RS                         RecordValue::Int(i64::MAX),
+//RS                         RecordValue::Int(i64::MIN),
+//RS                         RecordValue::Int(300),
+//RS                         RecordValue::Int(0),
+//RS                     ],
+//RS                 ),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "jet.diags/v1",
+//RS             vec![
+//RS                 RecordSection::new(
+//RS                     300,
+//RS                     (0..130).map(|index| RecordValue::Int(index - 65)).collect(),
+//RS                 ),
+//RS                 RecordSection::new(
+//RS                     2,
+//RS                     vec![
+//RS                         // Byte order, not case or length order: "B" < "a" < "ab" < "b" < "é".
+//RS                         map(&[
+//RS                             ("b", RecordValue::Null),
+//RS                             ("ab", RecordValue::List(Vec::new())),
+//RS                             ("a", map(&[])),
+//RS                             ("B", RecordValue::Str(String::new())),
+//RS                             ("é", RecordValue::Str(long_text.clone())),
+//RS                             ("", RecordValue::Str("{braces} \"quoted\" \\slash".to_string())),
+//RS                         ]),
+//RS                         RecordValue::Str(long_text),
+//RS                         RecordValue::List(vec![map(&[("k", map(&[("k", RecordValue::Str("k".to_string()))]))])]),
+//RS                     ],
+//RS                 ),
+//RS             ],
+//RS         ),
+//RS     ]
+//RS }
+//RS 
+//RS /// A record body followed by its checksum, so decoding reaches the framing
+//RS /// checks after the checksum check.
+//RS fn sealed(body: &[u8]) -> Vec<u8> {
+//RS     let mut bytes = body.to_vec();
+//RS     bytes.extend_from_slice(&sha256(body));
+//RS     bytes
+//RS }
+//RS 
+//RS /// A body with schema "s", the given string table, and one section 1 holding
+//RS /// the given raw elements.
+//RS fn body_with(strings: &[&str], elements: &[Vec<u8>]) -> Vec<u8> {
+//RS     let mut body = b"JETR\x01\x01s".to_vec();
+//RS     body.push(strings.len() as u8);
+//RS     for text in strings {
+//RS         body.push(text.len() as u8);
+//RS         body.extend_from_slice(text.as_bytes());
+//RS     }
+//RS     body.extend_from_slice(&[1, 1, elements.len() as u8]);
+//RS     for element in elements {
+//RS         body.push(element.len() as u8);
+//RS     }
+//RS     for element in elements {
+//RS         body.extend_from_slice(element);
+//RS     }
+//RS     body
+//RS }
+//RS 
+//RS /// Byte strings both decoders must treat identically: valid records and one
+//RS /// of every rejection.
+//RS fn decode_fixtures() -> Vec<Vec<u8>> {
+//RS     let valid = encode_record("jet.items/v1", &record_fixtures()[1].1).expect("fixture encodes");
+//RS     let mut flipped = valid.clone();
+//RS     *flipped.last_mut().unwrap() ^= 1;
+//RS     let mut bad_magic = valid.clone();
+//RS     bad_magic[3] = b'X';
+//RS     let mut trailing = body_with(&["a"], &[vec![4, 0]]);
+//RS     trailing.push(0);
+//RS     vec![
+//RS         valid.clone(),
+//RS         encode_record("jet.program/v1", &[]).expect("empty record encodes"),
+//RS         valid[..20].to_vec(),
+//RS         flipped,
+//RS         bad_magic,
+//RS         sealed(b"JETR\x02\x01s\x00\x00"),
+//RS         sealed(b"JETR\x81\x00\x01s\x00\x00"),
+//RS         sealed(b"JETR\x01\x01s\x00\x02\x01\x00\x01\x00"),
+//RS         sealed(b"JETR\x01\x01s\x01\x01\xff\x00"),
+//RS         sealed(&body_with(&["b", "a"], &[vec![7, 2, 0, 0, 1, 0]])),
+//RS         sealed(&body_with(&["a"], &[vec![7, 2, 0, 0, 0, 0]])),
+//RS         sealed(&body_with(&[], &[vec![4, 5]])),
+//RS         sealed(&body_with(&[], &[vec![9]])),
+//RS         sealed(&body_with(&[], &[vec![0, 0]])),
+//RS         sealed(&body_with(&[], &[vec![5, 3, 1]])),
+//RS         sealed(&body_with(&[], &[vec![3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02]])),
+//RS         sealed(&trailing),
+//RS     ]
+//RS }
+//RS 
+//RS fn rust_decode_line(bytes: &[u8]) -> String {
+//RS     match decode_record(bytes) {
+//RS         Ok(record) => {
+//RS             let again = encode_record(&record.schema, &record.sections).expect("decoded record re-encodes");
+//RS             format!("decode ok {} {}", hex(&again), hex(&record.digest))
+//RS         }
+//RS         Err(error) => format!("decode {error}"),
+//RS     }
+//RS }
+//RS 
+//RS struct KeyFixture {
+//RS     files: Vec<(&'static str, &'static str)>,
+//RS     manifest: Option<&'static str>,
+//RS     facts: Vec<(&'static str, &'static str)>,
+//RS     compiler: &'static str,
+//RS     package: &'static str,
+//RS     dependencies: Vec<(&'static str, &'static str)>,
+//RS }
+//RS 
+//RS fn key_fixtures() -> Vec<KeyFixture> {
+//RS     vec![
+//RS         KeyFixture {
+//RS             files: Vec::new(),
+//RS             manifest: None,
+//RS             facts: Vec::new(),
+//RS             compiler: "",
+//RS             package: "single-file:main.jet",
+//RS             dependencies: Vec::new(),
+//RS         },
+//RS         KeyFixture {
+//RS             files: vec![
+//RS                 ("Source/b.jet", "fn b() {}\n"),
+//RS                 ("Source/A.jet", "// é\nfn a() {}\n"),
+//RS                 ("Source/a/z.jet", ""),
+//RS             ],
+//RS             manifest: Some("package jet_sema {\n    version: \"0.1.0\"\n}\n"),
+//RS             facts: vec![("web", "false"), ("active_os", "linux"), ("edition", "2026")],
+//RS             compiler: "jet-dev-3f2a",
+//RS             package: "jet_sema@0.1.0",
+//RS             dependencies: vec![
+//RS                 ("jet_parser@0.1.0", "b1946ac92492d2347c6235b4d2611184e6b1b3f7c4b5c1f8b1946ac92492d234"),
+//RS                 ("core", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+//RS             ],
+//RS         },
+//RS     ]
+//RS }
+//RS 
+//RS #[test]
+//RS fn jet_record_codec_and_package_keys_match_rust_bytes() {
+//RS     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let mut program = String::new();
+//RS     for source in JET_SOURCES {
+//RS         program.push_str(&fs::read_to_string(repo.join(source)).expect("read Jet codec source"));
+//RS         program.push('\n');
+//RS     }
+//RS     program.push_str(JET_HARNESS);
+//RS     program.push_str("\nfn run() {\n");
+//RS     let mut expected = Vec::new();
+//RS 
+//RS     for (schema, sections) in record_fixtures() {
+//RS         let _ = writeln!(program, "    conformance_encode({}, {})", jet_string(schema), jet_sections(&sections));
+//RS         let bytes = encode_record(schema, &sections).expect("fixture encodes");
+//RS         expected.push(format!("encode {}", hex(&bytes)));
+//RS     }
+//RS     for bytes in decode_fixtures() {
+//RS         let _ = writeln!(program, "    conformance_decode({})", jet_bytes(&bytes));
+//RS         expected.push(rust_decode_line(&bytes));
+//RS     }
+//RS     for (index, fixture) in key_fixtures().into_iter().enumerate() {
+//RS         let files = fixture
+//RS             .files
+//RS             .iter()
+//RS             .map(|(path, source)| format!("PackageKeySourceFile{{relative_path: {}, source: {}}}", jet_string(path), jet_string(source)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let manifest = fixture.manifest.map_or("None".to_string(), |text| format!("Val({})", jet_string(text)));
+//RS         let facts = fixture
+//RS             .facts
+//RS             .iter()
+//RS             .map(|(name, value)| format!("PackageKeyTargetFact{{name: {}, value: {}}}", jet_string(name), jet_string(value)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let dependencies = fixture
+//RS             .dependencies
+//RS             .iter()
+//RS             .map(|(identity, digest)| format!("PackageKeyDependency{{identity: {}, interface_digest: {}}}", jet_string(identity), jet_string(digest)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(", ");
+//RS         let _ = writeln!(program, "    source_{index} :: package_key_source_digest([PackageKeySourceFile]{{{files}}}, {manifest})");
+//RS         let _ = writeln!(program, "    facts_{index} :: package_key_target_facts_digest([PackageKeyTargetFact]{{{facts}}})");
+//RS         let _ = writeln!(
+//RS             program,
+//RS             "    key_{index} :: package_key_check_key({}, facts_{index}, {}, source_{index}, [PackageKeyDependency]{{{dependencies}}})",
+//RS             jet_string(fixture.compiler),
+//RS             jet_string(fixture.package),
+//RS         );
+//RS         let _ = writeln!(program, "    print(\"keys {{source_{index}}} {{facts_{index}}} {{key_{index}}}\")");
+//RS 
+//RS         let files = fixture
+//RS             .files
+//RS             .iter()
+//RS             .map(|(path, source)| (path.to_string(), source.as_bytes()))
+//RS             .collect::<Vec<_>>();
+//RS         let source = source_digest(&files, fixture.manifest.map(str::as_bytes));
+//RS         let facts = target_facts_digest(
+//RS             &fixture.facts.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect::<Vec<_>>(),
+//RS         );
+//RS         let key = package_check_key(
+//RS             fixture.compiler,
+//RS             &facts,
+//RS             fixture.package,
+//RS             &source,
+//RS             &fixture
+//RS                 .dependencies
+//RS                 .iter()
+//RS                 .map(|(identity, digest)| (identity.to_string(), digest.to_string()))
+//RS                 .collect::<Vec<_>>(),
+//RS         );
+//RS         expected.push(format!("keys {source} {facts} {key}"));
+//RS     }
+//RS     program.push_str("}\n");
+//RS 
+//RS     let scratch = Scratch::new("record-conformance");
+//RS     fs::write(scratch.join("main.jet"), &program).expect("write conformance program");
+//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+//RS         .args(["run", "main.jet"])
+//RS         .current_dir(&scratch.path)
+//RS         .env("JET_STORE_DIR", scratch.join("store"))
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .expect("run the Jet record codec");
+//RS     let stdout = String::from_utf8_lossy(&output.stdout);
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "Jet record codec failed\nstdout:\n{stdout}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let actual = stdout.lines().map(str::to_string).collect::<Vec<_>>();
+//RS     assert_eq!(actual.len(), expected.len(), "Jet printed a different number of lines:\n{stdout}");
+//RS     for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+//RS         assert_eq!(actual, expected, "line {index} differs between the Jet and Rust codecs");
+//RS     }
+//RS }
+// END-PORT-PENDING 1128 tests/record_conformance.rs:1-404
+

@@ -1,0 +1,885 @@
+// PORT-PENDING 0147 crates-jet-codegen-src-prelude-core-embeddedhardware-slice-1790: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1790-2670
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn jet_hardware_dma_wait_typed<T: JetDmaPayload>(
+//RS     profile_id: &str,
+//RS     channel: &str,
+//RS     mut transfer: JetDmaTransfer<'static, T>,
+//RS ) -> T {
+//RS     if transfer.channel() != channel {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA wait channel does not match checked transfer",
+//RS         );
+//RS     }
+//RS     let token = transfer.host_token();
+//RS     if token <= 0 {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA wait transfer has no host token",
+//RS         );
+//RS     }
+//RS     let status =
+//RS         jet_hardware_with_current_host(|host| host.dma_wait(profile_id, channel, token));
+//RS     if status != 0 {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA wait adapter reported unavailable status",
+//RS         );
+//RS     }
+//RS     transfer.mark_complete();
+//RS     transfer
+//RS         .wait()
+//RS         .unwrap_or_else(|_| {
+//RS             jet_panic(
+//RS                 "<core.hardware>",
+//RS                 0,
+//RS                 "DMA wait completed without an owned buffer",
+//RS             )
+//RS         })
+//RS         .into_inner()
+//RS }
+//RS 
+//RS /// Erased setup installation entry used by JIT wrappers.
+//RS pub fn jet_hardware_setup(
+//RS     profile_id: i64,
+//RS     setup_kind: i64,
+//RS     item: i64,
+//RS     width_or_vector: i64,
+//RS     ownership_or_handler: i64,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_erased_host(|host| {
+//RS         host.setup(
+//RS             profile_id,
+//RS             setup_kind,
+//RS             item,
+//RS             width_or_vector,
+//RS             ownership_or_handler,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_register_read(profile_id: i64, block: i64, register: i64, width: i64) -> i64 {
+//RS     jet_hardware_with_current_erased_host(|host| host.register_read(profile_id, block, register, width))
+//RS }
+//RS 
+//RS pub fn jet_hardware_register_write(
+//RS     profile_id: i64,
+//RS     block: i64,
+//RS     register: i64,
+//RS     width: i64,
+//RS     value: i64,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_erased_host(|host| {
+//RS         host.register_write(profile_id, block, register, width, value)
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_dma_start(
+//RS     profile_id: i64,
+//RS     channel: i64,
+//RS     address: i64,
+//RS     bytes: i64,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_erased_host(|host| {
+//RS         host.dma_start(profile_id, channel, address, bytes)
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_dma_wait(profile_id: i64, channel: i64, transfer: i64) -> i64 {
+//RS     jet_hardware_with_current_erased_host(|host| host.dma_wait(profile_id, channel, transfer))
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Fixed-capacity host replay storage.  It uses the same `JetRegister` type as
+//RS /// target MMIO, so replay cannot bypass width/access/volatile checks.
+//RS pub struct JetRegisterReplay<const N: usize> {
+//RS     cells: [JetReplayCell; N],
+//RS }
+//RS 
+//RS struct JetReplayCell {
+//RS     defined: bool,
+//RS     address: u64,
+//RS     width: JetRegisterWidth,
+//RS     value: Cell<u64>,
+//RS }
+//RS 
+//RS impl JetReplayCell {
+//RS     fn empty() -> Self {
+//RS         Self {
+//RS             defined: false,
+//RS             address: 0,
+//RS             width: JetRegisterWidth::U8,
+//RS             value: Cell::new(0),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetRegisterReplayError {
+//RS     Full,
+//RS     Duplicate,
+//RS }
+//RS 
+//RS impl<const N: usize> JetRegisterReplay<N> {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             cells: core::array::from_fn(|_| JetReplayCell::empty()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn define(
+//RS         &mut self,
+//RS         address: u64,
+//RS         width: JetRegisterWidth,
+//RS         initial: u64,
+//RS     ) -> Result<(), JetRegisterReplayError> {
+//RS         if self
+//RS             .cells
+//RS             .iter()
+//RS             .any(|cell| cell.defined && cell.address == address)
+//RS         {
+//RS             return Err(JetRegisterReplayError::Duplicate);
+//RS         }
+//RS         let Some(cell) = self.cells.iter_mut().find(|cell| !cell.defined) else {
+//RS             return Err(JetRegisterReplayError::Full);
+//RS         };
+//RS         cell.defined = true;
+//RS         cell.address = address;
+//RS         cell.width = width;
+//RS         cell.value.set(initial);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn define_spec(
+//RS         &mut self,
+//RS         base: u64,
+//RS         spec: &JetRegisterSpec<'_>,
+//RS         initial: u64,
+//RS     ) -> Result<(), JetRegisterReplayError> {
+//RS         let address = base.saturating_add(spec.offset);
+//RS         self.define(address, spec.width, initial)
+//RS     }
+//RS 
+//RS     pub fn value(&self, address: u64, width: JetRegisterWidth) -> Option<u64> {
+//RS         self.cells
+//RS             .iter()
+//RS             .find(|cell| cell.defined && cell.address == address && cell.width == width)
+//RS             .map(|cell| cell.value.get())
+//RS     }
+//RS }
+//RS 
+//RS impl<const N: usize> Default for JetRegisterReplay<N> {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl<const N: usize> JetRegisterBackend for JetRegisterReplay<N> {
+//RS     fn read(&self, address: u64, width: JetRegisterWidth, _volatile_access: bool) -> u64 {
+//RS         self.value(address, width).unwrap_or(0)
+//RS     }
+//RS 
+//RS     fn write(&self, address: u64, width: JetRegisterWidth, value: u64, _volatile_access: bool) {
+//RS         if let Some(cell) = self
+//RS             .cells
+//RS             .iter()
+//RS             .find(|cell| cell.defined && cell.address == address && cell.width == width)
+//RS         {
+//RS             cell.value.set(value);
+//RS         }
+//RS     }
+//RS }
+//RS /// Replay uses the same width/access/volatile type witness as target MMIO.
+//RS /// The only difference is the backend storage, so host execution cannot
+//RS /// silently widen or bypass a checked register fact.
+//RS fn jet_replay_register_read_typed<W, A, const VOLATILE: bool>(
+//RS     backend: &JetRegisterReplay<128>,
+//RS     base: u64,
+//RS     spec: &JetRegisterSpec<'_>,
+//RS ) -> Option<u64>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterReadable,
+//RS {
+//RS     JetRegister::<W, A, JetRegisterReplay<128>, VOLATILE>::from_spec(backend, base, spec)
+//RS         .ok()
+//RS         .map(|register| register.read().into_bits())
+//RS }
+//RS 
+//RS fn jet_replay_register_read(
+//RS     backend: &JetRegisterReplay<128>,
+//RS     base: u64,
+//RS     spec: &JetRegisterSpec<'_>,
+//RS ) -> Option<u64> {
+//RS     match (spec.width, spec.access) {
+//RS         (JetRegisterWidth::U8, JetRegisterAccessMode::ReadOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u8, JetReadOnly, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u8, JetReadOnly, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U8, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u8, JetReadWrite, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u8, JetReadWrite, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U16, JetRegisterAccessMode::ReadOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u16, JetReadOnly, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u16, JetReadOnly, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U16, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u16, JetReadWrite, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u16, JetReadWrite, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U32, JetRegisterAccessMode::ReadOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u32, JetReadOnly, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u32, JetReadOnly, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U32, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u32, JetReadWrite, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u32, JetReadWrite, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U64, JetRegisterAccessMode::ReadOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u64, JetReadOnly, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u64, JetReadOnly, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U64, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_read_typed::<u64, JetReadWrite, true>(backend, base, spec)
+//RS             } else {
+//RS                 jet_replay_register_read_typed::<u64, JetReadWrite, false>(backend, base, spec)
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_replay_register_write_typed<W, A, const VOLATILE: bool>(
+//RS     backend: &JetRegisterReplay<128>,
+//RS     base: u64,
+//RS     spec: &JetRegisterSpec<'_>,
+//RS     value: u64,
+//RS ) -> Option<()>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterWritable,
+//RS {
+//RS     let register =
+//RS         JetRegister::<W, A, JetRegisterReplay<128>, VOLATILE>::from_spec(backend, base, spec)
+//RS             .ok()?;
+//RS     register.write(W::from_bits(value));
+//RS     Some(())
+//RS }
+//RS 
+//RS fn jet_replay_register_write(
+//RS     backend: &JetRegisterReplay<128>,
+//RS     base: u64,
+//RS     spec: &JetRegisterSpec<'_>,
+//RS     value: u64,
+//RS ) -> Option<()> {
+//RS     match (spec.width, spec.access) {
+//RS         (JetRegisterWidth::U8, JetRegisterAccessMode::WriteOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u8, JetWriteOnly, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u8, JetWriteOnly, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U8, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u8, JetReadWrite, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u8, JetReadWrite, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U16, JetRegisterAccessMode::WriteOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u16, JetWriteOnly, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u16, JetWriteOnly, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U16, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u16, JetReadWrite, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u16, JetReadWrite, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U32, JetRegisterAccessMode::WriteOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u32, JetWriteOnly, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u32, JetWriteOnly, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U32, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u32, JetReadWrite, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u32, JetReadWrite, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U64, JetRegisterAccessMode::WriteOnly) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u64, JetWriteOnly, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u64, JetWriteOnly, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         (JetRegisterWidth::U64, JetRegisterAccessMode::ReadWrite) => {
+//RS             if spec.volatile {
+//RS                 jet_replay_register_write_typed::<u64, JetReadWrite, true>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             } else {
+//RS                 jet_replay_register_write_typed::<u64, JetReadWrite, false>(
+//RS                     backend, base, spec, value,
+//RS                 )
+//RS             }
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS // ── Bounded interrupts ─────────────────────────────────────────────────────
+//RS 
+//RS /// A callback is a function pointer, not a boxed closure.  The context exposes
+//RS /// only the handler's shared cells; it contains no allocation or wait API.
+//RS pub enum JetInterruptHandler<C> {
+//RS     Context(fn(&mut C)),
+//RS     Bare(fn()),
+//RS }
+//RS 
+//RS impl<C> Copy for JetInterruptHandler<C> {}
+//RS impl<C> Clone for JetInterruptHandler<C> {
+//RS     fn clone(&self) -> Self {
+//RS         *self
+//RS     }
+//RS }
+//RS 
+//RS struct JetInterruptBinding<C> {
+//RS     vector: u16,
+//RS     handler: JetInterruptHandler<C>,
+//RS }
+//RS 
+//RS impl<C> Copy for JetInterruptBinding<C> {}
+//RS impl<C> Clone for JetInterruptBinding<C> {
+//RS     fn clone(&self) -> Self {
+//RS         *self
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetInterruptError {
+//RS     UnknownVector,
+//RS     UnboundedVector,
+//RS     DuplicateBinding,
+//RS     BindingTableFull,
+//RS     UnboundVector,
+//RS     QueueFull,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetInterruptDispatch {
+//RS     Empty,
+//RS     Dispatched(u16),
+//RS }
+//RS 
+//RS /// A fixed binding table and FIFO vector queue.  Registration and dispatch do
+//RS /// not allocate, block, or invoke a handler with access to this controller.
+//RS pub struct JetInterruptController<'a, C, const BINDINGS: usize, const PENDING: usize> {
+//RS     facts: &'a JetHardwareFacts<'a>,
+//RS     bindings: [Option<JetInterruptBinding<C>>; BINDINGS],
+//RS     pending: [u16; PENDING],
+//RS     head: usize,
+//RS     tail: usize,
+//RS     pending_len: usize,
+//RS     dropped: usize,
+//RS }
+//RS 
+//RS impl<'a, C, const BINDINGS: usize, const PENDING: usize>
+//RS     JetInterruptController<'a, C, BINDINGS, PENDING>
+//RS {
+//RS     pub fn new(facts: &'a JetHardwareFacts<'a>) -> Self {
+//RS         Self {
+//RS             facts,
+//RS             bindings: [None; BINDINGS],
+//RS             pending: [0; PENDING],
+//RS             head: 0,
+//RS             tail: 0,
+//RS             pending_len: 0,
+//RS             dropped: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn bind(
+//RS         &mut self,
+//RS         vector: u16,
+//RS         handler: JetInterruptHandler<C>,
+//RS     ) -> Result<(), JetInterruptError> {
+//RS         let Some(spec) = self.facts.interrupt_vector(vector) else {
+//RS             return Err(JetInterruptError::UnknownVector);
+//RS         };
+//RS         if !spec.bounded {
+//RS             return Err(JetInterruptError::UnboundedVector);
+//RS         }
+//RS         if self.binding_index(vector).is_some() {
+//RS             return Err(JetInterruptError::DuplicateBinding);
+//RS         }
+//RS         let Some(slot) = self.bindings.iter_mut().find(|slot| slot.is_none()) else {
+//RS             return Err(JetInterruptError::BindingTableFull);
+//RS         };
+//RS         *slot = Some(JetInterruptBinding { vector, handler });
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn raise(&mut self, vector: u16) -> Result<(), JetInterruptError> {
+//RS         if self.facts.interrupt_vector(vector).is_none() {
+//RS             return Err(JetInterruptError::UnknownVector);
+//RS         }
+//RS         if self.binding_index(vector).is_none() {
+//RS             return Err(JetInterruptError::UnboundVector);
+//RS         }
+//RS         if self.pending_len == PENDING {
+//RS             self.dropped = self.dropped.saturating_add(1);
+//RS             return Err(JetInterruptError::QueueFull);
+//RS         }
+//RS         self.pending[self.tail] = vector;
+//RS         self.tail = ring_next(self.tail, PENDING);
+//RS         self.pending_len += 1;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn dispatch_next(&mut self, context: &mut C) -> JetInterruptDispatch {
+//RS         if self.pending_len == 0 {
+//RS             return JetInterruptDispatch::Empty;
+//RS         }
+//RS         let vector = self.pending[self.head];
+//RS         self.head = ring_next(self.head, PENDING);
+//RS         self.pending_len -= 1;
+//RS         if let Some(binding) = self.binding(vector) {
+//RS             match binding.handler {
+//RS                 JetInterruptHandler::Context(handler) => handler(context),
+//RS                 JetInterruptHandler::Bare(handler) => handler(),
+//RS             }
+//RS         }
+//RS         JetInterruptDispatch::Dispatched(vector)
+//RS     }
+//RS 
+//RS     pub fn dispatch_all(&mut self, context: &mut C) -> usize {
+//RS         let mut dispatched = 0;
+//RS         while self.pending_len != 0 {
+//RS             let _ = self.dispatch_next(context);
+//RS             dispatched += 1;
+//RS         }
+//RS         dispatched
+//RS     }
+//RS 
+//RS     pub fn clear_pending(&mut self) {
+//RS         self.head = 0;
+//RS         self.tail = 0;
+//RS         self.pending_len = 0;
+//RS     }
+//RS 
+//RS     pub const fn pending_len(&self) -> usize {
+//RS         self.pending_len
+//RS     }
+//RS 
+//RS     pub const fn dropped(&self) -> usize {
+//RS         self.dropped
+//RS     }
+//RS 
+//RS     pub fn binding_count(&self) -> usize {
+//RS         self.bindings.iter().filter(|slot| slot.is_some()).count()
+//RS     }
+//RS 
+//RS     fn binding_index(&self, vector: u16) -> Option<usize> {
+//RS         self.bindings.iter().position(|slot| {
+//RS             slot.as_ref()
+//RS                 .is_some_and(|binding| binding.vector == vector)
+//RS         })
+//RS     }
+//RS 
+//RS     fn binding(&self, vector: u16) -> Option<JetInterruptBinding<C>> {
+//RS         self.binding_index(vector)
+//RS             .and_then(|index| self.bindings[index])
+//RS     }
+//RS }
+//RS 
+//RS fn ring_next(index: usize, capacity: usize) -> usize {
+//RS     if capacity == 0 || index + 1 == capacity {
+//RS         0
+//RS     } else {
+//RS         index + 1
+//RS     }
+//RS }
+//RS 
+//RS mod jet_dma_payload_sealed {
+//RS     pub trait Element {
+//RS         const WIDTH: u64;
+//RS     }
+//RS 
+//RS     macro_rules! fixed_width_element {
+//RS         ($($ty:ty => $width:expr),* $(,)?) => {
+//RS             $(impl Element for $ty {
+//RS                 const WIDTH: u64 = $width;
+//RS             })*
+//RS         };
+//RS     }
+//RS 
+//RS     fixed_width_element!(
+//RS         u8 => 1,
+//RS         u16 => 2,
+//RS         u32 => 4,
+//RS         u64 => 8,
+//RS         i8 => 1,
+//RS         i16 => 2,
+//RS         i32 => 4,
+//RS         i64 => 8,
+//RS         f32 => 4,
+//RS         f64 => 8,
+//RS     );
+//RS 
+//RS     pub trait Container {}
+//RS 
+//RS     impl<T: Element> Container for Vec<T> {}
+//RS     impl<T: Element> Container for Box<[T]> {}
+//RS     impl<T: Element, const N: usize> Container for [T; N] {}
+//RS }
+//RS 
+//RS /// A sealed, contiguous owning DMA payload. Only fixed-width integer and
+//RS /// floating-point element buffers are admitted; handles, records, strings,
+//RS /// booleans, and characters cannot satisfy this trait.
+//RS pub trait JetDmaPayload: jet_dma_payload_sealed::Container {
+//RS     fn dma_address(&self) -> u64;
+//RS     fn dma_bytes(&self) -> u64;
+//RS }
+//RS 
+//RS impl<T: jet_dma_payload_sealed::Element> JetDmaPayload for Vec<T> {
+//RS     fn dma_address(&self) -> u64 {
+//RS         self.as_ptr() as usize as u64
+//RS     }
+//RS 
+//RS     fn dma_bytes(&self) -> u64 {
+//RS         (self.len() as u64).saturating_mul(T::WIDTH)
+//RS     }
+//RS }
+//RS 
+//RS impl<T: jet_dma_payload_sealed::Element> JetDmaPayload for Box<[T]> {
+//RS     fn dma_address(&self) -> u64 {
+//RS         self.as_ptr() as usize as u64
+//RS     }
+//RS 
+//RS     fn dma_bytes(&self) -> u64 {
+//RS         (self.len() as u64).saturating_mul(T::WIDTH)
+//RS     }
+//RS }
+//RS 
+//RS impl<T: jet_dma_payload_sealed::Element, const N: usize> JetDmaPayload for [T; N] {
+//RS     fn dma_address(&self) -> u64 {
+//RS         self.as_ptr() as usize as u64
+//RS     }
+//RS 
+//RS     fn dma_bytes(&self) -> u64 {
+//RS         (N as u64).saturating_mul(T::WIDTH)
+//RS     }
+//RS }
+//RS 
+//RS // ── DMA ownership transfer ─────────────────────────────────────────────────
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDmaError {
+//RS     UnknownChannel,
+//RS     BorrowedChannel,
+//RS     ZeroLength,
+//RS     AddressMisaligned,
+//RS     TransferTooLarge,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDmaTransferState {
+//RS     InFlight,
+//RS     Complete,
+//RS }
+//RS 
+//RS /// A CPU-owned buffer.  It is intentionally not `Clone`; moving it into
+//RS /// `JetDmaRuntime::start` is the ownership transfer, and no buffer accessor is
+//RS /// exposed from `JetDmaTransfer` while the device owns it.
+//RS pub struct JetDmaBuffer<T> {
+//RS     value: T,
+//RS     address: u64,
+//RS     bytes: u64,
+//RS }
+//RS 
+//RS impl<T> JetDmaBuffer<T> {
+//RS     pub fn new(value: T, address: u64, bytes: u64) -> Self {
+//RS         Self {
+//RS             value,
+//RS             address,
+//RS             bytes,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn address(&self) -> u64 {
+//RS         self.address
+//RS     }
+//RS 
+//RS     pub const fn bytes(&self) -> u64 {
+//RS         self.bytes
+//RS     }
+//RS 
+//RS     pub fn as_ref(&self) -> &T {
+//RS         &self.value
+//RS     }
+//RS 
+//RS     pub fn as_mut(&mut self) -> &mut T {
+//RS         &mut self.value
+//RS     }
+//RS 
+//RS     pub fn into_inner(self) -> T {
+//RS         self.value
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetDmaTransfer<'a, T> {
+//RS     channel: JetDmaChannelSpec<'a>,
+//RS     sequence: u64,
+//RS     host_token: i64,
+//RS     state: JetDmaTransferState,
+//RS     buffer: Option<JetDmaBuffer<T>>,
+//RS     completion_handle: Option<
+//RS         jet_foundation::ResourceSchedule::JetFrameCompletionHandle,
+//RS     >,
+//RS }
+//RS 
+//RS impl<'a, T> JetDmaTransfer<'a, T> {
+//RS     fn new(
+//RS         channel: JetDmaChannelSpec<'a>,
+//RS         sequence: u64,
+//RS         buffer: JetDmaBuffer<T>,
+//RS     ) -> Self {
+//RS         let completion_handle =
+//RS             match jet_foundation::ResourceSchedule::current_frame_completion_handle(
+//RS                 "jet_dma_transfer",
+//RS             ) {
+//RS                 Ok(handle) => handle,
+//RS                 Err(error) => jet_panic("<core.hardware>", 0, &error),
+//RS             };
+//RS         Self {
+//RS             channel,
+//RS             sequence,
+//RS             host_token: JET_HARDWARE_UNAVAILABLE,
+//RS             state: JetDmaTransferState::InFlight,
+//RS             buffer: Some(buffer),
+//RS             completion_handle,
+//RS         }
+//RS     }
+//RS 
+//RS     fn host_token(&self) -> i64 {
+//RS         self.host_token
+//RS     }
+//RS 
+//RS     pub fn set_host_token(&mut self, token: i64) {
+//RS         self.host_token = token;
+//RS     }
+//RS     /// Called by the target completion adapter, or by `start_replay` for the
+//RS     /// deterministic host adapter. It performs no wait and cannot expose the
+//RS     /// owned buffer before completion.
+//RS     /// Mark the provider's real DMA completion event. This is the only point
+//RS     /// at which the checked frame may release a retained transfer resource.
+//RS     pub fn mark_complete(&mut self) {
+//RS         self.state = JetDmaTransferState::Complete;
+//RS         if let Some(handle) = &self.completion_handle {
+//RS             if let Err(error) = handle.signal() {
+//RS                 jet_panic("<core.hardware>", 0, &error);
+//RS             }
+//RS         } else if jet_foundation::ResourceSchedule::current_frame_completion_state().is_some() {
+//RS             jet_panic(
+//RS                 "<core.hardware>",
+//RS                 0,
+//RS                 "checked DMA completion is missing its submission binding",
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn channel(&self) -> &'a str {
+//RS         self.channel.name
+//RS     }
+//RS 
+//RS     pub const fn channel_number(&self) -> u16 {
+//RS         self.channel.channel
+//RS     }
+//RS 
+//RS     pub const fn sequence(&self) -> u64 {
+//RS         self.sequence
+//RS     }
+//RS 
+//RS     pub const fn state(&self) -> JetDmaTransferState {
+//RS         self.state
+//RS     }
+//RS 
+//RS     pub const fn is_complete(&self) -> bool {
+//RS         matches!(self.state, JetDmaTransferState::Complete)
+//RS     }
+//RS 
+//RS     /// Return the buffer only after the device has completed the transfer.
+//RS     /// An incomplete wait returns the transfer itself so ownership is never
+//RS     /// lost and a later completion can retry the same operation.
+//RS     pub fn wait(mut self) -> Result<JetDmaBuffer<T>, JetDmaWaitError<'a, T>> {
+//RS         if !self.is_complete() {
+//RS             return Err(JetDmaWaitError::Incomplete(self));
+//RS         }
+//RS         match self.buffer.take() {
+//RS             Some(buffer) => Ok(buffer),
+//RS             None => Err(JetDmaWaitError::Incomplete(self)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub enum JetDmaWaitError<'a, T> {
+//RS     Incomplete(JetDmaTransfer<'a, T>),
+//RS }
+//RS 
+//RS impl<'a, T> JetDmaWaitError<'a, T> {
+//RS     pub fn into_transfer(self) -> JetDmaTransfer<'a, T> {
+//RS         match self {
+//RS             Self::Incomplete(transfer) => transfer,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Shared DMA state machine.  The sema projection checks ordered ownership
+//RS /// facts; this runtime repeats only the target-independent buffer shape checks
+//RS /// needed by target and replay adapters.
+//RS pub struct JetDmaRuntime<'a> {
+//RS     facts: &'a JetHardwareFacts<'a>,
+//RS     next_sequence: u64,
+//RS }
+//RS 
+//RS impl<'a> JetDmaRuntime<'a> {
+//RS     pub fn new(facts: &'a JetHardwareFacts<'a>) -> Self {
+//RS         Self {
+//RS             facts,
+//RS             next_sequence: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn start<T>(
+//RS         &mut self,
+//RS         channel: &str,
+//RS         buffer: JetDmaBuffer<T>,
+//RS     ) -> Result<JetDmaTransfer<'a, T>, JetDmaError> {
+//RS         let Some(spec) = self.facts.dma_channel(channel).copied() else {
+//RS             return Err(JetDmaError::UnknownChannel);
+//RS         };
+//RS         if spec.ownership != JetDmaOwnership::Transfer {
+//RS             return Err(JetDmaError::BorrowedChannel);
+//RS         }
+//RS         let width = spec.transfer_width.bytes();
+//RS         if buffer.bytes == 0 {
+//RS             return Err(JetDmaError::ZeroLength);
+//RS         }
+//RS         if buffer.address % width != 0 || buffer.bytes % width != 0 {
+//RS             return Err(JetDmaError::AddressMisaligned);
+//RS         }
+//RS         if spec
+//RS             .max_transfer_bytes
+//RS             .is_some_and(|limit| buffer.bytes > limit)
+//RS         {
+//RS             return Err(JetDmaError::TransferTooLarge);
+//RS         }
+//RS         let sequence = self.next_sequence;
+//RS         self.next_sequence = self.next_sequence.saturating_add(1);
+//RS         Ok(JetDmaTransfer::new(spec, sequence, buffer))
+//RS     }
+//RS 
+//RS     /// Host replay completes through the same transfer state machine.  The
+//RS     /// only replay policy is that the deterministic adapter reports completion
+//RS     /// immediately; ownership still moves CPU → device → CPU through start and
+//RS     /// wait, and transfer sequence order remains observable.
+//RS     pub fn start_replay<T>(
+//RS         &mut self,
+//RS         channel: &str,
+//RS         buffer: JetDmaBuffer<T>,
+//RS     ) -> Result<JetDmaTransfer<'a, T>, JetDmaError> {
+//RS         let mut transfer = self.start(channel, buffer)?;
+//RS         transfer.mark_complete();
+//RS         Ok(transfer)
+//RS     }
+//RS 
+//RS     pub const fn next_sequence(&self) -> u64 {
+//RS         self.next_sequence
+//RS     }
+//RS }
+//RS 
+//RS /// Convenience aggregate for host replay and target adapters.  It contains no
+//RS /// alternate semantics: both fields are the controllers above, fed by the
+//RS /// same immutable `JetHardwareFacts`.
+//RS pub struct JetHardwareReplay<'a, C, const BINDINGS: usize, const PENDING: usize> {
+//RS     pub interrupts: JetInterruptController<'a, C, BINDINGS, PENDING>,
+//RS     pub dma: JetDmaRuntime<'a>,
+//RS }
+//RS 
+//RS impl<'a, C, const BINDINGS: usize, const PENDING: usize>
+//RS     JetHardwareReplay<'a, C, BINDINGS, PENDING>
+//RS {
+//RS     pub fn new(facts: &'a JetHardwareFacts<'a>) -> Self {
+//RS         Self {
+//RS             interrupts: JetInterruptController::new(facts),
+//RS             dma: JetDmaRuntime::new(facts),
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0147 crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1790-2670
+

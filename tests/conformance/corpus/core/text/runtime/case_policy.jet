@@ -1,0 +1,189 @@
+// RT197 + RT007: Rust Top/Text.rs:303-341,939-1014,1637-1671; Core/Ascii.rs:1-21.
+// Real canonical UnicodeString/normalizer/pinned assets, not bootstrap builtins.
+// Public predicate contradictions remain an owner gate; source and existing
+// public contracts are exercised separately below, never silently blended.
+// #4318/#4392 retained assets/bytes/views, native String receiver integration
+// and composed O0/O1/O2/Web remain original gates, not proved by these values.
+use core.text.runtime.kernel_unicode_string as case_kernel
+use core.text.parse as case_parse
+use core.text as case_text
+
+#Test("full title mappings distinguish title from uppercase") {
+    rows :: [
+        (input: "", expected: ""),
+        (input: "ß ﬃ և", expected: "Ss Ffi Եւ"),
+        (input: "ǄǄ ǆǆ ǅǅ", expected: "ǅǆ ǅǆ ǅǆ"),
+        (input: "ŉabc", expected: "ʼNabc"),
+        (input: "ΐabc", expected: "Ϊ́abc"),
+        (input: "ᾀabc", expected: "ᾈabc"),
+        (input: "ΟΣ ΟΣΑ", expected: "Οσ Οσα"), // interior scalar-local sigma
+        (input: "123ABC ²ABC", expected: "123abc ²abc"), // Numeric starts word
+        (input: "abc-def don't", expected: "Abc-Def Don'T"),
+        (input: "áBC", expected: "ÁBc"), // non-Alphabetic Mn resets word
+        (input: "aͅBC", expected: "Aͅbc"), // Other_Alphabetic Mn stays in word
+        (input: "界ABC", expected: "界abc"),
+        (input: "𐐨𐐀", expected: "𐐀𐐨"),
+    ]
+    loop row in rows {
+        assert_eq(case_kernel.title(row.input), row.expected)
+        assert_eq(case_parse.title(row.input), row.expected)
+    }
+}
+
+#Test("lowercase FinalSigma context and full multiscalar expansions") {
+    rows :: [
+        (input: "ΟΣ", expected: "ος"),
+        (input: "Σ", expected: "σ"),
+        (input: "ΟΣΑ", expected: "οσα"),
+        (input: "ΌΣ́", expected: "ός́"),
+        (input: "ΌΣ́Α", expected: "όσ́α"),
+        (input: "Ο Σ", expected: "ο σ"),
+        (input: "Ο'Σ", expected: "ο'ς"),
+        (input: "ΟΣ'Α", expected: "οσ'α"),
+        (input: "İ", expected: "i̇"),
+        (input: "꟎", expected: "꟏"), // pinned Unicode 17
+        (input: "𐐀", expected: "𐐨"),
+        (input: "", expected: ""),
+    ]
+    loop row in rows -> assert_eq(case_parse.lower(row.input), row.expected)
+    assert_eq(case_parse.upper("ßևﬃǆ𐐨"), "SSԵՒFFIǄ𐐀")
+    assert_eq(case_parse.upper("ẞ"), "ẞ")
+}
+
+#Test("capitalize title-first and suffix-only FinalSigma") {
+    rows :: [
+        (input: "", expected: ""),
+        (input: "ßABC", expected: "Ssabc"),
+        (input: "ﬃABC", expected: "Ffiabc"),
+        (input: "ǆABC", expected: "ǅabc"),
+        (input: "ևABC", expected: "Եւabc"),
+        (input: "ΟΣ", expected: "Οσ"), // first scalar excluded from suffix context
+        (input: "AΟΣ", expected: "Aος"),
+        (input: "ΣΟΣ", expected: "Σος"),
+        (input: "1ABC", expected: "1abc"),
+        (input: "界ABC", expected: "界abc"),
+        (input: "𐐨ABC", expected: "𐐀abc"),
+    ]
+    loop row in rows -> assert_eq(case_parse.capitalize(row.input), row.expected)
+}
+
+#Test("swapcase source ordering expansions and uncased preservation") {
+    assert_eq(case_parse.swapcase("Straßeİςﬃևǅ界123"), "sTRASSEi̇ΣFFIԵՒǄ界123")
+    assert_eq(case_parse.swapcase("ΟΣ"), "οσ") // no whole-string FinalSigma
+    assert_eq(case_parse.swapcase("ªᴬ"), "ªᴬ") // cased but identity mappings
+    assert_eq(case_parse.swapcase(""), "")
+}
+
+#Test("literal Rust cased predicates and title-state owner gate") {
+    rows :: [
+        (input: "", lower: false, upper: false, title: false),
+        (input: "AB", lower: false, upper: true, title: true),
+        (input: "ABC abc", lower: false, upper: false, title: false),
+        (input: "ǅ", lower: true, upper: true, title: false),
+        (input: "ǅabc", lower: true, upper: false, title: false),
+        (input: "界", lower: false, upper: false, title: false),
+        (input: "abc", lower: true, upper: false, title: false),
+        (input: "Abc", lower: false, upper: false, title: true),
+        (input: "123!?", lower: false, upper: false, title: false),
+        (input: "é界1", lower: true, upper: false, title: false),
+        (input: "É界1", lower: false, upper: true, title: false),
+        (input: "ß", lower: true, upper: false, title: false),
+        (input: "ẞ", lower: false, upper: true, title: true),
+        (input: "ª", lower: false, upper: false, title: false),
+        (input: "ᴬ", lower: false, upper: false, title: false), // Other_Lowercase despite name CAPITAL A
+        (input: "Aᴬ", lower: false, upper: false, title: true),
+        (input: "Ⅻ", lower: false, upper: true, title: true), // Other_Uppercase Nl
+        (input: "Ⓐ", lower: false, upper: true, title: true), // Other_Uppercase So
+        (input: "Aª", lower: false, upper: false, title: true), // Other_Lowercase
+        (input: "Aͅ", lower: false, upper: false, title: true), // Mn Lowercase
+        (input: "𐐨", lower: true, upper: false, title: false),
+        (input: "𐐀", lower: false, upper: true, title: true),
+    ]
+    loop row in rows {
+        if case_kernel.is_lower(row.input) != row.lower -> panic("literal is_lower mismatch for `{row.input}`")
+        if case_kernel.is_upper(row.input) != row.upper -> panic("literal is_upper mismatch for `{row.input}`")
+        if case_kernel.is_title(row.input) != row.title -> panic("literal is_title mismatch for `{row.input}`")
+    }
+}
+
+#Test("existing public predicate originals remain held independently") {
+    // Owner ballot: keep these exact public originals until ratified cutover.
+    assert_eq(case_parse.is_title("AB"), false)
+    assert_eq(case_parse.istitle("ABC abc"), false)
+    assert_eq(case_parse.is_title("ǅ"), true)
+    assert_eq(case_parse.istitle("ǅabc"), true)
+    assert_eq(case_parse.is_title("界"), true)
+    assert_eq(case_parse.is_title("abc"), false)
+    assert_eq(case_parse.is_title("Abc"), true)
+    assert_eq(case_parse.is_lower("ǅ"), false)
+    assert_eq(case_parse.is_upper("ǅ"), false)
+    assert_eq(case_parse.islower("ǅabc"), true)
+    assert_eq(case_parse.isupper("ǅabc"), false)
+}
+
+#Test("scalar properties retain Unicode versus intentionally ASCII contracts") {
+    assert_eq(case_parse.isalpha("Ж界ְͅ𐐀"), true)
+    assert_eq(case_parse.isalpha("a;b"), false)
+    assert_eq(case_parse.isalpha(""), false)
+    assert_eq(case_parse.isnumeric("²٣Ⅻ½𝟎"), true)
+    assert_eq(case_parse.isnumeric("x²"), false)
+    assert_eq(case_parse.isnumeric(""), false)
+    assert_eq(case_parse.isalnum("界²٣Ⅻͅ"), true)
+    assert_eq(case_parse.is_alnum("abc-1"), false)
+    assert_eq(case_parse.isalnum(""), false)
+    whitespace :: String.from_bytes([U8]{9, 10, 13, 194, 133, 194, 160, 225, 154, 128, 226, 128, 131, 226, 128, 168, 226, 128, 175, 227, 128, 128}) ?? panic("whitespace fixture")
+    assert_eq(case_parse.is_space(whitespace), true)
+    assert_eq(case_text.is_whitespace(whitespace), true)
+    assert_eq(case_text.is_alphabetic("Ж界ְͅ𐐀"), true)
+    assert_eq(case_text.is_numeric("²٣Ⅻ½𝟎"), true)
+    assert_eq(case_parse.isspace(""), false)
+    assert_eq(case_parse.is_space("​"), false)
+    assert_eq(case_parse.strip(" 　Σ "), "Σ") // U+00A0 U+3000 U+2003
+    assert_eq(case_parse.lstrip(" Σ "), "Σ ")
+    assert_eq(case_parse.rstrip(" Σ "), " Σ")
+    assert_eq(case_parse.strip("  "), "")
+    assert_eq(case_parse.is_digit("0129"), true)
+    assert_eq(case_parse.isdecimal("٣"), false)
+    assert_eq(case_parse.isdigit("²"), false)
+    assert_eq(case_parse.is_digit(""), false)
+    assert_eq(case_parse.is_ascii("AZ09"), true)
+    assert_eq(case_parse.isascii(""), true)
+    assert_eq(case_parse.isascii("é"), false)
+    assert_eq(case_parse.isprintable("界é​ ͸"), true) // U+200B U+2028 U+0378
+    assert_eq(case_parse.isprintable(""), true)
+    assert_eq(case_parse.isprintable("\n"), false)
+    assert_eq(case_parse.isprintable(String.from_bytes([U8]{194, 133}) ?? panic("NEL fixture")), false)
+    assert_eq(case_parse.isprintable(String.from_bytes([U8]{127}) ?? panic("DEL fixture")), false)
+}
+
+#Test("ASCII case preserves every non-ASCII scalar and differs from Unicode") {
+    assert_eq(case_kernel.ascii_lower("AZÉİΣẞ界𐐀"), "azÉİΣẞ界𐐀")
+    assert_eq(case_kernel.ascii_upper("azéıσßևﬃ界𐐨"), "AZéıσßևﬃ界𐐨")
+    assert_eq(case_kernel.ascii_lower(""), "")
+    assert_eq(case_kernel.ascii_upper(""), "")
+    assert_eq(case_kernel.ascii_lower("ΟΣ"), "ΟΣ")
+    assert_eq(case_kernel.lower("ΟΣ"), "ος")
+}
+
+#Test("default caseless is NFD fold NFD without compatibility or locale") {
+    rows :: [
+        (left: "Straße", right: "STRASSE", equal: true),
+        (left: "É", right: "é", equal: true),
+        (left: "Å", right: "å", equal: true),
+        (left: "Ạ̊", right: "ạ̊", equal: true), // final NFD ordering
+        (left: "Άͅ", right: "άι", equal: true), // initial NFD before fold U+0345
+        (left: "İ", right: "i̇", equal: true),
+        (left: "İ", right: "i", equal: false),
+        (left: "I", right: "ı", equal: false),
+        (left: "ς", right: "σ", equal: true),
+        (left: "ﬃ", right: "FFI", equal: true),
+        (left: "Ａ", right: "a", equal: false), // NOT NFKD
+        (left: "각", right: "각", equal: true),
+        (left: "", right: "", equal: true),
+        (left: "a", right: "", equal: false),
+    ]
+    loop row in rows {
+        assert_eq(case_text.caseless_eq(row.left, row.right), row.equal)
+        assert_eq(case_text.caseless_eq(row.right, row.left), row.equal)
+    }
+}

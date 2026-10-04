@@ -1,0 +1,428 @@
+// CoreLib/Top/ProcessPolicy.rs:1–562. Private portable authority/receipt policy.
+// The sole accepted ProcessSpecState is borrowed; this is not a public plan,
+// authority, handle or capability. Root activation stays HELD #4460/#4476/#4477.
+// Stream/error enums below keep the original native patterns (#4476/#4477).
+//
+// Native inventory / Main stage-2 extraction (no provider or fake facts here):
+// :106 jet_process_backend_limits() -> Vec<String>: native cfg selects the
+// exact std::env::consts::OS (&'static str); backend_limits below projects it.
+// :239 jet_process_policy_authority_cwd(&ProcessSpec) -> Result<Option<&str>, IOError>:
+// native std::path::Path::new(cwd).is_absolute(&Path) -> bool is sampled for
+// that SAME borrowed cwd, on the target, and passed below; no lexical substitute.
+// :446 jet_process_resolve_executable(&ProcessSpec) -> Result<String, IOError>:
+// keep Path::is_absolute(&Path)->bool, fs::canonicalize(impl AsRef<Path>)->
+// io::Result<PathBuf>, Path::is_file(&Path)->bool, OsStr PATH equality,
+// env::split_paths(&OsStr)->SplitPaths, Path::join(&Path,impl AsRef<Path>)->PathBuf,
+// Path::to_string_lossy(&Path)->Cow<str>, and
+// jet_std_env_snapshot_raw()->Vec<(OsString,OsString)> native. Empty argv is
+// portable validation below; native failures retain Resolve/command context.
+// :498 jet_process_isolation_backend()->Option<String> consumes
+// jet_process_sandbox::status()->Status{available:bool,mechanism:String,policy:String,reason:String}.
+// :503 backend_check consumes that actual availability, not a probe/table here.
+// :519 jet_process_spec_plan(&ProcessSpec)->Result<ProcessPlan,IOError> stays HELD:
+// resource_limits_check(spec) FIRST, bound-policy check, authority_cwd, native
+// resolve_executable, policy_check, check_executable, actual isolation backend,
+// native ProcessPlan marshaling, then unavailable error with the policy digest.
+// There is deliberately no second ProcessPlan or high-level native fallback.
+// Original pure private signatures before fact extraction:
+// policy_limits(&ProcessSpec)->Vec<String>, policy_material(&ProcessSpec)->String,
+// policy_digest(&ProcessSpec)->String, backend_check(&ProcessSpec)->Result<(),IOError>.
+// Their only added inputs below are the genuine native backend-limits return
+// and status.available/is_some fact; adapters pass them without reinterpretation.
+// Process.rs:115–169 jet_process_resource_limits_check(&ProcessSpec)->Result<(),IOError>
+// is held native target/resource validation, not a successful portable stub.
+// CommonTypes.rs:546–556 native ProcessPlan has EXACTLY executable_identity,
+// argv, input_digest, policy_digest, backend, authority, descendants, limits,
+// outputs, in that declaration order; no Jet replacement is declared here.
+// Native adapters: jet-jit ProcessPrelude.rs:483–576 borrows/moves the exact
+// 16 spec fields; spec_plan(&ProcessSpec)->Result<ProcessPlan,IOError> :575–577;
+// Process.rs:988–1015 mir_process_plan marshals original native plan fields.
+// Process.rs:404–484 receipt uses this redactor/material/digest, with native
+// clock/IO/limit facts; :572–604 verify_launch_plan compares backend, policy
+// digest, then input digest. PTY supported()->bool is ProcessPty.rs:1252–1268;
+// its open/attach/resize/job APIs, resource checks, IO/clock/launch stay stage2.
+//
+// Rust tests inventory: build_sandbox.rs:1–1658 (recipe/agent real native
+// confinement, ambient-env denial, unavailable-backend refusal, descendant/
+// network/device/resource tests); foreign_build_hosts.rs:1–266 (runner wiring,
+// native artifact publication and cancellation); authority_manifest.rs:1–478
+// (manifest/compiler checks and native source-linked delegation receipts);
+// comptime_cli_parity.rs:1–1657 (CLI/compiler tier/enum/build-stamp tests).
+// Those native/compiler journeys are NOT replaced with policy-only assertions.
+// The adjacent corpus exercises the reachable original ProcessPolicy bodies.
+use core.process.runtime.top_process_spec as process_policy_spec
+use core.text.runtime.kernel_unicode_string as process_policy_text
+use core.crypto.runtime.kernel_sha256 as process_policy_sha
+use core.encoding as process_policy_encoding
+
+// Rust jet_process_policy::terminal_facts :8–14, actual PTY supported fact.
+pub fn terminal_facts(pty_supported: Bool) -> [String] Never! {
+    if pty_supported -> return [String]{"terminal", "resize", "raw"}
+    [String]{}
+}
+
+// Rust Vec::dedup: adjacent only, including equal-length secret ties.
+// Reuse canonical sequence dedup, not a second algorithm/set. The current
+// surface is READ-only: Collections.rs:2118–2139 clones each emitted String
+// into prev and boxes the iterator, so Vec::dedup allocation parity is HELD #4484.
+// E0225 forbids moving an indexed String and consuming the read dedup call.
+// Main must extract no-copy canonical collection storage at stage2; there is
+// no clone-compaction/quadratic remove or invented provider workaround here.
+fn process_policy_dedup(values: [String]) -> [String] Never! {
+    values.dedup().to_list()
+}
+
+// Rust jet_process_policy_rights :17–29, exact str::lines (NOT trim or the
+// public split_lines helper: standalone CR is data, CRLF strips one CR, and
+// the final unterminated CR stays). Scalar spans use the sole UTF-8 owner.
+pub fn jet_process_policy_rights(spec: process_policy_spec.ProcessSpecState) -> [String] Never! {
+    wire :: spec.policy_wire ?? return [String]{}
+    raw :: process_policy_text.utf8_bytes(wire)
+    rights := [String]{}
+    byte := 0
+    scalar := 0
+    start := 0
+    previous_cr := false
+    loop byte < raw.len() {
+        if raw[byte] == (U8{10}) {
+            end :: if previous_cr -> scalar - 1 else -> scalar
+            if end > start {
+                line := wire.slice(start, end) // #4303: view into String call.
+                &rights.push(~line)
+            }
+            start = scalar + 1
+        }
+        previous_cr = raw[byte] == (U8{13})
+        byte = byte + process_policy_text.utf8_width_at(raw, byte)
+        scalar = scalar + 1
+    }
+    if scalar > start {
+        line := wire.slice(start, scalar) // #4303
+        &rights.push(~line)
+    }
+    &rights.sort()
+    process_policy_dedup(rights)
+}
+
+// Rust jet_process_policy_digest_right :34–41: ASCII only, key case retained.
+pub fn jet_process_policy_digest_right(right: String) -> String Never! {
+    lower :: process_policy_text.ascii_lower(right)
+    if lower.starts_with("secret=") {
+        pair :: process_policy_text.split_once(right, "=") ?? panic("Secret prefix lacks equals")
+        return "{pair.before}=<redacted>"
+    }
+    ~right
+}
+
+// Rust jet_process_policy_secret_values :43–66. Stable DESCENDING BYTE length,
+// then adjacent dedup, NOT lexical sorting/global dedup or scalar lengths.
+pub fn jet_process_policy_secret_values(spec: process_policy_spec.ProcessSpecState) -> [String] Never! {
+    values := [String]{}
+    loop right in jet_process_policy_rights(spec) {
+        if process_policy_text.split_once(right, "=") == .Val(pair) {
+            if process_policy_text.ascii_lower(pair.before) == "secret" && pair.after.len() > 0 -> &values.push(^pair.after)
+        }
+    }
+    parts :: [String#6]{"secret", "token", "password", "passwd", "credential", "key"}
+    loop entry in spec.env_set {
+        if entry.value.len() == 0 -> next
+        lower :: process_policy_text.ascii_lower(entry.name)
+        loop part in parts {
+            if process_policy_text.index_of(lower, part) != None {
+                &values.push(~entry.value)
+                break
+            }
+        }
+    }
+    &values.sort_by_desc((value: String) -> process_policy_text.utf8_bytes(value).len())
+    process_policy_dedup(values)
+}
+
+// Rust jet_process_redact_text :68–76. Fold in supplied order; replacement
+// material can itself match a later secret. Do NOT rescan the original text.
+pub fn jet_process_redact_text(text: String, values: [String]) -> String Never! {
+    out := ~text
+    loop value in values {
+        if value.len() > 0 -> out = out.replace(value, "<redacted>")
+    }
+    out
+}
+
+// Rust jet_process_policy_receipt_rights :78–84. Digest-key redaction FIRST,
+// value redaction SECOND. Do not sort or dedup the transformed rights again.
+pub fn jet_process_policy_receipt_rights(spec: process_policy_spec.ProcessSpecState) -> [String] Never! {
+    values :: jet_process_policy_secret_values(spec)
+    rights := jet_process_policy_rights(spec)
+    loop i in 0..<rights.len() -> rights[i] = jet_process_redact_text(jet_process_policy_digest_right(rights[i]), values)
+    rights
+}
+
+// Rust jet_process_stream_mode_name :86–92; exact original native enum #4476.
+pub fn jet_process_stream_mode_name(mode: ProcessStreamMode) -> String Never! {
+    if mode == {
+        .Stream -> "stream"
+        .Inherit -> "inherit"
+        .Capture -> "capture"
+    }
+}
+
+// Rust jet_process_policy_environment :94–104: values NEVER enter identity.
+pub fn jet_process_policy_environment(spec: process_policy_spec.ProcessSpecState) -> String Never! {
+    names := [String]{}
+    loop pair in spec.env_set -> &names.push("set:{pair.name}")
+    loop name in spec.env_remove -> &names.push("remove:{name}")
+    &names.sort()
+    names = process_policy_dedup(names)
+    names.join("\n")
+}
+
+// Rust jet_process_backend_limits :106–126; input MUST be actual
+// std::env::consts::OS, exactly cfg(target_os), not sys.family or a provider.
+pub fn jet_process_backend_limits(target_os: String) -> [String] Never! {
+    if target_os == "linux" -> return [String]{"private-tmpfs-bytes=67108864"}
+    if target_os == "windows" -> return [String]{"job-kill-on-close=true", "active-processes=256", "memory-bytes=2147483648"}
+    [String]{}
+}
+
+fn process_policy_limit(value: I64?, absent: String) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    ~absent
+}
+
+// Rust jet_process_policy_limits :128–163. Backend facts precede the five
+// limits; None here is "none", unlike the EMPTY value in digest material.
+pub fn jet_process_policy_limits(spec: process_policy_spec.ProcessSpecState, backend_limits: ^[String]) -> [String] Never! {
+    limits := ^backend_limits
+    &limits.push("timeout-ms={process_policy_limit(spec.timeout_ms, "none")}")
+    &limits.push("output-limit={process_policy_limit(spec.output_limit, "none")}")
+    &limits.push("cpu-time-limit-ms={process_policy_limit(spec.cpu_time_limit_ms, "none")}")
+    &limits.push("memory-limit-bytes={process_policy_limit(spec.memory_limit_bytes, "none")}")
+    &limits.push("open-file-limit={process_policy_limit(spec.open_file_limit, "none")}")
+    limits
+}
+
+// Rust jet_process_policy_outputs :165–173.
+pub fn jet_process_policy_outputs(spec: process_policy_spec.ProcessSpecState) -> [String] Never! {
+    if spec.detached -> return [String]{"stdout=discarded", "stderr=discarded"}
+    [String]{"stdout={jet_process_stream_mode_name(spec.stdout)}", "stderr={jet_process_stream_mode_name(spec.stderr)}"}
+}
+
+// Rust jet_process_policy_descendants :175–183. Some("") is still bound.
+pub fn jet_process_policy_descendants(spec: process_policy_spec.ProcessSpecState) -> String Never! {
+    if spec.detached -> return "detached"
+    if spec.policy_wire != None -> return "contained"
+    "direct"
+}
+
+// Rust jet_process_input_digest :185–199; explicit material owner for corpus.
+pub fn jet_process_input_material(spec: process_policy_spec.ProcessSpecState) -> String Never! {
+    material := [U8]{}
+    process_policy_append(&material, "jet-process-input-v1\n")
+    loop word in spec.cmd {
+        raw :: process_policy_text.utf8_bytes(word)
+        process_policy_append(&material, "{raw.len()}:")
+        loop byte in raw -> &material.push(byte)
+        &material.push(U8{10})
+    }
+    String.from_bytes(material) ?? panic("process input material lost UTF-8")
+}
+pub fn jet_process_input_digest(spec: process_policy_spec.ProcessSpecState) -> String Never! {
+    process_policy_hash(jet_process_input_material(spec))
+}
+fn process_policy_hash(material: String) -> String Never! {
+    digest :: process_policy_sha.sha256_bytes(process_policy_text.utf8_bytes(material))
+    view :: digest[0..<digest.len()]
+    process_policy_encoding.bytes_to_hex(view)
+}
+fn process_policy_append(material: &[U8], text: String) Never! {
+    loop byte in process_policy_text.utf8_bytes(text) -> &material.push(byte)
+}
+
+// Rust jet_process_policy_network :201–205: exact case and whole right.
+pub fn jet_process_policy_network(spec: process_policy_spec.ProcessSpecState) -> Bool Never! {
+    loop right in jet_process_policy_rights(spec) {
+        if right == "Net" -> return true
+    }
+    false
+}
+
+// Rust jet_process_policy_safe_right_name :207–212: first ':' OR '=', empty
+// prefix remains empty (split always yields a first item, never "unknown").
+pub fn jet_process_policy_safe_right_name(right: String) -> String Never! {
+    colon :: process_policy_text.index_of(right, ":")
+    equals :: process_policy_text.index_of(right, "=")
+    end := right.len()
+    if colon == .Val(at) -> end = at
+    if equals == .Val(at) {
+        if at < end -> end = at
+    }
+    name := right.slice(0, end) // #4303
+    ~name
+}
+
+// Rust JetProcessSandboxScope :213–218, exact original private projection.
+pub struct JetProcessSandboxScope {
+    pub source_readable: Bool
+    pub output_writable: Bool
+    pub share_network: Bool
+}
+
+// Rust jet_process_policy_sandbox_scope :223–234, executable check FIRST.
+pub fn jet_process_policy_sandbox_scope(spec: process_policy_spec.ProcessSpecState, executable_identity: String) -> JetProcessSandboxScope IOError! {
+    jet_process_policy_check_executable(spec, executable_identity) ?? return Err(err)
+    readable := false
+    writable := false
+    network := false
+    loop right in jet_process_policy_rights(spec) {
+        if right == "FS.Read:repo" -> readable = true
+        if right == "FS.Write:.jet/build" -> writable = true
+        if right == "Net" -> network = true
+    }
+    JetProcessSandboxScope{source_readable: readable, output_writable: writable, share_network: network}
+}
+
+// Rust jet_process_policy_authority_cwd :239–269. The bool is ONLY the
+// native Path::is_absolute result for this exact spec.cwd (see native inventory).
+// Return retains spec's cwd owner; #4392 borrowed-result cutover stays held.
+pub fn jet_process_policy_authority_cwd(spec: process_policy_spec.ProcessSpecState, cwd_is_absolute: Bool) -> View<str>? IOError! from spec {
+    if spec.cwd == None {
+        loop right in jet_process_policy_rights(spec) {
+            if right.starts_with("FS.") -> return Err(process_policy_cwd_error())
+        }
+        return None
+    }
+    cwd := spec.cwd ?? panic("cwd owner disappeared") // #4303: String slice call.
+    if cwd.len() == 0 || !cwd_is_absolute -> return Err(process_policy_cwd_error())
+    Val(cwd.slice(0, cwd.len()))
+}
+fn process_policy_cwd_error() -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val("cwd"), os_code: None,
+        cause: Val("authority-bound process execution requires an explicit absolute cwd/PathAuthority")})
+}
+fn process_policy_other(spec: process_policy_spec.ProcessSpecState, cause: String) -> IOError Never! {
+    command :: if spec.cmd.len() > 0 -> Val(~spec.cmd[0]) else -> None
+    IOError.Other(IOContext{operation: .Resolve, resource: command, os_code: None, cause: Val(cause)})
+}
+
+// Rust jet_process_policy_check :276–315: sorted first unsupported grant,
+// THEN terminal/live descriptor redaction bypass check. Exact #4477 errors.
+pub fn jet_process_policy_check(spec: process_policy_spec.ProcessSpecState) IOError! {
+    loop right in jet_process_policy_rights(spec) {
+        supported := right == "FS.Read:repo" || right == "FS.Write:.jet/build" || right == "Net" ||
+            right == "Exec" || right == "IO" || right == "Time.Wait" ||
+            (right.starts_with("Exec:") && right.len() > 5)
+        if !supported -> return Err(process_policy_other(spec,
+            "authority grant `{jet_process_policy_safe_right_name(right)}` cannot be enforced by the native process boundary; refusing before spawn"))
+    }
+    if spec.terminal != None || (!spec.detached &&
+        (spec.stdout != ProcessStreamMode.Capture || spec.stderr != ProcessStreamMode.Capture)) {
+        return Err(process_policy_other(spec,
+            "authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn"))
+    }
+    Ok()
+}
+
+// Rust jet_process_policy_check_executable :317–337: broad Exec is not an
+// override for scoped grants; any scoped grant requires one exact identity.
+pub fn jet_process_policy_check_executable(spec: process_policy_spec.ProcessSpecState, executable_identity: String) IOError! {
+    scoped := false
+    granted := false
+    loop right in jet_process_policy_rights(spec) {
+        if right.starts_with("Exec:") {
+            scoped = true
+            expected := "Exec:{executable_identity}"
+            if right == expected -> granted = true
+        }
+    }
+    if scoped && !granted -> return Err(process_policy_other(spec, "authority policy does not grant the resolved executable"))
+    Ok()
+}
+
+// Rust jet_process_policy_material :342–429; exact field order and UTF-8 BYTE
+// lengths. Native backend limits supplied unchanged, in original cfg order.
+pub fn jet_process_policy_material(spec: process_policy_spec.ProcessSpecState, backend_limits: [String]) -> String Never! {
+    rights := jet_process_policy_rights(spec)
+    loop i in 0..<rights.len() -> rights[i] = jet_process_policy_digest_right(rights[i])
+    cwd :: spec.cwd ?? "<unspecified-cwd>"
+    environment :: if spec.policy_wire != None || spec.env_clear -> "explicit-only" else -> "inherited"
+    stdin := "closed"
+    if spec.stdin == .Val(mode) -> stdin = jet_process_stream_mode_name(mode)
+    fields :: [(key: String, value: String)#20]{
+        (key: "authority.rights", value: rights.join("\n")),
+        (key: "network", value: if jet_process_policy_network(spec) -> "allow" else -> "deny"),
+        (key: "home", value: "deny"),
+        (key: "secrets", value: "deny"),
+        (key: "devices", value: "deny"),
+        (key: "inherited-handles", value: "deny"),
+        (key: "environment", value: environment),
+        (key: "cwd", value: cwd),
+        (key: "timeout-ms", value: process_policy_limit(spec.timeout_ms, "")),
+        (key: "output-limit", value: process_policy_limit(spec.output_limit, "")),
+        (key: "cpu-time-limit-ms", value: process_policy_limit(spec.cpu_time_limit_ms, "")),
+        (key: "memory-limit-bytes", value: process_policy_limit(spec.memory_limit_bytes, "")),
+        (key: "open-file-limit", value: process_policy_limit(spec.open_file_limit, "")),
+        (key: "backend.limits", value: backend_limits.join("\n")),
+        (key: "environment.keys", value: jet_process_policy_environment(spec)),
+        (key: "stdin", value: stdin),
+        (key: "stdout", value: jet_process_stream_mode_name(spec.stdout)),
+        (key: "stderr", value: jet_process_stream_mode_name(spec.stderr)),
+        (key: "detached", value: if spec.detached -> "true" else -> "false"),
+        (key: "terminal", value: if spec.terminal != None -> "requested" else -> "none"),
+    }
+    material := [U8]{}
+    process_policy_append(&material, "jet-process-policy-v1\n")
+    loop field in fields {
+        raw :: process_policy_text.utf8_bytes(field.value)
+        process_policy_append(&material, "{field.key}={raw.len()}:")
+        loop byte in raw -> &material.push(byte)
+        &material.push(U8{10})
+    }
+    String.from_bytes(material) ?? panic("process policy material lost UTF-8")
+}
+
+// Rust jet_process_policy_digest :433–440, sole byte SHA owner + shared hex.
+pub fn jet_process_policy_digest(spec: process_policy_spec.ProcessSpecState, backend_limits: [String]) -> String Never! {
+    process_policy_hash(jet_process_policy_material(spec, backend_limits))
+}
+// Rust jet_process_policy_redact :442–444.
+pub fn jet_process_policy_redact(spec: process_policy_spec.ProcessSpecState, text: String) -> String Never! {
+    jet_process_redact_text(text, jet_process_policy_secret_values(spec))
+}
+
+// Rust resolve_executable :449–456, reachable pre-native validation only.
+pub fn jet_process_command_check(spec: process_policy_spec.ProcessSpecState) IOError! {
+    if spec.cmd.len() == 0 -> return Err(IOError.InvalidInput(IOContext{
+        operation: .Resolve, resource: None, os_code: None,
+        cause: Val("process command needs at least one word")}))
+    Ok()
+}
+// Rust backend_check :503–517, actual isolation_backend().is_some() fact.
+pub fn jet_process_spec_backend_check(spec: process_policy_spec.ProcessSpecState, backend_available: Bool) IOError! {
+    if spec.policy_wire == None || backend_available -> return Ok()
+    Err(process_policy_other(spec, "authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn"))
+}
+// Rust plan :523–530. Native resource_limits_check MUST precede this guard.
+pub fn jet_process_plan_authority_check(spec: process_policy_spec.ProcessSpecState) IOError! {
+    if spec.policy_wire == None {
+        command :: if spec.cmd.len() > 0 -> Val(~spec.cmd[0]) else -> None
+        return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: command, os_code: None,
+            cause: Val("ProcessSpec.plan() requires an authority policy from .under(...)")}))
+    }
+    Ok()
+}
+// Rust plan :551–560. Called AFTER constructing the ORIGINAL native plan and
+// its digests/redacted argv/rights/limits/outputs, never a substitute plan type.
+pub fn jet_process_plan_backend_check(spec: process_policy_spec.ProcessSpecState, backend: String, policy_digest: String) IOError! {
+    if backend == "unavailable" -> return Err(process_policy_other(spec,
+        "authority-bound process plan refused before spawn: isolation backend unavailable (policy digest {policy_digest})"))
+    Ok()
+}
+
+// Rust jet_process_isolation_backend :498–501. These are ONLY fields from the
+// real native jet_process_sandbox::status()->Status, sampled once by the adapter.
+// Available moves the native mechanism String; unavailable drops it. No probe,
+// mocked status, global, provider or alternate backend table exists here.
+pub fn jet_process_isolation_backend(available: Bool, mechanism: ^String) -> String? Never! {
+    if available -> return Val(^mechanism)
+    None
+}

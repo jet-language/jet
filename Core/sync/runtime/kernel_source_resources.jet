@@ -1,0 +1,1804 @@
+// PORT-PENDING 2024 crates-jet-jit-src-sourceresources-slice-1: crates/jet-jit/src/SourceResources.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Invocation-scoped typed owners for Source/Core resource iteration.
+//RS //!
+//RS //! This is deliberately the only JIT-side table for Source resource leases.  A
+//RS //! slot is keyed by an arena-issued raw capability plus the checked MIR handle
+//RS //! identity and exact resource kind.  Raw values are opaque capabilities: they
+//RS //! are never cast to pointers, passed to a Rust semantic evaluator, or treated
+//RS //! as an item value.
+//RS 
+//RS use std::cell::RefCell;
+//RS use std::collections::HashMap;
+//RS use std::fmt;
+//RS use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+//RS use std::sync::{Arc, Mutex, MutexGuard, Weak};
+//RS 
+//RS use jet_codegen::Codegen::NativeLoopCursor::{
+//RS     NativeIter, NativeLoopResourceFactory, NativeLoopResourceKey, NativeLoopResourceOutcome,
+//RS };
+//RS use jet_foundation::MIR::{
+//RS     stable_id, MirCoreOwner, MirHandleId, MirLoopSourceKind, MirNativeCursor,
+//RS     MirNativeCursorError, MirNativeOwned, MirOwnershipMode, MirRuntimeValue, MirType, MirTypeKind,
+//RS };
+//RS use crate::backend::{SourceExecutionCompletion, SourceExecutionCompletionScope};
+//RS 
+//RS /// The checked handle identity emitted for the private Prelude cursor carrier.
+//RS pub fn loop_cursor_handle_id() -> MirHandleId {
+//RS     MirHandleId(stable_id("mir-handle", "core.prelude::loop_iter_cursor"))
+//RS }
+//RS 
+//RS /// Checked Prelude handle identity shared by physical native interface and
+//RS /// callable value roots. It is a capability namespace, never a function ID.
+//RS pub fn native_binding_handle_id() -> MirHandleId {
+//RS     MirHandleId(stable_id("mir-handle", "core.prelude::native_binding"))
+//RS }
+//RS /// Checked handle identity for a private physical Source Shared root.
+//RS pub fn shared_interop_root_handle_id() -> MirHandleId {
+//RS     MirHandleId(stable_id("mir-handle", "jet.internal::source_shared_interop_root"))
+//RS }
+//RS /// Checked handle identity for a private physical Source Shared weak root.
+//RS pub fn shared_interop_weak_root_handle_id() -> MirHandleId {
+//RS     MirHandleId(stable_id(
+//RS         "mir-handle",
+//RS         "jet.internal::source_shared_interop_weak_root",
+//RS     ))
+//RS }
+//RS 
+//RS 
+//RS /// Exact kind of a Source-owned resource slot.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum SourceResourceKind {
+//RS     PlainStream,
+//RS     LinesFile,
+//RS     /// A typed writer lease is releasable by the Source arena but is not a
+//RS     /// loop producer.  It exists so Core file creation never falls back to a
+//RS     /// raw legacy slot or a reopened path.
+//RS     FileWriter,
+//RS     LinesStdin,
+//RS     LinesProcessStream,
+//RS     ChannelReceiver,
+//RS     /// A canonical sender endpoint paired with exactly one receiver owner.
+//RS     ChannelSender,
+//RS     NativeBinding,
+//RS     SharedInteropRoot { type_identity: u64 },
+//RS     SharedInteropWeakRoot { type_identity: u64 },
+//RS     EncodingReader { reader_type: String },
+//RS     EncodingWriter { writer_type: String },
+//RS     NativeCursor,
+//RS }
+//RS impl SourceResourceKind {
+//RS     pub fn from_loop_source(source: &MirLoopSourceKind) -> Result<Self, String> {
+//RS         match source {
+//RS             MirLoopSourceKind::Plain => Ok(Self::PlainStream),
+//RS             MirLoopSourceKind::LinesFile => Ok(Self::LinesFile),
+//RS             MirLoopSourceKind::LinesStdin => Ok(Self::LinesStdin),
+//RS             MirLoopSourceKind::LinesProcessStream => Ok(Self::LinesProcessStream),
+//RS             MirLoopSourceKind::ChannelReceiver => Ok(Self::ChannelReceiver),
+//RS             MirLoopSourceKind::EncodingReader { reader_type } => {
+//RS                 Ok(Self::EncodingReader {
+//RS                     reader_type: reader_type.clone(),
+//RS                 })
+//RS             }
+//RS             MirLoopSourceKind::Chars => Err("character iteration is not a resource slot".to_string()),
+//RS             MirLoopSourceKind::Iterable { .. } => {
+//RS                 Err("UserIterable is not a native resource slot".to_string())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn matches_loop_source(&self, source: &MirLoopSourceKind) -> bool {
+//RS         match (self, source) {
+//RS             (Self::PlainStream, MirLoopSourceKind::Plain)
+//RS             | (Self::LinesFile, MirLoopSourceKind::LinesFile)
+//RS             | (Self::LinesStdin, MirLoopSourceKind::LinesStdin)
+//RS             | (Self::LinesProcessStream, MirLoopSourceKind::LinesProcessStream)
+//RS             | (Self::ChannelReceiver, MirLoopSourceKind::ChannelReceiver) => true,
+//RS             (
+//RS                 Self::EncodingReader { reader_type: left },
+//RS                 MirLoopSourceKind::EncodingReader { reader_type: right },
+//RS             ) => left == right,
+//RS             _ => false,
+//RS         }
+//RS     }
+//RS     pub fn as_loop_source(&self) -> Result<MirLoopSourceKind, String> {
+//RS         match self {
+//RS             Self::PlainStream => Ok(MirLoopSourceKind::Plain),
+//RS             Self::LinesFile => Ok(MirLoopSourceKind::LinesFile),
+//RS             Self::FileWriter => Err("file writer is not a loop producer kind".to_string()),
+//RS             Self::LinesStdin => Ok(MirLoopSourceKind::LinesStdin),
+//RS             Self::LinesProcessStream => Ok(MirLoopSourceKind::LinesProcessStream),
+//RS             Self::ChannelReceiver => Ok(MirLoopSourceKind::ChannelReceiver),
+//RS             Self::ChannelSender => Err("channel sender is not a loop producer kind".to_string()),
+//RS             Self::EncodingReader { reader_type } => Ok(MirLoopSourceKind::EncodingReader {
+//RS                 reader_type: reader_type.clone(),
+//RS             }),
+//RS             Self::EncodingWriter { .. } => {
+//RS                 Err("encoding writer is not a loop producer kind".to_string())
+//RS             }
+//RS             Self::SharedInteropRoot { .. } | Self::SharedInteropWeakRoot { .. } => {
+//RS                 Err("Source Shared owners are not loop producer kinds".to_string())
+//RS             }
+//RS             Self::NativeBinding => Err("native binding is not a loop producer kind".to_string()),
+//RS             Self::NativeCursor => Err("native cursor is not a loop producer kind".to_string()),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Map one checked Core owner registration and its checked MIR instance to
+//RS     /// the physical Source owner kind.
+//RS     ///
+//RS     /// The registration is the canonical authority for the owner name/key and
+//RS     /// ownership mode.  Its nominal identity must match the Apply spelling;
+//RS     /// an optional MIR instance identity may differ from the registration id.
+//RS     /// The live `(handle, raw, kind)` capability is validated separately by
+//RS     /// `take_owned_with_value`.
+//RS     pub fn from_core_owner_type(
+//RS         registration: &MirCoreOwner,
+//RS         owner_type: &MirType,
+//RS     ) -> Result<Self, String> {
+//RS         if registration.id.0 == 0 || registration.nominal_id.0 == 0 {
+//RS             return Err("checked Core owner registration has a zero identity".to_string());
+//RS         }
+//RS         if registration.key.is_empty() || registration.name.is_empty() {
+//RS             return Err("checked Core owner registration has an empty key or name".to_string());
+//RS         }
+//RS         if !matches!(
+//RS             registration.ownership,
+//RS             MirOwnershipMode::Owned | MirOwnershipMode::Move
+//RS         ) {
+//RS             return Err("checked Core owner registration is not owned".to_string());
+//RS         }
+//RS         let MirTypeKind::Apply { name, args } = &owner_type.kind else {
+//RS             return Err("checked Core resource owner is not a nominal Apply".to_string());
+//RS         };
+//RS         if name.id != registration.nominal_id {
+//RS             return Err(format!(
+//RS                 "checked Core owner `{}` identity disagrees with its nominal registration",
+//RS                 registration.name
+//RS             ));
+//RS         }
+//RS         if name.name != registration.name {
+//RS             return Err(format!(
+//RS                 "checked Core owner registration `{}` disagrees with Apply name `{}`",
+//RS                 registration.name, name.name
+//RS             ));
+//RS         }
+//RS 
+//RS         let (kind, expected_arity): (Self, usize) = match registration.name.as_str() {
+//RS             "Stream" => (Self::PlainStream, 1),
+//RS             "FileReader" => (Self::LinesFile, 0),
+//RS             "FileWriter" => (Self::FileWriter, 0),
+//RS             "StdinHandle" => (Self::LinesStdin, 0),
+//RS             "ProcessStdoutStream" | "ProcessStderrStream" => {
+//RS                 (Self::LinesProcessStream, 0)
+//RS             }
+//RS             "Receiver" => (Self::ChannelReceiver, 1),
+//RS             "Sender" => (Self::ChannelSender, 1),
+//RS             "JSONReader" => (
+//RS                 Self::EncodingReader {
+//RS                     reader_type: "JSONReader".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "JSONWriter" => (
+//RS                 Self::EncodingWriter {
+//RS                     writer_type: "JSONWriter".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "JSONLReader" => (
+//RS                 Self::EncodingReader {
+//RS                     reader_type: "JSONLReader".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "JSONLWriter" => (
+//RS                 Self::EncodingWriter {
+//RS                     writer_type: "JSONLWriter".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "CSVReader" => (
+//RS                 Self::EncodingReader {
+//RS                     reader_type: "CSVReader".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "CSVWriter" => (
+//RS                 Self::EncodingWriter {
+//RS                     writer_type: "CSVWriter".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "XMLReader" => (
+//RS                 Self::EncodingReader {
+//RS                     reader_type: "XMLReader".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "XMLWriter" => (
+//RS                 Self::EncodingWriter {
+//RS                     writer_type: "XMLWriter".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "CBORReader" => (
+//RS                 Self::EncodingReader {
+//RS                     reader_type: "CBORReader".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             "CBORWriter" => (
+//RS                 Self::EncodingWriter {
+//RS                     writer_type: "CBORWriter".to_string(),
+//RS                 },
+//RS                 0,
+//RS             ),
+//RS             _ => {
+//RS                 return Err(format!(
+//RS                     "unsupported checked Core resource owner `{}`",
+//RS                     registration.name
+//RS                 ))
+//RS             }
+//RS         };
+//RS         if args.len() != expected_arity {
+//RS             return Err(format!(
+//RS                 "checked Core resource owner `{}` has {} type arguments; expected {}",
+//RS                 registration.name,
+//RS                 args.len(),
+//RS                 expected_arity
+//RS             ));
+//RS         }
+//RS         Ok(kind)
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS impl SourceResourceHandle {
+//RS     pub fn native_loop_key(&self) -> Result<NativeLoopResourceKey, String> {
+//RS         Ok(NativeLoopResourceKey {
+//RS             handle: self.handle,
+//RS             raw: self.raw,
+//RS             source_kind: self.kind.as_loop_source()?,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// An arena-issued, invocation-scoped capability.  `generation` is retained
+//RS /// for diagnostics and stale-lease checks; the raw slot is never recycled.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct SourceResourceHandle {
+//RS     pub handle: MirHandleId,
+//RS     pub raw: i64,
+//RS     pub kind: SourceResourceKind,
+//RS     pub generation: u32,
+//RS }
+//RS 
+//RS /// Result of releasing one Source capability. A final physical channel
+//RS /// receiver returns every queued runtime value in an owned envelope; callers
+//RS /// must hand those values to Source cleanup before dropping this result.
+//RS #[derive(Debug)]
+//RS pub enum SourceResourceRelease {
+//RS     Released,
+//RS     DrainedChannel(Vec<MirRuntimeValue>),
+//RS }
+//RS 
+//RS impl SourceResourceRelease {
+//RS     pub fn drained_values(mut self) -> Vec<MirRuntimeValue> {
+//RS         match &mut self {
+//RS             Self::Released => Vec::new(),
+//RS             Self::DrainedChannel(values) => std::mem::take(values),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Failure from an origin cleanup callback. `remaining` owns the carrier only
+//RS /// when cleanup did not consume it; already-consumed failures use `None`.
+//RS #[derive(Debug)]
+//RS pub struct SourceResourceCleanupError {
+//RS     pub error: String,
+//RS     pub remaining: Option<MirRuntimeValue>,
+//RS }
+//RS 
+//RS 
+//RS /// Retirement could not hand every queued Source value to its origin owner.
+//RS /// `values` contains only carriers that were never passed to Source cleanup;
+//RS /// `arena` keeps their physical decode/resource context live for retry.
+//RS #[derive(Debug)]
+//RS pub struct SourceResourceRetireError {
+//RS     pub error: String,
+//RS     pub arena: SourceResourceArena,
+//RS     pub values: Vec<MirRuntimeValue>,
+//RS     pub completions: Vec<SourceExecutionCompletion>,
+//RS     retryable: bool,
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub enum SourceResourceFinalizationOutcome {
+//RS     Retired {
+//RS         completions: Vec<SourceExecutionCompletion>,
+//RS     },
+//RS     Failed(SourceResourceRetireError),
+//RS }
+//RS 
+//RS /// Active physical resource context and exact MIR carriers handed to the
+//RS /// origin Source evaluator for terminal cleanup.
+//RS pub struct SourceResourceFinalization {
+//RS     arena: SourceResourceArena,
+//RS     values: Vec<MirRuntimeValue>,
+//RS     lease: SourceResourceLease,
+//RS }
+//RS 
+//RS 
+//RS 
+//RS impl SourceResourceFinalization {
+//RS     pub fn arena(&self) -> &SourceResourceArena {
+//RS         &self.arena
+//RS     }
+//RS 
+//RS     /// The counted capability that keeps physical slots live through this
+//RS     /// synchronous finalization invocation.
+//RS     pub fn lease(&self) -> &SourceResourceLease {
+//RS         &self.lease
+//RS     }
+//RS 
+//RS     /// Run cleanup within the live arena/lease scope. Successful cleanup must
+//RS     /// consume every pending carrier; completions are returned exactly to the
+//RS     /// active execution scope or the explicit retirement caller.
+//RS     pub fn with_live_scope(
+//RS         mut self,
+//RS         scope: impl FnOnce(
+//RS             &SourceResourceArena,
+//RS             &SourceResourceLease,
+//RS             &mut Vec<MirRuntimeValue>,
+//RS             &mut Vec<SourceExecutionCompletion>,
+//RS         ) -> Result<(), String>,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceFinalizationError> {
+//RS         let mut completions = Vec::new();
+//RS         let phase = match self.lease.activate_finalization_phase() {
+//RS             Ok(phase) => phase,
+//RS             Err(error) => {
+//RS                 return Err(SourceResourceFinalizationError {
+//RS                     error,
+//RS                     values: self.values,
+//RS                     completions,
+//RS                 });
+//RS             }
+//RS         };
+//RS         let result = {
+//RS             let _phase = phase;
+//RS             let _activation = self.lease.activate();
+//RS             scope(&self.arena, &self.lease, &mut self.values, &mut completions)
+//RS         };
+//RS         match result {
+//RS             Ok(()) if self.values.is_empty() => Ok(completions),
+//RS             Ok(()) => Err(SourceResourceFinalizationError {
+//RS                 error: "Source finalization left carriers unconsumed".to_string(),
+//RS                 values: self.values,
+//RS                 completions,
+//RS             }),
+//RS             Err(error) => Err(SourceResourceFinalizationError {
+//RS                 error,
+//RS                 values: self.values,
+//RS                 completions,
+//RS             }),
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS }
+//RS 
+//RS impl fmt::Debug for SourceResourceFinalization {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         f.debug_struct("SourceResourceFinalization")
+//RS             .field("arena", &self.arena)
+//RS             .field("values", &self.values)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// Finalizer failure owns only carriers that were not yet handed to Source
+//RS /// cleanup. `completions` retains every exact execution receipt observed
+//RS /// before failure, whether or not a Source carrier remains.
+//RS #[derive(Debug)]
+//RS pub struct SourceResourceFinalizationError {
+//RS     pub error: String,
+//RS     pub values: Vec<MirRuntimeValue>,
+//RS     pub completions: Vec<SourceExecutionCompletion>,
+//RS }
+//RS 
+//RS impl SourceResourceFinalizationError {
+//RS     pub fn into_parts(
+//RS         self,
+//RS     ) -> (
+//RS         String,
+//RS         Vec<MirRuntimeValue>,
+//RS         Vec<SourceExecutionCompletion>,
+//RS     ) {
+//RS         (self.error, self.values, self.completions)
+//RS     }
+//RS }
+//RS 
+//RS /// Consumer for automatic last-root retirement. It receives successful
+//RS /// unscoped completions as well as full retryable retirement failures.
+//RS pub type SourceResourceFinalizationHandler =
+//RS     Arc<dyn Fn(SourceResourceFinalizationOutcome) + Send + Sync + 'static>;
+//RS 
+//RS /// Explicit origin-owner handoff used for queued Source channel values. The
+//RS /// consumer converts carriers with the checked origin codec while `arena` is
+//RS /// live and performs Source cleanup exactly once.
+//RS pub type SourceResourceFinalizer = Arc<
+//RS     dyn Fn(SourceResourceFinalization)
+//RS             -> Result<Vec<SourceExecutionCompletion>, SourceResourceFinalizationError>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS >;
+//RS 
+//RS fn route_completions(
+//RS     completions: Vec<SourceExecutionCompletion>,
+//RS ) -> Vec<SourceExecutionCompletion> {
+//RS     let mut unrecorded = Vec::new();
+//RS     for completion in completions {
+//RS         if let Err(completion) = SourceExecutionCompletionScope::record_current(completion) {
+//RS             unrecorded.push(completion);
+//RS         }
+//RS     }
+//RS     unrecorded
+//RS }
+//RS 
+//RS fn route_retire_result(
+//RS     result: Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>,
+//RS ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS     match result {
+//RS         Ok(completions) => Ok(route_completions(completions)),
+//RS         Err(mut error) => {
+//RS             error.completions = route_completions(error.completions);
+//RS             Err(error)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Checked identity of a physical native value root. Interface method identity
+//RS /// is intentionally absent: SourceInterfaces performs that method check after
+//RS /// it resolves the exact retained interface carrier.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum SourceNativeBindingIdentity {
+//RS     Callable(crate::SourceInterfaces::NativeCallableIdentity),
+//RS     Interface {
+//RS         execution: jet_foundation::MIR::MirExecutionIdentity,
+//RS         artifact: jet_foundation::MIR::MirArtifactId,
+//RS         receiver_type: MirType,
+//RS     },
+//RS }
+//RS 
+//RS impl SourceNativeBindingIdentity {
+//RS     pub fn value_type(&self) -> &MirType {
+//RS         match self {
+//RS             Self::Callable(identity) => &identity.callable_type,
+//RS             Self::Interface { receiver_type, .. } => receiver_type,
+//RS         }
+//RS     }
+//RS 
+//RS     fn same_scope_and_type(&self, other: &Self) -> bool {
+//RS         self == other
+//RS     }
+//RS }
+//RS 
+//RS /// Checked physical root for one native interface or native Fn value. The
+//RS /// retained `MirNativeOwned` carrier and object identity are physical metadata;
+//RS /// dispatch and binding-set scope validation stay with NativeAdapter and
+//RS /// SourceInterfaces.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct SourceNativeBinding {
+//RS     carrier: MirNativeOwned,
+//RS     object: crate::SourceInterfaces::NativeInterfaceObjectId,
+//RS     identity: SourceNativeBindingIdentity,
+//RS }
+//RS 
+//RS impl SourceNativeBinding {
+//RS     pub fn interface(
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         execution: jet_foundation::MIR::MirExecutionIdentity,
+//RS         artifact: jet_foundation::MIR::MirArtifactId,
+//RS         receiver_type: MirType,
+//RS     ) -> Result<Self, String> {
+//RS         if execution.artifact.artifact != artifact {
+//RS             return Err("native interface binding execution/artifact mismatch".to_string());
+//RS         }
+//RS         if !receiver_type.has_valid_layout() {
+//RS             return Err("native interface receiver type has invalid MIR layout".to_string());
+//RS         }
+//RS         Ok(Self {
+//RS             carrier: object.clone_root(),
+//RS             object: object.id(),
+//RS             identity: SourceNativeBindingIdentity::Interface {
+//RS                 execution,
+//RS                 artifact,
+//RS                 receiver_type,
+//RS             },
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn callable(
+//RS         object: &crate::SourceInterfaces::NativeInterfaceObject,
+//RS         identity: crate::SourceInterfaces::NativeCallableIdentity,
+//RS     ) -> Result<Self, String> {
+//RS         if identity.execution.artifact.artifact != identity.artifact {
+//RS             return Err("native callable binding execution/artifact mismatch".to_string());
+//RS         }
+//RS         if !identity.callable_type.has_valid_layout() {
+//RS             return Err("native callable type has invalid MIR layout".to_string());
+//RS         }
+//RS         crate::SourceInterfaces::NativeCallableSignature::checked(&identity.callable_type)
+//RS             .map_err(|error| error.to_string())?;
+//RS         Ok(Self {
+//RS             carrier: object.clone_root(),
+//RS             object: object.id(),
+//RS             identity: SourceNativeBindingIdentity::Callable(identity),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn carrier(&self) -> &MirNativeOwned {
+//RS         &self.carrier
+//RS     }
+//RS 
+//RS     pub fn object_id(&self) -> crate::SourceInterfaces::NativeInterfaceObjectId {
+//RS         self.object
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> &SourceNativeBindingIdentity {
+//RS         &self.identity
+//RS     }
+//RS 
+//RS     pub fn value_type(&self) -> &MirType {
+//RS         self.identity.value_type()
+//RS     }
+//RS 
+//RS     fn matches_expected(&self, expected: &SourceNativeBindingIdentity) -> bool {
+//RS         self.identity.same_scope_and_type(expected)
+//RS     }
+//RS }
+//RS 
+//RS /// Rejected Source channel send. The logical value remains owned by this
+//RS /// envelope until Source handles cleanup or retries it.
+//RS #[derive(Debug)]
+//RS pub struct SourceChannelSendError {
+//RS     pub error: MirNativeCursorError,
+//RS     pub value: MirRuntimeValue,
+//RS }
+//RS 
+//RS impl SourceChannelSendError {
+//RS     pub fn into_parts(self) -> (MirNativeCursorError, MirRuntimeValue) {
+//RS         (self.error, self.value)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Result of consuming one Source capability into another typed owner.
+//RS ///
+//RS /// `consumed` is `None` when the source capability failed pre-take
+//RS /// validation and remains releasable. It is `Some` once the physical owner
+//RS /// has been taken; that source token is stale thereafter, including when
+//RS /// codec construction or destination registration returns an error.
+//RS #[derive(Debug, PartialEq)]
+//RS pub struct SourceResourceTransferOutcome {
+//RS     pub consumed: Option<SourceResourceHandle>,
+//RS     pub result: Result<SourceResourceHandle, MirNativeCursorError>,
+//RS }
+//RS 
+//RS /// A physical owner detached from one checked Source capability.  The lease
+//RS /// carries the consumed receipt privately; no raw capability bits are placed
+//RS /// in the queued runtime carrier.
+//RS pub struct SourceOwnedLease {
+//RS     owner: Arc<Mutex<BackendOwner>>,
+//RS     consumed: SourceResourceHandle,
+//RS     kind: SourceResourceKind,
+//RS }
+//RS 
+//RS impl SourceOwnedLease {
+//RS     /// Attach the checked runtime payload before moving this lease into a
+//RS     /// scheduler value.
+//RS     pub fn with_value(self, value: MirRuntimeValue) -> SourceOwnedValue {
+//RS         SourceOwnedValue {
+//RS             value,
+//RS             owner: self.owner,
+//RS             consumed: self.consumed,
+//RS             kind: self.kind,
+//RS         }
+//RS     }
+//RS     fn into_owner(self) -> Arc<Mutex<BackendOwner>> {
+//RS         self.owner
+//RS     }
+//RS 
+//RS     pub fn kind(&self) -> &SourceResourceKind {
+//RS         &self.kind
+//RS     }
+//RS }
+//RS 
+//RS /// A checked runtime payload plus the physical Source owner that was moved
+//RS /// with it.  This is the only payload accepted by `adopt_owned`; callers
+//RS /// cannot construct one without first taking a live arena capability.
+//RS pub struct SourceOwnedValue {
+//RS     owner: Arc<Mutex<BackendOwner>>,
+//RS     value: MirRuntimeValue,
+//RS     consumed: SourceResourceHandle,
+//RS     kind: SourceResourceKind,
+//RS }
+//RS 
+//RS /// Typed payload object stored inside `MirNativeOwned`.  It is public only so
+//RS /// native boundary code can use the MIR carrier's typed downcast; its fields
+//RS /// remain private and it can only be built from a real Source-owned value.
+//RS pub struct SourceOwnedPayload {
+//RS     value: SourceOwnedValue,
+//RS }
+//RS 
+//RS impl SourceOwnedPayload {
+//RS     pub fn new(value: SourceOwnedValue) -> Self {
+//RS         Self { value }
+//RS     }
+//RS 
+//RS     pub fn value(&self) -> &SourceOwnedValue {
+//RS         &self.value
+//RS     }
+//RS 
+//RS     pub fn into_value(self) -> SourceOwnedValue {
+//RS         self.value
+//RS     }
+//RS }
+//RS 
+//RS impl SourceOwnedValue {
+//RS     pub fn value(&self) -> &MirRuntimeValue {
+//RS         &self.value
+//RS     }
+//RS 
+//RS 
+//RS     pub fn kind(&self) -> &SourceResourceKind {
+//RS         &self.kind
+//RS     }
+//RS 
+//RS     /// Wrap the payload and lease in the genuine non-serializable MIR carrier.
+//RS     pub fn into_runtime_value(self) -> MirRuntimeValue {
+//RS         MirRuntimeValue::NativeOwned(MirNativeOwned::new(SourceOwnedPayload::new(self)))
+//RS     }
+//RS }
+//RS 
+//RS /// Recover one uniquely-owned Source payload from the MIR native-owned
+//RS /// carrier.  Aliased carriers are rejected instead of cloning a physical
+//RS /// owner or inventing a second logical capability.
+//RS pub fn source_owned_from_runtime_value(
+//RS     value: MirRuntimeValue,
+//RS ) -> Result<SourceOwnedValue, MirNativeCursorError> {
+//RS     let MirRuntimeValue::NativeOwned(carrier) = value else {
+//RS         return Err(MirNativeCursorError::internal(
+//RS             "expected a native-owned Source payload",
+//RS         ));
+//RS     };
+//RS     let carrier = carrier
+//RS         .downcast::<SourceOwnedPayload>()
+//RS         .map_err(|_| MirNativeCursorError::internal("native-owned payload type mismatch"))?;
+//RS     std::sync::Arc::try_unwrap(carrier)
+//RS         .map(SourceOwnedPayload::into_value)
+//RS         .map_err(|_| {
+//RS             MirNativeCursorError::internal(
+//RS                 "native-owned Source payload is aliased and cannot be adopted",
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS /// Failure while attaching a logical runtime value to a consumed Source
+//RS /// owner. The value remains owned by this envelope so Source can retry or
+//RS /// perform semantic cleanup; the consumed receipt remains stale.
+//RS #[derive(Debug)]
+//RS pub struct SourceOwnedTakeError {
+//RS     pub error: MirNativeCursorError,
+//RS     pub value: MirRuntimeValue,
+//RS }
+//RS 
+//RS impl SourceOwnedTakeError {
+//RS     pub fn into_parts(self) -> (MirNativeCursorError, MirRuntimeValue) {
+//RS         (self.error, self.value)
+//RS     }
+//RS }
+//RS 
+//RS /// Failure while committing an already-detached Source owner into a
+//RS /// destination arena. Unlike a plain error, this envelope retains the
+//RS /// complete physical/logical owner for Source rollback or cleanup.
+//RS pub struct SourceOwnedTransferFailure {
+//RS     pub error: MirNativeCursorError,
+//RS     pub owned: SourceOwnedValue,
+//RS }
+//RS 
+//RS impl SourceOwnedTransferFailure {
+//RS     pub fn into_parts(self) -> (MirNativeCursorError, SourceOwnedValue) {
+//RS         (self.error, self.owned)
+//RS     }
+//RS }
+//RS impl std::fmt::Debug for SourceOwnedTransferFailure {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         formatter
+//RS             .debug_struct("SourceOwnedTransferFailure")
+//RS             .field("error", &self.error)
+//RS             .field("owned", &"<SourceOwnedValue>")
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// Receipt returned after a detached payload is adopted by a destination
+//RS /// handle. `result` preserves the complete owned value on every failure.
+//RS pub struct SourceOwnedTransferOutcome {
+//RS     pub consumed: SourceResourceHandle,
+//RS     pub result: Result<(SourceResourceHandle, MirRuntimeValue), SourceOwnedTransferFailure>,
+//RS }
+//RS 
+//RS /// Cursor acquisition outcome with the source receipt preserved after a
+//RS /// by-value owner is detached.  `consumed` is stale once present; it remains
+//RS /// available when iterator construction or cursor-slot installation fails.
+//RS #[derive(Debug, PartialEq)]
+//RS pub struct SourceCursorInitOutcome {
+//RS     pub consumed: Option<SourceResourceHandle>,
+//RS     pub result: Result<(SourceResourceHandle, MirRuntimeValue), MirNativeCursorError>,
+//RS }
+//RS 
+//RS /// A typed file owner adopted from the canonical FileStream Prelude leaf.
+//RS pub struct SourceFileReader(crate::enc_stream::runtime::JetFileReader);
+//RS 
+//RS impl SourceFileReader {
+//RS     pub fn open(path: &str) -> Result<Self, MirNativeCursorError> {
+//RS         crate::enc_stream::source_file_open(path)
+//RS             .map(Self)
+//RS             .map_err(file_error)
+//RS     }
+//RS 
+//RS     /// Consume a legacy JIT FileReader slot at the typed owner boundary.
+//RS     pub(crate) fn from_handle(handle: i64) -> Result<Self, String> {
+//RS         crate::enc_stream::source_take_file_reader(handle).map(Self)
+//RS     }
+//RS }
+//RS 
+//RS /// A typed writer owner.  Source keeps this owner in the same invocation
+//RS /// arena as readers so create/append never reopen a path or expose a slot ID.
+//RS pub struct SourceFileWriter(crate::enc_stream::runtime::JetFileWriter);
+//RS 
+//RS impl SourceFileWriter {
+//RS     pub fn create(path: &str) -> Result<Self, MirNativeCursorError> {
+//RS         crate::enc_stream::source_file_create(path)
+//RS             .map(Self)
+//RS             .map_err(file_error)
+//RS     }
+//RS 
+//RS     pub fn append(path: &str) -> Result<Self, MirNativeCursorError> {
+//RS         crate::enc_stream::source_file_append(path)
+//RS             .map(Self)
+//RS             .map_err(file_error)
+//RS     }
+//RS 
+//RS     /// Consume a legacy JIT FileWriter slot at the typed owner boundary.
+//RS     pub(crate) fn from_handle(handle: i64) -> Result<Self, String> {
+//RS         crate::enc_stream::source_take_file_writer(handle).map(Self)
+//RS     }
+//RS }
+//RS 
+//RS /// A process stdout/stderr owner whose reader lease is safe to move into a
+//RS /// native cursor task.  Construction from a checked ProcessChild stays in the
+//RS /// ProcessPrelude owner module.
+//RS pub struct SourceProcessStream(crate::ProcessPrelude::process_prelude::SourceProcessReader);
+//RS 
+//RS impl SourceProcessStream {
+//RS     pub(crate) fn from_child(
+//RS         child: &crate::ProcessPrelude::process_prelude::ProcessChild,
+//RS         stream: crate::ProcessPrelude::process_prelude::SourceProcessStreamKind,
+//RS     ) -> Result<Self, String> {
+//RS         crate::ProcessPrelude::process_prelude::source_take_process_stream(child, stream).map(Self)
+//RS     }
+//RS }
+//RS /// Public projection of the canonical encoding limits used when an owner is
+//RS /// acquired.  The runtime reader keeps the typed `JetOutcome` carrier
+//RS /// internally; Source callers only supply the checked scalar facts.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct SourceEncodingLimits {
+//RS     pub buffer_bytes: i64,
+//RS     pub max_depth: i64,
+//RS     pub max_item_bytes: i64,
+//RS     pub max_total_bytes: Option<i64>,
+//RS     pub max_expansion_depth: i64,
+//RS     pub max_expansion_bytes: i64,
+//RS }
+//RS 
+//RS impl SourceEncodingLimits {
+//RS     pub fn safe() -> Self {
+//RS         let limits = crate::enc_stream::runtime::jet_std::EncodingLimits::safe();
+//RS         Self {
+//RS             buffer_bytes: limits.buffer_bytes,
+//RS             max_depth: limits.max_depth,
+//RS             max_item_bytes: limits.max_item_bytes,
+//RS             max_total_bytes: match limits.max_total_bytes {
+//RS                 Ok(value) => Some(value),
+//RS                 Err(_) => None,
+//RS             },
+//RS             max_expansion_depth: limits.max_expansion_depth,
+//RS             max_expansion_bytes: limits.max_expansion_bytes,
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::EncodingLimits {
+//RS         crate::enc_stream::runtime::jet_std::EncodingLimits {
+//RS             buffer_bytes: self.buffer_bytes,
+//RS             max_depth: self.max_depth,
+//RS             max_item_bytes: self.max_item_bytes,
+//RS             max_total_bytes: self
+//RS                 .max_total_bytes
+//RS                 .map(Ok)
+//RS                 .unwrap_or(Err(jet_foundation::Outcome::JetAbsent)),
+//RS             max_expansion_depth: self.max_expansion_depth,
+//RS             max_expansion_bytes: self.max_expansion_bytes,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Checked XML parser limits projected from the shared Prelude carrier.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct SourceXmlLimits {
+//RS     pub max_depth: i64,
+//RS     pub max_nodes: i64,
+//RS     pub max_attributes_per_element: i64,
+//RS     pub max_name_bytes: i64,
+//RS     pub max_text_bytes: i64,
+//RS     pub max_entity_declarations: i64,
+//RS     pub max_entity_depth: i64,
+//RS     pub max_entity_replacement_bytes: i64,
+//RS }
+//RS 
+//RS impl SourceXmlLimits {
+//RS     fn from_runtime(
+//RS         limits: crate::enc_stream::runtime::jet_std::XMLLimits,
+//RS     ) -> Self {
+//RS         Self {
+//RS             max_depth: limits.max_depth,
+//RS             max_nodes: limits.max_nodes,
+//RS             max_attributes_per_element: limits.max_attributes_per_element,
+//RS             max_name_bytes: limits.max_name_bytes,
+//RS             max_text_bytes: limits.max_text_bytes,
+//RS             max_entity_declarations: limits.max_entity_declarations,
+//RS             max_entity_depth: limits.max_entity_depth,
+//RS             max_entity_replacement_bytes: limits.max_entity_replacement_bytes,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn safe() -> Self {
+//RS         Self::from_runtime(
+//RS             crate::enc_stream::runtime::jet_std::XMLLimits::safe(),
+//RS         )
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLLimits {
+//RS         crate::enc_stream::runtime::jet_std::XMLLimits {
+//RS             max_depth: self.max_depth,
+//RS             max_nodes: self.max_nodes,
+//RS             max_attributes_per_element: self.max_attributes_per_element,
+//RS             max_name_bytes: self.max_name_bytes,
+//RS             max_text_bytes: self.max_text_bytes,
+//RS             max_entity_declarations: self.max_entity_declarations,
+//RS             max_entity_depth: self.max_entity_depth,
+//RS             max_entity_replacement_bytes: self.max_entity_replacement_bytes,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum SourceXmlEntityPolicy {
+//RS     Preserve,
+//RS     Reject,
+//RS     Resolve(std::collections::BTreeMap<String, String>),
+//RS }
+//RS 
+//RS impl SourceXmlEntityPolicy {
+//RS     fn from_runtime(
+//RS         policy: crate::enc_stream::runtime::jet_std::XMLEntityPolicy,
+//RS     ) -> Self {
+//RS         match policy {
+//RS             crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Preserve => Self::Preserve,
+//RS             crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Reject => Self::Reject,
+//RS             crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Resolve(values) => {
+//RS                 Self::Resolve(values)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLEntityPolicy {
+//RS         match self {
+//RS             Self::Preserve => crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Preserve,
+//RS             Self::Reject => crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Reject,
+//RS             Self::Resolve(values) => {
+//RS                 crate::enc_stream::runtime::jet_std::XMLEntityPolicy::Resolve(values)
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct SourceXmlParseOptions {
+//RS     pub entities: SourceXmlEntityPolicy,
+//RS     pub limits: SourceXmlLimits,
+//RS }
+//RS 
+//RS impl SourceXmlParseOptions {
+//RS     pub fn safe() -> Self {
+//RS         let options = crate::enc_stream::runtime::jet_std::XMLParseOptions::safe();
+//RS         Self {
+//RS             entities: SourceXmlEntityPolicy::from_runtime(options.entities),
+//RS             limits: SourceXmlLimits::from_runtime(options.limits),
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLParseOptions {
+//RS         crate::enc_stream::runtime::jet_std::XMLParseOptions {
+//RS             entities: self.entities.into_runtime(),
+//RS             limits: self.limits.into_runtime(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum SourceXmlEncoding {
+//RS     Utf8,
+//RS     Utf8Bom,
+//RS     Utf16Le,
+//RS     Utf16Be,
+//RS }
+//RS 
+//RS impl SourceXmlEncoding {
+//RS     fn from_runtime(
+//RS         encoding: crate::enc_stream::runtime::jet_std::XMLEncoding,
+//RS     ) -> Self {
+//RS         match encoding {
+//RS             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8 => Self::Utf8,
+//RS             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8BOM => Self::Utf8Bom,
+//RS             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16LE => Self::Utf16Le,
+//RS             crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE => Self::Utf16Be,
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLEncoding {
+//RS         match self {
+//RS             Self::Utf8 => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8,
+//RS             Self::Utf8Bom => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF8BOM,
+//RS             Self::Utf16Le => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16LE,
+//RS             Self::Utf16Be => crate::enc_stream::runtime::jet_std::XMLEncoding::UTF16BE,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum SourceXmlLexicalPolicy {
+//RS     PreserveValid,
+//RS     Deterministic,
+//RS }
+//RS 
+//RS impl SourceXmlLexicalPolicy {
+//RS     fn from_runtime(
+//RS         policy: crate::enc_stream::runtime::jet_std::XMLLexicalPolicy,
+//RS     ) -> Self {
+//RS         match policy {
+//RS             crate::enc_stream::runtime::jet_std::XMLLexicalPolicy::PreserveValid => {
+//RS                 Self::PreserveValid
+//RS             }
+//RS             crate::enc_stream::runtime::jet_std::XMLLexicalPolicy::Deterministic => {
+//RS                 Self::Deterministic
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLLexicalPolicy {
+//RS         match self {
+//RS             Self::PreserveValid => {
+//RS                 crate::enc_stream::runtime::jet_std::XMLLexicalPolicy::PreserveValid
+//RS             }
+//RS             Self::Deterministic => {
+//RS                 crate::enc_stream::runtime::jet_std::XMLLexicalPolicy::Deterministic
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct SourceXmlRenderOptions {
+//RS     pub encoding: SourceXmlEncoding,
+//RS     pub lexical: SourceXmlLexicalPolicy,
+//RS }
+//RS 
+//RS impl SourceXmlRenderOptions {
+//RS     pub fn safe() -> Self {
+//RS         let options = crate::enc_stream::runtime::jet_std::XMLRenderOptions::safe();
+//RS         Self {
+//RS             encoding: SourceXmlEncoding::from_runtime(options.encoding),
+//RS             lexical: SourceXmlLexicalPolicy::from_runtime(options.lexical),
+//RS         }
+//RS     }
+//RS 
+//RS     fn into_runtime(self) -> crate::enc_stream::runtime::jet_std::XMLRenderOptions {
+//RS         crate::enc_stream::runtime::jet_std::XMLRenderOptions {
+//RS             encoding: self.encoding.into_runtime(),
+//RS             lexical: self.lexical.into_runtime(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// An encoding reader owner.  The concrete reader remains private so callers
+//RS /// can only obtain it through the canonical typed constructors below.
+//RS pub struct SourceEncodingReader(EncodingReader);
+//RS 
+//RS enum EncodingReader {
+//RS     Json(crate::enc_stream::runtime::jet_std::JSONReader),
+//RS     Jsonl(crate::enc_stream::runtime::jet_std::JSONLReader),
+//RS     Csv(crate::enc_stream::runtime::jet_std::CSVReader),
+//RS     Xml(crate::enc_stream::runtime::jet_std::XMLReader),
+//RS     Cbor(crate::enc_stream::runtime::jet_std::CBORReader),
+//RS }
+//RS 
+//RS impl SourceEncodingReader {
+//RS     fn validate_type(reader_type: &str) -> Result<(), MirNativeCursorError> {
+//RS         if matches!(
+//RS             reader_type,
+//RS             "JSONReader" | "JSONLReader" | "CSVReader" | "XMLReader" | "CBORReader"
+//RS         ) {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(MirNativeCursorError::internal(format!(
+//RS                 "unknown checked encoding reader type `{reader_type}`"
+//RS             )))
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_file(
+//RS         file: SourceFileReader,
+//RS         reader_type: &str,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_limits(file, reader_type, SourceEncodingLimits::safe())
+//RS     }
+//RS 
+//RS     pub fn from_file_with_limits(
+//RS         file: SourceFileReader,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_options(file, reader_type, limits, ",", false, false)
+//RS     }
+//RS 
+//RS     pub fn from_file_with_options(
+//RS         file: SourceFileReader,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         delimiter: &str,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_xml_options(
+//RS             file,
+//RS             reader_type,
+//RS             limits,
+//RS             delimiter,
+//RS             header,
+//RS             skip_blank,
+//RS             SourceXmlParseOptions::safe(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn from_file_with_xml_options(
+//RS         file: SourceFileReader,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         delimiter: &str,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS         xml_options: SourceXmlParseOptions,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         let limits = limits.into_runtime();
+//RS         let xml_options = xml_options.into_runtime();
+//RS         let reader = match reader_type {
+//RS             "JSONReader" => crate::enc_stream::runtime::enc_json_reader(file.0, limits.clone())
+//RS                 .map(EncodingReader::Json),
+//RS             "JSONLReader" => crate::enc_stream::runtime::enc_jsonl_reader(file.0, limits.clone())
+//RS                 .map(EncodingReader::Jsonl),
+//RS             "CSVReader" => crate::enc_stream::runtime::enc_csv_reader(
+//RS                 file.0,
+//RS                 limits.clone(),
+//RS                 delimiter.to_string(),
+//RS                 header,
+//RS                 skip_blank,
+//RS             )
+//RS             .map(EncodingReader::Csv),
+//RS             "XMLReader" => crate::enc_stream::runtime::enc_xml_reader(
+//RS                 file.0,
+//RS                 limits.clone(),
+//RS                 xml_options,
+//RS             )
+//RS             .map(EncodingReader::Xml),
+//RS             "CBORReader" => crate::enc_stream::runtime::enc_cbor_reader(file.0, limits)
+//RS                 .map(EncodingReader::Cbor),
+//RS             _ => {
+//RS                 return Err(MirNativeCursorError::internal(format!(
+//RS                     "unknown checked encoding reader type `{reader_type}`"
+//RS                 )))
+//RS             }
+//RS         };
+//RS         reader
+//RS             .map(Self)
+//RS             .map_err(|error| encoding_error(&error))
+//RS     }
+//RS 
+//RS     /// Consume a resident typed codec reader without reopening its input
+//RS     /// file.  The slot is moved exactly once by the enc_stream boundary.
+//RS     pub(crate) fn from_handle(handle: i64, reader_type: &str) -> Result<Self, String> {
+//RS         let reader = match reader_type {
+//RS             "JSONReader" => crate::enc_stream::source_take_json_reader(handle)
+//RS                 .map(EncodingReader::Json),
+//RS             "JSONLReader" => crate::enc_stream::source_take_jsonl_reader(handle)
+//RS                 .map(EncodingReader::Jsonl),
+//RS             "CSVReader" => crate::enc_stream::source_take_csv_reader(handle)
+//RS                 .map(EncodingReader::Csv),
+//RS             "XMLReader" => crate::enc_stream::source_take_xml_reader(handle)
+//RS                 .map(EncodingReader::Xml),
+//RS             "CBORReader" => crate::enc_stream::source_take_cbor_reader(handle)
+//RS                 .map(EncodingReader::Cbor),
+//RS             _ => return Err(format!("unknown checked encoding reader type `{reader_type}`")),
+//RS         }?;
+//RS         Ok(Self(reader))
+//RS     }
+//RS 
+//RS     fn reader_type(&self) -> &'static str {
+//RS         match &self.0 {
+//RS             EncodingReader::Json(_) => "JSONReader",
+//RS             EncodingReader::Jsonl(_) => "JSONLReader",
+//RS             EncodingReader::Csv(_) => "CSVReader",
+//RS             EncodingReader::Xml(_) => "XMLReader",
+//RS             EncodingReader::Cbor(_) => "CBORReader",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// An encoding writer owner. The output file lease is moved into the codec
+//RS /// exactly once; no path is reopened and no legacy integer slot is retained.
+//RS pub struct SourceEncodingWriter(EncodingWriter);
+//RS 
+//RS enum EncodingWriter {
+//RS     Json(crate::enc_stream::runtime::jet_std::JSONWriter),
+//RS     Jsonl(crate::enc_stream::runtime::jet_std::JSONLWriter),
+//RS     Csv(crate::enc_stream::runtime::jet_std::CSVWriter),
+//RS     Xml(crate::enc_stream::runtime::jet_std::XMLWriter),
+//RS     Cbor(crate::enc_stream::runtime::jet_std::CBORWriter),
+//RS }
+//RS 
+//RS impl SourceEncodingWriter {
+//RS     fn validate_type(writer_type: &str) -> Result<(), MirNativeCursorError> {
+//RS         if matches!(
+//RS             writer_type,
+//RS             "JSONWriter" | "JSONLWriter" | "CSVWriter" | "XMLWriter" | "CBORWriter"
+//RS         ) {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(MirNativeCursorError::internal(format!(
+//RS                 "unknown checked encoding writer type `{writer_type}`"
+//RS             )))
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_file(
+//RS         file: SourceFileWriter,
+//RS         writer_type: &str,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_options(file, writer_type, SourceEncodingLimits::safe(), false)
+//RS     }
+//RS 
+//RS     pub fn from_file_with_limits(
+//RS         file: SourceFileWriter,
+//RS         writer_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_options(file, writer_type, limits, false)
+//RS     }
+//RS 
+//RS     pub fn from_file_with_options(
+//RS         file: SourceFileWriter,
+//RS         writer_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         canonical: bool,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         Self::from_file_with_xml_options(
+//RS             file,
+//RS             writer_type,
+//RS             limits,
+//RS             canonical,
+//RS             SourceXmlRenderOptions::safe(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn from_file_with_xml_options(
+//RS         file: SourceFileWriter,
+//RS         writer_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         canonical: bool,
+//RS         xml_options: SourceXmlRenderOptions,
+//RS     ) -> Result<Self, MirNativeCursorError> {
+//RS         let limits = limits.into_runtime();
+//RS         let xml_options = xml_options.into_runtime();
+//RS         let writer = match writer_type {
+//RS             "JSONWriter" => crate::enc_stream::runtime::enc_json_writer(file.0, limits.clone(), canonical)
+//RS                 .map(EncodingWriter::Json),
+//RS             "JSONLWriter" => crate::enc_stream::runtime::enc_jsonl_writer(file.0, limits.clone())
+//RS                 .map(EncodingWriter::Jsonl),
+//RS             "CSVWriter" => crate::enc_stream::runtime::enc_csv_writer(file.0, limits.clone())
+//RS                 .map(EncodingWriter::Csv),
+//RS             "XMLWriter" => crate::enc_stream::runtime::enc_xml_writer(
+//RS                 file.0,
+//RS                 limits.clone(),
+//RS                 xml_options,
+//RS             )
+//RS             .map(EncodingWriter::Xml),
+//RS             "CBORWriter" => crate::enc_stream::runtime::enc_cbor_writer(file.0, limits)
+//RS                 .map(EncodingWriter::Cbor),
+//RS             _ => {
+//RS                 return Err(MirNativeCursorError::internal(format!(
+//RS                     "unknown checked encoding writer type `{writer_type}`"
+//RS                 )))
+//RS             }
+//RS         };
+//RS         writer
+//RS             .map(Self)
+//RS             .map_err(|error| encoding_error(&error))
+//RS     }
+//RS 
+//RS     fn writer_type(&self) -> &'static str {
+//RS         match &self.0 {
+//RS             EncodingWriter::Json(_) => "JSONWriter",
+//RS             EncodingWriter::Jsonl(_) => "JSONLWriter",
+//RS             EncodingWriter::Csv(_) => "CSVWriter",
+//RS             EncodingWriter::Xml(_) => "XMLWriter",
+//RS             EncodingWriter::Cbor(_) => "CBORWriter",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One owner admitted to the invocation-scoped arena.
+//RS enum BackendOwner {
+//RS     PlainStream(jet_codegen::scheduler::JetStream<MirRuntimeValue>),
+//RS     File(SourceFileReader),
+//RS     FileWriter(SourceFileWriter),
+//RS     Stdin(crate::enc_stream::SourceStdinReader),
+//RS     Process(SourceProcessStream),
+//RS     ChannelReceiver(jet_codegen::scheduler::JetSchedulerChannel<MirRuntimeValue>),
+//RS     ChannelSender(jet_codegen::scheduler::JetSchedulerSender<MirRuntimeValue>),
+//RS     SharedInteropRoot(crate::SourceSharedInterop::SourceSharedInterop),
+//RS     SharedInteropWeakRoot {
+//RS         type_identity: u64,
+//RS         root: Arc<crate::SourceSharedInterop::SourceSharedInteropWeak>,
+//RS     },
+//RS     NativeBinding(SourceNativeBinding),
+//RS     Encoding(SourceEncodingReader),
+//RS     EncodingWriter(SourceEncodingWriter),
+//RS }
+//RS impl BackendOwner {
+//RS     fn kind(&self) -> SourceResourceKind {
+//RS         match self {
+//RS             Self::PlainStream(_) => SourceResourceKind::PlainStream,
+//RS             Self::File(_) => SourceResourceKind::LinesFile,
+//RS             Self::FileWriter(_) => SourceResourceKind::FileWriter,
+//RS             Self::Stdin(_) => SourceResourceKind::LinesStdin,
+//RS             Self::Process(_) => SourceResourceKind::LinesProcessStream,
+//RS             Self::ChannelReceiver(_) => SourceResourceKind::ChannelReceiver,
+//RS             Self::ChannelSender(_) => SourceResourceKind::ChannelSender,
+//RS             Self::NativeBinding(_) => SourceResourceKind::NativeBinding,
+//RS             Self::SharedInteropRoot(root) => SourceResourceKind::SharedInteropRoot {
+//RS                 type_identity: root.type_id(),
+//RS             },
+//RS             Self::SharedInteropWeakRoot {
+//RS                 type_identity,
+//RS                 ..
+//RS             } => SourceResourceKind::SharedInteropWeakRoot {
+//RS                 type_identity: *type_identity,
+//RS             },
+//RS             Self::Encoding(reader) => SourceResourceKind::EncodingReader {
+//RS                 reader_type: reader.reader_type().to_string(),
+//RS             },
+//RS             Self::EncodingWriter(writer) => SourceResourceKind::EncodingWriter {
+//RS                 writer_type: writer.writer_type().to_string(),
+//RS             },
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS trait FromBackendOwner: Sized {
+//RS     fn from_backend_owner(owner: BackendOwner) -> Result<Self, BackendOwner>;
+//RS }
+//RS 
+//RS impl FromBackendOwner for SourceFileReader {
+//RS     fn from_backend_owner(owner: BackendOwner) -> Result<Self, BackendOwner> {
+//RS         match owner {
+//RS             BackendOwner::File(reader) => Ok(reader),
+//RS             owner => Err(owner),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl FromBackendOwner for SourceFileWriter {
+//RS     fn from_backend_owner(owner: BackendOwner) -> Result<Self, BackendOwner> {
+//RS         match owner {
+//RS             BackendOwner::FileWriter(writer) => Ok(writer),
+//RS             owner => Err(owner),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS enum SlotEntry {
+//RS     Backend(Arc<Mutex<BackendOwner>>),
+//RS     Cursor(MirNativeCursor),
+//RS }
+//RS 
+//RS struct Slot {
+//RS     handle: MirHandleId,
+//RS     kind: SourceResourceKind,
+//RS     generation: u32,
+//RS     entry: SlotEntry,
+//RS }
+//RS 
+//RS // Capability generations are globally monotonic, but this atomic is only a
+//RS // nonce allocator: owners remain in the invocation-local arena below.
+//RS static NEXT_CAPABILITY_GENERATION: AtomicU32 = AtomicU32::new(0);
+//RS 
+//RS struct ArenaState {
+//RS     next_slot: u32,
+//RS     slots: HashMap<u32, Slot>,
+//RS     /// `None` marks an alias whose owner token is being dropped outside this
+//RS     /// mutex; retirement must wait until the release guard removes that entry.
+//RS     shared_interop_aliases:
+//RS         HashMap<(i64, i64), Option<crate::SourceSharedInterop::SourceSharedInteropOwnerAlias>>,
+//RS     /// New roots are rejected once retirement has been requested.
+//RS     retirement_requested: bool,
+//RS     /// Explicit Source callback/task roots, never inferred from Arc clones.
+//RS     retained_roots: usize,
+//RS     finalizing: bool,
+//RS     retired: bool,
+//RS     finalizer: Option<SourceResourceFinalizer>,
+//RS     finalization_handler: Option<SourceResourceFinalizationHandler>,
+//RS }
+//RS 
+//RS 
+//RS thread_local! {
+//RS     static ACTIVE_SOURCE_ARENA: RefCell<Option<SourceResourceArena>> =
+//RS         const { RefCell::new(None) };
+//RS     static ACTIVE_SOURCE_RESOURCE_LEASE: RefCell<Option<SourceResourceLease>> =
+//RS         const { RefCell::new(None) };
+//RS }
+//RS 
+//RS /// Sole invocation-scoped source resource authority. Clones share the slot
+//RS /// table and therefore retain the same concrete owners until explicit
+//RS /// capability release. An explicit `SourceResourceLease`, not an arena
+//RS /// `Arc` clone, keeps the table alive across session retirement.
+//RS #[derive(Clone)]
+//RS pub struct SourceResourceArena {
+//RS     state: Arc<Mutex<ArenaState>>,
+//RS }
+//RS 
+//RS impl fmt::Debug for SourceResourceArena {
+//RS     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         f.debug_struct("SourceResourceArena").finish_non_exhaustive()
+//RS     }
+//RS }
+//RS 
+//RS /// Session ownership for callbacks that return live Source capabilities.
+//RS /// Individual outcome handles are released through `resource_release` or
+//RS /// `release_capability`.  `retire` requests logical retirement; an explicit
+//RS /// `SourceResourceLease` keeps the physical arena usable until its last
+//RS /// release.
+//RS #[derive(Clone)]
+//RS pub struct SourceResourceSession {
+//RS     arena: SourceResourceArena,
+//RS 
+//RS }
+//RS 
+//RS struct SourceResourceLeaseInner {
+//RS     arena: SourceResourceArena,
+//RS     finalization_root: bool,
+//RS     finalization_phase: Option<Arc<AtomicBool>>,
+//RS }
+//RS 
+//RS struct SourceResourceFinalizationPhase<'a>(&'a AtomicBool);
+//RS 
+//RS impl Drop for SourceResourceFinalizationPhase<'_> {
+//RS     fn drop(&mut self) {
+//RS         self.0.store(false, Ordering::Release);
+//RS     }
+//RS }
+//RS /// An explicit retained physical-root lease for one Source callback/task
+//RS /// graph. Arena `Arc` clones are lookup/activation handles only and do not
+//RS /// keep an arena alive after retirement. Lease aliases share one explicit
+//RS /// retained-root count; only the final alias releases it.
+//RS pub struct SourceResourceLease {
+//RS     inner: Arc<SourceResourceLeaseInner>,
+//RS }
+//RS 
+//RS /// Non-owning handle to a counted Source resource lease. It cannot keep the
+//RS /// arena alive; upgrading only aliases a lease that still has a strong owner.
+//RS #[derive(Clone)]
+//RS pub struct SourceResourceLeaseWeak {
+//RS     inner: Weak<SourceResourceLeaseInner>,
+//RS }
+//RS 
+//RS /// Checked permission for narrowly-scoped resource creation/adoption while
+//RS /// Source finalization is active. It can be created only from the finalizer's
+//RS /// counted lease and is invalid as soon as that finalization ends.
+//RS #[derive(Clone)]
+//RS pub struct SourceResourceCleanupLease {
+//RS     inner: Arc<SourceResourceLeaseInner>,
+//RS }
+//RS 
+//RS struct SharedInteropAliasReleaseGuard<'a> {
+//RS     arena: &'a SourceResourceArena,
+//RS     key: (i64, i64),
+//RS }
+//RS 
+//RS impl Drop for SharedInteropAliasReleaseGuard<'_> {
+//RS     fn drop(&mut self) {
+//RS         let mut state = self
+//RS             .arena
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if state
+//RS             .shared_interop_aliases
+//RS             .get(&self.key)
+//RS             .is_some_and(Option::is_none)
+//RS         {
+//RS             state.shared_interop_aliases.remove(&self.key);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Thread-local activation selects the arena and, when entered through a
+//RS /// counted lease, exposes that same lease to synchronous checked calls. The
+//RS /// guard restores prior state; a lease alias does not add another root count.
+//RS pub struct SourceResourceActivation {
+//RS     _current: SourceResourceArena,
+//RS     _current_lease: Option<SourceResourceLease>,
+//RS     previous: Option<SourceResourceArena>,
+//RS     previous_lease: Option<SourceResourceLease>,
+//RS }
+//RS 
+//RS impl Drop for SourceResourceActivation {
+//RS     fn drop(&mut self) {
+//RS         ACTIVE_SOURCE_ARENA.with(|slot| {
+//RS             *slot.borrow_mut() = self.previous.take();
+//RS         });
+//RS         let active_lease = ACTIVE_SOURCE_RESOURCE_LEASE.with(|slot| {
+//RS             std::mem::replace(&mut *slot.borrow_mut(), self.previous_lease.take())
+//RS         });
+//RS         drop(active_lease);
+//RS     }
+//RS }
+//RS 
+//RS impl Default for SourceResourceArena {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl SourceResourceSession {
+//RS     pub fn new() -> Self {
+//RS         Self::new_without_finalizer()
+//RS     }
+//RS 
+//RS     /// Configure Source cleanup and a separate live origin outcome consumer.
+//RS     /// The consumer receives successful completions as well as retryable
+//RS     /// retirement failures, without owning the arena through the finalizer.
+//RS     pub fn new_with_finalizer(
+//RS         finalizer: SourceResourceFinalizer,
+//RS         finalization_handler: SourceResourceFinalizationHandler,
+//RS     ) -> Self {
+//RS         Self {
+//RS             arena: SourceResourceArena::new_with_finalizer(finalizer, finalization_handler),
+//RS         }
+//RS     }
+//RS 
+//RS     fn new_without_finalizer() -> Self {
+//RS         Self {
+//RS             arena: SourceResourceArena::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn arena(&self) -> SourceResourceArena {
+//RS         self.arena.clone()
+//RS     }
+//RS 
+//RS 
+//RS     pub fn set_finalizer(
+//RS         &self,
+//RS         finalizer: SourceResourceFinalizer,
+//RS         finalization_handler: SourceResourceFinalizationHandler,
+//RS     ) -> Result<(), String> {
+//RS         self.arena.set_finalizer(finalizer, finalization_handler)
+//RS     }
+//RS     /// Retain one explicit physical-root lease for an escaping callback/task
+//RS     /// graph before retirement is requested. The lease must be released by
+//RS     /// Source semantic cleanup before the arena can finish retirement.
+//RS     pub fn retain_root(&self) -> Result<SourceResourceLease, String> {
+//RS         self.arena.retain_root()
+//RS     }
+//RS 
+//RS     pub fn activate(&self) -> SourceResourceActivation {
+//RS         activate_source_resource_arena(&self.arena)
+//RS     }
+//RS 
+//RS     pub fn retire(&self) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         self.arena.retire()
+//RS     }
+//RS 
+//RS     pub fn retire_with_cleanup<F>(
+//RS         &self,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         self.arena.retire_with_cleanup(cleanup)
+//RS     }
+//RS 
+//RS     pub fn retry_retire(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError> {
+//RS         self.arena.retry_retire(error)
+//RS     }
+//RS 
+//RS     pub fn retry_retire_with_cleanup<F>(
+//RS         &self,
+//RS         error: SourceResourceRetireError,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         self.arena.retry_retire_with_cleanup(error, cleanup)
+//RS     }
+//RS 
+//RS     pub fn is_retirement_requested(&self) -> Result<bool, String> {
+//RS         self.arena.is_retirement_requested()
+//RS     }
+//RS 
+//RS     pub fn retained_root_count(&self) -> Result<usize, String> {
+//RS         self.arena.retained_root_count()
+//RS     }
+//RS }
+//RS 
+//RS impl SourceResourceLease {
+//RS     fn activate_finalization_phase(
+//RS         &self,
+//RS     ) -> Result<SourceResourceFinalizationPhase<'_>, String> {
+//RS         let phase = self
+//RS             .inner
+//RS             .finalization_phase
+//RS             .as_deref()
+//RS             .ok_or_else(|| "Source lease is not a finalization authority".to_string())?;
+//RS         phase
+//RS             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+//RS             .map_err(|_| "Source finalization phase is already active".to_string())?;
+//RS         Ok(SourceResourceFinalizationPhase(phase))
+//RS     }
+//RS 
+//RS     /// Derive cleanup-only authority from the active finalizer lease. It does
+//RS     /// not add another retained root; all operations revalidate that this
+//RS     /// exact finalization is still active.
+//RS     pub fn cleanup_lease(&self) -> Result<SourceResourceCleanupLease, String> {
+//RS         self.inner.arena.validate_cleanup_lease(self)?;
+//RS         Ok(SourceResourceCleanupLease {
+//RS             inner: self.inner.clone(),
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl SourceResourceLeaseWeak {
+//RS     /// Recover an alias to the existing counted lease while any strong alias
+//RS     /// remains. This does not create another retained root.
+//RS     pub fn upgrade(&self) -> Option<SourceResourceLease> {
+//RS         self.inner
+//RS             .upgrade()
+//RS             .map(|inner| SourceResourceLease { inner })
+//RS     }
+//RS }
+//RS 
+//RS impl SourceResourceCleanupLease {
+//RS     pub fn arena(&self) -> SourceResourceArena {
+//RS         self.inner.arena.clone()
+//RS     }
+//RS 
+//RS     /// Register one fresh native binding for a logical helper scope created
+//RS     /// while cleaning a Source-owned value.
+//RS     pub fn register_native_binding_root(
+//RS         &self,
+//RS         binding: SourceNativeBinding,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.inner
+//RS             .arena
+//RS             .register_cleanup_native_binding_root(self, binding)
+//RS     }
+//RS 
+//RS     /// Re-adopt only a physical owner already detached from a checked Source
+//RS     /// capability. The logical value and consumed receipt stay in the outcome.
+//RS     pub fn adopt_owned(
+//RS         &self,
+//RS         target_handle: MirHandleId,
+//RS         expected_kind: &SourceResourceKind,
+//RS         owned: SourceOwnedValue,
+//RS     ) -> SourceOwnedTransferOutcome {
+//RS         self.inner
+//RS             .arena
+//RS             .adopt_owned_with_cleanup(self, target_handle, expected_kind, owned)
+//RS     }
+//RS }
+//RS 
+//RS impl SourceResourceLease {
+//RS     /// Obtain the shared arena retained by this physical-root lease.
+//RS     pub fn arena(&self) -> SourceResourceArena {
+//RS         self.inner.arena.clone()
+//RS     }
+//RS 
+//RS     /// Create a non-owning reference for callbacks that must not form an
+//RS     /// arena-to-owner-to-callback-to-lease cycle.
+//RS     pub fn downgrade(&self) -> SourceResourceLeaseWeak {
+//RS         SourceResourceLeaseWeak {
+//RS             inner: Arc::downgrade(&self.inner),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Activate the retained arena and counted lease for one owner-pump callback.
+//RS     pub fn activate(&self) -> SourceResourceActivation {
+//RS         activate_source_resource_context(&self.inner.arena, Some(self.clone()))
+//RS     }
+//RS 
+//RS     pub fn is_retired(&self) -> Result<bool, String> {
+//RS         self.inner.arena.is_retired()
+//RS     }
+//RS 
+//RS     pub fn retire_with_cleanup<F>(
+//RS         &self,
+//RS         cleanup: F,
+//RS     ) -> Result<Vec<SourceExecutionCompletion>, SourceResourceRetireError>
+//RS     where
+//RS         F: FnMut(MirRuntimeValue) -> Result<(), SourceResourceCleanupError>,
+//RS     {
+//RS         self.inner.arena.retire_with_cleanup(cleanup)
+//RS     }
+//RS }
+//RS 
+//RS impl Clone for SourceResourceLease {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for SourceResourceLeaseInner {
+//RS     fn drop(&mut self) {
+//RS         self.arena.release_root();
+//RS     }
+//RS }
+//RS 
+//RS impl Default for SourceResourceSession {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS /// Activate an existing session-owned arena and restore the prior activation
+//RS /// on normal return or unwind. Arena-only activation has no counted lease.
+//RS pub fn activate_source_resource_arena(
+//RS     arena: &SourceResourceArena,
+//RS ) -> SourceResourceActivation {
+//RS     activate_source_resource_context(arena, None)
+//RS }
+//RS 
+//RS fn activate_source_resource_context(
+//RS     arena: &SourceResourceArena,
+//RS     lease: Option<SourceResourceLease>,
+//RS ) -> SourceResourceActivation {
+//RS     let previous = ACTIVE_SOURCE_ARENA.with(|slot| slot.borrow_mut().replace(arena.clone()));
+//RS     let previous_lease = ACTIVE_SOURCE_RESOURCE_LEASE.with(|slot| {
+//RS         std::mem::replace(&mut *slot.borrow_mut(), lease.clone())
+//RS     });
+//RS     SourceResourceActivation {
+//RS         _current: arena.clone(),
+//RS         _current_lease: lease,
+//RS         previous,
+//RS         previous_lease,
+//RS     }
+//RS }
+//RS 
+//RS /// Establish a fresh, callback-local arena. Callers returning live
+//RS /// capabilities must instead retain a `SourceResourceSession`, obtain an
+//RS /// explicit `SourceResourceLease`, and activate that lease around each callback.
+//RS pub fn with_source_resource_arena<R>(
+//RS     body: impl FnOnce(&SourceResourceArena) -> R,
+//RS ) -> R {
+//RS     let arena = SourceResourceArena::new();
+//RS     let _activation = activate_source_resource_arena(&arena);
+//RS     body(&arena)
+//RS }
+//RS 
+//RS /// Obtain the active invocation arena for a plain bootstrap function pointer.
+//RS /// The clone shares the scoped table; it does not create a second registry.
+//RS pub fn active_source_resource_arena() -> Option<SourceResourceArena> {
+//RS     ACTIVE_SOURCE_ARENA.with(|slot| slot.borrow().clone())
+//RS }
+//RS 
+//RS /// Access the active invocation arena for a plain bootstrap function pointer.
+//RS /// The local snapshot keeps only a lookup handle alive; it adds no root count.
+//RS pub fn with_active_source_resource_arena<R>(
+//RS     body: impl FnOnce(Option<&SourceResourceArena>) -> R,
+//RS ) -> R {
+//RS     let active = ACTIVE_SOURCE_ARENA.with(|slot| slot.borrow().clone());
+//RS     body(active.as_ref())
+//RS }
+//RS /// Borrow the counted lease for the current callback activation, if it was
+//RS /// entered through `SourceResourceLease::activate`. A local alias keeps the
+//RS /// same counted root alive only for this call; do not retain it in an instance.
+//RS pub fn with_active_source_resource_lease<R>(
+//RS     body: impl FnOnce(Option<&SourceResourceLease>) -> R,
+//RS ) -> R {
+//RS     let active = ACTIVE_SOURCE_RESOURCE_LEASE.with(|slot| slot.borrow().clone());
+//RS     body(active.as_ref())
+//RS }
+//RS 
+//RS fn active_source_resource_lease_snapshot() -> Option<SourceResourceLease> {
+//RS     ACTIVE_SOURCE_RESOURCE_LEASE.with(|slot| slot.borrow().clone())
+//RS }
+//RS impl SourceResourceArena {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             state: Arc::new(Mutex::new(ArenaState {
+//RS                 next_slot: 0,
+//RS                 slots: HashMap::new(),
+//RS                 shared_interop_aliases: HashMap::new(),
+//RS                 retirement_requested: false,
+//RS                 retained_roots: 0,
+//RS                 finalizing: false,
+//RS                 retired: false,
+//RS                 finalizer: None,
+//RS                 finalization_handler: None,
+//RS             })),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn new_with_finalizer(
+//RS         finalizer: SourceResourceFinalizer,
+//RS         finalization_handler: SourceResourceFinalizationHandler,
+//RS     ) -> Self {
+//RS         let arena = Self::new();
+//RS         let mut state = arena
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         state.finalizer = Some(finalizer);
+//RS         state.finalization_handler = Some(finalization_handler);
+//RS         drop(state);
+//RS         arena
+//RS     }
+//RS 
+//RS     pub fn set_finalizer(
+//RS         &self,
+//RS         finalizer: SourceResourceFinalizer,
+//RS         finalization_handler: SourceResourceFinalizationHandler,
+//RS     ) -> Result<(), String> {
+//RS         let mut state = self.lock()?;
+//RS         if state.retired || state.finalizing || state.retirement_requested {
+//RS             return Err("Source resource arena retirement has already started".to_string());
+//RS         }
+//RS         if state.finalizer.is_some() || state.finalization_handler.is_some() {
+//RS             return Err("Source resource arena already has an origin finalizer".to_string());
+//RS         }
+//RS         state.finalizer = Some(finalizer);
+//RS         state.finalization_handler = Some(finalization_handler);
+// END-PORT-PENDING 2024 crates/jet-jit/src/SourceResources.rs:1-1800
+

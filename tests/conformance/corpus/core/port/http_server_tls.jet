@@ -1,0 +1,834 @@
+// PORT-PENDING 1076 tests-http-server-tls-module-group: tests/http_server_tls.rs:1-177
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS use common::{build_and_run, have_rustc};
+//RS 
+//RS fn have_cargo() -> bool {
+//RS     Command::new("cargo").arg("--version").output().is_ok()
+//RS }
+//RS 
+//RS fn jet_string(s: &str) -> String {
+//RS     format!("{s:?}")
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_tls_option_validates_fixture_before_binding() {
+//RS     if !have_rustc() || !have_cargo() {
+//RS         eprintln!("note: skipping server TLS bridge test (need cargo + rustc)");
+//RS         return;
+//RS     }
+//RS     let cert = jet_string(include_str!("../tests/fixtures/tls/localhost.cert.pem"));
+//RS     let key = jet_string(include_str!("../tests/fixtures/tls/localhost.key.pem"));
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {{
+//RS     mux :: server.mux()
+//RS     result :: server.serve("127.0.0.1:999999", mux, tls: server.tls({cert}, {key}))
+//RS     if result == {{
+//RS         Ok(_) -> {{ print("unexpected") }}
+//RS         Err(e) -> {{ print(e) }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS 
+//RS     let (code, stdout, stderr) = build_and_run("jet_http_server_tls", "valid_fixture", &src);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert!(
+//RS         stdout.contains("bind on `127.0.0.1:999999` failed"),
+//RS         "fixture should validate before controlled bind failure:\nstdout={stdout}\nstderr={stderr}"
+//RS     );
+//RS     assert!(!stdout.contains("TLS certificate"), "{stdout}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_tls_bad_cert_is_jet_voiced() {
+//RS     if !have_rustc() || !have_cargo() {
+//RS         eprintln!("note: skipping server TLS bridge test (need cargo + rustc)");
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {
+//RS     mux :: server.mux()
+//RS     result :: server.serve("127.0.0.1:999999", mux, tls: server.tls("not a cert", "not a key"))
+//RS     if result == {
+//RS         Ok(_) -> { print("unexpected") }
+//RS         Err(e) -> { print(e) }
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS     let (code, stdout, stderr) = build_and_run("jet_http_server_tls", "bad_cert", src);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert!(
+//RS         stdout.contains("TLS certificate PEM did not contain a certificate"),
+//RS         "bad cert should stay Jet-voiced:\nstdout={stdout}\nstderr={stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_tls_requires_named_tls_option() {
+//RS     let src = r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {
+//RS     mux :: server.mux()
+//RS     _ :: server.serve("127.0.0.1:0", mux, server.tls("cert", "key"))
+//RS }
+//RS "#;
+//RS 
+//RS     let err = jet::compile(src).expect_err("unlabeled third server argument should be rejected");
+//RS     let rendered = jet::render_diagnostics("tests/http_server_tls/bad_label.jet", src, &err);
+//RS     assert!(rendered.contains("Error [E0125]"), "{rendered}");
+//RS     assert!(
+//RS         rendered.contains("`serve` needs `tls:` before the third argument"),
+//RS         "{rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_bind_tls_requires_named_tls_option() {
+//RS     let src = r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {
+//RS     mux :: server.mux()
+//RS     _ :: server.bind("127.0.0.1:0", mux, server.tls("cert", "key"))
+//RS }
+//RS "#;
+//RS 
+//RS     let err = jet::compile(src).expect_err("unlabeled bind TLS argument should be rejected");
+//RS     let rendered = jet::render_diagnostics("tests/http_server_tls/bad_bind_label.jet", src, &err);
+//RS     assert!(rendered.contains("Error [E0125]"), "{rendered}");
+//RS     assert!(
+//RS         rendered.contains("`bind` needs `tls:` before the third argument"),
+//RS         "{rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_bind_tls_labeled_compiles() {
+//RS     let src = r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {
+//RS     mux :: server.mux()
+//RS     _ :: server.bind("127.0.0.1:0", mux, tls: server.tls("cert", "key"))
+//RS }
+//RS "#;
+//RS 
+//RS     // Sema + TIR must cover labeled bind+tls (serve already did; bind was missing).
+//RS     // Full compile may still fail later on PEM validation at runtime — front end must not ICE/E0104.
+//RS     match jet::compile(src) {
+//RS         Ok(_) => {}
+//RS         Err(err) => {
+//RS             let rendered =
+//RS                 jet::render_diagnostics("tests/http_server_tls/labeled_bind.jet", src, &err);
+//RS             assert!(
+//RS                 !rendered.contains("E0104"),
+//RS                 "labeled bind+tls must not be rejected as arity-2:\n{rendered}"
+//RS             );
+//RS             assert!(
+//RS                 !rendered.contains("E0125"),
+//RS                 "labeled bind+tls must not be rejected for missing tls: label:\n{rendered}"
+//RS             );
+//RS             assert!(
+//RS                 !rendered.contains("typed IR does not cover"),
+//RS                 "labeled bind+tls must be in the TIR subset:\n{rendered}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn server_bind_tls_validates_fixture_before_binding() {
+//RS     if !have_rustc() || !have_cargo() {
+//RS         eprintln!("note: skipping server bind TLS bridge test (need cargo + rustc)");
+//RS         return;
+//RS     }
+//RS     let cert = jet_string(include_str!("../tests/fixtures/tls/localhost.cert.pem"));
+//RS     let key = jet_string(include_str!("../tests/fixtures/tls/localhost.key.pem"));
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.server as server
+//RS 
+//RS fn run() {{
+//RS     mux :: server.mux()
+//RS     result :: server.bind("127.0.0.1:999999", mux, tls: server.tls({cert}, {key}))
+//RS     if result == {{
+//RS         Ok(_) -> {{ print("unexpected") }}
+//RS         Err(e) -> {{ print(e) }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS 
+//RS     let (code, stdout, stderr) = build_and_run("jet_http_server_tls", "bind_valid_fixture", &src);
+//RS     assert_eq!(code, 0, "{stderr}");
+//RS     assert!(
+//RS         stdout.contains("bind on `127.0.0.1:999999` failed"),
+//RS         "labeled bind+tls must validate PEM then hit controlled bind failure:\nstdout={stdout}\nstderr={stderr}"
+//RS     );
+//RS     assert!(!stdout.contains("TLS certificate"), "{stdout}");
+//RS }
+// END-PORT-PENDING 1076 tests/http_server_tls.rs:1-177
+
+// PORT-PENDING 1076 tests-http-server-tls-module-group: tests/int_division.rs:1-435
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-INTDIV1=A / D-TYPE2-DEFAULT1=A — `/` answers an exact quotient: whole
+//RS //! numbers produce a `Fraction`; finite non-whole results print as decimals,
+//RS //! and repeating results print as fractions. `/%` is the whole-number path.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
+//RS 
+//RS const SEED: &str = "fn score(n: Int) -> Int {\n    return n\n}\n";
+//RS 
+//RS /// D-INTDIV1=A: `7 / 2` is 3.5, and the fraction survives an average.
+//RS #[test]
+//RS fn int_division_answers_the_true_quotient() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn run() {{
+//RS     print(score(7) / score(2))
+//RS     print(score(6) / score(2))
+//RS     print(score(-7) / score(2))
+//RS     print(score(1) / score(4))
+//RS }}
+//RS "
+//RS     );
+//RS     let (code, out) = build_and_run("intdiv_quotient", &src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "3.5\n3\n-3.5\n0.25\n", "{out}");
+//RS }
+//RS 
+//RS /// D-TYPE2-DEFAULT1=A: exact division prints its exact result, while a Float
+//RS /// parameter requires the explicit destination-owned conversion.
+//RS #[test]
+//RS fn int_division_lands_exact() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn want_float(x: Float) {{
+//RS     print(x)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     exact :: score(7) / score(2)
+//RS     print(exact)
+//RS     print(7 / 3)
+//RS     want_float(Float.from_fraction(exact))
+//RS }}
+//RS "
+//RS     );
+//RS     assert_tiers_agree("intdiv_exact", &src, "3.5\n7/3\n3.5\n");
+//RS }
+//RS 
+//RS /// D-INTDIV1=A: storing that exact quotient back into a whole number is a
+//RS /// type error, and the fix names `/%`. `n /= 2` reaches sema as `n = n / 2`,
+//RS /// because compound assignment is desugared before checking, so both spellings
+//RS /// get the same advice. Struct fields use the same check.
+//RS #[test]
+//RS fn storing_a_quotient_in_a_whole_number_points_at_floor_division() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_intdiv_{}", std::process::id()));
+//RS     std::fs::create_dir_all(&dir).unwrap();
+//RS     for src in [
+//RS         "fn run() {\n    n := 7\n    n /= 2\n    print(n)\n}\n",
+//RS         "fn run() {\n    n := 7\n    n = n / 2\n    print(n)\n}\n",
+//RS         "struct Boxed { value: Int }\nfn run() {\n    item :: Boxed{ value: 7 / 2 }\n}\n",
+//RS     ] {
+//RS         let path = dir.join("intdiv_compound.jet");
+//RS         std::fs::write(&path, src).unwrap();
+//RS         let shown = path.to_string_lossy().into_owned();
+//RS         let diags = jet::compile_with_path(src, &shown)
+//RS             .err()
+//RS             .unwrap_or_default();
+//RS         let rendered = jet::render_diagnostics(&shown, src, &diags);
+//RS         assert!(
+//RS             diags.iter().any(|d| d.code == "E0108"),
+//RS             "expected a type error for a quotient stored in a whole number:\n{rendered}"
+//RS         );
+//RS         assert!(
+//RS             rendered.contains("Use `/%` to divide and round down"),
+//RS             "the fix must name floor division:\n{rendered}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// D-INTDIV1=A: `/%` is the whole-number path, and it still answers an Int.
+//RS #[test]
+//RS fn floor_division_remains_the_whole_number_path() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn want_int(n: Int) {{
+//RS     print(n)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     want_int(score(17) /% score(2))
+//RS     running := score(9)
+//RS     running /%= score(2)
+//RS     want_int(running)
+//RS }}
+//RS "
+//RS     );
+//RS     let (code, out) = build_and_run("intdiv_floor_still_int", &src);
+//RS     assert_eq!(code, 0, "{out}");
+//RS     assert_eq!(out, "8\n4\n", "{out}");
+//RS }
+//RS 
+//RS /// I9: the cases above are AOT only. This runs the same divisions under
+//RS /// `jet run` and asserts both tiers agree, so a quotient rule re-encoded in an
+//RS /// engine cannot pass.
+//RS #[test]
+//RS fn int_division_agrees_on_every_tier() {
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn run() {{
+//RS     print(score(7) / score(2))
+//RS     print(score(6) / score(2))
+//RS     print(score(-7) / score(2))
+//RS     print(score(1) / score(4))
+//RS     total :: score(8) + score(9)
+//RS     print(total / score(2))
+//RS     print(score(17) /% score(2))
+//RS }}
+//RS "
+//RS     );
+//RS     assert_tiers_agree("intdiv_tiers", &src, "3.5\n3\n-3.5\n0.25\n8.5\n8\n");
+//RS }
+//RS 
+//RS /// #1484: fixed-width `/` by zero must use the Prelude wording and exit 70 —
+//RS /// never a raw Rust "attempt to divide by zero" at exit 101 (I2). Includes a
+//RS /// call-result operand so the TIR overflow flag cannot hide behind Ident-only
+//RS /// AST replay, plus bare Ident and parameter shapes.
+//RS #[test]
+//RS fn fixed_width_divide_by_zero_traps_with_prelude_wording() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     for (name, src) in [
+//RS         (
+//RS             "u8_div_zero",
+//RS             r#"
+//RS fn run() {
+//RS     a :: U8{10}
+//RS     zero :: U8{0}
+//RS     print(a / zero)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "i8_div_zero",
+//RS             r#"
+//RS fn run() {
+//RS     a :: I8{10}
+//RS     zero :: I8{0}
+//RS     print(a / zero)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "u8_param_div_zero",
+//RS             r#"
+//RS fn div(a: U8, zero: U8) {
+//RS     print(a / zero)
+//RS }
+//RS fn run() {
+//RS     div(U8{10}, U8{0})
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "u8_call_div_zero",
+//RS             r#"
+//RS fn score(n: U8) -> U8 {
+//RS     return n
+//RS }
+//RS fn run() {
+//RS     print(score(U8{10}) / score(U8{0}))
+//RS }
+//RS "#,
+//RS         ),
+//RS     ] {
+//RS         let (code, out, err) = build_and_run_full("jet_intdiv", name, src);
+//RS         assert_eq!(
+//RS             code, 70,
+//RS             "{name}: fixed-width / by zero must exit 70, got {code}; out={out} err={err}"
+//RS         );
+//RS         assert!(
+//RS             err.contains("E3010") && err.contains("divided by zero"),
+//RS             "{name}: expected Prelude division wording, got: {err}"
+//RS         );
+//RS         assert!(
+//RS             !err.contains("attempt to divide by zero"),
+//RS             "{name}: raw Rust panic leaked (I2): {err}"
+//RS         );
+//RS 
+//RS         let (jit_code, jit_out, jit_err) = jit_run(&format!("{name}_jit"), src);
+//RS         assert_eq!(
+//RS             jit_code, 70,
+//RS             "{name}: jet run must exit 70 (I9), got {jit_code}: {jit_out}{jit_err}"
+//RS         );
+//RS         assert!(
+//RS             jit_err.contains("Stop [E3010]: `divided by zero`"),
+//RS             "{name}: jet run expected the E3010 Prelude stop, got: {jit_err}"
+//RS         );
+//RS         assert!(
+//RS             !jit_err.contains("E0953") && !jit_err.contains("attempt to divide by zero"),
+//RS             "{name}: jet run must not use E0953 or raw Rust panic: {jit_err}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Card #2872: the modulo/division-heavy ring recurrence keeps exact values
+//RS /// across the AOT, resident, and interpreter tiers.
+//RS #[test]
+//RS fn integer_ring_modulo_and_division_preserve_tier_output() {
+//RS     let source = include_str!("int_ring_witness.jet");
+//RS     assert_tiers_agree("int_ring_mod_div", source, "613081333\n");
+//RS }
+//RS 
+//RS /// #2872 / #1436: every exact-Int operation answers small inline operands on
+//RS /// the machine-word route and everything else on the exact rail. The edges
+//RS /// below cross the inline boundary (±2^62), the i64 boundary, and each sign
+//RS /// combination of floored `/%` and `%` against truncated `%%`, so a fast route
+//RS /// that wraps, truncates the wrong way, or keeps an out-of-range quotient
+//RS /// inline disagrees with the exact answer on some tier.
+//RS #[test]
+//RS fn exact_int_overflow_edges_agree_on_every_tier() {
+//RS     let src = format!(
+//RS         "{SEED}
+//RS fn run() {{
+//RS     max :: score(9223372036854775807)
+//RS     top :: score(4611686018427387903)
+//RS     bottom :: score(-4611686018427387904)
+//RS     print(max + score(1))
+//RS     print(top + score(1))
+//RS     print(bottom - score(1))
+//RS     print((top + score(1)) - score(1))
+//RS     print(-bottom)
+//RS     print(top * score(2))
+//RS     print(bottom * score(-1))
+//RS     print(score(3037000499) * score(3037000499))
+//RS     print(score(3037000500) * score(3037000500))
+//RS     print(bottom /% score(-1))
+//RS     print(bottom %% score(-1))
+//RS     print(score(7) /% score(2))
+//RS     print(score(-7) /% score(2))
+//RS     print(score(7) /% score(-2))
+//RS     print(score(-7) /% score(-2))
+//RS     print(score(7) % score(2))
+//RS     print(score(-7) % score(2))
+//RS     print(score(7) % score(-2))
+//RS     print(score(-7) % score(-2))
+//RS     print(score(7) %% score(2))
+//RS     print(score(-7) %% score(2))
+//RS     print(score(7) %% score(-2))
+//RS     print(score(-7) %% score(-2))
+//RS     print(score(-6) % score(3))
+//RS     print(score(-6) /% score(4))
+//RS     print(bottom /% score(3))
+//RS     print(bottom % score(3))
+//RS     print((max + score(1)) /% score(-3))
+//RS     print((max + score(1)) % score(-3))
+//RS     print(score(1) << score(61))
+//RS     print(score(1) << score(62))
+//RS     print(score(-1) << score(62))
+//RS     print(score(3) << score(100))
+//RS     print(score(-7) >> score(1))
+//RS     print(score(-1) >> score(200))
+//RS     print(score(7) >> score(200))
+//RS     print(score(-12) & score(13))
+//RS     print(score(-12) | score(10))
+//RS     print(score(-12) ~| score(13))
+//RS     print(bottom ~| score(-1))
+//RS     print(score(-7) < score(2))
+//RS     print(bottom < top)
+//RS     print((max + score(1)) > top)
+//RS }}
+//RS "
+//RS     );
+//RS     assert_tiers_agree(
+//RS         "exact_int_edges",
+//RS         &src,
+//RS         "9223372036854775808
+//RS 4611686018427387904
+//RS -4611686018427387905
+//RS 4611686018427387903
+//RS 4611686018427387904
+//RS 9223372036854775806
+//RS 4611686018427387904
+//RS 9223372030926249001
+//RS 9223372037000250000
+//RS 4611686018427387904
+//RS 0
+//RS 3
+//RS -4
+//RS -4
+//RS 3
+//RS 1
+//RS 1
+//RS -1
+//RS -1
+//RS 1
+//RS -1
+//RS 1
+//RS -1
+//RS 0
+//RS -2
+//RS -1537228672809129302
+//RS 2
+//RS -3074457345618258603
+//RS -1
+//RS 2305843009213693952
+//RS 4611686018427387904
+//RS -4611686018427387904
+//RS 3802951800684688204490109616128
+//RS -4
+//RS -1
+//RS 0
+//RS 4
+//RS -2
+//RS -7
+//RS 4611686018427387903
+//RS true
+//RS true
+//RS true
+//RS ",
+//RS     );
+//RS }
+//RS 
+//RS /// #1436 criterion 4: an exact-Int loop whose values stay inside the inline
+//RS /// range performs a fixed number of heap allocations however many iterations
+//RS /// run. The emitted AOT program is linked with a counting global allocator
+//RS /// and run at two iteration counts; before the small-value route existed,
+//RS /// every add, multiply, floor division and modulo allocated limb vectors.
+//RS #[test]
+//RS fn exact_int_inline_loop_allocations_do_not_scale() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "#CLI struct Args { rounds: Int }
+//RS 
+//RS fn churn(rounds: Int) -> Int {
+//RS     total := 0
+//RS     loop i in 0..<rounds {
+//RS         total = (total * 31 + i * 7 - 3) % 1000003
+//RS         total += (i /% 3) %% 5
+//RS     }
+//RS     total
+//RS }
+//RS 
+//RS fn run(args: Args) {
+//RS     print(churn(args.rounds) >= 0)
+//RS }
+//RS ";
+//RS     let scratch = common::Scratch::new("exact_int_allocations");
+//RS     let dir = &scratch.path;
+//RS     tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
+//RS     let jet_path = dir.join("churn.jet");
+//RS     std::fs::write(&jet_path, src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     let rust = jet::compile_with_path(src, &shown)
+//RS         .unwrap_or_else(|diags| {
+//RS             panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+//RS         })
+//RS         .rust;
+//RS     assert!(
+//RS         !rust.contains("#[global_allocator]"),
+//RS         "the default AOT program must keep the hidden system heap"
+//RS     );
+//RS     assert_eq!(
+//RS         rust.matches("\nfn main() {\n").count(),
+//RS         1,
+//RS         "emitted AOT program must have one entry to wrap"
+//RS     );
+//RS     let counted = rust.replacen("\nfn main() {\n", "\nfn __jet_emitted_main() {\n", 1)
+//RS         + r#"
+//RS struct JetAllocationCounter;
+//RS static JET_ALLOCATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+//RS unsafe impl std::alloc::GlobalAlloc for JetAllocationCounter {
+//RS     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+//RS         JET_ALLOCATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS         unsafe { std::alloc::GlobalAlloc::alloc(&std::alloc::System, layout) }
+//RS     }
+//RS     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+//RS         unsafe { std::alloc::GlobalAlloc::dealloc(&std::alloc::System, ptr, layout) }
+//RS     }
+//RS }
+//RS #[global_allocator]
+//RS static JET_ALLOCATION_COUNTER: JetAllocationCounter = JetAllocationCounter;
+//RS fn main() {
+//RS     __jet_emitted_main();
+//RS     eprintln!("jet-allocations={}", JET_ALLOCATIONS.load(std::sync::atomic::Ordering::Relaxed));
+//RS }
+//RS "#;
+//RS     let rs = dir.join("churn.rs");
+//RS     let bin = dir.join("churn");
+//RS     std::fs::write(&rs, counted).unwrap();
+//RS     let rustc = std::process::Command::new("rustc")
+//RS         .args(["--edition", "2021", "--crate-name", "churn"])
+//RS         .args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected the counted AOT program:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let allocations = |rounds: &str| -> usize {
+//RS         let run = std::process::Command::new(&bin).arg(rounds).output().unwrap();
+//RS         let stderr = String::from_utf8_lossy(&run.stderr);
+//RS         assert!(run.status.success(), "{rounds} rounds failed: {stderr}");
+//RS         assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n", "{rounds} rounds");
+//RS         stderr
+//RS             .lines()
+//RS             .find_map(|line| line.strip_prefix("jet-allocations="))
+//RS             .unwrap_or_else(|| panic!("no allocation count in: {stderr}"))
+//RS             .parse()
+//RS             .unwrap()
+//RS     };
+//RS     let small = allocations("1000");
+//RS     let large = allocations("100000");
+//RS     // 99,000 extra iterations of eight exact operations each: any per-op
+//RS     // allocation shows up as hundreds of thousands of extra allocations.
+//RS     assert!(
+//RS         large <= small + 64,
+//RS         "exact-Int loop allocations scale with iterations: {small} at 1e3 vs {large} at 1e5"
+//RS     );
+//RS }
+// END-PORT-PENDING 1076 tests/int_division.rs:1-435
+
+// PORT-PENDING 1076 tests-http-server-tls-module-group: tests/jit_shared_ownership.rs:1-186
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Native Shared-owner and closure-capture ownership regressions.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS 
+//RS const SOURCE: &str = r#"
+//RS struct Holder { owner: Shared<Int> }
+//RS 
+//RS struct SharedPair { first: Shared<Int>, rest: Shared<Int> }
+//RS struct Bucket {
+//RS     values: [Int],
+//RS     by_name: [String:Int],
+//RS }
+//RS 
+//RS fn extract_owner(holder: ^Holder) -> Shared<Int> {
+//RS     return holder.owner
+//RS }
+//RS 
+//RS fn append_then_fail(values: &[Int], value: Int) -> Int? String! -> {
+//RS     &values.push(value)
+//RS     return Err("expected failure")
+//RS }
+//RS 
+//RS fn make_counter(owner: ^Shared<Int>) -> fn(Int) Int {
+//RS     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
+//RS     return (value: Int) -> {
+//RS         failure :: append_then_fail(&bucket.values, value) ?? -value
+//RS         bucket.by_name["last"] = value
+//RS         return bucket.values.len() * 100 + bucket.by_name["last"] + owner.strong_count() + failure
+//RS     }
+//RS }
+//RS 
+//RS fn take_once(owner: ^Shared<Int>) -> Shared<Int> {
+//RS     callback :: () -> {
+//RS         return owner
+//RS     }
+//RS     return callback()
+//RS }
+//RS 
+//RS fn replace_then_take(owner: ^Shared<Int>) -> Shared<Int> {
+//RS     current := ^owner
+//RS     callback :: () -> {
+//RS         current = shared 13
+//RS         return current
+//RS     }
+//RS     return callback()
+//RS }
+//RS 
+//RS fn take_captured_first(pair: ^SharedPair) -> Shared<Int> {
+//RS     callback :: () -> {
+//RS         return pair.first
+//RS     }
+//RS     return callback()
+//RS }
+//RS 
+//RS fn expired_weak() -> Shared.Weak<Int> {
+//RS     owner :: shared 5
+//RS     return owner.downgrade()
+//RS }
+//RS 
+//RS fn run() {
+//RS     owner := shared 7
+//RS     weak :: owner.downgrade()
+//RS     holder :: Holder{owner: ^owner}
+//RS     escaped :: extract_owner(^holder)
+//RS     print(escaped.strong_count())
+//RS     {
+//RS         copied :: ~escaped
+//RS         print(copied.strong_count())
+//RS         print(escaped.strong_count())
+//RS     }
+//RS     print(escaped.strong_count())
+//RS     {
+//RS         snapshot :: escaped.capture()
+//RS         snapshot_copy :: ~snapshot
+//RS         print(escaped.strong_count())
+//RS         print(snapshot_copy.value)
+//RS     }
+//RS     projection :: escaped.capture((value: Int) -> value + 1)
+//RS     print(projection.value)
+//RS     replace_snapshot :: escaped.capture()
+//RS     replaced :: escaped.try_replace(^replace_snapshot, 8) ?? false
+//RS     print(replaced)
+//RS     print(escaped.capture().value)
+//RS 
+//RS     live :: weak.upgrade() ?? panic("moved aggregate released its owner")
+//RS     {
+//RS         counter :: make_counter(^live)
+//RS         alias :: ~counter
+//RS         print(counter(1))
+//RS         print(alias(2))
+//RS         print(counter(3))
+//RS         print(escaped.strong_count())
+//RS     }
+//RS     print(escaped.strong_count())
+//RS 
+//RS     once_owner :: shared 9
+//RS     once_weak :: once_owner.downgrade()
+//RS     once_escaped :: take_once(^once_owner)
+//RS     print(once_escaped.strong_count())
+//RS     if once_weak.upgrade() == .None { panic("FnOnce transfer released its owner") }
+//RS     replaced_owner := shared 37
+//RS     replaced_weak :: replaced_owner.downgrade()
+//RS     replaced_result :: replace_then_take(^replaced_owner)
+//RS     print(replaced_result.capture().value)
+//RS     print(replaced_result.strong_count())
+//RS     print(replaced_weak.upgrade() == .None)
+//RS     first_owner := shared 11
+//RS     rest_owner := shared 23
+//RS     first_weak :: first_owner.downgrade()
+//RS     rest_weak :: rest_owner.downgrade()
+//RS     pair := SharedPair{first: ^first_owner, rest: ^rest_owner}
+//RS     captured_first :: take_captured_first(^pair)
+//RS     print(captured_first.capture().value)
+//RS     print(captured_first.strong_count())
+//RS     print(first_weak.upgrade() != .None)
+//RS     print(rest_weak.upgrade() == .None)
+//RS 
+//RS     dead :: expired_weak()
+//RS     print(dead.upgrade() == .None)
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn resident_jit_preserves_shared_and_closure_owner_topology() {
+//RS     if !jet_jit::cranelift_host_supported() {
+//RS         return;
+//RS     }
+//RS 
+//RS     let dir = common::unique_tmp("jit_shared_ownership");
+//RS     fs::create_dir_all(&dir).expect("create scratch fixture directory");
+//RS     let file = dir.join("shared_ownership.jet");
+//RS     fs::write(&file, SOURCE).expect("write Shared ownership fixture");
+//RS 
+//RS     let shown = file.to_string_lossy().into_owned();
+//RS     let mut bundle = jet::Loader::load_entry(&shown).expect("load Shared ownership fixture");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+//RS         "Shared ownership fixture diagnostics: {diagnostics:#?}"
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_lowers(&bundle),
+//RS         "Shared ownership fixture must lower to canonical Cranelift MIR: {}",
+//RS         common::cranelift_lower_error(&bundle)
+//RS     );
+//RS     assert!(
+//RS         common::cranelift_resident_safe(&bundle),
+//RS         "Shared ownership fixture must be resident-safe: {}",
+//RS         common::cranelift_resident_safe_detail(&bundle)
+//RS     );
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+//RS     let stdout = match outcome {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 0, "resident JIT stderr: {stderr}");
+//RS             assert!(stderr.is_empty(), "resident JIT stderr: {stderr}");
+//RS             stdout
+//RS         }
+//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+//RS             panic!("Shared ownership fixture failed: {diagnostics:?}")
+//RS         }
+//RS     };
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "1\n2\n2\n1\n1\n7\n8\ntrue\n8\n102\n202\n302\n2\n1\n1\n13\n1\ntrue\n11\n1\ntrue\ntrue\ntrue\n"
+//RS     );
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "Shared ownership fixture must execute in resident JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+//RS         "Shared ownership fixture must stay resident without deopt or fallback"
+//RS     );
+//RS 
+//RS     fs::remove_dir_all(&dir).expect("remove scratch fixture directory");
+//RS }
+// END-PORT-PENDING 1076 tests/jit_shared_ownership.rs:1-186
+
+// PORT-PENDING 1076 tests-http-server-tls-module-group: tests/measurement_exact_mixing.rs:1-20
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS #[test]
+//RS fn exact_values_enter_measurement_with_zero_uncertainty() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     measured :: measurement(12.0, uncertainty: 0.1)
+//RS     exact :: 2
+//RS     print(measured + exact)
+//RS     print(exact + measured)
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree(
+//RS         "measurement_exact_mixing",
+//RS         source,
+//RS         "14.0 ± 0.1\n14.0 ± 0.1\n",
+//RS     );
+//RS }
+// END-PORT-PENDING 1076 tests/measurement_exact_mixing.rs:1-20
+

@@ -1,0 +1,141 @@
+// PORT-PENDING 0273 crates-jet-codegen-src-prelude-corelib-top-gameassetsimport-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsImport.rs:1-137
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // core.game asset imports are a typed boundary over the shared asset pipeline.
+//RS //
+//RS // Hosts provide root identities, watch events, source identities, and checked
+//RS // importer outcomes. This adapter never observes the filesystem, hashes bytes,
+//RS // infers an importer, or invents a cache key. The shared Prelude owns every
+//RS // validation, normalization, dependency, and report rule.
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct GameAssetImportAdapter {
+//RS     roots: JetGameAssetRootSet,
+//RS     graph: JetGameAssetDependencyGraph,
+//RS }
+//RS 
+//RS impl GameAssetImportAdapter {
+//RS     pub(crate) fn new(roots: JetGameAssetRootSet) -> Self {
+//RS         let graph = JetGameAssetDependencyGraph::new(roots.clone());
+//RS         Self { roots, graph }
+//RS     }
+//RS 
+//RS     pub(crate) fn with_roots(
+//RS         roots: Vec<JetGameAssetRootIdentity>,
+//RS     ) -> Result<Self, JetGameAssetPipelineError> {
+//RS         Ok(Self::new(JetGameAssetRootSet::new(roots)?))
+//RS     }
+//RS 
+//RS     pub(crate) fn roots(&self) -> &JetGameAssetRootSet {
+//RS         &self.roots
+//RS     }
+//RS 
+//RS     pub(crate) fn graph(&self) -> &JetGameAssetDependencyGraph {
+//RS         &self.graph
+//RS     }
+//RS 
+//RS     pub(crate) fn graph_mut(&mut self) -> &mut JetGameAssetDependencyGraph {
+//RS         &mut self.graph
+//RS     }
+//RS 
+//RS     pub(crate) fn watch_facts(
+//RS         &self,
+//RS         events: &[JetGameAssetWatchEvent],
+//RS     ) -> Result<JetGameAssetWatchFacts, JetGameAssetPipelineError> {
+//RS         JetGameAssetWatchFacts::coalesce(&self.roots, events)
+//RS     }
+//RS 
+//RS     pub(crate) fn add_source(
+//RS         &mut self,
+//RS         source: JetGameAssetSourceIdentity,
+//RS     ) -> Result<JetGameAssetNodeIdentity, JetGameAssetPipelineError> {
+//RS         self.graph.add_source(source)
+//RS     }
+//RS 
+//RS     pub(crate) fn set_dependencies(
+//RS         &mut self,
+//RS         source: &JetGameAssetSourceIdentity,
+//RS         dependencies: Vec<JetGameAssetDependencyIdentity>,
+//RS     ) -> Result<(), JetGameAssetPipelineError> {
+//RS         self.graph.set_dependencies(source, dependencies)
+//RS     }
+//RS 
+//RS     pub(crate) fn import_plan(
+//RS         &self,
+//RS         source: JetGameAssetSourceIdentity,
+//RS         recipe: JetGameAssetRecipeIdentity,
+//RS         tool: JetGameAssetToolIdentity,
+//RS         version: JetGameAssetVersionIdentity,
+//RS         dependencies: Vec<JetGameAssetDependencyIdentity>,
+//RS     ) -> Result<JetGameAssetImportPlan, JetGameAssetPipelineError> {
+//RS         JetGameAssetImportPlan::new(source, recipe, tool, version)?.with_dependencies(dependencies)
+//RS     }
+//RS 
+//RS     pub(crate) fn ready_outcome(
+//RS         &self,
+//RS         plan: &JetGameAssetImportPlan,
+//RS         output_hash: impl Into<String>,
+//RS     ) -> Result<JetGameAssetImportOutcome, JetGameAssetPipelineError> {
+//RS         JetGameAssetImportOutcome::ready(plan, output_hash)
+//RS     }
+//RS     pub(crate) fn runtime_fact(
+//RS         &self,
+//RS         plan: &JetGameAssetImportPlan,
+//RS         outcome: &JetGameAssetImportOutcome,
+//RS         bytes: Vec<u8>,
+//RS         metadata: impl Into<String>,
+//RS     ) -> Result<JetGameAssetRuntimeFact, JetGameAssetPipelineError> {
+//RS         JetGameAssetRuntimeFact::from_ready(plan, outcome, bytes, metadata)
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn failed_outcome(
+//RS         &self,
+//RS         plan: &JetGameAssetImportPlan,
+//RS         code: impl Into<String>,
+//RS         message: impl Into<String>,
+//RS     ) -> Result<JetGameAssetImportOutcome, JetGameAssetPipelineError> {
+//RS         JetGameAssetImportOutcome::failed(plan, code, message)
+//RS     }
+//RS 
+//RS     pub(crate) fn report_from_watch(
+//RS         &self,
+//RS         events: &[JetGameAssetWatchEvent],
+//RS     ) -> Result<JetGameAssetImportReport, JetGameAssetPipelineError> {
+//RS         Ok(JetGameAssetImportReport::from_watch(&self.watch_facts(events)?))
+//RS     }
+//RS     pub(crate) fn import_report(
+//RS         &self,
+//RS         facts: &JetGameAssetWatchFacts,
+//RS     ) -> JetGameAssetImportReport {
+//RS         let mut report = JetGameAssetImportReport::from_watch(facts);
+//RS         let imported = report.imported.clone();
+//RS         for node in imported.iter().cloned() {
+//RS             for dependency in self.graph.dependencies_for(&node) {
+//RS                 report.record_dependency(dependency);
+//RS             }
+//RS         }
+//RS 
+//RS         // The report is a projection of the declared graph, not a directory
+//RS         // scan. A registered source untouched by this watch batch is an
+//RS         // explicit skip, which lets hosts distinguish "not considered" from
+//RS         // "considered and unchanged" without inventing a second status store.
+//RS         let imported = imported.into_iter().collect::<std::collections::BTreeSet<_>>();
+//RS         let deleted = report
+//RS             .deleted
+//RS             .iter()
+//RS             .cloned()
+//RS             .collect::<std::collections::BTreeSet<_>>();
+//RS         let sources = self.graph.nodes().cloned().collect::<Vec<_>>();
+//RS         for node in sources {
+//RS             if self.graph.source(&node).is_some()
+//RS                 && !imported.contains(&node)
+//RS                 && !deleted.contains(&node)
+//RS             {
+//RS                 report.record_skipped(node);
+//RS             }
+//RS         }
+//RS         report
+//RS     }
+//RS }
+// END-PORT-PENDING 0273 crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsImport.rs:1-137
+

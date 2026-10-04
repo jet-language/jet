@@ -1,0 +1,1804 @@
+// PORT-PENDING 0185 crates-jet-codegen-src-prelude-scheduler-slice-1805: crates/jet-codegen/src/Prelude/Scheduler.rs:1805-3604
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     fn unregister(&self, id: usize) {
+//RS         self.interests.lock().unwrap().retain(|i| i.stream_id != id);
+//RS         self.retire_requested.lock().unwrap().insert(id);
+//RS         #[cfg(not(target_os = "windows"))]
+//RS         {
+//RS             self.streams.lock().unwrap().remove(&id);
+//RS             self.retire_requested.lock().unwrap().remove(&id);
+//RS         }
+//RS         #[cfg(target_os = "windows")]
+//RS         self.iocp_notify();
+//RS     }
+//RS 
+//RS     // jet:scheduler-native-notify-begin
+//RS     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
+//RS     fn iocp_notify(&self) {
+//RS         #[link(name = "kernel32")]
+//RS         extern "system" {
+//RS             fn PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: *mut std::ffi::c_void) -> i32;
+//RS         }
+//RS         let port = self.iocp_port.load(Ordering::Acquire);
+//RS         if port != 0 {
+//RS             unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
+//RS         }
+//RS     }
+//RS     // jet:scheduler-native-notify-end
+//RS 
+//RS     #[cfg(all(target_os = "windows", not(feature = "jet_native_io")))]
+//RS     fn iocp_notify(&self) {
+//RS         self.notify.notify_one();
+//RS     }
+//RS 
+//RS     fn run(self: Arc<Self>) {
+//RS         #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
+//RS         {
+//RS             self.run_linux_epoll();
+//RS         }
+//RS         #[cfg(all(
+//RS             any(
+//RS                 target_os = "macos",
+//RS                 target_os = "ios",
+//RS                 target_os = "tvos",
+//RS                 target_os = "watchos",
+//RS                 target_os = "freebsd",
+//RS                 target_os = "netbsd",
+//RS                 target_os = "openbsd"
+//RS             ),
+//RS             feature = "jet_native_io"
+//RS         ))]
+//RS         {
+//RS             self.run_kqueue();
+//RS         }
+//RS         #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
+//RS         {
+//RS             self.run_iocp();
+//RS         }
+//RS         #[cfg(not(any(
+//RS             all(target_os = "linux", feature = "jet_native_io"),
+//RS             all(
+//RS                 any(
+//RS                     target_os = "macos",
+//RS                     target_os = "ios",
+//RS                     target_os = "tvos",
+//RS                     target_os = "watchos",
+//RS                     target_os = "freebsd",
+//RS                     target_os = "netbsd",
+//RS                     target_os = "openbsd"
+//RS                 ),
+//RS                 feature = "jet_native_io"
+//RS             ),
+//RS             all(target_os = "windows", feature = "jet_native_io")
+//RS         )))]
+//RS         {
+//RS             self.run_portable_poll();
+//RS         }
+//RS     }
+//RS 
+//RS     // jet:scheduler-native-epoll-begin
+//RS     #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
+//RS     fn run_linux_epoll(self: Arc<Self>) {
+//RS         use std::collections::HashMap;
+//RS         use std::os::unix::io::AsRawFd;
+//RS 
+//RS         #[repr(C)]
+//RS         #[derive(Clone, Copy)]
+//RS         struct EpollEvent {
+//RS             events: u32,
+//RS             data: u64,
+//RS         }
+//RS 
+//RS         const EPOLLIN: u32 = 1;
+//RS         const EPOLLOUT: u32 = 4;
+//RS         const EPOLL_CTL_ADD: i32 = 1;
+//RS         const EPOLL_CTL_DEL: i32 = 2;
+//RS 
+//RS         #[link(name = "c")]
+//RS         extern "C" {
+//RS             fn epoll_create1(flags: i32) -> i32;
+//RS             fn epoll_ctl(epfd: i32, op: i32, fd: i32, event: *const EpollEvent) -> i32;
+//RS             fn epoll_wait(
+//RS                 epfd: i32,
+//RS                 events: *mut EpollEvent,
+//RS                 maxevents: i32,
+//RS                 timeout: i32,
+//RS             ) -> i32;
+//RS         }
+//RS 
+//RS         let epfd = unsafe { epoll_create1(0x80000) }; // CLOEXEC
+//RS         assert!(epfd >= 0, "epoll_create1 failed");
+//RS         let mut fd_slots: HashMap<i32, Arc<ParkSlot>> = HashMap::new();
+//RS 
+//RS         loop {
+//RS             // Register new interests with epoll.
+//RS             let pending: Vec<(i32, u32, Arc<ParkSlot>)> = {
+//RS                 let interests = self.interests.lock().unwrap();
+//RS                 let streams = self.streams.lock().unwrap();
+//RS                 let mut out = Vec::new();
+//RS                 for interest in interests.iter() {
+//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
+//RS                         continue;
+//RS                     };
+//RS                     let fd = stream.lock().unwrap().as_raw_fd();
+//RS                     if fd_slots.contains_key(&fd) {
+//RS                         continue;
+//RS                     }
+//RS                     let mut events = 0u32;
+//RS                     if interest.readable {
+//RS                         events |= EPOLLIN;
+//RS                     }
+//RS                     if interest.writable {
+//RS                         events |= EPOLLOUT;
+//RS                     }
+//RS                     out.push((fd, events, interest.slot.clone()));
+//RS                 }
+//RS                 out
+//RS             };
+//RS             for (fd, events, slot) in pending {
+//RS                 let ev = EpollEvent {
+//RS                     events,
+//RS                     data: fd as u64,
+//RS                 };
+//RS                 let rc = unsafe { epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev) };
+//RS                 if rc == 0 {
+//RS                     fd_slots.insert(fd, slot);
+//RS                 }
+//RS             }
+//RS 
+//RS             let mut events = [EpollEvent {
+//RS                 events: 0,
+//RS                 data: 0,
+//RS             }; 64];
+//RS             let n = unsafe { epoll_wait(epfd, events.as_mut_ptr(), 64, 50) };
+//RS             if n > 0 {
+//RS                 METRIC_POLLER_WAKE.fetch_add(n as usize, Ordering::Relaxed);
+//RS                 for ev in &events[..n as usize] {
+//RS                     let fd = ev.data as i32;
+//RS                     if let Some(slot) = fd_slots.remove(&fd) {
+//RS                         let _ = unsafe { epoll_ctl(epfd, EPOLL_CTL_DEL, fd, std::ptr::null()) };
+//RS                         let mut interests = self.interests.lock().unwrap();
+//RS                         interests.retain(|i| !Arc::ptr_eq(&i.slot, &slot));
+//RS                         slot.wake();
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     // jet:scheduler-native-epoll-end
+//RS 
+//RS     #[cfg(not(all(target_os = "linux", feature = "jet_native_io")))]
+//RS     fn run_linux_epoll(self: Arc<Self>) {
+//RS         self.run_portable_poll();
+//RS     }
+//RS 
+//RS     // jet:scheduler-native-kqueue-begin
+//RS     #[cfg(all(
+//RS         any(
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             target_os = "tvos",
+//RS             target_os = "watchos",
+//RS             target_os = "freebsd",
+//RS             target_os = "netbsd",
+//RS             target_os = "openbsd"
+//RS         ),
+//RS         feature = "jet_native_io"
+//RS     ))]
+//RS     fn run_kqueue(self: Arc<Self>) {
+//RS         use std::collections::HashMap;
+//RS         use std::os::unix::io::AsRawFd;
+//RS 
+//RS         #[repr(C)]
+//RS         #[derive(Clone, Copy)]
+//RS         struct Kevent {
+//RS             ident: usize,
+//RS             filter: i16,
+//RS             flags: u16,
+//RS             fflags: u32,
+//RS             data: i64,
+//RS             udata: *mut std::ffi::c_void,
+//RS         }
+//RS 
+//RS         const EVFILT_READ: i16 = -1;
+//RS         const EVFILT_WRITE: i16 = -2;
+//RS         const EV_ADD: u16 = 0x0001;
+//RS         const EV_DELETE: u16 = 0x0002;
+//RS         const EV_ONESHOT: u16 = 0x0010;
+//RS 
+//RS         #[link(name = "c")]
+//RS         extern "C" {
+//RS             fn kqueue() -> i32;
+//RS             fn kevent(
+//RS                 kq: i32,
+//RS                 changelist: *const Kevent,
+//RS                 nchanges: i32,
+//RS                 eventlist: *mut Kevent,
+//RS                 nevents: i32,
+//RS                 timeout: *const libc_timespec,
+//RS             ) -> i32;
+//RS         }
+//RS 
+//RS         #[repr(C)]
+//RS         struct libc_timespec {
+//RS             tv_sec: i64,
+//RS             tv_nsec: i64,
+//RS         }
+//RS 
+//RS         let kq = unsafe { kqueue() };
+//RS         assert!(kq >= 0, "kqueue() failed");
+//RS         let mut fd_slots: HashMap<i32, Arc<ParkSlot>> = HashMap::new();
+//RS 
+//RS         loop {
+//RS             let pending: Vec<(i32, i16, Arc<ParkSlot>)> = {
+//RS                 let interests = self.interests.lock().unwrap();
+//RS                 let streams = self.streams.lock().unwrap();
+//RS                 let mut out = Vec::new();
+//RS                 for interest in interests.iter() {
+//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
+//RS                         continue;
+//RS                     };
+//RS                     let fd = stream.lock().unwrap().as_raw_fd();
+//RS                     if fd_slots.contains_key(&fd) {
+//RS                         continue;
+//RS                     }
+//RS                     if interest.readable {
+//RS                         out.push((fd, EVFILT_READ, interest.slot.clone()));
+//RS                     }
+//RS                     if interest.writable {
+//RS                         out.push((fd, EVFILT_WRITE, interest.slot.clone()));
+//RS                     }
+//RS                 }
+//RS                 out
+//RS             };
+//RS             for (fd, filter, slot) in pending {
+//RS                 let ev = Kevent {
+//RS                     ident: fd as usize,
+//RS                     filter,
+//RS                     flags: EV_ADD | EV_ONESHOT,
+//RS                     fflags: 0,
+//RS                     data: 0,
+//RS                     udata: std::ptr::null_mut(),
+//RS                 };
+//RS                 let rc = unsafe { kevent(kq, &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+//RS                 if rc == 0 {
+//RS                     fd_slots.insert(fd, slot);
+//RS                 }
+//RS             }
+//RS 
+//RS             let mut events = [Kevent {
+//RS                 ident: 0,
+//RS                 filter: 0,
+//RS                 flags: 0,
+//RS                 fflags: 0,
+//RS                 data: 0,
+//RS                 udata: std::ptr::null_mut(),
+//RS             }; 64];
+//RS             let timeout = libc_timespec {
+//RS                 tv_sec: 0,
+//RS                 tv_nsec: 50_000_000,
+//RS             };
+//RS             let n = unsafe {
+//RS                 kevent(
+//RS                     kq,
+//RS                     std::ptr::null(),
+//RS                     0,
+//RS                     events.as_mut_ptr(),
+//RS                     64,
+//RS                     &timeout,
+//RS                 )
+//RS             };
+//RS             if n > 0 {
+//RS                 METRIC_POLLER_WAKE.fetch_add(n as usize, Ordering::Relaxed);
+//RS                 for ev in &events[..n as usize] {
+//RS                     let fd = ev.ident as i32;
+//RS                     if let Some(slot) = fd_slots.remove(&fd) {
+//RS                         let del = Kevent {
+//RS                             ident: ev.ident,
+//RS                             filter: ev.filter,
+//RS                             flags: EV_DELETE,
+//RS                             fflags: 0,
+//RS                             data: 0,
+//RS                             udata: std::ptr::null_mut(),
+//RS                         };
+//RS                         let _ = unsafe { kevent(kq, &del, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+//RS                         let mut interests = self.interests.lock().unwrap();
+//RS                         interests.retain(|i| !Arc::ptr_eq(&i.slot, &slot));
+//RS                         slot.wake();
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     // jet:scheduler-native-kqueue-end
+//RS 
+//RS     #[cfg(not(all(
+//RS         any(
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             target_os = "tvos",
+//RS             target_os = "watchos",
+//RS             target_os = "freebsd",
+//RS             target_os = "netbsd",
+//RS             target_os = "openbsd"
+//RS         ),
+//RS         feature = "jet_native_io"
+//RS     )))]
+//RS     fn run_kqueue(self: Arc<Self>) {
+//RS         self.run_portable_poll();
+//RS     }
+//RS 
+//RS     // jet:scheduler-native-iocp-begin
+//RS     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
+//RS     fn run_iocp(self: Arc<Self>) {
+//RS         use std::collections::HashMap;
+//RS         use std::os::windows::io::AsRawSocket;
+//RS         #[repr(C)]
+//RS         struct Overlapped { internal: usize, internal_high: usize, offset: u32, offset_high: u32, event: usize }
+//RS         #[repr(C)]
+//RS         struct WsaBuf { len: u32, buf: *mut u8 }
+//RS         struct Active {
+//RS             _stream: Arc<Mutex<TcpStream>>,
+//RS             socket: usize,
+//RS             operations: Vec<*mut Overlapped>,
+//RS             cancel_requested: bool,
+//RS         }
+//RS         const INVALID_HANDLE_VALUE: usize = usize::MAX;
+//RS         const WSA_IO_PENDING: i32 = 997;
+//RS         #[link(name = "kernel32")]
+//RS         extern "system" {
+//RS             fn CreateIoCompletionPort(file: usize, existing: usize, key: usize, threads: u32) -> usize;
+//RS             fn GetQueuedCompletionStatus(port: usize, bytes: *mut u32, key: *mut usize, ov: *mut *mut Overlapped, timeout_ms: u32) -> i32;
+//RS             fn CancelIoEx(file: usize, ov: *mut Overlapped) -> i32;
+//RS             fn GetLastError() -> u32;
+//RS             fn CloseHandle(handle: usize) -> i32;
+//RS         }
+//RS         #[link(name = "ws2_32")]
+//RS         extern "system" {
+//RS             fn WSARecv(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: *mut u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+//RS             fn WSASend(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+//RS             fn WSAGetLastError() -> i32;
+//RS         }
+//RS 
+//RS         let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1) };
+//RS         if port == 0 {
+//RS             METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS             *self.backend_state.lock().unwrap() =
+//RS                 IOBackendState::Failed("internal scheduler IOCP creation failed");
+//RS             for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+//RS             self.streams.lock().unwrap().clear();
+//RS             self.retire_requested.lock().unwrap().clear();
+//RS             self.iocp_shutdown_done.store(true, Ordering::Release);
+//RS             return;
+//RS         }
+//RS         self.iocp_port.store(port, Ordering::Release);
+//RS         self.iocp_shutdown_done.store(false, Ordering::Release);
+//RS         *self.backend_state.lock().unwrap() = IOBackendState::Running;
+//RS         let mut active: HashMap<usize, Active> = HashMap::new();
+//RS         loop {
+//RS             let pending: Vec<(usize, Arc<Mutex<TcpStream>>, usize, bool, bool)> = {
+//RS                 let interests = self.interests.lock().unwrap();
+//RS                 let streams = self.streams.lock().unwrap();
+//RS                 interests.iter()
+//RS                     .filter(|interest| !active.contains_key(&interest.stream_id))
+//RS                     .filter_map(|interest| streams.get(&interest.stream_id).map(|stream| (
+//RS                         interest.stream_id,
+//RS                         stream.clone(),
+//RS                         stream.lock().unwrap().as_raw_socket() as usize,
+//RS                         interest.readable,
+//RS                         interest.writable,
+//RS                     )))
+//RS                     .collect()
+//RS             };
+//RS             for (id, stream, socket, readable, writable) in pending {
+//RS                 let associated = unsafe { CreateIoCompletionPort(socket, port, id + 1, 0) };
+//RS                 if associated == 0 {
+//RS                     let _error = unsafe { GetLastError() };
+//RS                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS                     if let Some(slot) = self.interests.lock().unwrap().iter()
+//RS                         .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
+//RS                     { slot.wake(); }
+//RS                     self.interests.lock().unwrap().retain(|interest| interest.stream_id != id);
+//RS                     self.streams.lock().unwrap().remove(&id);
+//RS                     continue;
+//RS                 }
+//RS                 let mut operations = Vec::new();
+//RS                 for read in [true, false] {
+//RS                     if (read && !readable) || (!read && !writable) { continue; }
+//RS                     let raw = Box::into_raw(Box::new(Overlapped {
+//RS                         internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0,
+//RS                     }));
+//RS                     METRIC_IO_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+//RS                     let mut buffer = WsaBuf { len: 0, buf: std::ptr::null_mut() };
+//RS                     let mut bytes = 0;
+//RS                     let rc = if read {
+//RS                         let mut flags = 0;
+//RS                         unsafe { WSARecv(socket, &mut buffer, 1, &mut bytes, &mut flags, raw, std::ptr::null_mut()) }
+//RS                     } else {
+//RS                         unsafe { WSASend(socket, &mut buffer, 1, &mut bytes, 0, raw, std::ptr::null_mut()) }
+//RS                     };
+//RS                     if rc == 0 || unsafe { WSAGetLastError() } == WSA_IO_PENDING {
+//RS                         operations.push(raw);
+//RS                     } else {
+//RS                         unsafe { drop(Box::from_raw(raw)); }
+//RS                         METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+//RS                     }
+//RS                 }
+//RS                 if operations.is_empty() {
+//RS                     if let Some(slot) = self.interests.lock().unwrap().iter()
+//RS                         .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
+//RS                     { slot.wake(); }
+//RS                 } else {
+//RS                     active.insert(id, Active { _stream: stream, socket, operations, cancel_requested: false });
+//RS                     METRIC_IO_ACTIVE.fetch_add(1, Ordering::Relaxed);
+//RS                 }
+//RS             }
+//RS 
+//RS             let retiring: Vec<usize> = self.retire_requested.lock().unwrap().iter().copied().collect();
+//RS             for id in retiring {
+//RS                 if let Some(entry) = active.get_mut(&id) {
+//RS                     if !entry.cancel_requested {
+//RS                         entry.cancel_requested = true;
+//RS                         for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
+//RS                     }
+//RS                 } else {
+//RS                     self.streams.lock().unwrap().remove(&id);
+//RS                     self.retire_requested.lock().unwrap().remove(&id);
+//RS                 }
+//RS             }
+//RS 
+//RS             for (id, entry) in active.iter_mut() {
+//RS                 if !self.interests.lock().unwrap().iter().any(|interest| interest.stream_id == *id)
+//RS                     && !entry.cancel_requested {
+//RS                     entry.cancel_requested = true;
+//RS                     for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
+//RS                 }
+//RS             }
+//RS 
+//RS             let (mut bytes, mut key, mut operation) = (0, 0usize, std::ptr::null_mut());
+//RS             #[cfg(test)]
+//RS             let inject_fatal = TEST_IOCP_GQCS_FATAL.swap(false, Ordering::AcqRel);
+//RS             #[cfg(not(test))]
+//RS             let inject_fatal = false;
+//RS             let ok = if inject_fatal {
+//RS                 0
+//RS             } else {
+//RS                 unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX) }
+//RS             };
+//RS             if operation.is_null() {
+//RS                 if ok == 0 {
+//RS                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS                     *self.backend_state.lock().unwrap() =
+//RS                         IOBackendState::Failed("internal scheduler IOCP completion port failed");
+//RS                     for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+//RS                     for entry in active.values_mut() {
+//RS                         if !entry.cancel_requested {
+//RS                             entry.cancel_requested = true;
+//RS                             for pending in &entry.operations {
+//RS                                 let cancelled = unsafe { CancelIoEx(entry.socket, *pending) };
+//RS                                 if cancelled == 0 {
+//RS                                     let error = unsafe { GetLastError() };
+//RS                                     if error != 1168 { // ERROR_NOT_FOUND: completion already queued.
+//RS                                         METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS                                     }
+//RS                                 }
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     // CancelIoEx on an IOCP-associated socket queues one terminal
+//RS                     // completion per outstanding OVERLAPPED. Keep every Active
+//RS                     // socket owner and Box alive until those completions arrive.
+//RS                     let drain_deadline = Instant::now() + Duration::from_secs(5);
+//RS                     while !active.is_empty() && Instant::now() < drain_deadline {
+//RS                         let (mut drain_bytes, mut drain_key, mut drain_operation) =
+//RS                             (0, 0usize, std::ptr::null_mut());
+//RS                         unsafe {
+//RS                             GetQueuedCompletionStatus(
+//RS                                 port,
+//RS                                 &mut drain_bytes,
+//RS                                 &mut drain_key,
+//RS                                 &mut drain_operation,
+//RS                                 50,
+//RS                             );
+//RS                         }
+//RS                         if drain_operation.is_null() { continue; }
+//RS                         unsafe { drop(Box::from_raw(drain_operation)); }
+//RS                         METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+//RS                         let owner = active.iter().find_map(|(id, entry)|
+//RS                             entry.operations.contains(&drain_operation).then_some(*id));
+//RS                         if let Some(id) = owner {
+//RS                             let entry = active.get_mut(&id).unwrap();
+//RS                             entry.operations.retain(|candidate| *candidate != drain_operation);
+//RS                             if entry.operations.is_empty() {
+//RS                                 active.remove(&id);
+//RS                                 METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+//RS                                 self.streams.lock().unwrap().remove(&id);
+//RS                                 self.retire_requested.lock().unwrap().remove(&id);
+//RS                             }
+//RS                         } else {
+//RS                             METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed);
+//RS                         }
+//RS                     }
+//RS                     self.iocp_port.store(0, Ordering::Release);
+//RS                     *self.backend_state.lock().unwrap() = IOBackendState::Closed;
+//RS                     if unsafe { CloseHandle(port) } != 0 {
+//RS                         METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
+//RS                     } else {
+//RS                         METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS                     }
+//RS                     if active.is_empty() {
+//RS                         self.streams.lock().unwrap().clear();
+//RS                         self.retire_requested.lock().unwrap().clear();
+//RS                     } else {
+//RS                         // Kernel did not return cancellation completions before
+//RS                         // bounded shutdown. Retain sockets and OVERLAPPED boxes
+//RS                         // permanently: truthful nonzero counters beat UAF.
+//RS                         std::mem::forget(active);
+//RS                     }
+//RS                     *self.backend_state.lock().unwrap() =
+//RS                         IOBackendState::Failed("internal scheduler IOCP completion port failed");
+//RS                     self.iocp_shutdown_done.store(true, Ordering::Release);
+//RS                     return;
+//RS                 }
+//RS                 if key != 0 { METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed); }
+//RS                 continue;
+//RS             }
+//RS             if ok == 0 && unsafe { GetLastError() } != 995 {
+//RS                 METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+//RS             }
+//RS             unsafe { drop(Box::from_raw(operation)); }
+//RS             METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+//RS             let id = key.saturating_sub(1);
+//RS             let Some(entry) = active.get_mut(&id) else { continue; };
+//RS             entry.operations.retain(|candidate| *candidate != operation);
+//RS             let slot = {
+//RS                 let mut interests = self.interests.lock().unwrap();
+//RS                 let slot = interests.iter().find(|interest| interest.stream_id == id)
+//RS                     .map(|interest| interest.slot.clone());
+//RS                 interests.retain(|interest| interest.stream_id != id);
+//RS                 slot
+//RS             };
+//RS             if let Some(slot) = slot {
+//RS                 METRIC_POLLER_WAKE.fetch_add(1, Ordering::Relaxed);
+//RS                 for pending in &entry.operations { unsafe { CancelIoEx(entry.socket, *pending); } }
+//RS                 slot.wake();
+//RS             }
+//RS             if entry.operations.is_empty() {
+//RS                 active.remove(&id);
+//RS                 METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+//RS                 self.streams.lock().unwrap().remove(&id);
+//RS                 self.retire_requested.lock().unwrap().remove(&id);
+//RS             }
+//RS         }
+//RS     }
+//RS     // jet:scheduler-native-iocp-end
+//RS 
+//RS     #[cfg(not(all(target_os = "windows", feature = "jet_native_io")))]
+//RS     fn run_iocp(self: Arc<Self>) {
+//RS         self.run_portable_poll();
+//RS     }
+//RS 
+//RS     #[allow(dead_code)]
+//RS     fn run_portable_poll(self: Arc<Self>) {
+//RS         use std::io::Write;
+//RS         loop {
+//RS             let ready: Vec<Arc<ParkSlot>> = {
+//RS                 let interests = self.interests.lock().unwrap();
+//RS                 let streams = self.streams.lock().unwrap();
+//RS                 let mut slots = Vec::new();
+//RS                 for interest in interests.iter() {
+//RS                     let Some(stream) = streams.get(&interest.stream_id) else {
+//RS                         continue;
+//RS                     };
+//RS                     let mut s = stream.lock().unwrap();
+//RS                     let _ = s.set_nonblocking(true);
+//RS                     let mut buf = [0u8; 1];
+//RS                     if interest.readable {
+//RS                         match s.peek(&mut buf) {
+//RS                             Ok(0) | Ok(_) => slots.push(interest.slot.clone()),
+//RS                             Err(_) => {}
+//RS                         }
+//RS                     }
+//RS                     if interest.writable {
+//RS                         match s.write(&[]) {
+//RS                             Ok(_) => slots.push(interest.slot.clone()),
+//RS                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+//RS                             Err(_) => slots.push(interest.slot.clone()),
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 slots
+//RS             };
+//RS             if !ready.is_empty() {
+//RS                 let mut interests = self.interests.lock().unwrap();
+//RS                 for slot in &ready {
+//RS                     interests.retain(|i| !Arc::ptr_eq(&i.slot, slot));
+//RS                     slot.wake();
+//RS                 }
+//RS             }
+//RS             let g = self.interests.lock().unwrap();
+//RS             let _ = self
+//RS                 .notify
+//RS                 .wait_timeout(g, Duration::from_millis(5))
+//RS                 .unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // Unix-domain streams and UDP sockets cannot be represented as `TcpStream`,
+//RS // but they must park on the same task slots instead of blocking worker threads.
+//RS // One process-wide poller owns all raw-descriptor readiness registrations.
+//RS // The token is the logical handle identity. It carries the descriptor number,
+//RS // not a cloned OS handle, so close/cancel share one lifecycle.
+//RS #[cfg(unix)]
+//RS pub struct JetSchedulerRawIoHandle {
+//RS     fd: i32,
+//RS     closed: AtomicBool,
+//RS     registrations: Mutex<HashMap<usize, std::sync::Weak<JetRawIoRegistration>>>,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS impl JetSchedulerRawIoHandle {
+//RS     pub fn new(fd: i32) -> Arc<Self> {
+//RS         Arc::new(Self {
+//RS             fd,
+//RS             closed: AtomicBool::new(false),
+//RS             registrations: Mutex::new(HashMap::new()),
+//RS         })
+//RS     }
+//RS 
+//RS     fn add_registration(&self, registration: &Arc<JetRawIoRegistration>) -> bool {
+//RS         let mut registrations = self.registrations.lock().unwrap();
+//RS         if self.closed.load(Ordering::Acquire)
+//RS             || !registration.active.load(Ordering::Acquire)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         registrations.insert(registration.id, Arc::downgrade(registration));
+//RS         true
+//RS     }
+//RS 
+//RS     fn remove_registration(&self, id: usize) {
+//RS         self.registrations.lock().unwrap().remove(&id);
+//RS     }
+//RS 
+//RS     /// Close the logical handle once. Every live wait is woken and removed by
+//RS     /// its registration guard; repeated close calls are no-ops.
+//RS     pub fn close(&self) {
+//RS         if self.closed.swap(true, Ordering::AcqRel) {
+//RS             return;
+//RS         }
+//RS         let registrations = self
+//RS             .registrations
+//RS             .lock()
+//RS             .unwrap()
+//RS             .drain()
+//RS             .filter_map(|(_, registration)| registration.upgrade())
+//RS             .collect::<Vec<_>>();
+//RS         for registration in registrations {
+//RS             registration.close();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_raw_io_handle(fd: i32) -> Arc<JetSchedulerRawIoHandle> {
+//RS     JetSchedulerRawIoHandle::new(fd)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS struct JetRawIoRegistration {
+//RS     id: usize,
+//RS     handle: Arc<JetSchedulerRawIoHandle>,
+//RS     poller: std::sync::Weak<JetRawIoPoller>,
+//RS     slot: Arc<ParkSlot>,
+//RS     ready: Arc<Mutex<(bool, bool)>>,
+//RS     active: AtomicBool,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS impl JetRawIoRegistration {
+//RS     fn close(&self) {
+//RS         if !self.active.swap(false, Ordering::AcqRel) {
+//RS             return;
+//RS         }
+//RS         self.handle.remove_registration(self.id);
+//RS         if let Some(poller) = self.poller.upgrade() {
+//RS             poller.unregister(self.id);
+//RS         }
+//RS         self.slot.wake();
+//RS     }
+//RS 
+//RS     fn complete(&self, observed: (bool, bool)) {
+//RS         if !self.active.swap(false, Ordering::AcqRel) {
+//RS             return;
+//RS         }
+//RS         self.handle.remove_registration(self.id);
+//RS         *self.ready.lock().unwrap() = observed;
+//RS         self.slot.wake();
+//RS     }
+//RS 
+//RS     fn deactivate(&self) {
+//RS         if self.active.swap(false, Ordering::AcqRel) {
+//RS             self.handle.remove_registration(self.id);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS struct JetRawIoInterest {
+//RS     registration: Arc<JetRawIoRegistration>,
+//RS     readable: bool,
+//RS     writable: bool,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS struct JetRawIoPoller {
+//RS     interests: Mutex<Vec<JetRawIoInterest>>,
+//RS     notify: Condvar,
+//RS     next_key: AtomicUsize,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS impl JetRawIoPoller {
+//RS     fn register(
+//RS         self: &Arc<Self>,
+//RS         handle: Arc<JetSchedulerRawIoHandle>,
+//RS         readable: bool,
+//RS         writable: bool,
+//RS     ) -> Option<Arc<JetRawIoRegistration>> {
+//RS         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
+//RS         let slot = ParkSlot::new();
+//RS         let ready = Arc::new(Mutex::new((false, false)));
+//RS         let registration = Arc::new(JetRawIoRegistration {
+//RS             id,
+//RS             handle: handle.clone(),
+//RS             poller: Arc::downgrade(self),
+//RS             slot: slot.clone(),
+//RS             ready: ready.clone(),
+//RS             active: AtomicBool::new(true),
+//RS         });
+//RS         self.interests.lock().unwrap().push(JetRawIoInterest {
+//RS             registration: registration.clone(),
+//RS             readable,
+//RS             writable,
+//RS         });
+//RS         if !handle.add_registration(&registration) {
+//RS             self.interests
+//RS                 .lock()
+//RS                 .unwrap()
+//RS                 .retain(|interest| interest.registration.id != id);
+//RS             registration.deactivate();
+//RS             self.notify.notify_one();
+//RS             return None;
+//RS         }
+//RS         self.notify.notify_one();
+//RS         Some(registration)
+//RS     }
+//RS 
+//RS     fn unregister(&self, id: usize) {
+//RS         self.interests
+//RS             .lock()
+//RS             .unwrap()
+//RS             .retain(|interest| interest.registration.id != id);
+//RS         self.notify.notify_one();
+//RS     }
+//RS 
+//RS     fn run(self: Arc<Self>) {
+//RS         #[repr(C)]
+//RS         struct PollFd {
+//RS             fd: i32,
+//RS             events: i16,
+//RS             revents: i16,
+//RS         }
+//RS         extern "C" {
+//RS             fn poll(fds: *mut PollFd, count: usize, timeout_ms: i32) -> i32;
+//RS         }
+//RS         const POLLIN: i16 = 0x0001;
+//RS         const POLLOUT: i16 = 0x0004;
+//RS         loop {
+//RS             let (mut descriptors, descriptor_ids) = {
+//RS                 let interests = self.interests.lock().unwrap();
+//RS                 if interests.is_empty() {
+//RS                     let _guard = self.notify.wait(interests).unwrap();
+//RS                     continue;
+//RS                 }
+//RS                 let descriptors = interests
+//RS                     .iter()
+//RS                     .map(|interest| PollFd {
+//RS                         fd: interest.registration.handle.fd,
+//RS                         events: (if interest.readable { POLLIN } else { 0 })
+//RS                             | (if interest.writable { POLLOUT } else { 0 }),
+//RS                         revents: 0,
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 let ids = interests
+//RS                     .iter()
+//RS                     .map(|interest| interest.registration.id)
+//RS                     .collect::<Vec<_>>();
+//RS                 (descriptors, ids)
+//RS             };
+//RS             let ready = unsafe { poll(descriptors.as_mut_ptr(), descriptors.len(), 50) };
+//RS             if ready <= 0 {
+//RS                 continue;
+//RS             }
+//RS             const POLLERR: i16 = 0x0008;
+//RS             const POLLHUP: i16 = 0x0010;
+//RS             const POLLNVAL: i16 = 0x0020;
+//RS             let ready_events = descriptors
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .filter(|(_, descriptor)| descriptor.revents != 0)
+//RS                 .filter_map(|(index, descriptor)| descriptor_ids.get(index).copied().map(|id| {
+//RS                     let terminal = descriptor.revents & (POLLERR | POLLHUP | POLLNVAL) != 0;
+//RS                     (id, descriptor.revents & POLLIN != 0 || terminal, descriptor.revents & POLLOUT != 0 || terminal)
+//RS                 }))
+//RS                 .collect::<Vec<_>>();
+//RS             let ready_ids = ready_events.iter().map(|(id, _, _)| *id).collect::<HashSet<_>>();
+//RS             let ready = {
+//RS                 let mut interests = self.interests.lock().unwrap();
+//RS                 let ready = interests
+//RS                     .iter()
+//RS                     .filter_map(|interest| {
+//RS                         let (_, readable, writable) = ready_events
+//RS                             .iter()
+//RS                             .find(|(id, _, _)| *id == interest.registration.id)?;
+//RS                         Some((
+//RS                             interest.registration.clone(),
+//RS                             (
+//RS                                 interest.readable && *readable,
+//RS                                 interest.writable && *writable,
+//RS                             ),
+//RS                         ))
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 interests.retain(|interest| !ready_ids.contains(&interest.registration.id));
+//RS                 ready
+//RS             };
+//RS             METRIC_POLLER_WAKE.fetch_add(ready.len(), Ordering::Relaxed);
+//RS             for (registration, observed) in ready {
+//RS                 registration.complete(observed);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
+//RS     static POLLER: OnceLock<Arc<JetRawIoPoller>> = OnceLock::new();
+//RS     POLLER
+//RS         .get_or_init(|| {
+//RS             let poller = Arc::new(JetRawIoPoller {
+//RS                 interests: Mutex::new(Vec::new()),
+//RS                 notify: Condvar::new(),
+//RS                 next_key: AtomicUsize::new(0),
+//RS             });
+//RS             let worker = poller.clone();
+//RS             thread::spawn(move || worker.run());
+//RS             poller
+//RS         })
+//RS         .clone()
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_scheduler_raw_io_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     readable: bool,
+//RS     writable: bool,
+//RS     wait_kind: &str,
+//RS ) -> (bool, bool) {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let poller = jet_raw_io_poller();
+//RS     let Some(registration) = poller.register(handle.clone(), readable, writable) else {
+//RS         return (false, false);
+//RS     };
+//RS     struct Registration(Arc<JetRawIoRegistration>);
+//RS     impl Drop for Registration {
+//RS         fn drop(&mut self) {
+//RS             self.0.close();
+//RS         }
+//RS     }
+//RS     let _registration = Registration(registration.clone());
+//RS     jet_scheduler_yield(wait_kind, &registration.slot, None);
+//RS     let ready = *registration.ready.lock().unwrap();
+//RS     ready
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_unix_stream_io_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     read: bool,
+//RS     write: bool,
+//RS     wait_kind: &str,
+//RS ) {
+//RS     let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_unix_stream_ready_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     read: bool,
+//RS     write: bool,
+//RS     wait_kind: &str,
+//RS ) -> (bool, bool) {
+//RS     jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_tcp_stream_ready_wait(
+//RS     stream: &std::net::TcpStream,
+//RS     read: bool,
+//RS     write: bool,
+//RS     wait_kind: &str,
+//RS ) -> (bool, bool) {
+//RS     use std::os::fd::AsRawFd;
+//RS     let handle = JetSchedulerRawIoHandle::new(stream.as_raw_fd());
+//RS     jet_scheduler_raw_io_wait(&handle, read, write, wait_kind)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_tcp_listener_io_wait(
+//RS     listener: &std::net::TcpListener,
+//RS     wait_kind: &str,
+//RS ) {
+//RS     use std::os::fd::AsRawFd;
+//RS     let handle = JetSchedulerRawIoHandle::new(listener.as_raw_fd());
+//RS     let _ = jet_scheduler_raw_io_wait(&handle, true, false, wait_kind);
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS pub fn jet_scheduler_tcp_listener_io_wait(
+//RS     _listener: &std::net::TcpListener,
+//RS     _wait_kind: &str,
+//RS ) {
+//RS     jet_scheduler_park_ms("tcp accept readiness", 5);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_unix_listener_io_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     wait_kind: &str,
+//RS ) {
+//RS     let _ = jet_scheduler_raw_io_wait(handle, true, false, wait_kind);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_udp_io_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     read: bool,
+//RS     write: bool,
+//RS     wait_kind: &str,
+//RS ) {
+//RS     let _ = jet_scheduler_raw_io_wait(handle, read, write, wait_kind);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_udp_ready_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     read: bool,
+//RS     write: bool,
+//RS     wait_kind: &str,
+//RS ) -> (bool, bool) {
+//RS     jet_scheduler_raw_io_wait(handle, read, write, wait_kind)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_raw_io_write_wait(
+//RS     handle: &Arc<JetSchedulerRawIoHandle>,
+//RS     wait_kind: &str,
+//RS ) {
+//RS     let _ = jet_scheduler_raw_io_wait(handle, false, true, wait_kind);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS pub fn jet_scheduler_raw_io_set_nonblocking(fd: i32) -> Result<(), String> {
+//RS     extern "C" {
+//RS         fn fcntl(fd: i32, command: i32, ...) -> i32;
+//RS     }
+//RS     const F_GETFL: i32 = 3;
+//RS     const F_SETFL: i32 = 4;
+//RS     #[cfg(target_os = "linux")]
+//RS     const O_NONBLOCK: i32 = 0x800;
+//RS     #[cfg(not(target_os = "linux"))]
+//RS     const O_NONBLOCK: i32 = 0x4;
+//RS 
+//RS     let flags = unsafe { fcntl(fd, F_GETFL) };
+//RS     if flags < 0 {
+//RS         return Err(std::io::Error::last_os_error().to_string());
+//RS     }
+//RS     if flags & O_NONBLOCK == 0 && unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) } < 0 {
+//RS         return Err(std::io::Error::last_os_error().to_string());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS // jet:scheduler-native-end
+//RS 
+//RS static IO_POLLER: OnceLock<Arc<IOPoller>> = OnceLock::new();
+//RS 
+//RS fn io_poller() -> Arc<IOPoller> {
+//RS     IO_POLLER
+//RS         .get_or_init(|| {
+//RS             let poller = Arc::new(IOPoller {
+//RS                 interests: Mutex::new(Vec::new()),
+//RS                 streams: Mutex::new(HashMap::new()),
+//RS                 retire_requested: Mutex::new(HashSet::new()),
+//RS                 backend_state: Mutex::new(if cfg!(target_os = "windows") {
+//RS                     IOBackendState::Starting
+//RS                 } else {
+//RS                     IOBackendState::Running
+//RS                 }),
+//RS                 notify: Condvar::new(),
+//RS                 next_key: AtomicUsize::new(0),
+//RS                 #[cfg(target_os = "windows")]
+//RS                 iocp_port: AtomicUsize::new(0),
+//RS                 #[cfg(target_os = "windows")]
+//RS                 iocp_shutdown_done: AtomicBool::new(false),
+//RS             });
+//RS             let p = poller.clone();
+//RS             thread::spawn(move || p.run());
+//RS             poller
+//RS         })
+//RS         .clone()
+//RS }
+//RS 
+//RS /// Park until `stream` looks readable or writable (non-blocking probe via poller).
+//RS pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
+//RS     let poller = io_poller();
+//RS     let (id, slot) = poller
+//RS         .register(shared, read, write)
+//RS         .unwrap_or_else(|error| jet_scheduler_fatal(error));
+//RS     struct Registration(Arc<IOPoller>, usize);
+//RS     impl Drop for Registration {
+//RS         fn drop(&mut self) { self.0.unregister(self.1); }
+//RS     }
+//RS     let _registration = Registration(poller, id);
+//RS     jet_scheduler_yield(wait_kind, &slot, None);
+//RS     if let IOBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
+//RS         jet_scheduler_fatal(error);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetChannelKind {
+//RS     Channel,
+//RS     Timer,
+//RS     Interval,
+//RS }
+//RS 
+//RS struct ChannelState<T> {
+//RS     queue: VecDeque<T>,
+//RS     recv_waiters: Vec<Arc<ParkSlot>>,
+//RS     send_waiters: Vec<Arc<ParkSlot>>,
+//RS     reserved_sends: usize,
+//RS     closed: bool,
+//RS     cancelled: bool,
+//RS     capacity: Option<usize>,
+//RS     kind: JetChannelKind,
+//RS     delay_ms: i64,
+//RS     sender_count: usize,
+//RS     receiver_count: usize,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetSchedulerSendReserveError {
+//RS     Closed,
+//RS     Cancelled,
+//RS     ReservationCountExhausted,
+//RS     QueueAllocationFailed,
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub enum JetSchedulerSendPrepareError<E> {
+//RS     Closed,
+//RS     Preparation(E),
+//RS }
+//RS 
+//RS pub struct JetSchedulerSendReservation<T> {
+//RS     inner: Arc<ChannelInner<T>>,
+//RS     active: bool,
+//RS }
+//RS 
+//RS pub(crate) struct ChannelInner<T> {
+//RS     state: Mutex<ChannelState<T>>,
+//RS     observe_id: usize,
+//RS }
+//RS 
+//RS 
+//RS impl<T> Drop for JetSchedulerSendReservation<T> {
+//RS     fn drop(&mut self) {
+//RS         if !self.active {
+//RS             return;
+//RS         }
+//RS         let waiter = {
+//RS             let mut state = self
+//RS                 .inner
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             state.reserved_sends -= 1;
+//RS             let waiter = state.send_waiters.pop();
+//RS             jet_observe_channel_update(self.inner.observe_id, &state);
+//RS             waiter
+//RS         };
+//RS         self.active = false;
+//RS         if let Some(waiter) = waiter {
+//RS             jet_scheduler_wake(&waiter);
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_observe_channel_update<T>(id: usize, state: &ChannelState<T>) {
+//RS     let Some(registry) = jet_observe_registry() else { return };
+//RS     registry.channels.lock().unwrap().insert(
+//RS         id,
+//RS         JetObserveChannel {
+//RS             depth: state.queue.len(),
+//RS             capacity: state.capacity,
+//RS             send_waiters: state.send_waiters.len(),
+//RS             recv_waiters: state.recv_waiters.len(),
+//RS             closed: state.closed,
+//RS         },
+//RS     );
+//RS }
+//RS 
+//RS pub struct JetSchedulerChannel<T> {
+//RS     inner: Arc<ChannelInner<T>>,
+//RS }
+//RS 
+//RS // D-TUPLE-DESTRUCT1: hand-written, not `#[derive(Clone)]` — the derive adds a
+//RS // spurious `T: Clone` bound (it can't see that only the `Arc` is cloned, not a
+//RS // `T`); an `Arc` clone never needs its payload to be `Clone`. Same reasoning as
+//RS // `JetSchedulerSender`'s manual impl right below.
+//RS impl<T> Clone for JetSchedulerChannel<T> {
+//RS     fn clone(&self) -> Self {
+//RS         let mut state = self.inner.state.lock().unwrap();
+//RS         state.receiver_count += 1;
+//RS         jet_observe_channel_update(self.inner.observe_id, &state);
+//RS         drop(state);
+//RS         JetSchedulerChannel {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Drop for JetSchedulerChannel<T> {
+//RS     fn drop(&mut self) {
+//RS         let send_waiters = {
+//RS             let mut st = self.inner.state.lock().unwrap();
+//RS             st.receiver_count = st.receiver_count.saturating_sub(1);
+//RS             let waiters = if st.receiver_count == 0 {
+//RS                 st.closed = true;
+//RS                 std::mem::take(&mut st.send_waiters)
+//RS             } else {
+//RS                 Vec::new()
+//RS             };
+//RS             jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             waiters
+//RS         };
+//RS         for slot in send_waiters {
+//RS             slot.wake();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> JetSchedulerChannel<T> {
+//RS     pub fn new() -> Self {
+//RS         Self::with_capacity(None, JetChannelKind::Channel, 0)
+//RS     }
+//RS 
+//RS     pub fn bounded(capacity: i64) -> Self {
+//RS         Self::with_capacity(
+//RS             Some(capacity.max(1) as usize),
+//RS             JetChannelKind::Channel,
+//RS             0,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn timer(delay_ms: i64) -> Self {
+//RS         Self::with_capacity(None, JetChannelKind::Timer, delay_ms.max(0))
+//RS     }
+//RS 
+//RS     pub fn interval(delay_ms: i64) -> Self {
+//RS         Self::with_capacity(None, JetChannelKind::Interval, delay_ms.max(1))
+//RS     }
+//RS 
+//RS     fn with_capacity(
+//RS         capacity: Option<usize>,
+//RS         kind: JetChannelKind,
+//RS         delay_ms: i64,
+//RS     ) -> Self {
+//RS         let observe_id = jet_observe_registry()
+//RS             .map(|registry| registry.next_channel.fetch_add(1, Ordering::Relaxed))
+//RS             .unwrap_or(0);
+//RS         let channel = JetSchedulerChannel {
+//RS             inner: Arc::new(ChannelInner {
+//RS                 state: Mutex::new(ChannelState {
+//RS                     queue: VecDeque::new(),
+//RS                     recv_waiters: Vec::new(),
+//RS                     send_waiters: Vec::new(),
+//RS                     reserved_sends: 0,
+//RS                     closed: false,
+//RS                     cancelled: false,
+//RS                     capacity,
+//RS                     kind,
+//RS                     delay_ms,
+//RS                     sender_count: 0,
+//RS                     receiver_count: 1,
+//RS                 }),
+//RS                 observe_id,
+//RS             }),
+//RS         };
+//RS         if observe_id != 0 {
+//RS             let state = channel.inner.state.lock().unwrap();
+//RS             jet_observe_channel_update(observe_id, &state);
+//RS         }
+//RS         channel
+//RS     }
+//RS 
+//RS     pub fn sender(&self) -> JetSchedulerSender<T> {
+//RS         let mut state = self.inner.state.lock().unwrap();
+//RS         state.sender_count += 1;
+//RS         jet_observe_channel_update(self.inner.observe_id, &state);
+//RS         drop(state);
+//RS         JetSchedulerSender {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn receive(&self) -> Option<T> {
+//RS         loop {
+//RS             // D-CANCELMODEL1=C: a cancelled recv unwinds at this wait point (inside
+//RS             // a task) instead of returning the cooperative `None` sentinel. Shielded
+//RS             // regions defer the unwind and receive normally.
+//RS             if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+//RS                 jet_task_deliver_cancel();
+//RS                 return None;
+//RS             }
+//RS             if let Some(ctrl) = current_task_control() {
+//RS                 ctrl.wait_while_paused();
+//RS             }
+//RS             let slot = ParkSlot::new();
+//RS             let parked = {
+//RS                 let mut st = self.inner.state.lock().unwrap();
+//RS                 if let Some(v) = st.queue.pop_front() {
+//RS                     if let Some(slot) = st.send_waiters.pop() {
+//RS                         slot.wake();
+//RS                     }
+//RS                     jet_observe_channel_update(self.inner.observe_id, &st);
+//RS                     return Some(v);
+//RS                 }
+//RS                 if st.closed {
+//RS                     jet_observe_channel_update(self.inner.observe_id, &st);
+//RS                     return None;
+//RS                 }
+//RS                 st.recv_waiters.push(slot.clone());
+//RS                 jet_observe_channel_update(self.inner.observe_id, &st);
+//RS                 true
+//RS             };
+//RS             if parked {
+//RS                 jet_scheduler_yield("channel receive", &slot, None);
+//RS                 let mut st = self.inner.state.lock().unwrap();
+//RS                 st.recv_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
+//RS                 jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn try_receive(&self) -> Option<T> {
+//RS         let mut st = self.inner.state.lock().unwrap();
+//RS         let out = st.queue.pop_front();
+//RS         if out.is_some() {
+//RS             if let Some(slot) = st.send_waiters.pop() {
+//RS                 slot.wake();
+//RS             }
+//RS         }
+//RS         jet_observe_channel_update(self.inner.observe_id, &st);
+//RS         out
+//RS     }
+//RS 
+//RS     pub fn kind(&self) -> JetChannelKind {
+//RS         self.inner.state.lock().unwrap().kind
+//RS     }
+//RS 
+//RS     pub fn is_timer(&self) -> bool {
+//RS         self.kind() == JetChannelKind::Timer
+//RS     }
+//RS 
+//RS     pub fn is_interval(&self) -> bool {
+//RS         self.kind() == JetChannelKind::Interval
+//RS     }
+//RS 
+//RS     pub fn is_cancelled(&self) -> bool {
+//RS         self.inner.state.lock().unwrap().cancelled
+//RS     }
+//RS 
+//RS     pub fn is_ready(&self) -> bool {
+//RS         let state = self.inner.state.lock().unwrap();
+//RS         !state.queue.is_empty() || state.closed
+//RS     }
+//RS 
+//RS     pub fn delay_ms(&self) -> i64 {
+//RS         self.inner.state.lock().unwrap().delay_ms
+//RS     }
+//RS 
+//RS     pub fn close(&self) {
+//RS         self.close_inner(false);
+//RS     }
+//RS 
+//RS     pub fn cancel(&self) {
+//RS         self.close_inner(true);
+//RS     }
+//RS 
+//RS     fn close_inner(&self, cancelled: bool) {
+//RS         let (recv_waiters, send_waiters) = {
+//RS             let mut st = self.inner.state.lock().unwrap();
+//RS             st.closed = true;
+//RS             st.cancelled |= cancelled;
+//RS             let waiters = (
+//RS                 std::mem::take(&mut st.recv_waiters),
+//RS                 std::mem::take(&mut st.send_waiters),
+//RS             );
+//RS             jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             waiters
+//RS         };
+//RS         for w in recv_waiters.into_iter().chain(send_waiters) {
+//RS             w.wake();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetSchedulerSender<T> {
+//RS     inner: Arc<ChannelInner<T>>,
+//RS }
+//RS 
+//RS impl<T> Clone for JetSchedulerSender<T> {
+//RS     fn clone(&self) -> Self {
+//RS         let mut state = self.inner.state.lock().unwrap();
+//RS         state.sender_count += 1;
+//RS         jet_observe_channel_update(self.inner.observe_id, &state);
+//RS         drop(state);
+//RS         JetSchedulerSender {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Drop for JetSchedulerSender<T> {
+//RS     fn drop(&mut self) {
+//RS         let recv_waiters = {
+//RS             let mut st = self.inner.state.lock().unwrap();
+//RS             st.sender_count = st.sender_count.saturating_sub(1);
+//RS             let waiters = if st.sender_count == 0 {
+//RS                 st.closed = true;
+//RS                 std::mem::take(&mut st.recv_waiters)
+//RS             } else {
+//RS                 Vec::new()
+//RS             };
+//RS             jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             waiters
+//RS         };
+//RS         for slot in recv_waiters {
+//RS             slot.wake();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> JetSchedulerSender<T> {
+//RS     pub fn close(&self) {
+//RS         let (recv_waiters, send_waiters) = {
+//RS             let mut st = self.inner.state.lock().unwrap();
+//RS             st.closed = true;
+//RS             let waiters = (
+//RS                 std::mem::take(&mut st.recv_waiters),
+//RS                 std::mem::take(&mut st.send_waiters),
+//RS             );
+//RS             jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             waiters
+//RS         };
+//RS         for w in recv_waiters.into_iter().chain(send_waiters) {
+//RS             w.wake();
+//RS         }
+//RS     }
+//RS 
+//RS     /// Reserve bounded capacity before preparing or extracting an owned
+//RS     /// payload. A returned reservation is honored against all later senders.
+//RS     pub fn reserve_send(
+//RS         &self,
+//RS     ) -> Result<JetSchedulerSendReservation<T>, JetSchedulerSendReserveError> {
+//RS         loop {
+//RS             if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+//RS                 jet_task_deliver_cancel();
+//RS                 return Err(JetSchedulerSendReserveError::Cancelled);
+//RS             }
+//RS             if let Some(ctrl) = current_task_control() {
+//RS                 ctrl.wait_while_paused();
+//RS             }
+//RS             let slot = ParkSlot::new();
+//RS             let reserved = {
+//RS                 let mut state = self.inner.state.lock().unwrap();
+//RS                 if state.closed || state.receiver_count == 0 {
+//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
+//RS                     return Err(JetSchedulerSendReserveError::Closed);
+//RS                 }
+//RS                 let occupied = state
+//RS                     .queue
+//RS                     .len()
+//RS                     .checked_add(state.reserved_sends)
+//RS                     .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
+//RS                 if state.capacity.is_some_and(|capacity| occupied >= capacity) {
+//RS                     state.send_waiters.push(slot.clone());
+//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
+//RS                     false
+//RS                 } else {
+//RS                     let reserved_sends = state
+//RS                         .reserved_sends
+//RS                         .checked_add(1)
+//RS                         .ok_or(JetSchedulerSendReserveError::ReservationCountExhausted)?;
+//RS                     if state.queue.try_reserve(reserved_sends).is_err() {
+//RS                         jet_observe_channel_update(self.inner.observe_id, &state);
+//RS                         return Err(JetSchedulerSendReserveError::QueueAllocationFailed);
+//RS                     }
+//RS                     state.reserved_sends = reserved_sends;
+//RS                     jet_observe_channel_update(self.inner.observe_id, &state);
+//RS                     true
+//RS                 }
+//RS             };
+//RS             if reserved {
+//RS                 return Ok(JetSchedulerSendReservation {
+//RS                     inner: self.inner.clone(),
+//RS                     active: true,
+//RS                 });
+//RS             }
+//RS             jet_scheduler_yield("channel send capacity", &slot, None);
+//RS             let mut state = self.inner.state.lock().unwrap();
+//RS             state.send_waiters.retain(|waiter| !Arc::ptr_eq(waiter, &slot));
+//RS             jet_observe_channel_update(self.inner.observe_id, &state);
+//RS         }
+//RS     }
+//RS 
+//RS     /// Send an already-owned value while returning it exactly when acceptance
+//RS     /// fails. Transferable Source owners should reserve before extraction and
+//RS     /// use `commit_prepared` instead.
+//RS     pub fn send_owned(&self, value: T) -> Result<(), T> {
+//RS         match self.reserve_send() {
+//RS             Ok(reservation) => reservation.commit(value),
+//RS             Err(_) => Err(value),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn send(&self, value: T) -> bool {
+//RS         self.send_owned(value).is_ok()
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> JetSchedulerSendReservation<T> {
+//RS     /// Commit a value already owned by the caller. A rejected acceptance
+//RS     /// returns the exact value and releases this reservation.
+//RS     pub fn commit(mut self, value: T) -> Result<(), T> {
+//RS         let (result, waiter) = {
+//RS             let mut state = self
+//RS                 .inner
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             let (result, waiter) = if state.closed || state.receiver_count == 0 {
+//RS                 state.reserved_sends -= 1;
+//RS                 self.active = false;
+//RS                 (Err(value), state.send_waiters.pop())
+//RS             } else {
+//RS                 state.queue.push_back(value);
+//RS                 state.reserved_sends -= 1;
+//RS                 self.active = false;
+//RS                 (Ok(()), state.recv_waiters.pop())
+//RS             };
+//RS             jet_observe_channel_update(self.inner.observe_id, &state);
+//RS             (result, waiter)
+//RS         };
+//RS         if let Some(waiter) = waiter {
+//RS             jet_scheduler_wake(&waiter);
+//RS         }
+//RS         result
+//RS     }
+//RS 
+//RS     /// Atomically prepare an owned payload and publish it into capacity
+//RS     /// reserved by `reserve_send`. The closure runs only after the channel is
+//RS     /// accepted and while its queue lock excludes close/other senders. Queue
+//RS     /// storage is preallocated by the reservation, so after `Ok((value,
+//RS     /// receipt))` returns publication has no cancellation, allocation, or
+//RS     /// fallible step.
+//RS     pub fn commit_prepared<R, E>(
+//RS         mut self,
+//RS         prepare: impl FnOnce() -> Result<(T, R), E>,
+//RS     ) -> Result<R, JetSchedulerSendPrepareError<E>> {
+//RS         let mut prepare = Some(prepare);
+//RS         let (result, waiter) = {
+//RS             let mut state = self
+//RS                 .inner
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             let (result, waiter) = if state.closed || state.receiver_count == 0 {
+//RS                 state.reserved_sends -= 1;
+//RS                 self.active = false;
+//RS                 (
+//RS                     Err(JetSchedulerSendPrepareError::Closed),
+//RS                     state.send_waiters.pop(),
+//RS                 )
+//RS             } else {
+//RS                 match prepare.take().expect("prepared send closure missing")() {
+//RS                     Ok((value, receipt)) => {
+//RS                         state.queue.push_back(value);
+//RS                         state.reserved_sends -= 1;
+//RS                         self.active = false;
+//RS                         (Ok(receipt), state.recv_waiters.pop())
+//RS                     }
+//RS                     Err(error) => {
+//RS                         state.reserved_sends -= 1;
+//RS                         self.active = false;
+//RS                         (
+//RS                             Err(JetSchedulerSendPrepareError::Preparation(error)),
+//RS                             state.send_waiters.pop(),
+//RS                         )
+//RS                     }
+//RS                 }
+//RS             };
+//RS             jet_observe_channel_update(self.inner.observe_id, &state);
+//RS             (result, waiter)
+//RS         };
+//RS         drop(prepare);
+//RS         if let Some(waiter) = waiter {
+//RS             jet_scheduler_wake(&waiter);
+//RS         }
+//RS         result
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send> JetSchedulerChannel<T> {
+//RS     /// Close exactly this receiver endpoint and recover queued values only
+//RS     /// when it is the final physical receiver. Surviving receiver aliases
+//RS     /// retain the queue; concurrent senders observe the terminal receiver count
+//RS     /// under the same state lock and cannot enqueue after the drain.
+//RS     pub fn close_receiver_and_drain(&self) -> Vec<T> {
+//RS         let (queue, recv_waiters, send_waiters) = {
+//RS             let mut st = self.inner.state.lock().unwrap();
+//RS             if st.receiver_count > 1 {
+//RS                 return Vec::new();
+//RS             }
+//RS             st.receiver_count = 0;
+//RS             st.closed = true;
+//RS             let queue = std::mem::take(&mut st.queue);
+//RS             let recv_waiters = std::mem::take(&mut st.recv_waiters);
+//RS             let send_waiters = std::mem::take(&mut st.send_waiters);
+//RS             jet_observe_channel_update(self.inner.observe_id, &st);
+//RS             (queue, recv_waiters, send_waiters)
+//RS         };
+//RS         for waiter in recv_waiters.into_iter().chain(send_waiters) {
+//RS             waiter.wake();
+//RS         }
+//RS         queue.into_iter().collect()
+//RS     }
+//RS }
+//RS 
+//RS impl<T> JetSchedulerChannel<T> {
+//RS     #[allow(dead_code)]
+//RS     pub(crate) fn select_inner(&self) -> Arc<ChannelInner<T>> {
+//RS         self.inner.clone()
+//RS     }
+//RS }
+//RS /// A non-owning view used to keep a channel's physical queue state alive
+//RS /// during selection without retaining a logical receiver endpoint.
+//RS pub struct JetSchedulerChannelSelectView<T> {
+//RS     inner: Arc<ChannelInner<T>>,
+//RS }
+//RS 
+//RS impl<T> Clone for JetSchedulerChannelSelectView<T> {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> JetSchedulerChannel<T> {
+//RS     /// Retain only the queue state for a blocking select. Dropping this view
+//RS     /// never changes receiver ownership or closes the channel.
+//RS     pub fn select_view(&self) -> JetSchedulerChannelSelectView<T> {
+//RS         JetSchedulerChannelSelectView {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS // ── D-CONCSELECT1=A: scoped select multiplex ─────────────────────────────────
+//RS 
+//RS pub enum JetSelectOutcome<T> {
+//RS     Recv { arm: usize, value: T },
+//RS     After { arm: usize },
+//RS     Closed,
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS impl<T> ChannelInner<T> {
+//RS     fn try_pop(&self) -> Option<T> {
+//RS         let mut st = self.state.lock().unwrap();
+//RS         let out = st.queue.pop_front();
+//RS         if out.is_some() {
+//RS             if let Some(slot) = st.send_waiters.pop() {
+//RS                 slot.wake();
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn register_select_waiter(&self, slot: Arc<ParkSlot>) {
+//RS         self.state.lock().unwrap().recv_waiters.push(slot);
+//RS     }
+//RS 
+//RS     fn is_closed_and_empty(&self) -> bool {
+//RS         let state = self.state.lock().unwrap();
+//RS         state.closed && state.queue.is_empty()
+//RS     }
+//RS 
+//RS     fn remove_waiter(&self, slot: &ParkSlot) {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap()
+//RS             .recv_waiters
+//RS             .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+//RS     }
+//RS }
+//RS 
+//RS struct SelectRegistration<T> {
+//RS     recvs: Vec<Arc<ChannelInner<T>>>,
+//RS     master: Arc<ParkSlot>,
+//RS     cancel_control: Option<Arc<JetTaskControl>>,
+//RS }
+//RS 
+//RS impl<T> SelectRegistration<T> {
+//RS     fn new(
+//RS         recvs: &[Arc<ChannelInner<T>>],
+//RS         master: Arc<ParkSlot>,
+//RS         cancel_control: Option<Arc<JetTaskControl>>,
+//RS     ) -> Self {
+//RS         for channel in recvs {
+//RS             channel.register_select_waiter(master.clone());
+//RS         }
+//RS         if let Some(control) = &cancel_control {
+//RS             control.register_cancel_waiter(&master);
+//RS         }
+//RS         Self {
+//RS             recvs: recvs.to_vec(),
+//RS             master,
+//RS             cancel_control,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Drop for SelectRegistration<T> {
+//RS     fn drop(&mut self) {
+//RS         for channel in &self.recvs {
+//RS             channel.remove_waiter(&self.master);
+//RS         }
+//RS         if let Some(control) = &self.cancel_control {
+//RS             control.remove_cancel_waiter(&self.master);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[allow(dead_code)] // generated `jet_std::jet_select_wait` and JIT hooks
+//RS pub(crate) fn jet_scheduler_select<T: Send>(
+//RS     recvs: Vec<Arc<ChannelInner<T>>>,
+//RS     after_ms: Vec<u64>,
+//RS ) -> JetSelectOutcome<T> {
+//RS     assert!(
+//RS         !recvs.is_empty() || !after_ms.is_empty(),
+//RS         "select: no arms registered"
+//RS     );
+//RS 
+//RS     for (i, ch) in recvs.iter().enumerate() {
+//RS         if let Some(v) = ch.try_pop() {
+//RS             return JetSelectOutcome::Recv { arm: i, value: v };
+//RS         }
+//RS     }
+//RS     if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
+//RS         return JetSelectOutcome::After { arm: i };
+//RS     }
+//RS     if after_ms.is_empty()
+//RS         && !recvs.is_empty()
+//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
+//RS     {
+//RS         return JetSelectOutcome::Closed;
+//RS     }
+//RS 
+//RS     let master = ParkSlot::new();
+//RS     let cancel_control = current_task_control();
+//RS     let started = Instant::now();
+//RS     let _registration =
+//RS         SelectRegistration::new(&recvs, master.clone(), cancel_control.clone());
+//RS     // Close can race the first check and happen before waiter registration.
+//RS     // Recheck after registration so a lost close wake cannot park forever.
+//RS     if after_ms.is_empty()
+//RS         && !recvs.is_empty()
+//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
+//RS     {
+//RS         return JetSelectOutcome::Closed;
+//RS     }
+//RS     for ms in &after_ms {
+//RS         timer_wheel().schedule(Instant::now() + Duration::from_millis(*ms), master.clone());
+//RS     }
+//RS 
+//RS     loop {
+//RS         // D-CANCELMODEL1=C: a cancelled select unwinds at this wait point (inside a
+//RS         // task) instead of returning the cooperative `Closed` sentinel. Shield defers.
+//RS         if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+//RS             jet_task_deliver_cancel();
+//RS             return JetSelectOutcome::Closed;
+//RS         }
+//RS         METRIC_PARKED.fetch_add(1, Ordering::Relaxed);
+//RS         jet_scheduler_yield("select wait", &master, None);
+//RS         METRIC_PARKED.fetch_sub(1, Ordering::Relaxed);
+//RS         for (i, ch) in recvs.iter().enumerate() {
+//RS             if let Some(v) = ch.try_pop() {
+//RS                 return JetSelectOutcome::Recv { arm: i, value: v };
+//RS             }
+//RS         }
+//RS         if let Some((i, _)) = after_ms
+//RS             .iter()
+//RS             .enumerate()
+//RS             .find(|(_, ms)| started.elapsed() >= Duration::from_millis(**ms))
+//RS         {
+//RS             return JetSelectOutcome::After { arm: i };
+//RS         }
+//RS         if after_ms.is_empty()
+//RS             && !recvs.is_empty()
+//RS             && recvs.iter().all(|ch| ch.is_closed_and_empty())
+//RS         {
+//RS             return JetSelectOutcome::Closed;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONC-CHAN2=D: probe one readiness table without parking. `None` means no
+//RS /// receive or timer arm is ready yet; `Closed` remains explicit so a caller
+//RS /// with an `else` arm can treat a closed endpoint as non-ready without changing
+//RS /// the blocking select's close and cancellation behavior.
+//RS pub(crate) fn jet_scheduler_try_select<T: Send>(
+//RS     recvs: Vec<Arc<ChannelInner<T>>>,
+//RS     after_ms: Vec<u64>,
+//RS ) -> Option<JetSelectOutcome<T>> {
+//RS     assert!(
+//RS         !recvs.is_empty() || !after_ms.is_empty(),
+//RS         "select: no arms registered"
+//RS     );
+//RS 
+//RS     for (i, ch) in recvs.iter().enumerate() {
+//RS         if let Some(v) = ch.try_pop() {
+//RS             return Some(JetSelectOutcome::Recv { arm: i, value: v });
+//RS         }
+//RS     }
+//RS     if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
+//RS         return Some(JetSelectOutcome::After { arm: i });
+//RS     }
+//RS     if after_ms.is_empty()
+//RS         && !recvs.is_empty()
+//RS         && recvs.iter().all(|ch| ch.is_closed_and_empty())
+//RS     {
+//RS         return Some(JetSelectOutcome::Closed);
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS // ── Scheduler metrics (Tower #126 observability) ─────────────────────────────
+//RS 
+//RS static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
+//RS static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
+//RS static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
+//RS static METRIC_IO_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+// END-PORT-PENDING 0185 crates/jet-codegen/src/Prelude/Scheduler.rs:1805-3604
+

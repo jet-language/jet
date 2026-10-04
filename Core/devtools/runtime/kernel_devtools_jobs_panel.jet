@@ -1,0 +1,598 @@
+// DevtoolsJobsPanel.rs:1-1160. Metadata only: no arguments or payload carrier.
+// Main publishes this private module with packet0176's canonical event owner.
+// #4392/#4318: jobs_text.utf8_bytes still materializes upstream; allocation
+// parity requires its retained UTF-8 loan cutover, not another local byte owner.
+use core.devtools.runtime.devtools as jobs_protocol
+use core.text.runtime.kernel_unicode_string as jobs_text
+use core.text.runtime.unicode_assets as jobs_assets
+use core.text.runtime.assets.unicode_general_category as jobs_category
+
+pub JET_DEVTOOLS_JOB_PANEL_MAX_LABELS :: 32
+pub JET_DEVTOOLS_JOB_PANEL_MAX_TEXT_BYTES :: 16384
+pub JET_DEVTOOLS_JOB_PANEL_THROUGHPUT_WINDOW_MS :: U64{60000}
+
+pub enum JetDevtoolsJobPanelLifecycleState {
+    Enqueued
+    Started
+    Retrying
+    Completed
+    Failed
+    pub fn wire(self) -> String Never! {
+        if self == {
+            .Enqueued -> "enqueued"
+            .Started -> "started"
+            .Retrying -> "retrying"
+            .Completed -> "completed"
+            .Failed -> "failed"
+        }
+    }
+    pub fn is_terminal(self) -> Bool Never! { self == .Completed || self == .Failed }
+    pub fn is_pending(self) -> Bool Never! { self == .Enqueued || self == .Retrying }
+}
+pub enum JetDevtoolsJobPanelEventKind {
+    Enqueue
+    Start
+    Retry
+    Complete
+    Fail
+    pub fn wire(self) -> String Never! {
+        if self == {
+            .Enqueue -> "enqueue"
+            .Start -> "start"
+            .Retry -> "retry"
+            .Complete -> "complete"
+            .Fail -> "fail"
+        }
+    }
+}
+pub enum JetDevtoolsJobPanelFailureKind {
+    Error
+    Cancelled
+    WorkerLost
+    TimedOut
+    pub fn wire(self) -> String Never! {
+        if self == {
+            .Error -> "error"
+            .Cancelled -> "cancelled"
+            .WorkerLost -> "worker_lost"
+            .TimedOut -> "timed_out"
+        }
+    }
+}
+pub enum JetDevtoolsJobPanelLabelValue {
+    Text(String)
+    Integer(I64)
+    Boolean(Bool)
+    pub fn text(value: String) -> JetDevtoolsJobPanelLabelValue Never! { .Text(value) }
+    pub fn integer(value: I64) -> JetDevtoolsJobPanelLabelValue Never! { .Integer(value) }
+    pub fn boolean(value: Bool) -> JetDevtoolsJobPanelLabelValue Never! { .Boolean(value) }
+    fn render_json(self, out: &[U8]) Never! {
+        if self == {
+            .Text(value) -> jet_devtools_job_panel_render_text(value, &out)
+            .Integer(value) -> jobs_append(&out, "{value}")
+            .Boolean(value) -> jobs_append(&out, if value -> "true" else -> "false")
+        }
+    }
+}
+pub struct JetDevtoolsJobPanelLabel {
+    pub key: String
+    pub value: JetDevtoolsJobPanelLabelValue
+    pub fn new(key: String, value: JetDevtoolsJobPanelLabelValue) -> JetDevtoolsJobPanelLabel Never! {
+        JetDevtoolsJobPanelLabel{key, value}
+    }
+    pub fn text(key: String, value: String) -> JetDevtoolsJobPanelLabel Never! { JetDevtoolsJobPanelLabel.new(key, .Text(value)) }
+    pub fn integer(key: String, value: I64) -> JetDevtoolsJobPanelLabel Never! { JetDevtoolsJobPanelLabel.new(key, .Integer(value)) }
+    pub fn boolean(key: String, value: Bool) -> JetDevtoolsJobPanelLabel Never! { JetDevtoolsJobPanelLabel.new(key, .Boolean(value)) }
+}
+pub struct JetDevtoolsJobPanelLabelFilter {
+    pub key: String
+    pub value: JetDevtoolsJobPanelLabelValue
+    pub fn new(key: String, value: JetDevtoolsJobPanelLabelValue) -> JetDevtoolsJobPanelLabelFilter Never! {
+        JetDevtoolsJobPanelLabelFilter{key, value}
+    }
+    pub fn matches(self, labels: [JetDevtoolsJobPanelLabel]) -> Bool Never! {
+        loop label in labels -> if label.key == self.key && label.value == self.value -> return true
+        false
+    }
+}
+pub struct JetDevtoolsJobPanelFact {
+    pub sequence: U64
+    pub timestamp_ms: U64
+    pub kind: JetDevtoolsJobPanelEventKind
+    pub state: JetDevtoolsJobPanelLifecycleState
+    pub job_id: String
+    pub name: String
+    pub labels: [JetDevtoolsJobPanelLabel]
+    pub queue: String
+    pub attempts: U32
+    pub duration_ms: U64?
+    pub worker: String?
+    pub request_id: String?
+    pub failure: JetDevtoolsJobPanelFailureKind?
+    pub fn to_protocol_event(self, source: String) -> jobs_protocol.JetDevtoolsEvent Err! {
+        jobs_protocol.JetDevtoolsEvent.from_parts(self.timestamp_ms, source, "Job", ~self.job_id, self.render_fields_json())
+    }
+    pub fn render_fields_json(self) -> String Never! {
+        out := [U8]{U8{123}}
+        jet_devtools_job_panel_render_key_value_text("event", self.kind.wire(), &out)
+        jet_devtools_job_panel_render_key_value_text("state", self.state.wire(), &out)
+        jet_devtools_job_panel_render_key_value_text("job_id", self.job_id, &out)
+        jet_devtools_job_panel_render_key_value_text("name", self.name, &out)
+        jet_devtools_job_panel_render_key_value_text("queue", self.queue, &out)
+        jet_devtools_job_panel_render_key_value_u64("attempts", U64{self.attempts}, &out)
+        jet_devtools_job_panel_render_key_value_optional_u64("duration_ms", self.duration_ms, &out)
+        jet_devtools_job_panel_render_key_value_optional_text("worker", self.worker, &out)
+        jet_devtools_job_panel_render_key_value_optional_text("request_id", self.request_id, &out)
+        if self.failure == .Val(failure) -> jet_devtools_job_panel_render_key_value_text("failure", failure.wire(), &out)
+        else -> jet_devtools_job_panel_render_key_value_null("failure", &out)
+        jet_devtools_job_panel_render_labels(self.labels, &out)
+        &out.push(U8{125})
+        String.from_bytes(out) ?? panic("job panel rendered invalid UTF-8")
+    }
+}
+pub struct JetDevtoolsJobPanelJobProjection {
+    pub job_id: String
+    pub name: String
+    pub labels: [JetDevtoolsJobPanelLabel]
+    pub queue: String
+    pub state: JetDevtoolsJobPanelLifecycleState
+    pub attempts: U32
+    pub duration_ms: U64?
+    pub worker: String?
+    pub request_id: String?
+    pub failure: JetDevtoolsJobPanelFailureKind?
+    pub freshness_ms: U64
+    pub fn request_correlation(self) -> String? Never! { self.request_id }
+}
+pub struct JetDevtoolsJobPanelQueueProjection {
+    pub queue: String
+    pub depth: U64
+    pub wait_ms: U64
+    pub throughput: U64
+    pub workers: U64
+    pub capacity: U64
+    pub paused: Bool
+    pub freshness_ms: U64
+}
+pub struct JetDevtoolsJobPanelProjection {
+    pub jobs: [JetDevtoolsJobPanelJobProjection]
+    pub queues: [JetDevtoolsJobPanelQueueProjection]
+    pub history: [JetDevtoolsJobPanelFact]
+    pub freshness_ms: U64
+    pub fn jobs_for_label(self, filter: JetDevtoolsJobPanelLabelFilter) -> [JetDevtoolsJobPanelJobProjection] Never! {
+        out := [JetDevtoolsJobPanelJobProjection]{}
+        loop job in self.jobs -> if filter.matches(job.labels) -> &out.push(~job)
+        out
+    }
+}
+struct JetDevtoolsJobPanelJobRecord {
+    projection: JetDevtoolsJobPanelJobProjection
+    waiting_since_ms: U64?
+    started_at_ms: U64?
+}
+struct JetDevtoolsJobPanelQueueRecord {
+    name: String
+    capacity: U64
+    paused: Bool
+    snapshot_depth: U64?
+    snapshot_wait_ms: U64?
+    snapshot_throughput: U64?
+    freshness_ms: U64
+}
+// Ring slots replace VecDeque without an O(history) front removal. Accesses
+// borrow original slots; only explicit snapshot APIs clone retained facts.
+pub struct JetDevtoolsJobPanelState {
+    max_history: Int
+    next_sequence: U64
+    last_timestamp_ms: U64?
+    job_records: [JetDevtoolsJobPanelJobRecord]
+    queue_records: [JetDevtoolsJobPanelQueueRecord]
+    history_slots: [JetDevtoolsJobPanelFact]
+    history_head: Int
+
+    pub fn default() -> JetDevtoolsJobPanelState Never! { JetDevtoolsJobPanelState.new() }
+    pub fn new() -> JetDevtoolsJobPanelState Never! { JetDevtoolsJobPanelState.with_capacity(jobs_protocol.JET_DEVTOOLS_MAX_HISTORY) }
+    pub fn with_capacity(capacity: Int) -> JetDevtoolsJobPanelState Never! {
+        bounded := capacity
+        if bounded < 1 -> bounded = 1
+        if bounded > jobs_protocol.JET_DEVTOOLS_MAX_HISTORY -> bounded = jobs_protocol.JET_DEVTOOLS_MAX_HISTORY
+        JetDevtoolsJobPanelState{max_history: bounded, next_sequence: U64{1}, last_timestamp_ms: None, job_records: [JetDevtoolsJobPanelJobRecord]{}, queue_records: [JetDevtoolsJobPanelQueueRecord]{}, history_slots: [JetDevtoolsJobPanelFact]{}, history_head: 0}
+    }
+    pub fn history_len(self) -> Int Never! { self.history_slots.len() }
+    pub fn jobs(self) -> [JetDevtoolsJobPanelJobProjection] Never! { self.jobs_filtered(None) }
+    pub fn jobs_filtered(self, filter: JetDevtoolsJobPanelLabelFilter?) -> [JetDevtoolsJobPanelJobProjection] Never! {
+        out := [JetDevtoolsJobPanelJobProjection]{}
+        loop job in self.job_records -> if jobs_matches(filter, job.projection.labels) -> &out.push(~job.projection)
+        out
+    }
+    pub fn job(self, job_id: String) -> JetDevtoolsJobPanelJobProjection? Never! {
+        loop job in self.job_records -> if job.projection.job_id == job_id -> return Val(~job.projection)
+        None
+    }
+    pub fn history(self) -> [JetDevtoolsJobPanelFact] Never! {
+        out := [JetDevtoolsJobPanelFact]{}
+        loop offset in 0..<self.history_len() -> &out.push(~self.history_slots[(self.history_head + offset) % self.history_len()])
+        out
+    }
+    pub fn latest_fact(self) -> JetDevtoolsJobPanelFact? Never! {
+        if self.history_len() == 0 -> return None
+        Val(~self.history_slots[(self.history_head + self.history_len() - 1) % self.history_len()])
+    }
+    pub fn apply_fact(&self, fact: JetDevtoolsJobPanelFact) Err! {
+        expected :: if fact.kind == {
+            .Enqueue -> JetDevtoolsJobPanelLifecycleState.Enqueued
+            .Start -> JetDevtoolsJobPanelLifecycleState.Started
+            .Retry -> JetDevtoolsJobPanelLifecycleState.Retrying
+            .Complete -> JetDevtoolsJobPanelLifecycleState.Completed
+            .Fail -> JetDevtoolsJobPanelLifecycleState.Failed
+        }
+        if fact.state != expected -> return Err("jet.devtools.v1 jobs {fact.kind.wire()} fact has state {fact.state.wire()}, expected {expected.wire()}")
+        if fact.kind == {
+            .Enqueue -> &self.enqueue(fact.job_id, fact.name, fact.queue, fact.labels, fact.request_id, fact.timestamp_ms)
+            .Start -> {
+                worker :: fact.worker ?? return Err("jet.devtools.v1 jobs start fact must identify its worker")
+                &self.start(fact.job_id, fact.timestamp_ms, worker)
+            }
+            .Retry -> &self.retry(fact.job_id, fact.timestamp_ms)
+            .Complete -> &self.complete(fact.job_id, fact.timestamp_ms)
+            .Fail -> &self.fail_with(fact.job_id, fact.timestamp_ms, fact.failure ?? JetDevtoolsJobPanelFailureKind.Error)
+        }
+    }
+    pub fn configure_queue(&self, queue: String, capacity: U64, paused: Bool, timestamp_ms: U64) Err! {
+        jet_devtools_job_panel_validate_text(queue, "queue") ?? return Err(err)
+        self.finish_timestamp(timestamp_ms) ?? return Err(err)
+        if self.queue_index(queue) == .Val(index) {
+            self.queue_records[index].capacity = capacity
+            self.queue_records[index].paused = paused
+            self.queue_records[index].freshness_ms = timestamp_ms
+            self.last_timestamp_ms = Val(timestamp_ms)
+            return Ok()
+        }
+        if self.queue_records.len() >= self.max_history -> return Err("jet.devtools.v1 jobs queue history is full")
+        &self.queue_records.push(JetDevtoolsJobPanelQueueRecord{name: queue, capacity, paused, snapshot_depth: None, snapshot_wait_ms: None, snapshot_throughput: None, freshness_ms: timestamp_ms})
+        self.last_timestamp_ms = Val(timestamp_ms)
+        Ok()
+    }
+    pub fn observe_queue_status(&self, queue: String, capacity: U64, paused: Bool, depth: U64, wait_ms: U64, throughput: U64, timestamp_ms: U64) Err! {
+        jet_devtools_job_panel_validate_text(queue, "queue") ?? return Err(err)
+        self.finish_timestamp(timestamp_ms) ?? return Err(err)
+        if self.queue_index(queue) == .Val(index) {
+            self.queue_records[index].capacity = capacity
+            self.queue_records[index].paused = paused
+            self.queue_records[index].snapshot_depth = Val(depth)
+            self.queue_records[index].snapshot_wait_ms = Val(wait_ms)
+            self.queue_records[index].snapshot_throughput = Val(throughput)
+            self.queue_records[index].freshness_ms = timestamp_ms
+            self.last_timestamp_ms = Val(timestamp_ms)
+            return Ok()
+        }
+        if self.queue_records.len() >= self.max_history -> return Err("jet.devtools.v1 jobs queue history is full")
+        &self.queue_records.push(JetDevtoolsJobPanelQueueRecord{name: queue, capacity, paused, snapshot_depth: Val(depth), snapshot_wait_ms: Val(wait_ms), snapshot_throughput: Val(throughput), freshness_ms: timestamp_ms})
+        self.last_timestamp_ms = Val(timestamp_ms)
+        Ok()
+    }
+    pub fn set_queue_paused(&self, queue: String, paused: Bool, timestamp_ms: U64) Err! {
+        index :: self.queue_index(queue) ?? return Err("jet.devtools.v1 jobs queue `{queue}` has not been configured")
+        self.finish_timestamp(timestamp_ms) ?? return Err(err)
+        self.queue_records[index].paused = paused
+        self.queue_records[index].freshness_ms = timestamp_ms
+        self.last_timestamp_ms = Val(timestamp_ms)
+        Ok()
+    }
+    pub fn enqueue(&self, job_id: String, name: String, queue: String, labels: [JetDevtoolsJobPanelLabel], request_id: String?, timestamp_ms: U64) Err! {
+        jet_devtools_job_panel_validate_text(job_id, "job_id") ?? return Err(err)
+        jet_devtools_job_panel_validate_text(name, "name") ?? return Err(err)
+        jet_devtools_job_panel_validate_text(queue, "queue") ?? return Err(err)
+        jet_devtools_job_panel_validate_labels(labels) ?? return Err(err)
+        jet_devtools_job_panel_validate_optional_text(request_id, "request_id") ?? return Err(err)
+        loop job in self.job_records -> if job.projection.job_id == job_id -> return Err("jet.devtools.v1 jobs already contains `{job_id}`")
+        self.finish_timestamp(timestamp_ms) ?? return Err(err)
+        self.check_job_room() ?? return Err(err)
+        self.check_queue_room(queue) ?? return Err(err)
+        &self.ensure_job_room() ?? return Err(err)
+        &self.ensure_queue(queue, timestamp_ms) ?? return Err(err)
+        self.last_timestamp_ms = Val(timestamp_ms)
+        &self.job_records.push(JetDevtoolsJobPanelJobRecord{projection: JetDevtoolsJobPanelJobProjection{job_id: ~job_id, name: ~name, labels: ~labels, queue: ~queue, state: .Enqueued, attempts: U32{0}, duration_ms: None, worker: None, request_id: ~request_id, failure: None, freshness_ms: timestamp_ms}, waiting_since_ms: Val(timestamp_ms), started_at_ms: None})
+        &self.record_fact(JetDevtoolsJobPanelFact{sequence: U64{0}, timestamp_ms, kind: .Enqueue, state: .Enqueued, job_id, name, labels, queue, attempts: U32{0}, duration_ms: None, worker: None, request_id, failure: None})
+    }
+    pub fn start(&self, job_id: String, timestamp_ms: U64, worker: String) Err! {
+        jet_devtools_job_panel_validate_text(worker, "worker") ?? return Err(err)
+        index :: self.job_index(job_id) ?? return Err(err)
+        current :: self.job_records[index].projection.state
+        if !current.is_pending() -> return self.invalid_transition(job_id, current, .Start)
+        &self.accept_timestamp(timestamp_ms) ?? return Err(err)
+        if self.job_records[index].projection.attempts == (U32{0}) -> self.job_records[index].projection.attempts = U32{1}
+        self.job_records[index].projection.state = .Started
+        self.job_records[index].projection.worker = Val(worker)
+        self.job_records[index].projection.freshness_ms = timestamp_ms
+        self.job_records[index].waiting_since_ms = None
+        self.job_records[index].started_at_ms = Val(timestamp_ms)
+        &self.record_fact(self.fact_from_record(index, .Start, timestamp_ms, None))
+    }
+    pub fn retry(&self, job_id: String, timestamp_ms: U64) Err! {
+        index :: self.job_index(job_id) ?? return Err(err)
+        current :: self.job_records[index].projection.state
+        if current != .Started -> return self.invalid_transition(job_id, current, .Retry)
+        &self.accept_timestamp(timestamp_ms) ?? return Err(err)
+        self.job_records[index].projection.state = .Retrying
+        if self.job_records[index].projection.attempts != (U32{4294967295}) -> self.job_records[index].projection.attempts = self.job_records[index].projection.attempts + U32{1}
+        self.job_records[index].projection.duration_ms = None
+        self.job_records[index].projection.freshness_ms = timestamp_ms
+        self.job_records[index].waiting_since_ms = Val(timestamp_ms)
+        self.job_records[index].started_at_ms = None
+        &self.record_fact(self.fact_from_record(index, .Retry, timestamp_ms, None))
+    }
+    pub fn complete(&self, job_id: String, timestamp_ms: U64) Err! { &self.finish(job_id, timestamp_ms, .Complete, None) }
+    pub fn fail(&self, job_id: String, timestamp_ms: U64) Err! { &self.finish(job_id, timestamp_ms, .Fail, Val(JetDevtoolsJobPanelFailureKind.Error)) }
+    pub fn fail_with(&self, job_id: String, timestamp_ms: U64, failure: JetDevtoolsJobPanelFailureKind) Err! { &self.finish(job_id, timestamp_ms, .Fail, Val(failure)) }
+    pub fn queue_projection(self, queue: String, now_ms: U64, filter: JetDevtoolsJobPanelLabelFilter?) -> JetDevtoolsJobPanelQueueProjection? Never! {
+        index :: self.queue_index(queue) ?? return None
+        Val(self.queue_projection_from(self.queue_records[index], now_ms, filter))
+    }
+    // One pass over jobs/history rather than per-queue full-table scans.
+    pub fn queues(self, now_ms: U64, filter: JetDevtoolsJobPanelLabelFilter?) -> [JetDevtoolsJobPanelQueueProjection] Never! {
+        indices := [String: Int]{}
+        metrics := [JobPanelQueueMetrics]{}
+        loop index in 0..<self.queue_records.len() {
+            indices[~self.queue_records[index].name] = index
+            &metrics.push(jobs_metrics())
+        }
+        loop job in self.job_records {
+            if !jobs_matches(filter, job.projection.labels) -> next
+            index :: indices.get(job.projection.queue) ?? next
+            jobs_accumulate_job(&metrics[index], job)
+        }
+        cutoff :: jobs_sub(now_ms, JET_DEVTOOLS_JOB_PANEL_THROUGHPUT_WINDOW_MS)
+        loop offset in 0..<self.history_len() {
+            slot :: (self.history_head + offset) % self.history_len()
+            if self.history_slots[slot].kind != .Complete || self.history_slots[slot].timestamp_ms < cutoff || !jobs_matches(filter, self.history_slots[slot].labels) -> next
+            index :: indices.get(self.history_slots[slot].queue) ?? next
+            metrics[index].throughput = jobs_increment(metrics[index].throughput)
+        }
+        out := [JetDevtoolsJobPanelQueueProjection]{}
+        loop index in 0..<self.queue_records.len() {
+            if filter != None && !metrics[index].has_match -> next
+            &out.push(jobs_finalize_queue(self.queue_records[index], metrics[index], now_ms))
+        }
+        out
+    }
+    pub fn project(self, now_ms: U64, filter: JetDevtoolsJobPanelLabelFilter?) -> JetDevtoolsJobPanelProjection Never! {
+        jobs :: self.jobs_filtered(filter)
+        queues :: self.queues(now_ms, filter)
+        freshness := self.last_timestamp_ms ?? U64{0}
+        loop queue in queues -> if queue.freshness_ms > freshness -> freshness = queue.freshness_ms
+        JetDevtoolsJobPanelProjection{jobs, queues, history: self.history(), freshness_ms: freshness}
+    }
+    pub fn protocol_events(self, source: String) -> [jobs_protocol.JetDevtoolsEvent] Err! {
+        out := [jobs_protocol.JetDevtoolsEvent]{}
+        loop offset in 0..<self.history_len() {
+            slot :: (self.history_head + offset) % self.history_len()
+            event :: self.history_slots[slot].to_protocol_event(~source) ?? return Err(err)
+            &out.push(event)
+        }
+        Ok(out)
+    }
+    fn finish(&self, job_id: String, timestamp_ms: U64, kind: JetDevtoolsJobPanelEventKind, failure: JetDevtoolsJobPanelFailureKind?) Err! {
+        index :: self.job_index(job_id) ?? return Err(err)
+        current :: self.job_records[index].projection.state
+        if current != .Started -> return self.invalid_transition(job_id, current, kind)
+        &self.accept_timestamp(timestamp_ms) ?? return Err(err)
+        duration := None
+        if self.job_records[index].started_at_ms == .Val(started) -> duration = Val(jobs_sub(timestamp_ms, started))
+        self.job_records[index].projection.state = if failure != None -> JetDevtoolsJobPanelLifecycleState.Failed else -> JetDevtoolsJobPanelLifecycleState.Completed
+        self.job_records[index].projection.duration_ms = duration
+        self.job_records[index].projection.failure = failure
+        self.job_records[index].projection.freshness_ms = timestamp_ms
+        self.job_records[index].waiting_since_ms = None
+        &self.record_fact(self.fact_from_record(index, kind, timestamp_ms, duration))
+    }
+    fn fact_from_record(self, index: Int, kind: JetDevtoolsJobPanelEventKind, timestamp_ms: U64, duration_ms: U64?) -> JetDevtoolsJobPanelFact Never! {
+        // Only the outgoing fact clones metadata, never a whole job record.
+        JetDevtoolsJobPanelFact{sequence: U64{0}, timestamp_ms, kind, state: self.job_records[index].projection.state, job_id: ~self.job_records[index].projection.job_id, name: ~self.job_records[index].projection.name, labels: ~self.job_records[index].projection.labels, queue: ~self.job_records[index].projection.queue, attempts: self.job_records[index].projection.attempts, duration_ms: if duration_ms != None -> duration_ms else -> self.job_records[index].projection.duration_ms, worker: ~self.job_records[index].projection.worker, request_id: ~self.job_records[index].projection.request_id, failure: self.job_records[index].projection.failure}
+    }
+    fn record_fact(&self, fact: JetDevtoolsJobPanelFact) Err! {
+        incoming := fact
+        incoming.sequence = self.next_sequence
+        // Rust mutates the lifecycle before detecting exhausted sequence too.
+        if self.next_sequence == (U64{18446744073709551615}) -> return Err("jet.devtools.v1 jobs event sequence exhausted")
+        self.next_sequence = self.next_sequence + U64{1}
+        if self.history_len() == self.max_history {
+            self.history_slots[self.history_head] = incoming
+            self.history_head = (self.history_head + 1) % self.max_history
+        } else -> &self.history_slots.push(incoming)
+        Ok()
+    }
+    fn finish_timestamp(self, timestamp_ms: U64) Err! {
+        if self.last_timestamp_ms == .Val(previous) -> if timestamp_ms < previous -> return Err("jet.devtools.v1 jobs timestamps must be monotonic")
+        Ok()
+    }
+    fn accept_timestamp(&self, timestamp_ms: U64) Err! {
+        self.finish_timestamp(timestamp_ms) ?? return Err(err)
+        self.last_timestamp_ms = Val(timestamp_ms)
+        Ok()
+    }
+    fn ensure_queue(&self, queue: String, timestamp_ms: U64) Err! {
+        if self.queue_index(queue) == .Val(index) {
+            if timestamp_ms > self.queue_records[index].freshness_ms -> self.queue_records[index].freshness_ms = timestamp_ms
+            return Ok()
+        }
+        &self.queue_records.push(JetDevtoolsJobPanelQueueRecord{name: ~queue, capacity: U64{1}, paused: false, snapshot_depth: None, snapshot_wait_ms: None, snapshot_throughput: None, freshness_ms: timestamp_ms})
+        Ok()
+    }
+    fn check_queue_room(self, queue: String) Err! {
+        if self.queue_index(queue) == None && self.queue_records.len() >= self.max_history -> return Err("jet.devtools.v1 jobs queue history is full")
+        Ok()
+    }
+    fn check_job_room(self) Err! {
+        if self.job_records.len() < self.max_history -> return Ok()
+        loop job in self.job_records -> if job.projection.state.is_terminal() -> return Ok()
+        Err("jet.devtools.v1 jobs history is full of active jobs")
+    }
+    fn ensure_job_room(&self) Err! {
+        if self.job_records.len() < self.max_history -> return Ok()
+        loop index in 0..<self.job_records.len() {
+            if self.job_records[index].projection.state.is_terminal() {
+                _ :: &self.job_records.remove(index, .Slot)
+                return Ok()
+            }
+        }
+        Err("jet.devtools.v1 jobs history is full of active jobs")
+    }
+    fn queue_index(self, queue: String) -> Int? Never! {
+        loop index in 0..<self.queue_records.len() -> if self.queue_records[index].name == queue -> return Val(index)
+        None
+    }
+    fn job_index(self, job_id: String) -> Int Err! {
+        loop index in 0..<self.job_records.len() -> if self.job_records[index].projection.job_id == job_id -> return Ok(index)
+        Err("jet.devtools.v1 jobs has no job `{job_id}`")
+    }
+    fn invalid_transition(self, job_id: String, state: JetDevtoolsJobPanelLifecycleState, event: JetDevtoolsJobPanelEventKind) Err! {
+        Err("jet.devtools.v1 jobs cannot apply {event.wire()} to `{job_id}` from {state.wire()}")
+    }
+    fn queue_projection_from(self, config: JetDevtoolsJobPanelQueueRecord, now_ms: U64, filter: JetDevtoolsJobPanelLabelFilter?) -> JetDevtoolsJobPanelQueueProjection Never! {
+        metric := jobs_metrics()
+        loop job in self.job_records -> if job.projection.queue == config.name && jobs_matches(filter, job.projection.labels) -> jobs_accumulate_job(&metric, job)
+        cutoff :: jobs_sub(now_ms, JET_DEVTOOLS_JOB_PANEL_THROUGHPUT_WINDOW_MS)
+        loop offset in 0..<self.history_len() {
+            slot :: (self.history_head + offset) % self.history_len()
+            if self.history_slots[slot].queue == config.name && self.history_slots[slot].kind == .Complete && self.history_slots[slot].timestamp_ms >= cutoff && jobs_matches(filter, self.history_slots[slot].labels) -> metric.throughput = jobs_increment(metric.throughput)
+        }
+        jobs_finalize_queue(config, metric, now_ms)
+    }
+}
+// Shared accumulation preserves snapshots overriding filtered derived counters,
+// but workers always come from canonical starts, never a queue snapshot.
+struct JobPanelQueueMetrics {
+    depth: U64
+    workers: U64
+    oldest: U64?
+    throughput: U64
+    freshness: U64
+    has_match: Bool
+}
+fn jobs_metrics() -> JobPanelQueueMetrics Never! { JobPanelQueueMetrics{depth: U64{0}, workers: U64{0}, oldest: None, throughput: U64{0}, freshness: U64{0}, has_match: false} }
+fn jobs_increment(value: U64) -> U64 Never! { if value == (U64{18446744073709551615}) -> value else -> value + U64{1} }
+fn jobs_sub(left: U64, right: U64) -> U64 Never! { if left < right -> U64{0} else -> left - right }
+fn jobs_matches(filter: JetDevtoolsJobPanelLabelFilter?, labels: [JetDevtoolsJobPanelLabel]) -> Bool Never! {
+    if filter == .Val(wanted) -> return wanted.matches(labels)
+    true
+}
+fn jobs_accumulate_job(metric: &JobPanelQueueMetrics, job: JetDevtoolsJobPanelJobRecord) Never! {
+    metric.has_match = true
+    if job.projection.state.is_pending() {
+        metric.depth = jobs_increment(metric.depth)
+        if job.waiting_since_ms == .Val(waiting) {
+            oldest :: metric.oldest ?? waiting
+            metric.oldest = Val(if waiting < oldest -> waiting else -> oldest)
+        }
+    }
+    if job.projection.state == .Started -> metric.workers = jobs_increment(metric.workers)
+    if job.projection.freshness_ms > metric.freshness -> metric.freshness = job.projection.freshness_ms
+}
+fn jobs_finalize_queue(config: JetDevtoolsJobPanelQueueRecord, metric: JobPanelQueueMetrics, now_ms: U64) -> JetDevtoolsJobPanelQueueProjection Never! {
+    wait := U64{0}
+    if metric.oldest == .Val(oldest) -> wait = jobs_sub(now_ms, oldest)
+    JetDevtoolsJobPanelQueueProjection{queue: ~config.name, depth: config.snapshot_depth ?? metric.depth, wait_ms: config.snapshot_wait_ms ?? wait, throughput: config.snapshot_throughput ?? metric.throughput, workers: metric.workers, capacity: config.capacity, paused: config.paused, freshness_ms: if config.freshness_ms > metric.freshness -> config.freshness_ms else -> metric.freshness}
+}
+fn jet_devtools_job_panel_validate_optional_text(value: String?, field: String) Err! {
+    if value == .Val(text) -> jet_devtools_job_panel_validate_text(text, field) ?? return Err(err)
+    Ok()
+}
+fn jet_devtools_job_panel_validate_text(value: String, field: String) Err! {
+    if value.is_empty() -> return Err("jet.devtools.v1 jobs {field} must not be empty")
+    if value.count_bytes() > JET_DEVTOOLS_JOB_PANEL_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 jobs {field} exceeds the Prelude limit")
+    if !jobs_text.isprintable(value) -> return Err("jet.devtools.v1 jobs {field} contains a control character")
+    Ok()
+}
+fn jet_devtools_job_panel_validate_labels(labels: [JetDevtoolsJobPanelLabel]) Err! {
+    if labels.len() > JET_DEVTOOLS_JOB_PANEL_MAX_LABELS -> return Err("jet.devtools.v1 jobs has too many labels")
+    // Count keys first; validate in original order so an earlier duplicate wins
+    // over an invalid later label. No quadratic suffix scan or encoded keys.
+    counts := [String: Int]{}
+    loop label in labels -> counts[~label.key] = (counts.get(label.key) ?? 0) + 1
+    loop index in 0..<labels.len() {
+        jet_devtools_job_panel_validate_text(labels[index].key, "label key") ?? return Err(err)
+        if jobs_payload_name(labels[index].key) -> return Err("jet.devtools.v1 jobs label {index} uses a reserved payload name")
+        if (counts.get(labels[index].key) ?? 0) > 1 -> return Err("jet.devtools.v1 jobs contains duplicate label `{labels[index].key}`")
+        if labels[index].value == .Text(value) -> jet_devtools_job_panel_validate_text(value, "label value") ?? return Err(err)
+    }
+    Ok()
+}
+// Equality against the six ASCII payload names without allocating lowercase.
+fn jobs_payload_name(key: String) -> Bool Never! {
+    n :: key.count_bytes()
+    if n != 4 && n != 8 && n != 9 && n != 7 -> return false
+    b :: jobs_text.utf8_bytes(key)
+    if n == 4 {
+        return ((b[0] | U8{32}) == (U8{97}) && (b[1] | U8{32}) == (U8{114}) && (b[2] | U8{32}) == (U8{103}) && ((b[3] | U8{32}) == (U8{115}) || (b[3] | U8{32}) == (U8{118}))) || ((b[0] | U8{32}) == (U8{98}) && (b[1] | U8{32}) == (U8{111}) && (b[2] | U8{32}) == (U8{100}) && (b[3] | U8{32}) == (U8{121}))
+    }
+    if n == 7 {
+        return (b[0] | U8{32}) == (U8{112}) && (b[1] | U8{32}) == (U8{97}) && (b[2] | U8{32}) == (U8{121}) && (b[3] | U8{32}) == (U8{108}) && (b[4] | U8{32}) == (U8{111}) && (b[5] | U8{32}) == (U8{97}) && (b[6] | U8{32}) == (U8{100})
+    }
+    return (b[0] | U8{32}) == (U8{97}) && (b[1] | U8{32}) == (U8{114}) && (b[2] | U8{32}) == (U8{103}) && (b[3] | U8{32}) == (U8{117}) && (b[4] | U8{32}) == (U8{109}) && (b[5] | U8{32}) == (U8{101}) && (b[6] | U8{32}) == (U8{110}) && (b[7] | U8{32}) == (U8{116}) && (n == 8 || (b[8] | U8{32}) == (U8{115}))
+}
+fn jobs_append(out: &[U8], value: String) Never! { loop byte in jobs_text.utf8_bytes(value) -> &out.push(byte) }
+fn jet_devtools_job_panel_render_text(value: String, out: &[U8]) Never! {
+    &out.push(U8{34})
+    raw :: jobs_text.utf8_bytes(value)
+    category :: jobs_category.UNICODE_GENERAL_CATEGORY
+    at := 0
+    loop at < raw.len() {
+        cp :: jobs_text.scalar_at(raw, at)
+        if {
+            cp == 34 -> jobs_append(&out, "\\\"")
+            cp == 92 -> jobs_append(&out, "\\\\")
+            cp == 10 -> jobs_append(&out, "\\n")
+            cp == 13 -> jobs_append(&out, "\\r")
+            cp == 9 -> jobs_append(&out, "\\t")
+            jobs_assets.asset_tag(category, cp, 8) == 0 -> {
+                jobs_append(&out, "\\u")
+                shift := 12
+                loop shift >= 0 {
+                    nibble :: (cp >> shift) & 15
+                    &out.push(U8{if nibble < 10 -> 48 + nibble else -> 87 + nibble})
+                    shift = shift - 4
+                }
+            }
+            else -> jobs_text.append_cp(&out, cp)
+        }
+        at = at + jobs_text.utf8_width_at(raw, at)
+    }
+    &out.push(U8{34})
+}
+fn jet_devtools_job_panel_render_key(out: &[U8], key: String) Never! {
+    if out.len() > 1 -> &out.push(U8{44})
+    jet_devtools_job_panel_render_text(key, &out)
+    &out.push(U8{58})
+}
+fn jet_devtools_job_panel_render_key_value_text(key: String, value: String, out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, key)
+    jet_devtools_job_panel_render_text(value, &out)
+}
+fn jet_devtools_job_panel_render_key_value_u64(key: String, value: U64, out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, key)
+    jobs_append(&out, "{value}")
+}
+fn jet_devtools_job_panel_render_key_value_optional_u64(key: String, value: U64?, out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, key)
+    if value == .Val(number) -> jobs_append(&out, "{number}") else -> jobs_append(&out, "null")
+}
+fn jet_devtools_job_panel_render_key_value_optional_text(key: String, value: String?, out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, key)
+    if value == .Val(text) -> jet_devtools_job_panel_render_text(text, &out) else -> jobs_append(&out, "null")
+}
+fn jet_devtools_job_panel_render_key_value_null(key: String, out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, key)
+    jobs_append(&out, "null")
+}
+fn jet_devtools_job_panel_render_labels(labels: [JetDevtoolsJobPanelLabel], out: &[U8]) Never! {
+    jet_devtools_job_panel_render_key(&out, "labels")
+    &out.push(U8{123})
+    loop index in 0..<labels.len() {
+        if index != 0 -> &out.push(U8{44})
+        jet_devtools_job_panel_render_text(labels[index].key, &out)
+        &out.push(U8{58})
+        labels[index].value.render_json(&out)
+    }
+    &out.push(U8{125})
+}

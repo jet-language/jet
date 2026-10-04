@@ -1,0 +1,101 @@
+// Focused real portable policy assertions. These do not supply fake locks,
+// once storage, a collector, an exit hook or a concurrency provider.
+use core.mem.host.gc_portable as portable_gc
+use core.mem.host.gc_portable.[GCPoisonError, GCTryLockError]
+use core.mem.runtime.gc_core as portable_gc_facts
+use core.mem.runtime.gc_host_policy as portable_gc_failure
+
+// Give the payload-free alternative its concrete type, as Loadable.idle does.
+fn portable_gc_test_blocked_error() -> GCTryLockError<U64> Never! {
+    GCTryLockError.WouldBlock
+}
+fn portable_gc_test_poisoned_error(value: U64) -> GCTryLockError<U64> Never! {
+    GCTryLockError.Poisoned(value)
+}
+
+#Test("Portable GC identity starts at one and increments under exclusive access") {
+    next := U64{1}
+    first :: portable_gc.gc_portable_take_object_id(&next) ?? panic("first identity")
+    second :: portable_gc.gc_portable_take_object_id(&next) ?? panic("second identity")
+    assert_eq(first, U64{1})
+    assert_eq(second, U64{2})
+    assert_eq(next, U64{3})
+}
+
+#Test("Portable GC identity preserves all unsigned bits") {
+    next := U64{9223372036854775807}
+    below :: portable_gc.gc_portable_take_object_id(&next) ?? panic("below signed boundary")
+    above :: portable_gc.gc_portable_take_object_id(&next) ?? panic("above signed boundary")
+    assert_eq(below, U64{9223372036854775807})
+    assert_eq(above, U64{9223372036854775808})
+    assert_eq(next, U64{9223372036854775809})
+}
+
+#Test("Portable GC identity exhaustion refuses maximum without changing counter") {
+    // __gc_portable.rs:151–153 checks the successor BEFORE returning the id.
+    next := U64{18446744073709551614}
+    last :: portable_gc.gc_portable_take_object_id(&next) ?? panic("last identity")
+    assert_eq(last, U64{18446744073709551614})
+    assert_eq(next, U64{18446744073709551615})
+    loop _ in 0..<2 {
+        refused := false
+        portable_gc.gc_portable_take_object_id(&next) ?? {
+            refused = true
+            assert_eq(err, portable_gc_facts.GCFault.IDExhausted)
+            U64{0}
+        }
+        assert(refused)
+        assert_eq(next, U64{18446744073709551615})
+    }
+}
+
+#Test("Portable GC poison recovery consumes the complete payload") {
+    // GcPoisonError::into_inner (:53–55), not a poisoned-lock simulation.
+    error :: GCPoisonError<[U64]>{value: [U64]{U64{1}, U64{18446744073709551615}}}
+    payload :: portable_gc.gc_portable_poison_into_inner(^error)
+    assert_eq(payload, [U64]{U64{1}, U64{18446744073709551615}})
+}
+
+#Test("Portable GC try-lock error retains its closed carrier alternatives") {
+    // Carrier only. Actual lock/WouldBlock/unlock behavior needs the real leaf.
+    blocked :: portable_gc_test_blocked_error()
+    assert(blocked == .WouldBlock)
+    poisoned :: portable_gc_test_poisoned_error(U64{18446744073709551615})
+    retained := false
+    if poisoned == .Poisoned(value) {
+        retained = true
+        assert_eq(value, U64{18446744073709551615})
+    }
+    assert(retained)
+}
+
+#Test("Portable GC no-host tracing has explicit successful absence") {
+    // __gc_portable.rs:167–170,177–187. No graph/collection behavior is skipped.
+    assert(!portable_gc.gc_portable_trace_available())
+    assert(!portable_gc.gc_portable_ledger_available())
+    portable_gc.gc_portable_initialize_trace() ?? panic("trace initialization")
+    site :: portable_gc_facts.GCPromotionSite{
+        source: "<generated>", span_start: U64{1}, span_end: U64{2},
+        scope: "portable", policy_provenance: "automatic", reason: "escaped",
+        type_name: "U64", bytes: U64{8},
+    }
+    id :: portable_gc_facts.GCObjectID{value: U64{1}}
+    _ :: portable_gc.gc_portable_record_memory_ledger(site)
+    portable_gc.gc_portable_trace_promotion(id, site) ?? panic("trace promotion")
+    reclaimed := [portable_gc_facts.GCObjectID]{id}
+    extent :: reclaimed[0..<reclaimed.len()]
+    portable_gc.gc_portable_trace_collection(extent) ?? panic("trace collection")
+    assert_eq(reclaimed.len(), 1)
+    assert_eq(reclaimed[0].value, U64{1})
+    assert_eq(site.source, "<generated>")
+    assert_eq(site.bytes, U64{8})
+    empty := [portable_gc_facts.GCObjectID]{}
+    empty_extent :: empty[0..<empty.len()]
+    portable_gc.gc_portable_trace_collection(empty_extent) ?? panic("empty trace collection")
+}
+
+#Test("Portable GC abort failure uses the canonical target-independent diagnostic") {
+    // Formatting only; a returning test exit fake cannot prove terminal behavior.
+    expected :: "Error [E2110]: Automatic memory management failed\n Why: The private garbage collector could not complete an operation: collector invariant failed: IdExhausted\n Fix: Check the GC trace path and retry with a smaller workload\n"
+    assert_eq(portable_gc_failure.gc_failure_text(portable_gc_facts.GCFault.IDExhausted), expected)
+}

@@ -1,0 +1,361 @@
+// PORT-PENDING 2091 crates-jet-codegen-src-prelude-corelib-top-text-slice-1801: crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1801-2157
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS     for entry in rd {
+//RS         let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS         let name = entry.file_name().to_string_lossy().to_string();
+//RS         let full_path = std::path::Path::new(path.as_str())
+//RS             .join(&name)
+//RS             .to_string_lossy()
+//RS             .to_string();
+//RS         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+//RS         out.push(jet_std::DirEntry {
+//RS             name,
+//RS             path: full_path,
+//RS             is_dir,
+//RS         });
+//RS     }
+//RS     out.sort_by(|a, b| a.name.cmp(&b.name));
+//RS     Ok(out)
+//RS }
+//RS fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+//RS }
+//RS fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+//RS }
+//RS fn jet_std_fs_is_dir(path: &String) -> bool {
+//RS     std::path::Path::new(path).is_dir()
+//RS }
+//RS fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::remove_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+//RS }
+//RS fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     let p = std::path::Path::new(path);
+//RS     if p.is_dir() {
+//RS         std::fs::remove_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+//RS     } else {
+//RS         std::fs::remove_file(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+//RS     }
+//RS }
+//RS fn jet_std_fs_copy(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(from.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::copy(from, to)
+//RS         .map(|_| ())
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
+//RS }
+//RS fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(from.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     fn copy_tree(
+//RS         src: &std::path::Path,
+//RS         dst: &std::path::Path,
+//RS         shown: &str,
+//RS     ) -> Result<(), jet_std::IOError> {
+//RS         std::fs::create_dir_all(dst)
+//RS             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
+//RS         for entry in std::fs::read_dir(src)
+//RS             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?
+//RS         {
+//RS             let entry = entry
+//RS                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
+//RS             let src_path = entry.path();
+//RS             let dst_path = dst.join(entry.file_name());
+//RS             let ft = entry
+//RS                 .file_type()
+//RS                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
+//RS             if ft.is_dir() {
+//RS                 copy_tree(&src_path, &dst_path, shown)?;
+//RS             } else if ft.is_file() {
+//RS                 std::fs::copy(&src_path, &dst_path)
+//RS                     .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     copy_tree(std::path::Path::new(from), std::path::Path::new(to), from)
+//RS }
+//RS // D-TEXT-WASM1: Web text routes marshal only. Unicode predicates, title
+//RS // mapping, display-column width, and Unicode scalar offsets remain owned by
+//RS // the compiled Prelude above. Each input slot is checked against its exact
+//RS // TLS allocation before the bytes are copied into an owned `String`.
+//RS #[cfg(target_arch = "wasm32")]
+//RS thread_local! {
+//RS     static JET_TEXT_WASM_INPUT_SUBJECT: std::cell::RefCell<Vec<u8>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEXT_WASM_INPUT_SEARCH: std::cell::RefCell<Vec<u8>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEXT_WASM_INPUT_FILL: std::cell::RefCell<Vec<u8>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEXT_WASM_OUTPUT: std::cell::RefCell<Vec<u8>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_checked_len(length: u32) -> usize {
+//RS     let length = length as usize;
+//RS     assert!(
+//RS         length <= u32::MAX as usize,
+//RS         "text Wasm buffer length exceeds the u32 ABI"
+//RS     );
+//RS     length
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_input_cell(
+//RS     slot: u32,
+//RS ) -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<u8>>> {
+//RS     match slot {
+//RS         0 => &JET_TEXT_WASM_INPUT_SUBJECT,
+//RS         1 => &JET_TEXT_WASM_INPUT_SEARCH,
+//RS         2 => &JET_TEXT_WASM_INPUT_FILL,
+//RS         _ => panic!("text Wasm input slot is invalid"),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_input_alloc_slot(slot: u32, length: u32) -> u32 {
+//RS     let length = jet_text_wasm_checked_len(length);
+//RS     jet_text_wasm_input_cell(slot).with(|cell| {
+//RS         let mut bytes = cell.borrow_mut();
+//RS         bytes.resize(length, 0);
+//RS         bytes.as_mut_ptr() as usize as u32
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_input_free_slot(slot: u32, pointer: u32) {
+//RS     jet_text_wasm_input_cell(slot).with(|cell| {
+//RS         let mut bytes = cell.borrow_mut();
+//RS         assert_eq!(
+//RS             pointer as usize,
+//RS             bytes.as_ptr() as usize,
+//RS             "text Wasm input pointer does not own the slot"
+//RS         );
+//RS         bytes.clear();
+//RS         bytes.shrink_to_fit();
+//RS     });
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_input_string(slot: u32, pointer: u32, length: u32) -> String {
+//RS     let length = jet_text_wasm_checked_len(length);
+//RS     let bytes = jet_text_wasm_input_cell(slot).with(|cell| {
+//RS         let bytes = cell.borrow();
+//RS         assert_eq!(
+//RS             pointer as usize,
+//RS             bytes.as_ptr() as usize,
+//RS             "text Wasm input pointer does not own the slot"
+//RS         );
+//RS         assert!(
+//RS             length <= bytes.len(),
+//RS             "text Wasm input length exceeds the allocated slot"
+//RS         );
+//RS         bytes[..length].to_vec()
+//RS     });
+//RS     String::from_utf8(bytes).expect("text Wasm input is not valid UTF-8")
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS fn jet_text_wasm_output_set(value: String) {
+//RS     JET_TEXT_WASM_OUTPUT.with(|cell| {
+//RS         *cell.borrow_mut() = value.into_bytes();
+//RS     });
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_input_alloc(slot: u32, length: u32) -> u32 {
+//RS     jet_text_wasm_input_alloc_slot(slot, length)
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_input_free(slot: u32, pointer: u32) {
+//RS     jet_text_wasm_input_free_slot(slot, pointer);
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_output_ptr() -> u32 {
+//RS     JET_TEXT_WASM_OUTPUT.with(|cell| cell.borrow().as_ptr() as usize as u32)
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_output_len() -> u32 {
+//RS     JET_TEXT_WASM_OUTPUT.with(|cell| {
+//RS         u32::try_from(cell.borrow().len()).expect("text Wasm output exceeds the u32 ABI")
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_output_clear() {
+//RS     JET_TEXT_WASM_OUTPUT.with(|cell| {
+//RS         let mut output = cell.borrow_mut();
+//RS         output.clear();
+//RS         output.shrink_to_fit();
+//RS     });
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_pad_start(
+//RS     subject_pointer: u32,
+//RS     subject_length: u32,
+//RS     width: i64,
+//RS     fill_pointer: u32,
+//RS     fill_length: u32,
+//RS ) {
+//RS     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+//RS     let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
+//RS     jet_text_wasm_output_set(jet_text_pad_start(
+//RS         &subject,
+//RS         jet_foundation::Numeric::JetInt::from_i64(width),
+//RS         &fill,
+//RS     ));
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_pad_end(
+//RS     subject_pointer: u32,
+//RS     subject_length: u32,
+//RS     width: i64,
+//RS     fill_pointer: u32,
+//RS     fill_length: u32,
+//RS ) {
+//RS     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+//RS     let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
+//RS     jet_text_wasm_output_set(jet_text_pad_end(
+//RS         &subject,
+//RS         jet_foundation::Numeric::JetInt::from_i64(width),
+//RS         &fill,
+//RS     ));
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_index_of(
+//RS     subject_pointer: u32,
+//RS     subject_length: u32,
+//RS     search_pointer: u32,
+//RS     search_length: u32,
+//RS ) -> i64 {
+//RS     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+//RS     let search = jet_text_wasm_input_string(1, search_pointer, search_length);
+//RS     jet_unicode_index_of(&subject, &search).unwrap_or(-1)
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_count(
+//RS     subject_pointer: u32,
+//RS     subject_length: u32,
+//RS     search_pointer: u32,
+//RS     search_length: u32,
+//RS ) -> i64 {
+//RS     let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+//RS     let search = jet_text_wasm_input_string(1, search_pointer, search_length);
+//RS     jet_unicode_count(&subject, &search)
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_is_alphabetic(pointer: u32, length: u32) -> u32 {
+//RS     let value = jet_text_wasm_input_string(0, pointer, length);
+//RS     u32::from(jet_text_is_alphabetic(&value))
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_is_numeric(pointer: u32, length: u32) -> u32 {
+//RS     let value = jet_text_wasm_input_string(0, pointer, length);
+//RS     u32::from(jet_text_is_numeric(&value))
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_is_whitespace(pointer: u32, length: u32) -> u32 {
+//RS     let value = jet_text_wasm_input_string(0, pointer, length);
+//RS     u32::from(jet_text_is_whitespace(&value))
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_is_ascii(pointer: u32, length: u32) -> u32 {
+//RS     let value = jet_text_wasm_input_string(0, pointer, length);
+//RS     u32::from(jet_text_unicode_is_ascii(&value))
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_text_wasm_title(pointer: u32, length: u32) {
+//RS     let value = jet_text_wasm_input_string(0, pointer, length);
+//RS     jet_text_wasm_output_set(jet_text_title(&value));
+//RS }
+//RS 
+// END-PORT-PENDING 2091 crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs:1801-2157
+

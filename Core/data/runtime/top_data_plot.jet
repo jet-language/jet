@@ -1,0 +1,1792 @@
+// PORT-PENDING 0265 crates-jet-codegen-src-prelude-corelib-top-dataplot-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1-1788
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct DataPlotError {
+//RS     pub(crate) kind: &'static str,
+//RS     pub(crate) operation: &'static str,
+//RS     pub(crate) reason: &'static str,
+//RS     pub(crate) index: Option<i64>,
+//RS }
+//RS 
+//RS impl std::fmt::Display for DataPlotError {
+//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         write!(f, "{} {}", self.kind, self.operation)?;
+//RS         if let Some(index) = self.index {
+//RS             write!(f, ", index {index}")?;
+//RS         }
+//RS         write!(f, ": {}", self.reason)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_data_line_values<K>(groups: &Vec<jet_std::GroupValue<K, f64>>) -> Vec<f64> {
+//RS     groups.iter().map(|group| group.value).collect()
+//RS }
+//RS 
+//RS fn jet_data_line_options_validate(
+//RS     options: &jet_std::DataLineOptions,
+//RS     operation: &'static str,
+//RS ) -> Result<(), DataPlotError> {
+//RS     if let Ok(reference) = options.reference {
+//RS         if !reference.is_finite() {
+//RS             return Err(DataPlotError {
+//RS                 kind: "NonFinite",
+//RS                 operation,
+//RS                 reason: "reference line must be finite",
+//RS                 index: None,
+//RS             });
+//RS         }
+//RS     }
+//RS     if options.style != "solid" && options.style != "dashed" && options.style != "dotted" {
+//RS         return Err(DataPlotError {
+//RS             kind: "InvalidArgument",
+//RS             operation,
+//RS             reason: "line style must be solid, dashed, or dotted",
+//RS             index: None,
+//RS         });
+//RS     }
+//RS     if options.color.is_empty() {
+//RS         return Err(DataPlotError {
+//RS             kind: "InvalidArgument",
+//RS             operation,
+//RS             reason: "line color must not be empty",
+//RS             index: None,
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_data_line_validate<K: crate::JetShow>(
+//RS     groups: &Vec<jet_std::GroupValue<K, f64>>,
+//RS     options: &jet_std::DataLineOptions,
+//RS     operation: &'static str,
+//RS ) -> Result<(), DataPlotError> {
+//RS     for (index, group) in groups.iter().enumerate() {
+//RS         if !group.value.is_finite() {
+//RS             return Err(DataPlotError {
+//RS                 kind: "NonFinite",
+//RS                 operation,
+//RS                 reason: "plot values must be finite",
+//RS                 index: Some(index as i64),
+//RS             });
+//RS         }
+//RS     }
+//RS     jet_data_line_options_validate(options, operation)
+//RS }
+//RS 
+//RS pub(crate) fn jet_data_line_text_plot_checked<K: crate::JetShow>(
+//RS     groups: &Vec<jet_std::GroupValue<K, f64>>,
+//RS     options: &jet_std::DataLineOptions,
+//RS ) -> Result<String, DataPlotError> {
+//RS     jet_data_line_validate(groups, options, "line_text")?;
+//RS     Ok(jet_data_line_text(groups, options))
+//RS }
+//RS 
+//RS pub(crate) fn jet_data_line_svg_plot_checked<K: crate::JetShow>(
+//RS     groups: &Vec<jet_std::GroupValue<K, f64>>,
+//RS     options: &jet_std::DataLineOptions,
+//RS ) -> Result<String, DataPlotError> {
+//RS     jet_data_line_validate(groups, options, "line_svg")?;
+//RS     Ok(jet_data_line_svg(groups, options))
+//RS }
+//RS 
+//RS pub(crate) fn jet_data_line_text<K: crate::JetShow>(
+//RS     groups: &Vec<jet_std::GroupValue<K, f64>>,
+//RS     options: &jet_std::DataLineOptions,
+//RS ) -> String {
+//RS     let values = jet_data_line_values(groups);
+//RS     let labels = groups
+//RS         .iter()
+//RS         .map(|group| group.key.jet_show())
+//RS         .collect::<Vec<_>>()
+//RS         .join(" | ");
+//RS     let points = values
+//RS         .iter()
+//RS         .map(|value| {
+//RS             let value = jet_data_plot_normalize_zero(*value);
+//RS             format!("{value:.6}")
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(" -> ");
+//RS     let mut lines = Vec::new();
+//RS     if !options.title.is_empty() {
+//RS         lines.push(options.title.clone());
+//RS     }
+//RS     lines.push(format!("{}: {}", options.x_label, labels));
+//RS     lines.push(format!("{}: {}", options.y_label, points));
+//RS     lines.push(format!(
+//RS         "line: style={} color={} markers={}",
+//RS         options.style,
+//RS         options.color,
+//RS         if options.markers { "on" } else { "off" }
+//RS     ));
+//RS     if let Ok(reference) = options.reference {
+//RS         let reference = jet_data_plot_normalize_zero(reference);
+//RS         lines.push(format!("reference: {reference:.6}"));
+//RS     }
+//RS     if !options.legend.is_empty() {
+//RS         lines.push(format!("legend: {}", options.legend));
+//RS     }
+//RS     lines.join("\n")
+//RS }
+//RS 
+//RS pub(crate) fn jet_data_line_svg<K: crate::JetShow>(
+//RS     groups: &Vec<jet_std::GroupValue<K, f64>>,
+//RS     options: &jet_std::DataLineOptions,
+//RS ) -> String {
+//RS     let width = 640.0f64;
+//RS     let height = 360.0f64;
+//RS     let left = 64.0f64;
+//RS     let right = 24.0f64;
+//RS     let top = 44.0f64;
+//RS     let bottom = 52.0f64;
+//RS     let plot_width = width - left - right;
+//RS     let plot_height = height - top - bottom;
+//RS     let values = jet_data_line_values(groups);
+//RS     let mut min = values.iter().copied().fold(f64::INFINITY, f64::min);
+//RS     let mut max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+//RS     if let Ok(reference) = options.reference {
+//RS         min = min.min(reference);
+//RS         max = max.max(reference);
+//RS     }
+//RS     if !min.is_finite() || !max.is_finite() {
+//RS         min = 0.0;
+//RS         max = 1.0;
+//RS     }
+//RS     if (max - min).abs() < f64::EPSILON {
+//RS         min -= 1.0;
+//RS         max += 1.0;
+//RS     }
+//RS     let point = |index: usize, value: f64| {
+//RS         let x = if groups.len() <= 1 {
+//RS             left + plot_width / 2.0
+//RS         } else {
+//RS             left + plot_width * index as f64 / (groups.len() - 1) as f64
+//RS         };
+//RS         let y = top + (max - value) / (max - min) * plot_height;
+//RS         (x, y)
+//RS     };
+//RS     let points = values
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, value)| {
+//RS             let (x, y) = point(index, *value);
+//RS             format!("{x:.3},{y:.3}")
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(" ");
+//RS     let dash = match options.style.as_str() {
+//RS         "dashed" => " stroke-dasharray=\"8 5\"",
+//RS         "dotted" => " stroke-dasharray=\"2 5\"",
+//RS         _ => "",
+//RS     };
+//RS     let mut out = format!(
+//RS         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{}</title>",
+//RS         jet_data_plot_svg_escape(&options.title)
+//RS     );
+//RS     out.push_str("<rect width=\"640\" height=\"360\" fill=\"white\"/>");
+//RS     out.push_str(&format!(
+//RS         "<line x1=\"{left}\" y1=\"{top}\" x2=\"{left}\" y2=\"{}\" stroke=\"#333\"/><line x1=\"{left}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#333\"/>",
+//RS         height - bottom,
+//RS         height - bottom,
+//RS         width - right,
+//RS         height - bottom
+//RS     ));
+//RS     if let Ok(reference) = options.reference {
+//RS         let (_, y) = point(0, reference);
+//RS         out.push_str(&format!(
+//RS             "<line x1=\"{left}\" y1=\"{y:.3}\" x2=\"{}\" y2=\"{y:.3}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>",
+//RS             width - right
+//RS         ));
+//RS     }
+//RS     out.push_str(&format!(
+//RS         "<polyline fill=\"none\" stroke=\"{}\" stroke-width=\"2\"{} points=\"{}\"/>",
+//RS         jet_data_plot_svg_escape(&options.color),
+//RS         dash,
+//RS         points
+//RS     ));
+//RS     if options.markers {
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let (x, y) = point(index, *value);
+//RS             out.push_str(&format!(
+//RS                 "<circle cx=\"{x:.3}\" cy=\"{y:.3}\" r=\"4\" fill=\"{}\"/>",
+//RS                 jet_data_plot_svg_escape(&options.color)
+//RS             ));
+//RS         }
+//RS     }
+//RS     for (index, group) in groups.iter().enumerate() {
+//RS         let (x, _) = point(index, values[index]);
+//RS         out.push_str(&format!(
+//RS             "<text x=\"{x:.3}\" y=\"{}\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"11\">{}</text>",
+//RS             height - bottom + 18.0,
+//RS             jet_data_plot_svg_escape(&group.key.jet_show())
+//RS         ));
+//RS     }
+//RS     out.push_str(&format!(
+//RS         "<text x=\"{}\" y=\"24\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\">{}</text>",
+//RS         width / 2.0,
+//RS         jet_data_plot_svg_escape(&options.title)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"12\">{}</text>",
+//RS         width / 2.0,
+//RS         height - 10.0,
+//RS         jet_data_plot_svg_escape(&options.x_label)
+//RS     ));
+//RS     out.push_str(&format!(
+//RS         "<text x=\"16\" y=\"{}\" text-anchor=\"middle\" transform=\"rotate(-90 16 {})\" font-family=\"sans-serif\" font-size=\"12\">{}</text>",
+//RS         height / 2.0,
+//RS         height / 2.0,
+//RS         jet_data_plot_svg_escape(&options.y_label)
+//RS     ));
+//RS     if !options.legend.is_empty() {
+//RS         out.push_str(&format!(
+//RS             "<text x=\"{}\" y=\"{}\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{}\">{}</text>",
+//RS             width - right - 120.0,
+//RS             top - 12.0,
+//RS             jet_data_plot_svg_escape(&options.color),
+//RS             jet_data_plot_svg_escape(&options.legend)
+//RS         ));
+//RS     }
+//RS     out.push_str("</svg>");
+//RS     out
+//RS }
+//RS 
+//RS fn jet_data_plot_svg_escape(s: &str) -> String {
+//RS     s.replace('&', "&amp;")
+//RS         .replace('<', "&lt;")
+//RS         .replace('>', "&gt;")
+//RS         .replace('"', "&quot;")
+//RS }
+//RS // D-DX-PLOT1=A: one typed, headless grammar shared by every plot adapter.
+//RS //
+//RS // The plan owns only schema identities and declarative facts.  Row accessors
+//RS // stay on the typed `JetDataPlot<T>` handle and are evaluated only while an
+//RS // adapter renders a projection.  This keeps inspection source-backed and
+//RS // avoids a second untyped carrier or a renderer-specific semantic sidecar.
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::sync::Arc as JetDataPlotArc;
+//RS 
+//RS const JET_DATA_PLOT_SCHEMA_VERSION: u32 = 1;
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotMark {
+//RS     Line,
+//RS     Bar,
+//RS     Point,
+//RS }
+//RS 
+//RS impl JetDataPlotMark {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Line => "line",
+//RS             Self::Bar => "bar",
+//RS             Self::Point => "point",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotChannel {
+//RS     X,
+//RS     Y,
+//RS     Color,
+//RS     Size,
+//RS     Text,
+//RS     Detail,
+//RS }
+//RS 
+//RS impl JetDataPlotChannel {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::X => "x",
+//RS             Self::Y => "y",
+//RS             Self::Color => "color",
+//RS             Self::Size => "size",
+//RS             Self::Text => "text",
+//RS             Self::Detail => "detail",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotAggregate {
+//RS     None,
+//RS     Count,
+//RS     Sum,
+//RS     Mean,
+//RS     Min,
+//RS     Max,
+//RS }
+//RS 
+//RS impl JetDataPlotAggregate {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::None => "none",
+//RS             Self::Count => "count",
+//RS             Self::Sum => "sum",
+//RS             Self::Mean => "mean",
+//RS             Self::Min => "min",
+//RS             Self::Max => "max",
+//RS         }
+//RS     }
+//RS 
+//RS     fn needs_numeric(self) -> bool {
+//RS         matches!(self, Self::Sum | Self::Mean | Self::Min | Self::Max)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotFilterOp {
+//RS     Equal,
+//RS     NotEqual,
+//RS     Less,
+//RS     LessEqual,
+//RS     Greater,
+//RS     GreaterEqual,
+//RS }
+//RS 
+//RS impl JetDataPlotFilterOp {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Equal => "eq",
+//RS             Self::NotEqual => "ne",
+//RS             Self::Less => "lt",
+//RS             Self::LessEqual => "lte",
+//RS             Self::Greater => "gt",
+//RS             Self::GreaterEqual => "gte",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetDataPlotValue {
+//RS     Text(String),
+//RS     Integer(i64),
+//RS     Number(f64),
+//RS     Boolean(bool),
+//RS     Null,
+//RS }
+//RS 
+//RS impl JetDataPlotValue {
+//RS     pub const fn kind(&self) -> &'static str {
+//RS         match self {
+//RS             Self::Text(_) => "String",
+//RS             Self::Integer(_) => "Int",
+//RS             Self::Number(_) => "Float",
+//RS             Self::Boolean(_) => "Bool",
+//RS             Self::Null => "Null",
+//RS         }
+//RS     }
+//RS 
+//RS     fn number(&self) -> Option<f64> {
+//RS         match self {
+//RS             Self::Integer(value) => Some(*value as f64),
+//RS             Self::Number(value) => Some(*value),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         match self {
+//RS             Self::Text(value) => format!("text:{}", jet_data_plot_escape(value)),
+//RS             Self::Integer(value) => format!("int:{value}"),
+//RS             Self::Number(value) => format!("float:{}", jet_data_plot_number(*value)),
+//RS             Self::Boolean(value) => format!("bool:{value}"),
+//RS             Self::Null => "null".to_string(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn display_text(&self) -> String {
+//RS         match self {
+//RS             Self::Text(value) => value.clone(),
+//RS             Self::Integer(value) => value.to_string(),
+//RS             Self::Number(value) => jet_data_plot_number(*value),
+//RS             Self::Boolean(value) => value.to_string(),
+//RS             Self::Null => "null".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotField {
+//RS     pub id: String,
+//RS     pub name: String,
+//RS     pub type_name: String,
+//RS }
+//RS 
+//RS impl JetDataPlotField {
+//RS     pub fn new(name: impl Into<String>, type_name: impl Into<String>) -> Self {
+//RS         let name = name.into();
+//RS         let type_name = type_name.into();
+//RS         let id = jet_foundation::PreludeDataFlow::column_identity(&name, &type_name);
+//RS         Self {
+//RS             id,
+//RS             name,
+//RS             type_name,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_id(
+//RS         id: impl Into<String>,
+//RS         name: impl Into<String>,
+//RS         type_name: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             id: id.into(),
+//RS             name: name.into(),
+//RS             type_name: type_name.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), JetDataPlotError> {
+//RS         if self.id.trim().is_empty() || self.name.trim().is_empty() {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot column identity and name must not be empty",
+//RS             )
+//RS             .with_field(self.name.clone()));
+//RS         }
+//RS         if self
+//RS             .id
+//RS             .chars()
+//RS             .chain(self.name.chars())
+//RS             .chain(self.type_name.chars())
+//RS             .any(char::is_control)
+//RS         {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot column metadata must not contain control characters",
+//RS             )
+//RS             .with_field(self.name.clone()));
+//RS         }
+//RS         if self.type_name.trim().is_empty() {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot column type must not be empty",
+//RS             )
+//RS             .with_field(self.name.clone()));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}",
+//RS             jet_data_plot_escape(&self.id),
+//RS             jet_data_plot_escape(&self.name),
+//RS             jet_data_plot_escape(&self.type_name)
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotSchema {
+//RS     pub identity: String,
+//RS     pub row_type: String,
+//RS     pub columns: Vec<JetDataPlotField>,
+//RS }
+//RS 
+//RS impl JetDataPlotSchema {
+//RS     pub fn new(
+//RS         identity: impl Into<String>,
+//RS         row_type: impl Into<String>,
+//RS         columns: Vec<JetDataPlotField>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             identity: identity.into(),
+//RS             row_type: row_type.into(),
+//RS             columns,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), JetDataPlotError> {
+//RS         if self.identity.trim().is_empty() || self.row_type.trim().is_empty() {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot schema identity and row type must not be empty",
+//RS             ));
+//RS         }
+//RS         if self
+//RS             .identity
+//RS             .chars()
+//RS             .chain(self.row_type.chars())
+//RS             .any(char::is_control)
+//RS         {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot schema metadata must not contain control characters",
+//RS             ));
+//RS         }
+//RS         let mut names = BTreeSet::new();
+//RS         let mut ids = BTreeSet::new();
+//RS         for column in &self.columns {
+//RS             column.validate()?;
+//RS             if !names.insert(column.name.clone()) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.schema",
+//RS                     "plot schema repeats a column name",
+//RS                 )
+//RS                 .with_field(column.name.clone()));
+//RS             }
+//RS             if !ids.insert(column.id.clone()) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.schema",
+//RS                     "plot schema repeats a column identity",
+//RS                 )
+//RS                 .with_field(column.name.clone()));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn column_named(&self, name: &str) -> Option<&JetDataPlotField> {
+//RS         self.columns.iter().find(|column| column.name == name)
+//RS     }
+//RS 
+//RS     pub fn column_id(&self, id: &str) -> Option<&JetDataPlotField> {
+//RS         self.columns.iter().find(|column| column.id == id)
+//RS     }
+//RS 
+//RS     fn resolve(&self, field: &JetDataPlotField) -> Result<JetDataPlotField, JetDataPlotError> {
+//RS         let found = self.column_id(&field.id).ok_or_else(|| {
+//RS             JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot encoding references an unknown table column identity",
+//RS             )
+//RS             .with_field(field.name.clone())
+//RS             .with_expected(field.id.clone())
+//RS             .with_actual("missing")
+//RS         })?;
+//RS         if found.name != field.name || found.type_name != field.type_name {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.schema",
+//RS                 "plot encoding column type does not match the table schema",
+//RS             )
+//RS             .with_field(field.name.clone())
+//RS             .with_expected(found.type_name.clone())
+//RS             .with_actual(field.type_name.clone()));
+//RS         }
+//RS         Ok(found.clone())
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "schema={}:row={}:columns=[{}]",
+//RS             jet_data_plot_escape(&self.identity),
+//RS             jet_data_plot_escape(&self.row_type),
+//RS             self.columns
+//RS                 .iter()
+//RS                 .map(JetDataPlotField::canonical_key)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotSourceFacts {
+//RS     pub table_plan_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub row_type: String,
+//RS     pub rows: i64,
+//RS     pub data_identity: String,
+//RS     pub provenance: String,
+//RS }
+//RS 
+//RS impl JetDataPlotSourceFacts {
+//RS     pub fn new(
+//RS         table_plan_identity: impl Into<String>,
+//RS         source_identity: impl Into<String>,
+//RS         schema_identity: impl Into<String>,
+//RS         row_type: impl Into<String>,
+//RS         rows: i64,
+//RS         data_identity: impl Into<String>,
+//RS         provenance: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             table_plan_identity: table_plan_identity.into(),
+//RS             source_identity: source_identity.into(),
+//RS             schema_identity: schema_identity.into(),
+//RS             row_type: row_type.into(),
+//RS             rows,
+//RS             data_identity: data_identity.into(),
+//RS             provenance: provenance.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), JetDataPlotError> {
+//RS         if self.rows < 0 {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.source",
+//RS                 "plot source row count must not be negative",
+//RS             ));
+//RS         }
+//RS         for value in [
+//RS             &self.table_plan_identity,
+//RS             &self.source_identity,
+//RS             &self.schema_identity,
+//RS             &self.row_type,
+//RS             &self.data_identity,
+//RS             &self.provenance,
+//RS         ] {
+//RS             if value.trim().is_empty() {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.source",
+//RS                     "plot source facts must not be empty",
+//RS                 ));
+//RS             }
+//RS             if value.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.source",
+//RS                     "plot source facts must not contain control characters",
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "plan={};source={};schema={};row={};rows={};data={};provenance={}",
+//RS             jet_data_plot_escape(&self.table_plan_identity),
+//RS             jet_data_plot_escape(&self.source_identity),
+//RS             jet_data_plot_escape(&self.schema_identity),
+//RS             jet_data_plot_escape(&self.row_type),
+//RS             self.rows,
+//RS             jet_data_plot_escape(&self.data_identity),
+//RS             jet_data_plot_escape(&self.provenance)
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotEncoding {
+//RS     pub channel: JetDataPlotChannel,
+//RS     pub field: JetDataPlotField,
+//RS     pub aggregate: JetDataPlotAggregate,
+//RS }
+//RS 
+//RS impl JetDataPlotEncoding {
+//RS     pub fn new(
+//RS         channel: JetDataPlotChannel,
+//RS         field: JetDataPlotField,
+//RS         aggregate: JetDataPlotAggregate,
+//RS     ) -> Self {
+//RS         Self {
+//RS             channel,
+//RS             field,
+//RS             aggregate,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}",
+//RS             self.channel.as_str(),
+//RS             self.field.canonical_key(),
+//RS             self.aggregate.as_str()
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetDataPlotTransform {
+//RS     Filter {
+//RS         field: JetDataPlotField,
+//RS         op: JetDataPlotFilterOp,
+//RS         value: JetDataPlotValue,
+//RS     },
+//RS     Sort {
+//RS         field: JetDataPlotField,
+//RS         descending: bool,
+//RS     },
+//RS     Bin {
+//RS         field: JetDataPlotField,
+//RS         step: f64,
+//RS     },
+//RS     Aggregate {
+//RS         group_by: Vec<JetDataPlotField>,
+//RS         field: JetDataPlotField,
+//RS         aggregate: JetDataPlotAggregate,
+//RS     },
+//RS }
+//RS 
+//RS impl JetDataPlotTransform {
+//RS     fn canonical_key(&self) -> String {
+//RS         match self {
+//RS             Self::Filter { field, op, value } => {
+//RS                 format!("filter:{}:{}:{}", field.canonical_key(), op.as_str(), value.canonical_key())
+//RS             }
+//RS             Self::Sort {
+//RS                 field,
+//RS                 descending,
+//RS             } => format!(
+//RS                 "sort:{}:{}",
+//RS                 field.canonical_key(),
+//RS                 if *descending { "desc" } else { "asc" }
+//RS             ),
+//RS             Self::Bin { field, step } => {
+//RS                 format!("bin:{}:{}", field.canonical_key(), jet_data_plot_number(*step))
+//RS             }
+//RS             Self::Aggregate {
+//RS                 group_by,
+//RS                 field,
+//RS                 aggregate,
+//RS             } => format!(
+//RS                 "aggregate:[{}]:{}:{}",
+//RS                 group_by
+//RS                     .iter()
+//RS                     .map(JetDataPlotField::canonical_key)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(","),
+//RS                 field.canonical_key(),
+//RS                 aggregate.as_str()
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotScaleKind {
+//RS     Linear,
+//RS     Log,
+//RS     Band,
+//RS     Point,
+//RS }
+//RS 
+//RS impl JetDataPlotScaleKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Linear => "linear",
+//RS             Self::Log => "log",
+//RS             Self::Band => "band",
+//RS             Self::Point => "point",
+//RS         }
+//RS     }
+//RS 
+//RS     fn needs_numeric(self) -> bool {
+//RS         matches!(self, Self::Linear | Self::Log)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetDataPlotDomain {
+//RS     Auto,
+//RS     Numeric { min: f64, max: f64 },
+//RS     Categories(Vec<String>),
+//RS }
+//RS 
+//RS impl JetDataPlotDomain {
+//RS     fn canonical_key(&self) -> String {
+//RS         match self {
+//RS             Self::Auto => "auto".to_string(),
+//RS             Self::Numeric { min, max } => {
+//RS                 format!("numeric:{}:{}", jet_data_plot_number(*min), jet_data_plot_number(*max))
+//RS             }
+//RS             Self::Categories(values) => format!(
+//RS                 "categories:[{}]",
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| jet_data_plot_escape(value))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotScale {
+//RS     pub channel: JetDataPlotChannel,
+//RS     pub kind: JetDataPlotScaleKind,
+//RS     pub domain: JetDataPlotDomain,
+//RS     pub clamp: bool,
+//RS     pub reverse: bool,
+//RS }
+//RS 
+//RS impl JetDataPlotScale {
+//RS     pub fn new(
+//RS         channel: JetDataPlotChannel,
+//RS         kind: JetDataPlotScaleKind,
+//RS         domain: JetDataPlotDomain,
+//RS     ) -> Self {
+//RS         Self {
+//RS             channel,
+//RS             kind,
+//RS             domain,
+//RS             clamp: false,
+//RS             reverse: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:clamp={}:reverse={}",
+//RS             self.channel.as_str(),
+//RS             self.kind.as_str(),
+//RS             self.domain.canonical_key(),
+//RS             self.clamp,
+//RS             self.reverse
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotAxis {
+//RS     pub channel: JetDataPlotChannel,
+//RS     pub title: String,
+//RS     pub visible: bool,
+//RS     pub grid: bool,
+//RS     pub ticks: i64,
+//RS }
+//RS 
+//RS impl JetDataPlotAxis {
+//RS     pub fn new(channel: JetDataPlotChannel, title: impl Into<String>) -> Self {
+//RS         Self {
+//RS             channel,
+//RS             title: title.into(),
+//RS             visible: true,
+//RS             grid: true,
+//RS             ticks: 5,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:visible={}:grid={}:ticks={}",
+//RS             self.channel.as_str(),
+//RS             jet_data_plot_escape(&self.title),
+//RS             self.visible,
+//RS             self.grid,
+//RS             self.ticks
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotLegendPosition {
+//RS     Top,
+//RS     Right,
+//RS     Bottom,
+//RS     Left,
+//RS }
+//RS 
+//RS impl JetDataPlotLegendPosition {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Top => "top",
+//RS             Self::Right => "right",
+//RS             Self::Bottom => "bottom",
+//RS             Self::Left => "left",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotLegend {
+//RS     pub channel: JetDataPlotChannel,
+//RS     pub title: String,
+//RS     pub position: JetDataPlotLegendPosition,
+//RS     pub visible: bool,
+//RS }
+//RS 
+//RS impl JetDataPlotLegend {
+//RS     pub fn new(channel: JetDataPlotChannel, title: impl Into<String>) -> Self {
+//RS         Self {
+//RS             channel,
+//RS             title: title.into(),
+//RS             position: JetDataPlotLegendPosition::Right,
+//RS             visible: true,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:visible={}",
+//RS             self.channel.as_str(),
+//RS             jet_data_plot_escape(&self.title),
+//RS             self.position.as_str(),
+//RS             self.visible
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotFacetKind {
+//RS     Row,
+//RS     Column,
+//RS }
+//RS 
+//RS impl JetDataPlotFacetKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Row => "row",
+//RS             Self::Column => "column",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotFacet {
+//RS     pub field: JetDataPlotField,
+//RS     pub kind: JetDataPlotFacetKind,
+//RS     pub title: String,
+//RS     pub columns: i64,
+//RS     pub rows: i64,
+//RS }
+//RS 
+//RS impl JetDataPlotFacet {
+//RS     pub fn new(field: JetDataPlotField, kind: JetDataPlotFacetKind) -> Self {
+//RS         Self {
+//RS             field,
+//RS             kind,
+//RS             title: String::new(),
+//RS             columns: 0,
+//RS             rows: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:columns={}:rows={}",
+//RS             self.kind.as_str(),
+//RS             self.field.canonical_key(),
+//RS             jet_data_plot_escape(&self.title),
+//RS             self.columns,
+//RS             self.rows
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotLayer {
+//RS     pub name: String,
+//RS     pub mark: JetDataPlotMark,
+//RS     pub encodings: Vec<JetDataPlotEncoding>,
+//RS     pub transforms: Vec<JetDataPlotTransform>,
+//RS     pub opacity: f64,
+//RS }
+//RS 
+//RS impl JetDataPlotLayer {
+//RS     pub fn new(name: impl Into<String>, mark: JetDataPlotMark) -> Self {
+//RS         Self {
+//RS             name: name.into(),
+//RS             mark,
+//RS             encodings: Vec::new(),
+//RS             transforms: Vec::new(),
+//RS             opacity: 1.0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn encode(
+//RS         mut self,
+//RS         channel: JetDataPlotChannel,
+//RS         field: JetDataPlotField,
+//RS         aggregate: JetDataPlotAggregate,
+//RS     ) -> Self {
+//RS         let encoding = JetDataPlotEncoding::new(channel, field, aggregate);
+//RS         if let Some(existing) = self
+//RS             .encodings
+//RS             .iter_mut()
+//RS             .find(|existing| existing.channel == channel)
+//RS         {
+//RS             *existing = encoding;
+//RS         } else {
+//RS             self.encodings.push(encoding);
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn transform(mut self, transform: JetDataPlotTransform) -> Self {
+//RS         self.transforms.push(transform);
+//RS         self
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:opacity={}:encodings=[{}]:transforms=[{}]",
+//RS             jet_data_plot_escape(&self.name),
+//RS             self.mark.as_str(),
+//RS             jet_data_plot_number(self.opacity),
+//RS             self.encodings
+//RS                 .iter()
+//RS                 .map(JetDataPlotEncoding::canonical_key)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(","),
+//RS             self.transforms
+//RS                 .iter()
+//RS                 .map(JetDataPlotTransform::canonical_key)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotInteraction {
+//RS     Hover,
+//RS     Select,
+//RS     Zoom,
+//RS     Pan,
+//RS     Brush,
+//RS }
+//RS 
+//RS impl JetDataPlotInteraction {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Hover => "hover",
+//RS             Self::Select => "select",
+//RS             Self::Zoom => "zoom",
+//RS             Self::Pan => "pan",
+//RS             Self::Brush => "brush",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotAccessibility {
+//RS     pub title: String,
+//RS     pub description: String,
+//RS     pub summary: String,
+//RS     pub keyboard: bool,
+//RS     pub announce_selection: bool,
+//RS }
+//RS 
+//RS impl Default for JetDataPlotAccessibility {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             title: String::new(),
+//RS             description: String::new(),
+//RS             summary: String::new(),
+//RS             keyboard: true,
+//RS             announce_selection: true,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetDataPlotAccessibility {
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:keyboard={}:announce_selection={}",
+//RS             jet_data_plot_escape(&self.title),
+//RS             jet_data_plot_escape(&self.description),
+//RS             jet_data_plot_escape(&self.summary),
+//RS             self.keyboard,
+//RS             self.announce_selection
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotLayout {
+//RS     pub width: f64,
+//RS     pub height: f64,
+//RS     pub margin_top: f64,
+//RS     pub margin_right: f64,
+//RS     pub margin_bottom: f64,
+//RS     pub margin_left: f64,
+//RS }
+//RS 
+//RS impl Default for JetDataPlotLayout {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             width: 640.0,
+//RS             height: 360.0,
+//RS             margin_top: 44.0,
+//RS             margin_right: 24.0,
+//RS             margin_bottom: 52.0,
+//RS             margin_left: 64.0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetDataPlotLayout {
+//RS     fn validate(&self) -> Result<(), JetDataPlotError> {
+//RS         if ![
+//RS             self.width,
+//RS             self.height,
+//RS             self.margin_top,
+//RS             self.margin_right,
+//RS             self.margin_bottom,
+//RS             self.margin_left,
+//RS         ]
+//RS         .into_iter()
+//RS         .all(f64::is_finite)
+//RS             || self.width <= 0.0
+//RS             || self.height <= 0.0
+//RS             || self.margin_top < 0.0
+//RS             || self.margin_right < 0.0
+//RS             || self.margin_bottom < 0.0
+//RS             || self.margin_left < 0.0
+//RS             || self.width <= self.margin_left + self.margin_right
+//RS             || self.height <= self.margin_top + self.margin_bottom
+//RS         {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.layout",
+//RS                 "plot layout dimensions and margins are invalid",
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:{}:{}:{}",
+//RS             jet_data_plot_number(self.width),
+//RS             jet_data_plot_number(self.height),
+//RS             jet_data_plot_number(self.margin_top),
+//RS             jet_data_plot_number(self.margin_right),
+//RS             jet_data_plot_number(self.margin_bottom),
+//RS             jet_data_plot_number(self.margin_left)
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotBackend {
+//RS     Terminal,
+//RS     Browser,
+//RS     Native,
+//RS     Export,
+//RS }
+//RS 
+//RS impl JetDataPlotBackend {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Terminal => "terminal",
+//RS             Self::Browser => "browser",
+//RS             Self::Native => "native",
+//RS             Self::Export => "export",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetDataPlotSupport {
+//RS     Supported,
+//RS     Degraded,
+//RS     Unsupported,
+//RS }
+//RS 
+//RS impl JetDataPlotSupport {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Supported => "supported",
+//RS             Self::Degraded => "degraded",
+//RS             Self::Unsupported => "unsupported",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDataPlotCapability {
+//RS     pub backend: JetDataPlotBackend,
+//RS     pub feature: String,
+//RS     pub support: JetDataPlotSupport,
+//RS     pub reason: String,
+//RS     pub replacement: String,
+//RS }
+//RS 
+//RS impl JetDataPlotCapability {
+//RS     fn supported(backend: JetDataPlotBackend, feature: impl Into<String>) -> Self {
+//RS         Self {
+//RS             backend,
+//RS             feature: feature.into(),
+//RS             support: JetDataPlotSupport::Supported,
+//RS             reason: String::new(),
+//RS             replacement: String::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn degraded(
+//RS         backend: JetDataPlotBackend,
+//RS         feature: impl Into<String>,
+//RS         reason: impl Into<String>,
+//RS         replacement: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             backend,
+//RS             feature: feature.into(),
+//RS             support: JetDataPlotSupport::Degraded,
+//RS             reason: reason.into(),
+//RS             replacement: replacement.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn unsupported(
+//RS         backend: JetDataPlotBackend,
+//RS         feature: impl Into<String>,
+//RS         reason: impl Into<String>,
+//RS         replacement: impl Into<String>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             backend,
+//RS             feature: feature.into(),
+//RS             support: JetDataPlotSupport::Unsupported,
+//RS             reason: reason.into(),
+//RS             replacement: replacement.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "{}:{}:{}:{}:{}",
+//RS             self.backend.as_str(),
+//RS             jet_data_plot_escape(&self.feature),
+//RS             self.support.as_str(),
+//RS             jet_data_plot_escape(&self.reason),
+//RS             jet_data_plot_escape(&self.replacement)
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetDataPlotError {
+//RS     pub kind: JetDataPlotErrorKind,
+//RS     pub operation: String,
+//RS     pub field: Option<String>,
+//RS     pub channel: Option<String>,
+//RS     pub mark: Option<String>,
+//RS     pub expected: Option<String>,
+//RS     pub actual: Option<String>,
+//RS     pub index: Option<i64>,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDataPlotErrorKind {
+//RS     InvalidArgument,
+//RS     NonFinite,
+//RS     Unsupported,
+//RS     Empty,
+//RS     Limit,
+//RS }
+//RS 
+//RS impl JetDataPlotError {
+//RS     fn invalid(operation: impl Into<String>, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             kind: JetDataPlotErrorKind::InvalidArgument,
+//RS             operation: operation.into(),
+//RS             field: None,
+//RS             channel: None,
+//RS             mark: None,
+//RS             expected: None,
+//RS             actual: None,
+//RS             index: None,
+//RS             reason: reason.into(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn non_finite(operation: impl Into<String>, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             kind: JetDataPlotErrorKind::NonFinite,
+//RS             ..Self::invalid(operation, reason)
+//RS         }
+//RS     }
+//RS 
+//RS     fn unsupported(operation: impl Into<String>, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             kind: JetDataPlotErrorKind::Unsupported,
+//RS             ..Self::invalid(operation, reason)
+//RS         }
+//RS     }
+//RS 
+//RS     fn with_field(mut self, field: impl Into<String>) -> Self {
+//RS         self.field = Some(field.into());
+//RS         self
+//RS     }
+//RS 
+//RS     fn with_channel(mut self, channel: JetDataPlotChannel) -> Self {
+//RS         self.channel = Some(channel.as_str().to_string());
+//RS         self
+//RS     }
+//RS 
+//RS     fn with_mark(mut self, mark: JetDataPlotMark) -> Self {
+//RS         self.mark = Some(mark.as_str().to_string());
+//RS         self
+//RS     }
+//RS 
+//RS     fn with_expected(mut self, expected: impl Into<String>) -> Self {
+//RS         self.expected = Some(expected.into());
+//RS         self
+//RS     }
+//RS 
+//RS     fn with_actual(mut self, actual: impl Into<String>) -> Self {
+//RS         self.actual = Some(actual.into());
+//RS         self
+//RS     }
+//RS 
+//RS     fn with_index(mut self, index: usize) -> Self {
+//RS         self.index = Some(i64::try_from(index).unwrap_or(i64::MAX));
+//RS         self
+//RS     }
+//RS 
+//RS     fn message(&self) -> String {
+//RS         let mut out = self.reason.clone();
+//RS         if let Some(field) = &self.field {
+//RS             out.push_str(&format!("; field={field}"));
+//RS         }
+//RS         if let Some(channel) = &self.channel {
+//RS             out.push_str(&format!("; channel={channel}"));
+//RS         }
+//RS         if let Some(mark) = &self.mark {
+//RS             out.push_str(&format!("; mark={mark}"));
+//RS         }
+//RS         if let Some(expected) = &self.expected {
+//RS             out.push_str(&format!("; expected={expected}"));
+//RS         }
+//RS         if let Some(actual) = &self.actual {
+//RS             out.push_str(&format!("; actual={actual}"));
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     pub(crate) fn into_data_error(self) -> jet_std::DataError {
+//RS         let kind = match self.kind {
+//RS             JetDataPlotErrorKind::NonFinite => jet_std::DataErrorKind::NonFinite,
+//RS             JetDataPlotErrorKind::Unsupported => jet_std::DataErrorKind::Bridge,
+//RS             JetDataPlotErrorKind::Empty => jet_std::DataErrorKind::Empty,
+//RS             JetDataPlotErrorKind::Limit => jet_std::DataErrorKind::Limit,
+//RS             JetDataPlotErrorKind::InvalidArgument => jet_std::DataErrorKind::InvalidArgument,
+//RS         };
+//RS         let reason = self.message();
+//RS         jet_std::DataError {
+//RS             kind,
+//RS             operation: self.operation,
+//RS             row: Err(JetAbsent),
+//RS             column: Err(JetAbsent),
+//RS             index: self.index.map(Ok).unwrap_or(Err(JetAbsent)),
+//RS             reason,
+//RS             cause: Err(JetAbsent),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for JetDataPlotError {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         write!(formatter, "{:?} {}: {}", self.kind, self.operation, self.message())?;
+//RS         if let Some(index) = self.index {
+//RS             write!(formatter, ", index {index}")?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for JetDataPlotError {}
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetDataPlotPlan {
+//RS     pub source: JetDataPlotSourceFacts,
+//RS     pub schema: JetDataPlotSchema,
+//RS     pub limits: jet_std::DataLimits,
+//RS     pub mark: JetDataPlotMark,
+//RS     pub encodings: Vec<JetDataPlotEncoding>,
+//RS     pub transforms: Vec<JetDataPlotTransform>,
+//RS     pub scales: Vec<JetDataPlotScale>,
+//RS     pub axes: Vec<JetDataPlotAxis>,
+//RS     pub legends: Vec<JetDataPlotLegend>,
+//RS     pub facets: Vec<JetDataPlotFacet>,
+//RS     pub layers: Vec<JetDataPlotLayer>,
+//RS     pub interactions: Vec<JetDataPlotInteraction>,
+//RS     pub accessibility: JetDataPlotAccessibility,
+//RS     pub layout: JetDataPlotLayout,
+//RS }
+//RS 
+//RS impl JetDataPlotPlan {
+//RS     pub fn new(
+//RS         source: JetDataPlotSourceFacts,
+//RS         schema: JetDataPlotSchema,
+//RS     ) -> Result<Self, JetDataPlotError> {
+//RS         Self::with_limits(source, schema, jet_std::DataLimits::safe())
+//RS     }
+//RS 
+//RS     pub fn with_limits(
+//RS         source: JetDataPlotSourceFacts,
+//RS         schema: JetDataPlotSchema,
+//RS         limits: jet_std::DataLimits,
+//RS     ) -> Result<Self, JetDataPlotError> {
+//RS         source.validate()?;
+//RS         schema.validate()?;
+//RS         for (name, value) in [
+//RS             ("max_groups", limits.max_groups),
+//RS             ("max_sort_rows", limits.max_sort_rows),
+//RS             ("max_join_rows", limits.max_join_rows),
+//RS             ("max_output_rows", limits.max_output_rows),
+//RS         ] {
+//RS             if value < 1 {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.limits",
+//RS                     format!("{name} must be positive"),
+//RS                 )
+//RS                 .with_actual(value.to_string()));
+//RS             }
+//RS         }
+//RS         if source.schema_identity != schema.identity {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.plan",
+//RS                 "plot source schema identity does not match the plot schema",
+//RS             )
+//RS             .with_expected(schema.identity.clone())
+//RS             .with_actual(source.schema_identity.clone()));
+//RS         }
+//RS         if source.row_type != schema.row_type {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.plan",
+//RS                 "plot source row type does not match the plot schema",
+//RS             )
+//RS             .with_expected(schema.row_type.clone())
+//RS             .with_actual(source.row_type.clone()));
+//RS         }
+//RS         Ok(Self {
+//RS             source,
+//RS             schema,
+//RS             limits,
+//RS             mark: JetDataPlotMark::Line,
+//RS             encodings: Vec::new(),
+//RS             transforms: Vec::new(),
+//RS             scales: Vec::new(),
+//RS             axes: Vec::new(),
+//RS             legends: Vec::new(),
+//RS             facets: Vec::new(),
+//RS             layers: Vec::new(),
+//RS             interactions: Vec::new(),
+//RS             accessibility: JetDataPlotAccessibility::default(),
+//RS             layout: JetDataPlotLayout::default(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn set_encoding(
+//RS         &mut self,
+//RS         channel: JetDataPlotChannel,
+//RS         field: JetDataPlotField,
+//RS         aggregate: JetDataPlotAggregate,
+//RS     ) -> Result<(), JetDataPlotError> {
+//RS         let field = self.schema.resolve(&field)?;
+//RS         if aggregate.needs_numeric() && !jet_data_plot_numeric_type(&field.type_name) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.encoding",
+//RS                 "numeric aggregation needs an integer or floating column",
+//RS             )
+//RS             .with_field(field.name)
+//RS             .with_channel(channel)
+//RS             .with_expected("numeric")
+//RS             .with_actual(field.type_name));
+//RS         }
+//RS         if channel == JetDataPlotChannel::Size && !jet_data_plot_numeric_type(&field.type_name) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.encoding",
+//RS                 "size encoding needs an integer or floating column",
+//RS             )
+//RS             .with_field(field.name)
+//RS             .with_channel(channel)
+//RS             .with_expected("numeric")
+//RS             .with_actual(field.type_name));
+//RS         }
+//RS         let encoding = JetDataPlotEncoding::new(channel, field, aggregate);
+//RS         if let Some(existing) = self
+//RS             .encodings
+//RS             .iter_mut()
+//RS             .find(|existing| existing.channel == channel)
+//RS         {
+//RS             *existing = encoding;
+//RS         } else {
+//RS             self.encodings.push(encoding);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_transform(
+//RS         &mut self,
+//RS         transform: JetDataPlotTransform,
+//RS     ) -> Result<(), JetDataPlotError> {
+//RS         self.validate_transform(&transform)?;
+//RS         self.transforms.push(transform);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_scale(&mut self, scale: JetDataPlotScale) -> Result<(), JetDataPlotError> {
+//RS         self.validate_scale(&scale)?;
+//RS         if let Some(existing) = self
+//RS             .scales
+//RS             .iter_mut()
+//RS             .find(|existing| existing.channel == scale.channel)
+//RS         {
+//RS             *existing = scale;
+//RS         } else {
+//RS             self.scales.push(scale);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_axis(&mut self, axis: JetDataPlotAxis) -> Result<(), JetDataPlotError> {
+//RS         if !matches!(axis.channel, JetDataPlotChannel::X | JetDataPlotChannel::Y) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.axis",
+//RS                 "axes can only describe x or y channels",
+//RS             )
+//RS             .with_channel(axis.channel));
+//RS         }
+//RS         if axis.ticks < 0 {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.axis",
+//RS                 "axis tick count must not be negative",
+//RS             )
+//RS             .with_channel(axis.channel));
+//RS         }
+//RS         if axis.title.chars().any(char::is_control) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.axis",
+//RS                 "axis title must not contain control characters",
+//RS             )
+//RS             .with_channel(axis.channel));
+//RS         }
+//RS         if let Some(existing) = self
+//RS             .axes
+//RS             .iter_mut()
+//RS             .find(|existing| existing.channel == axis.channel)
+//RS         {
+//RS             *existing = axis;
+//RS         } else {
+//RS             self.axes.push(axis);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_legend(&mut self, legend: JetDataPlotLegend) -> Result<(), JetDataPlotError> {
+//RS         if !matches!(
+//RS             legend.channel,
+//RS             JetDataPlotChannel::Color | JetDataPlotChannel::Detail | JetDataPlotChannel::Text
+//RS         ) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.legend",
+//RS                 "legends need color, detail, or text channels",
+//RS             )
+//RS             .with_channel(legend.channel));
+//RS         }
+//RS         if legend.title.chars().any(char::is_control) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.legend",
+//RS                 "legend title must not contain control characters",
+//RS             )
+//RS             .with_channel(legend.channel));
+//RS         }
+//RS         self.legends.push(legend);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_facet(&mut self, facet: JetDataPlotFacet) -> Result<(), JetDataPlotError> {
+//RS         self.schema.resolve(&facet.field)?;
+//RS         if facet.columns < 0 || facet.rows < 0 {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.facet",
+//RS                 "facet row and column limits must not be negative",
+//RS             )
+//RS             .with_field(facet.field.name));
+//RS         }
+//RS         if facet.title.chars().any(char::is_control) {
+//RS             return Err(JetDataPlotError::invalid(
+//RS                 "plot.facet",
+//RS                 "facet title must not contain control characters",
+//RS             )
+//RS             .with_field(facet.field.name));
+//RS         }
+//RS         self.facets.push(facet);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_layer(&mut self, layer: JetDataPlotLayer) -> Result<(), JetDataPlotError> {
+//RS         self.validate_layer(&layer)?;
+//RS         self.layers.push(layer);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn add_interaction(
+//RS         &mut self,
+//RS         interaction: JetDataPlotInteraction,
+//RS     ) -> Result<(), JetDataPlotError> {
+//RS         if !self.interactions.contains(&interaction) {
+//RS             self.interactions.push(interaction);
+//RS             self.interactions.sort();
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_accessibility(
+//RS         &mut self,
+//RS         accessibility: JetDataPlotAccessibility,
+//RS     ) -> Result<(), JetDataPlotError> {
+//RS         for value in [
+//RS             &accessibility.title,
+//RS             &accessibility.description,
+//RS             &accessibility.summary,
+//RS         ] {
+//RS             if value.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.accessibility",
+//RS                     "accessibility text must not contain control characters",
+//RS                 ));
+//RS             }
+//RS         }
+//RS         self.accessibility = accessibility;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_layout(&mut self, layout: JetDataPlotLayout) -> Result<(), JetDataPlotError> {
+//RS         layout.validate()?;
+//RS         self.layout = layout;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn validate(&self) -> Result<(), JetDataPlotError> {
+//RS         self.source.validate()?;
+//RS         self.schema.validate()?;
+//RS         self.layout.validate()?;
+//RS         let mut channels = BTreeSet::new();
+//RS         let mut scale_channels = BTreeSet::new();
+//RS         let mut axis_channels = BTreeSet::new();
+//RS         for encoding in &self.encodings {
+//RS             if !channels.insert(encoding.channel) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.encoding",
+//RS                     "plot plan repeats an encoding channel",
+//RS                 )
+//RS                 .with_channel(encoding.channel));
+//RS             }
+//RS             let field = self.schema.resolve(&encoding.field)?;
+//RS             if encoding.aggregate.needs_numeric() && !jet_data_plot_numeric_type(&field.type_name) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.encoding",
+//RS                     "numeric aggregation needs an integer or floating column",
+//RS                 )
+//RS                 .with_field(field.name)
+//RS                 .with_channel(encoding.channel));
+//RS             }
+//RS             if encoding.channel == JetDataPlotChannel::Size
+//RS                 && !jet_data_plot_numeric_type(&field.type_name)
+//RS             {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.encoding",
+//RS                     "size encoding needs an integer or floating column",
+//RS                 )
+//RS                 .with_field(field.name)
+//RS                 .with_channel(encoding.channel));
+//RS             }
+//RS         }
+//RS         for transform in &self.transforms {
+//RS             self.validate_transform(transform)?;
+//RS         }
+//RS         for scale in &self.scales {
+//RS             if !scale_channels.insert(scale.channel) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.scale",
+//RS                     "plot plan repeats a scale channel",
+//RS                 )
+//RS                 .with_channel(scale.channel));
+//RS             }
+//RS             self.validate_scale(scale)?;
+//RS         }
+//RS         for axis in &self.axes {
+//RS             if !axis_channels.insert(axis.channel) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.axis",
+//RS                     "plot plan repeats an axis channel",
+//RS                 )
+//RS                 .with_channel(axis.channel));
+//RS             }
+//RS             if !matches!(axis.channel, JetDataPlotChannel::X | JetDataPlotChannel::Y) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.axis",
+//RS                     "axes can only describe x or y channels",
+//RS                 )
+//RS                 .with_channel(axis.channel));
+//RS             }
+//RS             if !channels.contains(&axis.channel) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.axis",
+//RS                     "axis references a channel that is not encoded",
+//RS                 )
+//RS                 .with_channel(axis.channel));
+//RS             }
+//RS             if axis.ticks < 0 || axis.title.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.axis",
+//RS                     "axis labels and tick counts are invalid",
+//RS                 )
+//RS                 .with_channel(axis.channel));
+//RS             }
+//RS         }
+//RS         for legend in &self.legends {
+//RS             if !matches!(
+//RS                 legend.channel,
+//RS                 JetDataPlotChannel::Color
+//RS                     | JetDataPlotChannel::Detail
+//RS                     | JetDataPlotChannel::Text
+//RS             ) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.legend",
+//RS                     "legends need color, detail, or text channels",
+//RS                 )
+//RS                 .with_channel(legend.channel));
+//RS             }
+//RS             if !channels.contains(&legend.channel) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.legend",
+//RS                     "legend references a channel that is not encoded",
+//RS                 )
+//RS                 .with_channel(legend.channel));
+//RS             }
+//RS             if legend.title.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.legend",
+//RS                     "legend title must not contain control characters",
+//RS                 )
+//RS                 .with_channel(legend.channel));
+//RS             }
+//RS         }
+//RS         for facet in &self.facets {
+//RS             self.schema.resolve(&facet.field)?;
+//RS             if facet.columns < 0 || facet.rows < 0 {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.facet",
+//RS                     "facet row and column limits must not be negative",
+//RS                 )
+//RS                 .with_field(facet.field.name.clone()));
+//RS             }
+//RS             if facet.title.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.facet",
+//RS                     "facet title must not contain control characters",
+//RS                 )
+//RS                 .with_field(facet.field.name.clone()));
+//RS             }
+//RS         }
+//RS         for layer in &self.layers {
+//RS             self.validate_layer(layer)?;
+//RS         }
+//RS         for value in [
+//RS             &self.accessibility.title,
+//RS             &self.accessibility.description,
+//RS             &self.accessibility.summary,
+//RS         ] {
+//RS             if value.chars().any(char::is_control) {
+//RS                 return Err(JetDataPlotError::invalid(
+//RS                     "plot.accessibility",
+//RS                     "accessibility text must not contain control characters",
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     pub fn validate_for_render(&self) -> Result<(), JetDataPlotError> {
+//RS         self.validate()?;
+//RS         self.validate_mark_encodings(self.mark, &self.encodings)?;
+//RS         for layer in &self.layers {
+//RS             let encodings = jet_data_plot_effective_encodings(&self.encodings, &layer.encodings);
+//RS             self.validate_mark_encodings(layer.mark, &encodings)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+// END-PORT-PENDING 0265 crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1-1788
+

@@ -1,0 +1,1805 @@
+// PORT-PENDING 0192 crates-jet-codegen-src-prelude-ui-slice-1: crates/jet-codegen/src/Prelude/Ui.rs:1-1801
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Render-target backend trait seam.
+//RS // Arc/Mutex (not Rc/RefCell): `jet_ui_reactive_render` requires Send+Sync
+//RS // closures that capture backends — fully-qualified paths avoid clashing with
+//RS // the AOT prelude's existing `use std::sync::{Arc, Mutex, …}`.
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub struct JetPoint {
+//RS     pub x: f64,
+//RS     pub y: f64,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub struct JetSize {
+//RS     pub width: f64,
+//RS     pub height: f64,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub struct JetRect {
+//RS     pub x: f64,
+//RS     pub y: f64,
+//RS     pub width: f64,
+//RS     pub height: f64,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub struct JetSizeConstraint {
+//RS     pub min_width: f64,
+//RS     pub min_height: f64,
+//RS     pub max_width: f64,
+//RS     pub max_height: f64,
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B (c134 Phase 6): the accessible-role vocabulary. A small,
+//RS /// real ARIA-style role set — mirrors the four Phase-4 starter components
+//RS /// (Button, Input, Label, Container) rather than the full ARIA taxonomy.
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub enum JetUiAriaRole {
+//RS     Button,
+//RS     TextInput,
+//RS     Label,
+//RS     Container,
+//RS }
+//RS 
+//RS impl JetUiAriaRole {
+//RS     /// Interactive roles are keyboard-focusable and need a real accessible
+//RS     /// label (E2930); `Label`/`Container` are structural/static, never
+//RS     /// focused.
+//RS     pub fn is_interactive(&self) -> bool {
+//RS         matches!(self, JetUiAriaRole::Button | JetUiAriaRole::TextInput)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetUiNodeKind {
+//RS     Custom,
+//RS     Text,
+//RS     Box,
+//RS     Button,
+//RS     TextInput,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetUiNode {
+//RS     /// Also the accessible name (WAI-ARIA accname model — one field serves
+//RS     /// both display and accessibility; no separate name field).
+//RS     pub label: String,
+//RS     pub width: f64,
+//RS     pub height: f64,
+//RS     /// D-A11YGATE1=B: `None` = decorative/non-interactive node.
+//RS     pub role: Option<JetUiAriaRole>,
+//RS     /// D-FOUND-PLATFORM1=A: optional host-facing accessibility metadata.
+//RS     /// The metadata stays on this canonical node so hosts project facts by
+//RS     /// stable node identity without constructing a second UI tree.
+//RS     pub accessibility: Option<JetUiAccessibility>,
+//RS     /// D-FOUND-PLATFORM1=A: an explicit IME policy travels with the canonical
+//RS     /// text-input node. `None` preserves the default native policy for a
+//RS     /// textbox created through the role-only constructor.
+//RS     pub ime: Option<JetUiImeMode>,
+//RS     /// D-STYLESHAPE1=A (c134 Phase 3/7 wiring): explicit fill color as a
+//RS     /// `#RRGGBB` string, matching `JetPaintCmd::FillRect`'s existing color
+//RS     /// representation. `None` falls back to the default fill (`#000000`).
+//RS     pub color: Option<String>,
+//RS     /// D-TUIKIT1=A: optional typed presentation style travels with the same
+//RS     /// canonical node tree that every backend mounts.
+//RS     pub style: Option<JetTuiStyle>,
+//RS     /// D-UITREE1=A: every renderer consumes this same typed node kind/tree.
+//RS     pub kind: JetUiNodeKind,
+//RS     pub children: Vec<JetUiNode>,
+//RS     /// D-UI-NODE-ID1=C: optional author key; when set, identity is the key
+//RS     /// instead of the render path.
+//RS     pub key: Option<String>,
+//RS     /// D-UI-EVT-DISP1=E: node-keyed click handler slot using the shared
+//RS     /// portable callback registry. `None` means no click callback.
+//RS     pub on_click: Option<i64>,
+//RS     /// D-UI-DROP1=A: node-keyed drop handler slot using the shared typed
+//RS     /// `JetUiDropItem` payload. `None` means no drop callback.
+//RS     pub on_drop: Option<i64>,
+//RS     /// Optional host action binding carried by the canonical node.
+//RS     pub shortcut: Option<JetUiShortcut>,
+//RS }
+//RS 
+//RS /// D-FOUND-PLATFORM1=A: accessibility metadata belongs to the canonical node.
+//RS /// Host services attach and project this value; no parallel accessibility tree
+//RS /// or process-global registry is needed.
+//RS impl JetUiAccessibilityTarget for JetUiNode {
+//RS     fn attach_jet_ui_accessibility(
+//RS         &mut self,
+//RS         accessibility: JetUiAccessibility,
+//RS     ) -> Result<(), JetUiHostError> {
+//RS         self.accessibility = Some(accessibility);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn jet_ui_accessibility(&self) -> Option<&JetUiAccessibility> {
+//RS         self.accessibility.as_ref()
+//RS     }
+//RS }
+//RS 
+//RS /// Route accessibility through the explicit host while keeping metadata on the
+//RS /// canonical node. The host owns capability checks and the typed outcome.
+//RS pub fn jet_ui_attach_accessibility(
+//RS     host: &dyn JetUiHost,
+//RS     node: &mut JetUiNode,
+//RS     accessibility: JetUiAccessibility,
+//RS ) -> JetUiServiceResult<()> {
+//RS     host.attach_accessibility(node, accessibility)
+//RS }
+//RS 
+//RS /// Project metadata for one explicit, stable node identity.
+//RS pub fn jet_ui_project_accessibility(
+//RS     host: &dyn JetUiHost,
+//RS     node: &JetUiNode,
+//RS     node_id: JetUiNodeId,
+//RS ) -> JetUiServiceResult<Option<JetUiAccessibilityProjection>> {
+//RS     host.project_accessibility(node, node_id)
+//RS }
+//RS 
+//RS /// Read the host's capability facts without consulting ambient state.
+//RS pub fn jet_ui_capability_facts(host: &dyn JetUiHost) -> JetUiCapabilityFacts {
+//RS     host.capability_facts()
+//RS }
+//RS /// Expose the canonical devtools panel selection and time cursor to UI code.
+//RS /// The envelope owns the state; this seam only borrows it, so every host
+//RS /// observes the same typed value without a UI-local copy or ambient lookup.
+//RS pub fn jet_ui_devtools_view_state(
+//RS     envelope: &JetDevtoolsEnvelope,
+//RS ) -> &JetDevtoolsViewState {
+//RS     envelope.view()
+//RS }
+//RS 
+//RS 
+//RS fn jet_ui_validate_file_dialog_selection(
+//RS     request: &JetUiFileDialogRequest,
+//RS     expected_kind: JetUiFileDialogKind,
+//RS     selection: &JetUiFileDialogSelection,
+//RS ) -> Result<(), JetUiHostError> {
+//RS     if request.kind != expected_kind {
+//RS         let operation = match expected_kind {
+//RS             JetUiFileDialogKind::Open => "open_file",
+//RS             JetUiFileDialogKind::Save => "save_file",
+//RS         };
+//RS         return Err(JetUiHostError::InvalidRequest(format!(
+//RS             "{operation} requires a {:?} dialog request",
+//RS             expected_kind
+//RS         )));
+//RS     }
+//RS     request.validate()?;
+//RS     if selection.files.is_empty() {
+//RS         return Err(JetUiHostError::InvalidRequest(
+//RS             "a completed file dialog must select at least one file".to_string(),
+//RS         ));
+//RS     }
+//RS     if !request.allow_multiple && selection.files.len() > 1 {
+//RS         return Err(JetUiHostError::InvalidRequest(
+//RS             "a single-selection dialog returned multiple files".to_string(),
+//RS         ));
+//RS     }
+//RS 
+//RS     let access = match request.kind {
+//RS         JetUiFileDialogKind::Open => JetUiFsAccess::Read,
+//RS         JetUiFileDialogKind::Save => JetUiFsAccess::Write,
+//RS     };
+//RS     for selected in &selection.files {
+//RS         let scoped = request.grant.scope(selected.path(), access)?;
+//RS         if scoped.path() != selected.path()
+//RS             || scoped.grant_root() != selected.grant_root()
+//RS             || scoped.access() != selected.access()
+//RS         {
+//RS             return Err(JetUiHostError::ResourceDenied(format!(
+//RS                 "file dialog selection `{}` is outside its grant",
+//RS                 selected.path()
+//RS             )));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_ui_checked_file_dialog_result(
+//RS     request: &JetUiFileDialogRequest,
+//RS     expected_kind: JetUiFileDialogKind,
+//RS     result: JetUiServiceResult<JetUiFileDialogSelection>,
+//RS ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS     match result {
+//RS         Ok(selection) => {
+//RS             match jet_ui_validate_file_dialog_selection(request, expected_kind, &selection) {
+//RS                 Ok(()) => Ok(selection),
+//RS                 Err(error) => Err(error),
+//RS             }
+//RS         }
+//RS         other => other,
+//RS     }
+//RS }
+//RS 
+//RS /// Open a file through the explicit host and re-check every returned path
+//RS /// against the request's grant before exposing a completed result.
+//RS pub fn jet_ui_open_file(
+//RS     host: &mut dyn JetUiHost,
+//RS     request: JetUiFileDialogRequest,
+//RS ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS     let checked_request = request.clone();
+//RS     jet_ui_checked_file_dialog_result(
+//RS         &checked_request,
+//RS         JetUiFileDialogKind::Open,
+//RS         host.open_file(request),
+//RS     )
+//RS }
+//RS 
+//RS /// Save a file through the explicit host and re-check every returned path
+//RS /// against the request's grant before exposing a completed result.
+//RS pub fn jet_ui_save_file(
+//RS     host: &mut dyn JetUiHost,
+//RS     request: JetUiFileDialogRequest,
+//RS ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS     let checked_request = request.clone();
+//RS     jet_ui_checked_file_dialog_result(
+//RS         &checked_request,
+//RS         JetUiFileDialogKind::Save,
+//RS         host.save_file(request),
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_ui_read_clipboard_text(
+//RS     host: &mut dyn JetUiHost,
+//RS ) -> JetUiServiceResult<JetUiClipboardText> {
+//RS     host.read_clipboard_text()
+//RS }
+//RS 
+//RS pub fn jet_ui_write_clipboard_text(
+//RS     host: &mut dyn JetUiHost,
+//RS     text: String,
+//RS ) -> JetUiServiceResult<JetUiClipboardWrite> {
+//RS     host.write_clipboard_text(text)
+//RS }
+//RS 
+//RS pub fn jet_ui_poll_ime_event(
+//RS     host: &mut dyn JetUiHost,
+//RS ) -> JetUiServiceResult<Option<JetUiImeEvent>> {
+//RS     host.poll_ime_event()
+//RS }
+//RS 
+//RS pub fn jet_ui_poll_drag_event(
+//RS     host: &mut dyn JetUiHost,
+//RS ) -> JetUiServiceResult<Option<JetUiDragEvent>> {
+//RS     host.poll_drag_event()
+//RS }
+//RS 
+//RS pub fn jet_ui_register_shortcut(
+//RS     host: &mut dyn JetUiHost,
+//RS     binding: JetUiShortcutBinding,
+//RS ) -> JetUiServiceResult<JetUiShortcutBinding> {
+//RS     host.register_shortcut(binding)
+//RS }
+//RS 
+//RS pub fn jet_ui_dispatch_shortcut(
+//RS     host: &mut dyn JetUiHost,
+//RS     shortcut: JetUiShortcut,
+//RS ) -> JetUiServiceResult<JetUiShortcutDispatch> {
+//RS     host.dispatch_shortcut(shortcut)
+//RS }
+//RS /// Route canonical-node metadata through the scoped current host.  The host
+//RS /// remains the capability authority; the node remains the only metadata store.
+//RS pub fn jet_ui_host_attach_accessibility(
+//RS     mut node: JetUiNode,
+//RS     accessibility: JetUiAccessibility,
+//RS ) -> JetUiServiceResult<JetUiNode> {
+//RS     jet_ui_with_current_host(|host| {
+//RS         match host.attach_accessibility(&mut node, accessibility) {
+//RS             Ok(()) => Ok(node),
+//RS             Err(error) => Err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_ui_host_project_accessibility(
+//RS     node: JetUiNode,
+//RS     node_id: JetUiNodeId,
+//RS ) -> JetUiServiceResult<Option<JetUiAccessibilityProjection>> {
+//RS     jet_ui_with_current_host(|host| host.project_accessibility(&node, node_id))
+//RS }
+//RS 
+//RS pub fn jet_ui_node_accessibility(
+//RS     mut node: JetUiNode,
+//RS     accessibility: JetUiAccessibility,
+//RS ) -> JetUiNode {
+//RS     node.accessibility = Some(accessibility);
+//RS     node
+//RS }
+//RS 
+//RS pub fn jet_ui_node_shortcut(
+//RS     mut node: JetUiNode,
+//RS     shortcut: JetUiShortcut,
+//RS ) -> JetUiNode {
+//RS     node.shortcut = Some(shortcut);
+//RS     node
+//RS }
+//RS 
+//RS pub fn jet_ui_text_input(
+//RS     state: &str,
+//RS     ime: JetUiImeMode,
+//RS ) -> JetUiNode {
+//RS     let mut node =
+//RS         jet_ui_node_role(state, state.chars().count() as f64, 1.0, JetUiAriaRole::TextInput);
+//RS     node.kind = JetUiNodeKind::TextInput;
+//RS     node.ime = Some(ime);
+//RS     node
+//RS }
+//RS 
+//RS /// D-UI-DROP1=A: the text-input drop callback is attached to the same
+//RS /// canonical node as the state and IME mode; it does not create a second tree.
+//RS pub fn jet_ui_text_input_on_drop<F: Fn(Vec<JetUiDropItem>) + Send + Sync + 'static>(
+//RS     state: &str,
+//RS     ime: JetUiImeMode,
+//RS     handler: F,
+//RS ) -> JetUiNode {
+//RS     let mut node = jet_ui_text_input(state, ime);
+//RS     node.on_drop = Some(jet_ui_register_drop(handler));
+//RS     node
+//RS }
+//RS 
+//RS pub fn jet_font_shape_run(text: &str, face: &JetFontFace) -> JetGlyphRun {
+//RS     jet_font_shape(text, face)
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetInputEvent {
+//RS     Key { code: String },
+//RS     Resize { size: JetSize },
+//RS }
+//RS /// Events delivered to a model-update-view program.  `JetInputEvent` remains
+//RS /// the small backend protocol; this richer event is the typed application
+//RS /// protocol and keeps timer/I/O messages on the same transition path as keys.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetTuiEvent {
+//RS     Key { code: String, modifiers: u8 },
+//RS     Resize { size: JetSize },
+//RS     Timer { id: String, elapsed_ms: i64 },
+//RS     IO { channel: String, payload: Vec<u8> },
+//RS     Focus { focused: bool },
+//RS     Interrupt,
+//RS     Close,
+//RS }
+//RS 
+//RS impl JetTuiEvent {
+//RS     pub fn key(code: &str) -> Self {
+//RS         Self::Key {
+//RS             code: code.to_string(),
+//RS             modifiers: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn key_with_modifiers(code: &str, modifiers: u8) -> Self {
+//RS         Self::Key {
+//RS             code: code.to_string(),
+//RS             modifiers,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn resize(width: f64, height: f64) -> Self {
+//RS         Self::Resize {
+//RS             size: JetSize { width, height },
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn timer(id: &str, elapsed_ms: i64) -> Self {
+//RS         Self::Timer {
+//RS             id: id.to_string(),
+//RS             elapsed_ms,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn io(channel: &str, payload: Vec<u8>) -> Self {
+//RS         Self::IO {
+//RS             channel: channel.to_string(),
+//RS             payload,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn focus(focused: bool) -> Self {
+//RS         Self::Focus { focused }
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS /// Terminal presentation capability.  Presentation changes here; model,
+//RS /// messages, and the canonical `JetUiNode` tree do not.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetTuiColorProfile {
+//RS     ANSI16,
+//RS     ANSI256,
+//RS     TrueColor,
+//RS     ASCII,
+//RS }
+//RS 
+//RS impl JetTuiColorProfile {
+//RS     pub const fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::ANSI16 => "ansi16",
+//RS             Self::ANSI256 => "ansi256",
+//RS             Self::TrueColor => "truecolor",
+//RS             Self::ASCII => "ascii",
+//RS         }
+//RS     }
+//RS 
+//RS     fn kernel(self) -> jet_tui_kernel::ColorProfile {
+//RS         match self {
+//RS             Self::ANSI16 => jet_tui_kernel::ColorProfile::Ansi16,
+//RS             Self::ANSI256 => jet_tui_kernel::ColorProfile::Ansi256,
+//RS             Self::TrueColor => jet_tui_kernel::ColorProfile::TrueColor,
+//RS             Self::ASCII => jet_tui_kernel::ColorProfile::Ascii,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetTuiCapabilities {
+//RS     pub profile: JetTuiColorProfile,
+//RS     pub color: bool,
+//RS     pub unicode: bool,
+//RS     pub mouse: bool,
+//RS     pub resize: bool,
+//RS     pub clipboard: bool,
+//RS     pub width: usize,
+//RS     pub height: usize,
+//RS }
+//RS 
+//RS impl JetTuiCapabilities {
+//RS     pub fn plain(width: usize, height: usize) -> Self {
+//RS         Self::from_kernel(jet_tui_kernel::capabilities(
+//RS             jet_tui_kernel::ColorProfile::Ascii,
+//RS             width,
+//RS             height,
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn for_profile(profile: JetTuiColorProfile, width: usize, height: usize) -> Self {
+//RS         Self::from_kernel(jet_tui_kernel::capabilities(profile.kernel(), width, height))
+//RS     }
+//RS 
+//RS     fn from_kernel(capabilities: jet_tui_kernel::Capabilities) -> Self {
+//RS         Self {
+//RS             profile: match capabilities.profile {
+//RS                 jet_tui_kernel::ColorProfile::Ansi16 => JetTuiColorProfile::ANSI16,
+//RS                 jet_tui_kernel::ColorProfile::Ansi256 => JetTuiColorProfile::ANSI256,
+//RS                 jet_tui_kernel::ColorProfile::TrueColor => JetTuiColorProfile::TrueColor,
+//RS                 jet_tui_kernel::ColorProfile::Ascii => JetTuiColorProfile::ASCII,
+//RS             },
+//RS             color: capabilities.color,
+//RS             unicode: capabilities.unicode,
+//RS             mouse: capabilities.mouse,
+//RS             resize: capabilities.resize,
+//RS             clipboard: capabilities.clipboard,
+//RS             width: capabilities.width,
+//RS             height: capabilities.height,
+//RS         }
+//RS     }
+//RS 
+//RS     fn kernel(&self) -> jet_tui_kernel::Capabilities {
+//RS         jet_tui_kernel::Capabilities {
+//RS             profile: self.profile.kernel(),
+//RS             color: self.color,
+//RS             unicode: self.unicode,
+//RS             mouse: self.mouse,
+//RS             resize: self.resize,
+//RS             clipboard: self.clipboard,
+//RS             width: self.width,
+//RS             height: self.height,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn supports_color(&self) -> bool {
+//RS         self.color
+//RS     }
+//RS }
+//RS 
+//RS fn jet_tui_env_dimension(name: &str, fallback: usize) -> usize {
+//RS     std::env::var(name)
+//RS         .ok()
+//RS         .and_then(|value| value.parse::<usize>().ok())
+//RS         .filter(|value| *value > 0)
+//RS         .unwrap_or(fallback)
+//RS }
+//RS 
+//RS fn jet_tui_env_flag(name: &str) -> bool {
+//RS     std::env::var_os(name).is_some_and(|value| value != "0")
+//RS }
+//RS 
+//RS /// Resolve one presentation profile.  `NO_COLOR` is an unconditional
+//RS /// no-ANSI override; `FORCE_COLOR` only opts a real terminal into color.
+//RS pub fn jet_tui_capabilities() -> JetTuiCapabilities {
+//RS     let width = jet_tui_env_dimension("COLUMNS", 80);
+//RS     let height = jet_tui_env_dimension("LINES", 24);
+//RS     let term = std::env::var("TERM").unwrap_or_default().to_ascii_lowercase();
+//RS     let color_term = std::env::var("COLORTERM")
+//RS         .unwrap_or_default()
+//RS         .to_ascii_lowercase();
+//RS     let ascii = jet_tui_env_flag("JET_TUI_ASCII") || term == "dumb";
+//RS     let profile = if ascii {
+//RS         JetTuiColorProfile::ASCII
+//RS     } else if color_term == "truecolor"
+//RS         || color_term == "24bit"
+//RS         || term.contains("truecolor")
+//RS         || term.contains("24bit")
+//RS     {
+//RS         JetTuiColorProfile::TrueColor
+//RS     } else if term.contains("256color") {
+//RS         JetTuiColorProfile::ANSI256
+//RS     } else {
+//RS         JetTuiColorProfile::ANSI16
+//RS     };
+//RS     let no_color = std::env::var_os("NO_COLOR").is_some();
+//RS     let forced = jet_tui_env_flag("FORCE_COLOR");
+//RS     let terminal = std::io::IsTerminal::is_terminal(&std::io::stdout());
+//RS     let mut capabilities = JetTuiCapabilities::for_profile(profile, width, height);
+//RS     capabilities.color = !no_color && profile != JetTuiColorProfile::ASCII && (terminal || forced);
+//RS     if no_color {
+//RS         capabilities.mouse = false;
+//RS         capabilities.clipboard = false;
+//RS     }
+//RS     capabilities
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetTuiColor {
+//RS     ANSI16(u8),
+//RS     ANSI256(u8),
+//RS     RGB(u8, u8, u8),
+//RS }
+//RS 
+//RS impl JetTuiColor {
+//RS     fn kernel(self) -> jet_tui_kernel::Color {
+//RS         match self {
+//RS             Self::ANSI16(index) => jet_tui_kernel::Color::Ansi16(index),
+//RS             Self::ANSI256(index) => jet_tui_kernel::Color::Ansi256(index),
+//RS             Self::RGB(red, green, blue) => jet_tui_kernel::Color::Rgb(red, green, blue),
+//RS         }
+//RS     }
+//RS 
+//RS     fn from_kernel(color: jet_tui_kernel::Color) -> Self {
+//RS         match color {
+//RS             jet_tui_kernel::Color::Ansi16(index) => Self::ANSI16(index),
+//RS             jet_tui_kernel::Color::Ansi256(index) => Self::ANSI256(index),
+//RS             jet_tui_kernel::Color::Rgb(red, green, blue) => Self::RGB(red, green, blue),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct JetTuiStyle {
+//RS     pub foreground: Option<JetTuiColor>,
+//RS     pub background: Option<JetTuiColor>,
+//RS     pub bold: bool,
+//RS     pub dim: bool,
+//RS     pub underline: bool,
+//RS }
+//RS 
+//RS impl JetTuiStyle {
+//RS     pub fn new() -> Self {
+//RS         Self::default()
+//RS     }
+//RS 
+//RS     pub fn foreground(mut self, color: JetTuiColor) -> Self {
+//RS         self.foreground = Some(color);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn background(mut self, color: JetTuiColor) -> Self {
+//RS         self.background = Some(color);
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn bold(mut self, enabled: bool) -> Self {
+//RS         self.bold = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn dim(mut self, enabled: bool) -> Self {
+//RS         self.dim = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn underline(mut self, enabled: bool) -> Self {
+//RS         self.underline = enabled;
+//RS         self
+//RS     }
+//RS 
+//RS     fn kernel(&self) -> jet_tui_kernel::Style {
+//RS         jet_tui_kernel::Style {
+//RS             foreground: self.foreground.map(JetTuiColor::kernel),
+//RS             background: self.background.map(JetTuiColor::kernel),
+//RS             bold: self.bold,
+//RS             dim: self.dim,
+//RS             underline: self.underline,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn render(&self, text: &str, capabilities: &JetTuiCapabilities) -> String {
+//RS         jet_tui_kernel::style_text(text, &self.kernel(), &capabilities.kernel())
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_tui_ascii(text: &str) -> String {
+//RS     jet_tui_kernel::ascii(text)
+//RS }
+//RS 
+//RS pub fn jet_tui_strip_ansi(text: &str) -> String {
+//RS     jet_tui_kernel::strip_ansi(text)
+//RS }
+//RS 
+//RS fn jet_tui_char_width(ch: char) -> usize {
+//RS     jet_tui_kernel::char_width(ch)
+//RS }
+//RS 
+//RS pub fn jet_tui_display_width(text: &str) -> usize {
+//RS     jet_tui_kernel::display_width(text)
+//RS }
+//RS 
+//RS pub fn jet_tui_truncate(text: &str, width: usize) -> String {
+//RS     jet_tui_kernel::truncate(text, width)
+//RS }
+//RS 
+//RS pub fn jet_tui_pad(text: &str, width: usize) -> String {
+//RS     jet_tui_kernel::pad(text, width)
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub enum JetTuiConstraint {
+//RS     Length(f64),
+//RS     Min(f64),
+//RS     Max(f64),
+//RS     Percent(f64),
+//RS     Fill(u16),
+//RS }
+//RS 
+//RS impl JetTuiConstraint {
+//RS     fn kernel(self) -> jet_tui_kernel::Constraint {
+//RS         match self {
+//RS             Self::Length(value) => jet_tui_kernel::Constraint::Length(value),
+//RS             Self::Min(value) => jet_tui_kernel::Constraint::Min(value),
+//RS             Self::Max(value) => jet_tui_kernel::Constraint::Max(value),
+//RS             Self::Percent(value) => jet_tui_kernel::Constraint::Percent(value),
+//RS             Self::Fill(weight) => jet_tui_kernel::Constraint::Fill(weight),
+//RS         }
+//RS     }
+//RS 
+//RS     fn from_kernel(constraint: jet_tui_kernel::Constraint) -> Self {
+//RS         match constraint {
+//RS             jet_tui_kernel::Constraint::Length(value) => Self::Length(value),
+//RS             jet_tui_kernel::Constraint::Min(value) => Self::Min(value),
+//RS             jet_tui_kernel::Constraint::Max(value) => Self::Max(value),
+//RS             jet_tui_kernel::Constraint::Percent(value) => Self::Percent(value),
+//RS             jet_tui_kernel::Constraint::Fill(weight) => Self::Fill(weight),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetTuiDirection {
+//RS     Horizontal,
+//RS     Vertical,
+//RS }
+//RS 
+//RS impl JetTuiDirection {
+//RS     fn kernel(self) -> jet_tui_kernel::Direction {
+//RS         match self {
+//RS             Self::Horizontal => jet_tui_kernel::Direction::Horizontal,
+//RS             Self::Vertical => jet_tui_kernel::Direction::Vertical,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Deterministic one-dimensional constraint allocation. Nested layouts call
+//RS /// this same function on each returned rectangle; no backend gets a second
+//RS /// solver or a different rounding policy.
+//RS pub fn jet_tui_layout(
+//RS     area: JetRect,
+//RS     direction: JetTuiDirection,
+//RS     constraints: Vec<JetTuiConstraint>,
+//RS ) -> Vec<JetRect> {
+//RS     let area = jet_tui_kernel::Rect {
+//RS         x: area.x,
+//RS         y: area.y,
+//RS         width: area.width,
+//RS         height: area.height,
+//RS     };
+//RS     let constraints = constraints
+//RS         .into_iter()
+//RS         .map(JetTuiConstraint::kernel)
+//RS         .collect::<Vec<_>>();
+//RS     jet_tui_kernel::layout(area, direction.kernel(), &constraints)
+//RS         .into_iter()
+//RS         .map(|rect| JetRect {
+//RS             x: rect.x,
+//RS             y: rect.y,
+//RS             width: rect.width,
+//RS             height: rect.height,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS pub trait JetTuiWidget {
+//RS     fn render(&self, area: JetRect) -> JetUiNode;
+//RS }
+//RS 
+//RS pub trait JetTuiStatefulWidget {
+//RS     type State;
+//RS 
+//RS     fn render(&self, area: JetRect, state: &mut Self::State) -> JetUiNode;
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct JetTuiTextWidget {
+//RS     pub text: String,
+//RS }
+//RS 
+//RS impl JetTuiTextWidget {
+//RS     pub fn new(text: &str) -> Self {
+//RS         Self {
+//RS             text: text.to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetTuiWidget for JetTuiTextWidget {
+//RS     fn render(&self, area: JetRect) -> JetUiNode {
+//RS         jet_ui_text(&jet_tui_truncate(&self.text, area.width.max(0.0).floor() as usize))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct JetTuiListState {
+//RS     selected: usize,
+//RS     offset: usize,
+//RS }
+//RS 
+//RS impl JetTuiListState {
+//RS     pub fn selected(&self) -> usize {
+//RS         self.selected
+//RS     }
+//RS 
+//RS     pub fn offset(&self) -> usize {
+//RS         self.offset
+//RS     }
+//RS 
+//RS     pub fn select(&mut self, selected: usize) {
+//RS         self.selected = selected;
+//RS     }
+//RS 
+//RS     pub fn scroll_to(&mut self, offset: usize) {
+//RS         self.offset = offset;
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct JetTuiList {
+//RS     pub items: Vec<String>,
+//RS }
+//RS 
+//RS impl JetTuiList {
+//RS     pub fn new(items: Vec<String>) -> Self {
+//RS         Self { items }
+//RS     }
+//RS }
+//RS 
+//RS impl JetTuiStatefulWidget for JetTuiList {
+//RS     type State = JetTuiListState;
+//RS 
+//RS     fn render(&self, area: JetRect, state: &mut Self::State) -> JetUiNode {
+//RS         let rows = area.height.max(1.0).floor() as usize;
+//RS         let width = area.width.max(0.0).floor() as usize;
+//RS         let selected = state.selected.min(self.items.len().saturating_sub(1));
+//RS         state.selected = selected;
+//RS         if selected < state.offset {
+//RS             state.offset = selected;
+//RS         }
+//RS         if rows > 0 && selected >= state.offset + rows {
+//RS             state.offset = selected + 1 - rows;
+//RS         }
+//RS         let mut children = Vec::new();
+//RS         for (index, item) in self
+//RS             .items
+//RS             .iter()
+//RS             .enumerate()
+//RS             .skip(state.offset)
+//RS             .take(rows)
+//RS         {
+//RS             let prefix = if index == selected { "> " } else { "  " };
+//RS             children.push(jet_ui_text(&jet_tui_truncate(
+//RS                 &format!("{prefix}{item}"),
+//RS                 width,
+//RS             )));
+//RS         }
+//RS         if children.is_empty() {
+//RS             children.push(jet_ui_text(""));
+//RS         }
+//RS         jet_ui_box(children)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
+//RS pub struct JetTuiTable {
+//RS     pub headers: Vec<String>,
+//RS     pub rows: Vec<Vec<String>>,
+//RS }
+//RS 
+//RS impl JetTuiTable {
+//RS     pub fn new(headers: Vec<String>, rows: Vec<Vec<String>>) -> Self {
+//RS         Self { headers, rows }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_tui_table_line(values: &[String], columns: usize, width: usize) -> String {
+//RS     if columns == 0 {
+//RS         return String::new();
+//RS     }
+//RS     let separators = columns.saturating_sub(1) * 3;
+//RS     let column_width = width.saturating_sub(separators) / columns;
+//RS     let mut line = String::new();
+//RS     for index in 0..columns {
+//RS         if index > 0 {
+//RS             line.push_str(" | ");
+//RS         }
+//RS         let value = values.get(index).map(String::as_str).unwrap_or("");
+//RS         let value = jet_tui_truncate(value, column_width);
+//RS         if index + 1 < columns {
+//RS             line.push_str(&jet_tui_pad(&value, column_width));
+//RS         } else {
+//RS             line.push_str(&value);
+//RS         }
+//RS     }
+//RS     jet_tui_truncate(&line, width)
+//RS }
+//RS 
+//RS impl JetTuiWidget for JetTuiTable {
+//RS     fn render(&self, area: JetRect) -> JetUiNode {
+//RS         let columns = self
+//RS             .headers
+//RS             .len()
+//RS             .max(self.rows.iter().map(|row| row.len()).max().unwrap_or(0));
+//RS         if columns == 0 {
+//RS             return jet_ui_text("");
+//RS         }
+//RS         let width = area.width.max(0.0).floor() as usize;
+//RS         let mut children = Vec::new();
+//RS         if !self.headers.is_empty() {
+//RS             children.push(jet_ui_text(&jet_tui_table_line(
+//RS                 &self.headers,
+//RS                 columns,
+//RS                 width,
+//RS             )));
+//RS         }
+//RS         for row in &self.rows {
+//RS             children.push(jet_ui_text(&jet_tui_table_line(row, columns, width)));
+//RS         }
+//RS         jet_ui_box(children)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default)]
+//RS pub struct JetTuiBindings {
+//RS     registry: JetUiShortcutRegistry,
+//RS }
+//RS 
+//RS impl JetTuiBindings {
+//RS     pub fn register(
+//RS         &mut self,
+//RS         binding: JetUiShortcutBinding,
+//RS     ) -> Result<JetUiShortcutBinding, JetUiHostError> {
+//RS         self.registry.register(binding)
+//RS     }
+//RS 
+//RS     pub fn dispatch(&self, event: &JetTuiEvent) -> Option<JetUiShortcutBinding> {
+//RS         let JetTuiEvent::Key { code, modifiers } = event else {
+//RS             return None;
+//RS         };
+//RS         let shortcut =
+//RS             JetUiShortcut::new(code, JetUiShortcutModifiers::from_bits(*modifiers)).ok()?;
+//RS         match self.registry.dispatch(&shortcut) {
+//RS             JetUiShortcutDispatch::Dispatched(binding) => Some(binding),
+//RS             JetUiShortcutDispatch::Unhandled => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn bindings(&self) -> Vec<JetUiShortcutBinding> {
+//RS         self.registry.bindings()
+//RS     }
+//RS 
+//RS     pub fn help_lines(&self, width: usize) -> Vec<String> {
+//RS         self.registry
+//RS             .bindings()
+//RS             .into_iter()
+//RS             .map(|binding| {
+//RS                 jet_tui_truncate(
+//RS                     &format!(
+//RS                         "{}  {}",
+//RS                         jet_tui_shortcut_label(&binding.shortcut),
+//RS                         binding.action
+//RS                     ),
+//RS                     width,
+//RS                 )
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn help_node(&self, width: usize) -> JetUiNode {
+//RS         jet_ui_box(
+//RS             self.help_lines(width)
+//RS                 .into_iter()
+//RS                 .map(|line| jet_ui_text(&line))
+//RS                 .collect(),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn jet_tui_shortcut_label(shortcut: &JetUiShortcut) -> String {
+//RS     let modifiers = shortcut.modifiers;
+//RS     let mut label = String::new();
+//RS     for (modifier, text) in [
+//RS         (JetUiShortcutModifier::Control, "Ctrl-"),
+//RS         (JetUiShortcutModifier::Alt, "Alt-"),
+//RS         (JetUiShortcutModifier::Shift, "Shift-"),
+//RS         (JetUiShortcutModifier::Meta, "Meta-"),
+//RS         (JetUiShortcutModifier::Command, "Cmd-"),
+//RS     ] {
+//RS         if modifiers.contains(modifier) {
+//RS             label.push_str(text);
+//RS         }
+//RS     }
+//RS     label.push_str(&shortcut.key);
+//RS     label
+//RS }
+//RS 
+//RS pub enum JetTuiCommand<Msg> {
+//RS     None,
+//RS     Task(Box<dyn FnOnce() -> Msg + Send + 'static>),
+//RS     Batch(Vec<JetTuiCommand<Msg>>),
+//RS }
+//RS 
+//RS impl<Msg> Default for JetTuiCommand<Msg> {
+//RS     fn default() -> Self {
+//RS         Self::None
+//RS     }
+//RS }
+//RS 
+//RS impl<Msg> JetTuiCommand<Msg> {
+//RS     pub fn none() -> Self {
+//RS         Self::None
+//RS     }
+//RS 
+//RS     pub fn task<F>(task: F) -> Self
+//RS     where
+//RS         F: FnOnce() -> Msg + Send + 'static,
+//RS     {
+//RS         Self::Task(Box::new(task))
+//RS     }
+//RS 
+//RS     pub fn batch(commands: Vec<Self>) -> Self {
+//RS         Self::Batch(commands)
+//RS     }
+//RS }
+//RS 
+//RS pub trait JetTuiRenderTarget {
+//RS     fn mount_tui(&self, node: JetUiNode, constraint: JetSizeConstraint);
+//RS     fn dispatch_tui(&self, event: JetInputEvent) -> JetEventResult;
+//RS     fn dispatch_tui_event(&self, event: JetTuiEvent) -> JetEventResult;
+//RS     fn frame_lines_tui(&self) -> Vec<String>;
+//RS }
+//RS 
+//RS pub struct JetTuiProgram<M, Msg, Update, View, B = JetTuiBackend> {
+//RS     model: Option<M>,
+//RS     update: Update,
+//RS     view: View,
+//RS     backend: B,
+//RS     constraint: JetSizeConstraint,
+//RS     event_mapper: Option<Box<dyn FnMut(JetTuiEvent) -> Option<Msg> + Send>>,
+//RS     bindings: JetTuiBindings,
+//RS     pending: Vec<std::sync::mpsc::Receiver<Msg>>,
+//RS     dirty: bool,
+//RS     stopped: bool,
+//RS }
+//RS 
+//RS impl<M, Msg, Update, View, B> JetTuiProgram<M, Msg, Update, View, B>
+//RS where
+//RS     Msg: Send + 'static,
+//RS     Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>),
+//RS     View: Fn(&M) -> JetUiNode,
+//RS     B: JetTuiRenderTarget,
+//RS {
+//RS     pub fn with_backend(model: M, update: Update, view: View, backend: B) -> Self {
+//RS         Self {
+//RS             model: Some(model),
+//RS             update,
+//RS             view,
+//RS             backend,
+//RS             constraint: jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+//RS             event_mapper: None,
+//RS             bindings: JetTuiBindings::default(),
+//RS             pending: Vec::new(),
+//RS             dirty: true,
+//RS             stopped: false,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn model(&self) -> Option<&M> {
+//RS         self.model.as_ref()
+//RS     }
+//RS 
+//RS     pub fn backend(&self) -> &B {
+//RS         &self.backend
+//RS     }
+//RS 
+//RS     pub fn set_constraint(&mut self, constraint: JetSizeConstraint) {
+//RS         self.constraint = constraint;
+//RS         self.dirty = true;
+//RS     }
+//RS 
+//RS     pub fn set_event_mapper<F>(&mut self, mapper: F)
+//RS     where
+//RS         F: FnMut(JetTuiEvent) -> Option<Msg> + Send + 'static,
+//RS     {
+//RS         self.event_mapper = Some(Box::new(mapper));
+//RS     }
+//RS 
+//RS     pub fn set_bindings(&mut self, bindings: JetTuiBindings) {
+//RS         self.bindings = bindings;
+//RS     }
+//RS 
+//RS     pub fn bindings(&self) -> &JetTuiBindings {
+//RS         &self.bindings
+//RS     }
+//RS 
+//RS     pub fn redraw(&mut self) {
+//RS         let Some(model) = self.model.as_ref() else {
+//RS             return;
+//RS         };
+//RS         let node = (self.view)(model);
+//RS         self.backend.mount_tui(node, self.constraint);
+//RS         self.dirty = false;
+//RS     }
+//RS 
+//RS     pub fn dispatch_message(&mut self, message: Msg) -> bool {
+//RS         if self.stopped {
+//RS             return false;
+//RS         }
+//RS         let Some(model) = self.model.take() else {
+//RS             return false;
+//RS         };
+//RS         let (model, command) = (self.update)(model, message);
+//RS         self.model = Some(model);
+//RS         self.start_command(command);
+//RS         self.dirty = true;
+//RS         true
+//RS     }
+//RS 
+//RS     pub fn dispatch_event(&mut self, event: JetTuiEvent) -> JetEventResult {
+//RS         let resized = matches!(event, JetTuiEvent::Resize { .. });
+//RS         let backend_result = self.backend.dispatch_tui_event(event.clone());
+//RS         let mapped = self
+//RS             .event_mapper
+//RS             .as_mut()
+//RS             .and_then(|mapper| mapper(event.clone()));
+//RS         if let Some(message) = mapped {
+//RS             self.dispatch_message(message);
+//RS             JetEventResult::Handled
+//RS         } else if matches!(event, JetTuiEvent::Interrupt | JetTuiEvent::Close) {
+//RS             self.stopped = true;
+//RS             JetEventResult::Handled
+//RS         } else {
+//RS             if resized {
+//RS                 self.dirty = true;
+//RS             }
+//RS             backend_result
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn dispatch_bound_event<F>(&mut self, event: JetTuiEvent, map: F) -> bool
+//RS     where
+//RS         F: FnOnce(String) -> Option<Msg>,
+//RS     {
+//RS         let Some(binding) = self.bindings.dispatch(&event) else {
+//RS             return false;
+//RS         };
+//RS         map(binding.action).is_some_and(|message| self.dispatch_message(message))
+//RS     }
+//RS 
+//RS     pub fn pump_commands(&mut self) -> usize {
+//RS         let mut messages = Vec::new();
+//RS         self.pending.retain(|receiver| match receiver.try_recv() {
+//RS             Ok(message) => {
+//RS                 messages.push(message);
+//RS                 false
+//RS             }
+//RS             Err(std::sync::mpsc::TryRecvError::Empty) => true,
+//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+//RS         });
+//RS         let count = messages.len();
+//RS         for message in messages {
+//RS             self.dispatch_message(message);
+//RS         }
+//RS         count
+//RS     }
+//RS 
+//RS     pub fn step(&mut self) -> bool {
+//RS         let completed = self.pump_commands();
+//RS         if self.dirty {
+//RS             self.redraw();
+//RS             true
+//RS         } else {
+//RS             completed > 0
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn run_headless<I>(&mut self, events: I) -> Vec<Vec<String>>
+//RS     where
+//RS         I: IntoIterator<Item = JetTuiEvent>,
+//RS     {
+//RS         self.redraw();
+//RS         let mut frames = vec![self.backend.frame_lines_tui()];
+//RS         for event in events {
+//RS             if !self.is_running() {
+//RS                 break;
+//RS             }
+//RS             self.dispatch_event(event);
+//RS             self.step();
+//RS             frames.push(self.backend.frame_lines_tui());
+//RS         }
+//RS         frames
+//RS     }
+//RS 
+//RS     pub fn frame_lines(&self) -> Vec<String> {
+//RS         self.backend.frame_lines_tui()
+//RS     }
+//RS 
+//RS     pub fn stop(&mut self) {
+//RS         self.stopped = true;
+//RS     }
+//RS 
+//RS     pub fn is_running(&self) -> bool {
+//RS         !self.stopped
+//RS     }
+//RS 
+//RS     fn start_command(&mut self, command: JetTuiCommand<Msg>) {
+//RS         match command {
+//RS             JetTuiCommand::None => {}
+//RS             JetTuiCommand::Task(task) => {
+//RS                 let (sender, receiver) = std::sync::mpsc::channel();
+//RS                 std::thread::spawn(move || {
+//RS                     let _ = sender.send(task());
+//RS                 });
+//RS                 self.pending.push(receiver);
+//RS             }
+//RS             JetTuiCommand::Batch(commands) => {
+//RS                 for command in commands {
+//RS                     self.start_command(command);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<M, Msg, Update, View> JetTuiProgram<M, Msg, Update, View, JetTuiBackend>
+//RS where
+//RS     Msg: Send + 'static,
+//RS     Update: FnMut(M, Msg) -> (M, JetTuiCommand<Msg>),
+//RS     View: Fn(&M) -> JetUiNode,
+//RS {
+//RS     pub fn new(model: M, update: Update, view: View) -> Self {
+//RS         Self::with_backend(model, update, view, JetTuiBackend::new())
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_tui_text_widget(text: &str) -> JetTuiTextWidget {
+//RS     JetTuiTextWidget::new(text)
+//RS }
+//RS 
+//RS pub fn jet_tui_list(items: Vec<String>) -> JetUiNode {
+//RS     let capabilities = jet_tui_capabilities();
+//RS     let area = jet_ui_rect(
+//RS         0.0,
+//RS         0.0,
+//RS         capabilities.width as f64,
+//RS         capabilities.height as f64,
+//RS     );
+//RS     JetTuiList::new(items).render(area, &mut JetTuiListState::default())
+//RS }
+//RS 
+//RS pub fn jet_tui_table(headers: Vec<String>, rows: Vec<Vec<String>>) -> JetUiNode {
+//RS     let capabilities = jet_tui_capabilities();
+//RS     let area = jet_ui_rect(
+//RS         0.0,
+//RS         0.0,
+//RS         capabilities.width as f64,
+//RS         capabilities.height as f64,
+//RS     );
+//RS     JetTuiTable::new(headers, rows).render(area)
+//RS }
+//RS 
+//RS pub fn jet_ui_tui_bindings(
+//RS     bindings: Vec<JetUiShortcutBinding>,
+//RS ) -> Result<JetTuiBindings, JetUiHostError> {
+//RS     let mut result = JetTuiBindings::default();
+//RS     for binding in bindings {
+//RS         result.register(binding)?;
+//RS     }
+//RS     Ok(result)
+//RS }
+//RS 
+//RS pub fn jet_ui_tui_help(bindings: &JetTuiBindings, width: f64) -> JetUiNode {
+//RS     bindings.help_node(width.max(0.0).floor() as usize)
+//RS }
+//RS pub fn jet_tui_key_event(code: &str) -> JetTuiEvent {
+//RS     JetTuiEvent::key(code)
+//RS }
+//RS 
+//RS pub fn jet_tui_key_event_modifiers(code: &str, modifiers: i64) -> JetTuiEvent {
+//RS     JetTuiEvent::key_with_modifiers(code, modifiers as u8)
+//RS }
+//RS 
+//RS pub fn jet_tui_resize_event(width: f64, height: f64) -> JetTuiEvent {
+//RS     JetTuiEvent::resize(width, height)
+//RS }
+//RS 
+//RS pub fn jet_tui_timer_event(id: &str, elapsed_ms: i64) -> JetTuiEvent {
+//RS     JetTuiEvent::timer(id, elapsed_ms)
+//RS }
+//RS 
+//RS pub fn jet_tui_io_event(channel: &str, payload: Vec<u8>) -> JetTuiEvent {
+//RS     JetTuiEvent::io(channel, payload)
+//RS }
+//RS 
+//RS pub fn jet_tui_focus_event(focused: bool) -> JetTuiEvent {
+//RS     JetTuiEvent::focus(focused)
+//RS }
+//RS 
+//RS pub fn jet_tui_interrupt_event() -> JetTuiEvent {
+//RS     JetTuiEvent::Interrupt
+//RS }
+//RS 
+//RS pub fn jet_tui_close_event() -> JetTuiEvent {
+//RS     JetTuiEvent::Close
+//RS }
+//RS 
+//RS pub fn jet_tui_color_ansi16(index: i64) -> JetTuiColor {
+//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_ansi16(index))
+//RS }
+//RS 
+//RS pub fn jet_tui_color_ansi256(index: i64) -> JetTuiColor {
+//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_ansi256(index))
+//RS }
+//RS 
+//RS pub fn jet_tui_color_rgb(red: i64, green: i64, blue: i64) -> JetTuiColor {
+//RS     JetTuiColor::from_kernel(jet_tui_kernel::color_rgb(red, green, blue))
+//RS }
+//RS 
+//RS pub fn jet_tui_style() -> JetTuiStyle {
+//RS     JetTuiStyle::new()
+//RS }
+//RS 
+//RS pub fn jet_tui_style_foreground(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
+//RS     style.foreground(color)
+//RS }
+//RS 
+//RS pub fn jet_tui_style_background(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
+//RS     style.background(color)
+//RS }
+//RS 
+//RS pub fn jet_tui_style_bold(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
+//RS     style.bold(enabled)
+//RS }
+//RS 
+//RS pub fn jet_tui_style_dim(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
+//RS     style.dim(enabled)
+//RS }
+//RS 
+//RS pub fn jet_tui_style_underline(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
+//RS     style.underline(enabled)
+//RS }
+//RS 
+//RS pub fn jet_tui_style_text(
+//RS     text: &str,
+//RS     style: JetTuiStyle,
+//RS     capabilities: JetTuiCapabilities,
+//RS ) -> String {
+//RS     style.render(text, &capabilities)
+//RS }
+//RS 
+//RS pub fn jet_tui_display_width_int(text: &str) -> i64 {
+//RS     jet_tui_display_width(text) as i64
+//RS }
+//RS 
+//RS pub fn jet_tui_length(value: f64) -> JetTuiConstraint {
+//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::length(value))
+//RS }
+//RS 
+//RS pub fn jet_tui_min(value: f64) -> JetTuiConstraint {
+//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::min(value))
+//RS }
+//RS 
+//RS pub fn jet_tui_max(value: f64) -> JetTuiConstraint {
+//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::max(value))
+//RS }
+//RS 
+//RS pub fn jet_tui_percent(value: f64) -> JetTuiConstraint {
+//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::percent(value))
+//RS }
+//RS 
+//RS pub fn jet_tui_fill(weight: f64) -> JetTuiConstraint {
+//RS     JetTuiConstraint::from_kernel(jet_tui_kernel::fill(weight))
+//RS }
+//RS 
+//RS pub fn jet_tui_horizontal() -> JetTuiDirection {
+//RS     JetTuiDirection::Horizontal
+//RS }
+//RS 
+//RS pub fn jet_tui_vertical() -> JetTuiDirection {
+//RS     JetTuiDirection::Vertical
+//RS }
+//RS 
+//RS pub fn jet_tui_list_state() -> JetTuiListState {
+//RS     JetTuiListState::default()
+//RS }
+//RS 
+//RS pub fn jet_tui_list_state_select(mut state: JetTuiListState, index: i64) -> JetTuiListState {
+//RS     state.select(index.max(0) as usize);
+//RS     state
+//RS }
+//RS 
+//RS pub fn jet_tui_list_state_selected(state: JetTuiListState) -> i64 {
+//RS     state.selected() as i64
+//RS }
+//RS 
+//RS pub fn jet_tui_list_state_offset(mut state: JetTuiListState, offset: i64) -> JetTuiListState {
+//RS     state.scroll_to(offset.max(0) as usize);
+//RS     state
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq)]
+//RS pub enum JetEventResult {
+//RS     Handled,
+//RS     Ignored,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetPaintCmd {
+//RS     FillRect { rect: JetRect, color: String },
+//RS     Text {
+//RS         rect: JetRect,
+//RS         text: String,
+//RS         style: Option<JetTuiStyle>,
+//RS     },
+//RS }
+//RS 
+//RS struct JetNullBackendState {
+//RS     measured: Option<JetSize>,
+//RS     layout_frame: Option<JetRect>,
+//RS     commands: Vec<JetPaintCmd>,
+//RS     last_event: Option<JetEventResult>,
+//RS     // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing over a flat list
+//RS     // of interactive nodes. `focused_index` is `Some` whenever `focus_nodes`
+//RS     // is non-empty (registration always focuses the first node).
+//RS     focus_nodes: Vec<JetUiNode>,
+//RS     focused_index: Option<usize>,
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B: advance focus on a `Tab` key. Returns `Some(Handled)` when
+//RS /// the key was consumed by focus routing; `None` means "not a focus event,
+//RS /// fall through to normal key handling".
+//RS fn jet_ui_advance_focus(
+//RS     focus_nodes: &[JetUiNode],
+//RS     focused_index: &mut Option<usize>,
+//RS     code: &str,
+//RS     _modifiers: u8,
+//RS ) -> Option<JetEventResult> {
+//RS     if !code.eq_ignore_ascii_case("tab") || focus_nodes.is_empty() {
+//RS         return None;
+//RS     }
+//RS     let next = match *focused_index {
+//RS         Some(i) => (i + 1) % focus_nodes.len(),
+//RS         None => 0,
+//RS     };
+//RS     *focused_index = Some(next);
+//RS     Some(JetEventResult::Handled)
+//RS }
+//RS 
+//RS /// Card #1658 (corpus say-it-once): the default mount viewport (classic
+//RS /// 80x24 terminal), named once so no host hand-types the literal. Every
+//RS /// `mount_node_default` — Rust and DomRuntime.js — renders from this pair.
+//RS pub const DEFAULT_MOUNT_COLS: f64 = 80.0;
+//RS pub const DEFAULT_MOUNT_ROWS: f64 = 24.0;
+//RS 
+//RS /// Portable backend seam between Jet UI and platform renderers.
+//RS pub trait JetBackend {
+//RS     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize;
+//RS     fn layout(&mut self, node: &JetUiNode, frame: JetRect);
+//RS     fn paint(&mut self, node: &JetUiNode);
+//RS     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult;
+//RS 
+//RS     /// Rich TUI events stay typed through the backend seam. Legacy backends
+//RS     /// still receive the portable key/resize subset, while TUI adapters may
+//RS     /// inspect modifiers and non-terminal events before choosing a result.
+//RS     fn on_tui_event(&mut self, event: JetTuiEvent) -> JetEventResult {
+//RS         match event {
+//RS             JetTuiEvent::Key { code, .. } => self.on_event(JetInputEvent::Key { code }),
+//RS             JetTuiEvent::Resize { size } => self.on_event(JetInputEvent::Resize { size }),
+//RS             JetTuiEvent::Timer { .. }
+//RS             | JetTuiEvent::IO { .. }
+//RS             | JetTuiEvent::Focus { .. }
+//RS             | JetTuiEvent::Interrupt
+//RS             | JetTuiEvent::Close => JetEventResult::Handled,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_measure_tree(node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+//RS     let natural = if node.kind == JetUiNodeKind::Box {
+//RS         JetSize {
+//RS             width: node
+//RS                 .children
+//RS                 .iter()
+//RS                 .map(|child| child.width)
+//RS                 .fold(0.0_f64, f64::max),
+//RS             height: node.children.iter().map(|child| child.height).sum(),
+//RS         }
+//RS     } else {
+//RS         JetSize {
+//RS             width: node.width,
+//RS             height: node.height,
+//RS         }
+//RS     };
+//RS     JetSize {
+//RS         width: natural
+//RS             .width
+//RS             .clamp(constraint.min_width, constraint.max_width),
+//RS         height: natural
+//RS             .height
+//RS             .clamp(constraint.min_height, constraint.max_height),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_collect_focus(node: &JetUiNode, out: &mut Vec<JetUiNode>) {
+//RS     if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
+//RS         out.push(node.clone());
+//RS     }
+//RS     for child in &node.children {
+//RS         jet_ui_collect_focus(child, out);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_visit_tree(node: &JetUiNode, frame: JetRect, visit: &mut dyn FnMut(&JetUiNode, JetRect)) {
+//RS     if node.kind == JetUiNodeKind::Box {
+//RS         let mut y = frame.y;
+//RS         for child in &node.children {
+//RS             let child_frame = JetRect {
+//RS                 x: frame.x,
+//RS                 y,
+//RS                 width: frame.width,
+//RS                 height: child.height,
+//RS             };
+//RS             jet_ui_visit_tree(child, child_frame, visit);
+//RS             y += child.height;
+//RS         }
+//RS     } else {
+//RS         visit(node, frame);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_paint_tree(node: &JetUiNode, frame: JetRect, commands: &mut Vec<JetPaintCmd>) {
+//RS     jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
+//RS         if leaf.kind != JetUiNodeKind::Text {
+//RS             commands.push(JetPaintCmd::FillRect {
+//RS                 rect: leaf_frame,
+//RS                 color: leaf
+//RS                     .color
+//RS                     .clone()
+//RS                     .unwrap_or_else(|| "#000000".to_string()),
+//RS             });
+//RS         }
+//RS         commands.push(JetPaintCmd::Text {
+//RS             rect: leaf_frame,
+//RS             text: leaf.label.clone(),
+//RS             style: leaf.style.clone(),
+//RS         });
+//RS     });
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetNullBackend {
+//RS     state: std::sync::Arc<std::sync::Mutex<JetNullBackendState>>,
+//RS }
+//RS 
+//RS impl JetNullBackend {
+//RS     pub fn new() -> Self {
+//RS         JetNullBackend {
+//RS             state: std::sync::Arc::new(std::sync::Mutex::new(JetNullBackendState {
+//RS                 measured: None,
+//RS                 layout_frame: None,
+//RS                 commands: Vec::new(),
+//RS                 last_event: None,
+//RS                 focus_nodes: Vec::new(),
+//RS                 focused_index: None,
+//RS             })),
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
+//RS     /// the first node when the list is non-empty.
+//RS     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+//RS         state.focus_nodes = nodes;
+//RS     }
+//RS 
+//RS     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
+//RS     /// `""` when nothing is focused.
+//RS     pub fn focused_label(&self) -> String {
+//RS         let state = self.state.lock().unwrap();
+//RS         state
+//RS             .focused_index
+//RS             .and_then(|i| state.focus_nodes.get(i))
+//RS             .map(|n| n.label.clone())
+//RS             .unwrap_or_default()
+//RS     }
+//RS 
+//RS     pub fn measure_node(
+//RS         &self,
+//RS         node: JetUiNode,
+//RS         constraint: JetSizeConstraint,
+//RS     ) -> JetSize {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::measure(&mut *state, &node, constraint)
+//RS     }
+//RS 
+//RS     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::layout(&mut *state, &node, frame);
+//RS     }
+//RS 
+//RS     pub fn paint_node(&self, node: JetUiNode) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::paint(&mut *state, &node);
+//RS     }
+//RS 
+//RS     /// D-UI-MOUNT1=A: measure → layout → paint in one call.
+//RS     pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+//RS         {
+//RS             let mut state = self.state.lock().unwrap();
+//RS             state.commands.clear();
+//RS         }
+//RS         let size = self.measure_node(node.clone(), constraint);
+//RS         self.layout_node(
+//RS             node.clone(),
+//RS             jet_ui_rect(0.0, 0.0, size.width, size.height),
+//RS         );
+//RS         self.paint_node(node);
+//RS     }
+//RS 
+//RS     /// Default viewport for the two-arg beginner mount (`backend.mount(tree)`).
+//RS     pub fn mount_node_default(&self, node: JetUiNode) {
+//RS         self.mount_node(
+//RS             node,
+//RS             jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+//RS         );
+//RS     }
+//RS 
+//RS     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::on_event(&mut *state, event)
+//RS     }
+//RS 
+//RS     pub fn paint_commands(&self) -> Vec<String> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap()
+//RS             .commands
+//RS             .iter()
+//RS             .map(|cmd| match cmd {
+//RS                 JetPaintCmd::FillRect { rect, color } => {
+//RS                     format!("fill({}, {})", rect.jet_show(), color)
+//RS                 }
+//RS                 JetPaintCmd::Text { rect, text, .. } => {
+//RS                     format!("text({}, {})", rect.jet_show(), text)
+//RS                 }
+//RS             })
+//RS             .collect()
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetNullBackend {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl JetBackend for JetNullBackendState {
+//RS     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+//RS         let size = jet_ui_measure_tree(node, constraint);
+//RS         self.measured = Some(size);
+//RS         size
+//RS     }
+//RS 
+//RS     fn layout(&mut self, node: &JetUiNode, frame: JetRect) {
+//RS         let _ = node;
+//RS         self.layout_frame = Some(frame);
+//RS     }
+//RS 
+//RS     fn paint(&mut self, node: &JetUiNode) {
+//RS         let frame = self.layout_frame.unwrap_or(JetRect {
+//RS             x: 0.0,
+//RS             y: 0.0,
+//RS             width: node.width,
+//RS             height: node.height,
+//RS         });
+//RS         jet_ui_paint_tree(node, frame, &mut self.commands);
+//RS         // D-UI-EVT-DISP1=E: bind portable on_click slots by identity. Headless
+//RS         // / TUI backends that cannot produce clicks still register (D-WEB-CLICK-PORT1=D
+//RS         // no-op until an event arrives).
+//RS         jet_ui_bind_tree_clicks(node, "null#0");
+//RS         let mut focus = Vec::new();
+//RS         jet_ui_collect_focus(node, &mut focus);
+//RS         if !focus.is_empty() {
+//RS             self.focused_index = Some(0);
+//RS             self.focus_nodes = focus;
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+//RS         if let JetInputEvent::Key { code } = &event {
+//RS             if let Some(result) =
+//RS                 jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code, 0)
+//RS             {
+//RS                 self.last_event = Some(result);
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         let result = match &event {
+//RS             JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
+//RS             JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
+//RS                 JetEventResult::Ignored
+//RS             }
+//RS             _ => JetEventResult::Handled,
+//RS         };
+//RS         self.last_event = Some(result);
+//RS         result
+//RS     }
+//RS }
+//RS 
+//RS // ── TUI backend — deterministic character-grid output ───────────────────────────
+//RS 
+//RS struct JetTuiBackendState {
+//RS     measured: Option<JetSize>,
+//RS     layout_frame: Option<JetRect>,
+//RS     grid: Vec<Vec<char>>,
+//RS     grid_cols: usize,
+//RS     grid_rows: usize,
+//RS     render_count: usize,
+//RS     last_event: Option<JetEventResult>,
+//RS     capabilities: JetTuiCapabilities,
+//RS     /// Keep the semantic tree so direct resize events can repaint without
+//RS     /// asking a platform backend to invent a second view representation.
+//RS     last_node: Option<JetUiNode>,
+//RS     // D-A11YGATE1=B (c134 Phase 6): see `JetNullBackendState`.
+//RS     focus_nodes: Vec<JetUiNode>,
+//RS     focused_index: Option<usize>,
+//RS }
+//RS 
+//RS fn tui_grid_dims(frame: &JetRect) -> (usize, usize) {
+//RS     let cols = frame.width.max(1.0).floor() as usize;
+//RS     let rows = frame.height.max(1.0).floor() as usize;
+//RS     (cols, rows)
+//RS }
+//RS 
+//RS fn tui_blank_grid(cols: usize, rows: usize) -> Vec<Vec<char>> {
+//RS     (0..rows).map(|_| vec![' '; cols]).collect()
+//RS }
+//RS 
+//RS fn tui_write_label(
+//RS     grid: &mut [Vec<char>],
+//RS     frame: &JetRect,
+//RS     label: &str,
+//RS     style: Option<&JetTuiStyle>,
+//RS     capabilities: &JetTuiCapabilities,
+//RS ) {
+//RS     let (cols, rows) = (grid.first().map(|r| r.len()).unwrap_or(0), grid.len());
+//RS     let start_col = frame.x.max(0.0) as usize;
+//RS     let start_row = frame.y.max(0.0) as usize;
+//RS     let rendered = style
+//RS         .map(|style| style.render(label, capabilities))
+//RS         .unwrap_or_else(|| label.to_string());
+//RS     let label = if capabilities.unicode {
+//RS         jet_tui_strip_ansi(&rendered)
+//RS     } else {
+//RS         jet_tui_ascii(&jet_tui_strip_ansi(&rendered))
+//RS     };
+//RS     let mut col = start_col;
+//RS     for ch in label.chars() {
+//RS         let width = jet_tui_char_width(ch);
+//RS         if width == 0 {
+//RS             continue;
+//RS         }
+//RS         if col < cols && start_row < rows {
+//RS             grid[start_row][col] = ch;
+//RS             if width == 2 && col + 1 < cols {
+//RS                 grid[start_row][col + 1] = ' ';
+//RS             }
+//RS         }
+//RS         col = col.saturating_add(width);
+//RS         if col >= cols {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetTuiBackend {
+//RS     state: std::sync::Arc<std::sync::Mutex<JetTuiBackendState>>,
+//RS }
+//RS impl JetTuiBackend {
+//RS     pub fn new() -> Self {
+//RS         Self::with_capabilities(jet_tui_capabilities())
+//RS     }
+//RS 
+//RS     pub fn with_capabilities(capabilities: JetTuiCapabilities) -> Self {
+//RS         JetTuiBackend {
+//RS             state: std::sync::Arc::new(std::sync::Mutex::new(JetTuiBackendState {
+//RS                 measured: None,
+//RS                 layout_frame: None,
+//RS                 grid: Vec::new(),
+//RS                 grid_cols: 0,
+//RS                 grid_rows: 0,
+//RS                 render_count: 0,
+//RS                 last_event: None,
+//RS                 capabilities,
+//RS                 last_node: None,
+//RS                 focus_nodes: Vec::new(),
+//RS                 focused_index: None,
+//RS             })),
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
+//RS     /// the first node when the list is non-empty.
+//RS     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+//RS         state.focus_nodes = nodes;
+//RS     }
+//RS 
+//RS     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
+//RS     /// `""` when nothing is focused.
+//RS     pub fn focused_label(&self) -> String {
+//RS         let state = self.state.lock().unwrap();
+//RS         state
+//RS             .focused_index
+//RS             .and_then(|i| state.focus_nodes.get(i))
+//RS             .map(|n| n.label.clone())
+//RS             .unwrap_or_default()
+//RS     }
+//RS     pub fn capabilities(&self) -> JetTuiCapabilities {
+//RS         self.state.lock().unwrap().capabilities.clone()
+//RS     }
+//RS 
+//RS     pub fn set_capabilities(&self, capabilities: JetTuiCapabilities) {
+//RS         self.state.lock().unwrap().capabilities = capabilities;
+//RS     }
+//RS 
+//RS     pub fn measure_node(
+//RS         &self,
+//RS         node: JetUiNode,
+//RS         constraint: JetSizeConstraint,
+//RS     ) -> JetSize {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::measure(&mut *state, &node, constraint)
+//RS     }
+//RS 
+//RS     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::layout(&mut *state, &node, frame);
+//RS     }
+//RS 
+// END-PORT-PENDING 0192 crates/jet-codegen/src/Prelude/Ui.rs:1-1801
+

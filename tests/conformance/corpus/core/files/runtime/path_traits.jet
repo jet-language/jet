@@ -1,0 +1,188 @@
+use core.files.runtime.kernel_path_components as traits_path
+use core.files.runtime.kernel_path_traits as traits_law
+use core.collections.runtime.kernel_siphash13 as traits_sip
+
+// Original pinned std/tests/path.rs test_compare's 16 shared + 5 Windows
+// equality/hash rows, test_ord's 7 rows, plus exact encoded-frame fixtures.
+fn traits_compare_row(platform: traits_path.PathPlatform, a: String, b: String, expected: Bool) Never! {
+    left :: traits_path.from_text(a, platform)
+    right :: traits_path.from_text(b, platform)
+    assert_eq(traits_law.equal(left, right), expected)
+    assert_eq(traits_law.compare(left, right) == Ordering.Equal, expected)
+    machines :: [traits_sip.HashMachine]{traits_sip.HashMachine.Usize32LE, traits_sip.HashMachine.Usize32BE, traits_sip.HashMachine.Usize64LE, traits_sip.HashMachine.Usize64BE}
+    loop machine in machines {
+        assert_eq(traits_law.default_hash(left, machine, false) == traits_law.default_hash(right, machine, false), expected)
+    }
+}
+fn traits_order_row(platform: traits_path.PathPlatform, a: String, b: String, expected: Ordering) Never! {
+    left :: traits_path.from_text(a, platform)
+    right :: traits_path.from_text(b, platform)
+    assert_eq(traits_law.compare(left, right), expected)
+    assert_eq(traits_law.equal(left, right), expected == Ordering.Equal)
+    reverse :: if expected == Ordering.Less -> Ordering.Greater else -> if expected == Ordering.Greater -> Ordering.Less else -> Ordering.Equal
+    assert_eq(traits_law.compare(right, left), reverse)
+    if expected == Ordering.Equal {
+        assert_eq(traits_law.default_hash(left, traits_sip.HashMachine.Usize64LE, false), traits_law.default_hash(right, traits_sip.HashMachine.Usize64LE, false))
+    }
+}
+#Test("std Path original equality/hash and Ord rows for both private platform carriers") {
+    platforms :: [traits_path.PathPlatform]{traits_path.PathPlatform.Unix, traits_path.PathPlatform.Windows}
+    loop platform in platforms {
+        traits_compare_row(platform, "", "", true)
+        traits_compare_row(platform, "foo", "", false)
+        traits_compare_row(platform, "", "foo", false)
+        traits_compare_row(platform, "foo", "foo", true)
+        traits_compare_row(platform, "foo/", "foo", true)
+        traits_compare_row(platform, "foo//", "foo", true)
+        traits_compare_row(platform, "foo///", "foo", true)
+        traits_compare_row(platform, "foo/.", "foo", true)
+        traits_compare_row(platform, "foo/./bar", "foo/bar", true)
+        traits_compare_row(platform, "foo/.//bar", "foo/bar", true)
+        traits_compare_row(platform, "foo//./bar", "foo/bar", true)
+        traits_compare_row(platform, "foo/bar", "foo", false)
+        traits_compare_row(platform, "foo/bar", "foobar", false)
+        traits_compare_row(platform, "foo/bar/baz", "foo/bar", false)
+        traits_compare_row(platform, "foo/bar", "foo/bar/baz", false)
+        traits_compare_row(platform, "./foo/bar/", ".", false)
+        traits_order_row(platform, "1", "2", Ordering.Less)
+        traits_order_row(platform, "/foo/bar", "/foo./bar", Ordering.Less)
+        traits_order_row(platform, "foo/bar", "foo/bar.", Ordering.Less)
+        traits_order_row(platform, "foo/./bar", "foo/bar/", Ordering.Equal)
+        traits_order_row(platform, "foo/bar", "foo/bar/", Ordering.Equal)
+        traits_order_row(platform, "foo/bar", "foo/bar/.", Ordering.Equal)
+        traits_order_row(platform, "foo/bar", "foo/bar//", Ordering.Equal)
+    }
+    windows :: traits_path.PathPlatform.Windows
+    traits_compare_row(windows, "C:\\src\\rust\\cargo-test\\test\\Cargo.toml", "c:\\src\\rust\\cargo-test\\test", false)
+    traits_compare_row(windows, "c:\\foo", "C:\\foo", true)
+    traits_compare_row(windows, "C:\\foo\\.\\bar.txt", "C:\\foo\\bar.txt", true)
+    traits_compare_row(windows, "C:\\foo\\.", "C:\\foo", true)
+    traits_compare_row(windows, "\\\\?\\C:\\foo\\.\\bar.txt", "\\\\?\\C:\\foo\\bar.txt", false)
+}
+#Test("Component and Prefix derived order, drive identity, verbatim and native case") {
+    unix :: traits_path.PathPlatform.Unix
+    windows :: traits_path.PathPlatform.Windows
+    traits_order_row(unix, "", "/", Ordering.Less)
+    traits_order_row(unix, "/", ".", Ordering.Less)
+    traits_order_row(unix, ".", "..", Ordering.Less)
+    traits_order_row(unix, "..", "a", Ordering.Less)
+    traits_order_row(unix, "foo", "foo/bar", Ordering.Less)
+    traits_order_row(unix, "foo/a", "foo./a", Ordering.Less)
+    traits_order_row(unix, "./foo", "foo", Ordering.Less)
+    traits_order_row(unix, "///", "/", Ordering.Equal)
+    traits_order_row(unix, "./.", "./", Ordering.Equal)
+    traits_order_row(windows, "C:", "\\", Ordering.Less)
+    traits_order_row(windows, "\\\\?\\cat", "\\\\?\\UNC\\server\\share", Ordering.Less)
+    traits_order_row(windows, "\\\\?\\UNC\\server\\share", "\\\\?\\C:", Ordering.Less)
+    traits_order_row(windows, "\\\\?\\C:", "\\\\.\\device", Ordering.Less)
+    traits_order_row(windows, "\\\\.\\device", "\\\\server\\share", Ordering.Less)
+    traits_order_row(windows, "\\\\server\\share", "C:", Ordering.Less)
+    traits_order_row(windows, "c:\\a", "C:/a", Ordering.Equal)
+    traits_order_row(windows, "C:\\A", "C:\\a", Ordering.Less)
+    traits_order_row(windows, "\\\\?\\c:\\a", "\\\\?\\C:\\a", Ordering.Equal)
+    traits_order_row(windows, "\\\\?\\C:\\a\\.\\b", "\\\\?\\C:\\a\\b", Ordering.Less)
+    traits_order_row(windows, "\\\\server\\a", "\\\\server\\b", Ordering.Less)
+    traits_order_row(windows, "\\\\Server\\share", "\\\\server\\share", Ordering.Less)
+}
+fn traits_raw_hash(data: View<U8>, chunk32: U64, chunk64: U64, machine: traits_sip.HashMachine) -> U64 Never! {
+    state := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+    traits_sip.write(&state, data)
+    traits_sip.write_usize(&state, if traits_sip.machine_is_32(machine) -> chunk32 else -> chunk64)
+    traits_sip.finish(state)
+}
+#Test("Exact original Path hash stream: chunk_bits/native width/endian, not components delimiters") {
+    machines :: [traits_sip.HashMachine]{traits_sip.HashMachine.Usize32LE, traits_sip.HashMachine.Usize32BE, traits_sip.HashMachine.Usize64LE, traits_sip.HashMachine.Usize64BE}
+    data :: "foobar".bytes()
+    empty :: [U8]{}
+    loop machine in machines {
+        expected_split :: traits_raw_hash(data, U64{0xf0000000}, U64{0xf000000000000000}, machine)
+        expected_joined :: traits_raw_hash(data, U64{0x80000001}, U64{0x8000000000000001}, machine)
+        assert(expected_split != expected_joined)
+        unix :: traits_path.PathPlatform.Unix
+        normalized :: [String]{"foo/bar", "foo/./bar", "foo//bar/.", "///foo///bar//"}
+        loop text in normalized {
+            assert_eq(traits_law.default_hash(traits_path.from_text(text, unix), machine, false), expected_split)
+        }
+        assert_eq(traits_law.default_hash(traits_path.from_text("foobar", unix), machine, false), expected_joined)
+        zero_forms :: [String]{"", "/", "////"}
+        loop text in zero_forms {
+            assert_eq(traits_law.default_hash(traits_path.from_text(text, unix), machine, false), traits_raw_hash(empty, U64{0}, U64{0}, machine))
+        }
+        // Root and empty are NOT equal despite this source-defined collision.
+        assert(!traits_law.equal(traits_path.from_text("", unix), traits_path.from_text("/", unix)))
+        invalid :: [U8]{U8{255}}
+        native :: traits_path.from_encoded(~invalid, unix)
+        assert_eq(traits_law.default_hash(native, machine, false), traits_raw_hash(invalid, U64{0x40000000}, U64{0x4000000000000000}, machine))
+        surrogate :: [U8]{U8{0xed}, U8{0xa0}, U8{0x80}}
+        wide :: traits_path.from_encoded(~surrogate, traits_path.PathPlatform.Windows)
+        assert_eq(traits_law.default_hash(wide, machine, false), traits_raw_hash(surrogate, U64{0xc0000000}, U64{0xc000000000000000}, machine))
+        after :: traits_path.from_encoded([U8]{U8{0xed}, U8{0xa0}, U8{0x81}}, traits_path.PathPlatform.Windows)
+        assert_eq(traits_law.compare(wide, after), Ordering.Less)
+    }
+}
+#Test("Exact Prefix hash frames: native discriminant, length-prefixed OsStr, normalized U8 drive") {
+    machines :: [traits_sip.HashMachine]{traits_sip.HashMachine.Usize32LE, traits_sip.HashMachine.Usize32BE, traits_sip.HashMachine.Usize64LE, traits_sip.HashMachine.Usize64BE}
+    windows :: traits_path.PathPlatform.Windows
+    loop machine in machines {
+        disk := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&disk, U64{5})
+        traits_sip.write_u8(&disk, U8{67})
+        traits_sip.write(&disk, "foobar".bytes())
+        traits_sip.write_usize(&disk, if traits_sip.machine_is_32(machine) -> U64{0xf0000000} else -> U64{0xf000000000000000})
+        assert_eq(traits_law.default_hash(traits_path.from_text("c:\\foo\\bar", windows), machine, false), traits_sip.finish(disk))
+        unc := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&unc, U64{4})
+        traits_sip.write_usize(&unc, U64{2})
+        traits_sip.write(&unc, "ab".bytes())
+        traits_sip.write_usize(&unc, U64{3})
+        traits_sip.write(&unc, "cde".bytes())
+        traits_sip.write_usize(&unc, U64{0})
+        assert_eq(traits_law.default_hash(traits_path.from_text("\\\\ab\\cde", windows), machine, false), traits_sip.finish(unc))
+        verbatim_unc := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&verbatim_unc, U64{1})
+        traits_sip.write_usize(&verbatim_unc, U64{2})
+        traits_sip.write(&verbatim_unc, "ab".bytes())
+        traits_sip.write_usize(&verbatim_unc, U64{3})
+        traits_sip.write(&verbatim_unc, "cde".bytes())
+        traits_sip.write_usize(&verbatim_unc, U64{0})
+        assert_eq(traits_law.default_hash(traits_path.from_text("\\\\?\\UNC\\ab\\cde", windows), machine, false), traits_sip.finish(verbatim_unc))
+        // Length prefixes separate same concatenated prefix payload bytes.
+        left :: traits_path.from_text("\\\\a\\bc", windows)
+        right :: traits_path.from_text("\\\\ab\\c", windows)
+        assert(!traits_law.equal(left, right))
+        assert(traits_law.default_hash(left, machine, false) != traits_law.default_hash(right, machine, false))
+    }
+}
+
+#Test("Remaining Prefix variant frames and unpaired-surrogate prefix bytes") {
+    machines :: [traits_sip.HashMachine]{traits_sip.HashMachine.Usize32LE, traits_sip.HashMachine.Usize32BE, traits_sip.HashMachine.Usize64LE, traits_sip.HashMachine.Usize64BE}
+    windows :: traits_path.PathPlatform.Windows
+    loop machine in machines {
+        verbatim := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&verbatim, U64{0})
+        traits_sip.write_usize(&verbatim, U64{3})
+        traits_sip.write(&verbatim, "cat".bytes())
+        traits_sip.write_usize(&verbatim, U64{0})
+        assert_eq(traits_law.default_hash(traits_path.from_text("\\\\?\\cat", windows), machine, false), traits_sip.finish(verbatim))
+        device := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&device, U64{3})
+        traits_sip.write_usize(&device, U64{5})
+        traits_sip.write(&device, "COM42".bytes())
+        traits_sip.write_usize(&device, U64{0})
+        assert_eq(traits_law.default_hash(traits_path.from_text("\\\\.\\COM42", windows), machine, false), traits_sip.finish(device))
+        drive := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&drive, U64{2})
+        traits_sip.write_u8(&drive, U8{67})
+        traits_sip.write_usize(&drive, U64{0})
+        assert_eq(traits_law.default_hash(traits_path.from_text("\\\\?\\c:", windows), machine, false), traits_sip.finish(drive))
+        encoded :: [U8]{U8{92}, U8{92}, U8{63}, U8{92}, U8{0xed}, U8{0xa0}, U8{0x80}}
+        payload :: [U8]{U8{0xed}, U8{0xa0}, U8{0x80}}
+        native :: traits_path.from_encoded(~encoded, windows)
+        expected := traits_sip.new_with_machine(U64{0}, U64{0}, machine, false)
+        traits_sip.write_usize(&expected, U64{0})
+        traits_sip.write_usize(&expected, U64{3})
+        traits_sip.write(&expected, payload)
+        traits_sip.write_usize(&expected, U64{0})
+        assert_eq(traits_law.default_hash(native, machine, false), traits_sip.finish(expected))
+    }
+}

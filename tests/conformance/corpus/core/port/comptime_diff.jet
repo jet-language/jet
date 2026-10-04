@@ -1,0 +1,1225 @@
+// PORT-PENDING 1007 tests-comptime-diff: tests/comptime_diff.rs:1-1221
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M9.5 differential battery (permanent CI). For each expression, the same
+//RS //! code is evaluated twice — once as `COMPTIME_VALUE :: e;` (the sema
+//RS //! tree-walking interpreter) and once as a runtime `r :: e` (generated
+//RS //! Rust). The program prints both; the two lines MUST be byte-identical.
+//RS //!
+//RS //! Divergence is a P0 miscompile-class bug (S26 rule 6: comptime implements
+//RS //! runtime semantics exactly — exact Int, IEEE f64 Float with S21 display,
+//RS //! char-counted Strings (S41), BTreeMap ordering (S38)).
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicUsize, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS mod common;
+//RS use common::{have_rustc, panic_message, test_worker_count, unsafe_keyword_columns};
+//RS 
+//RS /// Expressions whose comptime and runtime evaluation must agree. Each is
+//RS /// inlined verbatim on both sides, so it must be a self-contained
+//RS /// expression with an inferable type.
+//RS const CASES: &[&str] = &[
+//RS     // Int arithmetic + operator semantics
+//RS     "2 + 3 * 4",
+//RS     "100 / 7",
+//RS     "100 % 7",
+//RS     "7 / 2",
+//RS     "(0 - 17) % 5",
+//RS     "(0 - 17) / 5",
+//RS     "1 << 10",
+//RS     "255 & 15",
+//RS     // D-BITOREXPR1=A: value-position `|` is bitwise OR; `|=` remains covered
+//RS     // by tests/numops.rs.
+//RS     "12 | 10",
+//RS     "6 ^ 3",
+//RS     "1000000 * 1000000",
+//RS     // Float rounding + S21 "always a decimal" display
+//RS     "Float{3.0} / Float{2.0}",
+//RS     "Float{10.0} / Float{4.0}",
+//RS     "Float{1.0} / Float{3.0}",
+//RS     "Float{5.0}",
+//RS     "Float{2.0} * Float{2.0}",
+//RS     "Float{0.1} + Float{0.2}",
+//RS     // Bool / comparison
+//RS     "3 < 5 && 2 == 2",
+//RS     "10 >= 10 || false",
+//RS     // String + Char ops (char-counted, S41)
+//RS     "\"Hello\".to_upper()",
+//RS     "\"WORLD\".to_lower()",
+//RS     "\"héllo\".len()",
+//RS     "\"  trim me  \".trim()",
+//RS     "\"  trim me  \".trim_start()",
+//RS     "\"  trim me  \".trim_end()",
+//RS     "\"jet\".pad_start(5, \".\")",
+//RS     "\"jet\".pad_end(5, \".\")",
+//RS     "\"hello jet\".index_of(\"jet\")",
+//RS     "\"banana\".count(\"an\")",
+//RS     "\"Hello\".is_alphabetic()",
+//RS     "\"123\".is_numeric()",
+//RS     "\" \t\".is_whitespace()",
+//RS     "\"jet lang\".is_ascii()",
+//RS     "\"hELLO jet\".to_title()",
+//RS     "(\"left:right\".split_once(\":\") ?? panic(\"split\")).before",
+//RS     "\"ab\".repeat(3)",
+//RS     "\"a,b,c\".split(\",\").to_list()",
+//RS     "\"hello world\".replace(\"o\", \"0\")",
+//RS     // List values, ordering, and methods
+//RS     "[1, 2, 3]",
+//RS     "[3, 1, 2]",
+//RS     "[10, 20, 30][1]",
+//RS     "[\"x\", \"y\", \"z\"]",
+//RS     "loop value in [1, 2, 3] -> value * 2",
+//RS     // Map ordering via derived lists (BTreeMap is sorted by key). `.keys()`/
+//RS     // `.values()` return a lazy one-pass `Iter` (no `Display`, E0915) —
+//RS     // `.to_list()` materializes it for the differential's string print.
+//RS     "[\"b\": 2, \"a\": 1, \"c\": 3].keys().to_list()",
+//RS     "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
+//RS     "\"a,b,c\".split(\",\").skip(1).first()",
+//RS     "[2: \"two\", 1: \"one\"].keys().to_list()",
+//RS     "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
+//RS     "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
+//RS     "Rank.from([1, 2, 3]).symmetric_difference(Rank.from([2, 3, 4])).to_list()",
+//RS     "Rank.from([1, 2]).is_subset(Rank.from([1, 2, 3]))",
+//RS     "Rank.from([1, 2, 3]).is_superset(Rank.from([1, 2]))",
+//RS     "Rank.from([1, 2]).is_disjoint(Rank.from([3, 4]))",
+//RS     "Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len()",
+//RS     "Set.from([1, 2, 3]).difference(Set.from([2, 3, 4])).len()",
+//RS     "Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len()",
+//RS     "Set.from([1, 2]).is_subset(Set.from([1, 2, 3]))",
+//RS     "Set.from([1, 2, 3]).is_superset(Set.from([1, 2]))",
+//RS     "Set.from([1, 2]).is_disjoint(Set.from([3, 4]))",
+//RS     // D-INTBIG1: exact default Int keeps the machine-word path for small
+//RS     // values and spills only when a result needs more than the resident word.
+//RS     "(9223372036854775807 + 1).to_string()",
+//RS     "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
+//RS     "(100 - 1).to_string()",
+//RS     "(7 * 6).to_string()",
+//RS     "(2 ^ 200).to_string()",
+//RS     "(0 - 3).to_string()",
+//RS ];
+//RS 
+//RS const F32_VALUE_FLOW: &str = r#"
+//RS fn pass_f32(value: F32) -> F32 {
+//RS     return value
+//RS }
+//RS 
+//RS fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 {
+//RS     return transform(value)
+//RS }
+//RS 
+//RS fn f32_value_flow() -> String {
+//RS     literal :: F32{ 16777217.0 }
+//RS     one :: F32{ 1.0 }
+//RS     two :: F32{ 2.0 }
+//RS     three :: F32{ 3.0 }
+//RS     threshold :: F32{ 16777215.0 }
+//RS     immutable :: F32{ literal + one }
+//RS     mutable := F32{ literal }
+//RS     mutable += one
+//RS     mutable -= two
+//RS     mutable *= three
+//RS     mutable /= two
+//RS     transform :: (value: F32) -> value + one
+//RS     same :: pass_f32(literal)
+//RS     wide :: Float.from_f32(literal)
+//RS     narrowed :: F32.from_float(wide) ?? one
+//RS     nested :: [["values": [literal, apply_f32(transform, literal), narrowed]]]
+//RS     option_left :: [[[literal].get(0)]]
+//RS     option_right :: [[[same].get(0)]]
+//RS     result_left :: [[F32.from_float(wide)]]
+//RS     result_right :: [[F32.from_float(Float.from_f32(same))]]
+//RS     negative :: F32{ -literal }
+//RS     difference :: F32{ literal - one }
+//RS     product :: F32{ literal * two }
+//RS     quotient :: F32{ literal / two }
+//RS     return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
+//RS }
+//RS 
+//RS EXPECTED :: prep { f32_value_flow() }
+//RS 
+//RS fn run() {
+//RS     actual :: f32_value_flow()
+//RS     print("{EXPECTED}")
+//RS     print("{actual}")
+//RS }
+//RS "#;
+//RS 
+//RS /// card #392: the `use core.X as alias; alias.method(...)` module-call form
+//RS /// needs its own program per case (an inline expression alone can't `use`),
+//RS /// so it gets a dedicated differential loop rather than reusing `CASES`.
+//RS const MODULE_CASES: &[&str] = &[
+//RS     // D-CORE-USELIST1=A: comptime resolves each bracket-list member to the
+//RS     // same default local name that runtime code uses.
+//RS     "use core.math.[abs, min]\nCOMPTIME_VALUE :: prep { abs(-8) + min(9, 4) }\n\nfn run() {\n    r :: abs(-8) + min(9, 4)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // `("core.string", ...)` was a dead dispatch key (no import resolves to
+//RS     // it — `core.text` is the only ratified spelling), so every
+//RS     // `text.<method>(...)` call hit E0956. Fixed via `TextLite` (ported
+//RS     // verbatim from AOT's `jet_text_*` prelude fns).
+//RS     "use core.text as text\nCOMPTIME_VALUE :: prep { text.trim(\" hi \") }\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.text as text\nCOMPTIME_VALUE :: prep { text.upper(\"abc\") }\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.text as text\nCOMPTIME_VALUE :: prep { text.words(\"hello world's foo\")[0] }\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.text as text\nCOMPTIME_VALUE :: prep { text.pad_start(\"7\", 3, \"0\") }\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // core.math: previously only sqrt/floor/ceil/round/abs/pow/min/max/clamp/
+//RS     // log2/log10 were dispatched; the rest (trig, checked/saturating/
+//RS     // wrapping, gcd/lcm) fell to E0956.
+//RS     "use core.math as math\nCOMPTIME_VALUE :: prep { math.sin(0.0) }\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.math as math\nCOMPTIME_VALUE :: prep { math.gcd(12, 18) }\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.math as math\nCOMPTIME_VALUE :: prep { math.saturating_add(9223372036854775807, 1) }\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // card #392 pass 3: `core.net.url` (D-URL1=A), ported verbatim from AOT's
+//RS     // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
+//RS     // Plain string-returning free functions use this differential. URL
+//RS     // structs retain their canonical typed metadata through the comptime
+//RS     // marshalled value path; tier-wide typed-head coverage lives in
+//RS     // `tests/tir_language_features.rs`.
+//RS     // parity: guard tests/repl.rs::repl_core_url_dispatch
+//RS     "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_encode(\"a b/c?d#e\") }\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\") }\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.percent_decode(\"bad%\") ?? \"fallback\" }\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.net.url as url\nCOMPTIME_VALUE :: prep { url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]]) }\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
+//RS     // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
+//RS     // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
+//RS     // builtin struct values (`DataSummary`/`DataStatus`/`Group`), which
+//RS     // this crate's generic `CtValue::Struct` display can't print the same
+//RS     // way AOT's derived struct `Display` does (a pre-existing limit shared
+//RS     // by every builtin struct type, not specific to `core.data` — see
+//RS     // `UrlLite.rs`'s note) — covered instead by
+//RS     // `tests/repl.rs::repl_core_data_dispatch`.
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // #1657: catastrophic cancellation. A naive left-to-right sum answers
+//RS     // 0.0 here and the compensated kernel answers 1.0, so a second
+//RS     // implementation on either tier fails these three cases.
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.data as data\nCOMPTIME_VALUE :: prep { data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\") }\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
+//RS     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
+//RS     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
+//RS     // `jet_std_jsonl_*`/`jet_std_json_render_canonical`/`jet_std_json_events`
+//RS     // (see `EncodingLite.rs`). Every case round-trips `parse`+`to_string` (or
+//RS     // `to_bytes`+`parse`) so both the parser and the renderer sides differ
+//RS     // against real generated Rust, not just one direction.
+//RS     "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\") }\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.csv as csv\nCOMPTIME_VALUE :: prep { csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"name,note\\nAda,\\\"line1\\nline2\\\"\\nLin,\\\"said \\\"\\\"hi\\\"\\\"\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.yaml as yaml\nCOMPTIME_VALUE :: prep { yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\nCOMPTIME_VALUE :: prep { hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.jsonl as jsonl\nCOMPTIME_VALUE :: prep { jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     // D-JSONCANON1: edition 2027 `json.canonical` is fallible (`String ?
+//RS     // encoding.EncodingError`); `run()` is infallible, so the ratified
+//RS     // migration form is the panic fallback, not `?` propagation.
+//RS     "use core.encoding.json as json\nCOMPTIME_VALUE :: prep { json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\") }\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.encoding.json as json\nCOMPTIME_VALUE :: prep { json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS ];
+//RS 
+//RS const LOADABLE_CASES: &[&str] = &[
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.idle() }\n\nfn run() {\n    r :: loadable.idle()\n    print(\"{COMPTIME_VALUE.is_idle()}\")\n    print(\"{r.is_idle()}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loading() }\n\nfn run() {\n    r :: loadable.loading()\n    print(\"{COMPTIME_VALUE.is_loading()}\")\n    print(\"{r.is_loading()}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7) }\n\nfn run() {\n    r :: loadable.loaded(7)\n    print(\"{COMPTIME_VALUE.loaded() ?? 0}\")\n    print(\"{r.loaded() ?? 0}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.failed(\"offline\") }\n\nfn run() {\n    r :: loadable.failed(\"offline\")\n    print(\"{COMPTIME_VALUE.is_failed()}\")\n    print(\"{r.is_failed()}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.idle().is_idle() }\n\nfn run() {\n    r :: loadable.idle().is_idle()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loading().is_loading() }\n\nfn run() {\n    r :: loadable.loading().is_loading()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).is_loaded() }\n\nfn run() {\n    r :: loadable.loaded(7).is_loaded()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.failed(\"offline\").is_failed() }\n\nfn run() {\n    r :: loadable.failed(\"offline\").is_failed()\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).loaded() ?? 0 }\n\nfn run() {\n    r :: loadable.loaded(7).loaded() ?? 0\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS     "use core.reactive.loadable as loadable\nCOMPTIME_VALUE :: prep { loadable.loaded(7).or_else(0) }\n\nfn run() {\n    r :: loadable.loaded(7).or_else(0)\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+//RS ];
+//RS 
+//RS #[test]
+//RS fn comptime_loadable_matches_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping Loadable differential battery");
+//RS         return;
+//RS     }
+//RS     for (i, src) in LOADABLE_CASES.iter().enumerate() {
+//RS         if let Err(payload) = std::panic::catch_unwind(|| {
+//RS             check_comptime_src(10_000 + i, "core.reactive.loadable", src)
+//RS         }) {
+//RS             panic!("Loadable case {i} failed: {}", panic_message(payload));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn loadable_incompatible_defaults_stop_before_rustc() {
+//RS     for (name, expression) in [
+//RS         ("idle", "loadable.idle().or_else(7)"),
+//RS         ("loading", "loadable.loading().or_else(7)"),
+//RS         ("failed", "loadable.failed(\"offline\").or_else(7)"),
+//RS         ("loaded", "loadable.loaded(7).or_else(\"bad\")"),
+//RS     ] {
+//RS         let src = format!(
+//RS             "use core.reactive.loadable as loadable\n\nfn run() {{\n    print({expression})\n}}\n"
+//RS         );
+//RS         let Err(diags) = jet::Driver::compile_generated_src(
+//RS             &src,
+//RS             "loadable_default.jet",
+//RS             jet::Sema::CompileMode::Run,
+//RS         ) else {
+//RS             panic!(
+//RS                 "{name} incompatible fallback reached codegen and would be an I2 rustc rejection"
+//RS             );
+//RS         };
+//RS         assert!(
+//RS             diags.iter().any(|diag| diag.code == "E0112"),
+//RS             "{name} fallback missed the type mismatch: {diags:?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_matches_runtime() {
+//RS     let have_rustc = have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: rustc not found; skipping comptime differential battery");
+//RS         return;
+//RS     }
+//RS     let next = Arc::new(AtomicUsize::new(0));
+//RS     let failures = Arc::new(Mutex::new(Vec::new()));
+//RS     let workers = test_worker_count(16).min(CASES.len().max(1));
+//RS     let mut handles = Vec::new();
+//RS     for _ in 0..workers {
+//RS         let next = Arc::clone(&next);
+//RS         let failures = Arc::clone(&failures);
+//RS         handles.push(std::thread::spawn(move || loop {
+//RS             let i = next.fetch_add(1, Ordering::Relaxed);
+//RS             if i >= CASES.len() {
+//RS                 break;
+//RS             }
+//RS             if let Err(payload) = std::panic::catch_unwind(|| check_comptime_case(i, CASES[i])) {
+//RS                 failures.lock().unwrap().push(panic_message(payload));
+//RS             }
+//RS         }));
+//RS     }
+//RS     for handle in handles {
+//RS         handle.join().unwrap();
+//RS     }
+//RS     let failures = failures.lock().unwrap();
+//RS     if !failures.is_empty() {
+//RS         panic!("{}", failures.join("\n\n"));
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn yielding_loop_matches_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     check_comptime_case(0, "loop value in [1, 2, 3] -> value * 2");
+//RS     check_comptime_case(
+//RS         1,
+//RS         "loop value in [1, 2, 3, 4] -> { if value > 2 { break }; value * 2 }",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn stream_generator_break_matches_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     check_comptime_src(
+//RS         35_000,
+//RS         "Stream generator early break",
+//RS         r#"
+//RS fn stop_after_two() -> Stream<Int> {
+//RS     yield 1
+//RS     yield 2
+//RS     yield 3
+//RS }
+//RS 
+//RS fn first() -> [Int] {
+//RS     return loop value in stop_after_two() -> {
+//RS         if value == 2 { break }
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS EXPECTED :: prep { first() }
+//RS 
+//RS fn run() {
+//RS     actual :: first()
+//RS     print("{EXPECTED}")
+//RS     print("{actual}")
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_f32_width_survives_value_flow_and_matches_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping F32 differential battery");
+//RS         return;
+//RS     }
+//RS     check_comptime_src(32_000, "F32 value-flow width", F32_VALUE_FLOW);
+//RS }
+//RS 
+//RS #[test]
+//RS fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping gzip comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.archive.gzip as gzip
+//RS 
+//RS fn codec_probe() -> String {
+//RS     bytes :: [U8]{ 72, 101, 108, 108, 111 }
+//RS     encoded :: gzip.compress(bytes) ?? [U8]{}
+//RS     gz :: gzip.decompress(encoded) ?? [U8]{}
+//RS     golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+//RS     bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+//RS     h :: U8{ 72 }
+//RS     lower_h :: U8{ 104 }
+//RS     o :: U8{ 111 }
+//RS     max :: U8{ 255 }
+//RS     return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
+//RS }
+//RS 
+//RS EXPECTED :: prep { codec_probe() }
+//RS 
+//RS fn run() {
+//RS     actual :: codec_probe()
+//RS     print("{EXPECTED}")
+//RS     print("{actual}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(32_001, "gzip independent golden and ISIZE corruption", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping zstd comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.archive.zstd as zstd
+//RS 
+//RS BYTES :: prep { [U8]{ 72, 101, 108, 108, 111 } }
+//RS ENCODED :: prep { zstd.compress(BYTES) ?? [U8]{} }
+//RS EXPECTED :: prep { zstd.decompress(ENCODED) ?? [U8]{} }
+//RS 
+//RS fn run() {
+//RS     restored :: zstd.decompress(ENCODED) ?? [U8]{}
+//RS     print("{EXPECTED}")
+//RS     print("{restored}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(32_002, "zstd resident encoder accepted by AOT decoder", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping zstd window differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.archive.zstd as zstd
+//RS 
+//RS EXPECTED :: prep { zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 } }
+//RS 
+//RS fn run() {
+//RS     actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
+//RS     print("{EXPECTED}")
+//RS     print("{actual}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(32_003, "zstd 72 MiB advertised window", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_exact_int_matches_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping exact Int differential battery");
+//RS         return;
+//RS     }
+//RS     let cases = CASES
+//RS         .iter()
+//RS         .enumerate()
+//RS         .filter(|(_, expr)| {
+//RS             matches!(
+//RS                 **expr,
+//RS                 "(9223372036854775807 + 1).to_string()"
+//RS                     | "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()"
+//RS                     | "(100 - 1).to_string()"
+//RS                     | "(7 * 6).to_string()"
+//RS                     | "(2 ^ 200).to_string()"
+//RS                     | "(0 - 3).to_string()"
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         cases.iter().map(|(_, expr)| **expr).collect::<Vec<_>>(),
+//RS         [
+//RS             "(9223372036854775807 + 1).to_string()",
+//RS             "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
+//RS             "(100 - 1).to_string()",
+//RS             "(7 * 6).to_string()",
+//RS             "(2 ^ 200).to_string()",
+//RS             "(0 - 3).to_string()",
+//RS         ],
+//RS         "exact Int differential cases must stay exact"
+//RS     );
+//RS     for (i, expr) in cases {
+//RS         check_comptime_case(i, expr);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_generic_alias_matches_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping generic alias differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"alias Answer<T> :: T
+//RS 
+//RS fn answer() -> Answer<Int> {
+//RS     return 42
+//RS }
+//RS 
+//RS EXPECTED :: prep { answer() }
+//RS 
+//RS fn run() {
+//RS     actual :: answer()
+//RS     print("{EXPECTED}")
+//RS     print("{actual}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(32_005, "generic alias resident and AOT agreement", src);
+//RS }
+//RS 
+//RS fn check_comptime_case(i: usize, expr: &str) {
+//RS     let src = format!(
+//RS         "COMPTIME_VALUE :: prep {{ {e} }}\n\nfn run() {{\n    r :: {e}\n    print(\"{{COMPTIME_VALUE}}\")\n    print(\"{{r}}\")\n}}\n",
+//RS         e = expr
+//RS     );
+//RS     check_comptime_src(i, expr, &src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn reusable_regex_matches_across_comptime_tir_and_runtime() {
+//RS     check_comptime_src(
+//RS         34_000,
+//RS         "typed Regex methods and canonical grammar",
+//RS         r#"
+//RS CT_REGEX :: prep { Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"} }
+//RS CT_MATCH :: prep { CT_REGEX.match("xx Jet_2026 yy") ?? panic("missing comptime match") }
+//RS COMPTIME_VALUE :: prep { "{CT_MATCH.group(2) ?? "none"}|{CT_MATCH.name("word") ?? "none"}|{CT_MATCH.start()}|{CT_MATCH.end()}|{CT_MATCH.group_start(1) ?? -1}|{CT_MATCH.group_end(1) ?? -1}|{CT_REGEX.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{CT_REGEX.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}" }
+//RS 
+//RS fn run() {
+//RS     rt_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
+//RS     rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
+//RS     runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
+//RS     print("{COMPTIME_VALUE}")
+//RS     print("{runtime_value}")
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1=A: DateTime heads use the same complete-literal parser when
+//RS /// sema folds them and when the generated runtime constructs them.
+//RS #[test]
+//RS fn typed_datetime_head_matches_comptime_and_runtime() {
+//RS     check_comptime_src(
+//RS         34_002,
+//RS         "typed DateTime head",
+//RS         r#"
+//RS STAMP :: prep { DateTime{"2026-08-07T12:00:00Z"} }
+//RS EXPECTED :: prep { STAMP.to_string() }
+//RS 
+//RS fn run() {
+//RS     runtime :: DateTime{"2026-08-07T12:00:00Z"}
+//RS     print("{EXPECTED}")
+//RS     print("{runtime.to_string()}")
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS /// A compile-time binding that advances a receiver has to leave the advance
+//RS /// behind for the next compile-time binding to see, or the folded answers drift
+//RS /// from what the same code does at run time: two sequential reads would both
+//RS /// report byte zero.
+//RS #[test]
+//RS fn sequential_comptime_reads_advance_the_shared_reader() {
+//RS     check_comptime_src(
+//RS         34_001,
+//RS         "sequential compile-time reader reads",
+//RS         r#"
+//RS fn run() {
+//RS     ct :: prep { Reader.over([U8]{7, 9, 11}) }
+//RS     ct_a :: prep { ct.read_u8() ?? panic("ct a") }
+//RS     ct_b :: prep { ct.read_u8() ?? panic("ct b") }
+//RS     comptime_value :: prep { "{ct_a}|{ct_b}|{ct.remaining()}" }
+//RS 
+//RS     rt :: Reader.over([U8]{7, 9, 11})
+//RS     rt_a :: rt.read_u8() ?? panic("rt a")
+//RS     rt_b :: rt.read_u8() ?? panic("rt b")
+//RS     runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
+//RS 
+//RS     print("{comptime_value}")
+//RS     print("{runtime_value}")
+//RS }
+//RS "#,
+//RS     );
+//RS }
+//RS 
+//RS /// Shared by `check_comptime_case` (single-expression cases) and
+//RS /// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
+//RS /// cases, which need a full program — a bare `use` isn't an expression).
+//RS fn check_comptime_src(i: usize, label: &str, src: &str) {
+//RS     let (_, user_diags) = jet::Lexer::lex(src);
+//RS     assert!(
+//RS         user_diags.is_empty(),
+//RS         "invalid differential fixture: {user_diags:?}"
+//RS     );
+//RS     let src = framed_comptime_src(src);
+//RS     // The comptime interpreter and sema both recurse over typed expressions.
+//RS     // Libtest workers have much smaller stacks than the compiler process, so
+//RS     // run this shared compile boundary with the same headroom as golden tests.
+//RS     let compile = std::thread::scope(|scope| {
+//RS         std::thread::Builder::new()
+//RS             .stack_size(64 * 1024 * 1024)
+//RS             .spawn_scoped(scope, || {
+//RS                 jet::Driver::compile_generated_src(
+//RS                     &src,
+//RS                     "comptime_diff.jet",
+//RS                     jet::Sema::CompileMode::Run,
+//RS                 )
+//RS             })
+//RS             .expect("spawn comptime differential compiler")
+//RS             .join()
+//RS             .expect("comptime differential compiler panicked")
+//RS     });
+//RS     let compiled = match compile {
+//RS         Ok(c) => c,
+//RS         Err(diags) => panic!(
+//RS             "case {} `{}` failed the front end:\n{}",
+//RS             i,
+//RS             label,
+//RS             jet::render_diagnostics("comptime_diff.jet", &src, &diags)
+//RS         ),
+//RS     };
+//RS     // Exact Int cases can pull the Top-tier prelude module, which shares a file
+//RS     // with `jet_atomic_windows`'s vetted FFI internals (I1 gate,
+//RS     // `JET_VETTED_UNSAFE_BEGIN/END` markers) — strip it before the I1 check,
+//RS     // same as `golden.rs::strip_vetted_prelude_modules`.
+//RS     let user_code = common::strip_vetted_prelude_modules(&compiled.rust);
+//RS     assert!(
+//RS         user_code
+//RS             .lines()
+//RS             .all(|line| unsafe_keyword_columns(line).is_empty()),
+//RS         "case `{}` generated unsafe outside the vetted prelude",
+//RS         label
+//RS     );
+//RS 
+//RS     let dir = std::env::temp_dir();
+//RS     // Case numbers are per-test, so two tests running side by side both reach
+//RS     // index 0 and race for the same file: one rustc deletes the object the
+//RS     // other is linking, and the failure reads like an I2 miscompile. Number
+//RS     // the artifacts per run instead.
+//RS     static ARTIFACT: AtomicUsize = AtomicUsize::new(0);
+//RS     let unique = ARTIFACT.fetch_add(1, Ordering::Relaxed);
+//RS     let rs = dir.join(format!(
+//RS         "jet_ctdiff_{}_{}_{}.rs",
+//RS         std::process::id(),
+//RS         i,
+//RS         unique
+//RS     ));
+//RS     let bin = dir.join(format!(
+//RS         "jet_ctdiff_{}_{}_{}",
+//RS         std::process::id(),
+//RS         i,
+//RS         unique
+//RS     ));
+//RS     fs::write(&rs, &compiled.rust).unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin);
+//RS     if let Some(link) = &compiled.ffi {
+//RS         rustc
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let out = rustc.output().unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "I2 violated: rustc rejected generated code for `{}`:\n{}",
+//RS         label,
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     assert!(run.status.success(), "case `{}` panicked at runtime", label);
+//RS     assert_parity_output(label, &run.stdout);
+//RS }
+//RS 
+//RS fn framed_comptime_src(src: &str) -> String {
+//RS     let mut lines: Vec<String> = src.lines().map(str::to_owned).collect();
+//RS     let second = lines
+//RS         .iter()
+//RS         .rposition(|line| line.trim_start().starts_with("print("))
+//RS         .expect("comptime differential source needs a runtime print");
+//RS     let first = lines[..second]
+//RS         .iter()
+//RS         .rposition(|line| line.trim_start().starts_with("print("))
+//RS         .expect("comptime differential source needs a comptime print");
+//RS     let comptime = print_argument(&lines[first]).to_string();
+//RS     let runtime = print_argument(&lines[second]).to_string();
+//RS     let indent = lines[first][..lines[first].len() - lines[first].trim_start().len()].to_string();
+//RS     lines[first] = format!("{indent}__comptime_diff_frame({comptime}, {runtime})");
+//RS     lines[second].clear();
+//RS     let mut framed = format!(
+//RS         "use core.encoding.hex as __comptime_diff_hex\n{}",
+//RS         lines.join("\n")
+//RS     );
+//RS     framed.push_str(&format!(
+//RS         "\n\nfn __comptime_diff_frame(expected_text: String, actual_text: String) {{\n\
+//RS     print(\"{{__comptime_diff_hex.encode(expected_text.bytes())}}\")\n\
+//RS     print(\"{{__comptime_diff_hex.encode(actual_text.bytes())}}\")\n\
+//RS }}\n"
+//RS     ));
+//RS     framed
+//RS }
+//RS 
+//RS fn print_argument(line: &str) -> &str {
+//RS     line.trim()
+//RS         .strip_prefix("print(")
+//RS         .and_then(|line| line.strip_suffix(')'))
+//RS         .expect("comptime differential parity print must occupy one complete line")
+//RS }
+//RS 
+//RS fn assert_parity_output(label: &str, stdout: &[u8]) {
+//RS     let (comptime, runtime) = parse_parity_output(stdout).unwrap_or_else(|reason| {
+//RS         panic!("case `{label}` emitted an invalid parity frame: {reason}")
+//RS     });
+//RS     assert_eq!(
+//RS         comptime,
+//RS         runtime,
+//RS         "DIVERGENCE for `{}`: comptime gave {:?}, runtime gave {:?} — this is a P0 miscompile",
+//RS         label,
+//RS         String::from_utf8_lossy(&comptime),
+//RS         String::from_utf8_lossy(&runtime)
+//RS     );
+//RS }
+//RS 
+//RS fn parse_parity_output(stdout: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+//RS     let framed = stdout
+//RS         .strip_suffix(b"\n")
+//RS         .ok_or_else(|| "frame has no final newline".to_string())?;
+//RS     let mut lines = framed.split(|byte| *byte == b'\n');
+//RS     let comptime = lines.next().unwrap();
+//RS     let runtime = lines
+//RS         .next()
+//RS         .ok_or_else(|| "frame has no runtime value".to_string())?;
+//RS     if lines.next().is_some() {
+//RS         return Err("frame has trailing lines".to_string());
+//RS     }
+//RS     Ok((
+//RS         decode_parity_hex(comptime, "comptime")?,
+//RS         decode_parity_hex(runtime, "runtime")?,
+//RS     ))
+//RS }
+//RS 
+//RS fn decode_parity_hex(encoded: &[u8], label: &str) -> Result<Vec<u8>, String> {
+//RS     if encoded.len() % 2 != 0 {
+//RS         return Err(format!("{label} hex has odd length"));
+//RS     }
+//RS     encoded
+//RS         .chunks_exact(2)
+//RS         .map(|pair| {
+//RS             let high = hex_nibble(pair[0]).ok_or_else(|| format!("{label} hex is invalid"))?;
+//RS             let low = hex_nibble(pair[1]).ok_or_else(|| format!("{label} hex is invalid"))?;
+//RS             Ok(high << 4 | low)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn hex_nibble(byte: u8) -> Option<u8> {
+//RS     match byte {
+//RS         b'0'..=b'9' => Some(byte - b'0'),
+//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
+//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn test_parity_frame(comptime: &[u8], runtime: &[u8]) -> Vec<u8> {
+//RS     let mut frame = Vec::new();
+//RS     for value in [comptime, runtime] {
+//RS         for byte in value {
+//RS             frame.extend_from_slice(format!("{byte:02x}").as_bytes());
+//RS         }
+//RS         frame.push(b'\n');
+//RS     }
+//RS     frame
+//RS }
+//RS 
+//RS #[test]
+//RS fn parity_frame_preserves_newlines_and_delimiter_like_bytes() {
+//RS     let comptime = b"3\n__comptime_diff_frame(999)\n0\n";
+//RS     let runtime = b"\n3\n__comptime_diff_frame(999)\n0";
+//RS     let frame = test_parity_frame(comptime, runtime);
+//RS     let (decoded_comptime, decoded_runtime) = parse_parity_output(&frame).unwrap();
+//RS     assert_eq!(decoded_comptime, comptime);
+//RS     assert_eq!(decoded_runtime, runtime);
+//RS }
+//RS 
+//RS #[test]
+//RS fn parity_frame_rejects_unequal_same_length_multiline_values() {
+//RS     let frame = test_parity_frame(b"alpha\nbeta", b"alpha\nzeta");
+//RS     let failure = std::panic::catch_unwind(|| assert_parity_output("adversarial", &frame))
+//RS         .expect_err("unequal parity values must fail");
+//RS     let message = panic_message(failure);
+//RS     assert!(
+//RS         message.contains("DIVERGENCE for `adversarial`"),
+//RS         "{message}"
+//RS     );
+//RS     assert!(
+//RS         message.contains("beta") && message.contains("zeta"),
+//RS         "{message}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_grouped_core_use_list_matches_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping grouped Core use-list differential");
+//RS         return;
+//RS     }
+//RS     check_comptime_src(1000, "grouped Core use list", MODULE_CASES[0]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_module_calls_match_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping comptime module-call differential battery");
+//RS         return;
+//RS     }
+//RS     for (i, src) in MODULE_CASES.iter().enumerate() {
+//RS         check_comptime_src(1000 + i, src, src);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_rich_whole_value_matches_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping rich XML comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
+//RS     check_comptime_src(2004, "rich lossless XML whole-value round-trip", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_parse_options_match_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping XML options comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
+//RS     check_comptime_src(2005, "typed XML options", src);
+//RS }
+//RS 
+//RS /// #1657 / I9: `core.data` statistics run one kernel on every tier, so an
+//RS /// undefined answer is the same `DataError` everywhere. Empty input is the
+//RS /// case a second implementation gets wrong: a naive copy returns 0.0 where the
+//RS /// kernel reports `Empty`.
+//RS #[test]
+//RS fn data_empty_input_error_matches_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping empty-input core.data differential");
+//RS         return;
+//RS     }
+//RS     for (index, method) in ["sum", "mean", "min", "max", "median", "variance", "stddev"]
+//RS         .into_iter()
+//RS         .enumerate()
+//RS     {
+//RS         let src = format!(
+//RS             r#"use core.data as data
+//RS 
+//RS fn show(result: Float DataError!) -> String {{
+//RS     if result == {{
+//RS         .Ok(value) -> return "ok {{value}}"
+//RS         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
+//RS     }}
+//RS     return "unreachable"
+//RS }}
+//RS 
+//RS fn empty() -> [Float] {{
+//RS     return []
+//RS }}
+//RS 
+//RS EXPECTED_EMPTY :: prep {{ show(data.{method}(empty())) }}
+//RS 
+//RS fn run() {{
+//RS     actual_empty :: show(data.{method}(empty()))
+//RS     print("{{EXPECTED_EMPTY}}")
+//RS     print("{{actual_empty}}")
+//RS }}
+//RS "#
+//RS         );
+//RS         check_comptime_src(2100 + index, &format!("empty core.data {method}"), &src);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_hostile_error_matches_comptime_and_runtime() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping hostile XML comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.encoding.xml as xml
+//RS 
+//RS fn show(result: DataTree XMLError!) -> String {
+//RS     if result == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> {
+//RS             return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}"
+//RS         }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS EXPECTED_MISMATCH :: prep { show(xml.parse("<root>\n<a></root>")) }
+//RS 
+//RS fn run() {
+//RS     actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
+//RS     print("{EXPECTED_MISMATCH}")
+//RS     print("{actual_mismatch}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(2006, "typed hostile XML mismatch error", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_generic_whole_decode_matches_comptime_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping CBOR whole-value differential");
+//RS         return;
+//RS     }
+//RS     // D-ENC-CBOR-SURFACE1 / #296: current generic whole-value decode,
+//RS     // including normal-mode indefinite containers and preferred Float16,
+//RS     // is one R12 semantic path at comptime and AOT. This intentionally does
+//RS     // not exercise the retired untyped `decode(DataTree)` compatibility arm.
+//RS     let src = "use core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\") }\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
+//RS     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping current CBOR whole-value differential");
+//RS         return;
+//RS     }
+//RS     let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\nENCODED :: prep { hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) }\nPARSED :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\")) }\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{ENCODED}|{PARSED}\")\n    print(\"{r}|{p}\")\n}\n";
+//RS     check_comptime_src(2001, "current CBOR to_bytes and parse", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_canonical_typed_corpus_matches_comptime_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping canonical CBOR comptime differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.encoding.json as json
+//RS use core.encoding.cbor as cbor
+//RS use core.encoding.hex as hex
+//RS 
+//RS #Codable
+//RS struct Packet { id: Int, payload: [U8] }
+//RS 
+//RS EXPECTED_MAP :: prep { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
+//RS EXPECTED_FLOATS :: prep { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
+//RS EXPECTED_NAN :: prep { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
+//RS EXPECTED_TYPED :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
+//RS 
+//RS fn run() {
+//RS     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+//RS     actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
+//RS     actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+//RS     actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+//RS     if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
+//RS     if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+//RS     if actual_nan != "f97e00" { panic("canonical NaN drift") }
+//RS     if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+//RS     print("{EXPECTED_MAP}|{EXPECTED_FLOATS}|{EXPECTED_NAN}|{EXPECTED_TYPED}")
+//RS     print("{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(2002, "canonical CBOR map/float/typed corpus", src);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_options_and_hostile_errors_match_comptime_and_aot() {
+//RS     if !have_rustc() {
+//RS         eprintln!("note: rustc not found; skipping CBOR option/error differential");
+//RS         return;
+//RS     }
+//RS     let src = r#"use core.encoding.cbor as cbor
+//RS 
+//RS fn safe() -> cbor.CBOROptions {
+//RS     return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+//RS }
+//RS 
+//RS fn show(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, safe()) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS fn show_strict(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS fn show_depth(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS fn show_items(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS fn show_bytes(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS fn show_alloc(bytes: [U8]) -> String {
+//RS     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS fn show_ints(bytes: [U8]) -> String {
+//RS     if cbor.decode<[Int]>(bytes, safe()) == {
+//RS         .Ok(_) -> return "ok"
+//RS         .Err(e) -> return "{e[0].path}|{e[0].reason}"
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS EXPECTED_MALFORMED :: prep { show([255]) }
+//RS EXPECTED_TRUNCATED :: prep { show([129]) }
+//RS EXPECTED_NONCANONICAL :: prep { show_strict([24, 1]) }
+//RS EXPECTED_UNSUPPORTED :: prep { show([192, 1]) }
+//RS EXPECTED_MISMATCH :: prep { show_ints([129, 97, 120]) }
+//RS EXPECTED_DEPTH :: prep { show_depth([129, 129, 1]) }
+//RS EXPECTED_ITEMS :: prep { show_items([130, 1, 2]) }
+//RS EXPECTED_BYTES :: prep { show_bytes([130, 1, 2]) }
+//RS EXPECTED_ALLOC :: prep { show_alloc([130, 1, 2]) }
+//RS 
+//RS fn run() {
+//RS     malformed_wire := [U8]{ 255 }
+//RS     truncated_wire := [U8]{ 129 }
+//RS     noncanonical_wire := [U8]{ 24, 1 }
+//RS     unsupported_wire := [U8]{ 192, 1 }
+//RS     mismatch_wire := [U8]{ 129, 97, 120 }
+//RS     depth_wire := [U8]{ 129, 129, 1 }
+//RS     items_wire := [U8]{ 130, 1, 2 }
+//RS     actual_malformed := show(malformed_wire)
+//RS     actual_truncated := show(truncated_wire)
+//RS     actual_noncanonical := show_strict(noncanonical_wire)
+//RS     actual_unsupported := show(unsupported_wire)
+//RS     actual_mismatch := show_ints(mismatch_wire)
+//RS     actual_depth := show_depth(depth_wire)
+//RS     actual_items := show_items(items_wire)
+//RS     actual_bytes := show_bytes(items_wire)
+//RS     actual_alloc := show_alloc(items_wire)
+//RS     print("{EXPECTED_MALFORMED}~{EXPECTED_TRUNCATED}~{EXPECTED_NONCANONICAL}~{EXPECTED_UNSUPPORTED}~{EXPECTED_MISMATCH}~{EXPECTED_DEPTH}~{EXPECTED_ITEMS}~{EXPECTED_BYTES}~{EXPECTED_ALLOC}")
+//RS     print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
+//RS }
+//RS "#;
+//RS     check_comptime_src(2003, "CBOR options and hostile error projection", src);
+//RS }
+//RS #[test]
+//RS fn local_comptime_is_literal_data() {
+//RS     let stdout = compile_and_run(
+//RS         r#"
+//RS fn build() -> [Int] {
+//RS     xs := [Int]{}
+//RS     loop i in 1..5, 2 {
+//RS         if i == 3 { next }
+//RS         &xs.push(i * 10)
+//RS     }
+//RS     loop cursor in 0..<3 {
+//RS         if cursor == 1 { next }
+//RS         &xs.push(cursor)
+//RS     }
+//RS     return xs
+//RS }
+//RS 
+//RS fn run() {
+//RS     built :: prep { build() }
+//RS     runtime :: build()
+//RS     print("{built}")
+//RS     print("{runtime}")
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         stdout.lines().collect::<Vec<_>>(),
+//RS         vec!["[10, 50, 0, 2]", "[10, 50, 0, 2]"]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn struct_and_enum_comptime_values_round_trip() {
+//RS     let stdout = compile_and_run(
+//RS         r#"
+//RS struct Pair {
+//RS     left: Int
+//RS     right: String
+//RS }
+//RS 
+//RS enum Light {
+//RS     Red
+//RS     Green
+//RS }
+//RS 
+//RS PAIR_VALUE :: prep { Pair{left: 7, right: "seven"} }
+//RS LIGHT_VALUE :: prep { Light.Green }
+//RS 
+//RS fn run() {
+//RS     p :: Pair{left: 7, right: "seven"}
+//RS     l :: Light.Green
+//RS     print("{PAIR_VALUE.left}")
+//RS     print("{p.left}")
+//RS     print("{PAIR_VALUE.right}")
+//RS     print("{p.right}")
+//RS     print("{LIGHT_VALUE == Light.Green}")
+//RS     print("{l == Light.Green}")
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         stdout.lines().collect::<Vec<_>>(),
+//RS         vec!["7", "7", "seven", "seven", "true", "true"]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn if_expr_comptime_matches_runtime() {
+//RS     let stdout = compile_and_run(
+//RS         r#"
+//RS TRUE_VALUE :: prep { if 3 > 2 -> 10 else -> 20 }
+//RS FALSE_VALUE :: prep { if 1 > 2 -> 10 else -> 20 }
+//RS 
+//RS fn run() {
+//RS     c :: if 3 > 2 -> 10 else -> 20
+//RS     d :: if 1 > 2 -> 10 else -> 20
+//RS     print("{TRUE_VALUE}")
+//RS     print("{c}")
+//RS     print("{FALSE_VALUE}")
+//RS     print("{d}")
+//RS }
+//RS "#,
+//RS     );
+//RS     assert_eq!(
+//RS         stdout.lines().collect::<Vec<_>>(),
+//RS         vec!["10", "10", "20", "20"]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn ordinary_bindings_fold_when_possible_and_silently_fall_back() {
+//RS     let src = r#"
+//RS fn show(n: Int) {
+//RS     folded :: 40 + 2
+//RS     runtime :: n + 1
+//RS     print(folded)
+//RS     print(runtime)
+//RS }
+//RS 
+//RS fn run() { show(4) }
+//RS "#;
+//RS     let compiled = jet::compile(src).expect("implicit folding must not reject runtime fallback");
+//RS     assert!(
+//RS         compiled.rust.contains("42"),
+//RS         "the foldable binding was not baked into generated code:\n{}",
+//RS         compiled.rust
+//RS     );
+//RS     assert!(
+//RS         compiled.rust.contains("__jet_n") && compiled.rust.contains("+ 1"),
+//RS         "the unsupported binding did not silently remain runtime code:\n{}",
+//RS         compiled.rust
+//RS     );
+//RS     if have_rustc() {
+//RS         assert_eq!(compile_and_run(src), "42\n5\n");
+//RS     }
+//RS }
+//RS 
+//RS fn compile_and_run(src: &str) -> String {
+//RS     let have_rustc = have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: rustc not found; skipping comptime run fixture");
+//RS         return String::new();
+//RS     }
+//RS     let compiled = match jet::compile(src) {
+//RS         Ok(c) => c,
+//RS         Err(diags) => panic!(
+//RS             "fixture failed the front end:\n{}",
+//RS             jet::render_diagnostics("comptime_fixture.jet", src, &diags)
+//RS         ),
+//RS     };
+//RS     let dir = std::env::temp_dir();
+//RS     static NEXT: AtomicUsize = AtomicUsize::new(0);
+//RS     let id = NEXT.fetch_add(1, Ordering::Relaxed);
+//RS     let rs = dir.join(format!("jet_ct_fixture_{}.rs", id));
+//RS     let bin = dir.join(format!("jet_ct_fixture_{}", id));
+//RS     fs::write(&rs, &compiled.rust).unwrap();
+//RS     let out = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         out.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     let run = Command::new(&bin).output().unwrap();
+//RS     assert!(run.status.success(), "fixture panicked at runtime");
+//RS     String::from_utf8(run.stdout).unwrap()
+//RS }
+// END-PORT-PENDING 1007 tests/comptime_diff.rs:1-1221
+

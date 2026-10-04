@@ -1,0 +1,1798 @@
+// PORT-PENDING 0253 crates-jet-codegen-src-prelude-corelib-top-compute-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1-1794
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443) ─────────────
+//RS // One Core compute family. `Tensor` owns ranked multidimensional storage on the
+//RS // selected CPU-oracle or explicit accelerator ability; views retain the backing allocation and its
+//RS // strides. Mutable access requires the sema-proved exclusive ViewMut path;
+//RS // shared writes fail closed instead of copying or pretending to update an alias.
+//RS // Explicit Tensor copies materialize logical values into fresh backing storage.
+//RS // Engines only marshal into these Prelude symbols (I9).
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetComputeDevice {
+//RS     Auto,
+//RS     Cpu,
+//RS     Metal,
+//RS     Cuda,
+//RS     Vulkan,
+//RS     WebGpu,
+//RS }
+//RS 
+//RS const MAX_TENSOR_ELEMENTS: usize = 16 * 1024 * 1024;
+//RS const CPU_ORACLE_BACKEND: &str = "cpu-oracle";
+//RS const CPU_ORACLE_VERSION: &str = "builtin";
+//RS const CPU_ORACLE_CACHE: &str = "none";
+//RS const METAL_BACKEND: &str = "metal";
+//RS const METAL_VERSION: &str = "system";
+//RS const METAL_CACHE: &str = "runtime";
+//RS const CUDA_BACKEND: &str = "cuda";
+//RS const CUDA_VERSION: &str = "driver";
+//RS const CUDA_CACHE: &str = "runtime";
+//RS const VULKAN_BACKEND: &str = "vulkan";
+//RS const VULKAN_VERSION: &str = "system";
+//RS const VULKAN_CACHE: &str = "runtime";
+//RS const WEBGPU_BACKEND: &str = "webgpu";
+//RS const WEBGPU_VERSION: &str = "browser";
+//RS const WEBGPU_CACHE: &str = "runtime";
+//RS const CPU_ORACLE_F64_PROFILE: &str = "F64Strict+Reproducible";
+//RS const CPU_ORACLE_F32_PROFILE: &str = "F32Strict+Reproducible";
+//RS const CPU_ORACLE_F64_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "reproducible-reduction",
+//RS     "differential-oracle",
+//RS ];
+//RS const CPU_ORACLE_F32_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "f32-arithmetic",
+//RS     "cpu-simd-dispatch",
+//RS     "simd-tail",
+//RS     "blocked-matmul",
+//RS     "differential-oracle",
+//RS ];
+//RS const METAL_F32_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "f32-arithmetic",
+//RS     "reproducible-reduction",
+//RS     "elementwise",
+//RS     "matmul",
+//RS     "device-buffer",
+//RS     "stream",
+//RS     "differential-oracle",
+//RS ];
+//RS const CUDA_F32_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "f32-arithmetic",
+//RS     "reproducible-reduction",
+//RS     "elementwise",
+//RS     "matmul",
+//RS     "device-buffer",
+//RS     "stream",
+//RS     "differential-oracle",
+//RS ];
+//RS const VULKAN_F32_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "f32-arithmetic",
+//RS     "reproducible-reduction",
+//RS     "elementwise",
+//RS     "matmul",
+//RS     "device-buffer",
+//RS     "stream",
+//RS     "differential-oracle",
+//RS ];
+//RS const WEBGPU_F32_CAPABILITIES: &[&str] = &[
+//RS     "ranked-storage",
+//RS     "strided-view",
+//RS     "checked-bounds",
+//RS     "f32-arithmetic",
+//RS     "reproducible-reduction",
+//RS     "elementwise",
+//RS     "matmul",
+//RS     "device-buffer",
+//RS     "stream",
+//RS     "differential-oracle",
+//RS ];
+//RS 
+//RS // Compiled from `compute_vulkan.comp` with glslangValidator. Keeping the
+//RS // words in the Prelude makes AOT, JIT, comptime, and interpreter hosts use the
+//RS // same checked kernel without a runtime shader compiler dependency.
+//RS const VULKAN_SHADER: &[u32] = &[
+//RS     119734787, 65536, 524299, 479, 0, 131089, 1, 393227, 1, 1280527431, 1685353262, 808793134,
+//RS     0, 196622, 0, 1, 393231, 5, 4, 1852399981, 0, 11, 393232, 4,
+//RS     17, 64, 1, 1, 196611, 2, 450, 262149, 4, 1852399981, 0, 196613,
+//RS     8, 25705, 524293, 11, 1197436007, 1633841004, 1986939244, 1952539503, 1231974249, 68, 262149, 19,
+//RS     1634885968, 29549, 327686, 19, 0, 1853189987, 116, 327686, 19, 1, 1937207154, 0,
+//RS     327686, 19, 2, 1701736041, 114, 327686, 19, 3, 1936486243, 0, 262150, 19,
+//RS     4, 28783, 327686, 19, 5, 1818321779, 29281, 196613, 21, 112, 262149, 60,
+//RS     1952867692, 0, 196613, 62, 65, 262150, 62, 0, 97, 196613, 64, 0,
+//RS     262149, 69, 1751607666, 116, 196613, 71, 66, 262150, 71, 0, 98, 196613,
+//RS     73, 0, 196613, 83, 67, 262150, 83, 0, 99, 196613, 85, 0,
+//RS     262149, 152, 1970037110, 101, 196613, 211, 7827314, 196613, 217, 7106403, 196613, 222,
+//RS     7173491, 196613, 224, 107, 196613, 271, 7173491, 262149, 272, 1701080681, 120, 196613,
+//RS     302, 7173491, 262149, 303, 1701080681, 120, 327685, 313, 1717987684, 1852142181, 25955, 327685,
+//RS     341, 1717987684, 1852142181, 25955, 196613, 374, 68, 262150, 374, 0, 100, 196613,
+//RS     376, 0, 196613, 407, 7173491, 262149, 408, 1701080681, 120, 196613, 430, 69,
+//RS     262150, 430, 0, 101, 196613, 432, 0, 196613, 476, 70, 262150, 476,
+//RS     0, 102, 196613, 478, 0, 262215, 11, 11, 28, 196679, 19, 2,
+//RS     327752, 19, 0, 35, 0, 327752, 19, 1, 35, 4, 327752, 19,
+//RS     2, 35, 8, 327752, 19, 3, 35, 12, 327752, 19, 4, 35,
+//RS     16, 327752, 19, 5, 35, 20, 262215, 21, 33, 6, 262215, 21,
+//RS     34, 0, 262215, 61, 6, 4, 196679, 62, 3, 262216, 62, 0,
+//RS     24, 327752, 62, 0, 35, 0, 196679, 64, 24, 262215, 64, 33,
+//RS     0, 262215, 64, 34, 0, 262215, 70, 6, 4, 196679, 71, 3,
+//RS     262216, 71, 0, 24, 327752, 71, 0, 35, 0, 196679, 73, 24,
+//RS     262215, 73, 33, 1, 262215, 73, 34, 0, 262215, 82, 6, 4,
+//RS     196679, 83, 3, 327752, 83, 0, 35, 0, 262215, 85, 33, 2,
+//RS     262215, 85, 34, 0, 262215, 373, 6, 4, 196679, 374, 3, 262216,
+//RS     374, 0, 24, 327752, 374, 0, 35, 0, 196679, 376, 24, 262215,
+//RS     376, 33, 3, 262215, 376, 34, 0, 262215, 429, 6, 4, 196679,
+//RS     430, 3, 262216, 430, 0, 24, 327752, 430, 0, 35, 0, 196679,
+//RS     432, 24, 262215, 432, 33, 4, 262215, 432, 34, 0, 262215, 474,
+//RS     11, 25, 262215, 475, 6, 4, 196679, 476, 3, 262216, 476, 0,
+//RS     24, 327752, 476, 0, 35, 0, 196679, 478, 24, 262215, 478, 33,
+//RS     5, 262215, 478, 34, 0, 131091, 2, 196641, 3, 2, 262165, 6,
+//RS     32, 0, 262176, 7, 7, 6, 262167, 9, 6, 3, 262176, 10,
+//RS     1, 9, 262203, 10, 11, 1, 262187, 6, 12, 0, 262176, 13,
+//RS     1, 6, 131092, 16, 196630, 18, 32, 524318, 19, 6, 6, 6,
+//RS     6, 6, 18, 262176, 20, 2, 19, 262203, 20, 21, 2, 262165,
+//RS     22, 32, 1, 262187, 22, 23, 0, 262176, 24, 2, 6, 262187,
+//RS     22, 30, 4, 262187, 6, 33, 12, 262187, 6, 40, 13, 262187,
+//RS     6, 47, 15, 262187, 6, 55, 5, 262176, 59, 7, 18, 196637,
+//RS     61, 18, 196638, 62, 61, 262176, 63, 2, 62, 262203, 63, 64,
+//RS     2, 262176, 66, 2, 18, 196637, 70, 18, 196638, 71, 70, 262176,
+//RS     72, 2, 71, 262203, 72, 73, 2, 196637, 82, 18, 196638, 83,
+//RS     82, 262176, 84, 2, 83, 262203, 84, 85, 2, 262187, 6, 94,
+//RS     1, 262187, 6, 106, 2, 262187, 6, 118, 3, 262187, 6, 130,
+//RS     4, 262187, 6, 148, 10, 262187, 6, 158, 6, 262187, 6, 169,
+//RS     7, 262187, 6, 180, 8, 262187, 6, 191, 9, 262187, 6, 207,
+//RS     11, 262187, 22, 213, 3, 262187, 18, 223, 0, 262187, 22, 231,
+//RS     2, 262187, 22, 255, 1, 262187, 6, 337, 14, 262187, 22, 342,
+//RS     5, 262187, 18, 367, 1073741824, 196637, 373, 18, 196638, 374, 373, 262176,
+//RS     375, 2, 374, 262203, 375, 376, 2, 262187, 6, 398, 16, 196637,
+//RS     429, 18, 196638, 430, 429, 262176, 431, 2, 430, 262203, 431, 432,
+//RS     2, 262187, 6, 451, 18, 262187, 6, 473, 64, 393260, 9, 474,
+//RS     473, 94, 94, 196637, 475, 18, 196638, 476, 475, 262176, 477, 2,
+//RS     476, 262203, 477, 478, 2, 327734, 2, 4, 0, 3, 131320, 5,
+//RS     262203, 7, 8, 7, 262203, 59, 60, 7, 262203, 59, 69, 7,
+//RS     262203, 59, 152, 7, 262203, 7, 211, 7, 262203, 7, 217, 7,
+//RS     262203, 59, 222, 7, 262203, 7, 224, 7, 262203, 59, 271, 7,
+//RS     262203, 7, 272, 7, 262203, 59, 302, 7, 262203, 7, 303, 7,
+//RS     262203, 59, 313, 7, 262203, 59, 341, 7, 262203, 59, 346, 7,
+//RS     262203, 59, 407, 7, 262203, 7, 408, 7, 327745, 13, 14, 11,
+//RS     12, 262205, 6, 15, 14, 196670, 8, 15, 262205, 6, 17, 8,
+//RS     327745, 24, 25, 21, 23, 262205, 6, 26, 25, 327854, 16, 27,
+//RS     17, 26, 196855, 29, 0, 262394, 27, 28, 29, 131320, 28, 327745,
+//RS     24, 31, 21, 30, 262205, 6, 32, 31, 327851, 16, 34, 32,
+//RS     33, 131321, 29, 131320, 29, 458997, 16, 35, 27, 5, 34, 28,
+//RS     196855, 37, 0, 262394, 35, 36, 37, 131320, 36, 327745, 24, 38,
+//RS     21, 30, 262205, 6, 39, 38, 327851, 16, 41, 39, 40, 131321,
+//RS     37, 131320, 37, 458997, 16, 42, 35, 29, 41, 36, 196855, 44,
+//RS     0, 262394, 42, 43, 44, 131320, 43, 327745, 24, 45, 21, 30,
+//RS     262205, 6, 46, 45, 327851, 16, 48, 46, 47, 131321, 44, 131320,
+//RS     44, 458997, 16, 49, 42, 37, 48, 43, 196855, 51, 0, 262394,
+//RS     49, 50, 51, 131320, 50, 65789, 131320, 51, 327745, 24, 53, 21,
+//RS     30, 262205, 6, 54, 53, 327858, 16, 56, 54, 55, 196855, 58,
+//RS     0, 262394, 56, 57, 145, 131320, 57, 262205, 6, 65, 8, 393281,
+//RS     66, 67, 64, 23, 65, 262205, 18, 68, 67, 196670, 60, 68,
+//RS     262205, 6, 74, 8, 393281, 66, 75, 73, 23, 74, 262205, 18,
+//RS     76, 75, 196670, 69, 76, 327745, 24, 77, 21, 30, 262205, 6,
+//RS     78, 77, 327850, 16, 79, 78, 12, 196855, 81, 0, 262394, 79,
+//RS     80, 91, 131320, 80, 262205, 6, 86, 8, 262205, 18, 87, 60,
+//RS     262205, 18, 88, 69, 327809, 18, 89, 87, 88, 393281, 66, 90,
+//RS     85, 23, 86, 196670, 90, 89, 131321, 81, 131320, 91, 327745, 24,
+//RS     92, 21, 30, 262205, 6, 93, 92, 327850, 16, 95, 93, 94,
+//RS     196855, 97, 0, 262394, 95, 96, 103, 131320, 96, 262205, 6, 98,
+//RS     8, 262205, 18, 99, 60, 262205, 18, 100, 69, 327813, 18, 101,
+//RS     99, 100, 393281, 66, 102, 85, 23, 98, 196670, 102, 101, 131321,
+//RS     97, 131320, 103, 327745, 24, 104, 21, 30, 262205, 6, 105, 104,
+//RS     327850, 16, 107, 105, 106, 196855, 109, 0, 262394, 107, 108, 115,
+//RS     131320, 108, 262205, 6, 110, 8, 262205, 18, 111, 60, 262205, 18,
+//RS     112, 69, 327811, 18, 113, 111, 112, 393281, 66, 114, 85, 23,
+//RS     110, 196670, 114, 113, 131321, 109, 131320, 115, 327745, 24, 116, 21,
+//RS     30, 262205, 6, 117, 116, 327850, 16, 119, 117, 118, 196855, 121,
+//RS     0, 262394, 119, 120, 127, 131320, 120, 262205, 6, 122, 8, 262205,
+//RS     18, 123, 60, 262205, 18, 124, 69, 327816, 18, 125, 123, 124,
+//RS     393281, 66, 126, 85, 23, 122, 196670, 126, 125, 131321, 121, 131320,
+//RS     127, 327745, 24, 128, 21, 30, 262205, 6, 129, 128, 327850, 16,
+//RS     131, 129, 130, 196855, 133, 0, 262394, 131, 132, 139, 131320, 132,
+//RS     262205, 6, 134, 8, 262205, 18, 135, 60, 262205, 18, 136, 69,
+//RS     458764, 18, 137, 1, 40, 135, 136, 393281, 66, 138, 85, 23,
+//RS     134, 196670, 138, 137, 131321, 133, 131320, 139, 262205, 6, 140, 8,
+//RS     262205, 18, 141, 60, 262205, 18, 142, 69, 458764, 18, 143, 1,
+//RS     37, 141, 142, 393281, 66, 144, 85, 23, 140, 196670, 144, 143,
+//RS     131321, 133, 131320, 133, 131321, 121, 131320, 121, 131321, 109, 131320, 109,
+//RS     131321, 97, 131320, 97, 131321, 81, 131320, 81, 131321, 58, 131320, 145,
+//RS     327745, 24, 146, 21, 30, 262205, 6, 147, 146, 327858, 16, 149,
+//RS     147, 148, 196855, 151, 0, 262394, 149, 150, 204, 131320, 150, 262205,
+//RS     6, 153, 8, 393281, 66, 154, 64, 23, 153, 262205, 18, 155,
+//RS     154, 196670, 152, 155, 327745, 24, 156, 21, 30, 262205, 6, 157,
+//RS     156, 327850, 16, 159, 157, 158, 196855, 161, 0, 262394, 159, 160,
+//RS     166, 131320, 160, 262205, 6, 162, 8, 262205, 18, 163, 152, 262271,
+//RS     18, 164, 163, 393281, 66, 165, 85, 23, 162, 196670, 165, 164,
+//RS     131321, 161, 131320, 166, 327745, 24, 167, 21, 30, 262205, 6, 168,
+//RS     167, 327850, 16, 170, 168, 169, 196855, 172, 0, 262394, 170, 171,
+//RS     177, 131320, 171, 262205, 6, 173, 8, 262205, 18, 174, 152, 393228,
+//RS     18, 175, 1, 4, 174, 393281, 66, 176, 85, 23, 173, 196670,
+//RS     176, 175, 131321, 172, 131320, 177, 327745, 24, 178, 21, 30, 262205,
+//RS     6, 179, 178, 327850, 16, 181, 179, 180, 196855, 183, 0, 262394,
+//RS     181, 182, 188, 131320, 182, 262205, 6, 184, 8, 262205, 18, 185,
+//RS     152, 393228, 18, 186, 1, 27, 185, 393281, 66, 187, 85, 23,
+//RS     184, 196670, 187, 186, 131321, 183, 131320, 188, 327745, 24, 189, 21,
+//RS     30, 262205, 6, 190, 189, 327850, 16, 192, 190, 191, 196855, 194,
+//RS     0, 262394, 192, 193, 199, 131320, 193, 262205, 6, 195, 8, 262205,
+//RS     18, 196, 152, 393228, 18, 197, 1, 28, 196, 393281, 66, 198,
+//RS     85, 23, 195, 196670, 198, 197, 131321, 194, 131320, 199, 262205, 6,
+//RS     200, 8, 262205, 18, 201, 152, 393228, 18, 202, 1, 31, 201,
+//RS     393281, 66, 203, 85, 23, 200, 196670, 203, 202, 131321, 194, 131320,
+//RS     194, 131321, 183, 131320, 183, 131321, 172, 131320, 172, 131321, 161, 131320,
+//RS     161, 131321, 151, 131320, 204, 327745, 24, 205, 21, 30, 262205, 6,
+//RS     206, 205, 327850, 16, 208, 206, 207, 196855, 210, 0, 262394, 208,
+//RS     209, 260, 131320, 209, 262205, 6, 212, 8, 327745, 24, 214, 21,
+//RS     213, 262205, 6, 215, 214, 327814, 6, 216, 212, 215, 196670, 211,
+//RS     216, 262205, 6, 218, 8, 327745, 24, 219, 21, 213, 262205, 6,
+//RS     220, 219, 327817, 6, 221, 218, 220, 196670, 217, 221, 196670, 222,
+//RS     223, 196670, 224, 12, 131321, 225, 131320, 225, 262390, 227, 228, 0,
+//RS     131321, 229, 131320, 229, 262205, 6, 230, 224, 327745, 24, 232, 21,
+//RS     231, 262205, 6, 233, 232, 327856, 16, 234, 230, 233, 262394, 234,
+//RS     226, 227, 131320, 226, 262205, 6, 235, 211, 327745, 24, 236, 21,
+//RS     231, 262205, 6, 237, 236, 327812, 6, 238, 235, 237, 262205, 6,
+//RS     239, 224, 327808, 6, 240, 238, 239, 393281, 66, 241, 64, 23,
+//RS     240, 262205, 18, 242, 241, 262205, 6, 243, 224, 327745, 24, 244,
+//RS     21, 213, 262205, 6, 245, 244, 327812, 6, 246, 243, 245, 262205,
+//RS     6, 247, 217, 327808, 6, 248, 246, 247, 393281, 66, 249, 73,
+//RS     23, 248, 262205, 18, 250, 249, 327813, 18, 251, 242, 250, 262205,
+//RS     18, 252, 222, 327809, 18, 253, 252, 251, 196670, 222, 253, 131321,
+//RS     228, 131320, 228, 262205, 6, 254, 224, 327808, 6, 256, 254, 255,
+//RS     196670, 224, 256, 131321, 225, 131320, 227, 262205, 6, 257, 8, 262205,
+//RS     18, 258, 222, 393281, 66, 259, 85, 23, 257, 196670, 259, 258,
+//RS     131321, 210, 131320, 260, 327745, 24, 261, 21, 30, 262205, 6, 262,
+//RS     261, 327850, 16, 263, 262, 33, 196855, 265, 0, 262394, 263, 264,
+//RS     291, 131320, 264, 262205, 6, 266, 8, 327851, 16, 267, 266, 12,
+//RS     196855, 269, 0, 262394, 267, 268, 269, 131320, 268, 65789, 131320, 269,
+//RS     196670, 271, 223, 196670, 272, 12, 131321, 273, 131320, 273, 262390, 275,
+//RS     276, 0, 131321, 277, 131320, 277, 262205, 6, 278, 272, 327745, 24,
+//RS     279, 21, 23, 262205, 6, 280, 279, 327856, 16, 281, 278, 280,
+//RS     262394, 281, 274, 275, 131320, 274, 262205, 6, 282, 272, 393281, 66,
+//RS     283, 64, 23, 282, 262205, 18, 284, 283, 262205, 18, 285, 271,
+//RS     327809, 18, 286, 285, 284, 196670, 271, 286, 131321, 276, 131320, 276,
+//RS     262205, 6, 287, 272, 327808, 6, 288, 287, 255, 196670, 272, 288,
+//RS     131321, 273, 131320, 275, 262205, 18, 289, 271, 393281, 66, 290, 85,
+//RS     23, 23, 196670, 290, 289, 131321, 265, 131320, 291, 327745, 24, 292,
+//RS     21, 30, 262205, 6, 293, 292, 327850, 16, 294, 293, 40, 196855,
+//RS     296, 0, 262394, 294, 295, 334, 131320, 295, 262205, 6, 297, 8,
+//RS     327851, 16, 298, 297, 12, 196855, 300, 0, 262394, 298, 299, 300,
+//RS     131320, 299, 65789, 131320, 300, 196670, 302, 223, 196670, 303, 12, 131321,
+//RS     304, 131320, 304, 262390, 306, 307, 0, 131321, 308, 131320, 308, 262205,
+//RS     6, 309, 303, 327745, 24, 310, 21, 23, 262205, 6, 311, 310,
+//RS     327856, 16, 312, 309, 311, 262394, 312, 305, 306, 131320, 305, 262205,
+//RS     6, 314, 303, 393281, 66, 315, 64, 23, 314, 262205, 18, 316,
+//RS     315, 262205, 6, 317, 303, 393281, 66, 318, 73, 23, 317, 262205,
+//RS     18, 319, 318, 327811, 18, 320, 316, 319, 196670, 313, 320, 262205,
+//RS     18, 321, 313, 262205, 18, 322, 313, 327813, 18, 323, 321, 322,
+//RS     262205, 18, 324, 302, 327809, 18, 325, 324, 323, 196670, 302, 325,
+//RS     131321, 307, 131320, 307, 262205, 6, 326, 303, 327808, 6, 327, 326,
+//RS     255, 196670, 303, 327, 131321, 304, 131320, 306, 262205, 18, 328, 302,
+//RS     327745, 24, 329, 21, 23, 262205, 6, 330, 329, 262256, 18, 331,
+//RS     330, 327816, 18, 332, 328, 331, 393281, 66, 333, 85, 23, 23,
+//RS     196670, 333, 332, 131321, 296, 131320, 334, 327745, 24, 335, 21, 30,
+//RS     262205, 6, 336, 335, 327850, 16, 338, 336, 337, 196855, 340, 0,
+//RS     262394, 338, 339, 381, 131320, 339, 327745, 66, 343, 21, 342, 262205,
+//RS     18, 344, 343, 327860, 16, 345, 344, 223, 196855, 348, 0, 262394,
+//RS     345, 347, 356, 131320, 347, 262205, 6, 349, 8, 393281, 66, 350,
+//RS     64, 23, 349, 262205, 18, 351, 350, 262205, 6, 352, 8, 393281,
+//RS     66, 353, 73, 23, 352, 262205, 18, 354, 353, 327811, 18, 355,
+//RS     351, 354, 196670, 346, 355, 131321, 348, 131320, 356, 262205, 6, 357,
+//RS     8, 393281, 66, 358, 73, 23, 357, 262205, 18, 359, 358, 262205,
+//RS     6, 360, 8, 393281, 66, 361, 64, 23, 360, 262205, 18, 362,
+//RS     361, 327811, 18, 363, 359, 362, 196670, 346, 363, 131321, 348, 131320,
+//RS     348, 262205, 18, 364, 346, 196670, 341, 364, 262205, 6, 365, 8,
+//RS     262205, 18, 366, 341, 327745, 24, 368, 21, 23, 262205, 6, 369,
+//RS     368, 262256, 18, 370, 369, 327816, 18, 371, 367, 370, 327813, 18,
+//RS     372, 366, 371, 393281, 66, 377, 376, 23, 23, 262205, 18, 378,
+//RS     377, 327813, 18, 379, 372, 378, 393281, 66, 380, 85, 23, 365,
+//RS     196670, 380, 379, 131321, 340, 131320, 381, 327745, 24, 382, 21, 30,
+//RS     262205, 6, 383, 382, 327850, 16, 384, 383, 47, 196855, 386, 0,
+//RS     262394, 384, 385, 395, 131320, 385, 262205, 6, 387, 8, 262205, 6,
+//RS     388, 8, 393281, 66, 389, 64, 23, 388, 262205, 18, 390, 389,
+//RS     327745, 66, 391, 21, 342, 262205, 18, 392, 391, 327813, 18, 393,
+//RS     390, 392, 393281, 66, 394, 85, 23, 387, 196670, 394, 393, 131321,
+//RS     386, 131320, 395, 327745, 24, 396, 21, 30, 262205, 6, 397, 396,
+//RS     327850, 16, 399, 397, 398, 196855, 401, 0, 262394, 399, 400, 448,
+//RS     131320, 400, 262205, 6, 402, 8, 327851, 16, 403, 402, 12, 196855,
+//RS     405, 0, 262394, 403, 404, 405, 131320, 404, 65789, 131320, 405, 196670,
+//RS     407, 223, 196670, 408, 12, 131321, 409, 131320, 409, 262390, 411, 412,
+//RS     0, 131321, 413, 131320, 413, 262205, 6, 414, 408, 327745, 24, 415,
+//RS     21, 23, 262205, 6, 416, 415, 327856, 16, 417, 414, 416, 262394,
+//RS     417, 410, 411, 131320, 410, 262205, 6, 418, 408, 393281, 66, 419,
+//RS     64, 23, 418, 262205, 18, 420, 419, 262205, 6, 421, 408, 393281,
+//RS     66, 422, 73, 23, 421, 262205, 18, 423, 422, 327811, 18, 424,
+//RS     420, 423, 327813, 18, 425, 367, 424, 262205, 6, 426, 408, 393281,
+//RS     66, 427, 376, 23, 426, 262205, 18, 428, 427, 262205, 6, 433,
+//RS     408, 393281, 66, 434, 432, 23, 433, 262205, 18, 435, 434, 327811,
+//RS     18, 436, 428, 435, 327813, 18, 437, 425, 436, 262205, 18, 438,
+//RS     407, 327809, 18, 439, 438, 437, 196670, 407, 439, 131321, 412, 131320,
+//RS     412, 262205, 6, 440, 408, 327808, 6, 441, 440, 255, 196670, 408,
+//RS     441, 131321, 409, 131320, 411, 262205, 18, 442, 407, 327745, 24, 443,
+//RS     21, 23, 262205, 6, 444, 443, 262256, 18, 445, 444, 327816, 18,
+//RS     446, 442, 445, 393281, 66, 447, 85, 23, 23, 196670, 447, 446,
+//RS     131321, 401, 131320, 448, 327745, 24, 449, 21, 30, 262205, 6, 450,
+//RS     449, 327850, 16, 452, 450, 451, 196855, 454, 0, 262394, 452, 453,
+//RS     467, 131320, 453, 262205, 6, 455, 8, 262205, 6, 456, 8, 393281,
+//RS     66, 457, 64, 23, 456, 262205, 18, 458, 457, 327745, 66, 459,
+//RS     21, 342, 262205, 18, 460, 459, 262205, 6, 461, 8, 393281, 66,
+//RS     462, 73, 23, 461, 262205, 18, 463, 462, 327813, 18, 464, 460,
+//RS     463, 327811, 18, 465, 458, 464, 393281, 66, 466, 85, 23, 455,
+//RS     196670, 466, 465, 131321, 454, 131320, 467, 262205, 6, 468, 8, 262205,
+//RS     6, 469, 8, 393281, 66, 470, 64, 23, 469, 262205, 18, 471,
+//RS     470, 393281, 66, 472, 85, 23, 468, 196670, 472, 471, 131321, 454,
+//RS     131320, 454, 131321, 401, 131320, 401, 131321, 386, 131320, 386, 131321, 340,
+//RS     131320, 340, 131321, 296, 131320, 296, 131321, 265, 131320, 265, 131321, 210,
+//RS     131320, 210, 131321, 151, 131320, 151, 131321, 58, 131320, 58, 65789, 65592,
+//RS ];
+//RS // D-COMPUTE-BACKEND1=D / #1145: the Metal bridge is a Prelude-owned native
+//RS // adapter. It stages canonical F32 values into shared Metal buffers, launches
+//RS // checked kernels, and reads the result back into the Tensor owner. No host
+//RS // engine selects a kernel or supplies a fallback policy.
+//RS #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS mod jet_compute_metal {
+//RS     use super::JetComputeError;
+//RS     use std::ffi::CString;
+//RS 
+//RS     type Obj = usize;
+//RS 
+//RS     const STATUS_COMPLETED: Obj = 4;
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct Size {
+//RS         width: usize,
+//RS         height: usize,
+//RS         depth: usize,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct Params {
+//RS         count: u32,
+//RS         rows: u32,
+//RS         inner: u32,
+//RS         cols: u32,
+//RS         op: u32,
+//RS         scalar: f32,
+//RS     }
+//RS 
+//RS     const SHADER: &str = r#"
+//RS #include <metal_stdlib>
+//RS using namespace metal;
+//RS #pragma clang fp contract(off)
+//RS 
+//RS struct JetParams {
+//RS     uint count;
+//RS     uint rows;
+//RS     uint inner;
+//RS     uint cols;
+//RS     uint op;
+//RS     float scalar;
+//RS };
+//RS 
+//RS kernel void jet_binary(
+//RS     device const float* a [[buffer(0)]],
+//RS     device const float* b [[buffer(1)]],
+//RS     device float* out [[buffer(2)]],
+//RS     constant JetParams& p [[buffer(3)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     float left = a[id];
+//RS     float right = b[id];
+//RS     switch (p.op) {
+//RS         case 0: out[id] = left + right; break;
+//RS         case 1: out[id] = left * right; break;
+//RS         case 2: out[id] = left - right; break;
+//RS         case 3: out[id] = left / right; break;
+//RS         case 4: out[id] = max(left, right); break;
+//RS         case 5: out[id] = min(left, right); break;
+//RS         default: out[id] = 0.0f; break;
+//RS     }
+//RS }
+//RS 
+//RS kernel void jet_unary(
+//RS     device const float* a [[buffer(0)]],
+//RS     device float* out [[buffer(1)]],
+//RS     constant JetParams& p [[buffer(2)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     float value = a[id];
+//RS     switch (p.op) {
+//RS         case 0: out[id] = -value; break;
+//RS         case 1: out[id] = abs(value); break;
+//RS         case 2: out[id] = exp(value); break;
+//RS         case 3: out[id] = log(value); break;
+//RS         case 4: out[id] = sqrt(value); break;
+//RS         default: out[id] = 0.0f; break;
+//RS     }
+//RS }
+//RS 
+//RS kernel void jet_matmul(
+//RS     device const float* a [[buffer(0)]],
+//RS     device const float* b [[buffer(1)]],
+//RS     device float* out [[buffer(2)]],
+//RS     constant JetParams& p [[buffer(3)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     uint total = p.rows * p.cols;
+//RS     if (id >= total) return;
+//RS     uint row = id / p.cols;
+//RS     uint col = id % p.cols;
+//RS     float sum = 0.0f;
+//RS     for (uint inner = 0; inner < p.inner; inner++) {
+//RS         sum = sum + a[row * p.inner + inner] * b[inner * p.cols + col];
+//RS     }
+//RS     out[id] = sum;
+//RS }
+//RS 
+//RS kernel void jet_sum(
+//RS     device const float* a [[buffer(0)]],
+//RS     device float* out [[buffer(1)]],
+//RS     constant JetParams& p [[buffer(2)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id != 0) return;
+//RS     float sum = 0.0f;
+//RS     for (uint index = 0; index < p.count; index++) sum = sum + a[index];
+//RS     out[0] = sum;
+//RS }
+//RS 
+//RS kernel void jet_mse(
+//RS     device const float* a [[buffer(0)]],
+//RS     device const float* b [[buffer(1)]],
+//RS     device float* out [[buffer(2)]],
+//RS     constant JetParams& p [[buffer(3)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id != 0) return;
+//RS     float sum = 0.0f;
+//RS     for (uint index = 0; index < p.count; index++) {
+//RS         float difference = a[index] - b[index];
+//RS         sum = sum + difference * difference;
+//RS     }
+//RS     out[0] = sum / float(p.count);
+//RS }
+//RS 
+//RS kernel void jet_mse_grad(
+//RS     device const float* a [[buffer(0)]],
+//RS     device const float* b [[buffer(1)]],
+//RS     device const float* cot [[buffer(2)]],
+//RS     device float* out [[buffer(3)]],
+//RS     constant JetParams& p [[buffer(4)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     float difference = p.op == 0 ? a[id] - b[id] : b[id] - a[id];
+//RS     out[id] = difference * (2.0f / float(p.count)) * cot[0];
+//RS }
+//RS 
+//RS kernel void jet_mse_jvp(
+//RS     device const float* a [[buffer(0)]],
+//RS     device const float* b [[buffer(1)]],
+//RS     device const float* at [[buffer(2)]],
+//RS     device const float* bt [[buffer(3)]],
+//RS     device float* out [[buffer(4)]],
+//RS     constant JetParams& p [[buffer(5)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id != 0) return;
+//RS     float sum = 0.0f;
+//RS     for (uint index = 0; index < p.count; index++) {
+//RS         sum = sum + 2.0f * (a[index] - b[index]) * (at[index] - bt[index]);
+//RS     }
+//RS     out[0] = sum / float(p.count);
+//RS }
+//RS 
+//RS kernel void jet_sgd(
+//RS     device const float* parameter [[buffer(0)]],
+//RS     device const float* gradient [[buffer(1)]],
+//RS     device float* out [[buffer(2)]],
+//RS     constant JetParams& p [[buffer(3)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     out[id] = parameter[id] - p.scalar * gradient[id];
+//RS }
+//RS 
+//RS kernel void jet_scale(
+//RS     device const float* a [[buffer(0)]],
+//RS     device float* out [[buffer(1)]],
+//RS     constant JetParams& p [[buffer(2)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     out[id] = a[id] * p.scalar;
+//RS }
+//RS 
+//RS kernel void jet_copy(
+//RS     device const float* a [[buffer(0)]],
+//RS     device float* out [[buffer(1)]],
+//RS     constant JetParams& p [[buffer(2)]],
+//RS     uint id [[thread_position_in_grid]]) {
+//RS     if (id >= p.count) return;
+//RS     out[id] = a[id];
+//RS }
+//RS "#;
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_compute_metal
+//RS #[link(name = "Metal", kind = "framework")]
+//RS unsafe extern "C" {
+//RS     fn MTLCreateSystemDefaultDevice() -> Obj;
+//RS }
+//RS 
+//RS #[link(name = "objc")]
+//RS unsafe extern "C" {
+//RS     fn objc_getClass(name: *const i8) -> Obj;
+//RS     fn sel_registerName(name: *const i8) -> Obj;
+//RS     fn objc_msgSend(receiver: Obj, selector: Obj, ...) -> Obj;
+//RS }
+//RS 
+//RS struct Object(Obj);
+//RS 
+//RS impl Object {
+//RS     fn new(value: Obj, label: &str) -> Result<Self, JetComputeError> {
+//RS         if value == 0 {
+//RS             return Err(JetComputeError::Device(format!(
+//RS                 "Metal {label} allocation or launch failed"
+//RS             )));
+//RS         }
+//RS         Ok(Self(value))
+//RS     }
+//RS 
+//RS     fn raw(&self) -> Obj {
+//RS         self.0
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for Object {
+//RS     fn drop(&mut self) {
+//RS         unsafe {
+//RS             msg0(self.0, b"release\0");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS unsafe fn selector(name: &[u8]) -> Obj {
+//RS     unsafe { sel_registerName(name.as_ptr().cast()) }
+//RS }
+//RS 
+//RS unsafe fn msg0(receiver: Obj, name: &[u8]) -> Obj {
+//RS     unsafe { objc_msgSend(receiver, selector(name)) }
+//RS }
+//RS 
+//RS unsafe fn msg1(receiver: Obj, name: &[u8], first: Obj) -> Obj {
+//RS     unsafe { objc_msgSend(receiver, selector(name), first) }
+//RS }
+//RS 
+//RS unsafe fn msg2(receiver: Obj, name: &[u8], first: Obj, second: Obj) -> Obj {
+//RS     unsafe { objc_msgSend(receiver, selector(name), first, second) }
+//RS }
+//RS 
+//RS unsafe fn msg3(receiver: Obj, name: &[u8], first: Obj, second: Obj, third: Obj) -> Obj {
+//RS     unsafe { objc_msgSend(receiver, selector(name), first, second, third) }
+//RS }
+//RS 
+//RS unsafe fn msg_size2(receiver: Obj, name: &[u8], first: Size, second: Size) -> Obj {
+//RS     unsafe { objc_msgSend(receiver, selector(name), first, second) }
+//RS }
+//RS 
+//RS fn string(value: &str) -> Result<Object, JetComputeError> {
+//RS     let value = CString::new(value).map_err(|_| {
+//RS         JetComputeError::Unsupported("Metal source name contains a NUL byte".to_string())
+//RS     })?;
+//RS     unsafe {
+//RS         let class = objc_getClass(b"NSString\0".as_ptr().cast());
+//RS         if class == 0 {
+//RS             return Err(JetComputeError::Device(
+//RS                 "Metal Objective-C NSString class is unavailable".to_string(),
+//RS             ));
+//RS         }
+//RS         let allocated = msg0(class, b"alloc\0");
+//RS         if allocated == 0 {
+//RS             return Err(JetComputeError::Device(
+//RS                 "Metal could not allocate an Objective-C string".to_string(),
+//RS             ));
+//RS         }
+//RS         let result = msg1(allocated, b"initWithUTF8String:\0", value.as_ptr() as Obj);
+//RS         if result == 0 {
+//RS             msg0(allocated, b"release\0");
+//RS             return Err(JetComputeError::Device(
+//RS                 "Metal could not create an Objective-C string".to_string(),
+//RS             ));
+//RS         }
+//RS         Object::new(result, "string")
+//RS     }
+//RS }
+//RS 
+//RS fn device() -> Result<Object, JetComputeError> {
+//RS     unsafe { Object::new(MTLCreateSystemDefaultDevice(), "device") }
+//RS }
+//RS 
+//RS pub fn available() -> bool {
+//RS     let Ok(device) = device() else {
+//RS         return false;
+//RS     };
+//RS     drop(device);
+//RS     true
+//RS }
+//RS 
+//RS fn object(value: Obj, label: &str) -> Result<Object, JetComputeError> {
+//RS     Object::new(value, label)
+//RS }
+//RS 
+//RS fn u32_value(value: usize, label: &str) -> Result<u32, JetComputeError> {
+//RS     u32::try_from(value).map_err(|_| {
+//RS         JetComputeError::InvalidShape(format!("Metal {label} exceeds the u32 kernel limit"))
+//RS     })
+//RS }
+//RS 
+//RS fn run(
+//RS     function_name: &str,
+//RS     inputs: &[&[f32]],
+//RS     output_len: usize,
+//RS     params: Params,
+//RS     output_index: usize,
+//RS     params_index: usize,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if output_len == 0 {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let device = device()?;
+//RS     let source = string(SHADER)?;
+//RS     let function_name = string(function_name)?;
+//RS     let options_class = unsafe { objc_getClass(b"MTLCompileOptions\0".as_ptr().cast()) };
+//RS     if options_class == 0 {
+//RS         return Err(JetComputeError::Device(
+//RS             "Metal compile options are unavailable".to_string(),
+//RS         ));
+//RS     }
+//RS     let options = unsafe {
+//RS         let allocated = msg0(options_class, b"alloc\0");
+//RS         let initialized = msg0(allocated, b"init\0");
+//RS         let options = object(initialized, "compile options")?;
+//RS         msg1(options.raw(), b"setFastMathEnabled:\0", 0);
+//RS         options
+//RS     };
+//RS     let mut compile_error = 0;
+//RS     let library = unsafe {
+//RS         object(
+//RS             msg3(
+//RS                 device.raw(),
+//RS                 b"newLibraryWithSource:options:error:\0",
+//RS                 source.raw(),
+//RS                 options.raw(),
+//RS                 (&mut compile_error as *mut Obj) as Obj,
+//RS             ),
+//RS             "library",
+//RS         )
+//RS         .map_err(|_| {
+//RS             JetComputeError::Unsupported(
+//RS                 "Metal shader compilation rejected the requested kernel".to_string(),
+//RS             )
+//RS         })?
+//RS     };
+//RS     let function = unsafe {
+//RS         object(
+//RS             msg1(
+//RS                 library.raw(),
+//RS                 b"newFunctionWithName:\0",
+//RS                 function_name.raw(),
+//RS             ),
+//RS             "kernel function",
+//RS         )
+//RS         .map_err(|_| {
+//RS             JetComputeError::Unsupported(
+//RS                 "Metal shader does not contain the requested kernel".to_string(),
+//RS             )
+//RS         })?
+//RS     };
+//RS     let mut pipeline_error = 0;
+//RS     let pipeline = unsafe {
+//RS         object(
+//RS             msg2(
+//RS                 device.raw(),
+//RS                 b"newComputePipelineStateWithFunction:error:\0",
+//RS                 function.raw(),
+//RS                 (&mut pipeline_error as *mut Obj) as Obj,
+//RS             ),
+//RS             "compute pipeline",
+//RS         )
+//RS         .map_err(|_| {
+//RS             JetComputeError::Unsupported(
+//RS                 "Metal rejected the requested kernel pipeline".to_string(),
+//RS             )
+//RS         })?
+//RS     };
+//RS     let queue = unsafe {
+//RS         object(msg0(device.raw(), b"newCommandQueue\0"), "command queue")?
+//RS     };
+//RS     let command = unsafe {
+//RS         object(msg0(queue.raw(), b"commandBuffer\0"), "command buffer")?
+//RS     };
+//RS     let encoder = unsafe {
+//RS         object(
+//RS             msg0(command.raw(), b"computeCommandEncoder\0"),
+//RS             "compute encoder",
+//RS         )?
+//RS     };
+//RS     let mut input_buffers = Vec::with_capacity(inputs.len());
+//RS     for values in inputs {
+//RS         let bytes = values
+//RS             .len()
+//RS             .checked_mul(std::mem::size_of::<f32>())
+//RS             .ok_or_else(|| JetComputeError::InvalidShape("Metal buffer size overflow".to_string()))?;
+//RS         let buffer = unsafe {
+//RS             object(
+//RS                 msg3(
+//RS                     device.raw(),
+//RS                     b"newBufferWithBytes:length:options:\0",
+//RS                     values.as_ptr() as Obj,
+//RS                     bytes,
+//RS                     0,
+//RS                 ),
+//RS                 "input buffer",
+//RS             )?
+//RS         };
+//RS         input_buffers.push(buffer);
+//RS     }
+//RS     let output_bytes = output_len
+//RS         .checked_mul(std::mem::size_of::<f32>())
+//RS         .ok_or_else(|| JetComputeError::InvalidShape("Metal output buffer size overflow".to_string()))?;
+//RS     let output = unsafe {
+//RS         object(
+//RS             msg2(
+//RS                 device.raw(),
+//RS                 b"newBufferWithLength:options:\0",
+//RS                 output_bytes,
+//RS                 0,
+//RS             ),
+//RS             "output buffer",
+//RS         )?
+//RS     };
+//RS     unsafe {
+//RS         msg1(
+//RS             encoder.raw(),
+//RS             b"setComputePipelineState:\0",
+//RS             pipeline.raw(),
+//RS         );
+//RS         for (index, buffer) in input_buffers.iter().enumerate() {
+//RS             msg3(
+//RS                 encoder.raw(),
+//RS                 b"setBuffer:offset:atIndex:\0",
+//RS                 buffer.raw(),
+//RS                 0,
+//RS                 index,
+//RS             );
+//RS         }
+//RS         msg3(
+//RS             encoder.raw(),
+//RS             b"setBuffer:offset:atIndex:\0",
+//RS             output.raw(),
+//RS             0,
+//RS             output_index,
+//RS         );
+//RS         msg3(
+//RS             encoder.raw(),
+//RS             b"setBytes:length:atIndex:\0",
+//RS             (&params as *const Params) as Obj,
+//RS             std::mem::size_of::<Params>(),
+//RS             params_index,
+//RS         );
+//RS         msg_size2(
+//RS             encoder.raw(),
+//RS             b"dispatchThreads:threadsPerThreadgroup:\0",
+//RS             Size {
+//RS                 width: output_len,
+//RS                 height: 1,
+//RS                 depth: 1,
+//RS             },
+//RS             Size {
+//RS                 width: 1,
+//RS                 height: 1,
+//RS                 depth: 1,
+//RS             },
+//RS         );
+//RS         msg0(encoder.raw(), b"endEncoding\0");
+//RS         msg0(command.raw(), b"commit\0");
+//RS         msg0(command.raw(), b"waitUntilCompleted\0");
+//RS         if msg0(command.raw(), b"status\0") != STATUS_COMPLETED {
+//RS             return Err(JetComputeError::Device(
+//RS                 "Metal command buffer failed or device was lost".to_string(),
+//RS             ));
+//RS         }
+//RS         let contents = msg0(output.raw(), b"contents\0");
+//RS         if contents == 0 {
+//RS             return Err(JetComputeError::Device(
+//RS                 "Metal output buffer has no CPU-readable contents".to_string(),
+//RS             ));
+//RS         }
+//RS         let values = std::slice::from_raw_parts(contents as *const f32, output_len).to_vec();
+//RS         if values.iter().any(|value| !value.is_finite()) {
+//RS             return Err(JetComputeError::Arithmetic(
+//RS                 "Metal kernel produced a non-finite F32 value".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(values)
+//RS     }
+//RS }
+//RS 
+//RS pub fn copy(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS     let count = u32_value(values.len(), "copy count")?;
+//RS     run(
+//RS         "jet_copy",
+//RS         &[values],
+//RS         values.len(),
+//RS         Params {
+//RS             count,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar: 0.0,
+//RS         },
+//RS         1,
+//RS         2,
+//RS     )
+//RS }
+//RS 
+//RS pub fn binary(op: u32, left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS     if left.len() != right.len() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal binary inputs have different lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     let count = u32_value(left.len(), "binary count")?;
+//RS     run(
+//RS         "jet_binary",
+//RS         &[left, right],
+//RS         left.len(),
+//RS         Params {
+//RS             count,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op,
+//RS             scalar: 0.0,
+//RS         },
+//RS         2,
+//RS         3,
+//RS     )
+//RS }
+//RS 
+//RS pub fn unary(op: u32, values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS     let count = u32_value(values.len(), "unary count")?;
+//RS     run(
+//RS         "jet_unary",
+//RS         &[values],
+//RS         values.len(),
+//RS         Params {
+//RS             count,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op,
+//RS             scalar: 0.0,
+//RS         },
+//RS         1,
+//RS         2,
+//RS     )
+//RS }
+//RS 
+//RS pub fn matmul(
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     rows: usize,
+//RS     inner: usize,
+//RS     cols: usize,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     let count = rows
+//RS         .checked_mul(cols)
+//RS         .ok_or_else(|| JetComputeError::InvalidShape("Metal matmul output size overflow".to_string()))?;
+//RS     let params = Params {
+//RS         count: u32_value(count, "matmul output")?,
+//RS         rows: u32_value(rows, "matmul rows")?,
+//RS         inner: u32_value(inner, "matmul inner dimension")?,
+//RS         cols: u32_value(cols, "matmul columns")?,
+//RS         op: 0,
+//RS         scalar: 0.0,
+//RS     };
+//RS     run("jet_matmul", &[left, right], count, params, 2, 3)
+//RS }
+//RS 
+//RS pub fn sum(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS     let count = u32_value(values.len(), "sum count")?;
+//RS     run(
+//RS         "jet_sum",
+//RS         &[values],
+//RS         1,
+//RS         Params {
+//RS             count,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar: 0.0,
+//RS         },
+//RS         1,
+//RS         2,
+//RS     )
+//RS }
+//RS 
+//RS pub fn mse(left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS     if left.len() != right.len() || left.is_empty() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal MSE inputs must have the same non-empty length".to_string(),
+//RS         ));
+//RS     }
+//RS     run(
+//RS         "jet_mse",
+//RS         &[left, right],
+//RS         1,
+//RS         Params {
+//RS             count: u32_value(left.len(), "MSE count")?,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar: 0.0,
+//RS         },
+//RS         2,
+//RS         3,
+//RS     )
+//RS }
+//RS 
+//RS pub fn mse_grad(
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     cot: &[f32],
+//RS     positive: bool,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if left.len() != right.len() || left.is_empty() || cot.len() != 1 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal MSE gradient inputs have incompatible lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     run(
+//RS         "jet_mse_grad",
+//RS         &[left, right, cot],
+//RS         left.len(),
+//RS         Params {
+//RS             count: u32_value(left.len(), "MSE gradient count")?,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: u32::from(!positive),
+//RS             scalar: 0.0,
+//RS         },
+//RS         3,
+//RS         4,
+//RS     )
+//RS }
+//RS 
+//RS pub fn mse_jvp(
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     left_tangent: &[f32],
+//RS     right_tangent: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if left.len() != right.len()
+//RS         || left.len() != left_tangent.len()
+//RS         || left.len() != right_tangent.len()
+//RS         || left.is_empty()
+//RS     {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal MSE JVP inputs have incompatible lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     run(
+//RS         "jet_mse_jvp",
+//RS         &[left, right, left_tangent, right_tangent],
+//RS         1,
+//RS         Params {
+//RS             count: u32_value(left.len(), "MSE JVP count")?,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar: 0.0,
+//RS         },
+//RS         4,
+//RS         5,
+//RS     )
+//RS }
+//RS 
+//RS pub fn sgd(
+//RS     parameter: &[f32],
+//RS     gradient: &[f32],
+//RS     learning_rate: f32,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     if parameter.len() != gradient.len() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "Metal SGD inputs have different lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     run(
+//RS         "jet_sgd",
+//RS         &[parameter, gradient],
+//RS         parameter.len(),
+//RS         Params {
+//RS             count: u32_value(parameter.len(), "SGD count")?,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar: learning_rate,
+//RS         },
+//RS         2,
+//RS         3,
+//RS     )
+//RS }
+//RS 
+//RS pub fn scale(values: &[f32], scalar: f32) -> Result<Vec<f32>, JetComputeError> {
+//RS     run(
+//RS         "jet_scale",
+//RS         &[values],
+//RS         values.len(),
+//RS         Params {
+//RS             count: u32_value(values.len(), "scale count")?,
+//RS             rows: 0,
+//RS             inner: 0,
+//RS             cols: 0,
+//RS             op: 0,
+//RS             scalar,
+//RS         },
+//RS         1,
+//RS         2,
+//RS     )
+//RS }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_compute_metal
+//RS 
+//RS #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+//RS mod jet_compute_metal {
+//RS     use super::JetComputeError;
+//RS 
+//RS     fn unavailable<T>() -> Result<T, JetComputeError> {
+//RS         Err(JetComputeError::Unsupported(
+//RS             "Metal backend is unavailable on this target".to_string(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn available() -> bool {
+//RS         false
+//RS     }
+//RS 
+//RS     pub fn copy(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn binary(_: u32, _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn unary(_: u32, _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn matmul(_: &[f32], _: &[f32], _: usize, _: usize, _: usize) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn sum(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse(_: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse_grad(_: &[f32], _: &[f32], _: &[f32], _: bool) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse_jvp(_: &[f32], _: &[f32], _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn sgd(_: &[f32], _: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn scale(_: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS }
+//RS 
+//RS // D-COMPUTE-BACKEND1=D / #1144: CUDA is a dynamically loaded Driver API
+//RS // bridge. The compiler and generated program need no CUDA toolkit or link-time
+//RS // stub. A request succeeds only when the installed driver exposes the complete
+//RS // checked launch surface; otherwise it fails closed without a CPU fallback.
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_compute_cuda
+//RS #[cfg(target_os = "linux")]
+//RS mod jet_compute_cuda {
+//RS     use super::JetComputeError;
+//RS     use std::ffi::{c_char, c_int, c_void, CString};
+//RS     use std::ptr;
+//RS     use std::sync::Arc;
+//RS 
+//RS     type CuDevice = c_int;
+//RS     type CuDevicePtr = u64;
+//RS     type CuContext = *mut c_void;
+//RS     type CuModule = *mut c_void;
+//RS     type CuFunction = *mut c_void;
+//RS     type CuStream = *mut c_void;
+//RS     type CuInit = unsafe extern "C" fn(u32) -> c_int;
+//RS     type CuDeviceGetCount = unsafe extern "C" fn(*mut c_int) -> c_int;
+//RS     type CuDeviceGet = unsafe extern "C" fn(*mut CuDevice, c_int) -> c_int;
+//RS     type CuCtxCreate = unsafe extern "C" fn(*mut CuContext, u32, CuDevice) -> c_int;
+//RS     type CuCtxDestroy = unsafe extern "C" fn(CuContext) -> c_int;
+//RS     type CuCtxSetCurrent = unsafe extern "C" fn(CuContext) -> c_int;
+//RS     type CuCtxSynchronize = unsafe extern "C" fn() -> c_int;
+//RS     type CuModuleLoadData = unsafe extern "C" fn(*mut CuModule, *const c_void) -> c_int;
+//RS     type CuModuleUnload = unsafe extern "C" fn(CuModule) -> c_int;
+//RS     type CuModuleGetFunction = unsafe extern "C" fn(
+//RS         *mut CuFunction,
+//RS         CuModule,
+//RS         *const c_char,
+//RS     ) -> c_int;
+//RS     type CuMemAlloc = unsafe extern "C" fn(*mut CuDevicePtr, usize) -> c_int;
+//RS     type CuMemFree = unsafe extern "C" fn(CuDevicePtr) -> c_int;
+//RS     type CuMemcpyHtoD = unsafe extern "C" fn(CuDevicePtr, *const c_void, usize) -> c_int;
+//RS     type CuMemcpyDtoH = unsafe extern "C" fn(*mut c_void, CuDevicePtr, usize) -> c_int;
+//RS     type CuLaunchKernel = unsafe extern "C" fn(
+//RS         CuFunction,
+//RS         u32,
+//RS         u32,
+//RS         u32,
+//RS         u32,
+//RS         u32,
+//RS         u32,
+//RS         u32,
+//RS         CuStream,
+//RS         *mut *mut c_void,
+//RS         *mut *mut c_void,
+//RS     ) -> c_int;
+//RS     type CuStreamCreate = unsafe extern "C" fn(*mut CuStream, u32) -> c_int;
+//RS     type CuStreamDestroy = unsafe extern "C" fn(CuStream) -> c_int;
+//RS     type CuStreamSynchronize = unsafe extern "C" fn(CuStream) -> c_int;
+//RS 
+//RS     const CUDA_SUCCESS: c_int = 0;
+//RS     const RTLD_NOW: c_int = 2;
+//RS     // glibc defines RTLD_LOCAL as zero; 4 is RTLD_NOLOAD and would make the
+//RS     // explicit CUDA backend report an installed driver as unavailable unless
+//RS     // another host loaded libcuda first.
+//RS     const RTLD_LOCAL: c_int = 0;
+//RS     const BLOCK_SIZE: usize = 256;
+//RS 
+//RS     #[link(name = "dl")]
+//RS     unsafe extern "C" {
+//RS         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+//RS         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct Params {
+//RS         count: u32,
+//RS         rows: u32,
+//RS         inner: u32,
+//RS         cols: u32,
+//RS         op: u32,
+//RS         scalar: f32,
+//RS     }
+//RS 
+//RS     const PTX: &str = concat!(
+//RS         r#".version 6.0
+//RS .target sm_50
+//RS .address_size 64
+//RS 
+//RS .visible .entry jet_copy(
+//RS     .param .u64 a,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<2>;
+//RS     .reg .b64 %rd<6>;
+//RS     .reg .f32 %f;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [out];
+//RS     ld.param.u64 %rd2, [params];
+//RS     ld.global.u32 %r1, [%rd2];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra copy_done;
+//RS     mul.wide.u32 %rd3, %r0, 4;
+//RS     add.s64 %rd4, %rd0, %rd3;
+//RS     add.s64 %rd5, %rd1, %rd3;
+//RS     ld.global.f32 %f, [%rd4];
+//RS     st.global.f32 [%rd5], %f;
+//RS copy_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_binary(
+//RS     .param .u64 a,
+//RS     .param .u64 b,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<3>;
+//RS     .reg .b64 %rd<8>;
+//RS     .reg .f32 %f<3>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [b];
+//RS     ld.param.u64 %rd2, [out];
+//RS     ld.param.u64 %rd3, [params];
+//RS     ld.global.u32 %r1, [%rd3];
+//RS     ld.global.u32 %r2, [%rd3+16];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra binary_done;
+//RS     mul.wide.u32 %rd4, %r0, 4;
+//RS     add.s64 %rd5, %rd0, %rd4;
+//RS     add.s64 %rd6, %rd1, %rd4;
+//RS     add.s64 %rd7, %rd2, %rd4;
+//RS     ld.global.f32 %f0, [%rd5];
+//RS     ld.global.f32 %f1, [%rd6];
+//RS     setp.eq.u32 %p, %r2, 0;
+//RS     @%p bra binary_add;
+//RS     setp.eq.u32 %p, %r2, 1;
+//RS     @%p bra binary_mul;
+//RS     setp.eq.u32 %p, %r2, 2;
+//RS     @%p bra binary_sub;
+//RS     setp.eq.u32 %p, %r2, 3;
+//RS     @%p bra binary_div;
+//RS     setp.eq.u32 %p, %r2, 4;
+//RS     @%p bra binary_max;
+//RS     min.f32 %f2, %f0, %f1;
+//RS     bra binary_store;
+//RS binary_add:
+//RS     add.rn.f32 %f2, %f0, %f1;
+//RS     bra binary_store;
+//RS binary_mul:
+//RS     mul.rn.f32 %f2, %f0, %f1;
+//RS     bra binary_store;
+//RS binary_sub:
+//RS     sub.rn.f32 %f2, %f0, %f1;
+//RS     bra binary_store;
+//RS binary_div:
+//RS     div.rn.f32 %f2, %f0, %f1;
+//RS     bra binary_store;
+//RS binary_max:
+//RS     max.f32 %f2, %f0, %f1;
+//RS binary_store:
+//RS     st.global.f32 [%rd7], %f2;
+//RS binary_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_unary(
+//RS     .param .u64 a,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<3>;
+//RS     .reg .b64 %rd<6>;
+//RS     .reg .f32 %f<4>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [out];
+//RS     ld.param.u64 %rd2, [params];
+//RS     ld.global.u32 %r1, [%rd2];
+//RS     ld.global.u32 %r2, [%rd2+16];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra unary_done;
+//RS     mul.wide.u32 %rd3, %r0, 4;
+//RS     add.s64 %rd4, %rd0, %rd3;
+//RS     add.s64 %rd5, %rd1, %rd3;
+//RS     ld.global.f32 %f0, [%rd4];
+//RS     setp.eq.u32 %p, %r2, 0;
+//RS     @%p bra unary_negate;
+//RS     setp.eq.u32 %p, %r2, 1;
+//RS     @%p bra unary_abs;
+//RS     setp.eq.u32 %p, %r2, 2;
+//RS     @%p bra unary_exp;
+//RS     setp.eq.u32 %p, %r2, 3;
+//RS     @%p bra unary_log;
+//RS     sqrt.approx.f32 %f1, %f0;
+//RS     bra unary_store;
+//RS unary_negate:
+//RS     neg.f32 %f1, %f0;
+//RS     bra unary_store;
+//RS unary_abs:
+//RS     abs.f32 %f1, %f0;
+//RS     bra unary_store;
+//RS unary_exp:
+//RS     mul.f32 %f2, %f0, 1.4426950408889634;
+//RS     ex2.approx.f32 %f1, %f2;
+//RS     bra unary_store;
+//RS unary_log:
+//RS     lg2.approx.f32 %f1, %f0;
+//RS     mul.f32 %f1, %f1, 0.6931471805599453;
+//RS unary_store:
+//RS     st.global.f32 [%rd5], %f1;
+//RS unary_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_matmul(
+//RS     .param .u64 a,
+//RS     .param .u64 b,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<10>;
+//RS     .reg .b64 %rd<10>;
+//RS     .reg .f32 %f<4>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [b];
+//RS     ld.param.u64 %rd2, [out];
+//RS     ld.param.u64 %rd3, [params];
+//RS     ld.global.u32 %r1, [%rd3+4];
+//RS     ld.global.u32 %r2, [%rd3+8];
+//RS     ld.global.u32 %r3, [%rd3+12];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     mul.lo.u32 %r4, %r1, %r3;
+//RS     setp.ge.u32 %p, %r0, %r4;
+//RS     @%p bra matmul_done;
+//RS     div.u32 %r5, %r0, %r3;
+//RS     rem.u32 %r6, %r0, %r3;
+//RS     mov.u32 %r7, 0;
+//RS     mov.f32 %f3, 0f00000000;
+//RS matmul_loop:
+//RS     setp.ge.u32 %p, %r7, %r2;
+//RS     @%p bra matmul_store;
+//RS     mul.lo.u32 %r8, %r5, %r2;
+//RS     add.u32 %r8, %r8, %r7;
+//RS     mul.wide.u32 %rd4, %r8, 4;
+//RS     add.s64 %rd5, %rd0, %rd4;
+//RS     mul.lo.u32 %r9, %r7, %r3;
+//RS     add.u32 %r9, %r9, %r6;
+//RS     mul.wide.u32 %rd6, %r9, 4;
+//RS     add.s64 %rd7, %rd1, %rd6;
+//RS     ld.global.f32 %f0, [%rd5];
+//RS     ld.global.f32 %f1, [%rd7];
+//RS     mul.rn.f32 %f2, %f0, %f1;
+//RS     add.rn.f32 %f3, %f3, %f2;
+//RS     add.u32 %r7, %r7, 1;
+//RS     bra matmul_loop;
+//RS matmul_store:
+//RS     mul.wide.u32 %rd8, %r0, 4;
+//RS     add.s64 %rd9, %rd2, %rd8;
+//RS     st.global.f32 [%rd9], %f3;
+//RS matmul_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_sum(
+//RS     .param .u64 a,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<3>;
+//RS     .reg .b64 %rd<7>;
+//RS     .reg .f32 %f<3>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [out];
+//RS     ld.param.u64 %rd2, [params];
+//RS     ld.global.u32 %r1, [%rd2];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ne.u32 %p, %r0, 0;
+//RS     @%p bra sum_done;
+//RS     mov.u32 %r2, 0;
+//RS     mov.f32 %f0, 0f00000000;
+//RS sum_loop:
+//RS     setp.ge.u32 %p, %r2, %r1;
+//RS     @%p bra sum_store;
+//RS     mul.wide.u32 %rd3, %r2, 4;
+//RS     add.s64 %rd4, %rd0, %rd3;
+//RS     ld.global.f32 %f1, [%rd4];
+//RS     add.rn.f32 %f0, %f0, %f1;
+//RS     add.u32 %r2, %r2, 1;
+//RS     bra sum_loop;
+//RS sum_store:
+//RS     st.global.f32 [%rd1], %f0;
+//RS sum_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_mse(
+//RS     .param .u64 a,
+//RS     .param .u64 b,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<3>;
+//RS     .reg .b64 %rd<9>;
+//RS     .reg .f32 %f<5>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [b];
+//RS     ld.param.u64 %rd2, [out];
+//RS     ld.param.u64 %rd3, [params];
+//RS     ld.global.u32 %r1, [%rd3];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ne.u32 %p, %r0, 0;
+//RS     @%p bra mse_done;
+//RS     mov.u32 %r2, 0;
+//RS     mov.f32 %f0, 0f00000000;
+//RS mse_loop:
+//RS     setp.ge.u32 %p, %r2, %r1;
+//RS     @%p bra mse_store;
+//RS     mul.wide.u32 %rd4, %r2, 4;
+//RS     add.s64 %rd5, %rd0, %rd4;
+//RS     add.s64 %rd6, %rd1, %rd4;
+//RS     ld.global.f32 %f1, [%rd5];
+//RS     ld.global.f32 %f2, [%rd6];
+//RS     sub.rn.f32 %f3, %f1, %f2;
+//RS     mul.rn.f32 %f4, %f3, %f3;
+//RS     add.rn.f32 %f0, %f0, %f4;
+//RS     add.u32 %r2, %r2, 1;
+//RS     bra mse_loop;
+//RS mse_store:
+//RS     cvt.rn.f32.u32 %f1, %r1;
+//RS     div.rn.f32 %f0, %f0, %f1;
+//RS     st.global.f32 [%rd2], %f0;
+//RS mse_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_mse_grad(
+//RS     .param .u64 a,
+//RS     .param .u64 b,
+//RS     .param .u64 cot,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<4>;
+//RS     .reg .b64 %rd<11>;
+//RS     .reg .f32 %f<7>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [b];
+//RS     ld.param.u64 %rd2, [cot];
+//RS     ld.param.u64 %rd3, [out];
+//RS     ld.param.u64 %rd4, [params];
+//RS     ld.global.u32 %r1, [%rd4];
+//RS     ld.global.u32 %r2, [%rd4+16];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra mse_grad_done;
+//RS     mul.wide.u32 %rd5, %r0, 4;
+//RS     add.s64 %rd6, %rd0, %rd5;
+//RS     add.s64 %rd7, %rd1, %rd5;
+//RS     add.s64 %rd8, %rd3, %rd5;
+//RS     ld.global.f32 %f0, [%rd6];
+//RS     ld.global.f32 %f1, [%rd7];
+//RS     setp.eq.u32 %p, %r2, 0;
+//RS     @%p bra mse_grad_positive;
+//RS     sub.rn.f32 %f2, %f1, %f0;
+//RS     bra mse_grad_factor;
+//RS mse_grad_positive:
+//RS     sub.rn.f32 %f2, %f0, %f1;
+//RS mse_grad_factor:
+//RS     mov.f32 %f3, 0f40000000;
+//RS     cvt.rn.f32.u32 %f4, %r1;
+//RS     div.rn.f32 %f3, %f3, %f4;
+//RS     ld.global.f32 %f5, [%rd2];
+//RS     mul.rn.f32 %f3, %f3, %f5;
+//RS     mul.rn.f32 %f6, %f2, %f3;
+//RS     st.global.f32 [%rd8], %f6;
+//RS mse_grad_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_mse_jvp(
+//RS     .param .u64 a,
+//RS     .param .u64 b,
+//RS     .param .u64 at,
+//RS     .param .u64 bt,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<3>;
+//RS     .reg .b64 %rd<13>;
+//RS     .reg .f32 %f<8>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [b];
+//RS     ld.param.u64 %rd2, [at];
+//RS     ld.param.u64 %rd3, [bt];
+//RS     ld.param.u64 %rd4, [out];
+//RS     ld.param.u64 %rd5, [params];
+//RS     ld.global.u32 %r1, [%rd5];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ne.u32 %p, %r0, 0;
+//RS     @%p bra mse_jvp_done;
+//RS     mov.u32 %r2, 0;
+//RS     mov.f32 %f0, 0f00000000;
+//RS mse_jvp_loop:
+//RS     setp.ge.u32 %p, %r2, %r1;
+//RS     @%p bra mse_jvp_store;
+//RS     mul.wide.u32 %rd6, %r2, 4;
+//RS     add.s64 %rd7, %rd0, %rd6;
+//RS     add.s64 %rd8, %rd1, %rd6;
+//RS     add.s64 %rd9, %rd2, %rd6;
+//RS     add.s64 %rd10, %rd3, %rd6;
+//RS     ld.global.f32 %f1, [%rd7];
+//RS     ld.global.f32 %f2, [%rd8];
+//RS     ld.global.f32 %f3, [%rd9];
+//RS     ld.global.f32 %f4, [%rd10];
+//RS     sub.rn.f32 %f5, %f1, %f2;
+//RS     sub.rn.f32 %f6, %f3, %f4;
+//RS     mul.rn.f32 %f7, %f5, %f6;
+//RS     add.rn.f32 %f7, %f7, %f7;
+//RS     add.rn.f32 %f0, %f0, %f7;
+//RS     add.u32 %r2, %r2, 1;
+//RS     bra mse_jvp_loop;
+//RS mse_jvp_store:
+//RS     cvt.rn.f32.u32 %f1, %r1;
+//RS     div.rn.f32 %f0, %f0, %f1;
+//RS     st.global.f32 [%rd4], %f0;
+//RS mse_jvp_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_sgd(
+//RS     .param .u64 parameter,
+//RS     .param .u64 gradient,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<2>;
+//RS     .reg .b64 %rd<8>;
+//RS     .reg .f32 %f<4>;
+//RS     ld.param.u64 %rd0, [parameter];
+//RS     ld.param.u64 %rd1, [gradient];
+//RS     ld.param.u64 %rd2, [out];
+//RS     ld.param.u64 %rd3, [params];
+//RS     ld.global.u32 %r1, [%rd3];
+//RS     ld.global.f32 %f0, [%rd3+20];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra sgd_done;
+//RS     mul.wide.u32 %rd4, %r0, 4;
+//RS     add.s64 %rd5, %rd0, %rd4;
+//RS     add.s64 %rd6, %rd1, %rd4;
+//RS     add.s64 %rd7, %rd2, %rd4;
+//RS     ld.global.f32 %f1, [%rd5];
+//RS     ld.global.f32 %f2, [%rd6];
+//RS     mul.rn.f32 %f3, %f0, %f2;
+//RS     sub.rn.f32 %f3, %f1, %f3;
+//RS     st.global.f32 [%rd7], %f3;
+//RS sgd_done:
+//RS     ret;
+//RS }
+//RS 
+//RS .visible .entry jet_scale(
+//RS     .param .u64 a,
+//RS     .param .u64 out,
+//RS     .param .u64 params) {
+//RS     .reg .pred %p;
+//RS     .reg .b32 %r<2>;
+//RS     .reg .b64 %rd<6>;
+//RS     .reg .f32 %f<3>;
+//RS     ld.param.u64 %rd0, [a];
+//RS     ld.param.u64 %rd1, [out];
+//RS     ld.param.u64 %rd2, [params];
+//RS     ld.global.u32 %r1, [%rd2];
+//RS     ld.global.f32 %f0, [%rd2+20];
+//RS     mov.u32 %r0, %ctaid.x;
+//RS     mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
+//RS     setp.ge.u32 %p, %r0, %r1;
+//RS     @%p bra scale_done;
+//RS     mul.wide.u32 %rd3, %r0, 4;
+//RS     add.s64 %rd4, %rd0, %rd3;
+//RS     add.s64 %rd5, %rd1, %rd3;
+//RS     ld.global.f32 %f1, [%rd4];
+//RS     mul.rn.f32 %f2, %f1, %f0;
+//RS     st.global.f32 [%rd5], %f2;
+//RS scale_done:
+//RS     ret;
+//RS }
+//RS "#,
+//RS         "\0"
+//RS     );
+//RS 
+//RS     struct Api {
+//RS         init: CuInit,
+//RS         device_get_count: CuDeviceGetCount,
+//RS         device_get: CuDeviceGet,
+//RS         ctx_create: CuCtxCreate,
+//RS         ctx_destroy: CuCtxDestroy,
+//RS         ctx_set_current: CuCtxSetCurrent,
+//RS         ctx_synchronize: CuCtxSynchronize,
+//RS         module_load_data: CuModuleLoadData,
+//RS         module_unload: CuModuleUnload,
+//RS         module_get_function: CuModuleGetFunction,
+//RS         mem_alloc: CuMemAlloc,
+//RS         mem_free: CuMemFree,
+//RS         memcpy_htod: CuMemcpyHtoD,
+//RS         memcpy_dtoh: CuMemcpyDtoH,
+//RS         launch_kernel: CuLaunchKernel,
+//RS         stream_create: CuStreamCreate,
+//RS         stream_destroy: CuStreamDestroy,
+//RS         stream_synchronize: CuStreamSynchronize,
+//RS     }
+//RS 
+//RS     impl Api {
+//RS         fn load() -> Result<Arc<Self>, JetComputeError> {
+//RS             let handle = [b"libcuda.so.1\0".as_slice(), b"libcuda.so\0".as_slice()]
+//RS                 .into_iter()
+//RS                 .find_map(|path| {
+//RS                     let handle = unsafe { dlopen(path.as_ptr().cast(), RTLD_NOW | RTLD_LOCAL) };
+//RS                     (!handle.is_null()).then_some(handle)
+//RS                 })
+//RS                 .ok_or_else(|| {
+//RS                     JetComputeError::Unsupported(
+//RS                         "CUDA driver library is unavailable on this target".to_string(),
+//RS                     )
+//RS                 })?;
+//RS 
+//RS             macro_rules! symbol {
+//RS                 ($name:literal, $ty:ty) => {{
+//RS                     let name = concat!($name, "\0");
+//RS                     let pointer = unsafe { dlsym(handle, name.as_ptr().cast()) };
+//RS                     if pointer.is_null() {
+//RS                         return Err(JetComputeError::Unsupported(format!(
+//RS                             "CUDA driver symbol `{}` is unavailable",
+//RS                             $name
+//RS                         )));
+//RS                     }
+//RS                     unsafe { std::mem::transmute::<*mut c_void, $ty>(pointer) }
+//RS                 }};
+//RS             }
+//RS 
+//RS             let api = Arc::new(Self {
+//RS                 init: symbol!("cuInit", CuInit),
+//RS                 device_get_count: symbol!("cuDeviceGetCount", CuDeviceGetCount),
+//RS                 device_get: symbol!("cuDeviceGet", CuDeviceGet),
+//RS                 ctx_create: symbol!("cuCtxCreate_v2", CuCtxCreate),
+//RS                 ctx_destroy: symbol!("cuCtxDestroy_v2", CuCtxDestroy),
+//RS                 ctx_set_current: symbol!("cuCtxSetCurrent", CuCtxSetCurrent),
+//RS                 ctx_synchronize: symbol!("cuCtxSynchronize", CuCtxSynchronize),
+//RS                 module_load_data: symbol!("cuModuleLoadData", CuModuleLoadData),
+//RS                 module_unload: symbol!("cuModuleUnload", CuModuleUnload),
+//RS                 module_get_function: symbol!("cuModuleGetFunction", CuModuleGetFunction),
+//RS                 mem_alloc: symbol!("cuMemAlloc_v2", CuMemAlloc),
+//RS                 mem_free: symbol!("cuMemFree_v2", CuMemFree),
+//RS                 memcpy_htod: symbol!("cuMemcpyHtoD_v2", CuMemcpyHtoD),
+//RS                 memcpy_dtoh: symbol!("cuMemcpyDtoH_v2", CuMemcpyDtoH),
+//RS                 launch_kernel: symbol!("cuLaunchKernel", CuLaunchKernel),
+//RS                 stream_create: symbol!("cuStreamCreate", CuStreamCreate),
+//RS                 stream_destroy: symbol!("cuStreamDestroy_v2", CuStreamDestroy),
+//RS                 stream_synchronize: symbol!("cuStreamSynchronize", CuStreamSynchronize),
+//RS             });
+//RS             check(unsafe { (api.init)(0) }, "driver initialization")?;
+//RS             Ok(api)
+//RS         }
+//RS     }
+//RS 
+//RS     fn check(code: c_int, operation: &str) -> Result<(), JetComputeError> {
+//RS         if code == CUDA_SUCCESS {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(JetComputeError::Device(format!(
+//RS                 "CUDA {operation} failed (driver status {code})"
+//RS             )))
+//RS         }
+//RS     }
+//RS 
+//RS     struct Context {
+//RS         api: Arc<Api>,
+//RS         raw: CuContext,
+//RS     }
+//RS 
+//RS     impl Context {
+//RS         fn new(api: Arc<Api>) -> Result<Self, JetComputeError> {
+//RS             let mut device = 0;
+//RS             check(
+//RS                 unsafe { (api.device_get)(&mut device, 0) },
+//RS                 "device selection",
+//RS             )?;
+//RS             let mut raw = ptr::null_mut();
+//RS             check(
+//RS                 unsafe { (api.ctx_create)(&mut raw, 0, device) },
+//RS                 "context creation",
+//RS             )?;
+//RS             Ok(Self { api, raw })
+//RS         }
+//RS 
+//RS         fn make_current(&self) -> Result<(), JetComputeError> {
+//RS             check(
+//RS                 unsafe { (self.api.ctx_set_current)(self.raw) },
+//RS                 "context selection",
+//RS             )
+//RS         }
+//RS 
+//RS         fn synchronize(&self) -> Result<(), JetComputeError> {
+//RS             self.make_current()?;
+//RS             check(
+//RS                 unsafe { (self.api.ctx_synchronize)() },
+//RS                 "kernel synchronization",
+//RS             )
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Context {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 (self.api.ctx_destroy)(self.raw);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct Module {
+//RS         api: Arc<Api>,
+//RS         raw: CuModule,
+//RS     }
+//RS 
+//RS     impl Module {
+//RS         fn load(context: &Context) -> Result<Self, JetComputeError> {
+//RS             context.make_current()?;
+//RS             let mut raw = ptr::null_mut();
+//RS             check(
+//RS                 unsafe {
+//RS                     (context.api.module_load_data)(
+//RS                         &mut raw,
+//RS                         PTX.as_ptr().cast::<c_void>(),
+//RS                     )
+//RS                 },
+//RS                 "PTX module loading",
+//RS             )?;
+//RS             Ok(Self {
+//RS                 api: context.api.clone(),
+//RS                 raw,
+//RS             })
+//RS         }
+//RS 
+//RS         fn function(&self, name: &str) -> Result<CuFunction, JetComputeError> {
+//RS             let name = CString::new(name).map_err(|_| {
+//RS                 JetComputeError::Unsupported("CUDA kernel name contains a NUL byte".to_string())
+//RS             })?;
+//RS             let mut raw = ptr::null_mut();
+//RS             check(
+//RS                 unsafe { (self.api.module_get_function)(&mut raw, self.raw, name.as_ptr()) },
+//RS                 "kernel lookup",
+//RS             )?;
+//RS             Ok(raw)
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Module {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 (self.api.module_unload)(self.raw);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct Buffer {
+//RS         api: Arc<Api>,
+//RS         raw: CuDevicePtr,
+//RS     }
+//RS 
+//RS     impl Buffer {
+//RS         fn new(context: &Context, bytes: usize) -> Result<Self, JetComputeError> {
+//RS             context.make_current()?;
+//RS             let mut raw = 0;
+//RS             // CUDA rejects zero-byte allocations. Keep empty logical buffers
+//RS             // valid so zero-inner-dimension matmul still matches the CPU
+//RS             // oracle; kernels never dereference their empty inputs.
+//RS             let allocation_bytes = bytes.max(1);
+//RS             check(
+//RS                 unsafe { (context.api.mem_alloc)(&mut raw, allocation_bytes) },
+//RS                 "device allocation",
+//RS             )?;
+//RS             Ok(Self {
+//RS                 api: context.api.clone(),
+//RS                 raw,
+//RS             })
+//RS         }
+//RS 
+//RS         fn from_f32(context: &Context, values: &[f32]) -> Result<Self, JetComputeError> {
+//RS             let bytes = values
+//RS                 .len()
+//RS                 .checked_mul(std::mem::size_of::<f32>())
+//RS                 .ok_or_else(|| JetComputeError::InvalidShape("CUDA buffer size overflow".to_string()))?;
+//RS             context.make_current()?;
+//RS             let buffer = Self::new(context, bytes)?;
+//RS             check(
+//RS                 unsafe {
+//RS                     (buffer.api.memcpy_htod)(
+//RS                         buffer.raw,
+//RS                         values.as_ptr().cast::<c_void>(),
+//RS                         bytes,
+//RS                     )
+//RS                 },
+//RS                 "host-to-device transfer",
+//RS             )?;
+//RS             Ok(buffer)
+//RS         }
+//RS 
+// END-PORT-PENDING 0253 crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1-1794
+

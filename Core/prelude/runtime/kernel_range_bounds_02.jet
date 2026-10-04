@@ -1,0 +1,89 @@
+// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/RangeBounds.rs:1-85
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-RANGE-VALUE1=A: one bounds rule for AOT, resident JIT, and TIR evaluation.
+//RS // The returned end is exclusive so empty half-open ranges remain representable.
+//RS pub(crate) fn jet_range_bounds(
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     len: i64,
+//RS ) -> Option<(i64, i64)> {
+//RS     if start < 0 || end < 0 || start > end {
+//RS         return None;
+//RS     }
+//RS     let end_exclusive = if exclusive { end } else { end.checked_add(1)? };
+//RS     (end_exclusive <= len).then_some((start, end_exclusive))
+//RS }
+//RS 
+//RS pub(crate) fn jet_view_bounds_error(
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     len: i64,
+//RS ) -> String {
+//RS     format!(
+//RS         "can't view {len} items from {start} to {end} ({})",
+//RS         if exclusive { "exclusive" } else { "inclusive" }
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn jet_checked_view_bounds(
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     len: i64,
+//RS ) -> Result<(i64, i64), String> {
+//RS     jet_range_bounds(start, end, exclusive, len)
+//RS         .ok_or_else(|| jet_view_bounds_error(start, end, exclusive, len))
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn jet_string_slice_value(
+//RS     text: &str,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS ) -> Result<String, String> {
+//RS     let chars: Vec<char> = text.chars().collect();
+//RS     let len = chars.len() as i64;
+//RS     let (start, end_exclusive) = jet_range_bounds(start, end, exclusive, len).ok_or_else(|| {
+//RS         format!(
+//RS             "can't slice {} characters from {} to {} ({})",
+//RS             len,
+//RS             start,
+//RS             end,
+//RS             if exclusive { "exclusive" } else { "inclusive" }
+//RS         )
+//RS     })?;
+//RS     Ok(chars[start as usize..end_exclusive as usize]
+//RS         .iter()
+//RS         .collect())
+//RS }
+//RS 
+//RS pub(crate) fn jet_range_contains(
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS     value: i64,
+//RS ) -> bool {
+//RS     value >= start && if exclusive { value < end } else { value <= end }
+//RS }
+//RS 
+//RS pub(crate) fn jet_range_structural_text(start: i64, end: i64, exclusive: bool) -> String {
+//RS     jet_debug_range(start, end, exclusive)
+//RS }
+//RS 
+//RS pub(crate) fn jet_range_equal(
+//RS     left_start: i64,
+//RS     left_end: i64,
+//RS     left_exclusive: bool,
+//RS     right_start: i64,
+//RS     right_end: i64,
+//RS     right_exclusive: bool,
+//RS ) -> bool {
+//RS     left_start == right_start
+//RS         && left_end == right_end
+//RS         && left_exclusive == right_exclusive
+//RS }
+// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/RangeBounds.rs:1-85
+

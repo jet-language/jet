@@ -1,0 +1,2466 @@
+// PORT-PENDING 0292 crates-jet-codegen-src-prelude-corelib-top-nethttp-slice-1812: crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1812-4273
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {
+//RS     stream
+//RS         .peer_identity
+//RS         .clone()
+//RS         .expect("verified TLS stream always retains peer identity")
+//RS }
+//RS 
+//RS fn jet_net_tls_ready(
+//RS     stream: &JetTLSStream,
+//RS     interest: JetNetReadyInterest,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetNetReady, jet_std::IOError> {
+//RS     let operation = if matches!(interest, JetNetReadyInterest::Write) {
+//RS         jet_std::IOOperation::Write
+//RS     } else {
+//RS         jet_std::IOOperation::Read
+//RS     };
+//RS     let _deadline =
+//RS         jet_net_explicit_deadline(deadline, "tls ready").map_err(jet_net_to_io_error)?;
+//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+//RS         return Err(jet_net_to_io_error(jet_net_deadline_timeout("tls ready")));
+//RS     }
+//RS     let want_read = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     let want_write = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     loop {
+//RS         let readable =
+//RS             want_read && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
+//RS         if readable {
+//RS             return Ok(JetNetReady {
+//RS                 readable: true,
+//RS                 writable: false,
+//RS             });
+//RS         }
+//RS         let (tls_read, tls_write) = jet_net_tls_io_result((stream.wants)(stream.id), operation)?;
+//RS         let (raw_readable, raw_writable) = jet_net_tcp_scheduler_ready_wait(
+//RS             &stream.socket,
+//RS             want_read || tls_read,
+//RS             want_write || tls_write,
+//RS             "tls ready",
+//RS         )
+//RS         .map_err(jet_net_to_io_error)?;
+//RS         let readable = want_read
+//RS             && raw_readable
+//RS             && jet_net_tls_io_result((stream.read_ready)(stream.id), operation)?;
+//RS         let writable = want_write && raw_writable;
+//RS         if readable || writable {
+//RS             return Ok(JetNetReady { readable, writable });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result<(), JetNetError> {
+//RS     if let Some(remaining) = jet_deadline_remaining_ms() {
+//RS         if remaining <= 0 {
+//RS             return Err(jet_net_deadline_timeout(op));
+//RS         }
+//RS         let dur = Some(std::time::Duration::from_millis(remaining as u64));
+//RS         stream
+//RS             .set_read_timeout(dur)
+//RS             .map_err(|error| jet_net_io_error(&format!("{} read timeout", op), None, error))?;
+//RS         stream
+//RS             .set_write_timeout(dur)
+//RS             .map_err(|error| jet_net_io_error(&format!("{} write timeout", op), None, error))?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_ip_addr(text: &String) -> Result<JetIpAddr, JetNetError> {
+//RS     jet_net_pure_parse_ip(text)
+//RS         .map(|inner| JetIpAddr { inner })
+//RS         .map_err(|e| {
+//RS             JetNetError::InvalidInput(jet_net_detail(
+//RS                 "parse IP address",
+//RS                 Some(text.clone()),
+//RS                 None,
+//RS                 format!("invalid IP address `{}`: {}", text, e),
+//RS                 None,
+//RS             ))
+//RS         })
+//RS }
+//RS 
+//RS fn jet_net_ip_to_string(ip: &JetIpAddr) -> String {
+//RS     ip.inner.to_string()
+//RS }
+//RS 
+//RS fn jet_net_ip_is_ipv4(ip: &JetIpAddr) -> bool {
+//RS     jet_net_pure_ip_is_ipv4(&ip.inner)
+//RS }
+//RS 
+//RS fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNetError> {
+//RS     if port < 0 || port > u16::MAX as i64 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "resolve socket address",
+//RS             Some(host.clone()),
+//RS             None,
+//RS             format!("invalid port `{}`: expected 0..65535", port),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     let text = format!("{}:{}", host, port);
+//RS     let resolved = match jet_net_pure_parse_socket_addr(&text) {
+//RS         Ok(address) => Ok(address),
+//RS         Err(_) => {
+//RS             use std::net::ToSocketAddrs;
+//RS             match text.to_socket_addrs() {
+//RS                 Ok(iter) => iter,
+//RS                 Err(e) => return Err(jet_net_io_error("resolve socket address", Some(text), e)),
+//RS             }
+//RS             .next()
+//RS             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address"))
+//RS         }
+//RS     };
+//RS     resolved
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| jet_net_io_error("resolve socket address", Some(text), e))
+//RS }
+//RS 
+//RS fn jet_net_socket_addr_parse(text: &String) -> Result<JetSocketAddr, JetNetError> {
+//RS     jet_net_pure_parse_socket_addr(text)
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| {
+//RS             JetNetError::InvalidInput(jet_net_detail(
+//RS                 "parse socket address",
+//RS                 Some(text.clone()),
+//RS                 None,
+//RS                 format!("invalid socket address `{}`: {}", text, e),
+//RS                 None,
+//RS             ))
+//RS         })
+//RS }
+//RS 
+//RS fn jet_net_socket_host(addr: &JetSocketAddr) -> String {
+//RS     jet_net_pure_socket_host(&addr.inner)
+//RS }
+//RS 
+//RS fn jet_net_socket_port(addr: &JetSocketAddr) -> i64 {
+//RS     jet_net_pure_socket_port(&addr.inner)
+//RS }
+//RS 
+//RS fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
+//RS     jet_net_pure_socket_to_string(&addr.inner)
+//RS }
+//RS 
+//RS fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTCPListener, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let inner = std::net::TcpListener::bind(addr.inner)
+//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
+//RS     Ok(JetTCPListener { inner })
+//RS }
+//RS 
+//RS fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> Result<JetTCPStream, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     jet_net_connect_addr_worker(addr.inner)
+//RS }
+//RS 
+//RS fn jet_net_tcp_connect_timeout(addr: &JetSocketAddr, ms: i64) -> Result<JetTCPStream, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp connect",
+//RS             Some(addr.inner.to_string()),
+//RS             None,
+//RS             m,
+//RS             None,
+//RS         ))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(ms));
+//RS     jet_net_connect_addr_worker(addr.inner)
+//RS }
+//RS 
+//RS fn jet_net_tcp_connect_happy(
+//RS     host: &String,
+//RS     port: i64,
+//RS     ms: i64,
+//RS ) -> Result<JetTCPStream, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     if port < 0 || port > u16::MAX as i64 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp connect",
+//RS             Some(host.clone()),
+//RS             None,
+//RS             format!("invalid port `{}`: expected 0..65535", port),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp connect",
+//RS             Some(host.clone()),
+//RS             None,
+//RS             m,
+//RS             None,
+//RS         ))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(ms));
+//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+//RS         return Err(jet_net_deadline_timeout("tcp connect"));
+//RS     }
+//RS     let query = host.clone();
+//RS     let (resolve_sender, resolve_receiver) = std::sync::mpsc::sync_channel(1);
+//RS     std::thread::spawn(move || {
+//RS         use std::net::ToSocketAddrs;
+//RS         let result = (query.as_str(), port as u16)
+//RS             .to_socket_addrs()
+//RS             .map(|addrs| addrs.collect::<Vec<_>>());
+//RS         let _ = resolve_sender.send(result);
+//RS     });
+//RS     let addrs = loop {
+//RS         match resolve_receiver.try_recv() {
+//RS             Ok(Ok(addrs)) => break addrs,
+//RS             Ok(Err(error)) => {
+//RS                 return Err(jet_net_io_error(
+//RS                     "resolve socket address",
+//RS                     Some(host.clone()),
+//RS                     error,
+//RS                 ))
+//RS             }
+//RS             Err(std::sync::mpsc::TryRecvError::Empty) => jet_net_scheduler_park("tcp connect", 5)?,
+//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+//RS                 return Err(JetNetError::Other(jet_net_detail(
+//RS                     "tcp connect",
+//RS                     Some(host.clone()),
+//RS                     None,
+//RS                     "socket address resolver stopped without a result".to_string(),
+//RS                     None,
+//RS                 )));
+//RS             }
+//RS         }
+//RS     };
+//RS     if addrs.is_empty() {
+//RS         return Err(JetNetError::AddressUnavailable(jet_net_detail(
+//RS             "tcp connect",
+//RS             Some(host.clone()),
+//RS             None,
+//RS             format!("tcp connect failed: no address for `{}`", host),
+//RS             None,
+//RS         )));
+//RS     }
+//RS 
+//RS     let first_is_v6 = addrs[0].is_ipv6();
+//RS     let mut v6 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv6);
+//RS     let mut v4 = addrs.iter().copied().filter(std::net::SocketAddr::is_ipv4);
+//RS     let mut ordered = Vec::with_capacity(addrs.len());
+//RS     loop {
+//RS         let next = if ordered.len() % 2 == 0 {
+//RS             if first_is_v6 {
+//RS                 v6.next().or_else(|| v4.next())
+//RS             } else {
+//RS                 v4.next().or_else(|| v6.next())
+//RS             }
+//RS         } else if first_is_v6 {
+//RS             v4.next().or_else(|| v6.next())
+//RS         } else {
+//RS             v6.next().or_else(|| v4.next())
+//RS         };
+//RS         match next {
+//RS             Some(addr) => ordered.push(addr),
+//RS             None => break,
+//RS         }
+//RS     }
+//RS 
+//RS     let (sender, receiver) = std::sync::mpsc::channel();
+//RS     let mut next = 0usize;
+//RS     let mut in_flight = 0usize;
+//RS     let mut last = None;
+//RS     let mut next_launch = std::time::Instant::now();
+//RS     loop {
+//RS         if next < ordered.len() && std::time::Instant::now() >= next_launch {
+//RS             let addr = ordered[next];
+//RS             let remaining = jet_deadline_remaining_ms().unwrap_or(0);
+//RS             if remaining <= 0 {
+//RS                 return Err(jet_net_deadline_timeout("tcp connect"));
+//RS             }
+//RS             let attempt_sender = sender.clone();
+//RS             std::thread::spawn(move || {
+//RS                 let timeout = std::time::Duration::from_millis(remaining as u64);
+//RS                 let _ = attempt_sender
+//RS                     .send((addr, std::net::TcpStream::connect_timeout(&addr, timeout)));
+//RS             });
+//RS             next += 1;
+//RS             in_flight += 1;
+//RS             next_launch = std::time::Instant::now() + std::time::Duration::from_millis(250);
+//RS         }
+//RS         match receiver.try_recv() {
+//RS             Ok((_addr, Ok(stream))) => return jet_net_tcp_stream(stream),
+//RS             Ok((addr, Err(error))) => {
+//RS                 in_flight -= 1;
+//RS                 last = Some((addr, error));
+//RS                 next_launch = std::time::Instant::now();
+//RS             }
+//RS             Err(std::sync::mpsc::TryRecvError::Empty) => {}
+//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+//RS                 unreachable!("connect sender retained")
+//RS             }
+//RS         }
+//RS         if next == ordered.len() && in_flight == 0 {
+//RS             let (addr, error) = last.expect("at least one connection attempt completed");
+//RS             return Err(jet_net_io_error(
+//RS                 "tcp connect",
+//RS                 Some(addr.to_string()),
+//RS                 error,
+//RS             ));
+//RS         }
+//RS         jet_net_scheduler_park("tcp connect", 5)?;
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_listener_local_socket_addr(
+//RS     listener: &JetTCPListener,
+//RS ) -> Result<JetSocketAddr, JetNetError> {
+//RS     listener
+//RS         .inner
+//RS         .local_addr()
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_tcp_local_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, JetNetError> {
+//RS     stream
+//RS         .inner
+//RS         .local_addr()
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| jet_net_io_error("tcp local address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, JetNetError> {
+//RS     stream
+//RS         .inner
+//RS         .peer_addr()
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| jet_net_io_error("tcp peer address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_tcp_listen(addr: &String) -> Result<JetTCPListener, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let inner = std::net::TcpListener::bind(addr.as_str())
+//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+//RS     Ok(JetTCPListener { inner })
+//RS }
+//RS 
+//RS fn jet_net_tcp_accept(listener: &JetTCPListener) -> Result<JetTCPStream, JetNetError> {
+//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS     {
+//RS         listener
+//RS             .inner
+//RS             .set_nonblocking(true)
+//RS             .map_err(|error| jet_net_io_error("tcp accept setup", None, error))?;
+//RS         loop {
+//RS             match listener.inner.accept() {
+//RS                 Ok((stream, _)) => return jet_net_tcp_stream(stream),
+//RS                 Err(error)
+//RS                     if matches!(
+//RS                         error.kind(),
+//RS                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                     ) =>
+//RS                 {
+//RS                     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+//RS                         return Err(jet_net_deadline_timeout("tcp accept"));
+//RS                     }
+//RS                     if jet_scheduler_wait_point_cancelled() {
+//RS                         return Err(JetNetError::Cancelled(jet_net_detail(
+//RS                             "tcp accept",
+//RS                             None,
+//RS                             None,
+//RS                             "tcp accept cancelled".to_string(),
+//RS                             None,
+//RS                         )));
+//RS                     }
+//RS                     std::thread::sleep(std::time::Duration::from_millis(2));
+//RS                 }
+//RS                 Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     loop {
+//RS         match listener.inner.accept() {
+//RS             Ok((stream, _)) => return jet_net_tcp_stream(stream),
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_tcp_listener_scheduler_wait(&listener.inner, "tcp accept")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_tcp_accept_deadline(
+//RS     listener: &JetTCPListener,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetTCPStream, JetNetError> {
+//RS     let deadline_ms = deadline.as_millis();
+//RS     jet_net_timeout(deadline_ms).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("tcp accept", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+//RS     jet_net_tcp_accept(listener)
+//RS }
+//RS 
+//RS fn jet_net_tcp_connect(addr: &String) -> Result<JetTCPStream, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS     {
+//RS         return std::net::TcpStream::connect(addr.as_str())
+//RS             .map_err(|error| jet_net_io_error("tcp connect", Some(addr.clone()), error))
+//RS             .and_then(jet_net_tcp_stream);
+//RS     }
+//RS 
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     {
+//RS         let address = addr.clone();
+//RS         let worker_address = address.clone();
+//RS         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+//RS         std::thread::spawn(move || {
+//RS             let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
+//RS         });
+//RS         jet_net_wait_for_connect(receiver, Some(address))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_tcp_read(stream: &mut JetTCPStream) -> Result<String, JetNetError> {
+//RS     jet_net_tcp_read_text(stream, 8192)
+//RS }
+//RS 
+//RS fn jet_net_tcp_read_bytes(stream: &mut JetTCPStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
+//RS     use std::io::Read;
+//RS     if stream.closed || stream.read_shutdown {
+//RS         return Err(jet_net_closed("tcp read"));
+//RS     }
+//RS     if limit < 0 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp read",
+//RS             None,
+//RS             None,
+//RS             "tcp read limit must be non-negative".to_string(),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     let cap = std::cmp::min(limit as usize, 16 * 1024 * 1024);
+//RS     if cap == 0 {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
+//RS     jet_net_apply_tcp_deadlines(&stream.inner, "tcp read")?;
+//RS     let mut bytes = vec![0u8; cap];
+//RS     loop {
+//RS         match stream.inner.read(&mut bytes) {
+//RS             Ok(n) => {
+//RS                 bytes.truncate(n);
+//RS                 return Ok(bytes);
+//RS             }
+//RS             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                 jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?;
+//RS             }
+//RS             Err(e) => return Err(jet_net_io_error("tcp read", None, e)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_tcp_read_bytes_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     limit: i64,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<Vec<u8>, JetNetError> {
+//RS     let deadline_ms = deadline.as_millis();
+//RS     jet_net_timeout(deadline_ms).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("tcp read", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+//RS     jet_net_tcp_read_bytes(stream, limit)
+//RS }
+//RS 
+//RS fn jet_net_tcp_read_text(stream: &mut JetTCPStream, limit: i64) -> Result<String, JetNetError> {
+//RS     let bytes = jet_net_tcp_read_bytes(stream, limit)?;
+//RS     String::from_utf8(bytes).map_err(|error| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp read text",
+//RS             None,
+//RS             None,
+//RS             format!("tcp read text failed: invalid UTF-8: {}", error),
+//RS             None,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_net_tcp_read_text_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     limit: i64,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<String, JetNetError> {
+//RS     let bytes = jet_net_tcp_read_bytes_deadline(stream, limit, deadline)?;
+//RS     String::from_utf8(bytes).map_err(|error| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "tcp read text",
+//RS             None,
+//RS             None,
+//RS             format!("tcp read text failed: {}", error),
+//RS             None,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_bytes_with_current_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     data: &[u8],
+//RS ) -> Result<i64, JetNetError> {
+//RS     use std::io::Write;
+//RS     if stream.closed || stream.write_shutdown {
+//RS         return Err(jet_net_closed("tcp write"));
+//RS     }
+//RS     jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?;
+//RS     loop {
+//RS         match stream.inner.write(data) {
+//RS             Ok(n) => return Ok(n as i64),
+//RS             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                 jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?;
+//RS             }
+//RS             Err(e) => return Err(jet_net_io_error("tcp write", None, e)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_bytes(stream: &mut JetTCPStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+//RS     jet_net_tcp_write_bytes_with_current_deadline(stream, data)
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_bytes_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     data: &Vec<u8>,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<i64, JetNetError> {
+//RS     let deadline_ms = deadline.as_millis();
+//RS     jet_net_timeout(deadline_ms).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("tcp write", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+//RS     jet_net_tcp_write_bytes(stream, data)
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_all_bytes(
+//RS     stream: &mut JetTCPStream,
+//RS     data: &Vec<u8>,
+//RS ) -> Result<(), JetNetError> {
+//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+//RS     let mut offset = 0usize;
+//RS     while offset < data.len() {
+//RS         let wrote =
+//RS             jet_net_tcp_write_bytes_with_current_deadline(stream, &data[offset..])? as usize;
+//RS         if wrote == 0 {
+//RS             return Err(JetNetError::ConnectionReset(jet_net_detail(
+//RS                 "tcp write all",
+//RS                 None,
+//RS                 None,
+//RS                 "tcp write all failed: zero bytes written".to_string(),
+//RS                 None,
+//RS             )));
+//RS         }
+//RS         offset += wrote;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_all_bytes_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     data: &Vec<u8>,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     let deadline_ms = deadline.as_millis();
+//RS     jet_net_timeout(deadline_ms).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("tcp write all", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+//RS     jet_net_tcp_write_all_bytes(stream, data)
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_text(stream: &mut JetTCPStream, text: &String) -> Result<(), JetNetError> {
+//RS     jet_net_tcp_write_all_bytes(stream, &text.as_bytes().to_vec())
+//RS }
+//RS 
+//RS fn jet_net_tcp_write_text_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     text: &String,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     jet_net_tcp_write_all_bytes_deadline(stream, &text.as_bytes().to_vec(), deadline)
+//RS }
+//RS 
+//RS fn jet_net_tcp_shutdown(stream: &mut JetTCPStream, how: JetNetShutdown) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("tcp shutdown"));
+//RS     }
+//RS     let shutdown = match how {
+//RS         JetNetShutdown::Read => std::net::Shutdown::Read,
+//RS         JetNetShutdown::Write => std::net::Shutdown::Write,
+//RS         JetNetShutdown::Both => std::net::Shutdown::Both,
+//RS     };
+//RS     stream
+//RS         .inner
+//RS         .shutdown(shutdown)
+//RS         .map_err(|e| jet_net_io_error("tcp shutdown", None, e))?;
+//RS     match how {
+//RS         JetNetShutdown::Read => stream.read_shutdown = true,
+//RS         JetNetShutdown::Write => stream.write_shutdown = true,
+//RS         JetNetShutdown::Both => {
+//RS             stream.read_shutdown = true;
+//RS             stream.write_shutdown = true;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_tcp_close(stream: &mut JetTCPStream) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Ok(());
+//RS     }
+//RS     match stream.inner.shutdown(std::net::Shutdown::Both) {
+//RS         Ok(()) => {}
+//RS         Err(error) if matches!(error.kind(), std::io::ErrorKind::NotConnected) => {}
+//RS         Err(error) => return Err(jet_net_io_error("tcp close", None, error)),
+//RS     }
+//RS     stream.closed = true;
+//RS     stream.read_shutdown = true;
+//RS     stream.write_shutdown = true;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_tcp_ready(
+//RS     stream: &mut JetTCPStream,
+//RS     interest: JetNetReadyInterest,
+//RS     deadline_ms: i64,
+//RS ) -> Result<JetNetReady, JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("tcp ready"));
+//RS     }
+//RS     let _ = jet_net_timeout(deadline_ms).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("tcp ready", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline_ms));
+//RS     let read = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     let write = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     let (readable, writable) =
+//RS         jet_net_tcp_scheduler_ready_wait(&stream.inner, read, write, "tcp ready")?;
+//RS     Ok(JetNetReady { readable, writable })
+//RS }
+//RS 
+//RS fn jet_net_tcp_ready_deadline(
+//RS     stream: &mut JetTCPStream,
+//RS     interest: JetNetReadyInterest,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetNetReady, JetNetError> {
+//RS     jet_net_tcp_ready(stream, interest, deadline.as_millis())
+//RS }
+//RS 
+//RS fn jet_net_ready_readable(ready: &JetNetReady) -> bool {
+//RS     ready.readable
+//RS }
+//RS 
+//RS fn jet_net_ready_writable(ready: &JetNetReady) -> bool {
+//RS     ready.writable
+//RS }
+//RS 
+//RS fn jet_net_tcp_write(stream: &mut JetTCPStream, data: &String) -> Result<(), JetNetError> {
+//RS     jet_net_tcp_write_text(stream, data)
+//RS }
+//RS 
+//RS fn jet_net_tcp_local_addr(stream: &JetTCPStream) -> Result<String, JetNetError> {
+//RS     stream
+//RS         .inner
+//RS         .local_addr()
+//RS         .map(|a| a.to_string())
+//RS         .map_err(|e| jet_net_io_error("tcp local address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_tcp_peer_addr(stream: &JetTCPStream) -> Result<String, JetNetError> {
+//RS     stream
+//RS         .inner
+//RS         .peer_addr()
+//RS         .map(|a| a.to_string())
+//RS         .map_err(|e| jet_net_io_error("tcp peer address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_listener_local_addr(listener: &JetTCPListener) -> Result<String, JetNetError> {
+//RS     listener
+//RS         .inner
+//RS         .local_addr()
+//RS         .map(|a| a.to_string())
+//RS         .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_set_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
+//RS     let _ = jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail("set tcp timeout", None, None, m, None))
+//RS     })?;
+//RS     stream.read_timeout_ms = Some(ms);
+//RS     stream.write_timeout_ms = Some(ms);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_set_read_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
+//RS     let _ = jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail("set tcp read timeout", None, None, m, None))
+//RS     })?;
+//RS     stream.read_timeout_ms = Some(ms);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_set_write_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), JetNetError> {
+//RS     let _ = jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail("set tcp write timeout", None, None, m, None))
+//RS     })?;
+//RS     stream.write_timeout_ms = Some(ms);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_nodelay(stream: &JetTCPStream) -> Result<bool, JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("tcp nodelay"));
+//RS     }
+//RS     stream
+//RS         .inner
+//RS         .nodelay()
+//RS         .map_err(|e| jet_net_io_error("tcp nodelay", None, e))
+//RS }
+//RS 
+//RS fn jet_net_set_nodelay(stream: &JetTCPStream, enabled: bool) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("set tcp nodelay"));
+//RS     }
+//RS     stream
+//RS         .inner
+//RS         .set_nodelay(enabled)
+//RS         .map_err(|e| jet_net_io_error("set tcp nodelay", None, e))
+//RS }
+//RS 
+//RS fn jet_net_ttl(stream: &JetTCPStream) -> Result<i64, JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("tcp ttl"));
+//RS     }
+//RS     stream
+//RS         .inner
+//RS         .ttl()
+//RS         .map(|v| v as i64)
+//RS         .map_err(|e| jet_net_io_error("tcp ttl", None, e))
+//RS }
+//RS 
+//RS fn jet_net_set_ttl(stream: &JetTCPStream, ttl: i64) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("set tcp ttl"));
+//RS     }
+//RS     if !(0..=u32::MAX as i64).contains(&ttl) {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "set tcp ttl",
+//RS             None,
+//RS             None,
+//RS             "ttl must fit u32".to_string(),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     stream
+//RS         .inner
+//RS         .set_ttl(ttl as u32)
+//RS         .map_err(|e| jet_net_io_error("set tcp ttl", None, e))
+//RS }
+//RS 
+//RS /// TCP streams are always SOCK_STREAM; returned for ledger socket_type parity.
+//RS fn jet_net_socket_type(_stream: &JetTCPStream) -> String {
+//RS     "stream".to_string()
+//RS }
+//RS 
+//RS /// Copy file bytes onto an open TCP stream (observable sendfile; not the syscall).
+//RS fn jet_net_sendfile(stream: &mut JetTCPStream, path: &String) -> Result<i64, JetNetError> {
+//RS     if stream.closed || stream.write_shutdown {
+//RS         return Err(jet_net_closed("tcp sendfile"));
+//RS     }
+//RS     let mut file = std::fs::File::open(path.as_str())
+//RS         .map_err(|e| jet_net_io_error("tcp sendfile open", Some(path.clone()), e))?;
+//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+//RS     let mut written: u64 = 0;
+//RS     let mut buf = [0u8; 8192];
+//RS     loop {
+//RS         let n = std::io::Read::read(&mut file, &mut buf)
+//RS             .map_err(|e| jet_net_io_error("tcp sendfile read", Some(path.clone()), e))?;
+//RS         if n == 0 {
+//RS             break;
+//RS         }
+//RS         let chunk = buf[..n].to_vec();
+//RS         jet_net_tcp_write_all_bytes(stream, &chunk)?;
+//RS         written += n as u64;
+//RS     }
+//RS     Ok(written.min(i64::MAX as u64) as i64)
+//RS }
+//RS 
+//RS const JET_NET_SERVICES: &[(&str, i64)] = &[
+//RS     ("ftp", 21),
+//RS     ("ssh", 22),
+//RS     ("telnet", 23),
+//RS     ("smtp", 25),
+//RS     ("dns", 53),
+//RS     ("domain", 53),
+//RS     ("http", 80),
+//RS     ("pop3", 110),
+//RS     ("imap", 143),
+//RS     ("https", 443),
+//RS     ("smtps", 465),
+//RS     ("submission", 587),
+//RS     ("imaps", 993),
+//RS     ("pop3s", 995),
+//RS ];
+//RS 
+//RS pub(crate) fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
+//RS     let key = name.to_ascii_lowercase();
+//RS     JET_NET_SERVICES
+//RS         .iter()
+//RS         .find(|(n, _)| *n == key)
+//RS         .map(|(_, port)| *port)
+//RS         .ok_or_else(|| {
+//RS             JetNetError::InvalidInput(jet_net_detail(
+//RS                 "getservbyname",
+//RS                 None,
+//RS                 None,
+//RS                 format!("unknown service `{name}`"),
+//RS                 None,
+//RS             ))
+//RS         })
+//RS }
+//RS 
+//RS pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
+//RS     JET_NET_SERVICES
+//RS         .iter()
+//RS         .find(|(_, p)| *p == port)
+//RS         .map(|(n, _)| (*n).to_string())
+//RS         .ok_or_else(|| {
+//RS             JetNetError::InvalidInput(jet_net_detail(
+//RS                 "getservbyport",
+//RS                 None,
+//RS                 None,
+//RS                 format!("unknown port `{port}`"),
+//RS                 None,
+//RS             ))
+//RS         })
+//RS }
+//RS 
+//RS fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let inner = std::net::UdpSocket::bind(addr.as_str())
+//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+//RS     let inner = std::sync::Arc::new(inner);
+//RS     Ok(JetUDPSocket {
+//RS         inner: inner.clone(),
+//RS         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
+//RS         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+//RS         #[cfg(unix)]
+//RS         scheduler: jet_net_scheduler_handle(inner.as_ref()),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let inner = std::net::UdpSocket::bind(addr.inner)
+//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
+//RS     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
+//RS     let inner = std::sync::Arc::new(inner);
+//RS     Ok(JetUDPSocket {
+//RS         inner: inner.clone(),
+//RS         timeout_ms: std::sync::Arc::new(std::sync::Mutex::new(None)),
+//RS         closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+//RS         #[cfg(unix)]
+//RS         scheduler: jet_net_scheduler_handle(inner.as_ref()),
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS fn jet_net_udp_apply_timeout(
+//RS     socket: &JetUDPSocket,
+//RS     read: bool,
+//RS     operation: &str,
+//RS ) -> Result<(), JetNetError> {
+//RS     let Some(remaining) = jet_deadline_remaining_ms() else {
+//RS         return Ok(());
+//RS     };
+//RS     if remaining <= 0 {
+//RS         return Err(jet_net_deadline_timeout(operation));
+//RS     }
+//RS     let timeout = Some(std::time::Duration::from_millis(remaining as u64));
+//RS     let result = if read {
+//RS         socket.inner.set_read_timeout(timeout)
+//RS     } else {
+//RS         socket.inner.set_write_timeout(timeout)
+//RS     };
+//RS     result.map_err(|error| jet_net_io_error(&format!("{} timeout setup", operation), None, error))
+//RS }
+//RS 
+//RS fn jet_net_udp_open(socket: &JetUDPSocket, operation: &str) -> Result<(), JetNetError> {
+//RS     if socket.closed.load(std::sync::atomic::Ordering::Acquire) {
+//RS         Err(jet_net_closed(operation))
+//RS     } else {
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_udp_local_addr(socket: &JetUDPSocket) -> Result<JetSocketAddr, JetNetError> {
+//RS     jet_net_udp_open(socket, "udp local address")?;
+//RS     socket
+//RS         .inner
+//RS         .local_addr()
+//RS         .map(|inner| JetSocketAddr { inner })
+//RS         .map_err(|e| jet_net_io_error("udp local address", None, e))
+//RS }
+//RS 
+//RS fn jet_net_udp_set_timeout(socket: &JetUDPSocket, ms: i64) -> Result<(), JetNetError> {
+//RS     jet_net_udp_open(socket, "set udp timeout")?;
+//RS     let _ = jet_net_timeout(ms).map_err(|m| {
+//RS         JetNetError::InvalidInput(jet_net_detail("set udp timeout", None, None, m, None))
+//RS     })?;
+//RS     *socket.timeout_ms.lock().unwrap() = Some(ms);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_udp_send_to(
+//RS     socket: &JetUDPSocket,
+//RS     data: &String,
+//RS     addr: &JetSocketAddr,
+//RS ) -> Result<i64, JetNetError> {
+//RS     jet_net_udp_send_slice(socket, data.as_bytes(), addr)
+//RS }
+//RS 
+//RS fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket, JetNetError> {
+//RS     jet_net_udp_open(socket, "udp receive")?;
+//RS     if limit <= 0 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "udp receive",
+//RS             None,
+//RS             None,
+//RS             "udp receive limit must be positive".to_string(),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS     jet_net_udp_apply_timeout(socket, true, "udp receive")?;
+//RS     let cap = std::cmp::min(limit as usize, 1 << 20);
+//RS     let mut buf = vec![0u8; 65535];
+//RS     loop {
+//RS         match socket.inner.recv_from(&mut buf) {
+//RS             Ok((n, addr)) => {
+//RS                 return Ok({
+//RS                     let original_len = n;
+//RS                     buf.truncate(std::cmp::min(n, cap));
+//RS                     JetUDPPacket {
+//RS                         data: buf,
+//RS                         addr: JetSocketAddr { inner: addr },
+//RS                         original_len: original_len as i64,
+//RS                         truncated: original_len > cap,
+//RS                     }
+//RS                 })
+//RS             }
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_udp_packet_data(packet: &JetUDPPacket) -> String {
+//RS     String::from_utf8_lossy(&packet.data).to_string()
+//RS }
+//RS 
+//RS fn jet_net_udp_packet_addr(packet: &JetUDPPacket) -> JetSocketAddr {
+//RS     packet.addr.clone()
+//RS }
+//RS 
+//RS fn jet_net_udp_send_bytes_to(
+//RS     socket: &JetUDPSocket,
+//RS     data: &Vec<u8>,
+//RS     addr: &JetSocketAddr,
+//RS ) -> Result<i64, JetNetError> {
+//RS     jet_net_udp_send_slice(socket, data, addr)
+//RS }
+//RS 
+//RS fn jet_net_udp_send_slice(
+//RS     socket: &JetUDPSocket,
+//RS     data: &[u8],
+//RS     addr: &JetSocketAddr,
+//RS ) -> Result<i64, JetNetError> {
+//RS     jet_net_udp_open(socket, "udp send")?;
+//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS     jet_net_udp_apply_timeout(socket, false, "udp send")?;
+//RS     loop {
+//RS         match socket.inner.send_to(data, addr.inner) {
+//RS             Ok(n) if n == data.len() => return Ok(n as i64),
+//RS             Ok(n) => {
+//RS                 return Err(JetNetError::Protocol(jet_net_detail(
+//RS                     "udp send",
+//RS                     Some(addr.inner.to_string()),
+//RS                     None,
+//RS                     format!("udp send wrote {} of {} datagram bytes", n, data.len()),
+//RS                     None,
+//RS                 )))
+//RS             }
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_udp_scheduler_wait(socket, false, true, "udp send")?;
+//RS             }
+//RS             Err(error) => {
+//RS                 return Err(jet_net_io_error(
+//RS                     "udp send",
+//RS                     Some(addr.inner.to_string()),
+//RS                     error,
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_udp_receive(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket, JetNetError> {
+//RS     jet_net_udp_open(socket, "udp receive")?;
+//RS     if limit < 0 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "udp receive",
+//RS             None,
+//RS             None,
+//RS             "udp receive limit must be non-negative".to_string(),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+//RS     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+//RS     jet_net_udp_apply_timeout(socket, true, "udp receive")?;
+//RS     let cap = std::cmp::min(limit as usize, 65535);
+//RS     let mut bytes = vec![0u8; 65535];
+//RS     let (original_len, addr) = loop {
+//RS         match socket.inner.recv_from(&mut bytes) {
+//RS             Ok(packet) => break packet,
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_udp_scheduler_wait(socket, true, false, "udp receive")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("udp receive", None, error)),
+//RS         }
+//RS     };
+//RS     bytes.truncate(std::cmp::min(original_len, cap));
+//RS     Ok(JetUDPPacket {
+//RS         data: bytes,
+//RS         addr: JetSocketAddr { inner: addr },
+//RS         original_len: original_len as i64,
+//RS         truncated: original_len > cap,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_net_udp_receive_deadline(
+//RS     socket: &JetUDPSocket,
+//RS     limit: i64,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetUDPPacket, JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "udp receive")?;
+//RS     jet_net_udp_receive(socket, limit)
+//RS }
+//RS 
+//RS fn jet_net_udp_send_bytes_to_deadline(
+//RS     socket: &JetUDPSocket,
+//RS     data: &Vec<u8>,
+//RS     addr: &JetSocketAddr,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<i64, JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "udp send")?;
+//RS     jet_net_udp_send_bytes_to(socket, data, addr)
+//RS }
+//RS 
+//RS fn jet_net_udp_close(socket: &JetUDPSocket) -> Result<(), JetNetError> {
+//RS     if !socket
+//RS         .closed
+//RS         .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS     {
+//RS         #[cfg(unix)]
+//RS         socket.scheduler.close();
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_udp_ready(
+//RS     socket: &JetUDPSocket,
+//RS     interest: JetNetReadyInterest,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetNetReady, JetNetError> {
+//RS     jet_net_udp_open(socket, "udp ready")?;
+//RS     jet_net_timeout(deadline.as_millis()).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail("udp ready", None, None, message, None))
+//RS     })?;
+//RS     let _deadline = jet_net_operation_deadline(Some(deadline.as_millis()));
+//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+//RS         return Err(jet_net_deadline_timeout("udp ready"));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     return Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "udp ready",
+//RS         None,
+//RS         None,
+//RS         "udp readiness backend is unavailable on this target".to_string(),
+//RS         None,
+//RS     )));
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let want_read = matches!(
+//RS             interest,
+//RS             JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
+//RS         );
+//RS         let want_write = matches!(
+//RS             interest,
+//RS             JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
+//RS         );
+//RS         let (readable, writable) =
+//RS             jet_net_udp_scheduler_ready_wait(socket, want_read, want_write, "udp ready")?;
+//RS         Ok(JetNetReady { readable, writable })
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_udp_packet_bytes(packet: &JetUDPPacket) -> Vec<u8> {
+//RS     packet.data.clone()
+//RS }
+//RS 
+//RS fn jet_net_udp_packet_original_len(packet: &JetUDPPacket) -> i64 {
+//RS     packet.original_len
+//RS }
+//RS 
+//RS fn jet_net_udp_packet_truncated(packet: &JetUDPPacket) -> bool {
+//RS     packet.truncated
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_listen(path: &String) -> Result<JetUnixListener, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let _ = std::fs::remove_file(path);
+//RS     let inner = std::os::unix::net::UnixListener::bind(path)
+//RS         .map_err(|e| jet_net_io_error("unix listen", Some(path.clone()), e))?;
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("unix listen", Some(path.clone()), e))?;
+//RS     let inner = std::sync::Arc::new(inner);
+//RS     Ok(JetUnixListener {
+//RS         scheduler: jet_net_scheduler_handle(inner.as_ref()),
+//RS         inner,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_listen(path: &String) -> Result<JetUnixListener, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix listen",
+//RS         Some(path.clone()),
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_accept(listener: &JetUnixListener) -> Result<JetUnixStream, JetNetError> {
+//RS     loop {
+//RS         match listener.inner.accept() {
+//RS             Ok((inner, _)) => {
+//RS                 inner
+//RS                     .set_nonblocking(true)
+//RS                     .map_err(|error| jet_net_io_error("unix accept", None, error))?;
+//RS                 return Ok(JetUnixStream {
+//RS                     scheduler: jet_net_scheduler_handle(&inner),
+//RS                     inner,
+//RS                     closed: false,
+//RS                     read_shutdown: false,
+//RS                     write_shutdown: false,
+//RS                     read_timeout_ms: None,
+//RS                     write_timeout_ms: None,
+//RS                 });
+//RS             }
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_unix_listener_scheduler_wait(listener, "unix accept")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("unix accept", None, error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_accept_deadline(
+//RS     listener: &JetUnixListener,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetUnixStream, JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "unix accept")?;
+//RS     jet_net_unix_accept(listener)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_accept(_listener: &JetUnixListener) -> Result<JetUnixStream, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix accept",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_accept_deadline(
+//RS     _listener: &JetUnixListener,
+//RS     _deadline: &jet_std::Duration,
+//RS ) -> Result<JetUnixStream, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix accept",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let address = path.clone();
+//RS     let worker_address = address.clone();
+//RS     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+//RS     std::thread::spawn(move || {
+//RS         let _ = sender.send(std::os::unix::net::UnixStream::connect(worker_address));
+//RS     });
+//RS     let inner = loop {
+//RS         match receiver.try_recv() {
+//RS             Ok(Ok(stream)) => break stream,
+//RS             Ok(Err(error)) => return Err(jet_net_io_error("unix connect", Some(address), error)),
+//RS             Err(std::sync::mpsc::TryRecvError::Empty) => jet_net_scheduler_park("unix connect", 5)?,
+//RS             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+//RS                 return Err(JetNetError::Other(jet_net_detail(
+//RS                     "unix connect",
+//RS                     Some(address),
+//RS                     None,
+//RS                     "unix connect worker stopped without a result".to_string(),
+//RS                     None,
+//RS                 )))
+//RS             }
+//RS         }
+//RS     };
+//RS     inner
+//RS         .set_nonblocking(true)
+//RS         .map_err(|e| jet_net_io_error("unix connect", Some(path.clone()), e))?;
+//RS     Ok(JetUnixStream {
+//RS         scheduler: jet_net_scheduler_handle(&inner),
+//RS         inner,
+//RS         closed: false,
+//RS         read_shutdown: false,
+//RS         write_shutdown: false,
+//RS         read_timeout_ms: None,
+//RS         write_timeout_ms: None,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix connect",
+//RS         Some(path.clone()),
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_net_unix_connect_deadline(
+//RS     path: &String,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetUnixStream, JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "unix connect")?;
+//RS     jet_net_unix_connect(path)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_read(stream: &mut JetUnixStream) -> Result<String, JetNetError> {
+//RS     let bytes = jet_net_unix_read_bytes(stream, 8192)?;
+//RS     String::from_utf8(bytes).map_err(|e| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "unix read text",
+//RS             None,
+//RS             None,
+//RS             format!("unix read text failed: invalid UTF-8: {}", e),
+//RS             None,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_read(_stream: &mut JetUnixStream) -> Result<String, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix read",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_write(stream: &mut JetUnixStream, data: &String) -> Result<(), JetNetError> {
+//RS     jet_net_unix_write_all_bytes(stream, &data.as_bytes().to_vec())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_write(_stream: &mut JetUnixStream, _data: &String) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix write",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_read_bytes(stream: &mut JetUnixStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
+//RS     use std::io::Read;
+//RS     if stream.closed || stream.read_shutdown {
+//RS         return Err(jet_net_closed("unix read"));
+//RS     }
+//RS     if limit <= 0 {
+//RS         return Err(JetNetError::InvalidInput(jet_net_detail(
+//RS             "unix read",
+//RS             None,
+//RS             None,
+//RS             "unix read limit must be positive".to_string(),
+//RS             None,
+//RS         )));
+//RS     }
+//RS     let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
+//RS     let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
+//RS     loop {
+//RS         match stream.inner.read(&mut bytes) {
+//RS             Ok(n) => {
+//RS                 bytes.truncate(n);
+//RS                 return Ok(bytes);
+//RS             }
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_unix_scheduler_wait(stream, true, false, "unix read")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("unix read", None, error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_read_bytes_deadline(
+//RS     stream: &mut JetUnixStream,
+//RS     limit: i64,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<Vec<u8>, JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "unix read")?;
+//RS     jet_net_unix_read_bytes(stream, limit)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_read_bytes_deadline(
+//RS     _stream: &mut JetUnixStream,
+//RS     _limit: i64,
+//RS     _deadline: &jet_std::Duration,
+//RS ) -> Result<Vec<u8>, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix read",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_read_bytes(
+//RS     _stream: &mut JetUnixStream,
+//RS     _limit: i64,
+//RS ) -> Result<Vec<u8>, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix read",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_write_all_bytes(
+//RS     stream: &mut JetUnixStream,
+//RS     data: &Vec<u8>,
+//RS ) -> Result<(), JetNetError> {
+//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+//RS     let mut offset = 0usize;
+//RS     while offset < data.len() {
+//RS         let wrote = jet_net_unix_write_slice(stream, &data[offset..])? as usize;
+//RS         if wrote == 0 {
+//RS             return Err(JetNetError::ConnectionReset(jet_net_detail(
+//RS                 "unix write all",
+//RS                 None,
+//RS                 None,
+//RS                 "unix write all failed: zero bytes written".to_string(),
+//RS                 None,
+//RS             )));
+//RS         }
+//RS         offset += wrote;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_write_all_bytes_deadline(
+//RS     stream: &mut JetUnixStream,
+//RS     data: &Vec<u8>,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "unix write all")?;
+//RS     jet_net_unix_write_all_bytes(stream, data)
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_write_all_bytes_deadline(
+//RS     _stream: &mut JetUnixStream,
+//RS     _data: &Vec<u8>,
+//RS     _deadline: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix write",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_write_bytes(
+//RS     stream: &mut JetUnixStream,
+//RS     data: &Vec<u8>,
+//RS ) -> Result<i64, JetNetError> {
+//RS     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+//RS     jet_net_unix_write_slice(stream, data)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_write_slice(stream: &mut JetUnixStream, data: &[u8]) -> Result<i64, JetNetError> {
+//RS     use std::io::Write;
+//RS     if stream.closed || stream.write_shutdown {
+//RS         return Err(jet_net_closed("unix write"));
+//RS     }
+//RS     loop {
+//RS         match stream.inner.write(data) {
+//RS             Ok(count) => return Ok(count as i64),
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 jet_net_unix_scheduler_wait(stream, false, true, "unix write")?;
+//RS             }
+//RS             Err(error) => return Err(jet_net_io_error("unix write", None, error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_write_all_bytes(
+//RS     _stream: &mut JetUnixStream,
+//RS     _data: &Vec<u8>,
+//RS ) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix write",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_write_bytes(
+//RS     _stream: &mut JetUnixStream,
+//RS     _data: &Vec<u8>,
+//RS ) -> Result<i64, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix write",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_shutdown(
+//RS     stream: &mut JetUnixStream,
+//RS     how: JetNetShutdown,
+//RS ) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("unix shutdown"));
+//RS     }
+//RS     let os_how = match how {
+//RS         JetNetShutdown::Read => std::net::Shutdown::Read,
+//RS         JetNetShutdown::Write => std::net::Shutdown::Write,
+//RS         JetNetShutdown::Both => std::net::Shutdown::Both,
+//RS     };
+//RS     stream
+//RS         .inner
+//RS         .shutdown(os_how)
+//RS         .map_err(|error| jet_net_io_error("unix shutdown", None, error))?;
+//RS     match how {
+//RS         JetNetShutdown::Read => stream.read_shutdown = true,
+//RS         JetNetShutdown::Write => stream.write_shutdown = true,
+//RS         JetNetShutdown::Both => {
+//RS             stream.read_shutdown = true;
+//RS             stream.write_shutdown = true;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_shutdown(
+//RS     _stream: &mut JetUnixStream,
+//RS     _how: JetNetShutdown,
+//RS ) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix shutdown",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_close(stream: &mut JetUnixStream) -> Result<(), JetNetError> {
+//RS     if stream.closed {
+//RS         return Ok(());
+//RS     }
+//RS     stream.closed = true;
+//RS     stream.read_shutdown = true;
+//RS     stream.write_shutdown = true;
+//RS     stream.scheduler.close();
+//RS     match stream.inner.shutdown(std::net::Shutdown::Both) {
+//RS         Ok(()) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
+//RS         Err(error) => return Err(jet_net_io_error("unix close", None, error)),
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_close(_stream: &mut JetUnixStream) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix close",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_set_timeout(
+//RS     stream: &mut JetUnixStream,
+//RS     timeout: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     jet_net_timeout(timeout.as_millis()).map_err(|message| {
+//RS         JetNetError::InvalidInput(jet_net_detail(
+//RS             "set unix timeout",
+//RS             None,
+//RS             None,
+//RS             message,
+//RS             None,
+//RS         ))
+//RS     })?;
+//RS     stream.read_timeout_ms = Some(timeout.as_millis());
+//RS     stream.write_timeout_ms = Some(timeout.as_millis());
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_set_timeout(
+//RS     _stream: &mut JetUnixStream,
+//RS     _timeout: &jet_std::Duration,
+//RS ) -> Result<(), JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "set unix timeout",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_net_unix_ready(
+//RS     stream: &JetUnixStream,
+//RS     interest: JetNetReadyInterest,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetNetReady, JetNetError> {
+//RS     if stream.closed {
+//RS         return Err(jet_net_closed("unix ready"));
+//RS     }
+//RS     let _deadline = jet_net_explicit_deadline(deadline, "unix ready")?;
+//RS     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+//RS         return Err(jet_net_deadline_timeout("unix ready"));
+//RS     }
+//RS     let want_read = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     let want_write = matches!(
+//RS         interest,
+//RS         JetNetReadyInterest::Write | JetNetReadyInterest::ReadWrite
+//RS     );
+//RS     let (readable, writable) =
+//RS         jet_net_unix_scheduler_ready_wait(stream, want_read, want_write, "unix ready")?;
+//RS     Ok(JetNetReady { readable, writable })
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_net_unix_ready(
+//RS     _stream: &JetUnixStream,
+//RS     _interest: JetNetReadyInterest,
+//RS     _deadline: &jet_std::Duration,
+//RS ) -> Result<JetNetReady, JetNetError> {
+//RS     Err(JetNetError::Unsupported(jet_net_detail(
+//RS         "unix ready",
+//RS         None,
+//RS         None,
+//RS         "unix sockets are not supported on this platform".to_string(),
+//RS         None,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_net_dns_system_servers() -> Vec<String> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let mut out = Vec::new();
+//RS     #[cfg(target_os = "linux")]
+//RS     if let Ok(text) = std::fs::read_to_string("/etc/resolv.conf") {
+//RS         out.extend(jet_net_dns_parse_resolv_conf(&text));
+//RS     }
+//RS 
+//RS     // macOS resolver policy is scoped per interface/VPN. `scutil --dns` is
+//RS     // the stable system view; /etc/resolv.conf explicitly does not carry all
+//RS     // scoped resolvers.
+//RS     #[cfg(target_os = "macos")]
+//RS     if let Ok(output) = std::process::Command::new("scutil").arg("--dns").output() {
+//RS         out.extend(jet_net_dns_parse_scutil(&String::from_utf8_lossy(
+//RS             &output.stdout,
+//RS         )));
+//RS     }
+//RS 
+//RS     // PowerShell returns address values, not localized ipconfig labels, and
+//RS     // preserves IPv4/IPv6 plus interface-scoped resolver policy.
+//RS     #[cfg(windows)]
+//RS     if let Ok(output) = std::process::Command::new("powershell.exe")
+//RS         .args([
+//RS             "-NoProfile",
+//RS             "-NonInteractive",
+//RS             "-Command",
+//RS             "Get-DNSClientServerAddress | ForEach-Object { $_.ServerAddresses }",
+//RS         ])
+//RS         .output()
+//RS     {
+//RS         out.extend(jet_net_dns_parse_windows_addresses(
+//RS             &String::from_utf8_lossy(&output.stdout),
+//RS         ));
+//RS     }
+//RS     out.sort();
+//RS     out.dedup();
+//RS     out
+//RS }
+//RS 
+//RS fn jet_net_dns_encode_name(out: &mut Vec<u8>, name: &str) -> Result<(), String> {
+//RS     let trimmed = name.trim_end_matches('.');
+//RS     if trimmed.is_empty() {
+//RS         out.push(0);
+//RS         return Ok(());
+//RS     }
+//RS     for label in trimmed.split('.') {
+//RS         if label.is_empty() || label.len() > 63 || !label.is_ascii() {
+//RS             return Err(format!("invalid DNS name `{}`", name));
+//RS         }
+//RS         out.push(label.len() as u8);
+//RS         out.extend_from_slice(label.as_bytes());
+//RS     }
+//RS     out.push(0);
+//RS     if out.len() > 255 {
+//RS         return Err(format!(
+//RS             "invalid DNS name `{}`: encoded name exceeds 255 bytes",
+//RS             name
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_net_dns_read_name(packet: &[u8], pos: &mut usize) -> Result<String, String> {
+//RS     let mut labels = Vec::new();
+//RS     let mut p = *pos;
+//RS     let mut jumped = false;
+//RS     let mut seen = vec![false; packet.len()];
+//RS     let mut wire_len = 1usize;
+//RS     loop {
+//RS         if p >= packet.len() {
+//RS             return Err("network protocol error: truncated DNS name".to_string());
+//RS         }
+//RS         if seen[p] {
+//RS             return Err("network protocol error: cyclic DNS compression pointer".to_string());
+//RS         }
+//RS         seen[p] = true;
+//RS         let len = packet[p];
+//RS         if len & 0xc0 == 0xc0 {
+//RS             if p + 1 >= packet.len() {
+//RS                 return Err("network protocol error: truncated DNS compression pointer".to_string());
+//RS             }
+//RS             let ptr = (((len & 0x3f) as usize) << 8) | packet[p + 1] as usize;
+//RS             if ptr >= packet.len() {
+//RS                 return Err(
+//RS                     "network protocol error: DNS compression pointer is out of bounds".to_string(),
+//RS                 );
+//RS             }
+//RS             if ptr >= p {
+//RS                 return Err(
+//RS                     "network protocol error: DNS compression pointer does not point backward"
+//RS                         .to_string(),
+//RS                 );
+//RS             }
+//RS             if !jumped {
+//RS                 *pos = p + 2;
+//RS             }
+//RS             p = ptr;
+//RS             jumped = true;
+//RS             continue;
+//RS         }
+//RS         if len & 0xc0 != 0 {
+//RS             return Err("network protocol error: reserved DNS label encoding".to_string());
+//RS         }
+//RS         p += 1;
+//RS         if len == 0 {
+//RS             if !jumped {
+//RS                 *pos = p;
+//RS             }
+//RS             break;
+//RS         }
+//RS         if len > 63 {
+//RS             return Err("network protocol error: DNS label exceeds 63 bytes".to_string());
+//RS         }
+//RS         let end = p + len as usize;
+//RS         if end > packet.len() {
+//RS             return Err("network protocol error: truncated DNS label".to_string());
+//RS         }
+//RS         wire_len += len as usize + 1;
+//RS         if wire_len > 255 {
+//RS             return Err("network protocol error: DNS name exceeds 255 bytes".to_string());
+//RS         }
+//RS         let label = std::str::from_utf8(&packet[p..end])
+//RS             .map_err(|_| "network protocol error: DNS label is not valid UTF-8".to_string())?;
+//RS         labels.push(label.to_string());
+//RS         p = end;
+//RS         if !jumped {
+//RS             *pos = p;
+//RS         }
+//RS     }
+//RS     Ok(if labels.is_empty() {
+//RS         ".".to_string()
+//RS     } else {
+//RS         labels.join(".")
+//RS     })
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetDNSWireRecord {
+//RS     owner: String,
+//RS     ty: u16,
+//RS     class: u16,
+//RS     packet: std::sync::Arc<Vec<u8>>,
+//RS     rdata_start: usize,
+//RS     rdata_len: usize,
+//RS }
+//RS 
+//RS fn jet_net_dns_txid() -> Result<u16, String> {
+//RS     let mut bytes = [0u8; 2];
+//RS     jet_crypto_entropy_fill(&mut bytes).map_err(|_| {
+//RS         "DNS transaction ID needs operating-system cryptographic randomness".to_string()
+//RS     })?;
+//RS     Ok(u16::from_be_bytes(bytes))
+//RS }
+//RS 
+//RS fn jet_net_dns_read_u16(packet: &[u8], at: usize, what: &str) -> Result<u16, String> {
+//RS     let bytes = packet
+//RS         .get(at..at + 2)
+//RS         .ok_or_else(|| format!("network protocol error: truncated DNS {}", what))?;
+//RS     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+//RS }
+//RS 
+//RS fn jet_net_dns_parse_response(
+//RS     packet: Vec<u8>,
+//RS     txid: u16,
+//RS     name: &str,
+//RS     qtype: u16,
+//RS ) -> Result<(bool, Vec<JetDNSWireRecord>), String> {
+//RS     if packet.len() < 12 {
+//RS         return Err("network protocol error: truncated DNS header".to_string());
+//RS     }
+//RS     if jet_net_dns_read_u16(&packet, 0, "transaction ID")? != txid {
+//RS         return Err("network protocol error: DNS transaction ID mismatch".to_string());
+//RS     }
+//RS     let flags = jet_net_dns_read_u16(&packet, 2, "flags")?;
+//RS     if flags & 0x8000 == 0 {
+//RS         return Err("network protocol error: DNS packet is not a response".to_string());
+//RS     }
+//RS     if flags & 0x7800 != 0 {
+//RS         return Err("network protocol error: unsupported DNS opcode".to_string());
+//RS     }
+//RS     if flags & 0x0040 != 0 {
+//RS         return Err("network protocol error: reserved DNS header bit is set".to_string());
+//RS     }
+//RS     let rcode = flags & 0x000f;
+//RS     if rcode == 3 {
+//RS         return Err(format!("DNS name not found: `{}`", name));
+//RS     }
+//RS     if rcode != 0 {
+//RS         return Err(format!(
+//RS             "DNS server failure for `{}`: RCODE {}",
+//RS             name, rcode
+//RS         ));
+//RS     }
+//RS     let qd = jet_net_dns_read_u16(&packet, 4, "question count")? as usize;
+//RS     if qd != 1 {
+//RS         return Err("network protocol error: DNS response must echo one question".to_string());
+//RS     }
+//RS     let total_records = jet_net_dns_read_u16(&packet, 6, "answer count")? as usize
+//RS         + jet_net_dns_read_u16(&packet, 8, "authority count")? as usize
+//RS         + jet_net_dns_read_u16(&packet, 10, "additional count")? as usize;
+//RS     let mut pos = 12usize;
+//RS     let echoed_name = jet_net_dns_read_name(&packet, &mut pos)?;
+//RS     let echoed_type = jet_net_dns_read_u16(&packet, pos, "question type")?;
+//RS     let echoed_class = jet_net_dns_read_u16(&packet, pos + 2, "question class")?;
+//RS     pos += 4;
+//RS     if !echoed_name
+//RS         .trim_end_matches('.')
+//RS         .eq_ignore_ascii_case(name.trim_end_matches('.'))
+//RS         || echoed_type != qtype
+//RS         || echoed_class != 1
+//RS     {
+//RS         return Err("network protocol error: DNS question echo mismatch".to_string());
+//RS     }
+//RS     // TC explicitly means the UDP body is incomplete. The header and echoed
+//RS     // question above must still authenticate; declared records cannot be parsed
+//RS     // safely until the bounded TCP retry supplies the complete message.
+//RS     if flags & 0x0200 != 0 {
+//RS         return Ok((true, Vec::new()));
+//RS     }
+//RS     let minimum_record_bytes = total_records.checked_mul(11).ok_or_else(|| {
+//RS         "network protocol error: DNS record count overflows packet bounds".to_string()
+//RS     })?;
+//RS     if minimum_record_bytes > packet.len().saturating_sub(pos) {
+//RS         return Err("network protocol error: DNS record counts exceed packet bounds".to_string());
+//RS     }
+//RS     let packet = std::sync::Arc::new(packet);
+//RS     let mut records = Vec::with_capacity(total_records);
+//RS     for _ in 0..total_records {
+//RS         let owner = jet_net_dns_read_name(packet.as_slice(), &mut pos)?;
+//RS         let ty = jet_net_dns_read_u16(packet.as_slice(), pos, "record type")?;
+//RS         let class = jet_net_dns_read_u16(packet.as_slice(), pos + 2, "record class")?;
+//RS         let rdata_len = jet_net_dns_read_u16(packet.as_slice(), pos + 8, "record length")? as usize;
+//RS         pos += 10;
+//RS         let end = pos
+//RS             .checked_add(rdata_len)
+//RS             .filter(|end| *end <= packet.len())
+//RS             .ok_or_else(|| "network protocol error: truncated DNS record data".to_string())?;
+//RS         records.push(JetDNSWireRecord {
+//RS             owner,
+//RS             ty,
+//RS             class,
+//RS             packet: packet.clone(),
+//RS             rdata_start: pos,
+//RS             rdata_len,
+//RS         });
+//RS         pos = end;
+//RS     }
+//RS     if pos != packet.len() {
+//RS         return Err("network protocol error: trailing bytes after DNS records".to_string());
+//RS     }
+//RS     Ok((false, records))
+//RS }
+//RS 
+//RS fn jet_net_dns_cancelled() -> bool {
+//RS     jet_scheduler_task_cancelled() && !jet_scheduler_shielded()
+//RS }
+//RS 
+//RS fn jet_net_dns_remaining(
+//RS     deadline: std::time::Instant,
+//RS     name: &str,
+//RS ) -> Result<std::time::Duration, String> {
+//RS     if jet_net_dns_cancelled() {
+//RS         return Err(format!(
+//RS             "network operation cancelled during DNS lookup for `{}`",
+//RS             name
+//RS         ));
+//RS     }
+//RS     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS     if remaining.is_zero() {
+//RS         return Err(format!("network timeout during DNS lookup for `{}`", name));
+//RS     }
+//RS     Ok(remaining)
+//RS }
+//RS 
+//RS fn jet_net_dns_io_slice(
+//RS     deadline: std::time::Instant,
+//RS     name: &str,
+//RS ) -> Result<std::time::Duration, String> {
+//RS     Ok(jet_net_dns_remaining(deadline, name)?.min(std::time::Duration::from_millis(10)))
+//RS }
+//RS 
+//RS fn jet_net_dns_tcp_exchange(
+//RS     server_addr: std::net::SocketAddr,
+//RS     request: &[u8],
+//RS     deadline: std::time::Instant,
+//RS     name: &str,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     use std::io::{Read, Write};
+//RS     let mut stream =
+//RS         std::net::TcpStream::connect_timeout(&server_addr, jet_net_dns_remaining(deadline, name)?)
+//RS             .map_err(|e| format!("DNS TCP connect to `{}` failed: {}", server_addr, e))?;
+//RS     let len = u16::try_from(request.len())
+//RS         .map_err(|_| "network protocol error: DNS request exceeds TCP frame".to_string())?;
+//RS     let mut framed = Vec::with_capacity(request.len() + 2);
+//RS     framed.extend_from_slice(&len.to_be_bytes());
+//RS     framed.extend_from_slice(request);
+//RS     let mut written = 0usize;
+//RS     while written < framed.len() {
+//RS         stream
+//RS             .set_write_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+//RS             .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+//RS         match stream.write(&framed[written..]) {
+//RS             Ok(0) => {
+//RS                 return Err(
+//RS                     "network protocol error: DNS TCP connection closed while sending query"
+//RS                         .to_string(),
+//RS                 )
+//RS             }
+//RS             Ok(n) => written += n,
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::TimedOut
+//RS                         | std::io::ErrorKind::WouldBlock
+//RS                         | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 continue
+//RS             }
+//RS             Err(error) => return Err(format!("DNS TCP query send failed: {}", error)),
+//RS         }
+//RS     }
+//RS     let mut prefix = [0u8; 2];
+//RS     let mut prefix_read = 0usize;
+//RS     while prefix_read < prefix.len() {
+//RS         stream
+//RS             .set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+//RS             .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+//RS         match stream.read(&mut prefix[prefix_read..]) {
+//RS             Ok(0) => {
+//RS                 return Err(
+//RS                     "network protocol error: DNS TCP connection closed before response length"
+//RS                         .to_string(),
+//RS                 )
+//RS             }
+//RS             Ok(n) => prefix_read += n,
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::TimedOut
+//RS                         | std::io::ErrorKind::WouldBlock
+//RS                         | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 continue
+//RS             }
+//RS             Err(error) => return Err(format!("DNS TCP response length failed: {}", error)),
+//RS         }
+//RS     }
+//RS     let response_len = u16::from_be_bytes(prefix) as usize;
+//RS     if response_len < 12 || response_len > 65535 {
+//RS         return Err("network protocol error: invalid DNS TCP response length".to_string());
+//RS     }
+//RS     let mut packet = vec![0u8; response_len];
+//RS     let mut read = 0usize;
+//RS     while read < packet.len() {
+//RS         stream
+//RS             .set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+//RS             .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+//RS         match stream.read(&mut packet[read..]) {
+//RS             Ok(0) => {
+//RS                 return Err("network protocol error: DNS TCP response is truncated".to_string())
+//RS             }
+//RS             Ok(n) => read += n,
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::TimedOut
+//RS                         | std::io::ErrorKind::WouldBlock
+//RS                         | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 continue
+//RS             }
+//RS             Err(error) => return Err(format!("DNS TCP response truncated: {}", error)),
+//RS         }
+//RS     }
+//RS     Ok(packet)
+//RS }
+//RS 
+//RS fn jet_net_dns_query(
+//RS     server: &String,
+//RS     name: &String,
+//RS     qtype: u16,
+//RS     ms: i64,
+//RS ) -> Result<Vec<JetDNSWireRecord>, String> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let configured = jet_net_timeout(ms)?;
+//RS     let timeout = match jet_deadline_remaining_ms() {
+//RS         Some(remaining) if remaining <= 0 => {
+//RS             return Err(format!("network timeout during DNS lookup for `{}`", name))
+//RS         }
+//RS         Some(remaining) => configured.min(std::time::Duration::from_millis(remaining as u64)),
+//RS         None => configured,
+//RS     };
+//RS     let deadline = std::time::Instant::now()
+//RS         .checked_add(timeout)
+//RS         .ok_or_else(|| "network timeout exceeds platform range".to_string())?;
+//RS     jet_net_dns_remaining(deadline, name)?;
+//RS     let server_addr = server
+//RS         .parse::<std::net::SocketAddr>()
+//RS         .map_err(|e| format!("invalid DNS server `{}`: {}", server, e))?;
+//RS     let bind_addr = if server_addr.is_ipv6() {
+//RS         "[::]:0"
+//RS     } else {
+//RS         "0.0.0.0:0"
+//RS     };
+//RS     let socket = std::net::UdpSocket::bind(bind_addr)
+//RS         .map_err(|e| format!("dns socket bind failed: {}", e))?;
+//RS     socket
+//RS         .connect(server_addr)
+//RS         .map_err(|e| format!("DNS server `{}` is unreachable: {}", server, e))?;
+//RS     let mut req = Vec::new();
+//RS     let txid = jet_net_dns_txid()?;
+//RS     req.extend_from_slice(&txid.to_be_bytes());
+//RS     req.extend_from_slice(&0x0100u16.to_be_bytes());
+//RS     req.extend_from_slice(&1u16.to_be_bytes());
+//RS     req.extend_from_slice(&0u16.to_be_bytes());
+//RS     req.extend_from_slice(&0u16.to_be_bytes());
+//RS     req.extend_from_slice(&0u16.to_be_bytes());
+//RS     jet_net_dns_encode_name(&mut req, name)?;
+//RS     req.extend_from_slice(&qtype.to_be_bytes());
+//RS     req.extend_from_slice(&1u16.to_be_bytes());
+//RS     socket
+//RS         .send(&req)
+//RS         .map_err(|e| format!("dns query send failed: {}", e))?;
+//RS     let mut packet = vec![0u8; 65535];
+//RS     let n = loop {
+//RS         socket
+//RS             .set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+//RS             .map_err(|e| format!("dns timeout setup failed: {}", e))?;
+//RS         match socket.recv(&mut packet) {
+//RS             Ok(n) => break n,
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::TimedOut
+//RS                         | std::io::ErrorKind::WouldBlock
+//RS                         | std::io::ErrorKind::Interrupted
+//RS                 ) =>
+//RS             {
+//RS                 continue
+//RS             }
+//RS             Err(error) => return Err(format!("dns query for `{}` failed: {}", name, error)),
+//RS         }
+//RS     };
+//RS     packet.truncate(n);
+//RS     let (truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
+//RS     if truncated {
+//RS         let packet = jet_net_dns_tcp_exchange(server_addr, &req, deadline, name)?;
+//RS         let (still_truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
+//RS         if still_truncated {
+//RS             return Err("network protocol error: DNS TCP response is truncated".to_string());
+//RS         }
+//RS         return Ok(records);
+//RS     }
+//RS     Ok(records)
+//RS }
+//RS 
+//RS fn jet_net_dns_record_name(record: &JetDNSWireRecord) -> Result<String, String> {
+//RS     let mut pos = record.rdata_start;
+//RS     let name = jet_net_dns_read_name(record.packet.as_slice(), &mut pos)?;
+//RS     if pos != record.rdata_start + record.rdata_len {
+//RS         return Err("network protocol error: DNS name record length mismatch".to_string());
+//RS     }
+//RS     Ok(name)
+//RS }
+//RS 
+//RS fn jet_net_dns_matching_records(
+//RS     records: &[JetDNSWireRecord],
+//RS     name: &str,
+//RS     qtype: u16,
+//RS ) -> Result<Vec<JetDNSWireRecord>, String> {
+//RS     let mut current = name.trim_end_matches('.').to_string();
+//RS     let mut visited = std::collections::BTreeSet::new();
+//RS     for _ in 0..16 {
+//RS         if !visited.insert(current.to_ascii_lowercase()) {
+//RS             return Err("network protocol error: cyclic DNS CNAME chain".to_string());
+//RS         }
+//RS         let found: Vec<_> = records
+//RS             .iter()
+//RS             .filter(|r| r.class == 1 && r.ty == qtype && r.owner.eq_ignore_ascii_case(&current))
+//RS             .cloned()
+//RS             .collect();
+//RS         if !found.is_empty() {
+//RS             return Ok(found);
+//RS         }
+//RS         let alias = records
+//RS             .iter()
+//RS             .find(|r| r.class == 1 && r.ty == 5 && r.owner.eq_ignore_ascii_case(&current));
+//RS         match alias {
+//RS             Some(record) => {
+//RS                 current = jet_net_dns_record_name(record)?
+//RS                     .trim_end_matches('.')
+//RS                     .to_string()
+//RS             }
+//RS             None => return Ok(Vec::new()),
+//RS         }
+//RS     }
+//RS     Err("network protocol error: DNS CNAME chain exceeds 16 records".to_string())
+//RS }
+//RS 
+//RS fn jet_net_dns_system_lookup(name: &String, ms: i64) -> Result<Vec<std::net::SocketAddr>, String> {
+//RS     jet_scheduler_world_reject_uncontrolled("network");
+//RS     let configured = jet_net_timeout(ms)?;
+//RS     let timeout = match jet_deadline_remaining_ms() {
+//RS         Some(remaining) if remaining <= 0 => {
+//RS             return Err(format!("network timeout during DNS lookup for `{}`", name));
+//RS         }
+//RS         Some(remaining) => configured.min(std::time::Duration::from_millis(remaining as u64)),
+//RS         None => configured,
+//RS     };
+//RS     let owned_name = name.clone();
+//RS     let (tx, rx) = std::sync::mpsc::sync_channel(1);
+//RS     std::thread::spawn(move || {
+//RS         use std::net::ToSocketAddrs;
+//RS         let result = (owned_name.as_str(), 0)
+//RS             .to_socket_addrs()
+//RS             .map(|iter| iter.collect::<Vec<_>>())
+//RS             .map_err(|e| e.to_string());
+//RS         let _ = tx.send(result);
+//RS     });
+//RS     let deadline = std::time::Instant::now()
+//RS         .checked_add(timeout)
+//RS         .ok_or_else(|| "network timeout exceeds platform range".to_string())?;
+//RS     loop {
+//RS         let slice = jet_net_dns_io_slice(deadline, name)?;
+//RS         match rx.recv_timeout(slice) {
+//RS             Ok(result) => {
+//RS                 return result.map_err(|e| format!("DNS lookup for `{}` failed: {}", name, e))
+//RS             }
+//RS             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+//RS             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+//RS                 return Err(format!("DNS lookup worker for `{}` failed", name));
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_net_dns_a(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+//RS     let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
+//RS         .into_iter()
+//RS         .filter(|a| a.is_ipv4())
+//RS         .map(|a| JetIpAddr { inner: a.ip() })
+//RS         .collect();
+//RS     out.sort_by_key(|a| a.inner);
+//RS     out.dedup_by_key(|a| a.inner);
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_net_dns_aaaa(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+//RS     let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
+//RS         .into_iter()
+//RS         .filter(|a| a.is_ipv6())
+//RS         .map(|a| JetIpAddr { inner: a.ip() })
+//RS         .collect();
+//RS     out.sort_by_key(|a| a.inner);
+//RS     out.dedup_by_key(|a| a.inner);
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_net_dns_a_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+//RS     Ok(
+//RS         jet_net_dns_matching_records(&jet_net_dns_query(server, name, 1, ms)?, name, 1)?
+//RS             .into_iter()
+//RS             .map(|r| {
+//RS                 let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+//RS                 if data.len() != 4 {
+//RS                     return Err("network protocol error: DNS A record is not 4 bytes".to_string());
+//RS                 }
+//RS                 Ok(JetIpAddr {
+//RS                     inner: std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+//RS                         data[0], data[1], data[2], data[3],
+//RS                     )),
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+//RS     Ok(
+//RS         jet_net_dns_matching_records(&jet_net_dns_query(server, name, 28, ms)?, name, 28)?
+//RS             .into_iter()
+//RS             .map(|r| {
+//RS                 let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+//RS                 if data.len() != 16 {
+//RS                     return Err(
+//RS                         "network protocol error: DNS AAAA record is not 16 bytes".to_string()
+//RS                     );
+//RS                 }
+//RS                 let mut b = [0u8; 16];
+//RS                 b.copy_from_slice(data);
+//RS                 Ok(JetIpAddr {
+//RS                     inner: std::net::IpAddr::V6(std::net::Ipv6Addr::from(b)),
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, String> {
+//RS     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
+//RS     let servers = jet_net_dns_system_servers();
+//RS     if servers.is_empty() {
+//RS         return Err("host DNS configuration has no resolver for TXT lookup".to_string());
+//RS     }
+//RS     let mut last = String::new();
+//RS     for server in servers {
+//RS         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS         if remaining.is_zero() {
+//RS             return Err(format!("network timeout during DNS lookup for `{}`", name));
+//RS         }
+//RS         match jet_net_dns_txt_at(
+//RS             &server,
+//RS             name,
+//RS             remaining.as_millis().min(i64::MAX as u128) as i64,
+//RS         ) {
+//RS             Ok(v) => return Ok(v),
+//RS             Err(e) => last = e,
+//RS         }
+//RS     }
+//RS     Err(last)
+//RS }
+//RS 
+//RS fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
+//RS     let mut out = Vec::new();
+//RS     let records = jet_net_dns_query(server, name, 16, ms)?;
+//RS     for r in jet_net_dns_matching_records(&records, name, 16)? {
+//RS         let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+//RS         let mut p = 0usize;
+//RS         let mut s = String::new();
+//RS         while p < data.len() {
+//RS             let len = data[p] as usize;
+//RS             p += 1;
+//RS             if p + len > data.len() {
+//RS                 return Err("network protocol error: truncated DNS TXT record".to_string());
+//RS             }
+//RS             let part = std::str::from_utf8(&data[p..p + len]).map_err(|_| {
+//RS                 "network protocol error: DNS TXT record is not valid UTF-8".to_string()
+//RS             })?;
+//RS             s.push_str(part);
+//RS             p += len;
+//RS         }
+//RS         out.push(s);
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_net_dns_ptr(name: &String, ms: i64) -> Result<Vec<String>, String> {
+//RS     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
+//RS     let servers = jet_net_dns_system_servers();
+//RS     if servers.is_empty() {
+//RS         return Err("host DNS configuration has no resolver for PTR lookup".to_string());
+//RS     }
+//RS     let mut last = String::new();
+//RS     for server in servers {
+//RS         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS         if remaining.is_zero() {
+//RS             return Err(format!("network timeout during DNS lookup for `{name}`"));
+//RS         }
+//RS         match jet_net_dns_ptr_at(
+//RS             &server,
+//RS             name,
+//RS             remaining.as_millis().min(i64::MAX as u128) as i64,
+//RS         ) {
+//RS             Ok(v) => return Ok(v),
+//RS             Err(e) => last = e,
+//RS         }
+//RS     }
+//RS     Err(last)
+//RS }
+//RS 
+//RS fn jet_net_dns_ptr_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
+//RS     let mut out = Vec::new();
+//RS     let records = jet_net_dns_query(server, name, 12, ms)?;
+//RS     for r in jet_net_dns_matching_records(&records, name, 12)? {
+//RS         out.push(jet_net_dns_record_name(&r)?);
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
+//RS     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
+//RS     let servers = jet_net_dns_system_servers();
+//RS     if servers.is_empty() {
+//RS         return Err("host DNS configuration has no resolver for SRV lookup".to_string());
+//RS     }
+//RS     let mut last = String::new();
+//RS     for server in servers {
+//RS         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS         if remaining.is_zero() {
+//RS             return Err(format!("network timeout during DNS lookup for `{}`", name));
+//RS         }
+//RS         match jet_net_dns_srv_at(
+//RS             &server,
+//RS             name,
+//RS             remaining.as_millis().min(i64::MAX as u128) as i64,
+//RS         ) {
+//RS             Ok(v) => return Ok(v),
+//RS             Err(e) => last = e,
+//RS         }
+//RS     }
+//RS     Err(last)
+//RS }
+//RS 
+//RS fn jet_net_dns_srv_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
+//RS     let records = jet_net_dns_query(server, name, 33, ms)?;
+//RS     let mut out = Vec::new();
+//RS     for r in jet_net_dns_matching_records(&records, name, 33)? {
+//RS         if r.rdata_len < 7 {
+//RS             return Err("network protocol error: truncated DNS SRV record".to_string());
+//RS         }
+//RS         let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+//RS         let priority = u16::from_be_bytes([data[0], data[1]]) as i64;
+//RS         let weight = u16::from_be_bytes([data[2], data[3]]) as i64;
+//RS         let port = u16::from_be_bytes([data[4], data[5]]) as i64;
+//RS         let mut pos = r.rdata_start + 6;
+//RS         let target = jet_net_dns_read_name(r.packet.as_slice(), &mut pos)?;
+//RS         if pos != r.rdata_start + r.rdata_len {
+//RS             return Err("network protocol error: DNS SRV record length mismatch".to_string());
+//RS         }
+//RS         out.push(JetDNSSrv {
+//RS             priority,
+//RS             weight,
+//RS             port,
+//RS             target,
+//RS         });
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_net_dns_srv_target(srv: &JetDNSSrv) -> String {
+//RS     srv.target.clone()
+//RS }
+//RS 
+//RS fn jet_net_dns_srv_port(srv: &JetDNSSrv) -> i64 {
+//RS     srv.port
+//RS }
+//RS 
+//RS fn jet_net_dns_srv_priority(srv: &JetDNSSrv) -> i64 {
+//RS     srv.priority
+//RS }
+//RS 
+//RS fn jet_net_dns_srv_weight(srv: &JetDNSSrv) -> i64 {
+//RS     srv.weight
+//RS }
+//RS 
+//RS /// Send a well-formed HTTP/1.1 response on a TcpStream and close it.
+//RS /// Handles CRLF line endings internally so Jet code doesn't need `\r`.
+//RS fn jet_net_tcp_reply(
+//RS     mut stream: JetTCPStream,
+//RS     status: &String,
+//RS     body: &String,
+//RS ) -> Result<(), JetNetError> {
+//RS     use std::io::Write;
+//RS     let response = format!(
+//RS         "HTTP/1.1 {}\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
+//RS         status, body.len(), body
+//RS     );
+//RS     stream
+//RS         .inner
+//RS         .write_all(response.as_bytes())
+//RS         .map_err(|e| jet_net_io_error("tcp reply", None, e))?;
+//RS     stream
+//RS         .inner
+//RS         .shutdown(std::net::Shutdown::Write)
+//RS         .map_err(|e| jet_net_io_error("tcp reply close", None, e))
+//RS }
+// END-PORT-PENDING 0292 crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs:1812-4273
+

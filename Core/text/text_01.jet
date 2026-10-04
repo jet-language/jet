@@ -1,0 +1,134 @@
+// PORT-PENDING 0640 crates-jet-pkg-model-src-prelude-plugin-module-group: crates/jet-pkg-model/src/Prelude/VaultNfc.rs:1-130
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS const VAULT_HANGUL_SBASE: u32 = 0xAC00;
+//RS const VAULT_HANGUL_LBASE: u32 = 0x1100;
+//RS const VAULT_HANGUL_VBASE: u32 = 0x1161;
+//RS const VAULT_HANGUL_TBASE: u32 = 0x11A7;
+//RS const VAULT_HANGUL_LCOUNT: u32 = 19;
+//RS const VAULT_HANGUL_VCOUNT: u32 = 21;
+//RS const VAULT_HANGUL_TCOUNT: u32 = 28;
+//RS const VAULT_HANGUL_NCOUNT: u32 = VAULT_HANGUL_VCOUNT * VAULT_HANGUL_TCOUNT;
+//RS const VAULT_HANGUL_SCOUNT: u32 = VAULT_HANGUL_LCOUNT * VAULT_HANGUL_NCOUNT;
+//RS 
+//RS fn jet_vault_ccc(cp: u32) -> u8 {
+//RS     UNICODE_CCC
+//RS         .binary_search_by(|&(start, end, _)| {
+//RS             if cp < start {
+//RS                 std::cmp::Ordering::Greater
+//RS             } else if cp > end {
+//RS                 std::cmp::Ordering::Less
+//RS             } else {
+//RS                 std::cmp::Ordering::Equal
+//RS             }
+//RS         })
+//RS         .map(|index| UNICODE_CCC[index].2)
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_vault_hangul_decompose(cp: u32) -> Option<[u32; 3]> {
+//RS     if !(VAULT_HANGUL_SBASE..VAULT_HANGUL_SBASE + VAULT_HANGUL_SCOUNT).contains(&cp) {
+//RS         return None;
+//RS     }
+//RS     let index = cp - VAULT_HANGUL_SBASE;
+//RS     let trailing = index % VAULT_HANGUL_TCOUNT;
+//RS     Some([
+//RS         VAULT_HANGUL_LBASE + index / VAULT_HANGUL_NCOUNT,
+//RS         VAULT_HANGUL_VBASE + (index % VAULT_HANGUL_NCOUNT) / VAULT_HANGUL_TCOUNT,
+//RS         if trailing == 0 { 0 } else { VAULT_HANGUL_TBASE + trailing },
+//RS     ])
+//RS }
+//RS 
+//RS fn jet_vault_decomposition(cp: u32) -> Option<&'static [u32]> {
+//RS     let index = UNICODE_DECOMP_INDEX
+//RS         .binary_search_by_key(&cp, |&(codepoint, _, _, _)| codepoint)
+//RS         .ok()?;
+//RS     let (_, start, len, canonical) = UNICODE_DECOMP_INDEX[index];
+//RS     if canonical == 0 {
+//RS         return None;
+//RS     }
+//RS     Some(&UNICODE_DECOMP_POOL[start as usize..(start + len) as usize])
+//RS }
+//RS 
+//RS fn jet_vault_decompose(cp: u32, output: &mut Vec<u32>) {
+//RS     if let Some([leading, vowel, trailing]) = jet_vault_hangul_decompose(cp) {
+//RS         output.push(leading);
+//RS         output.push(vowel);
+//RS         if trailing != 0 {
+//RS             output.push(trailing);
+//RS         }
+//RS     } else if let Some(decomposition) = jet_vault_decomposition(cp) {
+//RS         for &part in decomposition {
+//RS             jet_vault_decompose(part, output);
+//RS         }
+//RS     } else {
+//RS         output.push(cp);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_vault_compose_pair(first: u32, second: u32) -> Option<u32> {
+//RS     if (VAULT_HANGUL_LBASE..VAULT_HANGUL_LBASE + VAULT_HANGUL_LCOUNT).contains(&first)
+//RS         && (VAULT_HANGUL_VBASE..VAULT_HANGUL_VBASE + VAULT_HANGUL_VCOUNT).contains(&second)
+//RS     {
+//RS         return Some(
+//RS             VAULT_HANGUL_SBASE
+//RS                 + ((first - VAULT_HANGUL_LBASE) * VAULT_HANGUL_VCOUNT
+//RS                     + second
+//RS                     - VAULT_HANGUL_VBASE)
+//RS                     * VAULT_HANGUL_TCOUNT,
+//RS         );
+//RS     }
+//RS     if (VAULT_HANGUL_SBASE..VAULT_HANGUL_SBASE + VAULT_HANGUL_SCOUNT).contains(&first)
+//RS         && (first - VAULT_HANGUL_SBASE) % VAULT_HANGUL_TCOUNT == 0
+//RS         && second > VAULT_HANGUL_TBASE
+//RS         && second < VAULT_HANGUL_TBASE + VAULT_HANGUL_TCOUNT
+//RS     {
+//RS         return Some(first + second - VAULT_HANGUL_TBASE);
+//RS     }
+//RS     UNICODE_COMPOSE_PAIRS
+//RS         .binary_search_by(|&(left, right, _)| (left, right).cmp(&(first, second)))
+//RS         .ok()
+//RS         .map(|index| UNICODE_COMPOSE_PAIRS[index].2)
+//RS }
+//RS 
+//RS fn jet_vault_nfc(input: &str) -> String {
+//RS     let mut decomposed = Vec::with_capacity(input.len());
+//RS     for character in input.chars() {
+//RS         jet_vault_decompose(character as u32, &mut decomposed);
+//RS     }
+//RS     for index in 1..decomposed.len() {
+//RS         let class = jet_vault_ccc(decomposed[index]);
+//RS         if class == 0 {
+//RS             continue;
+//RS         }
+//RS         let mut cursor = index;
+//RS         while cursor > 0 && jet_vault_ccc(decomposed[cursor - 1]) > class {
+//RS             decomposed.swap(cursor - 1, cursor);
+//RS             cursor -= 1;
+//RS         }
+//RS     }
+//RS 
+//RS     let mut composed = Vec::with_capacity(decomposed.len());
+//RS     let mut starter = None;
+//RS     let mut last_class = -1i32;
+//RS     for codepoint in decomposed {
+//RS         let class = jet_vault_ccc(codepoint) as i32;
+//RS         if let Some(starter_index) = starter {
+//RS             if let Some(result) = jet_vault_compose_pair(composed[starter_index], codepoint) {
+//RS                 if last_class < class {
+//RS                     composed[starter_index] = result;
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS         }
+//RS         composed.push(codepoint);
+//RS         if class == 0 {
+//RS             starter = Some(composed.len() - 1);
+//RS             last_class = -1;
+//RS         } else {
+//RS             last_class = class;
+//RS         }
+//RS     }
+//RS     composed.into_iter().filter_map(char::from_u32).collect()
+//RS }
+// END-PORT-PENDING 0640 crates/jet-pkg-model/src/Prelude/VaultNfc.rs:1-130
+

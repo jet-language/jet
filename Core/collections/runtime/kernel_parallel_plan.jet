@@ -1,0 +1,751 @@
+use core.encoding.[DataTree]
+
+// ParallelPlan.rs: D-PARCAPTURE1=D / D-ACCEL1=A. Backend-neutral proof,
+// resource, measurement and outcome facts; this module is not a scheduler.
+// Rust usize slots are retained as U64, NOT narrowed to host Int. The checked
+// selected-target adapter supplies usize_max to chunk selection (#4483).
+// Native activation gates: #4494 process-static LazyLock/AtomicU64, actual
+// monotonic clocks/black_box, worker Send+Sync/catch-unwind, receipt capture;
+// #4483 native/wasm and available_parallelism selection. No native substitute
+// or successful placeholder is declared here. See the source-anchor gates below.
+// #4499 and #4409 do not apply: no composite map keys or IO error-kind conversion.
+// #4500 gates linear FnOnce/Fn captures, Send/Sync crossing, retained payload
+// loans, capacity reservation and consuming list extension without T copies.
+
+pub const JET_PARALLEL_DEFAULT_CHUNK_ITEMS: U64 = U64{64}
+pub const JET_PARALLEL_DEFAULT_MAX_CHUNKS: U64 = U64{1048576}
+pub const JET_ACCEL_STATIC_FLOOR_ITEMS: U64 = U64{1024}
+pub const JET_ACCEL_CACHE_BLOCK_BYTES: U64 = U64{65536}
+pub const JET_ACCEL_REQUIRED_GAIN_NUMERATOR: U64 = U64{2}
+pub const JET_ACCEL_REQUIRED_GAIN_DENOMINATOR: U64 = U64{1}
+pub const JET_ACCELERATION_RECEIPT_TYPE_NAME: String = "AccelerationDecision"
+pub const JET_ACCELERATION_RECEIPT_SECTION_PREFIX: String = "jet.acceleration."
+pub const JET_ACCELERATION_RECEIPT_SCHEMA_DIGEST: String = "fb216702b04de0611c6ceeb7b92efeeec9b91d3076277f38baac13475962d6d1"
+
+#Debug
+#Comparable
+#Equatable
+pub enum JetAccelerationPin { Scalar Local }
+pub fn pin_as_str(pin: JetAccelerationPin) -> String Never! {
+    if pin == .Scalar -> return "#Scalar"
+    "#Local"
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetAccelerationTransform { TransientColumnCopy PooledParallelChunks }
+pub fn transform_as_str(transform: JetAccelerationTransform) -> String Never! {
+    if transform == .TransientColumnCopy -> return "column-copy"
+    "parallel"
+}
+#Debug
+#Equatable
+pub struct JetAccelerationRuntimeCosts {
+    pub spawn_nanos: U64
+    pub bandwidth_floor_nanos: U64
+    pub spawn_cost_once_per_process: Bool
+    pub bandwidth_floor_measured: Bool
+}
+// Rust :66. This is the actual below-floor fact, not a native cost provider.
+pub fn costs_unavailable() -> JetAccelerationRuntimeCosts Never! {
+    JetAccelerationRuntimeCosts{spawn_nanos: U64{0}, bandwidth_floor_nanos: U64{0},
+        spawn_cost_once_per_process: false, bandwidth_floor_measured: false}
+}
+// Rust :75–87 costs::once is gated by the ONE process-static lazy cell plus
+// measured spawn/bandwidth bodies (:488–512), not a per-call cost probe.
+#Debug
+pub struct JetAccelerationSample<R> {
+    pub value: R
+    pub sample_items: U64
+    pub sample_nanos: U64
+}
+#Debug
+#Equatable
+pub struct JetAccelerationGateInput {
+    pub items: U64
+    pub sample_items: U64
+    pub sample_nanos: U64
+    pub spawn_nanos: U64
+    pub bandwidth_floor_nanos: U64
+    pub first_chunk_serial_timed: Bool
+    pub spawn_cost_once_per_process: Bool
+    pub bandwidth_floor_measured: Bool
+    pub release_build: Bool
+    pub cross_mode_parity_proven: Bool
+    pub pin: JetAccelerationPin?
+    pub nested_reuse: Bool
+    pub single_pass: Bool
+    pub proof_proven: Bool
+}
+pub fn gate_input_deferred(items: U64, release_build: Bool) -> JetAccelerationGateInput Never! {
+    JetAccelerationGateInput{items: items, sample_items: U64{0}, sample_nanos: U64{0},
+        spawn_nanos: U64{0}, bandwidth_floor_nanos: U64{0}, first_chunk_serial_timed: false,
+        spawn_cost_once_per_process: false, bandwidth_floor_measured: false,
+        release_build: release_build, cross_mode_parity_proven: false, pin: None,
+        nested_reuse: false, single_pass: false, proof_proven: false}
+}
+pub fn gate_input_measured(items: U64, sample_items: U64, sample_nanos: U64,
+    costs: JetAccelerationRuntimeCosts, release_build: Bool, cross_mode_parity_proven: Bool,
+    proof_proven: Bool, nested_reuse: Bool, single_pass: Bool, pin: JetAccelerationPin?) -> JetAccelerationGateInput Never! {
+    JetAccelerationGateInput{items: items, sample_items: sample_items, sample_nanos: sample_nanos,
+        spawn_nanos: costs.spawn_nanos, bandwidth_floor_nanos: costs.bandwidth_floor_nanos,
+        first_chunk_serial_timed: sample_items != (U64{0}) && sample_nanos != (U64{0}),
+        spawn_cost_once_per_process: costs.spawn_cost_once_per_process,
+        bandwidth_floor_measured: costs.bandwidth_floor_measured, release_build: release_build,
+        cross_mode_parity_proven: cross_mode_parity_proven, pin: pin, nested_reuse: nested_reuse,
+        single_pass: single_pass, proof_proven: proof_proven}
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetAccelerationGateStatus {
+    BelowStaticFloor
+    Pinned(pin: JetAccelerationPin)
+    NotReleaseBuild
+    CrossModeParityMissing
+    ColumnCopyNotApplicable
+    ProofIncomplete
+    SampleNotTimed
+    SpawnCostNotMeasured
+    BandwidthFloorNotMeasured
+    InvalidMeasurement
+    ProjectedGainBelowThreshold
+    Selected
+}
+pub fn gate_status_as_str(status: JetAccelerationGateStatus) -> String Never! {
+    if status == {
+        .BelowStaticFloor -> "below-static-floor"
+        .Pinned(_) -> "pinned"
+        .NotReleaseBuild -> "not-release-build"
+        .CrossModeParityMissing -> "cross-mode-parity-missing"
+        .ColumnCopyNotApplicable -> "column-copy-not-applicable"
+        .ProofIncomplete -> "proof-incomplete"
+        .SampleNotTimed -> "sample-not-timed"
+        .SpawnCostNotMeasured -> "spawn-cost-not-measured"
+        .BandwidthFloorNotMeasured -> "bandwidth-floor-not-measured"
+        .InvalidMeasurement -> "invalid-measurement"
+        .ProjectedGainBelowThreshold -> "projected-gain-below-threshold"
+        .Selected -> "selected"
+    }
+}
+pub fn gate_status_is_selected(status: JetAccelerationGateStatus) -> Bool Never! { status == .Selected }
+#Debug
+#Equatable
+pub struct JetAccelerationMeasurement {
+    pub items: U64
+    pub sample_items: U64
+    pub sample_nanos: U64
+    pub spawn_nanos: U64
+    pub bandwidth_floor_nanos: U64
+    pub floor_nanos: U64
+    pub projected_serial_nanos: U64?
+    pub required_serial_nanos: U64?
+}
+#Debug
+#Equatable
+pub struct JetAccelerationDecision {
+    pub transform: JetAccelerationTransform
+    pub status: JetAccelerationGateStatus
+    pub measurement: JetAccelerationMeasurement
+}
+pub fn decision_selected(decision: JetAccelerationDecision) -> Bool Never! { gate_status_is_selected(decision.status) }
+#Debug
+#Equatable
+pub struct JetAccelerationGate {
+    pub static_floor_items: U64
+    pub cache_block_bytes: U64
+    pub required_gain_numerator: U64
+    pub required_gain_denominator: U64
+}
+pub fn gate_d_accel1() -> JetAccelerationGate Never! {
+    JetAccelerationGate{static_floor_items: JET_ACCEL_STATIC_FLOOR_ITEMS,
+        cache_block_bytes: JET_ACCEL_CACHE_BLOCK_BYTES,
+        required_gain_numerator: JET_ACCEL_REQUIRED_GAIN_NUMERATOR,
+        required_gain_denominator: JET_ACCEL_REQUIRED_GAIN_DENOMINATOR}
+}
+pub fn gate_default() -> JetAccelerationGate Never! { gate_d_accel1() }
+pub fn gate_should_measure(gate: JetAccelerationGate, items: U64) -> Bool Never! { items > gate.static_floor_items }
+// Rust :448–478. Overflow is None, including overflow in ceiling's addend;
+// do NOT algebraically replace it with a non-overflowing rounded division.
+fn checked_projection(nanos: U64, items: U64, divisor: U64) -> U64? Never! {
+    if divisor == (U64{0}) -> return None
+    product :: nanos.checked_mul(items) ?? return None
+    rounded :: product.checked_add(divisor - U64{1}) ?? return None
+    Val(rounded / divisor)
+}
+pub fn gate_measurement(gate: JetAccelerationGate, input: JetAccelerationGateInput) -> JetAccelerationMeasurement Never! {
+    floor :: max(input.spawn_nanos, input.bandwidth_floor_nanos)
+    JetAccelerationMeasurement{items: input.items, sample_items: input.sample_items,
+        sample_nanos: input.sample_nanos, spawn_nanos: input.spawn_nanos,
+        bandwidth_floor_nanos: input.bandwidth_floor_nanos, floor_nanos: floor,
+        projected_serial_nanos: checked_projection(input.sample_nanos, input.items, input.sample_items),
+        required_serial_nanos: checked_projection(floor, gate.required_gain_numerator, gate.required_gain_denominator)}
+}
+pub fn gate_evaluate(gate: JetAccelerationGate, transform: JetAccelerationTransform,
+    input: JetAccelerationGateInput) -> JetAccelerationDecision Never! {
+    measurement :: gate_measurement(gate, input)
+    status := JetAccelerationGateStatus.Selected
+    if input.items <= gate.static_floor_items { status = .BelowStaticFloor }
+    else if input.pin == .Val(pin) { status = .Pinned(pin) }
+    else if !input.release_build { status = .NotReleaseBuild }
+    else if !input.cross_mode_parity_proven { status = .CrossModeParityMissing }
+    else if transform == .TransientColumnCopy && (!input.nested_reuse || input.single_pass) { status = .ColumnCopyNotApplicable }
+    else if !input.proof_proven { status = .ProofIncomplete }
+    else if !input.first_chunk_serial_timed { status = .SampleNotTimed }
+    else if !input.spawn_cost_once_per_process { status = .SpawnCostNotMeasured }
+    else if !input.bandwidth_floor_measured { status = .BandwidthFloorNotMeasured }
+    else if input.sample_items == (U64{0}) || input.sample_items > input.items || input.sample_nanos == (U64{0})
+        || input.spawn_nanos == (U64{0}) || input.bandwidth_floor_nanos == (U64{0})
+        || gate.required_gain_numerator == (U64{0}) || gate.required_gain_denominator == (U64{0}) {
+        status = .InvalidMeasurement
+    } else {
+        if measurement.projected_serial_nanos == {
+            .None -> status = .InvalidMeasurement
+            .Val(projected) -> {
+                if measurement.required_serial_nanos == {
+                    .None -> status = .InvalidMeasurement
+                    .Val(required) -> if projected < required -> status = .ProjectedGainBelowThreshold
+                }
+            }
+        }
+    }
+    JetAccelerationDecision{transform: transform, status: status, measurement: measurement}
+}
+// Rust :364–373; canonical DataTree Int is exact, but the Rust receipt saturates
+// at signed64, so retain that wire law even though Jet could represent more.
+pub fn jet_acceleration_int(value: U64) -> DataTree Never! {
+    DataTree.Int(Int.from_u64(min(value, U64{9223372036854775807})))
+}
+pub fn jet_acceleration_optional_int(value: U64?) -> DataTree Never! {
+    if value == .Val(number) -> return jet_acceleration_int(number)
+    DataTree.Null
+}
+// Rust :287–361. Canonical ordered String-key object, not a second value tree.
+pub fn jet_acceleration_receipt_payload(function: String, loop_header: U32,
+    source_start: U64, source_end: U64, decision: JetAccelerationDecision) -> DataTree Never! {
+    row :: decision.measurement
+    measurement := [String: DataTree]{}
+    _ :: &measurement.add("bandwidth_floor_nanos", jet_acceleration_int(row.bandwidth_floor_nanos))
+    _ :: &measurement.add("floor_nanos", jet_acceleration_int(row.floor_nanos))
+    _ :: &measurement.add("items", jet_acceleration_int(row.items))
+    _ :: &measurement.add("projected_serial_nanos", jet_acceleration_optional_int(row.projected_serial_nanos))
+    _ :: &measurement.add("required_serial_nanos", jet_acceleration_optional_int(row.required_serial_nanos))
+    _ :: &measurement.add("sample_items", jet_acceleration_int(row.sample_items))
+    _ :: &measurement.add("sample_nanos", jet_acceleration_int(row.sample_nanos))
+    _ :: &measurement.add("spawn_nanos", jet_acceleration_int(row.spawn_nanos))
+    pin := DataTree.Null
+    if decision.status == .Pinned(value) -> pin = DataTree.Text(pin_as_str(value))
+    choice := [String: DataTree]{}
+    _ :: &choice.add("measurement", DataTree.Object(^measurement))
+    _ :: &choice.add("pin", ^pin)
+    _ :: &choice.add("status", DataTree.Text(gate_status_as_str(decision.status)))
+    _ :: &choice.add("transform", DataTree.Text(transform_as_str(decision.transform)))
+    source := [String: DataTree]{}
+    _ :: &source.add("end", jet_acceleration_int(source_end))
+    _ :: &source.add("start", jet_acceleration_int(source_start))
+    out := [String: DataTree]{}
+    _ :: &out.add("decision", DataTree.Object(^choice))
+    _ :: &out.add("function", DataTree.Text(~function))
+    _ :: &out.add("loop_header", DataTree.Int(Int.from_u32(loop_header)))
+    _ :: &out.add("source", DataTree.Object(^source))
+    DataTree.Object(^out)
+}
+
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelOperation { Map Filter Partition Fold }
+pub fn operation_surface_name(operation: JetParallelOperation) -> String Never! {
+    if operation == { .Map -> "para_map" .Filter -> "para_filter" .Partition -> "para_partition" .Fold -> "para_fold" }
+}
+pub fn operation_is_reduction(operation: JetParallelOperation) -> Bool Never! { operation == .Fold }
+#Debug
+#Equatable
+pub enum JetParallelIterationDomain {
+    Indexed(start: U64, end: U64)
+    Unknown(reason: String)
+}
+pub fn domain_indexed(start: U64, end: U64) -> JetParallelIterationDomain Never! { JetParallelIterationDomain.Indexed(start, end) }
+pub fn domain_from_len(len: U64) -> JetParallelIterationDomain Never! { domain_indexed(U64{0}, len) }
+pub fn domain_unknown(reason: ^String) -> JetParallelIterationDomain Never! { JetParallelIterationDomain.Unknown(^reason) }
+pub fn domain_start(domain: JetParallelIterationDomain) -> U64? Never! {
+    if domain == { .Indexed(start, _) -> Val(start) .Unknown(_) -> None }
+}
+pub fn domain_end(domain: JetParallelIterationDomain) -> U64? Never! {
+    if domain == { .Indexed(_, end) -> Val(end) .Unknown(_) -> None }
+}
+pub fn domain_len(domain: JetParallelIterationDomain) -> U64? Never! {
+    if domain == .Indexed(start, end) && start <= end -> return Val(end - start)
+    None
+}
+// A named tuple is the private, non-materializing Range<usize> fact.
+pub fn domain_range(domain: JetParallelIterationDomain) -> (start: U64, end: U64)? Never! {
+    if domain == .Indexed(start, end) && start <= end -> return Val((start: start, end: end))
+    None
+}
+pub fn domain_is_valid(domain: JetParallelIterationDomain) -> Bool Never! { domain_range(domain) != None }
+pub fn domain_rejection_reason(domain: JetParallelIterationDomain) -> String Never! {
+    if domain == {
+        .Indexed(start, end) -> {
+            if start > end -> return "indexed domain has start {start} after end {end}"
+            return ""
+        }
+        .Unknown(reason) -> {
+            if reason == "" -> return "iteration bounds were not exposed by sema"
+            return ~reason
+        }
+    }
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelAccessMode { Read Write ReadWrite Reduce }
+pub fn access_mode_writes(mode: JetParallelAccessMode) -> Bool Never! { mode != .Read }
+pub fn access_mode_is_reduction(mode: JetParallelAccessMode) -> Bool Never! { mode == .Reduce }
+pub fn access_mode_display(mode: JetParallelAccessMode) -> String Never! {
+    if mode == { .Read -> "read" .Write -> "write" .ReadWrite -> "read/write" .Reduce -> "reduction" }
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelAccessScope { Invariant IterationLocal Disjoint Unknown }
+pub fn access_scope_display(scope: JetParallelAccessScope) -> String Never! {
+    if scope == { .Invariant -> "invariant" .IterationLocal -> "iteration-local" .Disjoint -> "disjoint" .Unknown -> "unknown" }
+}
+#Debug
+#Equatable
+pub struct JetParallelAccessFact {
+    pub place: String
+    pub mode: JetParallelAccessMode
+    pub scope: JetParallelAccessScope
+}
+pub fn access_new(place: ^String, mode: JetParallelAccessMode, scope: JetParallelAccessScope) -> JetParallelAccessFact Never! {
+    JetParallelAccessFact{place: ^place, mode: mode, scope: scope}
+}
+pub fn access_read(place: ^String) -> JetParallelAccessFact Never! { access_new(^place, .Read, .Invariant) }
+pub fn access_write(place: ^String) -> JetParallelAccessFact Never! { access_new(^place, .Write, .Invariant) }
+pub fn access_read_write(place: ^String) -> JetParallelAccessFact Never! { access_new(^place, .ReadWrite, .Invariant) }
+pub fn access_reduce(place: ^String) -> JetParallelAccessFact Never! { access_new(^place, .Reduce, .Invariant) }
+pub fn access_disjoint(place: ^String, mode: JetParallelAccessMode) -> JetParallelAccessFact Never! { access_new(^place, mode, .Disjoint) }
+pub fn access_is_proven_disjoint(fact: JetParallelAccessFact) -> Bool Never! { fact.scope == .IterationLocal || fact.scope == .Disjoint }
+pub fn access_description(fact: JetParallelAccessFact) -> String Never! {
+    "{access_mode_display(fact.mode)} `{fact.place}` ({access_scope_display(fact.scope)})"
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelEffectKind { Pure ReadOnly SharedRead Reduction MayFail CancellationPoint SharedWrite External Unknown }
+pub fn effect_kind_display(kind: JetParallelEffectKind) -> String Never! {
+    if kind == {
+        .Pure -> "pure" .ReadOnly -> "read-only" .SharedRead -> "synchronized read"
+        .Reduction -> "reduction" .MayFail -> "fallible" .CancellationPoint -> "cancellation point"
+        .SharedWrite -> "shared write" .External -> "external effect" .Unknown -> "unknown effect"
+    }
+}
+#Debug
+#Equatable
+pub struct JetParallelEffectFact { pub name: String pub kind: JetParallelEffectKind }
+pub fn effect_new(name: ^String, kind: JetParallelEffectKind) -> JetParallelEffectFact Never! { JetParallelEffectFact{name: ^name, kind: kind} }
+pub fn effect_pure() -> JetParallelEffectFact Never! { effect_new("callback", .Pure) }
+pub fn effect_read_only(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .ReadOnly) }
+pub fn effect_shared_read(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .SharedRead) }
+pub fn effect_reduction(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .Reduction) }
+pub fn effect_shared_write(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .SharedWrite) }
+pub fn effect_external(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .External) }
+pub fn effect_unknown(name: ^String) -> JetParallelEffectFact Never! { effect_new(^name, .Unknown) }
+pub fn effect_rejection_reason(fact: JetParallelEffectFact, operation: JetParallelOperation, has_reduction: Bool) -> String? Never! {
+    reason := ""
+    if fact.kind == {
+        .Pure -> return None
+        .ReadOnly -> return None
+        .SharedRead -> return None
+        .MayFail -> return None
+        .CancellationPoint -> return None
+        .Reduction -> {
+            if operation_is_reduction(operation) && has_reduction -> return None
+            reason = "reduction effect needs a proven identity and associative merge law"
+        }
+        .SharedWrite -> reason = "shared writes can race; use explicit synchronized state outside the callback"
+        .External -> reason = "external effects observe callback order and are not rollback-safe"
+        .Unknown -> reason = "effect facts were not classified by sema"
+    }
+    Val("effect `{fact.name}` is {effect_kind_display(fact.kind)}: {reason}")
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelDependencyKind { Independent ReadAfterWrite WriteAfterRead WriteAfterWrite LoopCarried Unknown }
+pub fn dependency_kind_conflicts(kind: JetParallelDependencyKind) -> Bool Never! { kind != .Independent }
+pub fn dependency_kind_display(kind: JetParallelDependencyKind) -> String Never! {
+    if kind == {
+        .Independent -> "independent" .ReadAfterWrite -> "read-after-write" .WriteAfterRead -> "write-after-read"
+        .WriteAfterWrite -> "write-after-write" .LoopCarried -> "loop-carried" .Unknown -> "unknown"
+    }
+}
+#Debug
+#Equatable
+pub struct JetParallelDependencyFact {
+    pub place: String
+    pub kind: JetParallelDependencyKind
+    pub source_iteration: U64?
+    pub target_iteration: U64?
+    pub detail: String
+}
+pub fn dependency_new(place: ^String, kind: JetParallelDependencyKind, source_iteration: U64?, target_iteration: U64?, detail: ^String) -> JetParallelDependencyFact Never! {
+    JetParallelDependencyFact{place: ^place, kind: kind, source_iteration: source_iteration, target_iteration: target_iteration, detail: ^detail}
+}
+pub fn dependency_independent(place: ^String) -> JetParallelDependencyFact Never! {
+    dependency_new(^place, .Independent, None, None, "sema proved disjoint iteration projections")
+}
+pub fn dependency_write_after_write(place: ^String, source: U64?, target: U64?) -> JetParallelDependencyFact Never! {
+    dependency_new(^place, .WriteAfterWrite, source, target, "iterations write the same location")
+}
+pub fn dependency_unknown(place: ^String, detail: ^String) -> JetParallelDependencyFact Never! { dependency_new(^place, .Unknown, None, None, ^detail) }
+pub fn dependency_description(fact: JetParallelDependencyFact) -> String Never! {
+    pair := ""
+    if fact.source_iteration == .Val(source) && fact.target_iteration == .Val(target) -> pair = " from iteration {source} to {target}"
+    if fact.detail == "" -> return "{dependency_kind_display(fact.kind)} on `{fact.place}`{pair}"
+    "{dependency_kind_display(fact.kind)} on `{fact.place}`{pair}: {fact.detail}"
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelReductionOrder { SourceOrder StableAdjacentPair }
+pub fn reduction_order_display(order: JetParallelReductionOrder) -> String Never! {
+    if order == .SourceOrder -> return "source-order"
+    "stable-adjacent-pair"
+}
+#Debug
+#Equatable
+pub struct JetParallelReductionFact {
+    pub operator: String
+    pub identity_proved: Bool
+    pub associative: Bool
+    pub commutative: Bool
+    pub order: JetParallelReductionOrder
+}
+pub fn reduction_new(operator: ^String, identity_proved: Bool, associative: Bool) -> JetParallelReductionFact Never! {
+    JetParallelReductionFact{operator: ^operator, identity_proved: identity_proved, associative: associative,
+        commutative: false, order: .StableAdjacentPair}
+}
+pub fn reduction_proven(operator: ^String) -> JetParallelReductionFact Never! { reduction_new(^operator, true, true) }
+pub fn reduction_rejection_reason(fact: JetParallelReductionFact) -> String? Never! {
+    operator := fact.operator.trim() // #4303
+    if operator == "" -> return Val("reduction operator is unnamed")
+    if !fact.identity_proved -> return Val("merge identity is not proven on both sides")
+    if !fact.associative -> return Val("merge is not proven associative")
+    if fact.order != .StableAdjacentPair -> return Val("reduction order `{reduction_order_display(fact.order)}` is not the stable adjacent-pair tree")
+    None
+}
+#Debug
+#Equatable
+pub struct JetParallelResourceBounds {
+    pub requested_workers: U64
+    pub available_workers: U64
+    pub chunk_items: U64
+    pub max_chunks: U64
+}
+pub fn resources_new(requested_workers: U64, available_workers: U64, chunk_items: U64, max_chunks: U64) -> JetParallelResourceBounds Never! {
+    JetParallelResourceBounds{requested_workers: requested_workers, available_workers: available_workers, chunk_items: chunk_items, max_chunks: max_chunks}
+}
+pub fn resources_default() -> JetParallelResourceBounds Never! { resources_explicit(U64{1}, U64{1}) }
+pub fn resources_explicit(workers: U64, available_workers: U64) -> JetParallelResourceBounds Never! {
+    resources_new(workers, available_workers, JET_PARALLEL_DEFAULT_CHUNK_ITEMS, JET_PARALLEL_DEFAULT_MAX_CHUNKS)
+}
+pub fn resources_with_chunk_items(resources: JetParallelResourceBounds, chunk_items: U64) -> JetParallelResourceBounds Never! {
+    resources_new(resources.requested_workers, resources.available_workers, chunk_items, resources.max_chunks)
+}
+pub fn resources_worker_limit(resources: JetParallelResourceBounds) -> U64 Never! { max(U64{1}, resources.requested_workers) }
+pub fn resources_selected_workers(resources: JetParallelResourceBounds, chunk_count: U64) -> U64 Never! {
+    if chunk_count == (U64{0}) || resources.available_workers == (U64{0}) -> return U64{0}
+    min(resources_worker_limit(resources), min(resources.available_workers, chunk_count))
+}
+#Debug
+#Comparable
+#Equatable
+pub struct JetParallelChunk { pub ordinal: U64 pub start: U64 pub end: U64 pub worker: U64 }
+pub fn chunk_len(chunk: JetParallelChunk) -> U64 Never! {
+    if chunk.end < chunk.start -> return U64{0}
+    chunk.end - chunk.start
+}
+pub fn chunk_range(chunk: JetParallelChunk) -> (start: U64, end: U64) Never! { (start: chunk.start, end: chunk.end) }
+// Rust :1297. usize_max is a CHECKED target fact, never inferred from host.
+pub fn resources_deterministic_chunks(resources: JetParallelResourceBounds, domain: JetParallelIterationDomain, usize_max: U64) -> [JetParallelChunk] JetParallelRejection! {
+    range :: domain_range(domain) ?? return Err(JetParallelRejection.Domain(domain_rejection_reason(domain)))
+    if resources.chunk_items == (U64{0}) -> return Err(JetParallelRejection.Resource("chunk_items must be greater than zero (got 0)"))
+    len :: range.end - range.start
+    if len == (U64{0}) -> return Ok([JetParallelChunk]{})
+    if resources.available_workers == (U64{0}) -> return Err(JetParallelRejection.Resource("available_workers must be greater than zero for a non-empty domain (got 0)"))
+    addend :: resources.chunk_items - U64{1}
+    if len > usize_max - addend -> return Err(JetParallelRejection.Resource("chunk count overflows usize for {len} items and chunk_items={resources.chunk_items}"))
+    chunk_count :: (len + addend) / resources.chunk_items
+    if chunk_count > resources.max_chunks -> return Err(JetParallelRejection.Resource("chunk count {chunk_count} exceeds max_chunks {resources.max_chunks}"))
+    workers :: resources_selected_workers(resources, chunk_count)
+    chunks := [JetParallelChunk]{}
+    ordinal := U64{0}
+    loop ordinal < chunk_count {
+        start :: range.start + ordinal * resources.chunk_items
+        end :: start + min(resources.chunk_items, usize_max - start)
+        &chunks.push(JetParallelChunk{ordinal: ordinal, start: start, end: min(end, range.end), worker: ordinal % workers})
+        ordinal = ordinal + U64{1}
+    }
+    Ok(^chunks)
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelSequentialReason { EmptyDomain SingleChunk WorkerLimitOne AccelerationGateRejected ExplicitSerial }
+pub fn sequential_reason_display(reason: JetParallelSequentialReason) -> String Never! {
+    if reason == {
+        .EmptyDomain -> "empty iteration domain"
+        .SingleChunk -> "one deterministic chunk does not justify worker setup"
+        .WorkerLimitOne -> "worker limit is one"
+        .AccelerationGateRejected -> "D-ACCEL1 measured gain did not clear its threshold"
+        .ExplicitSerial -> "caller selected the serial execution form"
+    }
+}
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelExecution { Sequential(reason: JetParallelSequentialReason) Parallel(workers: U64) }
+pub fn execution_is_parallel(execution: JetParallelExecution) -> Bool Never! {
+    if execution == .Parallel(_) -> return true
+    false
+}
+pub fn execution_workers(execution: JetParallelExecution) -> U64 Never! {
+    if execution == .Parallel(workers) -> return workers
+    U64{1}
+}
+#Debug
+#Error
+#Equatable
+pub enum JetParallelRejection {
+    Domain(reason: String)
+    MissingEffectFacts
+    Access(fact: JetParallelAccessFact, reason: String)
+    Dependence(fact: JetParallelDependencyFact)
+    Effect(fact: JetParallelEffectFact, reason: String)
+    Reduction(reason: String)
+    Resource(reason: String)
+}
+pub fn rejection_reason(rejection: JetParallelRejection) -> String Never! {
+    if rejection == {
+        .Domain(reason) -> "iteration domain rejected: {reason}"
+        .MissingEffectFacts -> "effect rejected: callback effect facts are unavailable"
+        .Access(fact, reason) -> "access rejected: {access_description(fact)}: {reason}"
+        .Dependence(fact) -> "dependence rejected: {dependency_description(fact)}"
+        .Effect(fact, reason) -> "{reason} (`{fact.name}` is {effect_kind_display(fact.kind)}); operation cannot reorder it"
+        .Reduction(reason) -> "reduction law rejected: {reason}"
+        .Resource(reason) -> "resource bound rejected: {reason}"
+    }
+}
+#Debug
+#Equatable
+pub struct JetParallelProof {
+    pub domain: JetParallelIterationDomain
+    pub accesses: [JetParallelAccessFact]
+    pub effects: [JetParallelEffectFact]
+    pub dependencies: [JetParallelDependencyFact]
+    pub reduction: JetParallelReductionFact?
+}
+pub fn proof_new(domain: ^JetParallelIterationDomain, accesses: ^[JetParallelAccessFact], effects: ^[JetParallelEffectFact], dependencies: ^[JetParallelDependencyFact], reduction: ^JetParallelReductionFact?) -> JetParallelProof Never! {
+    JetParallelProof{domain: ^domain, accesses: ^accesses, effects: ^effects, dependencies: ^dependencies, reduction: ^reduction}
+}
+pub fn proof_pure(domain: ^JetParallelIterationDomain) -> JetParallelProof Never! {
+    proof_new(^domain, [JetParallelAccessFact]{}, [JetParallelEffectFact]{effect_pure()}, [JetParallelDependencyFact]{}, None)
+}
+// Rust :1607–1675; linear walks, exact domain/access/effect/dependency/law precedence.
+pub fn proof_validate(proof: JetParallelProof, operation: JetParallelOperation) JetParallelRejection! {
+    if !domain_is_valid(proof.domain) -> return Err(JetParallelRejection.Domain(domain_rejection_reason(proof.domain)))
+    if proof.effects.len() == 0 -> return Err(JetParallelRejection.MissingEffectFacts)
+    loop access in proof.accesses {
+        if access.scope == .Unknown -> return Err(JetParallelRejection.Access(~access, "scope is unknown, so iteration disjointness is not proven"))
+        if access_mode_is_reduction(access.mode) && !operation_is_reduction(operation) {
+            return Err(JetParallelRejection.Access(~access, "reduction access is only valid for para_fold, not {operation_surface_name(operation)}"))
+        }
+        if access_mode_writes(access.mode) && !access_is_proven_disjoint(access) && !access_mode_is_reduction(access.mode) {
+            return Err(JetParallelRejection.Dependence(dependency_write_after_write(~access.place, None, None)))
+        }
+    }
+    loop effect in proof.effects {
+        if effect_rejection_reason(effect, operation, proof.reduction != None) == .Val(reason) {
+            return Err(JetParallelRejection.Effect(~effect, ^reason))
+        }
+    }
+    loop dependency in proof.dependencies {
+        if dependency_kind_conflicts(dependency.kind) -> return Err(JetParallelRejection.Dependence(~dependency))
+    }
+    if operation_is_reduction(operation) {
+        reduction :: proof.reduction ?? return Err(JetParallelRejection.Reduction("para_fold requires a proven identity and associative merge law"))
+        if reduction_rejection_reason(reduction) == .Val(reason) -> return Err(JetParallelRejection.Reduction(^reason))
+    }
+    Ok(())
+}
+pub fn proof_is_proven_independent(proof: JetParallelProof, operation: JetParallelOperation) -> Bool Never! {
+    if proof_validate(proof, operation) == { .Ok(_) -> true .Err(_) -> false }
+}
+pub fn proof_rejection(proof: JetParallelProof, operation: JetParallelOperation) -> JetParallelRejection? Never! {
+    if proof_validate(proof, operation) == { .Ok(_) -> None .Err(reason) -> Val(^reason) }
+}
+#Debug
+#Equatable
+pub struct JetParallelPlan {
+    pub operation: JetParallelOperation
+    pub domain: JetParallelIterationDomain
+    pub proof: JetParallelProof
+    pub resources: JetParallelResourceBounds
+    pub chunks: [JetParallelChunk]
+    pub execution: JetParallelExecution
+    pub reduction: JetParallelReductionFact?
+    pub acceleration: JetAccelerationDecision?
+}
+pub fn plan_select_explicit(operation: JetParallelOperation, proof: ^JetParallelProof, resources: JetParallelResourceBounds, usize_max: U64) -> JetParallelPlan JetParallelRejection! {
+    plan_select_with_acceleration(operation, ^proof, resources, None, usize_max)
+}
+pub fn plan_select_with_acceleration(operation: JetParallelOperation, proof: ^JetParallelProof, resources: JetParallelResourceBounds, acceleration: JetAccelerationDecision?, usize_max: U64) -> JetParallelPlan JetParallelRejection! {
+    if proof_validate(proof, operation) == .Err(rejection) -> return Err(^rejection)
+    chunks :: if resources_deterministic_chunks(resources, proof.domain, usize_max) == {
+        .Ok(values) -> ^values
+        .Err(rejection) -> return Err(^rejection)
+    }
+    execution := JetParallelExecution.Sequential(.EmptyDomain)
+    if chunks.len() != 0 {
+        workers :: resources_selected_workers(resources, U64{chunks.len()})
+        if chunks.len() == 1 { execution = .Sequential(.SingleChunk) }
+        else if resources_worker_limit(resources) == (U64{1}) || workers <= (U64{1}) { execution = .Sequential(.WorkerLimitOne) }
+        else if acceleration == .Val(decision) && !decision_selected(decision) { execution = .Sequential(.AccelerationGateRejected) }
+        else { execution = .Parallel(workers) }
+    }
+    domain :: ~proof.domain
+    reduction :: ~proof.reduction
+    Ok(JetParallelPlan{operation: operation, domain: ^domain, proof: ^proof, resources: resources,
+        chunks: ^chunks, execution: execution, reduction: ^reduction, acceleration: acceleration})
+}
+pub fn plan_is_parallel(plan: JetParallelPlan) -> Bool Never! { execution_is_parallel(plan.execution) }
+pub fn plan_worker_count(plan: JetParallelPlan) -> U64 Never! { execution_workers(plan.execution) }
+pub fn plan_chunk_count(plan: JetParallelPlan) -> U64 Never! { U64{plan.chunks.len()} }
+// Rust :1497–1518, with Main's source-defect ruling: pair EVERY adjacent
+// ordinal at each level and carry odd tails. Compact scalar ordinals in-place:
+// O(n) total work, one active buffer, n-1 pairs, no per-level allocation.
+pub fn plan_merge_tree(plan: JetParallelPlan) -> [(left: U64, right: U64)] Never! {
+    pairs := [(left: U64, right: U64)]{}
+    if !operation_is_reduction(plan.operation) -> return ^pairs
+    active := [U64]{}
+    loop chunk in plan.chunks -> &active.push(chunk.ordinal)
+    count := active.len()
+    loop count > 1 {
+        cursor := 0
+        next_count := 0
+        loop cursor < count {
+            left :: active[cursor]
+            if cursor + 1 < count {
+                &pairs.push((left: left, right: active[cursor + 1]))
+                cursor += 2
+            } else { cursor += 1 }
+            active[next_count] = left
+            next_count += 1
+        }
+        count = next_count
+    }
+    ^pairs
+}
+#Debug
+#Equatable
+pub struct JetParallelFailure { pub source_index: U64 pub message: String }
+#Debug
+#Comparable
+#Equatable
+pub enum JetParallelReceiptStatus { Running Completed Failed Cancelled }
+pub fn receipt_status_display(status: JetParallelReceiptStatus) -> String Never! {
+    if status == { .Running -> "running" .Completed -> "completed" .Failed -> "failed" .Cancelled -> "cancelled" }
+}
+#Debug
+#Equatable
+pub struct JetParallelReceipt {
+    pub operation: JetParallelOperation
+    pub status: JetParallelReceiptStatus
+    pub chunks_total: U64
+    pub chunks_started: U64
+    pub chunks_completed: U64
+    pub items_completed: U64
+    pub first_failure: JetParallelFailure?
+    pub cancellation_index: U64?
+    pub partial_result_discarded: Bool
+    pub external_effects_rolled_back: Bool
+    pub acceleration: JetAccelerationDecision?
+}
+pub fn receipt_new(plan: JetParallelPlan) -> JetParallelReceipt Never! {
+    JetParallelReceipt{operation: plan.operation, status: .Running, chunks_total: U64{plan.chunks.len()},
+        chunks_started: U64{0}, chunks_completed: U64{0}, items_completed: U64{0}, first_failure: None,
+        cancellation_index: None, partial_result_discarded: false, external_effects_rolled_back: false,
+        acceleration: ~plan.acceleration}
+}
+pub fn plan_receipt(plan: JetParallelPlan) -> JetParallelReceipt Never! { receipt_new(plan) }
+pub fn receipt_record_failure(receipt: &JetParallelReceipt, source_index: U64, message: ^String) Never! {
+    replace := true
+    if receipt.first_failure == .Val(current) {
+        replace = source_index < current.source_index || (source_index == current.source_index && message < current.message)
+    }
+    if replace -> receipt.first_failure = Val(JetParallelFailure{source_index: source_index, message: ^message})
+    receipt.partial_result_discarded = true
+    receipt.external_effects_rolled_back = false
+    receipt.status = .Running
+}
+pub fn receipt_record_cancellation(receipt: &JetParallelReceipt, source_index: U64) Never! {
+    replace := true
+    if receipt.cancellation_index == .Val(current) -> replace = source_index < current
+    if replace -> receipt.cancellation_index = Val(source_index)
+    receipt.partial_result_discarded = true
+    receipt.external_effects_rolled_back = false
+    receipt.status = .Running
+}
+pub fn receipt_finish(receipt: &JetParallelReceipt) -> JetParallelReceiptStatus Never! {
+    if receipt.first_failure != None { receipt.status = .Failed }
+    else if receipt.cancellation_index != None { receipt.status = .Cancelled }
+    else { receipt.status = .Completed }
+    if receipt.status != .Completed -> receipt.partial_result_discarded = true
+    ~receipt.status
+}
+pub fn receipt_has_result(receipt: JetParallelReceipt) -> Bool Never! { receipt.status == .Completed && !receipt.partial_result_discarded }
+// Borrow the original optional slot (the same retaining-reference convention
+// as OverlayState.error_pause), never clone the failure/message for inspection.
+pub fn receipt_selected_failure(receipt: JetParallelReceipt) -> &(JetParallelFailure?) from receipt {
+    &receipt.first_failure
+}
+
+// Exact native/cross-owner body gates (no callable stubs):
+// :239 AtomicU64 sequence; :248 publish requires selected wasm no-op OR real
+// native var_os("JET_RECEIPT_DIR"/"JET_RECEIPT_CLAIM") BEFORE allocation/clock,
+// relaxed fetch_add old sequence, canonical JSON render(false,0), existing
+// jet_receipt_attach_encoded(payload,section,type,digest). The published ABI
+// provides required var_os/counter concepts but no receipt attach or stable
+// acceleration-specific static atomic cell. Do not use a temp-file counter.
+// :75 costs_once: above-floor ONE lazy process cell initializes BOTH costs.
+// :488 spawn: actual available_parallelism default1, saturating 64*max(workers,2),
+// time kernel(items,usize::MAX,workers, |_| Ok(())), elapsed.as_nanos.max(1) as U64.
+// :499 bandwidth: two 65536-byte blocks; source[index]=index as U8; time real
+// target.copy_from_slice(source), wrapping U8 checksum, black_box, elapsed above.
+// :516 first_chunk: no clock at <=1024; otherwise f(0..min(items,64)) ONCE,
+// retain value and timed nanos. Needs canonical monotonic/Instant duration law.
+// :539 measured_chunks: static refusal chunk_count0/len<=1024/workers<=1/
+// !release/!parity/!proof calls canonical serial kernel with deferred input;
+// otherwise retain first result, costs_once, evaluate, invoke existing selected
+// parallel or serial kernel ONLY over len-sample_items with offset ranges;
+// move first value at ordinal0 and tail ordinals+1 into source-ordered results.
+// :621 column_range_map_with_sample: absent sample uses original(range); with
+// sample assert len==sample_items, MOVE sample.value, reserve remaining range,
+// compute min(saturating(start+sample_items),end), return if no tail; selected
+// tail calls canonical column_copy_range_map, rejected tail calls original;
+// MOVE tail into retained result. Sole dependency owner (packet0143):
+// core.collections.runtime.kernel_collections.jet_list_accel_column_copy_range_map.
+// That callable and no-copy reserve/consuming extension are not published.
+// :663 accel_range_map: source range remains an index fact; actual worker cap
+// (test cfg3, otherwise available_parallelism default1); measured_chunks with
+// PooledParallelChunks and nested/singlepass false; each item uses original
+// jet_para_call(source_index, f), ordered flatten, lowest failure.index wins,
+// jet_para_raise_failure after collecting. Sole owners: packet0144
+// core.collections.runtime.kernel_parallel_kernel.jet_list_para_chunks_kernel
+// and .jet_list_para_chunks_serial_kernel; packet0138 owns the canonical
+// failure/catch-unwind rail. Send/Sync/capture and selected cfg stay gated.
+// Until those APIs and #4494/#4483/#4500 exist these eight bodies remain explicit
+// missing prerequisites, not production wrappers, aliases, or parity claims.

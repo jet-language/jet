@@ -1,0 +1,104 @@
+// RangeBounds.rs:3–68,74–85 policy and ownership/error expectations.
+// True source proof is not native storage/retained UTF-8/link acceptance.
+use core.prelude.runtime.kernel_range_bounds as range_kernel
+
+fn range_expect_bounds(start: I64, end: I64, exclusive: Bool, len: I64, wanted_start: I64, wanted_end: I64) Never! {
+    actual :: range_kernel.jet_range_bounds(start, end, exclusive, len) ?? panic("expected valid range")
+    assert_eq(actual.start, wanted_start)
+    assert_eq(actual.end_exclusive, wanted_end)
+    checked :: range_kernel.jet_checked_view_bounds(start, end, exclusive, len) ?? panic("expected checked bounds")
+    assert_eq(checked.start, wanted_start)
+    assert_eq(checked.end_exclusive, wanted_end)
+}
+fn range_expect_error(start: I64, end: I64, exclusive: Bool, len: I64, expected: String) Never! {
+    assert(range_kernel.jet_range_bounds(start, end, exclusive, len) == None)
+    _ :: range_kernel.jet_checked_view_bounds(start, end, exclusive, len) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected bounds error")
+}
+fn range_expect_slice_error(text: String, start: I64, end: I64, exclusive: Bool, expected: String) Never! {
+    _ :: range_kernel.jet_string_slice_value(text, start, end, exclusive) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected slice error")
+}
+
+#Test("range empty endpoints inclusive length and checked I64 overflow") {
+    range_expect_bounds(I64{0}, I64{0}, true, I64{0}, I64{0}, I64{0})
+    range_expect_bounds(I64{3}, I64{3}, true, I64{3}, I64{3}, I64{3})
+    range_expect_bounds(I64{0}, I64{2}, false, I64{3}, I64{0}, I64{3})
+    range_expect_bounds(I64{1}, I64{3}, true, I64{3}, I64{1}, I64{3})
+    max :: I64{9223372036854775807}
+    range_expect_bounds(max, max, true, max, max, max)
+    range_expect_bounds(max - I64{1}, max - I64{1}, false, max, max - I64{1}, max)
+    range_expect_error(max, max, false, max, "can't view 9223372036854775807 items from 9223372036854775807 to 9223372036854775807 (inclusive)")
+    range_expect_error(I64{0}, I64{0}, false, I64{0}, "can't view 0 items from 0 to 0 (inclusive)")
+    range_expect_error(I64{4}, I64{4}, true, I64{3}, "can't view 3 items from 4 to 4 (exclusive)")
+}
+
+#Test("range exact canonical Err messages negative reversed and outside length") {
+    range_expect_error(I64{-1}, I64{2}, false, I64{3}, "can't view 3 items from -1 to 2 (inclusive)")
+    range_expect_error(I64{0}, I64{-1}, true, I64{3}, "can't view 3 items from 0 to -1 (exclusive)")
+    range_expect_error(I64{2}, I64{1}, true, I64{3}, "can't view 3 items from 2 to 1 (exclusive)")
+    range_expect_error(I64{0}, I64{0}, true, I64{-1}, "can't view -1 items from 0 to 0 (exclusive)")
+    range_expect_error(I64{0}, I64{3}, false, I64{3}, "can't view 3 items from 0 to 3 (inclusive)")
+    // ownership.rs:4671–4685 original dynamic-view construction error.
+    range_expect_error(I64{2}, I64{2}, false, I64{1}, "can't view 1 items from 2 to 2 (inclusive)")
+    // #4391 minimum literal remains held; exact value via in-range subtraction.
+    min :: I64{-9223372036854775807} - I64{1}
+    range_expect_error(min, I64{0}, true, I64{3}, "can't view 3 items from -9223372036854775808 to 0 (exclusive)")
+}
+
+#Test("range contains is raw membership not indexing validation") {
+    assert(range_kernel.jet_range_contains(I64{-3}, I64{-1}, false, I64{-1}))
+    assert(range_kernel.jet_range_contains(I64{-3}, I64{-1}, true, I64{-3}))
+    assert(!range_kernel.jet_range_contains(I64{-3}, I64{-1}, true, I64{-1}))
+    assert(!range_kernel.jet_range_contains(I64{2}, I64{1}, false, I64{1}))
+    assert(!range_kernel.jet_range_contains(I64{2}, I64{2}, true, I64{2}))
+    assert(range_kernel.jet_range_contains(I64{2}, I64{2}, false, I64{2}))
+    assert(!range_kernel.jet_range_contains(I64{2}, I64{3}, false, I64{1}))
+    assert(!range_kernel.jet_range_contains(I64{2}, I64{3}, false, I64{4}))
+    max :: I64{9223372036854775807}
+    min :: I64{-9223372036854775807} - I64{1}
+    assert(range_kernel.jet_range_contains(min, max, false, min))
+    assert(range_kernel.jet_range_contains(min, max, false, max))
+    assert(!range_kernel.jet_range_contains(min, max, true, max))
+}
+
+#Test("range equality compares all original fields without normalization") {
+    assert(range_kernel.jet_range_equal(I64{-1}, I64{3}, true, I64{-1}, I64{3}, true))
+    assert(!range_kernel.jet_range_equal(I64{0}, I64{3}, true, I64{1}, I64{3}, true))
+    assert(!range_kernel.jet_range_equal(I64{0}, I64{3}, true, I64{0}, I64{4}, true))
+    assert(!range_kernel.jet_range_equal(I64{0}, I64{3}, true, I64{0}, I64{3}, false))
+    assert(!range_kernel.jet_range_equal(I64{0}, I64{2}, false, I64{0}, I64{3}, true))
+    assert(range_kernel.jet_range_equal(I64{3}, I64{1}, false, I64{3}, I64{1}, false))
+}
+
+#Test("owned string slicing uses Unicode scalars including combining and NUL") {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL fixture failed")
+    text :: "aé界😀é{nul}z"
+    actual :: String{range_kernel.jet_string_slice_value(text, I64{1}, I64{4}, true) ?? panic("scalar slice failed")}
+    assert_eq(actual, "é界😀")
+    assert_eq(range_kernel.jet_string_slice_value(text, I64{1}, I64{3}, false) ?? panic("inclusive slice failed"), "é界😀")
+    assert_eq(range_kernel.jet_string_slice_value(text, I64{4}, I64{6}, true) ?? panic("combining slice failed"), "é")
+    assert_eq(range_kernel.jet_string_slice_value(text, I64{6}, I64{6}, false) ?? panic("NUL slice failed"), nul)
+    assert_eq(range_kernel.jet_string_slice_value(text, I64{8}, I64{8}, true) ?? panic("empty end slice failed"), "")
+    assert_eq(range_kernel.jet_string_slice_value("", I64{0}, I64{0}, true) ?? panic("empty slice failed"), "")
+    expected :: "aé界😀é{nul}z"
+    assert_eq(text, expected)
+}
+
+#Test("owned slice exact scalar length and invalid bounds Err wording") {
+    text :: "é界😀"
+    range_expect_slice_error(text, I64{-1}, I64{2}, true, "can't slice 3 characters from -1 to 2 (exclusive)")
+    range_expect_slice_error(text, I64{0}, I64{-1}, false, "can't slice 3 characters from 0 to -1 (inclusive)")
+    range_expect_slice_error(text, I64{2}, I64{1}, true, "can't slice 3 characters from 2 to 1 (exclusive)")
+    range_expect_slice_error(text, I64{0}, I64{3}, false, "can't slice 3 characters from 0 to 3 (inclusive)")
+    range_expect_slice_error(text, I64{0}, I64{4}, true, "can't slice 3 characters from 0 to 4 (exclusive)")
+    range_expect_slice_error("", I64{0}, I64{0}, false, "can't slice 0 characters from 0 to 0 (inclusive)")
+    range_expect_slice_error(text, I64{0}, I64{9223372036854775807}, false, "can't slice 3 characters from 0 to 9223372036854775807 (inclusive)")
+    assert_eq(text, "é界😀")
+}

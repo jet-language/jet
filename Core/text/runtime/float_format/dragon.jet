@@ -1,0 +1,98 @@
+// Direct port of pinned core num/imp/flt2dec/strategy/dragon.rs.
+use core.text.runtime.float_format.big as big
+use core.text.runtime.float_format.decoded as dec
+
+fn digit(mant: &big.Big, scale: &big.Big, s2: &big.Big, s4: &big.Big, s8: &big.Big) -> U8 Never! {
+    d := U8{0}
+    if big.compare(mant, s8) >= (I32{0}) { big.sub(mant, s8); d += U8{8} }
+    if big.compare(mant, s4) >= (I32{0}) { big.sub(mant, s4); d += U8{4} }
+    if big.compare(mant, s2) >= (I32{0}) { big.sub(mant, s2); d += U8{2} }
+    if big.compare(mant, scale) >= (I32{0}) { big.sub(mant, scale); d += U8{1} }
+    assert(d < (U8{10}))
+    U8{48} + d
+}
+fn less(a: &big.Big, b: &big.Big, inclusive: Bool) -> Bool Never! {
+    c :: big.compare(a, b)
+    c < (I32{0}) || (inclusive && c == (I32{0}))
+}
+pub fn shortest(d: &dec.Decoded, buf: &[U8#N]) -> dec.Digits Never! {
+    k := dec.estimate(d.mant + d.plus, d.exp)
+    mant := big.from_word(d.mant)
+    minus := big.from_word(d.minus)
+    plus := big.from_word(d.plus)
+    scale := big.from_word(U64{1})
+    if d.exp < 0 { big.shift(&scale, -d.exp) } else {
+        big.shift(&mant, d.exp); big.shift(&minus, d.exp); big.shift(&plus, d.exp)
+    }
+    if k >= 0 { big.pow10(&scale, k) } else {
+        big.pow10(&mant, -k); big.pow10(&minus, -k); big.pow10(&plus, -k)
+    }
+    sum := big.copy(&mant)
+    big.add(&sum, &plus)
+    if less(&scale, &sum, d.inclusive) { k += 1 } else {
+        big.mul_small(&mant, U64{10}); big.mul_small(&minus, U64{10}); big.mul_small(&plus, U64{10})
+    }
+    s2 := big.copy(&scale); big.shift(&s2, 1)
+    s4 := big.copy(&scale); big.shift(&s4, 2)
+    s8 := big.copy(&scale); big.shift(&s8, 3)
+    len := 0
+    loop {
+        assert(len < N)
+        buf[len] = digit(&mant, &scale, &s2, &s4, &s8)
+        len += 1
+        down :: less(&mant, &minus, d.inclusive)
+        sum = big.copy(&mant); big.add(&sum, &plus)
+        up :: less(&scale, &sum, d.inclusive)
+        if down || up {
+            if up {
+                big.shift(&mant, 1)
+                if !down || big.compare(&mant, &scale) >= (I32{0}) {
+                    carry :: dec.round_up(buf, len)
+                    if carry != None {
+                        buf[len] = carry ?? panic("carry")
+                        len += 1; k += 1
+                    }
+                }
+            }
+            return dec.Digits{len: len, exp: k}
+        }
+        big.mul_small(&mant, U64{10}); big.mul_small(&minus, U64{10}); big.mul_small(&plus, U64{10})
+    }
+}
+pub fn exact(d: &dec.Decoded, buf: &[U8#N], capacity: Int, limit: Int) -> dec.Digits Never! {
+    k := dec.estimate(d.mant, d.exp)
+    mant := big.from_word(d.mant)
+    scale := big.from_word(U64{1})
+    if d.exp < 0 { big.shift(&scale, -d.exp) } else { big.shift(&mant, d.exp) }
+    if k >= 0 { big.pow10(&scale, k) } else { big.pow10(&mant, -k) }
+    test := big.copy(&scale)
+    big.div_2pow10(&test, capacity); big.add(&test, &mant)
+    if big.compare(&test, &scale) >= (I32{0}) { k += 1 } else { big.mul_small(&mant, U64{10}) }
+    len := if k < limit -> 0 else -> if k - limit < capacity -> k - limit else -> capacity
+    if len > 0 {
+        s2 := big.copy(&scale); big.shift(&s2, 1)
+        s4 := big.copy(&scale); big.shift(&s4, 2)
+        s8 := big.copy(&scale); big.shift(&s8, 3)
+        loop i in 0..<len {
+            if big.is_zero(&mant) {
+                loop j in i..<len -> buf[j] = U8{48}
+                return dec.Digits{len: len, exp: k}
+            }
+            buf[i] = digit(&mant, &scale, &s2, &s4, &s8)
+            big.mul_small(&mant, U64{10})
+        }
+    }
+    big.mul_small(&scale, U64{5})
+    order :: big.compare(&mant, &scale)
+    if order > (I32{0}) || (order == (I32{0}) && len > 0 && (buf[len - 1] & U8{1}) == (U8{1})) {
+        carry :: dec.round_up(buf, len)
+        if carry != None {
+            k += 1
+            if k > limit && len < capacity {
+                buf[len] = carry ?? panic("carry")
+                len += 1
+            }
+        }
+    }
+    dec.Digits{len: len, exp: k}
+}

@@ -1,0 +1,591 @@
+// Rust Prelude/Core/UnicodeString.rs:1-155, the always-on String kernel.
+// Full locale-free mappings and pinned whitespace, not a text-import fallback.
+use core.text.runtime.unicode_assets as text_asset
+use core.text.runtime.assets.unicode_fold_index as text_unicode_fold_index
+use core.text.runtime.assets.unicode_fold_pool as text_unicode_fold_pool
+use core.text.runtime.assets.unicode_title_index as text_unicode_title_index
+use core.text.runtime.assets.unicode_title_pool as text_unicode_title_pool
+use core.text.runtime.assets.unicode_alphabetic as text_unicode_alphabetic
+use core.text.runtime.assets.unicode_numeric as text_unicode_numeric
+use core.text.runtime.assets.unicode_general_category as text_unicode_category
+// BEGIN GENERATED STRING ASSETS
+use core.text.runtime.assets.unicode_lower_pool as text_unicode_lower_pool
+use core.text.runtime.assets.unicode_lower_index as text_unicode_lower_index
+use core.text.runtime.assets.unicode_upper_pool as text_unicode_upper_pool
+use core.text.runtime.assets.unicode_upper_index as text_unicode_upper_index
+use core.text.runtime.assets.unicode_white_space as text_unicode_white_space
+use core.text.runtime.assets.unicode_cased as text_unicode_cased
+use core.text.runtime.assets.unicode_case_ignorable as text_unicode_case_ignorable
+use core.text.runtime.assets.unicode_lowercase as text_unicode_lowercase
+use core.text.runtime.assets.unicode_uppercase as text_unicode_uppercase
+// END GENERATED STRING ASSETS
+
+pub UNICODE_STRING_VERSION :: "17.0.0"
+
+// One private R0 byte-read seam for Unicode and the other text kernels.
+// #4318/#4392: the bootstrap byte builtin below still materializes a Vec.
+// Native cutover must retain String's original UTF-8 owner without copying;
+// callers do not claim allocation parity until that borrowed-result leaf lands.
+pub fn utf8_bytes(text: String) -> [U8] Never! { text.bytes() }
+
+// Rust jet_unicode_append_mapping:42-53. One caller-owned UTF-8 output buffer.
+fn append_mapping(out: &[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
+    if text_asset.mapping(index, pool, cp) == .Val(span) {
+        loop i in span.start..<(span.start + span.length) -> append_cp(&out, text_asset.scalar(pool, i))
+        return
+    }
+    append_cp(&out, cp)
+}
+
+// Compare the pinned full mapping without allocating a one-scalar String.
+fn mapping_changes(cp: Int, index: View<U8>, pool: View<U8>) -> Bool Never! {
+    if text_asset.mapping(index, pool, cp) == .Val(span) {
+        return span.length != 1 || text_asset.scalar(pool, span.start) != cp
+    }
+    false
+}
+
+// Rust jet_unicode_final_sigma:55-66. Ignore Case_Ignorable in both directions.
+fn final_sigma(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Never! {
+    before := false
+    i := at - 1
+    loop i >= 0 {
+        cp :: chars[i]
+        if !text_asset.asset_contains(ignorable, cp) {
+            before = text_asset.asset_contains(cased, cp)
+            break
+        }
+        i = i - 1
+    }
+    if !before -> return false
+    i = at + 1
+    loop i < chars.len() {
+        cp :: chars[i]
+        if !text_asset.asset_contains(ignorable, cp) -> return !text_asset.asset_contains(cased, cp)
+        i = i + 1
+    }
+    true
+}
+
+// Decode only the current UTF-8 scalar. String's checked owner guarantees UTF-8.
+pub fn scalar_at(raw: [U8], at: Int) -> Int Never! {
+    width :: utf8_width_at(raw, at)
+    cp := Int.from_u8(raw[at])
+    if width == 2 -> cp = cp & 31
+    if width == 3 -> cp = cp & 15
+    if width == 4 -> cp = cp & 7
+    loop k in 1..<width -> cp = (cp << 6) | (Int.from_u8(raw[at + k]) & 63)
+    cp
+}
+
+// Rust jet_unicode_lower:68-80. As in Rust, only lowercase collects scalars.
+pub fn lower(text: String) -> String Never! {
+    lower_index :: text_unicode_lower_index.UNICODE_LOWER_INDEX
+    lower_pool :: text_unicode_lower_pool.UNICODE_LOWER_POOL
+    cased_asset :: text_unicode_cased.UNICODE_CASED
+    ignorable_asset :: text_unicode_case_ignorable.UNICODE_CASE_IGNORABLE
+    assert(text_asset.valid(lower_index, 4, 11) && text_asset.valid(lower_pool, 1, 3), "invalid Unicode mapping assets")
+    index :: lower_index[40..<lower_index.len()]
+    pool :: lower_pool[40..<lower_pool.len()]
+    raw :: utf8_bytes(text)
+    chars := [Int]{}
+    at := 0
+    loop at < raw.len() {
+        &chars.push(scalar_at(raw, at))
+        at = at + utf8_width_at(raw, at)
+    }
+    out := [U8]{}
+    loop i in 0..<chars.len() {
+        cp :: chars[i]
+        if cp == 931 && final_sigma(chars, i, cased_asset, ignorable_asset) {
+            append_cp(&out, 962)
+        } else {
+            append_mapping(&out, cp, index, pool)
+        }
+    }
+    String.from_bytes(out) ?? panic("Unicode lowercase produced invalid UTF-8")
+}
+
+// Rust jet_unicode_upper:82-89. Streaming input, full expansion into one buffer.
+pub fn upper(text: String) -> String Never! {
+    upper_index :: text_unicode_upper_index.UNICODE_UPPER_INDEX
+    upper_pool :: text_unicode_upper_pool.UNICODE_UPPER_POOL
+    map_stream(text, upper_index, upper_pool)
+}
+
+// UnicodeTables.rs:17-21 default C+F fold; no locale or Final_Sigma condition.
+pub fn casefold(text: String) -> String Never! {
+    fold_index :: text_unicode_fold_index.UNICODE_FOLD_INDEX
+    fold_pool :: text_unicode_fold_pool.UNICODE_FOLD_POOL
+    map_stream(text, fold_index, fold_pool)
+}
+
+fn map_stream(text: String, index_asset: [U8], pool_asset: [U8]) -> String Never! {
+    assert(text_asset.valid(index_asset, 4, 11) && text_asset.valid(pool_asset, 1, 3), "invalid Unicode mapping assets")
+    index :: index_asset[40..<index_asset.len()]
+    pool :: pool_asset[40..<pool_asset.len()]
+    raw :: utf8_bytes(text)
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        append_mapping(&out, scalar_at(raw, at), index, pool)
+        at = at + utf8_width_at(raw, at)
+    }
+    String.from_bytes(out) ?? panic("Unicode mapping produced invalid UTF-8")
+}
+
+// Rust Text.rs:303-335. Word membership is Alphabetic OR Numeric; interior
+// lowercase is scalar-local (NOT whole-word FinalSigma), including expansions.
+pub fn title(text: String) -> String Never! {
+    title_index_asset :: text_unicode_title_index.UNICODE_TITLE_INDEX
+    title_pool_asset :: text_unicode_title_pool.UNICODE_TITLE_POOL
+    lower_index_asset :: text_unicode_lower_index.UNICODE_LOWER_INDEX
+    lower_pool_asset :: text_unicode_lower_pool.UNICODE_LOWER_POOL
+    assert(text_asset.valid(title_index_asset, 4, 11) && text_asset.valid(title_pool_asset, 1, 3), "invalid Unicode mapping assets")
+    assert(text_asset.valid(lower_index_asset, 4, 11) && text_asset.valid(lower_pool_asset, 1, 3), "invalid Unicode mapping assets")
+    title_index :: title_index_asset[40..<title_index_asset.len()]
+    title_pool :: title_pool_asset[40..<title_pool_asset.len()]
+    lower_index :: lower_index_asset[40..<lower_index_asset.len()]
+    lower_pool :: lower_pool_asset[40..<lower_pool_asset.len()]
+    alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
+    numeric :: text_unicode_numeric.UNICODE_NUMERIC
+    raw :: utf8_bytes(text)
+    out := [U8]{}
+    word_start := true
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
+            if word_start -> append_mapping(&out, cp, title_index, title_pool)
+            else -> append_mapping(&out, cp, lower_index, lower_pool)
+            word_start = false
+        } else {
+            append_cp(&out, cp)
+            word_start = true
+        }
+        at = at + utf8_width_at(raw, at)
+    }
+    String.from_bytes(out) ?? panic("Unicode title mapping produced invalid UTF-8")
+}
+
+// Rust Text.rs:982-992. Only the suffix participates in FinalSigma context.
+pub fn capitalize(text: String) -> String Never! {
+    raw :: utf8_bytes(text)
+    if raw.len() == 0 -> return ""
+    title_index_asset :: text_unicode_title_index.UNICODE_TITLE_INDEX
+    title_pool_asset :: text_unicode_title_pool.UNICODE_TITLE_POOL
+    assert(text_asset.valid(title_index_asset, 4, 11) && text_asset.valid(title_pool_asset, 1, 3), "invalid Unicode mapping assets")
+    title_index :: title_index_asset[40..<title_index_asset.len()]
+    title_pool :: title_pool_asset[40..<title_pool_asset.len()]
+    out := [U8]{}
+    append_mapping(&out, scalar_at(raw, 0), title_index, title_pool)
+    rest := text.slice(1, text.len()) // #4303: String-typed lowercase input.
+    loop byte in utf8_bytes(lower(rest)) -> &out.push(byte)
+    String.from_bytes(out) ?? panic("Unicode capitalization produced invalid UTF-8")
+}
+
+// Rust Text.rs:993-1014: uppercase wins when both mappings change (titlecase
+// digraphs). Sigma is scalar-local here, unlike lowercase's FinalSigma.
+pub fn swapcase(text: String) -> String Never! {
+    cased :: text_unicode_cased.UNICODE_CASED
+    upper_index_asset :: text_unicode_upper_index.UNICODE_UPPER_INDEX
+    upper_pool_asset :: text_unicode_upper_pool.UNICODE_UPPER_POOL
+    lower_index_asset :: text_unicode_lower_index.UNICODE_LOWER_INDEX
+    lower_pool_asset :: text_unicode_lower_pool.UNICODE_LOWER_POOL
+    assert(text_asset.valid(upper_index_asset, 4, 11) && text_asset.valid(upper_pool_asset, 1, 3), "invalid Unicode mapping assets")
+    assert(text_asset.valid(lower_index_asset, 4, 11) && text_asset.valid(lower_pool_asset, 1, 3), "invalid Unicode mapping assets")
+    upper_index :: upper_index_asset[40..<upper_index_asset.len()]
+    upper_pool :: upper_pool_asset[40..<upper_pool_asset.len()]
+    lower_index :: lower_index_asset[40..<lower_index_asset.len()]
+    lower_pool :: lower_pool_asset[40..<lower_pool_asset.len()]
+    raw :: utf8_bytes(text)
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if {
+            !text_asset.asset_contains(cased, cp) -> append_cp(&out, cp)
+            mapping_changes(cp, upper_index, upper_pool) -> append_mapping(&out, cp, upper_index, upper_pool)
+            else -> append_mapping(&out, cp, lower_index, lower_pool)
+        }
+        at = at + utf8_width_at(raw, at)
+    }
+    String.from_bytes(out) ?? panic("Unicode swapcase produced invalid UTF-8")
+}
+
+// Rust Text.rs:944-981: cased + changed opposite full mapping, not the
+// Lowercase/Uppercase properties used by istitle. Public cutover is owner-gated:
+// titlecase digraph U+01C5 has BOTH predicates true in this source contract.
+pub fn is_lower(text: String) -> Bool Never! {
+    index :: text_unicode_upper_index.UNICODE_UPPER_INDEX
+    pool :: text_unicode_upper_pool.UNICODE_UPPER_POOL
+    all_cased_change(text, index, pool)
+}
+pub fn is_upper(text: String) -> Bool Never! {
+    index :: text_unicode_lower_index.UNICODE_LOWER_INDEX
+    pool :: text_unicode_lower_pool.UNICODE_LOWER_POOL
+    all_cased_change(text, index, pool)
+}
+fn all_cased_change(text: String, index_asset: [U8], pool_asset: [U8]) -> Bool Never! {
+    assert(text_asset.valid(index_asset, 4, 11) && text_asset.valid(pool_asset, 1, 3), "invalid Unicode mapping assets")
+    index :: index_asset[40..<index_asset.len()]
+    pool :: pool_asset[40..<pool_asset.len()]
+    cased :: text_unicode_cased.UNICODE_CASED
+    raw :: utf8_bytes(text)
+    saw := false
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if text_asset.asset_contains(cased, cp) {
+            if !mapping_changes(cp, index, pool) -> return false
+            saw = true
+        }
+        at = at + utf8_width_at(raw, at)
+    }
+    saw
+}
+
+// Rust Core/Ascii.rs:5-21: the sole deliberately byte-preserving ASCII kernel.
+// Existing String.to_ascii_lower/to_ascii_upper routing is a native/tier gate;
+// these private-module policies do not add a public core.text spelling.
+pub fn ascii_lower(text: String) -> String Never! { ascii_case(text, false) }
+pub fn ascii_upper(text: String) -> String Never! { ascii_case(text, true) }
+fn ascii_case(text: String, upper: Bool) -> String Never! {
+    raw :: utf8_bytes(text)
+    out := [U8]{}
+    loop byte in raw {
+        if {
+            upper && byte >= (U8{97}) && byte <= (U8{122}) -> &out.push(byte - U8{32})
+            !upper && byte >= (U8{65}) && byte <= (U8{90}) -> &out.push(byte + U8{32})
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? panic("ASCII mapping produced invalid UTF-8")
+}
+
+// Rust Text.rs:1649-1668 literal source, NOT equality with title(text).
+// Owner gate: repeated uppercase is accepted; uncased alphabetic is rejected.
+pub fn is_title(text: String) -> Bool Never! {
+    uppercase :: text_unicode_uppercase.UNICODE_UPPERCASE
+    lowercase :: text_unicode_lowercase.UNICODE_LOWERCASE
+    alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
+    raw :: utf8_bytes(text)
+    has_cased := false
+    expect_upper := true
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if {
+            text_asset.asset_contains(uppercase, cp) -> {
+                has_cased = true
+                expect_upper = false
+            }
+            text_asset.asset_contains(lowercase, cp) -> {
+                has_cased = true
+                if expect_upper -> return false
+            }
+            text_asset.asset_contains(alphabetic, cp) -> return false
+            else -> { expect_upper = true }
+        }
+        at = at + utf8_width_at(raw, at)
+    }
+    has_cased
+}
+
+// Rust Text.rs:939-941,1640-1645; pinned scalar properties, no scalar list.
+pub fn is_alphabetic(text: String) -> Bool Never! {
+    asset :: text_unicode_alphabetic.UNICODE_ALPHABETIC
+    all_property(text, asset)
+}
+pub fn is_numeric(text: String) -> Bool Never! {
+    asset :: text_unicode_numeric.UNICODE_NUMERIC
+    all_property(text, asset)
+}
+pub fn is_whitespace(text: String) -> Bool Never! {
+    asset :: text_unicode_white_space.UNICODE_WHITE_SPACE
+    all_property(text, asset)
+}
+fn all_property(text: String, asset: [U8]) -> Bool Never! {
+    raw :: utf8_bytes(text)
+    if raw.len() == 0 -> return false
+    at := 0
+    loop at < raw.len() {
+        if !text_asset.asset_contains(asset, scalar_at(raw, at)) -> return false
+        at = at + utf8_width_at(raw, at)
+    }
+    true
+}
+pub fn is_alnum(text: String) -> Bool Never! {
+    alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
+    numeric :: text_unicode_numeric.UNICODE_NUMERIC
+    raw :: utf8_bytes(text)
+    if raw.len() == 0 -> return false
+    at := 0
+    loop at < raw.len() {
+        cp :: scalar_at(raw, at)
+        if !text_asset.asset_contains(alphabetic, cp) && !text_asset.asset_contains(numeric, cp) -> return false
+        at = at + utf8_width_at(raw, at)
+    }
+    true
+}
+
+// Rust Text.rs:1669-1671: empty is printable; only General_Category Cc fails.
+// Format, separators, unassigned scalars and non-ASCII letters remain printable.
+pub fn isprintable(text: String) -> Bool Never! {
+    category :: text_unicode_category.UNICODE_GENERAL_CATEGORY
+    raw :: utf8_bytes(text)
+    at := 0
+    loop at < raw.len() {
+        if text_asset.asset_tag(category, scalar_at(raw, at), 8) == 0 -> return false
+        at = at + utf8_width_at(raw, at)
+    }
+    true
+}
+
+// Rust jet_unicode_trim_view:91-94: original owner, scalar extent, no allocation.
+// #4392: String.slice does not yet expose a borrowed str extent with checked
+// `from text` provenance (E2307). Keep this contract; no owned-view shim.
+pub fn trim_view(text: String) -> View<str> from text {
+    bounds :: trim_bounds(text, true, true)
+    text.slice(bounds.start, bounds.end)
+}
+
+fn trim_bounds(text: String, left: Bool, right: Bool) -> (start: Int, end: Int) Never! {
+    whitespace_asset :: text_unicode_white_space.UNICODE_WHITE_SPACE
+    raw :: utf8_bytes(text)
+    start := 0
+    end := 0
+    scalar := 0
+    at := 0
+    leading := true
+    loop at < raw.len() {
+        space :: text_asset.asset_contains(whitespace_asset, scalar_at(raw, at))
+        if leading && space -> start = scalar + 1
+        if !space {
+            leading = false
+            end = scalar + 1
+        }
+        scalar = scalar + 1
+        at = at + utf8_width_at(raw, at)
+    }
+    if !left -> start = 0
+    if !right -> end = scalar
+    if end < start -> end = start
+    (start: start, end: end)
+}
+
+// Rust jet_unicode_trim_start:96-98, jet_unicode_trim_end:100-102, trim:104-106.
+pub fn trim_start(text: String) -> String Never! {
+    bounds :: trim_bounds(text, true, false)
+    text.slice(bounds.start, bounds.end)
+}
+pub fn trim_end(text: String) -> String Never! {
+    bounds :: trim_bounds(text, false, true)
+    text.slice(bounds.start, bounds.end)
+}
+pub fn trim(text: String) -> String Never! {
+    bounds :: trim_bounds(text, true, true)
+    text.slice(bounds.start, bounds.end)
+}
+
+// Constant-storage two-way substring search: linear time without needle copies.
+// A reversed accessor implements rfind with the same search policy.
+fn byte_at(bytes: [U8], at: Int, reverse: Bool) -> U8 Never! {
+    if reverse -> return bytes[bytes.len() - 1 - at]
+    bytes[at]
+}
+
+fn maximal_suffix(needle: [U8], reverse: Bool, order: Bool) -> (split: Int, period: Int) Never! {
+    suffix := -1
+    candidate := 0
+    offset := 1
+    period := 1
+    loop candidate + offset < needle.len() {
+        a :: byte_at(needle, candidate + offset, reverse)
+        b :: byte_at(needle, suffix + offset, reverse)
+        if a == b {
+            if offset == period {
+                candidate = candidate + period
+                offset = 1
+            } else {
+                offset = offset + 1
+            }
+        } else {
+            if (a < b) == order {
+                candidate = candidate + offset
+                offset = 1
+                period = candidate - suffix
+            } else {
+                suffix = candidate
+                candidate = suffix + 1
+                offset = 1
+                period = 1
+            }
+        }
+    }
+    (split: suffix + 1, period: period)
+}
+
+fn find_bytes(hay: [U8], needle: [U8], from: Int, reverse: Bool) -> Int? {
+    size :: needle.len()
+    if size == 0 {
+        if reverse -> return Val(hay.len())
+        return Val(from)
+    }
+    if from < 0 || from > hay.len() || size > hay.len() - from -> return None
+    first :: maximal_suffix(needle, reverse, true)
+    second :: maximal_suffix(needle, reverse, false)
+    split := first.split
+    period := first.period
+    if second.split > split {
+        split = second.split
+        period = second.period
+    }
+    periodic := period + split <= size
+    if periodic {
+        loop i in 0..<split {
+            if byte_at(needle, i, reverse) != byte_at(needle, period + i, reverse) {
+                periodic = false
+                break
+            }
+        }
+    }
+    if !periodic {
+        period = split
+        if size - split > period -> period = size - split
+        period = period + 1
+    }
+    position := from
+    memory := 0
+    loop position <= hay.len() - size {
+        i := split
+        if memory > i -> i = memory
+        loop i < size && byte_at(needle, i, reverse) == byte_at(hay, position + i, reverse) -> i = i + 1
+        if i < size {
+            position = position + i - split + 1
+            memory = 0
+            next
+        }
+        i = split
+        loop i > memory && byte_at(needle, i - 1, reverse) == byte_at(hay, position + i - 1, reverse) -> i = i - 1
+        if i <= memory {
+            if reverse -> return Val(hay.len() - position - size)
+            return Val(position)
+        }
+        position = position + period
+        if periodic -> memory = size - period
+    }
+    None
+}
+
+fn scalar_offset(raw: [U8], byte: Int) -> Int Never! {
+    at := 0
+    count := 0
+    loop at < byte {
+        at = at + utf8_width_at(raw, at)
+        count = count + 1
+    }
+    count
+}
+
+// Rust jet_unicode_index_of:108-111, last_index_of:113-116: scalar, not byte.
+pub fn index_of(text: String, needle: String) -> Int? {
+    raw :: utf8_bytes(text)
+    byte :: find_bytes(raw, utf8_bytes(needle), 0, false) ?? return None
+    Val(scalar_offset(raw, byte))
+}
+pub fn last_index_of(text: String, needle: String) -> Int? {
+    raw :: utf8_bytes(text)
+    byte :: find_bytes(raw, utf8_bytes(needle), 0, true) ?? return None
+    Val(scalar_offset(raw, byte))
+}
+
+// Rust jet_unicode_count:118-129: nonoverlapping; empty needle counts zero.
+pub fn count(text: String, needle: String) -> Int Never! {
+    nd :: utf8_bytes(needle)
+    if nd.len() == 0 -> return 0
+    raw :: utf8_bytes(text)
+    from := 0
+    count := 0
+    loop {
+        at :: find_bytes(raw, nd, from, false) ?? break
+        count = count + 1
+        from = at + nd.len()
+    }
+    count
+}
+
+// Rust jet_unicode_split_once:131-142, cut_last:144-155: absent, never success
+// with invented empty fields. UTF-8 byte offsets are converted to scalar bounds.
+pub fn split_once(text: String, sep: String) -> (before: String, after: String)? {
+    split_at(text, sep, false)
+}
+pub fn cut_last(text: String, sep: String) -> (before: String, after: String)? {
+    split_at(text, sep, true)
+}
+fn split_at(text: String, sep: String, reverse: Bool) -> (before: String, after: String)? {
+    raw :: utf8_bytes(text)
+    separator :: utf8_bytes(sep)
+    at :: find_bytes(raw, separator, 0, reverse) ?? return None
+    head :: scalar_offset(raw, at)
+    tail :: scalar_offset(raw, at + separator.len())
+    end :: scalar_offset(raw, raw.len())
+    Val((before: text.slice(0, head), after: text.slice(tail, end)))
+}
+pub fn utf8_width_at(raw: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= raw.len() -> return 1
+    first :: raw[at]
+    if first < 128 -> return 1
+    if first >= 194 && first <= 223 {
+        if at + 1 < raw.len() {
+            second :: raw[at + 1]
+            if second >= 128 && second <= 191 -> return 2
+        }
+        return 1
+    }
+    if first >= 224 && first <= 239 {
+        if at + 2 < raw.len() {
+            second :: raw[at + 1]
+            third :: raw[at + 2]
+            if second >= 128 && second <= 191 && third >= 128 && third <= 191 {
+                if first != 224 || second >= 160 {
+                    if first != 237 || second <= 159 -> return 3
+                }
+            }
+        }
+        return 1
+    }
+    if first >= 240 && first <= 244 {
+        if at + 3 < raw.len() {
+            second :: raw[at + 1]
+            third :: raw[at + 2]
+            fourth :: raw[at + 3]
+            if second >= 128 && second <= 191 && third >= 128 && third <= 191 && fourth >= 128 && fourth <= 191 {
+                if first != 240 || second >= 144 {
+                    if first != 244 || second <= 143 -> return 4
+                }
+            }
+        }
+    }
+    1
+}
+// Write into the caller's UTF-8 buffer: normalization allocates no per-scalar strings.
+pub fn append_cp(out: &[U8], cp: Int) Never! {
+    n := cp
+    if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
+    if n < 128 {
+        &out.push(U8{n})
+    } else if n < 2048 {
+        &out.push(U8{Int{192} | (n >> 6)})
+        &out.push(U8{Int{128} | (n & Int{63})})
+    } else if n < 65536 {
+        &out.push(U8{Int{224} | (n >> 12)})
+        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        &out.push(U8{Int{128} | (n & Int{63})})
+    } else {
+        &out.push(U8{Int{240} | (n >> 18)})
+        &out.push(U8{Int{128} | ((n >> 12) & Int{63})})
+        &out.push(U8{Int{128} | ((n >> 6) & Int{63})})
+        &out.push(U8{Int{128} | (n & Int{63})})
+    }
+}

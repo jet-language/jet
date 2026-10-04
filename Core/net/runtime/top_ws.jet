@@ -1,0 +1,112 @@
+// PORT-PENDING 0316 crates-jet-codegen-src-prelude-corelib-top-ws-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs:1-108
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-WS1=B: native std-only WebSocket (RFC6455) for core.net.ws.
+//RS // Client connect and server upgrade share one frame codec. No external crates.
+//RS thread_local! {
+//RS     static JET_WS_ACTIVE_STREAM: std::cell::RefCell<Option<*mut std::net::TcpStream>> =
+//RS         const { std::cell::RefCell::new(None) };
+//RS     static JET_WS_UPGRADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS struct JetWsStreamGuard;
+//RS 
+//RS impl JetWsStreamGuard {
+//RS     fn install(stream: &mut std::net::TcpStream) -> Self {
+//RS         JET_WS_UPGRADED.with(|flag| flag.set(false));
+//RS         JET_WS_ACTIVE_STREAM.with(|slot| {
+//RS             *slot.borrow_mut() = Some(stream as *mut std::net::TcpStream);
+//RS         });
+//RS         Self
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetWsStreamGuard {
+//RS     fn drop(&mut self) {
+//RS         JET_WS_ACTIVE_STREAM.with(|slot| {
+//RS             *slot.borrow_mut() = None;
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_take_upgraded() -> bool {
+//RS     JET_WS_UPGRADED.with(|flag| {
+//RS         let upgraded = flag.get();
+//RS         flag.set(false);
+//RS         upgraded
+//RS     })
+//RS }
+//RS 
+//RS fn jet_ws_header_get<'a>(headers: &'a JetHTTPHeaders, name: &str) -> Option<&'a str> {
+//RS     headers.get(name).map(String::as_str)
+//RS }
+//RS 
+//RS fn jet_ws_header_has_token(headers: &JetHTTPHeaders, name: &str, token: &str) -> bool {
+//RS     headers.all(name).iter().any(|value| {
+//RS         value
+//RS             .split(',')
+//RS             .map(str::trim)
+//RS             .any(|part| part.eq_ignore_ascii_case(token))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_ws_validate_upgrade_request(req: &JetHTTPRequest) -> Result<String, JetWsError> {
+//RS     if req.method != "GET" {
+//RS         return Err(JetWsError::InvalidHandshake);
+//RS     }
+//RS     if !jet_ws_header_has_token(&req.headers, "upgrade", "websocket") {
+//RS         return Err(JetWsError::InvalidHandshake);
+//RS     }
+//RS     if !jet_ws_header_has_token(&req.headers, "connection", "Upgrade") {
+//RS         return Err(JetWsError::InvalidHandshake);
+//RS     }
+//RS     let version = jet_ws_header_get(&req.headers, "sec-websocket-version")
+//RS         .ok_or(JetWsError::InvalidHandshake)?;
+//RS     if version != "13" {
+//RS         return Err(JetWsError::InvalidHandshake);
+//RS     }
+//RS     let key = jet_ws_header_get(&req.headers, "sec-websocket-key")
+//RS         .ok_or(JetWsError::InvalidHandshake)?;
+//RS     if key.is_empty() || key.len() > 256 {
+//RS         return Err(JetWsError::InvalidHandshake);
+//RS     }
+//RS     Ok(key.to_string())
+//RS }
+//RS 
+//RS fn jet_ws_write_upgrade_response(
+//RS     stream: &mut std::net::TcpStream,
+//RS     accept: &str,
+//RS ) -> Result<(), JetWsError> {
+//RS     use std::io::Write;
+//RS     let response = format!(
+//RS         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+//RS     );
+//RS     stream
+//RS         .write_all(response.as_bytes())
+//RS         .map_err(|_| JetWsError::IO {
+//RS             operation: "write upgrade response".to_string(),
+//RS         })?;
+//RS     stream.flush().map_err(|_| JetWsError::IO {
+//RS         operation: "flush upgrade response".to_string(),
+//RS     })?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_ws_upgrade(req: &JetHTTPRequest) -> Result<JetWsConn, JetWsError> {
+//RS     let key = jet_ws_validate_upgrade_request(req)?;
+//RS     let accept = jet_ws_accept_key(&key);
+//RS     let mut stream = JET_WS_ACTIVE_STREAM.with(|slot| -> Result<std::net::TcpStream, JetWsError> {
+//RS         let ptr = slot.borrow().ok_or(JetWsError::InvalidHandshake)?;
+//RS         // SAFETY: pointer is set only while JetWsStreamGuard wraps mux dispatch.
+//RS         // JET_VETTED_UNSAFE_BEGIN: jet_ws_upgrade
+//RS         let stream = unsafe { &mut *ptr };
+//RS         // JET_VETTED_UNSAFE_END: jet_ws_upgrade
+//RS         stream.try_clone().map_err(|_| JetWsError::IO {
+//RS             operation: "clone upgrade stream".to_string(),
+//RS         })
+//RS     })?;
+//RS     jet_ws_write_upgrade_response(&mut stream, &accept)?;
+//RS     JET_WS_UPGRADED.with(|flag| flag.set(true));
+//RS     JetWsConn::from_stream(stream, JetWsRole::Server)
+//RS }
+// END-PORT-PENDING 0316 crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs:1-108
+

@@ -1,0 +1,1437 @@
+// PORT-PENDING 0258 crates-jet-codegen-src-prelude-corelib-top-compute-module-group-slice-9065: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9065-10497
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_compute_jvp(
+//RS     state: &JetComputeVjpState,
+//RS     input_tangents: Vec<JetTensor>,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let (nodes, inputs) = {
+//RS         let tape = state
+//RS             .tape
+//RS             .lock()
+//RS             .map_err(|_| JetComputeError::Unsupported("autodiff tape is poisoned".to_string()))?;
+//RS         (tape.nodes.clone(), tape.inputs.clone())
+//RS     };
+//RS     if input_tangents.len() != inputs.len() {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "JVP tangent count must equal the function input count".to_string(),
+//RS         ));
+//RS     }
+//RS     for (input, tangent) in inputs.iter().zip(input_tangents.iter()) {
+//RS         if input.shape != tangent.shape {
+//RS             return Err(JetComputeError::RankMismatch(
+//RS                 "JVP tangent shapes must match their primal inputs".to_string(),
+//RS             ));
+//RS         }
+//RS         jet_compute_require_same_contract(input, tangent, "JVP tangent")?;
+//RS     }
+//RS     let mut tangents: Vec<Option<JetTensor>> = vec![None; nodes.len()];
+//RS     for (index, tangent) in input_tangents.into_iter().enumerate() {
+//RS         if let Some(slot) = tangents.get_mut(index) {
+//RS             *slot = Some(jet_compute_remove_trace_level(&tangent, &state.tape));
+//RS         }
+//RS     }
+//RS     for (index, node) in nodes.iter().enumerate().skip(inputs.len()) {
+//RS         let Some(rule) = &node.rule else {
+//RS             continue;
+//RS         };
+//RS         let mut node_tangents = Vec::with_capacity(node.parents.len());
+//RS         for (parent, value) in node.parents.iter().zip(node.values.iter()) {
+//RS             node_tangents.push(
+//RS                 parent
+//RS                     .and_then(|parent| tangents.get(parent).and_then(Option::as_ref).cloned())
+//RS                     .unwrap_or(jet_compute_zero_like(value)?),
+//RS             );
+//RS         }
+//RS         tangents[index] = Some(jet_compute_jvp_rule(
+//RS             rule,
+//RS             &node.values,
+//RS             &node.output,
+//RS             &node_tangents,
+//RS         )?);
+//RS     }
+//RS     match state.output_node {
+//RS         Some(node) => tangents
+//RS             .get(node)
+//RS             .and_then(Option::clone)
+//RS             .ok_or_else(|| JetComputeError::Unsupported("JVP output tangent is unavailable".to_string())),
+//RS         None => jet_compute_zero_like(&state.value),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_vjp_matmul(
+//RS     a: &JetTensor,
+//RS     b: &JetTensor,
+//RS     cot: &JetTensor,
+//RS ) -> Result<(JetTensor, JetTensor), JetComputeError> {
+//RS     jet_compute_validate_tensor(a)?;
+//RS     jet_compute_validate_tensor(b)?;
+//RS     jet_compute_validate_tensor(cot)?;
+//RS     if a.shape.len() != 2
+//RS         || b.shape.len() != 2
+//RS         || cot.shape.len() != 2
+//RS         || a.shape[1] != b.shape[0]
+//RS         || cot.shape[0] != a.shape[0]
+//RS         || cot.shape[1] != b.shape[1]
+//RS     {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "matmul cotangent shape must equal the matmul output".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_require_same_contract(a, b, "matmul cotangent")?;
+//RS     jet_compute_require_same_contract(a, cot, "matmul cotangent")?;
+//RS     let b_t = jet_compute_transpose(b)?;
+//RS     let a_t = jet_compute_transpose(a)?;
+//RS     Ok((
+//RS         jet_compute_inherit_placement(jet_compute_matmul(cot, &b_t)?, a),
+//RS         jet_compute_inherit_placement(jet_compute_matmul(&a_t, cot)?, b),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_f32_projection(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     let values = jet_compute_tensor_values(tensor)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "f32 autodiff input"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let mut projected = jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), 0.0)?;
+//RS     projected.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS     if !jet_compute_is_accelerator(projected.device) {
+//RS         projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS         projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS             .iter()
+//RS             .map(|ability| (*ability).to_string())
+//RS             .collect();
+//RS         projected.last_placement.reason = "autodiff f32 projection".to_string();
+//RS     }
+//RS     jet_compute_validate_tensor(&projected)?;
+//RS     Ok(projected)
+//RS }
+//RS 
+//RS fn jet_compute_vjp_matmul_f32_tile(
+//RS     a: &JetTensor,
+//RS     b: &JetTensor,
+//RS     cot: &JetTensor,
+//RS ) -> Result<(JetTensor, JetTensor), JetComputeError> {
+//RS     jet_compute_validate_tensor(a)?;
+//RS     jet_compute_validate_tensor(b)?;
+//RS     jet_compute_validate_tensor(cot)?;
+//RS     if a.shape.len() != 2
+//RS         || b.shape.len() != 2
+//RS         || cot.shape.len() != 2
+//RS         || a.shape[1] != b.shape[0]
+//RS         || cot.shape[0] != a.shape[0]
+//RS         || cot.shape[1] != b.shape[1]
+//RS     {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "matmul_f32_tile cotangent shape must equal the matmul output".to_string(),
+//RS         ));
+//RS     }
+//RS     if a.device != b.device || a.device != cot.device {
+//RS         return Err(JetComputeError::Device(
+//RS             "matmul_f32_tile cotangent devices must match the inputs".to_string(),
+//RS         ));
+//RS     }
+//RS     let a32 = jet_compute_f32_projection(a)?;
+//RS     let b32 = jet_compute_f32_projection(b)?;
+//RS     let cot32 = jet_compute_f32_projection(cot)?;
+//RS     let b_transposed = jet_compute_transpose(&b32)?;
+//RS     let a_transposed = jet_compute_transpose(&a32)?;
+//RS     let a_gradient = jet_compute_matmul_f32_tile(&cot32, &b_transposed)?;
+//RS     let b_gradient = jet_compute_matmul_f32_tile(&a_transposed, &cot32)?;
+//RS     Ok((
+//RS         jet_compute_tensor_from_values_like(a, &jet_compute_tensor_values(&a_gradient))?,
+//RS         jet_compute_tensor_from_values_like(b, &jet_compute_tensor_values(&b_gradient))?,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_jvp_matmul_f32_tile(
+//RS     a: &JetTensor,
+//RS     b: &JetTensor,
+//RS     a_tangent: &JetTensor,
+//RS     b_tangent: &JetTensor,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(a)?;
+//RS     jet_compute_validate_tensor(b)?;
+//RS     jet_compute_validate_tensor(a_tangent)?;
+//RS     jet_compute_validate_tensor(b_tangent)?;
+//RS     if a.shape != a_tangent.shape || b.shape != b_tangent.shape {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "matmul_f32_tile tangent shapes must match the inputs".to_string(),
+//RS         ));
+//RS     }
+//RS     if a.device != b.device
+//RS         || a.device != a_tangent.device
+//RS         || b.device != b_tangent.device
+//RS     {
+//RS         return Err(JetComputeError::Device(
+//RS             "matmul_f32_tile tangent devices must match the inputs".to_string(),
+//RS         ));
+//RS     }
+//RS     let a32 = jet_compute_f32_projection(a)?;
+//RS     let b32 = jet_compute_f32_projection(b)?;
+//RS     let a_tangent32 = jet_compute_f32_projection(a_tangent)?;
+//RS     let b_tangent32 = jet_compute_f32_projection(b_tangent)?;
+//RS     let left = jet_compute_matmul_f32_tile(&a_tangent32, &b32)?;
+//RS     let right = jet_compute_matmul_f32_tile(&a32, &b_tangent32)?;
+//RS     jet_compute_binary("add", &left, &right)
+//RS }
+//RS 
+//RS fn jet_compute_f32_value(value: f64, context: &str) -> Result<f32, JetComputeError> {
+//RS     let narrowed = value as f32;
+//RS     if !narrowed.is_finite() {
+//RS         return Err(JetComputeError::Arithmetic(format!(
+//RS             "{context} is outside the finite F32 range"
+//RS         )));
+//RS     }
+//RS     Ok(narrowed)
+//RS }
+//RS 
+//RS fn jet_compute_validate_profile_value(
+//RS     profile: &str,
+//RS     value: f64,
+//RS     context: &str,
+//RS ) -> Result<(), JetComputeError> {
+//RS     if profile == CPU_ORACLE_F32_PROFILE {
+//RS         let narrowed = jet_compute_f32_value(value, context)?;
+//RS         if f64::from(narrowed) != value {
+//RS             return Err(JetComputeError::Arithmetic(format!(
+//RS                 "{context} is not canonical for the F32 precision profile"
+//RS             )));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_compute_validate_serialized_profile_values(
+//RS     profile: &str,
+//RS     values: &[f64],
+//RS ) -> Result<(), JetComputeError> {
+//RS     if profile == CPU_ORACLE_F32_PROFILE {
+//RS         for value in values {
+//RS             let narrowed = jet_compute_f32_value(*value, "serialized Tensor value")?;
+//RS             if f64::from(narrowed) != *value {
+//RS                 return Err(JetComputeError::Serialization(
+//RS                     "serialized Tensor value is not canonical for its F32 profile".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_compute_wire_checksum(body: &str) -> String {
+//RS     let mut hash = 0xcbf29ce484222325_u64;
+//RS     for byte in body.as_bytes() {
+//RS         hash ^= u64::from(*byte);
+//RS         hash = hash.wrapping_mul(0x100000001b3_u64);
+//RS     }
+//RS     format!("{hash:016x}")
+//RS }
+//RS 
+//RS // ── #1142: ML training/inference + model serialization over the Tensor oracle ─
+//RS 
+//RS fn jet_compute_validate_mse_inputs(
+//RS     pred: &JetTensor,
+//RS     target: &JetTensor,
+//RS ) -> Result<(Vec<f64>, Vec<f64>), JetComputeError> {
+//RS     jet_compute_validate_tensor(pred)?;
+//RS     jet_compute_validate_tensor(target)?;
+//RS     if pred.shape != target.shape {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "mse_loss prediction and target shapes must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if pred.device != target.device {
+//RS         return Err(JetComputeError::Device(
+//RS             "mse_loss prediction and target devices must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if pred.last_placement.profile != target.last_placement.profile {
+//RS         return Err(JetComputeError::Device(
+//RS             "mse_loss prediction and target precision profiles must match".to_string(),
+//RS         ));
+//RS     }
+//RS     let pred_values = jet_compute_tensor_values(pred);
+//RS     let target_values = jet_compute_tensor_values(target);
+//RS     if pred_values.is_empty() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "mse_loss requires a non-empty tensor".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok((pred_values, target_values))
+//RS }
+//RS 
+//RS fn jet_compute_scalar_from_like(
+//RS     template: &JetTensor,
+//RS     value: f64,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     if !value.is_finite() {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "compute scalar produced a non-finite value".to_string(),
+//RS         ));
+//RS     }
+//RS     let output = jet_compute_inherit_placement(
+//RS         jet_compute_tensor_from_shape(vec![1], value, JetComputeDevice::Cpu)?,
+//RS         template,
+//RS     );
+//RS     jet_compute_validate_tensor(&output)?;
+//RS     Ok(output)
+//RS }
+//RS 
+//RS fn jet_compute_mse_value(
+//RS     pred: &JetTensor,
+//RS     pred_values: &[f64],
+//RS     target_values: &[f64],
+//RS ) -> Result<f64, JetComputeError> {
+//RS     let loss = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+//RS         let mut sum = 0.0_f32;
+//RS         for (pred_value, target_value) in pred_values.iter().zip(target_values.iter()) {
+//RS             let pred_value = jet_compute_f32_value(*pred_value, "mse_loss prediction")?;
+//RS             let target_value = jet_compute_f32_value(*target_value, "mse_loss target")?;
+//RS             let difference = pred_value - target_value;
+//RS             let next = sum + difference * difference;
+//RS             if !next.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "mse_loss accumulated a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             sum = next;
+//RS         }
+//RS         f64::from(sum / pred_values.len() as f32)
+//RS     } else {
+//RS         let mut sum = 0.0_f64;
+//RS         for (pred_value, target_value) in pred_values.iter().zip(target_values.iter()) {
+//RS             let difference = *pred_value - *target_value;
+//RS             let next = sum + difference * difference;
+//RS             if !next.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "mse_loss accumulated a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             sum = next;
+//RS         }
+//RS         sum / pred_values.len() as f64
+//RS     };
+//RS     if !loss.is_finite() {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "mse_loss produced a non-finite value".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(loss)
+//RS }
+//RS 
+//RS /// MSE is a scalar Tensor operation, not a host float reduction. Recording it
+//RS /// here keeps eager loss, transformed loss, and all execution tiers on one
+//RS /// VJP/JVP rule.
+//RS fn jet_compute_mse_loss(
+//RS     pred: &JetTensor,
+//RS     target: &JetTensor,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let (pred_values, target_values) = jet_compute_validate_mse_inputs(pred, target)?;
+//RS     if jet_compute_is_accelerator(pred.device) {
+//RS         let pred_values = jet_compute_accelerator_values(pred, "MSE input")?;
+//RS         let target_values = jet_compute_accelerator_values(target, "MSE input")?;
+//RS         let loss = jet_compute_accelerator_mse(pred.device, &pred_values, &target_values)?
+//RS             .into_iter()
+//RS             .next()
+//RS             .ok_or_else(|| {
+//RS                 JetComputeError::Device(format!("{} MSE returned no value", pred.device.jet_show()))
+//RS             })?;
+//RS         return jet_compute_record(
+//RS             jet_compute_scalar_from_like(pred, f64::from(loss))?,
+//RS             &[pred, target],
+//RS             vec![pred.clone(), target.clone()],
+//RS             JetComputeTapeRule::MseLoss,
+//RS         );
+//RS     }
+//RS     let loss = jet_compute_mse_value(pred, &pred_values, &target_values)?;
+//RS     jet_compute_record(
+//RS         jet_compute_scalar_from_like(pred, loss)?,
+//RS         &[pred, target],
+//RS         vec![pred.clone(), target.clone()],
+//RS         JetComputeTapeRule::MseLoss,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_mse_vjp(
+//RS     pred: &JetTensor,
+//RS     target: &JetTensor,
+//RS     cot: &JetTensor,
+//RS     positive: bool,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let (pred_values, target_values) = jet_compute_validate_mse_inputs(pred, target)?;
+//RS     jet_compute_validate_tensor(cot)?;
+//RS     if cot.shape != vec![1] {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "mse_loss cotangent must be a scalar Tensor".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_require_same_contract(pred, cot, "mse_loss cotangent")?;
+//RS     let cot_value = jet_compute_tensor_values(cot)
+//RS         .first()
+//RS         .copied()
+//RS         .ok_or_else(|| JetComputeError::InvalidShape("mse_loss cotangent is empty".to_string()))?;
+//RS     if jet_compute_is_accelerator(pred.device) {
+//RS         let pred_values = jet_compute_accelerator_values(pred, "MSE gradient input")?;
+//RS         let target_values = jet_compute_accelerator_values(target, "MSE gradient input")?;
+//RS         let cot_value = jet_compute_f32_value(cot_value, "mse_loss cotangent")?;
+//RS         let data = jet_compute_accelerator_mse_grad(
+//RS             pred.device,
+//RS             &pred_values,
+//RS             &target_values,
+//RS             &[cot_value],
+//RS             positive,
+//RS         )?;
+//RS         return jet_compute_tensor_from_values_like(
+//RS             pred,
+//RS             &data.into_iter().map(f64::from).collect::<Vec<_>>(),
+//RS         );
+//RS     }
+//RS     let data = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+//RS         let cot_value = jet_compute_f32_value(cot_value, "mse_loss cotangent")?;
+//RS         let factor = 2.0_f32 / pred_values.len() as f32 * cot_value;
+//RS         if !factor.is_finite() {
+//RS             return Err(JetComputeError::Arithmetic(
+//RS                 "mse_loss gradient factor is non-finite".to_string(),
+//RS             ));
+//RS         }
+//RS         pred_values
+//RS             .iter()
+//RS             .zip(target_values.iter())
+//RS             .map(|(pred_value, target_value)| {
+//RS                 let pred_value = jet_compute_f32_value(*pred_value, "mse_loss prediction")?;
+//RS                 let target_value = jet_compute_f32_value(*target_value, "mse_loss target")?;
+//RS                 let difference = if positive {
+//RS                     pred_value - target_value
+//RS                 } else {
+//RS                     target_value - pred_value
+//RS                 };
+//RS                 let value = difference * factor;
+//RS                 value.is_finite().then_some(f64::from(value)).ok_or_else(|| {
+//RS                     JetComputeError::Arithmetic(
+//RS                         "mse_loss gradient produced a non-finite value".to_string(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS     } else {
+//RS         let factor = 2.0 / pred_values.len() as f64 * cot_value;
+//RS         if !factor.is_finite() {
+//RS             return Err(JetComputeError::Arithmetic(
+//RS                 "mse_loss gradient factor is non-finite".to_string(),
+//RS             ));
+//RS         }
+//RS         pred_values
+//RS             .iter()
+//RS             .zip(target_values.iter())
+//RS             .map(|(pred_value, target_value)| {
+//RS                 let difference = if positive {
+//RS                     *pred_value - *target_value
+//RS                 } else {
+//RS                     *target_value - *pred_value
+//RS                 };
+//RS                 let value = difference * factor;
+//RS                 value.is_finite().then_some(value).ok_or_else(|| {
+//RS                     JetComputeError::Arithmetic(
+//RS                         "mse_loss gradient produced a non-finite value".to_string(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS     };
+//RS     jet_compute_tensor_from_values_like(pred, &data)
+//RS }
+//RS 
+//RS fn jet_compute_mse_jvp(
+//RS     pred: &JetTensor,
+//RS     target: &JetTensor,
+//RS     pred_tangent: &JetTensor,
+//RS     target_tangent: &JetTensor,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     let (pred_values, target_values) = jet_compute_validate_mse_inputs(pred, target)?;
+//RS     jet_compute_validate_tensor(pred_tangent)?;
+//RS     jet_compute_validate_tensor(target_tangent)?;
+//RS     if pred_tangent.shape != pred.shape || target_tangent.shape != target.shape {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "mse_loss tangent shapes must match their primal tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     if pred_tangent.last_placement.profile != pred.last_placement.profile
+//RS         || target_tangent.last_placement.profile != target.last_placement.profile
+//RS     {
+//RS         return Err(JetComputeError::Device(
+//RS             "mse_loss tangent precision profiles must match their primal tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_require_same_contract(pred, pred_tangent, "mse_loss tangent")?;
+//RS     jet_compute_require_same_contract(target, target_tangent, "mse_loss tangent")?;
+//RS     let pred_tangent_values = jet_compute_tensor_values(pred_tangent);
+//RS     let target_tangent_values = jet_compute_tensor_values(target_tangent);
+//RS     if jet_compute_is_accelerator(pred.device) {
+//RS         let pred_values = jet_compute_accelerator_values(pred, "MSE JVP input")?;
+//RS         let target_values = jet_compute_accelerator_values(target, "MSE JVP input")?;
+//RS         let pred_tangent_values =
+//RS             jet_compute_accelerator_values(pred_tangent, "MSE JVP tangent")?;
+//RS         let target_tangent_values =
+//RS             jet_compute_accelerator_values(target_tangent, "MSE JVP tangent")?;
+//RS         let value = jet_compute_accelerator_mse_jvp(
+//RS             pred.device,
+//RS             &pred_values,
+//RS             &target_values,
+//RS             &pred_tangent_values,
+//RS             &target_tangent_values,
+//RS         )?
+//RS             .into_iter()
+//RS             .next()
+//RS             .ok_or_else(|| {
+//RS                 JetComputeError::Device(format!("{} MSE JVP returned no value", pred.device.jet_show()))
+//RS             })?;
+//RS         return jet_compute_scalar_from_like(pred, f64::from(value));
+//RS     }
+//RS     let value = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+//RS         let mut sum = 0.0_f32;
+//RS         for (((pred_value, target_value), pred_tangent), target_tangent) in pred_values
+//RS             .iter()
+//RS             .zip(target_values.iter())
+//RS             .zip(pred_tangent_values.iter())
+//RS             .zip(target_tangent_values.iter())
+//RS         {
+//RS             let difference = jet_compute_f32_value(*pred_value, "mse_loss prediction")?
+//RS                 - jet_compute_f32_value(*target_value, "mse_loss target")?;
+//RS             let direction = jet_compute_f32_value(*pred_tangent, "mse_loss prediction tangent")?
+//RS                 - jet_compute_f32_value(*target_tangent, "mse_loss target tangent")?;
+//RS             let next = sum + 2.0_f32 * difference * direction;
+//RS             if !next.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "mse_loss JVP accumulated a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             sum = next;
+//RS         }
+//RS         f64::from(sum / pred_values.len() as f32)
+//RS     } else {
+//RS         let mut sum = 0.0_f64;
+//RS         for (((pred_value, target_value), pred_tangent), target_tangent) in pred_values
+//RS             .iter()
+//RS             .zip(target_values.iter())
+//RS             .zip(pred_tangent_values.iter())
+//RS             .zip(target_tangent_values.iter())
+//RS         {
+//RS             let next = sum
+//RS                 + 2.0
+//RS                     * (*pred_value - *target_value)
+//RS                     * (*pred_tangent - *target_tangent);
+//RS             if !next.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "mse_loss JVP accumulated a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             sum = next;
+//RS         }
+//RS         sum / pred_values.len() as f64
+//RS     };
+//RS     jet_compute_scalar_from_like(pred, value)
+//RS }
+//RS 
+//RS fn jet_compute_sgd_step(
+//RS     param: &JetTensor,
+//RS     grad: &JetTensor,
+//RS     lr: f64,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     jet_compute_validate_tensor(param)?;
+//RS     jet_compute_validate_tensor(grad)?;
+//RS     if param.shape != grad.shape {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "sgd parameter and gradient shapes must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if param.device != grad.device {
+//RS         return Err(JetComputeError::Device(
+//RS             "sgd parameter and gradient devices must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if param.last_placement.profile != grad.last_placement.profile {
+//RS         return Err(JetComputeError::Device(
+//RS             "sgd parameter and gradient precision profiles must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if !lr.is_finite() || lr < 0.0 {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "sgd learning rate must be finite and non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     if jet_compute_is_accelerator(param.device) {
+//RS         let parameter = jet_compute_accelerator_values(param, "SGD input")?;
+//RS         let gradient = jet_compute_accelerator_values(grad, "SGD input")?;
+//RS         let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+//RS         let data = jet_compute_accelerator_sgd(param.device, &parameter, &gradient, learning_rate)?;
+//RS         return jet_compute_record(
+//RS             jet_compute_accelerator_result_like(param, param.shape.clone(), data)?,
+//RS             &[param, grad],
+//RS             vec![param.clone(), grad.clone()],
+//RS             JetComputeTapeRule::SgdStep {
+//RS                 learning_rate: lr,
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     let param_values = jet_compute_tensor_values(param);
+//RS     let grad_values = jet_compute_tensor_values(grad);
+//RS     let data = if param.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+//RS         let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+//RS         param_values
+//RS             .iter()
+//RS             .zip(grad_values.iter())
+//RS             .map(|(param_value, grad_value)| {
+//RS                 let param_value = jet_compute_f32_value(*param_value, "sgd parameter")?;
+//RS                 let grad_value = jet_compute_f32_value(*grad_value, "sgd gradient")?;
+//RS                 let next = param_value - learning_rate * grad_value;
+//RS                 next.is_finite().then_some(f64::from(next)).ok_or_else(|| {
+//RS                     JetComputeError::Arithmetic(
+//RS                         "sgd_step produced a non-finite value".to_string(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS     } else {
+//RS         param_values
+//RS             .iter()
+//RS             .zip(grad_values.iter())
+//RS             .map(|(param_value, grad_value)| {
+//RS                 let next = *param_value - lr * *grad_value;
+//RS                 next.is_finite().then_some(next).ok_or_else(|| {
+//RS                     JetComputeError::Arithmetic(
+//RS                         "sgd_step produced a non-finite value".to_string(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS     };
+//RS     let next = JetTensor {
+//RS         shape: param.shape.clone(),
+//RS         strides: jet_compute_row_major_strides(&param.shape)?,
+//RS         data: std::sync::Arc::new(data),
+//RS         device: param.device,
+//RS         last_placement: param.last_placement.clone(),
+//RS         last_transfer: None,
+//RS         trace: None,
+//RS     };
+//RS     jet_compute_validate_tensor(&next)?;
+//RS     jet_compute_record(
+//RS         next,
+//RS         &[param, grad],
+//RS         vec![param.clone(), grad.clone()],
+//RS         JetComputeTapeRule::SgdStep {
+//RS             learning_rate: lr,
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_sgd_vjp(
+//RS     param: &JetTensor,
+//RS     grad: &JetTensor,
+//RS     cot: &JetTensor,
+//RS     lr: f64,
+//RS ) -> Result<(JetTensor, JetTensor), JetComputeError> {
+//RS     jet_compute_validate_tensor(param)?;
+//RS     jet_compute_validate_tensor(grad)?;
+//RS     jet_compute_validate_tensor(cot)?;
+//RS     if param.shape != grad.shape || param.shape != cot.shape {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "sgd cotangent shape must equal the parameter and gradient shapes".to_string(),
+//RS         ));
+//RS     }
+//RS     if param.device != grad.device
+//RS         || param.device != cot.device
+//RS         || param.last_placement.profile != grad.last_placement.profile
+//RS         || param.last_placement.profile != cot.last_placement.profile
+//RS     {
+//RS         return Err(JetComputeError::Device(
+//RS             "sgd parameter, gradient, and cotangent devices and profiles must match".to_string(),
+//RS         ));
+//RS     }
+//RS     if !lr.is_finite() || lr < 0.0 {
+//RS         return Err(JetComputeError::Arithmetic(
+//RS             "sgd learning rate must be finite and non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     let cot_values = jet_compute_tensor_values(cot);
+//RS     if jet_compute_is_accelerator(param.device) {
+//RS         let cot_values = jet_compute_accelerator_values(cot, "SGD cotangent")?;
+//RS         let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+//RS         let gradients = jet_compute_accelerator_scale(param.device, &cot_values, -learning_rate)?;
+//RS         return Ok((
+//RS             jet_compute_tensor_from_values_like(
+//RS                 param,
+//RS                 &cot_values.into_iter().map(f64::from).collect::<Vec<_>>(),
+//RS             )?,
+//RS             jet_compute_tensor_from_values_like(
+//RS                 grad,
+//RS                 &gradients.into_iter().map(f64::from).collect::<Vec<_>>(),
+//RS             )?,
+//RS         ));
+//RS     }
+//RS     let (parameter_values, gradient_values) = if param.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+//RS         let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+//RS         let mut parameters = Vec::with_capacity(cot_values.len());
+//RS         let mut gradients = Vec::with_capacity(cot_values.len());
+//RS         for cot_value in cot_values {
+//RS             let cot_value = jet_compute_f32_value(cot_value, "sgd cotangent")?;
+//RS             let gradient = -learning_rate * cot_value;
+//RS             if !gradient.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "sgd gradient produced a non-finite value".to_string(),
+//RS                 ));
+//RS             }
+//RS             parameters.push(f64::from(cot_value));
+//RS             gradients.push(f64::from(gradient));
+//RS         }
+//RS         (parameters, gradients)
+//RS     } else {
+//RS         let gradients = cot_values
+//RS             .iter()
+//RS             .map(|cot_value| {
+//RS                 let value = -lr * *cot_value;
+//RS                 value.is_finite().then_some(value).ok_or_else(|| {
+//RS                     JetComputeError::Arithmetic(
+//RS                         "sgd gradient produced a non-finite value".to_string(),
+//RS                     )
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         (cot_values, gradients)
+//RS     };
+//RS     Ok((
+//RS         jet_compute_tensor_from_values_like(param, &parameter_values)?,
+//RS         jet_compute_tensor_from_values_like(grad, &gradient_values)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> {
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "Tensor serialization does not accept traced tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     if jet_compute_is_accelerator(tensor.device) {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "accelerator Tensor serialization requires an explicit transfer to CPU".to_string(),
+//RS         ));
+//RS     }
+//RS     let values = jet_compute_tensor_values(tensor);
+//RS     let shape = tensor
+//RS         .shape
+//RS         .iter()
+//RS         .map(|d| d.to_string())
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let data = values
+//RS         .iter()
+//RS         // Debug formatting is Rust's shortest round-tripping f64 spelling.
+//RS         // Keep it stable across the AOT/JIT/interpreter Prelude boundary.
+//RS         .map(|v| format!("{v:?}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     let profile = tensor.last_placement.profile.as_str();
+//RS     jet_compute_validate_serialized_profile_values(profile, &values)?;
+//RS     let body = format!("shape={shape};data={data};profile={profile}");
+//RS     let checksum = jet_compute_wire_checksum(&body);
+//RS     Ok(format!("{body};checksum={checksum}"))
+//RS }
+//RS 
+//RS fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
+//RS     let mut fields = payload.split(';');
+//RS     let Some(shape_part) = fields.next() else {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+//RS         ));
+//RS     };
+//RS     let Some(data_part) = fields.next() else {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+//RS         ));
+//RS     };
+//RS     let Some(profile_part) = fields.next() else {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+//RS         ));
+//RS     };
+//RS     let Some(checksum_part) = fields.next() else {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "deserialize expects shape=…;data=…;profile=…;checksum=…".to_string(),
+//RS         ));
+//RS     };
+//RS     if fields.next().is_some()
+//RS         || !data_part.starts_with("data=")
+//RS         || !profile_part.starts_with("profile=")
+//RS         || !checksum_part.starts_with("checksum=")
+//RS     {
+//RS         return Err(JetComputeError::Serialization(
+//RS             "deserialize contains duplicate or unknown fields".to_string(),
+//RS         ));
+//RS     }
+//RS     let shape_str = shape_part
+//RS         .strip_prefix("shape=")
+//RS         .ok_or_else(|| JetComputeError::Serialization("missing shape=".to_string()))?;
+//RS     if shape_str.is_empty() {
+//RS         return Err(JetComputeError::Serialization(
+//RS             "serialized Tensor shape cannot be empty".to_string(),
+//RS         ));
+//RS     }
+//RS     let shape: Vec<i64> = shape_str
+//RS         .split(',')
+//RS         .map(|p| {
+//RS             if p.is_empty() {
+//RS                 return Err(JetComputeError::Serialization(
+//RS                     "serialized Tensor shape contains an empty axis".to_string(),
+//RS                 ));
+//RS             }
+//RS             let axis = p.parse::<i64>().map_err(|_| {
+//RS                 JetComputeError::Serialization(format!("bad shape axis `{p}`"))
+//RS             })?;
+//RS             if axis.to_string() != p {
+//RS                 return Err(JetComputeError::Serialization(format!(
+//RS                     "non-canonical shape axis `{p}`"
+//RS                 )));
+//RS             }
+//RS             Ok(axis)
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let data_str = data_part.strip_prefix("data=").unwrap_or("");
+//RS     let data: Vec<f64> = if data_str.is_empty() {
+//RS         Vec::new()
+//RS     } else {
+//RS         data_str
+//RS             .split(',')
+//RS             .map(|p| {
+//RS                 if p.is_empty() {
+//RS                     return Err(JetComputeError::Serialization(
+//RS                         "serialized Tensor data contains an empty value".to_string(),
+//RS                     ));
+//RS                 }
+//RS                 let value = p.parse::<f64>().map_err(|_| {
+//RS                     JetComputeError::Serialization(format!("bad data value `{p}`"))
+//RS                 })?;
+//RS                 if !value.is_finite() {
+//RS                     return Err(JetComputeError::Serialization(
+//RS                         "serialized Tensor contains a non-finite value".to_string(),
+//RS                     ));
+//RS                 }
+//RS                 if format!("{value:?}") != p {
+//RS                     return Err(JetComputeError::Serialization(format!(
+//RS                         "non-canonical data value `{p}`"
+//RS                     )));
+//RS                 }
+//RS                 Ok(value)
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?
+//RS     };
+//RS     let profile = profile_part.strip_prefix("profile=").unwrap_or("");
+//RS     let Some(abilities) = jet_compute_registered_abilities(profile) else {
+//RS         return Err(JetComputeError::Serialization(format!(
+//RS             "unsupported Tensor precision profile `{profile}`"
+//RS         )));
+//RS     };
+//RS     jet_compute_validate_serialized_profile_values(profile, &data)?;
+//RS     let checksum = checksum_part.strip_prefix("checksum=").unwrap_or("");
+//RS     if checksum.len() != 16
+//RS         || !checksum
+//RS             .bytes()
+//RS             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+//RS     {
+//RS         return Err(JetComputeError::Serialization(
+//RS             "serialized Tensor checksum is not canonical".to_string(),
+//RS         ));
+//RS     }
+//RS     let body = format!("{shape_part};{data_part};{profile_part}");
+//RS     if jet_compute_wire_checksum(&body) != checksum {
+//RS         return Err(JetComputeError::Serialization(
+//RS             "serialized Tensor checksum does not match its contents".to_string(),
+//RS         ));
+//RS     }
+//RS     let expected = jet_compute_storage_len(&shape)?;
+//RS     if expected != data.len() {
+//RS         return Err(JetComputeError::Serialization(format!(
+//RS             "deserialize storage length mismatch: shape wants {expected}, got {}",
+//RS             data.len()
+//RS         )));
+//RS     }
+//RS     let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu)?;
+//RS     tensor.data = std::sync::Arc::new(data);
+//RS     tensor.last_placement.profile = profile.to_string();
+//RS     tensor.last_placement.abilities = abilities
+//RS         .iter()
+//RS         .map(|ability| (*ability).to_string())
+//RS         .collect();
+//RS     tensor.last_placement.reason = "deserialized canonical Tensor".to_string();
+//RS     jet_compute_validate_tensor(&tensor)?;
+//RS     Ok(tensor)
+//RS }
+//RS 
+//RS // ── #1137 sparse CSR + #1143 CPU SIMD tile + #1147 profile ──────────────────
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetSparseCsr {
+//RS     rows: i64,
+//RS     cols: i64,
+//RS     row_ptr: Vec<i64>,
+//RS     col_idx: Vec<i64>,
+//RS     values: Vec<f64>,
+//RS }
+//RS 
+//RS impl JetShow for JetSparseCsr {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "SparseCsr({}x{}, nnz={})",
+//RS             self.rows,
+//RS             self.cols,
+//RS             self.values.len()
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeError> {
+//RS     if tensor.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "to_sparse has no registered autodiff rule".to_string(),
+//RS         ));
+//RS     }
+//RS     if tensor.shape.len() != 2 {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "to_sparse requires a rank-2 tensor".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_validate_tensor(tensor)?;
+//RS     if jet_compute_is_accelerator(tensor.device) {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "accelerator backend does not support sparse conversion; transfer to CPU explicitly"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     let rows = tensor.shape[0];
+//RS     let cols = tensor.shape[1];
+//RS     let mut row_ptr = vec![0i64];
+//RS     let mut col_idx = Vec::new();
+//RS     let mut values = Vec::new();
+//RS     for r in 0..rows {
+//RS         for c in 0..cols {
+//RS             let v = jet_compute_get_raw(tensor, &vec![r, c])?;
+//RS             if v != 0.0 {
+//RS                 col_idx.push(c);
+//RS                 values.push(v);
+//RS             }
+//RS         }
+//RS         row_ptr.push(i64::try_from(values.len()).map_err(|_| {
+//RS             JetComputeError::InvalidShape("sparse nnz is too large".to_string())
+//RS         })?);
+//RS     }
+//RS     Ok(JetSparseCsr {
+//RS         rows,
+//RS         cols,
+//RS         row_ptr,
+//RS         col_idx,
+//RS         values,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_compute_sparse_nnz(sparse: &JetSparseCsr) -> i64 {
+//RS     i64::try_from(sparse.values.len()).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS fn jet_compute_sparse_mv(
+//RS     sparse: &JetSparseCsr,
+//RS     vector: &JetTensor,
+//RS ) -> Result<JetTensor, JetComputeError> {
+//RS     if vector.trace.is_some() {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "sparse_mv has no registered autodiff rule".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_validate_sparse(sparse)?;
+//RS     jet_compute_validate_tensor(vector)?;
+//RS     if jet_compute_is_accelerator(vector.device) {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "accelerator backend does not support sparse_mv; transfer the vector to CPU explicitly"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
+//RS         return Err(JetComputeError::RankMismatch(format!(
+//RS             "sparse_mv expects a length-{} vector",
+//RS             sparse.cols
+//RS         )));
+//RS     }
+//RS     let mut out = jet_compute_zeros(&vec![sparse.rows])?;
+//RS     for r in 0..sparse.rows {
+//RS         let row = usize::try_from(r).map_err(|_| {
+//RS             JetComputeError::InvalidShape("sparse row index is too large".to_string())
+//RS         })?;
+//RS         let start = usize::try_from(sparse.row_ptr[row]).map_err(|_| {
+//RS             JetComputeError::InvalidShape("sparse row pointer is invalid".to_string())
+//RS         })?;
+//RS         let end = usize::try_from(sparse.row_ptr[row + 1]).map_err(|_| {
+//RS             JetComputeError::InvalidShape("sparse row pointer is invalid".to_string())
+//RS         })?;
+//RS         let mut acc = 0.0;
+//RS         for k in start..end {
+//RS             let c = sparse.col_idx[k];
+//RS             acc += sparse.values[k] * jet_compute_get_raw(vector, &[c])?;
+//RS             if !acc.is_finite() {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "sparse matrix-vector multiplication produced a non-finite value"
+//RS                         .to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         jet_compute_set(&mut out, &vec![r], acc)?;
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn jet_compute_validate_sparse(sparse: &JetSparseCsr) -> Result<(), JetComputeError> {
+//RS     if sparse.rows < 0 || sparse.cols < 0 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "sparse dimensions must be non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     let rows = usize::try_from(sparse.rows).map_err(|_| {
+//RS         JetComputeError::InvalidShape("sparse row count is too large".to_string())
+//RS     })?;
+//RS     if sparse.row_ptr.len() != rows.saturating_add(1)
+//RS         || sparse.col_idx.len() != sparse.values.len()
+//RS     {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "sparse CSR arrays have inconsistent lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     let nnz = i64::try_from(sparse.values.len()).map_err(|_| {
+//RS         JetComputeError::InvalidShape("sparse nnz is too large".to_string())
+//RS     })?;
+//RS     if sparse.row_ptr.first().copied() != Some(0)
+//RS         || sparse.row_ptr.last().copied() != Some(nnz)
+//RS         || sparse
+//RS             .row_ptr
+//RS             .windows(2)
+//RS             .any(|pair| pair[0] < 0 || pair[1] < pair[0] || pair[1] > nnz)
+//RS         || sparse
+//RS             .col_idx
+//RS             .iter()
+//RS             .any(|col| *col < 0 || *col >= sparse.cols)
+//RS         || sparse.values.iter().any(|value| !value.is_finite())
+//RS     {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "sparse CSR invariants are invalid".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_compute_sparse_show(sparse: &JetSparseCsr) -> String {
+//RS     sparse.jet_show()
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum JetComputeSimdBackend {
+//RS     Avx2,
+//RS     Sse2,
+//RS     Scalar,
+//RS }
+//RS 
+//RS impl JetComputeSimdBackend {
+//RS     fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Avx2 => "avx2",
+//RS             Self::Sse2 => "sse2",
+//RS             Self::Scalar => "scalar",
+//RS         }
+//RS     }
+//RS 
+//RS     fn width(self) -> usize {
+//RS         match self {
+//RS             Self::Avx2 => 8,
+//RS             Self::Sse2 => 4,
+//RS             Self::Scalar => 1,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_simd_backend() -> JetComputeSimdBackend {
+//RS     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+//RS     {
+//RS         return jet_compute_simd_backend_for_features(
+//RS             is_x86_feature_detected!("avx2"),
+//RS             is_x86_feature_detected!("sse2"),
+//RS         );
+//RS     }
+//RS     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+//RS     {
+//RS         jet_compute_simd_backend_for_features(false, false)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_compute_simd_backend_for_features(avx2: bool, sse2: bool) -> JetComputeSimdBackend {
+//RS     if avx2 {
+//RS         return JetComputeSimdBackend::Avx2;
+//RS     }
+//RS     if sse2 {
+//RS         return JetComputeSimdBackend::Sse2;
+//RS     }
+//RS     JetComputeSimdBackend::Scalar
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS fn jet_compute_f32_dot_scalar(a: &[f32], b: &[f32]) -> f32 {
+//RS     a.iter()
+//RS         .zip(b.iter())
+//RS         .fold(0.0_f32, |sum, (left, right)| sum + left * right)
+//RS }
+//RS 
+//RS fn jet_compute_simd_backend_available(backend: JetComputeSimdBackend) -> bool {
+//RS     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+//RS     {
+//RS         match backend {
+//RS             JetComputeSimdBackend::Avx2 => is_x86_feature_detected!("avx2"),
+//RS             JetComputeSimdBackend::Sse2 => is_x86_feature_detected!("sse2"),
+//RS             JetComputeSimdBackend::Scalar => true,
+//RS         }
+//RS     }
+//RS     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+//RS     {
+//RS         matches!(backend, JetComputeSimdBackend::Scalar)
+//RS     }
+//RS }
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_compute_cpu_simd
+//RS #[cfg(target_arch = "x86_64")]
+//RS #[target_feature(enable = "avx2")]
+//RS unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
+//RS     use std::arch::x86_64::{
+//RS         _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+//RS     };
+//RS 
+//RS     let mut acc = _mm256_setzero_ps();
+//RS     let mut index = 0usize;
+//RS     let limit = a.len() / 8 * 8;
+//RS     while index < limit {
+//RS         let left = _mm256_loadu_ps(a.as_ptr().add(index));
+//RS         let right = _mm256_loadu_ps(b.as_ptr().add(index));
+//RS         acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
+//RS         index += 8;
+//RS     }
+//RS     let mut lanes = [0.0_f32; 8];
+//RS     _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+//RS     let mut sum = 0.0_f32;
+//RS     for lane in lanes {
+//RS         sum += lane;
+//RS     }
+//RS     while index < a.len() {
+//RS         sum += a[index] * b[index];
+//RS         index += 1;
+//RS     }
+//RS     sum
+//RS }
+//RS 
+//RS #[cfg(target_arch = "x86")]
+//RS #[target_feature(enable = "avx2")]
+//RS unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
+//RS     use std::arch::x86::{
+//RS         _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+//RS     };
+//RS 
+//RS     let mut acc = _mm256_setzero_ps();
+//RS     let mut index = 0usize;
+//RS     let limit = a.len() / 8 * 8;
+//RS     while index < limit {
+//RS         let left = _mm256_loadu_ps(a.as_ptr().add(index));
+//RS         let right = _mm256_loadu_ps(b.as_ptr().add(index));
+//RS         acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
+//RS         index += 8;
+//RS     }
+//RS     let mut lanes = [0.0_f32; 8];
+//RS     _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+//RS     let mut sum = 0.0_f32;
+//RS     for lane in lanes {
+//RS         sum += lane;
+//RS     }
+//RS     while index < a.len() {
+//RS         sum += a[index] * b[index];
+//RS         index += 1;
+//RS     }
+//RS     sum
+//RS }
+//RS 
+//RS #[cfg(target_arch = "x86_64")]
+//RS #[target_feature(enable = "sse2")]
+//RS unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
+//RS     use std::arch::x86_64::{
+//RS         _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
+//RS     };
+//RS 
+//RS     let mut acc = _mm_setzero_ps();
+//RS     let mut index = 0usize;
+//RS     let limit = a.len() / 4 * 4;
+//RS     while index < limit {
+//RS         let left = _mm_loadu_ps(a.as_ptr().add(index));
+//RS         let right = _mm_loadu_ps(b.as_ptr().add(index));
+//RS         acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
+//RS         index += 4;
+//RS     }
+//RS     let mut lanes = [0.0_f32; 4];
+//RS     _mm_storeu_ps(lanes.as_mut_ptr(), acc);
+//RS     let mut sum = 0.0_f32;
+//RS     for lane in lanes {
+//RS         sum += lane;
+//RS     }
+//RS     while index < a.len() {
+//RS         sum += a[index] * b[index];
+//RS         index += 1;
+//RS     }
+//RS     sum
+//RS }
+//RS 
+//RS #[cfg(target_arch = "x86")]
+//RS #[target_feature(enable = "sse2")]
+//RS unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
+//RS     use std::arch::x86::{
+//RS         _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
+//RS     };
+//RS 
+//RS     let mut acc = _mm_setzero_ps();
+//RS     let mut index = 0usize;
+//RS     let limit = a.len() / 4 * 4;
+//RS     while index < limit {
+//RS         let left = _mm_loadu_ps(a.as_ptr().add(index));
+//RS         let right = _mm_loadu_ps(b.as_ptr().add(index));
+//RS         acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
+//RS         index += 4;
+//RS     }
+//RS     let mut lanes = [0.0_f32; 4];
+//RS     _mm_storeu_ps(lanes.as_mut_ptr(), acc);
+//RS     let mut sum = 0.0_f32;
+//RS     for lane in lanes {
+//RS         sum += lane;
+//RS     }
+//RS     while index < a.len() {
+//RS         sum += a[index] * b[index];
+//RS         index += 1;
+//RS     }
+//RS     sum
+//RS }
+//RS fn jet_compute_f32_dot(
+//RS     backend: JetComputeSimdBackend,
+//RS     a: &[f32],
+//RS     b: &[f32],
+//RS ) -> Result<f32, JetComputeError> {
+//RS     if a.len() != b.len() {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "SIMD dot-product inputs have different lengths".to_string(),
+//RS         ));
+//RS     }
+//RS     let value = match backend {
+//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+//RS         JetComputeSimdBackend::Avx2 => unsafe { jet_compute_f32_dot_avx2(a, b) },
+//RS         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+//RS         JetComputeSimdBackend::Sse2 => unsafe { jet_compute_f32_dot_sse2(a, b) },
+//RS         JetComputeSimdBackend::Scalar => jet_compute_f32_dot_scalar(a, b),
+//RS         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+//RS         _ => jet_compute_f32_dot_scalar(a, b),
+//RS     };
+//RS     if value.is_finite() {
+//RS         Ok(value)
+//RS     } else {
+//RS         Err(JetComputeError::Arithmetic(
+//RS             "f32 SIMD dot product overflowed".to_string(),
+//RS         ))
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_compute_cpu_simd
+//RS 
+//RS /// CPU-SIMD profile path (#1143): blocked matmul in f32 arithmetic. The dot
+//RS /// product uses runtime-dispatched safe intrinsics where available, then an
+//RS /// ordered scalar tail. Lane products are reduced in lane order so the SIMD
+//RS /// backend preserves the reproducible CPU-oracle reduction contract.
+//RS fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+//RS     if a.shape.len() != 2 || b.shape.len() != 2 {
+//RS         return Err(JetComputeError::RankMismatch(
+//RS             "matmul_f32_tile requires rank-2 tensors".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_compute_validate_tensor(a)?;
+//RS     jet_compute_validate_tensor(b)?;
+//RS     let (m, k) = (a.shape[0], a.shape[1]);
+//RS     let (k2, n) = (b.shape[0], b.shape[1]);
+//RS     if m < 0 || k < 0 || k2 < 0 || n < 0 {
+//RS         return Err(JetComputeError::InvalidShape(
+//RS             "matmul_f32_tile dimensions must be non-negative".to_string(),
+//RS         ));
+//RS     }
+//RS     if k != k2 {
+//RS         return Err(JetComputeError::RankMismatch(format!(
+//RS             "matmul_f32_tile inner dims {} and {} disagree",
+//RS             k, k2
+//RS         )));
+//RS     }
+//RS     if a.device == JetComputeDevice::Metal {
+//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
+//RS         let rows = usize::try_from(m).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Metal f32 tile row count is too large".to_string())
+//RS         })?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Metal f32 tile inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Metal f32 tile column count is too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_metal_values(a, "f32 tile input")?;
+//RS         let right = jet_compute_metal_values(b, "f32 tile input")?;
+//RS         let data = jet_compute_metal::matmul(&left, &right, rows, inner, cols)?;
+//RS         let mut out = jet_compute_metal_result_like(a, vec![m, n], data)?;
+//RS         out.last_placement.reason =
+//RS             "algorithm=metal-matmul; arithmetic=f32; reduction=ordered; dispatch=metal".to_string();
+//RS         return jet_compute_record(
+//RS             out,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::MatmulF32Tile,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::Cuda {
+//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
+//RS         let rows = usize::try_from(m).map_err(|_| {
+//RS             JetComputeError::InvalidShape("CUDA f32 tile row count is too large".to_string())
+//RS         })?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("CUDA f32 tile inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("CUDA f32 tile column count is too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_cuda_values(a, "f32 tile input")?;
+//RS         let right = jet_compute_cuda_values(b, "f32 tile input")?;
+//RS         let data = jet_compute_cuda::matmul(&left, &right, rows, inner, cols)?;
+//RS         let mut out = jet_compute_cuda_result_like(a, vec![m, n], data)?;
+//RS         out.last_placement.reason =
+//RS             "algorithm=cuda-matmul; arithmetic=f32; reduction=ordered; dispatch=cuda".to_string();
+//RS         return jet_compute_record(
+//RS             out,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::MatmulF32Tile,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::Vulkan {
+//RS         jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
+//RS         let rows = usize::try_from(m).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan f32 tile row count is too large".to_string())
+//RS         })?;
+//RS         let inner = usize::try_from(k).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan f32 tile inner dimension is too large".to_string())
+//RS         })?;
+//RS         let cols = usize::try_from(n).map_err(|_| {
+//RS             JetComputeError::InvalidShape("Vulkan f32 tile column count is too large".to_string())
+//RS         })?;
+//RS         let left = jet_compute_vulkan_values(a, "f32 tile input")?;
+//RS         let right = jet_compute_vulkan_values(b, "f32 tile input")?;
+//RS         let data = jet_compute_vulkan::matmul(&left, &right, rows, inner, cols)?;
+//RS         let mut out = jet_compute_vulkan_result_like(a, vec![m, n], data)?;
+//RS         out.last_placement.reason =
+//RS             "algorithm=vulkan-matmul; arithmetic=f32; reduction=ordered; dispatch=vulkan".to_string();
+//RS         return jet_compute_record(
+//RS             out,
+//RS             &[a, b],
+//RS             vec![a.clone(), b.clone()],
+//RS             JetComputeTapeRule::MatmulF32Tile,
+//RS         );
+//RS     }
+//RS     if a.device == JetComputeDevice::WebGpu {
+//RS         return Err(JetComputeError::Unsupported(
+//RS             "WebGPU backend requires a browser WebGPU host".to_string(),
+//RS         ));
+//RS     }
+//RS     let output_shape = vec![m, n];
+//RS     let m = usize::try_from(m)
+//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile row count is too large".to_string()))?;
+//RS     let k = usize::try_from(k)
+//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile inner dimension is too large".to_string()))?;
+//RS     let n = usize::try_from(n)
+//RS         .map_err(|_| JetComputeError::InvalidShape("f32 tile column count is too large".to_string()))?;
+//RS     let a_values = jet_compute_tensor_values(a)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "f32 tile input"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let b_values = jet_compute_tensor_values(b)
+//RS         .into_iter()
+//RS         .map(|value| jet_compute_f32_value(value, "f32 tile input"))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let packed_b_len = n.checked_mul(k).ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("f32 tile packed-B storage length overflow".to_string())
+//RS     })?;
+//RS     let mut packed_b = vec![0.0_f32; packed_b_len];
+//RS     for row in 0..k {
+//RS         for column in 0..n {
+//RS             packed_b[column * k + row] = b_values[row * n + column];
+//RS         }
+//RS     }
+//RS     let output_len = m.checked_mul(n).ok_or_else(|| {
+//RS         JetComputeError::InvalidShape("f32 tile output storage length overflow".to_string())
+//RS     })?;
+//RS     let backend = jet_compute_simd_backend();
+//RS     let mut output = vec![0.0_f64; output_len];
+//RS     const TILE: usize = 8;
+//RS     for row_tile in (0..m).step_by(TILE) {
+//RS         let row_end = row_tile.saturating_add(TILE).min(m);
+//RS         for column_tile in (0..n).step_by(TILE) {
+//RS             let column_end = column_tile.saturating_add(TILE).min(n);
+//RS             for row in row_tile..row_end {
+//RS                 let left = &a_values[row * k..(row + 1) * k];
+//RS                 for column in column_tile..column_end {
+//RS                     let right = &packed_b[column * k..(column + 1) * k];
+//RS                     let value = jet_compute_f32_dot(backend, left, right)?;
+//RS                     output[row * n + column] = f64::from(value);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut out = jet_compute_tensor_from_shape(
+//RS         output_shape,
+//RS         0.0,
+//RS         JetComputeDevice::Cpu,
+//RS     )?;
+//RS     out.data = std::sync::Arc::new(output);
+//RS     out.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS     out.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS         .iter()
+//RS         .map(|ability| (*ability).to_string())
+//RS         .collect();
+//RS     out.last_placement.reason = format!(
+//RS         "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered; dispatch={}; vector_width={}; tail=scalar",
+//RS         backend.name(),
+//RS         backend.width(),
+//RS     );
+//RS     jet_compute_record(
+//RS         out,
+//RS         &[a, b],
+//RS         vec![a.clone(), b.clone()],
+//RS         JetComputeTapeRule::MatmulF32Tile,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_profile_f32_strict() -> String {
+//RS     let backend = jet_compute_simd_backend();
+//RS     format!(
+//RS         "backend={};version={};profile={};algorithm=blocked-matmul;tile=8;dispatch={};vector_width={};tail=scalar;cache={}",
+//RS         CPU_ORACLE_BACKEND,
+//RS         CPU_ORACLE_VERSION,
+//RS         CPU_ORACLE_F32_PROFILE,
+//RS         backend.name(),
+//RS         backend.width(),
+//RS         CPU_ORACLE_CACHE,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_compute_profile_show() -> String {
+//RS     jet_compute_profile_f32_strict()
+//RS }
+// END-PORT-PENDING 0258 crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:9065-10497
+

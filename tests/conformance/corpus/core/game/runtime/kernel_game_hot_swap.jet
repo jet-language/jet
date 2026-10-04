@@ -1,0 +1,172 @@
+// GameHotSwap.rs:1293-1420 original fixtures and all five tests.
+// Main runs these after publishing the private runtime module; source only here.
+use core.game.runtime.kernel_game_hot_swap as hot
+
+fn identity(source: String, build: String) -> hot.JetGameHotSwapIdentity Never! {
+    hot.JetGameHotSwapIdentity.new(source, build) ?? panic("valid identity")
+}
+fn snapshot(source: String, build: String, schema: String, value: I64, body: String, asset: String) -> hot.JetGameHotSwapSnapshot Never! {
+    id :: identity(source, build)
+    world :: hot.JetGameWorldRevisionFact.new(~id, schema) ?? panic("world")
+    persist :: hot.JetGameHotSwapPersistState.new("world", "World{{score:Int}}", hot.JetGameHotSwapValue.Int(value)) ?? panic("persist")
+    script :: hot.JetGameScriptRevisionFact.new("tick", ~id, "tick(Int)->Unit", body) ?? panic("script")
+    asset_fact :: hot.JetGameAssetRevisionFact.new("scene/main", ~id, asset) ?? panic("asset")
+    p := [hot.JetGameHotSwapPersistState]{persist}
+    s := [hot.JetGameScriptRevisionFact]{script}
+    a := [hot.JetGameAssetRevisionFact]{asset_fact}
+    hot.JetGameHotSwapSnapshot.new(id, world, ^p, ^s, ^a) ?? panic("snapshot")
+}
+fn eligible(current: hot.JetGameHotSwapSnapshot, candidate: hot.JetGameHotSwapSnapshot) -> hot.JetGameHotSwapPlan Never! {
+    hot.JetGameHotSwapPlan.new(current, candidate, .ScriptAndScene) ?? panic("eligible plan")
+}
+#Test("body_edit_keeps_persisted_value_and_commits_script_and_asset_revision") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    plan :: eligible(current, candidate)
+    live := ~current
+    receipt :: plan.execute(&live) ?? panic("commit")
+    assert(receipt.is_committed())
+    state :: live.persist_value("world") ?? panic("world")
+    assert_eq(state.value, hot.JetGameHotSwapValue.Int(I64{41}))
+    assert_eq(live.identity, candidate.identity)
+    assert_eq(receipt.changed_scripts, [String]{"tick"})
+    assert_eq(receipt.changed_assets, [String]{"scene/main"})
+}
+#Test("changed_schema_is_rejected_before_live_mutation") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v2", I64{0}, "body-2", "asset-2")
+    live :: ~current
+    if hot.JetGameHotSwapPlan.new(current, candidate, .ScriptAndScene) == {
+        .Ok(_) -> panic("layout change must fail closed")
+        .Err(error) -> {
+            assert(error.is_incompatible())
+            assert_eq(error.message(), "persisted world schema changed from `World.v1` to `World.v2`")
+        }
+    }
+    assert_eq(live, current)
+}
+#Test("rollback_restores_prior_world_after_apply") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    plan :: eligible(current, candidate)
+    transaction := hot.JetGameHotSwapTransaction.begin(current, plan) ?? panic("begin")
+    id :: transaction.transaction_id()
+    &transaction.pause(id) ?? panic("pause")
+    applied :: &transaction.apply_scripts_and_assets(current, id) ?? panic("apply")
+    assert_eq(applied.0.identity, candidate.identity)
+    restored :: &transaction.rollback(^applied.0, id) ?? panic("rollback")
+    assert(restored.1.is_rolled_back())
+    assert_eq(restored.0, current)
+}
+#Test("wrong_transaction_id_is_rejected_without_advancing_phase") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    plan :: eligible(current, candidate)
+    transaction := hot.JetGameHotSwapTransaction.begin(current, plan) ?? panic("begin")
+    id :: transaction.transaction_id()
+    if &transaction.pause(id ~| U64{1}) == {
+        .Ok(_) -> panic("wrong id")
+        .Err(error) -> if error == {
+            .TransactionIdMismatch(expected, actual) -> { assert_eq(expected, id); assert_eq(actual, id ~| U64{1}) }
+            else -> panic("wrong error")
+        }
+    }
+    assert_eq(transaction.phase(), hot.JetGameHotSwapReceiptPhase.Prepared)
+}
+#Test("disabled_link_mode_is_explicit_and_auditable") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    if hot.JetGameHotSwapPlan.new(current, candidate, .Script) == {
+        .Ok(_) -> panic("scene changes require scene link mode")
+        .Err(error) -> if error == {
+            .Incompatible(reason) -> {
+                assert_eq(reason.code(), "asset_sync_disabled")
+                assert(reason.message().contains("script"))
+            }
+            else -> panic("wrong error")
+        }
+    }
+}
+
+#Test("restart resets existing state; fresh persist facts stay candidate values") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate := snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    &candidate.persist.push(hot.JetGameHotSwapPersistState.new("z", "Int", hot.JetGameHotSwapValue.Int(I64{7})) ?? panic("fresh"))
+    plan :: hot.JetGameHotSwapPlan.new(current, candidate, .Restart) ?? panic("restart")
+    assert_eq(plan.kept_values, [String]{})
+    assert_eq(plan.reset_values, [String]{"world"})
+    assert_eq(plan.fresh_values, [String]{"z"})
+    live := ~current
+    plan.execute(&live) ?? panic("restart commit")
+    assert_eq(live, candidate)
+}
+#Test("preflight includes content, not merely source/build; rejection leaves phase unchanged") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    stale :: snapshot("source-1", "build-1", "World.v1", I64{42}, "body-1", "asset-1")
+    plan :: eligible(current, candidate)
+    if plan.preflight(stale) == {
+        .Ok(_) -> panic("same revision does not authorize different content")
+        .Err(error) -> if error == { .StaleLive(_, _) -> {}, else -> panic("wrong error") }
+    }
+    transaction := hot.JetGameHotSwapTransaction.begin(current, plan) ?? panic("begin")
+    id :: transaction.transaction_id()
+    &transaction.pause(id) ?? panic("pause")
+    if &transaction.apply_scripts_and_assets(stale, id) == {
+        .Ok(_) -> panic("stale apply")
+        .Err(error) -> if error == { .StaleLive(_, _) -> {}, else -> panic("wrong error") }
+    }
+    assert_eq(transaction.phase(), hot.JetGameHotSwapReceiptPhase.Paused)
+}
+#Test("failed commit stays Applied; rollback and finalization guards preserve prior state") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate :: snapshot("source-2", "build-2", "World.v1", I64{0}, "body-2", "asset-2")
+    plan :: eligible(current, candidate)
+    transaction := hot.JetGameHotSwapTransaction.begin(current, plan) ?? panic("begin")
+    id :: transaction.transaction_id()
+    if &transaction.apply_scripts_and_assets(current, id) == {
+        .Ok(_) -> panic("apply before pause")
+        .Err(error) -> if error == { .InvalidPhase(expected, actual) -> { assert_eq(expected, hot.JetGameHotSwapReceiptPhase.Paused); assert_eq(actual, hot.JetGameHotSwapReceiptPhase.Prepared) }, else -> panic("wrong error") }
+    }
+    &transaction.pause(id) ?? panic("pause")
+    applied :: &transaction.apply_scripts_and_assets(current, id) ?? panic("apply")
+    wrong := ~candidate
+    if &transaction.commit(^wrong, id) == {
+        .Ok(_) -> panic("commit must compare exact persisted values")
+        .Err(error) -> if error == { .StaleLive(_, _) -> {}, else -> panic("wrong error") }
+    }
+    assert_eq(transaction.phase(), hot.JetGameHotSwapReceiptPhase.Applied)
+    restored :: &transaction.rollback(^applied.0, id) ?? panic("rollback")
+    assert_eq(restored.0, current)
+    another := ~current
+    if &transaction.rollback(^another, id) == {
+        .Ok(_) -> panic("double rollback")
+        .Err(error) -> assert_eq(error, hot.JetGameHotSwapError.AlreadyFinalized)
+    }
+}
+#Test("validation precedes compatibility; source mismatch precedes build mismatch") {
+    current :: snapshot("source-1", "build-1", "World.v1", I64{41}, "body-1", "asset-1")
+    candidate := snapshot("source-2", "build-2", "World.v2", I64{0}, "body-2", "asset-2")
+    candidate.world.identity = identity("wrong-source", "wrong-build")
+    explanation :: hot.JetGameHotSwapExplanation.explain(current, candidate, .ScriptAndScene)
+    assert(!explanation.compatible)
+    assert_eq(explanation.transaction_id, None)
+    assert_eq(explanation.code, "source_revision_mismatch")
+    assert_eq(explanation.message, "source revision mismatch: expected `source-2`, got `wrong-source`")
+    if hot.JetGameHotSwapIdentity.new("", "") == {
+        .Ok(_) -> panic("invalid empty identity")
+        .Err(error) -> assert_eq(error, hot.JetGameHotSwapError.InvalidRevision("source_revision"))
+    }
+}
+#Test("recursive values sort record fields and preserve exact receipt JSON escaping") {
+    fields := [(String, hot.JetGameHotSwapValue)]{("z", .Bytes([U8]{U8{0}, U8{255}})), ("a", .List([hot.JetGameHotSwapValue]{.Bool(true), .Int(I64{-7})}))}
+    record :: hot.JetGameHotSwapValue.record(^fields) ?? panic("record")
+    assert_eq(record.render_json(), "{{\"a\":[true,-7],\"z\":[0,255]}}")
+    text :: hot.JetGameHotSwapValue.text("\"\\\n\r\t")
+    assert_eq(text.render_json(), "\"\\\"\\\\\\n\\r\\t\"")
+    duplicate := [(String, hot.JetGameHotSwapValue)]{("a", .Int(I64{1})), ("a", .Int(I64{2}))}
+    if hot.JetGameHotSwapValue.record(^duplicate) == {
+        .Ok(_) -> panic("duplicate field")
+        .Err(error) -> assert_eq(error, hot.JetGameHotSwapError.DuplicateFact("persist record field", "a"))
+    }
+}

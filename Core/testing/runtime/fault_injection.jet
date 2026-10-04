@@ -1,0 +1,296 @@
+// PORT-PENDING 0137 crates-jet-codegen-src-prelude-commandsuite-module-group: crates/jet-codegen/src/Prelude/FaultInjection.rs:1-292
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TESTFAULT1=A / D-EFFTREE1: one Prelude-owned fault schedule over the
+//RS // existing effect tree. AOT and Cranelift adapters only report typed operation
+//RS // paths here; they do not choose roots, ordinals, policy, or error meaning.
+//RS //
+//RS // The generated harness returns ordinary `Result` values. The surrounding test
+//RS // harness wraps any error in the existing `JetTestFailure` report envelope
+//RS // (D-REPORT-TEST1); this part never invents a second report format.
+//RS 
+//RS const JET_FAULT_MAX_ATTEMPTS: usize = 4096;
+//RS 
+//RS /// A schedule target is either one canonical effect-tree path or the shared
+//RS /// fallible-allocation rail. Allocation is deliberately a channel, not a
+//RS /// synthetic public effect selector.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS enum JetFaultTarget {
+//RS     EffectPath(String),
+//RS     Allocation,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct JetFaultState {
+//RS     targets: Vec<JetFaultTarget>,
+//RS     counts: Vec<usize>,
+//RS     active: Option<usize>,
+//RS     fail_nth: usize,
+//RS     injected: bool,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_FAULT_STATE: std::cell::RefCell<JetFaultState> =
+//RS         std::cell::RefCell::new(JetFaultState::default());
+//RS }
+//RS 
+//RS fn jet_fault_clear() {
+//RS     JET_FAULT_STATE.with(|state| {
+//RS         *state.borrow_mut() = JetFaultState::default();
+//RS     });
+//RS }
+//RS 
+//RS fn jet_fault_state_is_clear() -> bool {
+//RS     JET_FAULT_STATE.with(|state| {
+//RS         let state = state.borrow();
+//RS         state.targets.is_empty()
+//RS             && state.counts.is_empty()
+//RS             && state.active.is_none()
+//RS             && state.fail_nth == 0
+//RS             && !state.injected
+//RS     })
+//RS }
+//RS 
+//RS /// D-EFFTREE1's one ancestor rule: a root covers every dotted path beneath it;
+//RS /// a leaf covers itself and deeper descendants, never a sibling.
+//RS fn jet_fault_effect_covers(bound: &str, observed: &str) -> bool {
+//RS     observed == bound
+//RS         || observed
+//RS             .strip_prefix(bound)
+//RS             .is_some_and(|suffix| suffix.starts_with('.'))
+//RS }
+//RS 
+//RS fn jet_fault_record(state: &mut JetFaultState, target_index: usize, inject: bool) -> bool {
+//RS     let fail_nth = state.fail_nth;
+//RS     let injected = {
+//RS         let Some(count) = state.counts.get_mut(target_index) else {
+//RS             return false;
+//RS         };
+//RS         *count = count.saturating_add(1);
+//RS         inject && fail_nth != 0 && *count == fail_nth
+//RS     };
+//RS     if injected {
+//RS         state.injected = true;
+//RS     }
+//RS     injected
+//RS }
+//RS 
+//RS /// Called by Core operation adapters. An inactive schedule answers false.
+//RS /// Operation paths are already canonicalized by sema and supplied by the
+//RS /// shared AOT/JIT Prelude adapter code.
+//RS pub fn jet_fault_should_fail(operation: &str) -> bool {
+//RS     JET_FAULT_STATE.with(|state| {
+//RS         let mut state = state.borrow_mut();
+//RS         let active = state.active;
+//RS         let mut injected = false;
+//RS         // The clean pass and every injected pass observe every configured
+//RS         // target. Only the selected target may inject; this captures recovery
+//RS         // calls under other roots for the next deterministic schedule round.
+//RS         for target_index in 0..state.targets.len() {
+//RS             let matches = state.targets.get(target_index).is_some_and(|target| {
+//RS                 matches!(target, JetFaultTarget::EffectPath(selector)
+//RS                     if jet_fault_effect_covers(selector, operation))
+//RS             });
+//RS             if matches {
+//RS                 injected |= jet_fault_record(&mut state, target_index, active == Some(target_index));
+//RS             }
+//RS         }
+//RS         injected
+//RS     })
+//RS }
+//RS 
+//RS /// Called by every shared fallible-allocation rail. This is the final typed
+//RS /// target in the same schedule as effect paths, so OOM recovery gets the same
+//RS /// fail-nth loop without adding a fake `Alloc` effect root.
+//RS pub fn jet_fault_should_fail_allocation() -> bool {
+//RS     JET_FAULT_STATE.with(|state| {
+//RS         let mut state = state.borrow_mut();
+//RS         let Some(target_index) = state
+//RS             .targets
+//RS             .iter()
+//RS             .position(|target| matches!(target, JetFaultTarget::Allocation))
+//RS         else {
+//RS             return false;
+//RS         };
+//RS         let inject = state.active == Some(target_index);
+//RS         jet_fault_record(&mut state, target_index, inject)
+//RS     })
+//RS }
+//RS 
+//RS /// Stable identity for a fault plan. It is deliberately independent of time,
+//RS /// process identity, hash-map order, or thread scheduling, so a capped run is
+//RS /// reproducible from the source selector list alone.
+//RS fn jet_fault_seed(selectors: &[&str]) -> u64 {
+//RS     let mut seed = 0xcbf29ce484222325u64;
+//RS     for selector in selectors {
+//RS         for byte in selector.as_bytes() {
+//RS             seed ^= u64::from(*byte);
+//RS             seed = seed.wrapping_mul(0x100000001b3);
+//RS         }
+//RS         seed ^= 0xff;
+//RS         seed = seed.wrapping_mul(0x100000001b3);
+//RS     }
+//RS     seed.max(1)
+//RS }
+//RS 
+//RS struct JetFaultScope;
+//RS 
+//RS impl Drop for JetFaultScope {
+//RS     fn drop(&mut self) {
+//RS         // Runs can leave through a normal error, a panic, or a runtime stop.
+//RS         // One Drop path clears the scheduler in all three cases before the
+//RS         // next deterministic attempt starts.
+//RS         jet_fault_clear();
+//RS     }
+//RS }
+//RS 
+//RS struct JetFaultRun {
+//RS     result: Result<(), String>,
+//RS     injected: bool,
+//RS     counts: Vec<usize>,
+//RS     scheduler_clean: bool,
+//RS }
+//RS 
+//RS fn jet_fault_run_once_with_cleanup<F: FnMut() -> Result<(), String>>(
+//RS     selectors: &[&str],
+//RS     active: Option<usize>,
+//RS     fail_nth: usize,
+//RS     body: &mut F,
+//RS ) -> Result<JetFaultRun, String> {
+//RS     let mut targets = selectors
+//RS         .iter()
+//RS         .map(|selector| JetFaultTarget::EffectPath((*selector).to_string()))
+//RS         .collect::<Vec<_>>();
+//RS     // The shared allocation rail is part of every non-empty fault plan. It is
+//RS     // not exposed as a user-written selector and therefore cannot drift from
+//RS     // the ratified effect-root surface.
+//RS     targets.push(JetFaultTarget::Allocation);
+//RS     let target_count = targets.len();
+//RS     if active.is_some_and(|index| index >= target_count) {
+//RS         return Err("fault schedule selected an invalid target".to_string());
+//RS     }
+//RS 
+//RS     JET_FAULT_STATE.with(|state| {
+//RS         let mut state = state.borrow_mut();
+//RS         state.targets = targets;
+//RS         state.counts = vec![0; target_count];
+//RS         state.active = active;
+//RS         state.fail_nth = fail_nth;
+//RS         state.injected = false;
+//RS     });
+//RS 
+//RS     // This guard owns scheduler cleanup. The body itself still runs its normal
+//RS     // Jet defer/sentry cleanup on every return and on every caught unwind.
+//RS     let scope = JetFaultScope;
+//RS     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+//RS     let (injected, counts) = JET_FAULT_STATE.with(|state| {
+//RS         let state = state.borrow();
+//RS         (state.injected, state.counts.clone())
+//RS     });
+//RS     drop(scope);
+//RS     let scheduler_clean = jet_fault_state_is_clear();
+//RS     if !scheduler_clean {
+//RS         return Err("fault scheduler cleanup did not complete".to_string());
+//RS     }
+//RS     let result = match result {
+//RS         Ok(result) => result,
+//RS         Err(_) => return Err("test panicked during fault injection".to_string()),
+//RS     };
+//RS     Ok(JetFaultRun {
+//RS         result,
+//RS         injected,
+//RS         counts,
+//RS         scheduler_clean,
+//RS     })
+//RS }
+//RS 
+//RS // Kept as the small internal probe used by allocator-family checks. The
+//RS // production loop uses the richer result above so cleanup remains an explicit
+//RS // criterion instead of an assertion hidden in a test helper.
+//RS fn jet_fault_run_once<F: FnMut() -> Result<(), String>>(
+//RS     selectors: &[&str],
+//RS     active: Option<usize>,
+//RS     fail_nth: usize,
+//RS     body: &mut F,
+//RS ) -> Result<(Result<(), String>, bool, Vec<usize>), String> {
+//RS     let run = jet_fault_run_once_with_cleanup(selectors, active, fail_nth, body)?;
+//RS     Ok((run.result, run.injected, run.counts))
+//RS }
+//RS 
+//RS /// Run the clean case, then fail each reachable effect/allocation target at
+//RS /// each observed ordinal. An injected iteration must return through the
+//RS /// ordinary error rail without a panic. Newly revealed sites extend the same
+//RS /// bounded deterministic schedule; a runaway body becomes one ordinary test
+//RS /// failure instead of an unbounded test process.
+//RS pub(crate) fn jet_fault_test_loop<F: FnMut() -> Result<(), String>>(
+//RS     selectors: &[&str],
+//RS     mut body: F,
+//RS ) -> Result<(), String> {
+//RS     if selectors.is_empty() {
+//RS         return body();
+//RS     }
+//RS     let seed = jet_fault_seed(selectors);
+//RS     let target_count = selectors.len() + 1; // effect paths + allocation rail
+//RS     let clean = jet_fault_run_once_with_cleanup(selectors, None, 0, &mut body)?;
+//RS     if !clean.scheduler_clean {
+//RS         return Err("fault scheduler cleanup did not complete".to_string());
+//RS     }
+//RS     if let Err(error) = clean.result {
+//RS         return Err(error);
+//RS     }
+//RS     let mut max_counts = clean.counts;
+//RS     let mut next_fail_nth = vec![1; target_count];
+//RS     let mut attempts = 0usize;
+//RS 
+//RS     loop {
+//RS         let mut discovered = false;
+//RS         let mut selector_index = 0usize;
+//RS         while selector_index < target_count {
+//RS             let mut fail_nth = next_fail_nth[selector_index];
+//RS             while fail_nth <= max_counts[selector_index] {
+//RS                 if attempts >= JET_FAULT_MAX_ATTEMPTS {
+//RS                     return Err(format!(
+//RS                         "fault schedule exceeded {} attempts (seed {})",
+//RS                         JET_FAULT_MAX_ATTEMPTS, seed
+//RS                     ));
+//RS                 }
+//RS                 attempts += 1;
+//RS                 let run = jet_fault_run_once_with_cleanup(
+//RS                     selectors,
+//RS                     Some(selector_index),
+//RS                     fail_nth,
+//RS                     &mut body,
+//RS                 )?;
+//RS                 if !run.scheduler_clean {
+//RS                     return Err("fault scheduler cleanup did not complete".to_string());
+//RS                 }
+//RS                 if !run.injected {
+//RS                     if let Err(error) = run.result {
+//RS                         return Err(error);
+//RS                     }
+//RS                 }
+//RS                 if run.injected {
+//RS                     for (index, count) in run.counts.iter().enumerate() {
+//RS                         if *count > max_counts[index] {
+//RS                             max_counts[index] = *count;
+//RS                             discovered = true;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 fail_nth = fail_nth.saturating_add(1);
+//RS                 next_fail_nth[selector_index] = fail_nth;
+//RS             }
+//RS             selector_index += 1;
+//RS         }
+//RS         if !discovered
+//RS             && next_fail_nth
+//RS                 .iter()
+//RS                 .zip(&max_counts)
+//RS                 .all(|(next, max)| *next > *max)
+//RS         {
+//RS             break;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+// END-PORT-PENDING 0137 crates/jet-codegen/src/Prelude/FaultInjection.rs:1-292
+

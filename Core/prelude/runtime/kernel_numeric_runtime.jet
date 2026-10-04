@@ -1,0 +1,20 @@
+use jet_codegen.[jet_numeric_checked_widen, JET_NUMERIC_WIDEN_TRAP]
+use core.mem.runtime.portable_core.[jet_arithmetic_stop]
+use jet_std.[jet_int_bit_count]
+// Rust: crates/jet-codegen/src/Prelude/Core/NumericRuntime.rs:3
+pub fn jet_numeric_checked_widen_at(raw: U64, signed: Bool, target_f32: Bool, file: String, line: U32) -> F64 Never! {
+    jet_numeric_checked_widen(raw, signed, target_f32) ?? jet_arithmetic_stop(file, line, JET_NUMERIC_WIDEN_TRAP)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/NumericRuntime.rs:15
+pub fn jet_numeric_int_bit_count(value: I64, operation: I64, width: I64) -> I64 Never! {
+    method :: match operation {
+        0 => "count_ones"
+        1 => "count_zeros"
+        2 => "leading_zeros"
+        3 => "trailing_zeros"
+        4 => "bit_count"
+        5 => "bit_length"
+        _ => panic("checked integer population operation")
+    }
+    jet_int_bit_count(value, U32.from_i64_wrapping(width), method)
+}

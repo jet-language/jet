@@ -1,0 +1,1799 @@
+// PORT-PENDING 0203 crates-jet-jit-src-compute-slice-1: crates/jet-jit/src/Compute.rs:1-1795
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Resident adapters for the shared compute Prelude.
+//RS //!
+//RS //! The JIT owns only handles and list marshalling. Tensor construction,
+//RS //! copying, view bounds, and writes stay in the same Prelude source used by
+//RS //! AOT and the interpreter (I9).
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::JitRuntime;
+//RS use crate::Marshal::{result_err_msg, result_ok};
+//RS use crate::runtime_host::{JitCallableSlot, bind_jit_callable_handle, jit_callable_parts};
+//RS 
+//RS #[allow(dead_code, unused_imports)]
+//RS mod semantics {
+//RS     use crate::Math::simd_lanes::{jet_simd_reduce_fixed_iter, JetSimdScalar};
+//RS     use crate::{JetDisplay, JetShow};
+//RS     use jet_foundation::Outcome::jet_list_bounds_message;
+//RS     use jet_foundation::StructuralDebug::jet_debug_range;
+//RS 
+//RS     fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
+//RS         panic!("{message}");
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS     struct JetRange {
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
+//RS 
+//RS     #[cfg(test)]
+//RS     mod cpu_simd_tests {
+//RS         use super::*;
+//RS         use std::time::{Duration, Instant};
+//RS 
+//RS         fn detected_backend() -> JetComputeSimdBackend {
+//RS             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+//RS             {
+//RS                 jet_compute_simd_backend_for_features(
+//RS                     is_x86_feature_detected!("avx2"),
+//RS                     is_x86_feature_detected!("sse2"),
+//RS                 )
+//RS             }
+//RS             #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+//RS             {
+//RS                 jet_compute_simd_backend_for_features(false, false)
+//RS             }
+//RS         }
+//RS 
+//RS         fn sample_lanes(length: usize) -> (Vec<f32>, Vec<f32>) {
+//RS             let left = (0..length)
+//RS                 .map(|index| (index % 37) as f32 * 0.03125 - 0.5)
+//RS                 .collect();
+//RS             let right = (0..length)
+//RS                 .map(|index| (index % 29) as f32 * 0.0625 - 0.875)
+//RS                 .collect();
+//RS             (left, right)
+//RS         }
+//RS 
+//RS         fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+//RS             let mut tensor =
+//RS                 jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+//RS             tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS             tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS             tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS                 .iter()
+//RS                 .map(|ability| (*ability).to_string())
+//RS                 .collect();
+//RS             jet_compute_validate_tensor(&tensor).unwrap();
+//RS             tensor
+//RS         }
+//RS 
+//RS         fn measure(iterations: usize, operation: impl Fn() -> f32) -> Duration {
+//RS             let start = Instant::now();
+//RS             let mut total = 0.0_f32;
+//RS             for _ in 0..iterations {
+//RS                 total += std::hint::black_box(operation());
+//RS             }
+//RS             std::hint::black_box(total);
+//RS             start.elapsed()
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn runtime_dispatch_prefers_avx2_then_sse2_then_scalar() {
+//RS             assert_eq!(
+//RS                 jet_compute_simd_backend_for_features(true, true),
+//RS                 JetComputeSimdBackend::Avx2
+//RS             );
+//RS             assert_eq!(
+//RS                 jet_compute_simd_backend_for_features(false, true),
+//RS                 JetComputeSimdBackend::Sse2
+//RS             );
+//RS             assert_eq!(
+//RS                 jet_compute_simd_backend_for_features(false, false),
+//RS                 JetComputeSimdBackend::Scalar
+//RS             );
+//RS             assert_eq!(jet_compute_simd_backend(), detected_backend());
+//RS         }
+//RS 
+//RS         fn lane_accumulation_oracle<const WIDTH: usize>(left: &[f32], right: &[f32]) -> f32 {
+//RS             let mut lanes = [0.0_f32; WIDTH];
+//RS             let mut index = 0usize;
+//RS             let limit = left.len() / WIDTH * WIDTH;
+//RS             while index < limit {
+//RS                 for lane in 0..WIDTH {
+//RS                     lanes[lane] += left[index + lane] * right[index + lane];
+//RS                 }
+//RS                 index += WIDTH;
+//RS             }
+//RS             let mut sum = 0.0_f32;
+//RS             for lane in lanes {
+//RS                 sum += lane;
+//RS             }
+//RS             while index < left.len() {
+//RS                 sum += left[index] * right[index];
+//RS                 index += 1;
+//RS             }
+//RS             sum
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn simd_dot_paths_match_scalar_bit_for_bit_including_tail() {
+//RS             let (left, right) = sample_lanes(4099);
+//RS             let scalar = jet_compute_f32_dot_scalar(&left, &right);
+//RS             for (backend, width) in [
+//RS                 (JetComputeSimdBackend::Sse2, 4usize),
+//RS                 (JetComputeSimdBackend::Avx2, 8usize),
+//RS             ] {
+//RS                 if !jet_compute_simd_backend_available(backend) {
+//RS                     continue;
+//RS                 }
+//RS                 let actual = jet_compute_f32_dot(backend, &left, &right).unwrap();
+//RS                 let oracle = match width {
+//RS                     4 => lane_accumulation_oracle::<4>(&left, &right),
+//RS                     8 => lane_accumulation_oracle::<8>(&left, &right),
+//RS                     _ => unreachable!(),
+//RS                 };
+//RS                 assert_eq!(
+//RS                     actual.to_bits(),
+//RS                     oracle.to_bits(),
+//RS                     "{} path changed lane-accumulation f32 reduction",
+//RS                     backend.name()
+//RS                 );
+//RS                 let delta = (actual - scalar).abs();
+//RS                 let scale = scalar.abs().max(1.0);
+//RS                 assert!(
+//RS                     delta / scale < 1e-5,
+//RS                     "{} path drifted from sequential scalar: actual={actual} scalar={scalar}",
+//RS                     backend.name()
+//RS                 );
+//RS             }
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn tiled_matmul_matches_f32_scalar_oracle_bit_for_bit() {
+//RS             let left_values = (0..39)
+//RS                 .map(|index| (index * 7 % 23) as f32 - 11.0)
+//RS                 .collect::<Vec<_>>();
+//RS             let right_values = (0..91)
+//RS                 .map(|index| (index * 5 % 19) as f32 - 9.0)
+//RS                 .collect::<Vec<_>>();
+//RS             let mut scalar_values = Vec::with_capacity(3 * 7);
+//RS             for row in 0..3 {
+//RS                 for column in 0..7 {
+//RS                     let mut sum = 0.0_f32;
+//RS                     for inner in 0..13 {
+//RS                         sum += left_values[row * 13 + inner] * right_values[inner * 7 + column];
+//RS                     }
+//RS                     scalar_values.push(f64::from(sum));
+//RS                 }
+//RS             }
+//RS             let left = f32_tensor(vec![3, 13], left_values);
+//RS             let right = f32_tensor(vec![13, 7], right_values);
+//RS             let tiled = jet_compute_matmul_f32_tile(&left, &right).unwrap();
+//RS             let tiled_values = jet_compute_tensor_values(&tiled);
+//RS             assert_eq!(
+//RS                 scalar_values
+//RS                     .iter()
+//RS                     .map(|value| value.to_bits())
+//RS                     .collect::<Vec<_>>(),
+//RS                 tiled_values
+//RS                     .iter()
+//RS                     .map(|value| value.to_bits())
+//RS                     .collect::<Vec<_>>()
+//RS             );
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn selected_simd_path_beats_scalar_and_records_speedup() {
+//RS             let backend = jet_compute_simd_backend();
+//RS             if backend == JetComputeSimdBackend::Scalar {
+//RS                 eprintln!("SKIP compute_simd_speedup: no runtime SIMD feature");
+//RS                 return;
+//RS             }
+//RS             let (left, right) = sample_lanes(1 << 18);
+//RS             let _ = measure(2, || jet_compute_f32_dot_scalar(&left, &right));
+//RS             let _ = measure(2, || jet_compute_f32_dot(backend, &left, &right).unwrap());
+//RS             let scalar = (0..7)
+//RS                 .map(|_| measure(4, || jet_compute_f32_dot_scalar(&left, &right)))
+//RS                 .min()
+//RS                 .unwrap();
+//RS             let simd = (0..7)
+//RS                 .map(|_| measure(4, || jet_compute_f32_dot(backend, &left, &right).unwrap()))
+//RS                 .min()
+//RS                 .unwrap();
+//RS             assert!(
+//RS                 simd < scalar,
+//RS                 "{} SIMD path did not beat scalar: scalar={:?}, simd={:?}",
+//RS                 backend.name(),
+//RS                 scalar,
+//RS                 simd
+//RS             );
+//RS             let speedup = scalar.as_secs_f64() / simd.as_secs_f64();
+//RS             eprintln!(
+//RS                 "compute_simd_speedup backend={} scalar_ns={} simd_ns={} speedup={speedup:.2}x",
+//RS                 backend.name(),
+//RS                 scalar.as_nanos(),
+//RS                 simd.as_nanos(),
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(test)]
+//RS     mod metal_tests {
+//RS         use super::*;
+//RS 
+//RS         fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+//RS             let mut tensor =
+//RS                 jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+//RS             tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS             tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS             tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS                 .iter()
+//RS                 .map(|ability| (*ability).to_string())
+//RS                 .collect();
+//RS             jet_compute_validate_tensor(&tensor).unwrap();
+//RS             tensor
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn explicit_metal_is_real_when_available_and_fails_closed_when_not() {
+//RS             let cpu = f32_tensor(vec![1], vec![2.0]);
+//RS             let result = jet_compute_on_device(&cpu, JetComputeDevice::Metal);
+//RS             if !jet_compute_metal::available() {
+//RS                 let error = result.expect_err("unavailable Metal must not fall back to CPU");
+//RS                 assert!(
+//RS                     matches!(
+//RS                         &error,
+//RS                         JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+//RS                     ),
+//RS                     "unexpected unavailable Metal error: {error:?}"
+//RS                 );
+//RS                 return;
+//RS             }
+//RS 
+//RS             let metal = result.expect("system Metal device should accept F32 placement");
+//RS             assert_eq!(metal.device, JetComputeDevice::Metal);
+//RS             assert_eq!(metal.last_placement.backend, METAL_BACKEND);
+//RS             assert_eq!(metal.last_placement.profile, CPU_ORACLE_F32_PROFILE);
+//RS 
+//RS             let doubled = jet_compute_binary("add", &metal, &metal).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&doubled), vec![4.0]);
+//RS             let downloaded = jet_compute_transfer(&doubled, JetComputeDevice::Cpu).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0]);
+//RS             assert_eq!(downloaded.last_transfer.unwrap().bytes, 4);
+//RS 
+//RS             let shaped = jet_compute_on_device(
+//RS                 &f32_tensor(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+//RS                 JetComputeDevice::Metal,
+//RS             )
+//RS             .unwrap();
+//RS             let transposed = jet_compute_transpose(&shaped).unwrap();
+//RS             let downloaded = jet_compute_transfer(&transposed, JetComputeDevice::Cpu).unwrap();
+//RS             assert_eq!(
+//RS                 jet_compute_tensor_values(&downloaded),
+//RS                 vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
+//RS             );
+//RS             assert_eq!(downloaded.strides, vec![2, 1]);
+//RS 
+//RS             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Metal).unwrap();
+//RS             jet_compute_stream_sync(&stream).unwrap();
+//RS 
+//RS             let unsupported = jet_compute_det(&metal).unwrap_err();
+//RS             assert!(matches!(unsupported, JetComputeError::Unsupported(_)));
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn metal_mse_vjp_and_jvp_use_the_device_kernel() {
+//RS             if !jet_compute_metal::available() {
+//RS                 eprintln!("SKIP metal autodiff: no system Metal device");
+//RS                 return;
+//RS             }
+//RS             let prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Metal)
+//RS                     .unwrap();
+//RS             let target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Metal)
+//RS                     .unwrap();
+//RS             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+//RS             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+//RS             let state = jet_compute_vjp_begin(loss, tape);
+//RS             let seed = jet_compute_gradient_seed(&state).unwrap();
+//RS             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
+//RS             let tangent_prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Metal)
+//RS                     .unwrap();
+//RS             let tangent_target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Metal)
+//RS                     .unwrap();
+//RS             let tangent =
+//RS                 jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(test)]
+//RS     mod cuda_tests {
+//RS         use super::*;
+//RS 
+//RS         fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+//RS             let mut tensor =
+//RS                 jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+//RS             tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS             tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS             tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS                 .iter()
+//RS                 .map(|ability| (*ability).to_string())
+//RS                 .collect();
+//RS             jet_compute_validate_tensor(&tensor).unwrap();
+//RS             tensor
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn explicit_cuda_is_real_when_available_and_fails_closed_when_not() {
+//RS             let cpu = f32_tensor(vec![1], vec![2.0]);
+//RS             let result = jet_compute_on_device(&cpu, JetComputeDevice::Cuda);
+//RS             if !jet_compute_cuda::available() {
+//RS                 let error = result.expect_err("unavailable CUDA must not fall back to CPU");
+//RS                 assert!(
+//RS                     matches!(
+//RS                         &error,
+//RS                         JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+//RS                     ),
+//RS                     "unexpected unavailable CUDA error: {error:?}"
+//RS                 );
+//RS                 return;
+//RS             }
+//RS 
+//RS             let cuda = result.expect("CUDA device should accept F32 placement");
+//RS             assert_eq!(cuda.device, JetComputeDevice::Cuda);
+//RS             assert_eq!(cuda.last_placement.backend, CUDA_BACKEND);
+//RS             assert_eq!(cuda.last_placement.profile, CPU_ORACLE_F32_PROFILE);
+//RS 
+//RS             let cpu_doubled = jet_compute_binary("add", &cpu, &cpu).unwrap();
+//RS             let doubled = jet_compute_binary("add", &cuda, &cuda).unwrap();
+//RS             assert_eq!(
+//RS                 jet_compute_tensor_values(&doubled),
+//RS                 jet_compute_tensor_values(&cpu_doubled)
+//RS             );
+//RS             let square_root = jet_compute_unary("sqrt", &doubled).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&square_root), vec![2.0]);
+//RS             let downloaded = jet_compute_transfer(&doubled, JetComputeDevice::Cpu).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0]);
+//RS             assert_eq!(downloaded.last_transfer.unwrap().bytes, 4);
+//RS 
+//RS             let left = jet_compute_on_device(
+//RS                 &f32_tensor(vec![1, 2], vec![1.0, 2.0]),
+//RS                 JetComputeDevice::Cuda,
+//RS             )
+//RS             .unwrap();
+//RS             let right = jet_compute_on_device(
+//RS                 &f32_tensor(vec![2, 1], vec![3.0, 4.0]),
+//RS                 JetComputeDevice::Cuda,
+//RS             )
+//RS             .unwrap();
+//RS             let cpu_left = f32_tensor(vec![1, 2], vec![1.0, 2.0]);
+//RS             let cpu_right = f32_tensor(vec![2, 1], vec![3.0, 4.0]);
+//RS             let cpu_product = jet_compute_matmul(&cpu_left, &cpu_right).unwrap();
+//RS             let product = jet_compute_matmul(&left, &right).unwrap();
+//RS             assert_eq!(
+//RS                 jet_compute_tensor_values(&product),
+//RS                 jet_compute_tensor_values(&cpu_product)
+//RS             );
+//RS             let reduced = jet_compute_sum_axis(&product, 0).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&reduced), vec![11.0]);
+//RS 
+//RS             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Cuda).unwrap();
+//RS             jet_compute_stream_sync(&stream).unwrap();
+//RS 
+//RS             let unsupported = jet_compute_det(&cuda).unwrap_err();
+//RS             assert!(matches!(unsupported, JetComputeError::Unsupported(_)));
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn cuda_mse_vjp_and_jvp_use_the_device_kernels() {
+//RS             if !jet_compute_cuda::available() {
+//RS                 eprintln!("SKIP cuda autodiff: no CUDA device");
+//RS                 return;
+//RS             }
+//RS             let prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Cuda)
+//RS                     .unwrap();
+//RS             let target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Cuda)
+//RS                     .unwrap();
+//RS             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+//RS             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+//RS             let state = jet_compute_vjp_begin(loss, tape);
+//RS             let seed = jet_compute_gradient_seed(&state).unwrap();
+//RS             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
+//RS             let tangent_prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Cuda)
+//RS                     .unwrap();
+//RS             let tangent_target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Cuda)
+//RS                     .unwrap();
+//RS             let tangent =
+//RS                 jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(test)]
+//RS     mod vulkan_tests {
+//RS         use super::*;
+//RS 
+//RS         fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+//RS             let mut tensor =
+//RS                 jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+//RS             tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+//RS             tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+//RS             tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+//RS                 .iter()
+//RS                 .map(|ability| (*ability).to_string())
+//RS                 .collect();
+//RS             jet_compute_validate_tensor(&tensor).unwrap();
+//RS             tensor
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn explicit_vulkan_is_real_when_available_and_fails_closed_when_not() {
+//RS             let cpu = f32_tensor(vec![2], vec![2.0, 3.0]);
+//RS             let result = jet_compute_on_device(&cpu, JetComputeDevice::Vulkan);
+//RS             if !jet_compute_vulkan::available() {
+//RS                 if let Err(error) = jet_compute_vulkan::probe() {
+//RS                     eprintln!("SKIP Vulkan: {error:?}");
+//RS                 }
+//RS                 let error = result.expect_err("unavailable Vulkan must not fall back to CPU");
+//RS                 assert!(
+//RS                     matches!(
+//RS                         &error,
+//RS                         JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+//RS                     ),
+//RS                     "unexpected unavailable Vulkan error: {error:?}"
+//RS                 );
+//RS                 return;
+//RS             }
+//RS 
+//RS             let vulkan = result.expect("system Vulkan device should accept F32 placement");
+//RS             assert_eq!(vulkan.device, JetComputeDevice::Vulkan);
+//RS             assert_eq!(vulkan.last_placement.backend, VULKAN_BACKEND);
+//RS             assert_eq!(vulkan.last_placement.profile, CPU_ORACLE_F32_PROFILE);
+//RS 
+//RS             let cpu_doubled = jet_compute_binary("add", &cpu, &cpu).unwrap();
+//RS             let doubled = jet_compute_binary("add", &vulkan, &vulkan).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&doubled), vec![4.0, 6.0]);
+//RS             assert_eq!(
+//RS                 jet_compute_tensor_values(&doubled),
+//RS                 jet_compute_tensor_values(&cpu_doubled)
+//RS             );
+//RS 
+//RS             let left = jet_compute_on_device(
+//RS                 &f32_tensor(vec![1, 2], vec![1.0, 2.0]),
+//RS                 JetComputeDevice::Vulkan,
+//RS             )
+//RS             .unwrap();
+//RS             let right = jet_compute_on_device(
+//RS                 &f32_tensor(vec![2, 1], vec![3.0, 4.0]),
+//RS                 JetComputeDevice::Vulkan,
+//RS             )
+//RS             .unwrap();
+//RS             let product = jet_compute_matmul(&left, &right).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&product), vec![11.0]);
+//RS             let reduced = jet_compute_sum_axis(&product, 0).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&reduced), vec![11.0]);
+//RS 
+//RS             let downloaded = jet_compute_transfer(&doubled, JetComputeDevice::Cpu).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0, 6.0]);
+//RS             assert_eq!(downloaded.last_transfer.unwrap().bytes, 8);
+//RS 
+//RS             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Vulkan).unwrap();
+//RS             assert!(stream.vulkan.is_some());
+//RS             jet_compute_stream_sync(&stream).unwrap();
+//RS 
+//RS             let unsupported = jet_compute_det(&vulkan).unwrap_err();
+//RS             assert!(matches!(unsupported, JetComputeError::Unsupported(_)));
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn vulkan_mse_vjp_and_jvp_use_the_device_kernel() {
+//RS             if !jet_compute_vulkan::available() {
+//RS                 eprintln!("SKIP Vulkan autodiff: no Vulkan device");
+//RS                 return;
+//RS             }
+//RS             let prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Vulkan)
+//RS                     .unwrap();
+//RS             let target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Vulkan)
+//RS                     .unwrap();
+//RS             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+//RS             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+//RS             let state = jet_compute_vjp_begin(loss, tape);
+//RS             let seed = jet_compute_gradient_seed(&state).unwrap();
+//RS             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
+//RS             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
+//RS             let tangent_prediction =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Vulkan)
+//RS                     .unwrap();
+//RS             let tangent_target =
+//RS                 jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Vulkan)
+//RS                     .unwrap();
+//RS             let tangent =
+//RS                 jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+//RS             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
+//RS         }
+//RS 
+//RS         #[test]
+//RS         fn webgpu_native_path_fails_closed_without_cpu_drift() {
+//RS             let cpu = f32_tensor(vec![1], vec![2.0]);
+//RS             let result = jet_compute_on_device(&cpu, JetComputeDevice::WebGpu);
+//RS             assert!(
+//RS                 matches!(
+//RS                     result,
+//RS                     Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
+//RS                 ),
+//RS                 "native WebGPU must report its missing browser provider"
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) type Tensor = JetTensor;
+//RS     pub(super) type Device = JetComputeDevice;
+//RS     pub(super) type Stream = JetComputeStream;
+//RS     pub(super) type Sparse = JetSparseCsr;
+//RS 
+//RS 
+//RS 
+//RS 
+//RS 
+//RS     pub(super) fn error_message(error: &JetComputeError) -> String {
+//RS         error.jet_show()
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS     pub(super) fn from_list(values: &[f64]) -> Result<Tensor, String> {
+//RS         jet_compute_from_list(&values.to_vec()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn matrix(rows: i64, cols: i64, fill: f64) -> Result<Tensor, String> {
+//RS         jet_compute_matrix(rows, cols, fill).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn zeros(shape: &[i64]) -> Result<Tensor, String> {
+//RS         jet_compute_zeros(&shape.to_vec()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn ones(shape: &[i64]) -> Result<Tensor, String> {
+//RS         jet_compute_ones(&shape.to_vec()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn full(shape: &[i64], value: f64) -> Result<Tensor, String> {
+//RS         jet_compute_full(&shape.to_vec(), value).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn eye(size: i64) -> Result<Tensor, String> {
+//RS         jet_compute_eye(size).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn vec(len: i64, fill: f64) -> Result<Tensor, String> {
+//RS         jet_compute_vec(len, fill).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn reshape(tensor: &Tensor, shape: &[i64]) -> Result<Tensor, String> {
+//RS         jet_compute_reshape(tensor, &shape.to_vec()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn device_cpu() -> Device {
+//RS         jet_compute_device_cpu()
+//RS     }
+//RS 
+//RS     pub(super) fn device_auto() -> Device {
+//RS         jet_compute_device_auto()
+//RS     }
+//RS 
+//RS     pub(super) fn device_metal() -> Device {
+//RS         jet_compute_device_metal()
+//RS     }
+//RS 
+//RS     pub(super) fn device_cuda() -> Device {
+//RS         jet_compute_device_cuda()
+//RS     }
+//RS 
+//RS     pub(super) fn device_vulkan() -> Device {
+//RS         jet_compute_device_vulkan()
+//RS     }
+//RS 
+//RS     pub(super) fn device_webgpu() -> Device {
+//RS         jet_compute_device_webgpu()
+//RS     }
+//RS 
+//RS     pub(super) fn device_word(device: Device) -> i64 {
+//RS         match device {
+//RS             JetComputeDevice::Auto => 0,
+//RS             JetComputeDevice::Cpu => 1,
+//RS             JetComputeDevice::Metal => 2,
+//RS             JetComputeDevice::Cuda => 3,
+//RS             JetComputeDevice::Vulkan => 4,
+//RS             JetComputeDevice::WebGpu => 5,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn device_from_word(word: i64) -> Option<Device> {
+//RS         match word {
+//RS             0 => Some(JetComputeDevice::Auto),
+//RS             1 => Some(JetComputeDevice::Cpu),
+//RS             2 => Some(JetComputeDevice::Metal),
+//RS             3 => Some(JetComputeDevice::Cuda),
+//RS             4 => Some(JetComputeDevice::Vulkan),
+//RS             5 => Some(JetComputeDevice::WebGpu),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn device_show(word: i64) -> Option<String> {
+//RS         device_from_word(word).map(|device| device.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn on_device(tensor: &Tensor, device: Device) -> Result<Tensor, String> {
+//RS         jet_compute_on_device(tensor, device).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn broadcast_to(tensor: &Tensor, shape: &[i64]) -> Result<Tensor, String> {
+//RS         jet_compute_broadcast_to(tensor, &shape.to_vec()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn transpose(tensor: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_transpose(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn det(tensor: &Tensor) -> Result<f64, String> {
+//RS         jet_compute_det(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn inv(tensor: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_inv(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn solve(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_solve(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn fft(tensor: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_fft(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn stream_new() -> Stream {
+//RS         jet_compute_stream_new()
+//RS     }
+//RS 
+//RS     pub(super) fn stream_new_on(device: Device) -> Result<Stream, String> {
+//RS         jet_compute_stream_new_on_device(device).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn stream_sync(stream: &Stream) -> Result<(), String> {
+//RS         jet_compute_stream_sync(stream).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn stream_show(stream: &Stream) -> String {
+//RS         jet_compute_stream_show(stream)
+//RS     }
+//RS 
+//RS     pub(super) fn transfer(tensor: &Tensor, device: Device) -> Result<Tensor, String> {
+//RS         jet_compute_transfer(tensor, device).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn transfer_show(tensor: &Tensor) -> String {
+//RS         jet_compute_transfer_show(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn kernel_bounds_ok(shape: &[i64], indices: &[i64]) -> Result<bool, String> {
+//RS         jet_compute_kernel_bounds_ok(shape, indices).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn to_sparse(tensor: &Tensor) -> Result<Sparse, String> {
+//RS         jet_compute_to_sparse(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn sparse_nnz(sparse: &Sparse) -> i64 {
+//RS         jet_compute_sparse_nnz(sparse)
+//RS     }
+//RS 
+//RS     pub(super) fn sparse_mv(sparse: &Sparse, vector: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_sparse_mv(sparse, vector).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn sparse_show(sparse: &Sparse) -> String {
+//RS         jet_compute_sparse_show(sparse)
+//RS     }
+//RS 
+//RS     pub(super) fn add(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_add(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn mul(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_mul(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn sub(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_binary("sub", left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn div(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_binary("div", left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn maximum(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_binary("maximum", left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn minimum(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_binary("minimum", left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn unary(op: &str, tensor: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_unary(op, tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn matmul(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_matmul(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn sum_axis(tensor: &Tensor, axis: i64) -> Result<Tensor, String> {
+//RS         jet_compute_sum_axis(tensor, axis).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn mse_loss(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_mse_loss(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn sgd_step(
+//RS         param: &Tensor,
+//RS         grad: &Tensor,
+//RS         learning_rate: f64,
+//RS     ) -> Result<Tensor, String> {
+//RS         jet_compute_sgd_step(param, grad, learning_rate).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn serialize(tensor: &Tensor) -> Result<String, String> {
+//RS         jet_compute_serialize(tensor).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn deserialize(payload: &str) -> Result<Tensor, String> {
+//RS         jet_compute_deserialize(&payload.to_string()).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn matmul_f32_tile(left: &Tensor, right: &Tensor) -> Result<Tensor, String> {
+//RS         jet_compute_matmul_f32_tile(left, right).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn set(tensor: &mut Tensor, indices: &[i64], value: f64) -> Result<(), String> {
+//RS         jet_compute_set(tensor, indices, value).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn get(tensor: &Tensor, indices: &[i64]) -> Result<f64, String> {
+//RS         jet_compute_get(tensor, indices).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_shape(tensor: &Tensor) -> Vec<i64> {
+//RS         jet_compute_tensor_shape(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_rank(tensor: &Tensor) -> i64 {
+//RS         jet_compute_tensor_rank(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_numel(tensor: &Tensor) -> i64 {
+//RS         jet_compute_tensor_numel(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_device(tensor: &Tensor) -> String {
+//RS         jet_compute_tensor_device(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_placement(tensor: &Tensor) -> String {
+//RS         jet_compute_tensor_placement(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn profile_show() -> String {
+//RS         jet_compute_profile_show()
+//RS     }
+//RS 
+//RS     pub(super) fn copy(tensor: &Tensor) -> Tensor {
+//RS         jet_compute_copy(tensor)
+//RS     }
+//RS 
+//RS     pub(super) fn clone(tensor: &Tensor) -> Tensor {
+//RS         tensor.clone()
+//RS     }
+//RS 
+//RS     pub(super) fn tensor_values(tensor: &Tensor) -> Result<Vec<f64>, String> {
+//RS         jet_compute_validate_tensor(tensor).map_err(|error| error.jet_show())?;
+//RS         Ok(jet_compute_tensor_to_list(tensor))
+//RS     }
+//RS 
+//RS     /// Marshal the logical storage projection without applying the user-facing
+//RS     /// `to_list` trace rule. Resident slots must retain traced tensors while a
+//RS     /// Prelude transform is running; the heap list is only an adapter mirror.
+//RS     pub(super) fn marshal_values(tensor: &Tensor) -> Result<Vec<f64>, String> {
+//RS         jet_compute_validate_tensor(tensor).map_err(|error| error.jet_show())?;
+//RS         Ok(jet_compute_tensor_values(tensor))
+//RS     }
+//RS 
+//RS     pub(super) fn slice(
+//RS         tensor: &Tensor,
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS     ) -> Result<Tensor, String> {
+//RS         jet_compute_slice_checked(tensor, start, end, exclusive).map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn view_values(
+//RS         tensor: &Tensor,
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS     ) -> Result<Vec<f64>, String> {
+//RS         jet_compute_view_checked(tensor, start, end, exclusive)
+//RS             .map(|view| view.to_vec())
+//RS             .map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub(super) fn window_get(
+//RS         tensor: &Tensor,
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS         index: i64,
+//RS     ) -> Result<f64, String> {
+//RS         jet_compute_window_get(tensor, start, end, exclusive, index)
+//RS     }
+//RS 
+//RS     pub(super) fn validate_mut(
+//RS         tensor: &mut Tensor,
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS     ) -> Result<(), String> {
+//RS         jet_compute_view_mut_checked(tensor, start, end, exclusive)
+//RS             .map(|_| ())
+//RS             .map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     /// Marshal one mutable Tensor-window write into the shared Prelude seam.
+//RS     pub(super) fn window_set(
+//RS         tensor: &mut Tensor,
+//RS         start: i64,
+//RS         end: i64,
+//RS         exclusive: bool,
+//RS         index: i64,
+//RS         value: f64,
+//RS     ) -> Result<(), String> {
+//RS         jet_compute_window_set(tensor, start, end, exclusive, index, value)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS pub(crate) struct ComputeState {
+//RS     slots: Vec<Option<TensorSlot>>,
+//RS     windows: Vec<TensorWindowSlot>,
+//RS     streams: Vec<Option<semantics::Stream>>,
+//RS     sparse: Vec<Option<semantics::Sparse>>,
+//RS     curried_handles: Vec<i64>,
+//RS     deferred_tensor_drop_depth: usize,
+//RS     deferred_tensor_drops: Vec<i64>,
+//RS }
+//RS 
+//RS impl ComputeState {
+//RS     pub(crate) fn clear(&mut self) {
+//RS         self.windows.clear();
+//RS         self.slots.clear();
+//RS         self.streams.clear();
+//RS         self.sparse.clear();
+//RS         self.deferred_tensor_drop_depth = 0;
+//RS         self.deferred_tensor_drops.clear();
+//RS         for handle in self.curried_handles.drain(..) {
+//RS             semantics::jet_compute_curried_drop(handle);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct TensorSlot {
+//RS     tensor: semantics::Tensor,
+//RS     /// The flattened list handle used by the ordinary ViewMut JIT record.
+//RS     list: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct TensorWindowSlot {
+//RS     /// The materialized list used by generic view operations.
+//RS     list: i64,
+//RS     /// The owning Tensor handle and its original Prelude window facts.
+//RS     tensor: i64,
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS }
+//RS 
+//RS fn tensor_index(handle: i64) -> Option<usize> {
+//RS     usize::try_from(handle).ok()?.checked_sub(1)
+//RS }
+//RS 
+//RS fn stream<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a semantics::Stream> {
+//RS     tensor_index(handle)
+//RS         .and_then(|index| runtime.compute.streams.get(index))
+//RS         .and_then(Option::as_ref)
+//RS }
+//RS 
+//RS fn sparse<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a semantics::Sparse> {
+//RS     tensor_index(handle)
+//RS         .and_then(|index| runtime.compute.sparse.get(index))
+//RS         .and_then(Option::as_ref)
+//RS }
+//RS 
+//RS 
+//RS fn slot<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a TensorSlot> {
+//RS     tensor_index(handle)
+//RS         .and_then(|index| runtime.compute.slots.get(index))
+//RS         .and_then(Option::as_ref)
+//RS }
+//RS 
+//RS fn slot_mut<'a>(runtime: &'a mut JitRuntime, handle: i64) -> Option<&'a mut TensorSlot> {
+//RS     tensor_index(handle)
+//RS         .and_then(|index| runtime.compute.slots.get_mut(index))
+//RS         .and_then(Option::as_mut)
+//RS }
+//RS 
+//RS fn release_tensor(runtime: &mut JitRuntime, tensor: i64) {
+//RS     let Some(index) = tensor_index(tensor) else {
+//RS         return;
+//RS     };
+//RS     let released = runtime
+//RS         .compute
+//RS         .slots
+//RS         .get_mut(index)
+//RS         .and_then(Option::take)
+//RS         .is_some();
+//RS     if released {
+//RS         runtime
+//RS             .compute
+//RS             .windows
+//RS             .retain(|window| window.tensor != tensor);
+//RS     }
+//RS }
+//RS 
+//RS // A resident transform callback runs ordinary lexical cleanup before returning
+//RS // its Tensor handle. Defer those drops until the host has copied the callback
+//RS // result into the shared Prelude representation, then release only its temps.
+//RS fn begin_tensor_drop_deferral(runtime: &mut JitRuntime) -> usize {
+//RS     let mark = runtime.compute.deferred_tensor_drops.len();
+//RS     runtime.compute.deferred_tensor_drop_depth += 1;
+//RS     mark
+//RS }
+//RS 
+//RS fn finish_tensor_drop_deferral(runtime: &mut JitRuntime, mark: usize, preserve: &[i64]) {
+//RS     runtime.compute.deferred_tensor_drop_depth = runtime
+//RS         .compute
+//RS         .deferred_tensor_drop_depth
+//RS         .checked_sub(1)
+//RS         .expect("JIT compute drop deferral underflow");
+//RS     while runtime.compute.deferred_tensor_drops.len() > mark {
+//RS         let tensor = runtime
+//RS             .compute
+//RS             .deferred_tensor_drops
+//RS             .pop()
+//RS             .expect("deferred Tensor drop");
+//RS         if !preserve.contains(&tensor) {
+//RS             release_tensor(runtime, tensor);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn trap(runtime: &mut JitRuntime, message: &str) -> i64 {
+//RS     runtime.set_trap(message);
+//RS     0
+//RS }
+//RS 
+//RS fn range_window(runtime: &JitRuntime, range: i64) -> Option<(i64, i64, i8)> {
+//RS     let start = runtime.heap.record_get_int(range, 0)?;
+//RS     let end = runtime.heap.record_get_int(range, 1)?;
+//RS     let exclusive = runtime
+//RS         .heap
+//RS         .record_get_bool(range, 2)
+//RS         .or_else(|| runtime.heap.record_get_int(range, 2).map(|value| value != 0))?;
+//RS     Some((start, end, i8::from(exclusive)))
+//RS }
+//RS 
+//RS fn read_float_list(runtime: &JitRuntime, handle: i64) -> Option<Vec<f64>> {
+//RS     let len = runtime.heap.list_len(handle)?;
+//RS     (0..len)
+//RS         .map(|index| runtime.heap.list_get_float(handle, index))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn alloc_float_list(runtime: &mut JitRuntime, values: &[f64]) -> i64 {
+//RS     let list = runtime.heap.alloc_empty_list();
+//RS     for &value in values {
+//RS         if runtime.heap.list_push_float(list, value).is_none() {
+//RS             runtime.set_trap("JIT compute list allocation failed");
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn alloc_int_list(runtime: &mut JitRuntime, values: &[i64]) -> i64 {
+//RS     let list = runtime.heap.alloc_empty_list();
+//RS     for &value in values {
+//RS         if runtime.heap.list_push_int(list, value).is_none() {
+//RS             runtime.set_trap("JIT compute integer-list allocation failed");
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn read_int_list(runtime: &JitRuntime, handle: i64) -> Option<Vec<i64>> {
+//RS     let len = runtime.heap.list_len(handle)?;
+//RS     (0..len)
+//RS         .map(|index| runtime.heap.list_get_int(handle, index))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn sync_float_list(runtime: &mut JitRuntime, list: i64, values: &[f64]) -> bool {
+//RS     for (index, &value) in values.iter().enumerate() {
+//RS         let Ok(index) = i64::try_from(index) else {
+//RS             runtime.set_trap("JIT compute list index overflow");
+//RS             return false;
+//RS         };
+//RS         if runtime.heap.list_set_float(list, index, value).is_none() {
+//RS             runtime.set_trap("JIT compute list mirror is invalid");
+//RS             return false;
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn alloc_tensor(runtime: &mut JitRuntime, tensor: semantics::Tensor) -> i64 {
+//RS     let Ok(values) = semantics::marshal_values(&tensor) else {
+//RS         runtime.set_trap("JIT compute tensor validation failed");
+//RS         return 0;
+//RS     };
+//RS     let list = alloc_float_list(runtime, &values);
+//RS     runtime
+//RS         .compute
+//RS         .slots
+//RS         .push(Some(TensorSlot { tensor, list }));
+//RS     runtime.compute.slots.len() as i64
+//RS }
+//RS 
+//RS fn alloc_record_words(runtime: &mut JitRuntime, values: &[i64], context: &str) -> i64 {
+//RS     let record = runtime.heap.alloc_record(values.len());
+//RS     for (index, &value) in values.iter().enumerate() {
+//RS         let Ok(index) = i64::try_from(index) else {
+//RS             runtime.set_trap(&format!("{context} field index overflow"));
+//RS             return 0;
+//RS         };
+//RS         if runtime.heap.record_set_int(record, index, value).is_none() {
+//RS             runtime.set_trap(&format!("{context} record allocation failed"));
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     record
+//RS }
+//RS 
+//RS fn alloc_tensor_record(
+//RS     runtime: &mut JitRuntime,
+//RS     tensors: &[semantics::Tensor],
+//RS     context: &str,
+//RS ) -> i64 {
+//RS     let handles = tensors
+//RS         .iter()
+//RS         .cloned()
+//RS         .map(|tensor| alloc_tensor(runtime, tensor))
+//RS         .collect::<Vec<_>>();
+//RS     if handles.iter().any(|handle| *handle == 0) {
+//RS         return 0;
+//RS     }
+//RS     alloc_record_words(runtime, &handles, context)
+//RS }
+//RS 
+//RS 
+//RS fn read_record_words(runtime: &JitRuntime, handle: i64, count: usize) -> Option<Vec<i64>> {
+//RS     (0..count)
+//RS         .map(|index| runtime.heap.record_get_int(handle, index as i64))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn invoke_callable(slot: JitCallableSlot, args: &[i64]) -> i64 {
+//RS     // SAFETY: the callable binder records the Cranelift signature shape and
+//RS     // this adapter only invokes Tensor-valued functions after sema has proved
+//RS     // their arity. The resident function-value ABI is C-compatible on the JIT
+//RS     // target, with the environment word prepended for captured values.
+//RS     unsafe {
+//RS         if slot.has_env {
+//RS             match args {
+//RS                 [] => {
+//RS                     let callback: unsafe extern "C" fn(i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env)
+//RS                 }
+//RS                 [a] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a)
+//RS                 }
+//RS                 [a, b] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a, *b)
+//RS                 }
+//RS                 [a, b, c] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a, *b, *c)
+//RS                 }
+//RS                 [a, b, c, d] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a, *b, *c, *d)
+//RS                 }
+//RS                 [a, b, c, d, e] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a, *b, *c, *d, *e)
+//RS                 }
+//RS                 [a, b, c, d, e, f] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(slot.env, *a, *b, *c, *d, *e, *f)
+//RS                 }
+//RS                 _ => 0,
+//RS             }
+//RS         } else {
+//RS             match args {
+//RS                 [] => {
+//RS                     let callback: unsafe extern "C" fn() -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback()
+//RS                 }
+//RS                 [a] => {
+//RS                     let callback: unsafe extern "C" fn(i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a)
+//RS                 }
+//RS                 [a, b] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a, *b)
+//RS                 }
+//RS                 [a, b, c] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a, *b, *c)
+//RS                 }
+//RS                 [a, b, c, d] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a, *b, *c, *d)
+//RS                 }
+//RS                 [a, b, c, d, e] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a, *b, *c, *d, *e)
+//RS                 }
+//RS                 [a, b, c, d, e, f] => {
+//RS                     let callback: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
+//RS                         std::mem::transmute(slot.fn_ptr as usize);
+//RS                     callback(*a, *b, *c, *d, *e, *f)
+//RS                 }
+//RS                 _ => 0,
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn transform_failure(runtime: &mut JitRuntime, message: &str) -> i64 {
+//RS     runtime.set_trap(message);
+//RS     0
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn curried_base(
+//RS     base_handle: i64,
+//RS     base_arity: usize,
+//RS     result_fields: usize,
+//RS     error_type_id: Option<u64>,
+//RS ) -> semantics::JetComputeBase {
+//RS     semantics::JetComputeBase::new(base_arity, move |inputs| {
+//RS         let result = Concurrency::with_runtime_mut(|runtime| {
+//RS             let Some(callable) = jit_callable_parts(runtime, base_handle) else {
+//RS                 return Some(Err(semantics::JetComputeError::Unsupported(
+//RS                     "core.compute transform received an invalid function".to_string(),
+//RS                 )));
+//RS             };
+//RS             let handles = inputs
+//RS                 .iter()
+//RS                 .cloned()
+//RS                 .map(|tensor| alloc_tensor(runtime, tensor))
+//RS                 .collect::<Vec<_>>();
+//RS             if handles.iter().any(|handle| *handle == 0) {
+//RS                 for handle in handles {
+//RS                     release_tensor(runtime, handle);
+//RS                 }
+//RS                 return Some(Err(semantics::JetComputeError::Unsupported(
+//RS                     "core.compute transform received an invalid Tensor".to_string(),
+//RS                 )));
+//RS             }
+//RS             let drop_mark = begin_tensor_drop_deferral(runtime);
+//RS             let output_handle = invoke_callable(callable, &handles);
+//RS             let output_handle = match error_type_id {
+//RS                 Some(error_type_id) => {
+//RS                     match crate::runtime_host::jit_result_parts(runtime, output_handle) {
+//RS                         Some((true, bits)) => Ok(bits as i64),
+//RS                         Some((false, bits)) => Err(semantics::JetComputeError::Unsupported(
+//RS                             format!(
+//RS                                 "autodiff callable failed: {}",
+//RS                                 crate::runtime_host::display_handle_text(
+//RS                                     runtime, bits as i64, error_type_id, 0,
+//RS                                 ),
+//RS                             ),
+//RS                         )),
+//RS                         None => Err(semantics::JetComputeError::Unsupported(
+//RS                             "core.compute transform returned an invalid Result".to_string(),
+//RS                         )),
+//RS                     }
+//RS                 }
+//RS                 None => Ok(output_handle),
+//RS             };
+//RS             let value = output_handle.and_then(|output_handle| if output_handle == 0 {
+//RS                 Err(semantics::JetComputeError::Unsupported(
+//RS                     "core.compute transform function returned no value".to_string(),
+//RS                 ))
+//RS             } else if result_fields == 0 {
+//RS                 slot(runtime, output_handle)
+//RS                     .map(|slot| semantics::JetComputeBaseResult::Tensor(slot.tensor.clone()))
+//RS                     .ok_or_else(|| {
+//RS                         semantics::JetComputeError::Unsupported(
+//RS                             "core.compute transform returned an invalid Tensor".to_string(),
+//RS                         )
+//RS                     })
+//RS             } else {
+//RS                 read_record_words(runtime, output_handle, result_fields)
+//RS                     .and_then(|fields| {
+//RS                         fields
+//RS                             .into_iter()
+//RS                             .map(|handle| slot(runtime, handle).map(|slot| slot.tensor.clone()))
+//RS                             .collect::<Option<Vec<_>>>()
+//RS                     })
+//RS                     .map(semantics::JetComputeBaseResult::TensorTuple)
+//RS                     .ok_or_else(|| {
+//RS                         semantics::JetComputeError::Unsupported(
+//RS                             "core.compute.gradient returned an invalid tuple".to_string(),
+//RS                         )
+//RS                     })
+//RS             });
+//RS             finish_tensor_drop_deferral(runtime, drop_mark, &[]);
+//RS             for handle in handles {
+//RS                 release_tensor(runtime, handle);
+//RS             }
+//RS             Some(value)
+//RS         });
+//RS         result.unwrap_or_else(|| {
+//RS             Err(semantics::JetComputeError::Unsupported(
+//RS                 "core.compute transform has no active resident runtime".to_string(),
+//RS             ))
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_curried_gradient(
+//RS     runtime: &mut JitRuntime,
+//RS     values: &[Vec<semantics::Tensor>],
+//RS     context: &str,
+//RS ) -> i64 {
+//RS     let mut outer = Vec::with_capacity(values.len());
+//RS     for target in values {
+//RS         let handle = if target.len() == 1 {
+//RS             alloc_tensor(runtime, target[0].clone())
+//RS         } else {
+//RS             alloc_tensor_record(runtime, target, context)
+//RS         };
+//RS         if handle == 0 {
+//RS             return 0;
+//RS         }
+//RS         outer.push(handle);
+//RS     }
+//RS     alloc_record_words(runtime, &outer, context)
+//RS }
+//RS 
+//RS fn run_curried_handle(runtime: &mut JitRuntime, handle: i64, inputs: &[i64]) -> i64 {
+//RS     let Some(tensors) = inputs
+//RS         .iter()
+//RS         .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
+//RS         .collect::<Option<Vec<_>>>()
+//RS     else {
+//RS         return transform_failure(runtime, "core.compute transform received an invalid Tensor");
+//RS     };
+//RS     let result = match semantics::jet_compute_call_curried(
+//RS         handle,
+//RS         semantics::JetComputeInputPack::from_flat(tensors),
+//RS     ) {
+//RS         Ok(result) => result,
+//RS         Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
+//RS     };
+//RS     match result {
+//RS         semantics::JetComputeCurriedResult::Gradient(values) => {
+//RS             alloc_curried_gradient(runtime, &values, "core.compute.gradient")
+//RS         }
+//RS         semantics::JetComputeCurriedResult::ValueAndGradient { value, gradients } => {
+//RS             let value_handle = alloc_tensor(runtime, value);
+//RS             let gradients_handle =
+//RS                 alloc_curried_gradient(runtime, &gradients, "core.compute.value_and_gradient");
+//RS             if value_handle == 0 || gradients_handle == 0 {
+//RS                 0
+//RS             } else {
+//RS                 alloc_record_words(
+//RS                     runtime,
+//RS                     &[value_handle, gradients_handle],
+//RS                     "core.compute.value_and_gradient",
+//RS                 )
+//RS             }
+//RS         }
+//RS         semantics::JetComputeCurriedResult::Vjp { value, pull, grads } => {
+//RS             let value_handle = alloc_tensor(runtime, value);
+//RS             if value_handle == 0 {
+//RS                 return 0;
+//RS             }
+//RS             runtime.compute.curried_handles.push(pull);
+//RS             runtime.compute.curried_handles.push(grads);
+//RS             let pull_callable = bind_jit_callable_handle(
+//RS                 runtime,
+//RS                 crate::host_seam::guarded_addr(jet_jit_compute_curried_pull) as i64,
+//RS                 pull,
+//RS                 true,
+//RS             );
+//RS             let grads_callable = bind_jit_callable_handle(
+//RS                 runtime,
+//RS                 crate::host_seam::guarded_addr(jet_jit_compute_curried_grads) as i64,
+//RS                 grads,
+//RS                 true,
+//RS             );
+//RS             if pull_callable == 0 || grads_callable == 0 {
+//RS                 0
+//RS             } else {
+//RS                 alloc_record_words(
+//RS                     runtime,
+//RS                     &[value_handle, pull_callable, grads_callable],
+//RS                     "core.compute.vjp",
+//RS                 )
+//RS             }
+//RS         }
+//RS         semantics::JetComputeCurriedResult::Jvp { value, tangent } => {
+//RS             let value_handle = alloc_tensor(runtime, value);
+//RS             let tangent_handle = alloc_tensor(runtime, tangent);
+//RS             if value_handle == 0 || tangent_handle == 0 {
+//RS                 0
+//RS             } else {
+//RS                 alloc_record_words(runtime, &[value_handle, tangent_handle], "core.compute.jvp")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Marshal one resident callable invocation into the single Prelude-owned
+//RS /// curried call. The record is adapter state only: the plan handle retains
+//RS /// transform policy, tape state, and continuation lifetime in the Prelude.
+//RS fn run_curried_call(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) -> i64 {
+//RS     run_curried_handle(runtime, env, inputs)
+//RS }
+//RS 
+//RS fn run_curried_call_list(runtime: &mut JitRuntime, env: i64, inputs_handle: i64) -> i64 {
+//RS     let Some(inputs) = read_int_list(runtime, inputs_handle) else {
+//RS         return transform_failure(runtime, "core.compute transform inputs are invalid");
+//RS     };
+//RS     run_curried_call(runtime, env, &inputs)
+//RS }
+//RS 
+//RS /// The resident host call has one logical ABI for every curried transform.
+//RS /// Typed function-value adapters below only pack their arguments into a list
+//RS /// and enter this operation.
+//RS fn jet_jit_compute_call_curried(env: i64, inputs_handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_list(runtime, env, inputs_handle))
+//RS }
+//RS 
+//RS fn run_curried_call_adapter(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) -> i64 {
+//RS     let inputs_handle = alloc_int_list(runtime, inputs);
+//RS     if inputs_handle == 0 {
+//RS         return 0;
+//RS     }
+//RS     run_curried_call_list(runtime, env, inputs_handle)
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_pull(env: i64, seed: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_handle(runtime, env, &[seed]))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_compute_curried_grads(env: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let result = semantics::jet_compute_call_curried(
+//RS             env,
+//RS             semantics::JetComputeInputPack::new(Vec::new(), Vec::new()),
+//RS         );
+//RS         let values = match result {
+//RS             Ok(semantics::JetComputeCurriedResult::Gradient(values)) => values,
+//RS             Ok(_) => {
+//RS                 return transform_failure(
+//RS                     runtime,
+//RS                     "core.compute.vjp.grads returned the wrong result",
+//RS                 );
+//RS             }
+//RS             Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
+//RS         };
+//RS         alloc_curried_gradient(runtime, &values, "core.compute.vjp.grads")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_0(env: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[]))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_1(env: i64, a: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a]))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_2(env: i64, a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b]))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_3(env: i64, a: i64, b: i64, c: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c]))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_4(env: i64, a: i64, b: i64, c: i64, d: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d]))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_5(env: i64, a: i64, b: i64, c: i64, d: i64, e: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         run_curried_call_adapter(runtime, env, &[a, b, c, d, e])
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_call_6(env: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         run_curried_call_adapter(runtime, env, &[a, b, c, d, e, f])
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_compute_transform(
+//RS     base: i64,
+//RS     inputs: i64,
+//RS     targets: i64,
+//RS     method: i64,
+//RS     base_arity: i64,
+//RS     result_fields: i64,
+//RS     return_type_id: i64,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let (plan, _) = match create_transform_plan(
+//RS             runtime, base, targets, method, base_arity, result_fields, return_type_id,
+//RS         ) {
+//RS             Ok(plan) => plan,
+//RS             Err(error) => return transform_failure(runtime, &error),
+//RS         };
+//RS         let result = run_curried_call_list(runtime, plan, inputs);
+//RS         semantics::jet_compute_curried_drop(plan);
+//RS         result
+//RS     })
+//RS }
+//RS 
+//RS fn create_transform_plan(
+//RS     runtime: &mut JitRuntime,
+//RS     base: i64,
+//RS     targets: i64,
+//RS     method: i64,
+//RS     base_arity: i64,
+//RS     result_fields: i64,
+//RS     return_type_id: i64,
+//RS ) -> Result<(i64, usize), String> {
+//RS     let kind = semantics::JetComputeTransformKind::from_i64(method)
+//RS         .ok_or("core.compute transform method is invalid")?;
+//RS     let base_arity = usize::try_from(base_arity)
+//RS         .map_err(|_| "core.compute transform arity is invalid")?;
+//RS     let result_fields = usize::try_from(result_fields)
+//RS         .map_err(|_| "core.compute transform result shape is invalid")?;
+//RS     let targets = read_int_list(runtime, targets)
+//RS         .ok_or("core.compute transform expects integer targets")?;
+//RS     let descriptor = runtime.runtime_type_descriptor(return_type_id as u64)
+//RS         .ok_or("core.compute transform has no checked return descriptor")?;
+//RS     let error_type_id = descriptor.err;
+//RS     let adapter_arity = if kind.is_jvp() {
+//RS         base_arity.saturating_mul(2)
+//RS     } else {
+//RS         base_arity
+//RS     };
+//RS     if adapter_arity > 6 {
+//RS         return Err("core.compute transform function arity exceeds the resident ABI".to_string());
+//RS     }
+//RS     let plan = semantics::jet_compute_curried_new(
+//RS         curried_base(base, base_arity, result_fields, error_type_id),
+//RS         kind,
+//RS         &targets,
+//RS         if result_fields == 0 {
+//RS             semantics::JetComputeResultShape::Tensor
+//RS         } else {
+//RS             semantics::JetComputeResultShape::TensorTuple(result_fields)
+//RS         },
+//RS     );
+//RS     Ok((plan, adapter_arity))
+//RS }
+//RS 
+//RS fn jet_jit_compute_curried_new(
+//RS     base: i64,
+//RS     targets: i64,
+//RS     method: i64,
+//RS     base_arity: i64,
+//RS     result_fields: i64,
+//RS     return_type_id: i64,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let (plan, adapter_arity) = match create_transform_plan(
+//RS             runtime, base, targets, method, base_arity, result_fields, return_type_id,
+//RS         ) {
+//RS             Ok(plan) => plan,
+//RS             Err(error) => return transform_failure(runtime, &error),
+//RS         };
+//RS         runtime.compute.curried_handles.push(plan);
+//RS         // These adapters are handed to generated code as plain callable
+//RS         // addresses rather than as named `host_fns!` imports, so they need the
+//RS         // same no-unwind boundary explicitly (#1997, `host_seam.rs`).
+//RS         let fn_ptr = match adapter_arity {
+//RS             0 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_0) as i64,
+//RS             1 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_1) as i64,
+//RS             2 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_2) as i64,
+//RS             3 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_3) as i64,
+//RS             4 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_4) as i64,
+//RS             5 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_5) as i64,
+//RS             6 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_6) as i64,
+//RS             _ => {
+//RS                 return transform_failure(
+//RS                     runtime,
+//RS                     "core.compute transform function arity exceeds the resident ABI",
+//RS                 );
+//RS             }
+//RS         };
+//RS         bind_jit_callable_handle(runtime, fn_ptr, plan, true)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_drop_tensor(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         if runtime.compute.deferred_tensor_drop_depth != 0 {
+//RS             runtime.compute.deferred_tensor_drops.push(tensor);
+//RS         } else {
+//RS             release_tensor(runtime, tensor);
+//RS         }
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_drop_window(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         runtime.compute.windows.retain(|window| window.list != list);
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_from_list(values: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(values) = read_float_list(runtime, values) else {
+//RS             return trap(runtime, "core.compute.from_list expects a float list");
+//RS         };
+//RS         match semantics::from_list(&values) {
+//RS             Ok(tensor) => {
+//RS                 let handle = alloc_tensor(runtime, tensor);
+//RS                 result_ok(handle as u64)
+//RS             }
+//RS             Err(message) => trap(runtime, &message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_matrix(rows: i64, cols: i64, fill: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match semantics::matrix(rows, cols, fill) {
+//RS         Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS         Err(message) => result_err_msg(&message),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_zeros(shape: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.zeros expects an integer shape list");
+//RS         };
+//RS         match semantics::zeros(&shape) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_ones(shape: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.ones expects an integer shape list");
+//RS         };
+//RS         match semantics::ones(&shape) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_full(shape: i64, value: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.full expects an integer shape list");
+//RS         };
+//RS         match semantics::full(&shape, value) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_eye(size: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match semantics::eye(size) {
+//RS         Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS         Err(message) => result_err_msg(&message),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_vec(len: i64, fill: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match semantics::vec(len, fill) {
+//RS         Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS         Err(message) => result_err_msg(&message),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_reshape(tensor: i64, shape: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.reshape expects an integer shape list");
+//RS         };
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.reshape received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::reshape(&tensor, &shape) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_cpu() -> i64 {
+//RS     semantics::device_word(semantics::device_cpu())
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_auto() -> i64 {
+//RS     semantics::device_word(semantics::device_auto())
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_show(device: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match semantics::device_show(device) {
+//RS         Some(text) => runtime.heap.alloc_string(text),
+//RS         None => {
+//RS             runtime.set_trap("core.compute.device_show received an invalid device");
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_metal() -> i64 {
+//RS     semantics::device_word(semantics::device_metal())
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_cuda() -> i64 {
+//RS     semantics::device_word(semantics::device_cuda())
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_vulkan() -> i64 {
+//RS     semantics::device_word(semantics::device_vulkan())
+//RS }
+//RS 
+//RS fn jet_jit_compute_device_webgpu() -> i64 {
+//RS     semantics::device_word(semantics::device_webgpu())
+//RS }
+//RS 
+//RS fn jet_jit_compute_on_device(tensor: i64, device: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(device) = semantics::device_from_word(device) else {
+//RS             return result_err_msg("core.compute.on_device received an invalid device");
+//RS         };
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.on_device received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::on_device(&tensor, device) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_broadcast_to(tensor: i64, shape: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.broadcast_to expects an integer shape list");
+//RS         };
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.broadcast_to received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::broadcast_to(&tensor, &shape) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_transpose(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.transpose received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::transpose(&tensor) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_det(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.det received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::det(&tensor) {
+//RS             Ok(value) => result_ok(value.to_bits()),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_inv(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.inv received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::inv(&tensor) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0203 crates/jet-jit/src/Compute.rs:1-1795
+

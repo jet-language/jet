@@ -1,0 +1,166 @@
+// PORT-PENDING 0252 crates-jet-codegen-src-prelude-corelib-top-commandsuite-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingComparison.rs:1-162
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TEST-COMPARE1=A: the Foundation comparison engine is embedded in the
+//RS // generated Prelude by Codegen/mod.rs.  This carrier only invokes the two
+//RS // checked callables, records their observations, and marshals the canonical
+//RS // Foundation verdict into the Core plain type.
+//RS 
+//RS fn jet_testing_relation(
+//RS     relation: &String,
+//RS ) -> crate::jet_testing_comparison_foundation::ObservationRelation {
+//RS     match relation.as_str() {
+//RS         "" | "typed_equality" => {
+//RS             crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+//RS         }
+//RS         "ordered_effects" => {
+//RS             crate::jet_testing_comparison_foundation::ObservationRelation::OrderedEffects
+//RS         }
+//RS         "typed_failure" => {
+//RS             crate::jet_testing_comparison_foundation::ObservationRelation::TypedFailure
+//RS         }
+//RS         other => crate::jet_testing_comparison_foundation::ObservationRelation::Custom(
+//RS             other.to_string(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_testing_observation(
+//RS     value: &jet_std::DataTree,
+//RS ) -> crate::jet_testing_comparison_foundation::ComparisonObservation {
+//RS     crate::jet_testing_comparison_foundation::ComparisonObservation::value(
+//RS         jet_std::render_datatree_json(value, false, 0),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_testing_record(
+//RS     record: crate::jet_testing_comparison_foundation::ComparisonRecord,
+//RS     cases: &Vec<jet_std::DataTree>,
+//RS     reference_values: Vec<jet_std::DataTree>,
+//RS     candidate_values: Vec<jet_std::DataTree>,
+//RS     seed: Option<i64>,
+//RS ) -> jet_std::JetTestComparison {
+//RS     let case_ids = record
+//RS         .samples
+//RS         .iter()
+//RS         .map(|sample| sample.identity.case_id.clone())
+//RS         .collect::<Vec<_>>();
+//RS     let first_difference = record
+//RS         .first_difference
+//RS         .map(|index| index as i64)
+//RS         .unwrap_or(-1);
+//RS     jet_std::JetTestComparison {
+//RS         status: record.status.as_str().to_string(),
+//RS         relation: record.relation.as_str().to_string(),
+//RS         source: "core.testing".to_string(),
+//RS         tool: "jet".to_string(),
+//RS         target: "embedded-prelude".to_string(),
+//RS         seed,
+//RS         case_ids,
+//RS         inputs: cases.clone(),
+//RS         reference: reference_values,
+//RS         candidate: candidate_values,
+//RS         first_difference,
+//RS         reason: record
+//RS             .reason
+//RS             .unwrap_or_else(|| "comparison has no reason".to_string()),
+//RS         universal_proof: record.universal_proof,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_testing_compare(
+//RS     cases: &Vec<jet_std::DataTree>,
+//RS     reference: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+//RS     candidate: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+//RS     relation: &String,
+//RS ) -> jet_std::JetTestComparison {
+//RS     let relation = jet_testing_relation(relation);
+//RS     if !relation.supports_plain_callable()
+//RS         && matches!(relation.as_str(), "ordered_effects" | "typed_failure")
+//RS     {
+//RS         let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
+//RS             relation,
+//RS             crate::jet_testing_comparison_foundation::ComparisonStatus::Unsupported,
+//RS             "relation requires recorded observations",
+//RS         );
+//RS         return jet_testing_record(record, cases, Vec::new(), Vec::new(), None);
+//RS     }
+//RS     let seed = std::env::var("JET_PROP_SEED")
+//RS         .ok()
+//RS         .and_then(|value| value.parse::<i64>().ok());
+//RS     let mut samples = Vec::with_capacity(cases.len());
+//RS     let mut reference_values = Vec::with_capacity(cases.len());
+//RS     let mut candidate_values = Vec::with_capacity(cases.len());
+//RS 
+//RS     for (index, input) in cases.iter().enumerate() {
+//RS         // Each implementation receives an independent input clone.  A panic
+//RS         // or runtime stop is an unavailable comparison, never a matched one.
+//RS         let reference_value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             reference(input.clone())
+//RS         })) {
+//RS             Ok(value) => value,
+//RS             Err(_) => {
+//RS                 let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
+//RS                     relation.clone(),
+//RS                     crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
+//RS                     format!("reference implementation crashed on case-{index}"),
+//RS                 );
+//RS                 return jet_testing_record(record, cases, reference_values, candidate_values, seed);
+//RS             }
+//RS         };
+//RS         let candidate_value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             candidate(input.clone())
+//RS         })) {
+//RS             Ok(value) => value,
+//RS             Err(_) => {
+//RS                 reference_values.push(reference_value);
+//RS                 let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
+//RS                     relation.clone(),
+//RS                     crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
+//RS                     format!("candidate implementation crashed on case-{index}"),
+//RS                 );
+//RS                 return jet_testing_record(record, cases, reference_values, candidate_values, seed);
+//RS             }
+//RS         };
+//RS         let identity = crate::jet_testing_comparison_foundation::ComparisonIdentity::new(
+//RS             format!("case-{index}"),
+//RS             format!("input-{index}"),
+//RS             "core.testing",
+//RS             "jet",
+//RS             "embedded-prelude",
+//RS         );
+//RS         samples.push(
+//RS             crate::jet_testing_comparison_foundation::ComparisonSample::new(
+//RS                 identity,
+//RS                 jet_testing_observation(&reference_value),
+//RS                 jet_testing_observation(&candidate_value),
+//RS             ),
+//RS         );
+//RS         reference_values.push(reference_value);
+//RS         candidate_values.push(candidate_value);
+//RS     }
+//RS 
+//RS     let record = crate::jet_testing_comparison_foundation::compare_samples(relation, samples);
+//RS     jet_testing_record(record, cases, reference_values, candidate_values, seed)
+//RS }
+//RS 
+//RS fn jet_testing_assert_equal(comparison: &jet_std::JetTestComparison) -> bool {
+//RS     comparison.status == "matched"
+//RS         && !comparison.universal_proof
+//RS         && comparison.first_difference < 0
+//RS         && !comparison.inputs.is_empty()
+//RS }
+//RS 
+//RS fn jet_testing_status(comparison: &jet_std::JetTestComparison) -> String {
+//RS     comparison.status.clone()
+//RS }
+//RS 
+//RS impl JetShow for jet_std::JetTestComparison {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "TestComparison {{ status: {}, relation: {}, first_difference: {}, reason: {} }}",
+//RS             self.status, self.relation, self.first_difference, self.reason
+//RS         )
+//RS     }
+//RS }
+// END-PORT-PENDING 0252 crates/jet-codegen/src/Prelude/CoreLib/Top/TestingComparison.rs:1-162
+

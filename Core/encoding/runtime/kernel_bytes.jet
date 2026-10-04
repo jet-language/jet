@@ -1,0 +1,285 @@
+use core.sys.target as target
+use core.text.runtime.kernel_unicode_string as unicode
+use core.text.parse as text_parse
+use jet_foundation.[JetAbsent]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:1
+// Growable byte builder with one read cursor. Text operations use lossy UTF-8.
+// GATE #4494: native vector capacity and UTF-8 lossy decode leaves.
+#Clone
+pub struct JetByteBuffer {
+    pub bytes: [U8]
+    pub pos: Int
+}
+
+impl JetByteBuffer {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:11
+    pub fn from_owned(bytes: ^[U8]) -> JetByteBuffer Never! {
+        JetByteBuffer{bytes: ^bytes, pos: 0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:17
+    pub fn new() -> JetByteBuffer Never! { from_owned([U8]{}) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:20
+    pub fn with_capacity(n: Int) -> JetByteBuffer Never! {
+        // GATE #4483: Rust's i64-to-usize cast truncates on narrow targets.
+        size :: n.max(0) & Int.from_u64(target.usize_max())
+        // GATE #4494: retained vector allocation, not a Rust bridge.
+        from_owned([U8].with_capacity(size))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:23
+    pub fn from(bytes: [U8]) -> JetByteBuffer Never! { from_owned(bytes.clone()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:26
+    pub fn write_u8(self: &JetByteBuffer, v: U8) Never! { self.bytes.push(v) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:29
+    pub fn write_i8(self: &JetByteBuffer, v: I8) Never! { self.bytes.push(v as U8) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:32
+    pub fn write_byte(self: &JetByteBuffer, v: U8) Never! { self.write_u8(v) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:35
+    pub fn write_u16_le(self: &JetByteBuffer, v: U16) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:38
+    pub fn write_u16_be(self: &JetByteBuffer, v: U16) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:41
+    pub fn write_i16_le(self: &JetByteBuffer, v: I16) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:44
+    pub fn write_i16_be(self: &JetByteBuffer, v: I16) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:47
+    pub fn write_u32_le(self: &JetByteBuffer, v: U32) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:50
+    pub fn write_u32_be(self: &JetByteBuffer, v: U32) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:53
+    pub fn write_i32_le(self: &JetByteBuffer, v: I32) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:56
+    pub fn write_i32_be(self: &JetByteBuffer, v: I32) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:59
+    pub fn write_u64_le(self: &JetByteBuffer, v: U64) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:62
+    pub fn write_u64_be(self: &JetByteBuffer, v: U64) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:65
+    pub fn write_i64_le(self: &JetByteBuffer, v: I64) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:68
+    pub fn write_i64_be(self: &JetByteBuffer, v: I64) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:71
+    pub fn write_f32_le(self: &JetByteBuffer, v: F32) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:74
+    pub fn write_f32_be(self: &JetByteBuffer, v: F32) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:77
+    pub fn write_f64_le(self: &JetByteBuffer, v: F64) Never! { self.bytes.extend(v.to_le_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:80
+    pub fn write_f64_be(self: &JetByteBuffer, v: F64) Never! { self.bytes.extend(v.to_be_bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:83
+    pub fn write_bytes(self: &JetByteBuffer, bytes: [U8]) Never! { self.bytes.extend(bytes) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:86
+    pub fn write(self: &JetByteBuffer, bytes: [U8]) Never! { self.write_bytes(bytes) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:89
+    pub fn write_to(self: &JetByteBuffer, other: &JetByteBuffer) Never! { other.bytes.extend(self.bytes) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:92
+    pub fn to_bytes(self) -> [U8] Never! { self.bytes.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:95
+    pub fn get_buffer(self) -> [U8] Never! { self.bytes.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:98
+    pub fn buffer(self) -> [U8] Never! { self.bytes.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:101
+    pub fn capacity(self) -> Int Never! { self.bytes.capacity() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:104
+    pub fn len(self) -> Int Never! { self.bytes.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:107
+    pub fn is_empty(self) -> Bool Never! { self.bytes.is_empty() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:110
+    pub fn clear(self: &JetByteBuffer) Never! { self.bytes.clear(); self.pos = 0 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:114
+    pub fn position(self) -> Int Never! { self.pos }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:117
+    pub fn eof(self) -> Bool Never! { self.pos >= self.bytes.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:120
+    pub fn rewind(self: &JetByteBuffer) Never! { self.pos = 0 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:123
+    pub fn seek(self: &JetByteBuffer, index: Int) Never! {
+        if index <= 0 { self.pos = 0; return }
+        // GATE #4483: preserve the selected target's usize cast.
+        at :: index & Int.from_u64(target.usize_max())
+        self.pos = at.min(self.bytes.len())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:132
+    pub fn get(self, index: Int) -> U8 JetAbsent! {
+        if index < 0 -> return Err(JetAbsent{})
+        // GATE #4483: get casts positive indices rather than checked conversion.
+        at :: index & Int.from_u64(target.usize_max())
+        if at >= self.bytes.len() -> return Err(JetAbsent{})
+        Ok(self.bytes[at])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:138
+    pub fn first(self) -> U8 JetAbsent! {
+        if self.bytes.is_empty() -> return Err(JetAbsent{})
+        Ok(self.bytes[0])
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:141
+    pub fn next(self: &JetByteBuffer) -> U8 JetAbsent! { self.read_byte() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:145
+    pub fn read_byte_fast(self: &JetByteBuffer) -> U8? Never! {
+        if self.pos >= self.bytes.len() -> return None
+        pos :: self.pos
+        byte :: self.bytes[pos]
+        self.pos = pos + 1
+        Val(byte)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:154
+    pub fn read_byte(self: &JetByteBuffer) -> U8 JetAbsent! {
+        if self.read_byte_fast() == .Val(byte) -> return Ok(byte)
+        Err(JetAbsent{})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:157
+    pub fn read_bytes(self: &JetByteBuffer, n: Int) -> [U8] JetAbsent! {
+        // Comparing the remaining length also rejects usize overflow, without addition.
+        if n < 0 || n > self.bytes.len() - self.pos -> return Err(JetAbsent{})
+        end :: self.pos + n
+        out :: self.bytes[self.pos..<end].to_vec()
+        self.pos = end
+        Ok(^out)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:174
+    pub fn read(self: &JetByteBuffer) -> [U8] JetAbsent! {
+        if self.eof() -> return Err(JetAbsent{})
+        out :: self.bytes[self.pos..<self.bytes.len()].to_vec()
+        self.pos = self.bytes.len()
+        Ok(^out)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:182
+    pub fn read_string(self: &JetByteBuffer, n: Int) -> String JetAbsent! {
+        bytes :: self.read_bytes(n)?
+        // GATE #4494: canonical UTF-8 lossy decoder.
+        Ok(String.from_utf8_lossy(bytes).into_owned())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:186
+    pub fn as_text(self) -> String Never! { String.from_utf8_lossy(self.bytes).into_owned() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:189
+    pub fn to_string(self) -> String Never! { self.as_text() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:192
+    pub fn string(self) -> String Never! { self.as_text() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:195
+    pub fn contains(self, needle: String) -> Bool Never! { self.as_text().contains(needle) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:198
+    pub fn starts_with(self, prefix: String) -> Bool Never! { self.as_text().starts_with(prefix) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:201
+    pub fn ends_with(self, suffix: String) -> Bool Never! { self.as_text().ends_with(suffix) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:204
+    pub fn trim(self) -> JetByteBuffer Never! { text := unicode.trim(self.as_text()); from_owned(text.bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:207
+    pub fn trim_start(self) -> JetByteBuffer Never! { text := unicode.trim_start(self.as_text()); from_owned(text.bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:210
+    pub fn trim_end(self) -> JetByteBuffer Never! { text := unicode.trim_end(self.as_text()); from_owned(text.bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:213
+    pub fn to_lower(self) -> JetByteBuffer Never! { from_owned(unicode.lower(self.as_text()).bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:216
+    pub fn to_upper(self) -> JetByteBuffer Never! { from_owned(unicode.upper(self.as_text()).bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:219
+    pub fn to_title(self) -> JetByteBuffer Never! {
+        text :: self.as_text()
+        out := String.with_capacity(text.len()) // GATE #4494
+        start := true
+        loop ch in text.chars() {
+            // GATE #4494: allocation-free scalar Unicode iterators.
+            if ch.is_whitespace() {
+                start = true
+                out.push(ch)
+            } else if start {
+                loop c in ch.to_uppercase() -> out.push(c)
+                start = false
+            } else {
+                loop c in ch.to_lowercase() -> out.push(c)
+            }
+        }
+        from_owned(out.into_bytes())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:240
+    pub fn title(self) -> JetByteBuffer Never! { self.to_title() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:243
+    pub fn replace(self, from: String, to: String) -> JetByteBuffer Never! {
+        from_owned(self.as_text().replace(from, to).bytes())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:246
+    pub fn split(self, sep: String) -> [String] Never! {
+        text :: self.as_text()
+        if sep.is_empty() {
+            out := [String]{""}
+            loop ch in text.chars() -> out.push(ch.to_string())
+            out.push("")
+            return ^out
+        }
+        text_parse.split(text, sep)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:258
+    pub fn partition(self, separator: JetByteBuffer) -> [JetByteBuffer] Err! {
+        if separator.bytes.is_empty() -> return Err("byte partition separator must not be empty")
+        index := 0
+        loop index + separator.bytes.len() <= self.bytes.len() {
+            if self.bytes[index..<(index + separator.bytes.len())] == separator.bytes[0..<separator.bytes.len()] {
+                return Ok([JetByteBuffer]{
+                    from_owned(self.bytes[0..<index].to_vec()), separator.clone(),
+                    from_owned(self.bytes[(index + separator.bytes.len())..<self.bytes.len()].to_vec())})
+            }
+            index = index + 1
+        }
+        Ok([JetByteBuffer]{self.clone(), new(), new()})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:282
+    pub fn join(self, parts: [String]) -> JetByteBuffer Never! { from_owned(parts.join(self.as_text()).bytes()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:285
+    pub fn lines(self) -> [String] Never! {
+        // Rust lines uses LF with an optional preceding CR; other separators stay text.
+        text :: self.as_text()
+        if text.is_empty() -> return [String]{}
+        parts := text_parse.split(text, "\n")
+        if text.ends_with("\n") -> _ :: parts.pop()
+        loop i in 0..<parts.len() {
+            if parts[i].ends_with("\r") && (i < parts.len() - 1 || text.ends_with("\n")) {
+                parts[i] = parts[i].slice(0, parts[i].len() - 1)
+            }
+        }
+        ^parts
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:288
+    pub fn index_of(self, needle: String) -> Int JetAbsent! {
+        index :: text_parse.find(self.as_text(), needle)
+        if index < 0 -> return Err(JetAbsent{})
+        Ok(index)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:291
+    pub fn last_index_of(self, needle: String) -> Int JetAbsent! {
+        index :: text_parse.rfind(self.as_text(), needle)
+        if index < 0 -> return Err(JetAbsent{})
+        Ok(index)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:294
+    pub fn is_ascii(self) -> Bool Never! {
+        loop byte in self.bytes { if byte >= U8{128} -> return false }
+        true
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:297
+    pub fn copy(self) -> JetByteBuffer Never! { self.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:300
+    pub fn copy_to(self, other: &JetByteBuffer) Never! { other.bytes = self.bytes.clone(); other.pos = 0 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:304
+    pub fn equal(self, other: JetByteBuffer) -> Bool Never! { self.bytes == other.bytes }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:307
+    pub fn compare(self, other: JetByteBuffer) -> Int Never! {
+        loop i in 0..<self.bytes.len().min(other.bytes.len()) {
+            if self.bytes[i] < other.bytes[i] -> return -1
+            if self.bytes[i] > other.bytes[i] -> return 1
+        }
+        if self.bytes.len() < other.bytes.len() -> return -1
+        if self.bytes.len() > other.bytes.len() -> return 1
+        0
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:314
+    pub fn parse(self) -> Int Err! {
+        text := unicode.trim(self.as_text()) // #4303
+        // GATE #4494: fixed-width i64 parsing retains the std error message.
+        if I64.from_str(text) == { .Ok(value) -> Ok(Int.from_i64(value)); .Err(error) -> Err(error.to_string()) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:320
+    pub fn flush(self: &JetByteBuffer) Never! {} // In-memory buffer: Rust operation is empty.
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:321
+    pub fn close(self: &JetByteBuffer) Never! { self.clear() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Bytes.rs:324
+    pub fn shutdown(self: &JetByteBuffer) Never! { self.clear() }
+}

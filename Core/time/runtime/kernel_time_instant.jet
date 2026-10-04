@@ -1,0 +1,61 @@
+// PORT-PENDING 0173 crates-jet-codegen-src-prelude-deadline-module-group: crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:1-57
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TIME-INSTANT-SPLIT1=A: Instant is an optional Core time value. Keep its
+//RS // carrier and primitive operations in one shared Prelude fragment so AOT and
+//RS // JIT do not maintain separate time semantics across the cache boundary.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+//RS pub struct JetInstant {
+//RS     start_ns: i64,
+//RS }
+//RS 
+//RS impl JetInstant {
+//RS     pub(crate) fn now() -> Self {
+//RS         JetInstant {
+//RS             start_ns: jet_time_monotonic_now_ns(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn elapsed_millis(&self) -> i64 {
+//RS         self.elapsed_nanos().saturating_div(1_000_000)
+//RS     }
+//RS 
+//RS     pub(crate) fn elapsed_nanos(&self) -> i64 {
+//RS         jet_time_instant_elapsed_ns(jet_time_monotonic_now_ns(), self.start_ns)
+//RS     }
+//RS 
+//RS     pub(crate) fn plus_duration_ns(&self, ns: i64) -> Self {
+//RS         Self {
+//RS             start_ns: jet_time_instant_add_duration_ns(self.start_ns, ns),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn minus_duration_ns(&self, ns: i64) -> Self {
+//RS         Self {
+//RS             start_ns: jet_time_instant_sub_duration_ns(self.start_ns, ns),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn difference_ns(&self, other: &Self) -> i64 {
+//RS         jet_time_instant_difference_ns(self.start_ns, other.start_ns)
+//RS     }
+//RS 
+//RS     pub(crate) fn compare_to(&self, other: &Self) -> i64 {
+//RS         jet_time_instant_compare(self.start_ns, other.start_ns)
+//RS     }
+//RS 
+//RS     pub(crate) fn to_string_fmt(&self) -> String {
+//RS         "Instant".to_string()
+//RS     }
+//RS }
+//RS 
+//RS /// Wait until an Instant using the same monotonic clock and deadline-aware
+//RS /// sleep kernel as `core.time.sleep`.
+//RS pub(crate) fn jet_time_sleep_until(deadline: &JetInstant) {
+//RS     let remaining = deadline
+//RS         .start_ns
+//RS         .saturating_sub(jet_time_monotonic_now_ns())
+//RS         .max(0);
+//RS     jet_std_time_sleep_duration_ns(remaining);
+//RS }
+// END-PORT-PENDING 0173 crates/jet-codegen/src/Prelude/Core/TimeInstant.rs:1-57
+

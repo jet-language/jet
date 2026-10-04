@@ -1,0 +1,144 @@
+// PORT-PENDING 0271 crates-jet-codegen-src-prelude-corelib-top-fsruntimeops-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs:1-140
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Streaming file operations shared by AOT, JIT, and the interpreter.
+//RS //
+//RS // The surrounding engine supplies `JetFileReader`, `JetFileWriter`, `jet_std`,
+//RS // `jet_fault_should_fail`, and the raw `jet_fs_*` kernels. This fragment owns
+//RS // the operation policy and line trimming once, so a default-tier deopt calls
+//RS // the same functions as generated AOT code.
+//RS 
+//RS pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let file = jet_fs_open(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+//RS     Ok(JetFileReader {
+//RS         inner: std::io::BufReader::new(file),
+//RS         path: path.clone(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+//RS         return Err(error);
+//RS     }
+//RS     let file = std::fs::File::create(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+//RS     Ok(JetFileWriter {
+//RS         inner: std::io::BufWriter::new(file),
+//RS         path: path.clone(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+//RS         return Err(error);
+//RS     }
+//RS     let file = std::fs::OpenOptions::new()
+//RS         .create(true)
+//RS         .append(true)
+//RS         .open(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+//RS     Ok(JetFileWriter {
+//RS         inner: std::io::BufWriter::new(file),
+//RS         path: path.clone(),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_file_reader_path(reader: &JetFileReader) -> String {
+//RS     reader.path.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_file_reader_read_line(
+//RS     reader: &mut JetFileReader,
+//RS ) -> Result<Option<String>, jet_std::IOError> {
+//RS     use std::io::BufRead;
+//RS 
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(reader.path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let mut line = String::new();
+//RS     match reader.inner.read_line(&mut line) {
+//RS         Ok(0) => Ok(None),
+//RS         Ok(_) => {
+//RS             while line.ends_with('\n') || line.ends_with('\r') {
+//RS                 line.pop();
+//RS             }
+//RS             Ok(Some(line))
+//RS         }
+//RS         Err(error) => Err(jet_std::io_error_at(
+//RS             jet_std::IOOperation::Read,
+//RS             &reader.path,
+//RS             error,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_file_writer_write_line(
+//RS     writer: &mut JetFileWriter,
+//RS     line: &String,
+//RS ) -> Result<(), jet_std::IOError> {
+//RS     use std::io::Write;
+//RS 
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(writer.path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     writer
+//RS         .inner
+//RS         .write_all(line.as_bytes())
+//RS         .and_then(|_| writer.inner.write_all(b"\n"))
+//RS         .map_err(|error| {
+//RS             jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error)
+//RS         })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_file_writer_flush(
+//RS     writer: &mut JetFileWriter,
+//RS ) -> Result<(), jet_std::IOError> {
+//RS     use std::io::Write;
+//RS 
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(writer.path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     writer
+//RS         .inner
+//RS         .flush()
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_file_writer_path(writer: &JetFileWriter) -> String {
+//RS     writer.path.clone()
+//RS }
+// END-PORT-PENDING 0271 crates/jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs:1-140
+

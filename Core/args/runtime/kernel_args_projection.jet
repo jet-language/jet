@@ -1,0 +1,363 @@
+// PORT-PENDING 0140 crates-jet-codegen-src-prelude-core-argsprojection-module-group: crates/jet-codegen/src/Prelude/Core/ArgsProjection.rs:1-359
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SHAPE-PROJECT1: root-level semantic adapters for typed argument
+//RS // projection. This file is included once, after the canonical Shape source and
+//RS // raw Args Prelude source, so multiply-included host fragments stay
+//RS // dependency-minimal.
+//RS 
+//RS /// D-SHAPE-ONE1=A: decode a typed value anywhere through the same builder
+//RS /// used by `fn run(args: T)`. The parser remains the only argv reader; this
+//RS /// adapter only marshals the shared host-neutral tree into the canonical
+//RS /// `DataTree` consumed by `__jet_Decode`.
+//RS fn jet_args_decode<T: __jet_Decode>(
+//RS     spec: &JetArgsSpec,
+//RS     argv: &Vec<String>,
+//RS     names: &[(&str, &str)],
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let parsed = jet_args_parse(spec, argv).map_err(|message| jet_std::FieldError::one(message))?;
+//RS     let fields = jet_args_shape_tree_values(spec, &parsed, names).map_err(|errors| {
+//RS         errors
+//RS             .into_iter()
+//RS             .flat_map(|error| {
+//RS                 if error.path.is_empty() {
+//RS                     jet_std::FieldError::one(error.reason).into_iter()
+//RS                 } else {
+//RS                     jet_std::FieldError::at(error.path, error.reason).into_iter()
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     })?;
+//RS     let fields = fields
+//RS         .into_iter()
+//RS         .map(|(name, value)| (name, jet_args_shape_value_to_datatree(value)))
+//RS         .collect();
+//RS     T::jet_decode(&jet_std::DataTree::Object(fields))
+//RS }
+//RS 
+//RS fn jet_args_shape_value_to_datatree(value: JetArgsShapeValue) -> jet_std::DataTree {
+//RS     match value {
+//RS         JetArgsShapeValue::Bool(value) => jet_std::DataTree::Bool(value),
+//RS         JetArgsShapeValue::Int(value) => jet_std::DataTree::Int(value),
+//RS         JetArgsShapeValue::Float(value) => jet_std::DataTree::Float(value),
+//RS         JetArgsShapeValue::Text(value) => jet_std::DataTree::Text(value),
+//RS         JetArgsShapeValue::Array(values) => jet_std::DataTree::Array(
+//RS             values
+//RS                 .into_iter()
+//RS                 .map(jet_args_shape_value_to_datatree)
+//RS                 .collect(),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS /// D-SHAPE-PROJECT1=A: `T.merge(flags, settings)`. Presence comes from the
+//RS /// same builder parse `args.decode<T>()` ran: a field named on argv keeps the
+//RS /// flag layer's value, every other field takes the settings layer, whose own
+//RS /// decode already applied the environment value or the field default. An
+//RS /// invalid present value never reaches this function: each layer's decoder
+//RS /// returned `FieldError` for it.
+//RS fn jet_config_merge<T: __jet_Encode + __jet_Decode>(
+//RS     spec: &JetArgsSpec,
+//RS     argv: &Vec<String>,
+//RS     names: &[(&str, &str)],
+//RS     flags: &T,
+//RS     settings: &T,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let jet_std::DataTree::Object(flag_fields) = flags.jet_encode() else {
+//RS         return Err(jet_std::FieldError::one("flags layer is not a record"));
+//RS     };
+//RS     let jet_std::DataTree::Object(settings_fields) = settings.jet_encode() else {
+//RS         return Err(jet_std::FieldError::one("settings layer is not a record"));
+//RS     };
+//RS     let fields = jet_args_merge_fields(spec, argv, names, flag_fields, settings_fields)
+//RS         .map_err(|errors| {
+//RS             errors
+//RS                 .into_iter()
+//RS                 .flat_map(|error| {
+//RS                     if error.path.is_empty() {
+//RS                         jet_std::FieldError::one(error.reason).into_iter()
+//RS                     } else {
+//RS                         jet_std::FieldError::at(error.path, error.reason).into_iter()
+//RS                     }
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         })?;
+//RS     T::jet_decode(&jet_std::DataTree::Object(fields))
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetGuidedTuiModel {
+//RS     label: String,
+//RS     value: String,
+//RS     cursor: usize,
+//RS     width: usize,
+//RS     error: Option<String>,
+//RS     done: bool,
+//RS }
+//RS 
+//RS enum JetGuidedTuiMessage {
+//RS     Key { code: String, modifiers: u8 },
+//RS     Resize(JetSize),
+//RS     Reset {
+//RS         value: String,
+//RS         error: Option<String>,
+//RS     },
+//RS }
+//RS 
+//RS fn jet_guided_tui_update(
+//RS     mut model: JetGuidedTuiModel,
+//RS     message: JetGuidedTuiMessage,
+//RS ) -> (JetGuidedTuiModel, JetTuiCommand<JetGuidedTuiMessage>) {
+//RS     match message {
+//RS         JetGuidedTuiMessage::Reset { value, error } => {
+//RS             model.value = value;
+//RS             model.cursor = model.value.chars().count();
+//RS             model.error = error;
+//RS             model.done = false;
+//RS         }
+//RS         JetGuidedTuiMessage::Resize(size) => {
+//RS             model.width = size.width.max(1.0).floor() as usize;
+//RS         }
+//RS         JetGuidedTuiMessage::Key { code, modifiers } => {
+//RS             if modifiers & 1 != 0 {
+//RS                 match code.as_str() {
+//RS                     "c" => {
+//RS                         model.error = Some("guided input cancelled".to_string());
+//RS                         model.done = true;
+//RS                     }
+//RS                     "u" => {
+//RS                         model.value.clear();
+//RS                         model.cursor = 0;
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             } else {
+//RS                 match code.as_str() {
+//RS                     "enter" => model.done = true,
+//RS                     "escape" => {
+//RS                         model.error = Some("guided input cancelled".to_string());
+//RS                         model.done = true;
+//RS                     }
+//RS                     "left" => model.cursor = model.cursor.saturating_sub(1),
+//RS                     "right" => {
+//RS                         model.cursor = (model.cursor + 1).min(model.value.chars().count());
+//RS                     }
+//RS                     "backspace" => {
+//RS                         if model.cursor > 0 {
+//RS                             let mut chars = model.value.chars().collect::<Vec<_>>();
+//RS                             chars.remove(model.cursor - 1);
+//RS                             model.value = chars.into_iter().collect();
+//RS                             model.cursor -= 1;
+//RS                         }
+//RS                     }
+//RS                     "delete" => {
+//RS                         let mut chars = model.value.chars().collect::<Vec<_>>();
+//RS                         if model.cursor < chars.len() {
+//RS                             chars.remove(model.cursor);
+//RS                             model.value = chars.into_iter().collect();
+//RS                         }
+//RS                     }
+//RS                     "up" | "down" | "tab" | "unknown" => {}
+//RS                     _ if !code.is_empty() => {
+//RS                         let mut chars = model.value.chars().collect::<Vec<_>>();
+//RS                         let inserted = code.chars().collect::<Vec<_>>();
+//RS                         chars.splice(model.cursor..model.cursor, inserted.iter().copied());
+//RS                         model.value = chars.into_iter().collect();
+//RS                         model.cursor += inserted.len();
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             if !model.done && !matches!(code.as_str(), "enter" | "escape") {
+//RS                 model.error = None;
+//RS             }
+//RS         }
+//RS     }
+//RS     (model, JetTuiCommand::none())
+//RS }
+//RS 
+//RS fn jet_guided_visible_input(model: &JetGuidedTuiModel) -> String {
+//RS     let chars = model.value.chars().collect::<Vec<_>>();
+//RS     let cursor = model.cursor.min(chars.len());
+//RS     let width = model.width.max(8).saturating_sub(1);
+//RS     let start = cursor
+//RS         .saturating_sub(width.saturating_sub(1))
+//RS         .min(chars.len().saturating_sub(width));
+//RS     let end = (start + width).min(chars.len());
+//RS     let mut visible: String = chars[start..end].iter().copied().collect();
+//RS     let caret = cursor.saturating_sub(start);
+//RS     let caret_byte = visible
+//RS         .char_indices()
+//RS         .nth(caret)
+//RS         .map_or(visible.len(), |(index, _)| index);
+//RS     visible.insert(caret_byte, '▏');
+//RS     visible
+//RS }
+//RS 
+//RS fn jet_guided_tui_view(model: &JetGuidedTuiModel) -> JetUiNode {
+//RS     let mut children = vec![
+//RS         jet_ui_text(&model.label),
+//RS         jet_ui_text_input(&jet_guided_visible_input(model), JetUiImeMode::Native),
+//RS     ];
+//RS     if let Some(error) = &model.error {
+//RS         children.push(jet_ui_text(&format!("Correction: {error}")));
+//RS     }
+//RS     jet_ui_box(children)
+//RS }
+//RS 
+//RS fn jet_guided_tui_frame(
+//RS     program: &JetTuiProgram<
+//RS         JetGuidedTuiModel,
+//RS         JetGuidedTuiMessage,
+//RS         fn(
+//RS             JetGuidedTuiModel,
+//RS             JetGuidedTuiMessage,
+//RS         ) -> (JetGuidedTuiModel, JetTuiCommand<JetGuidedTuiMessage>),
+//RS         fn(&JetGuidedTuiModel) -> JetUiNode,
+//RS     >,
+//RS ) -> Result<(), String> {
+//RS     let frame = program.frame_lines().join(" | ");
+//RS     jet_term_write_stderr(&format!("\r\x1b[2K{frame}"), true)
+//RS         .map_err(|error| format!("guided prompt output failed: {error}"))
+//RS }
+//RS 
+//RS fn jet_args_guided_tui_prompt(
+//RS     field: &JetGuidedField,
+//RS     initial: &str,
+//RS     error: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     let label = if field.help.is_empty() {
+//RS         format!("Page {} · {}:", field.page + 1, field.name)
+//RS     } else {
+//RS         format!("Page {} · {} — {}:", field.page + 1, field.name, field.help)
+//RS     };
+//RS     let width = jet_term_width(|name| std::env::var(name).ok()).max(1) as usize;
+//RS     let model = JetGuidedTuiModel {
+//RS         label,
+//RS         value: initial.to_string(),
+//RS         cursor: initial.chars().count(),
+//RS         width,
+//RS         error: error.map(str::to_string),
+//RS         done: false,
+//RS     };
+//RS     let update: fn(
+//RS         JetGuidedTuiModel,
+//RS         JetGuidedTuiMessage,
+//RS     ) -> (JetGuidedTuiModel, JetTuiCommand<JetGuidedTuiMessage>) = jet_guided_tui_update;
+//RS     let view: fn(&JetGuidedTuiModel) -> JetUiNode = jet_guided_tui_view;
+//RS     let mut program = JetTuiProgram::new(model, update, view);
+//RS     program.set_constraint(jet_ui_constraint(
+//RS         0.0,
+//RS         0.0,
+//RS         jet_term_width(|name| std::env::var(name).ok()) as f64,
+//RS         jet_term_height(|name| std::env::var(name).ok()).min(8) as f64,
+//RS     ));
+//RS     program.set_event_mapper(|event| match event {
+//RS         JetTuiEvent::Key { code, modifiers } => {
+//RS             Some(JetGuidedTuiMessage::Key { code, modifiers })
+//RS         }
+//RS         JetTuiEvent::Resize { size } => Some(JetGuidedTuiMessage::Resize(size)),
+//RS         JetTuiEvent::Interrupt | JetTuiEvent::Close => Some(JetGuidedTuiMessage::Key {
+//RS             code: "escape".to_string(),
+//RS             modifiers: 0,
+//RS         }),
+//RS         JetTuiEvent::Timer { .. }
+//RS         | JetTuiEvent::IO { .. }
+//RS         | JetTuiEvent::Focus { .. } => None,
+//RS     });
+//RS     program.redraw();
+//RS     jet_guided_tui_frame(&program)?;
+//RS     jet_term_enter();
+//RS     let _resize = program.dispatch_event(JetTuiEvent::resize(
+//RS         width as f64,
+//RS         jet_term_height(|name| std::env::var(name).ok()) as f64,
+//RS     ));
+//RS     program.step();
+//RS     loop {
+//RS         let key = jet_term_read_key();
+//RS         if matches!(key, JetKey::Unknown) {
+//RS             jet_term_leave();
+//RS             return Err("guided input ended before the form was submitted".to_string());
+//RS         }
+//RS         let event = JetTuiEvent::key_with_modifiers(&key.code(), key.modifier_bits());
+//RS         program.dispatch_event(event);
+//RS         program.step();
+//RS         if let Err(error) = jet_guided_tui_frame(&program) {
+//RS             jet_term_leave();
+//RS             return Err(error);
+//RS         }
+//RS         let Some(model) = program.model() else {
+//RS             jet_term_leave();
+//RS             return Err("guided input model stopped unexpectedly".to_string());
+//RS         };
+//RS         if model.done {
+//RS             let result = if let Some(error) = model.error.clone() {
+//RS                 Err(error)
+//RS             } else {
+//RS                 Ok(model.value.clone())
+//RS             };
+//RS             jet_term_leave();
+//RS             jet_term_write_stderr("\n", true)
+//RS                 .map_err(|output_error| format!("guided prompt output failed: {output_error}"))?;
+//RS             return result;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_args_guided_line_prompt(
+//RS     field: &JetGuidedField,
+//RS     initial: &str,
+//RS     error: Option<&str>,
+//RS ) -> Result<String, String> {
+//RS     let mut prompt = if field.help.is_empty() {
+//RS         format!("{}:", field.name)
+//RS     } else {
+//RS         format!("{} — {}:", field.name, field.help)
+//RS     };
+//RS     if !initial.is_empty() {
+//RS         prompt.push_str(&format!(" [{}]", initial));
+//RS     }
+//RS     if let Some(error) = error {
+//RS         prompt.push_str(&format!(" Correction: {error}"));
+//RS     }
+//RS     prompt.push(' ');
+//RS     jet_term_write_stderr(&prompt, true)
+//RS         .map_err(|output_error| format!("guided prompt output failed: {output_error}"))?;
+//RS     match jet_term_read_stdin_line().map_err(|error| error.to_string())? {
+//RS         JetTermRead::Line(value) => Ok(value),
+//RS         JetTermRead::EndOfInput => {
+//RS             Err("guided input ended before the form was submitted".to_string())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_args_guided_interactive() -> bool {
+//RS     jet_term_stdin_is_terminal()
+//RS         && jet_term_stderr_is_terminal()
+//RS         && !jet_term_machine_output()
+//RS         && std::env::var_os("CI").is_none()
+//RS }
+//RS 
+//RS fn jet_args_guided_accessible() -> bool {
+//RS     std::env::var_os("NO_COLOR").is_some()
+//RS         || std::env::var_os("JET_ACCESSIBLE").is_some()
+//RS         || std::env::var_os("JET_CLI_ACCESSIBLE").is_some()
+//RS         || std::env::var("TERM")
+//RS             .ok()
+//RS             .is_some_and(|term| term.eq_ignore_ascii_case("dumb"))
+//RS }
+//RS 
+//RS fn jet_args_guided_argv_tui(
+//RS     spec: &JetArgsSpec,
+//RS     argv: &Vec<String>,
+//RS ) -> Result<Vec<String>, String> {
+//RS     if !jet_args_guided_interactive() {
+//RS         return Ok(argv.clone());
+//RS     }
+//RS     if jet_args_guided_accessible() {
+//RS         jet_args_guided_argv_with(spec, argv, jet_args_guided_line_prompt)
+//RS     } else {
+//RS         jet_args_guided_argv_with(spec, argv, jet_args_guided_tui_prompt)
+//RS     }
+//RS }
+// END-PORT-PENDING 0140 crates/jet-codegen/src/Prelude/Core/ArgsProjection.rs:1-359
+

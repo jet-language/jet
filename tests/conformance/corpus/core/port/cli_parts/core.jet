@@ -1,0 +1,1262 @@
+// PORT-PENDING 0995 tests-cli-parts-core: tests/cli_parts/core.rs:1-1258
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use super::*;
+//RS 
+//RS 
+//RS #[test]
+//RS fn epoch3_string_and_set_surface_runs_on_default_tier() {
+//RS     let dir = isolated_cwd("epoch3_string_set_default");
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         r#"fn run() {
+//RS     print("  jet".trim_start())
+//RS     print("jet  ".trim_end())
+//RS     print("jet".pad_start(5, "."))
+//RS     print("jet".pad_end(5, "."))
+//RS     print("hello jet".index_of("jet"))
+//RS     print("banana".count("an"))
+//RS     print("hELLO jet".to_title())
+//RS     print("Hello".is_alphabetic())
+//RS     print("123".is_numeric())
+//RS     print(" \t".is_whitespace())
+//RS     print("Jet lang".is_ascii())
+//RS     pair :: "left:right".split_once(":") ?? panic("split")
+//RS     print(pair.before)
+//RS     print(pair.after)
+//RS     print(Set.from([1, 2, 3]).intersection(Set.from([2, 3, 4])).len())
+//RS     print(Set.from([1, 2, 3]).symmetric_difference(Set.from([2, 3, 4])).len())
+//RS     print(Set.from([1, 2, 3]).is_subset(Set.from([1, 2, 3, 4])))
+//RS     print(Set.from([1, 2, 3]).is_superset(Set.from([1, 2])))
+//RS     print(Set.from([1, 2, 3]).is_disjoint(Set.from([8])))
+//RS     print(Rank.from([1, 2, 3]).union(Rank.from([3, 4])).len())
+//RS     print(Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).len())
+//RS     print(Set.from(["left", "right"]).intersection(Set.from(["right", "other"])).len())
+//RS     print(Rank.from(["left", "right"]).is_subset(Rank.from(["left", "right", "other"])))
+//RS     print(Set.from(["a", "a"]).len())
+//RS     print(Rank.from(["z", "z", "a"]).len())
+//RS     print(Rank.from(["z", "a"]).first() ?? "none")
+//RS     print(Rank.from(["z", "a"]).last() ?? "none")
+//RS     typed_words := Rank<String>{Rank.new()}
+//RS     print(typed_words.add("z"))
+//RS     print(typed_words.add("z"))
+//RS     print(typed_words.first() ?? "none")
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["run", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         output.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8(output.stdout).unwrap(),
+//RS         "jet\njet\n..jet\njet..\n6\n2\nHello Jet\ntrue\ntrue\ntrue\ntrue\nleft\nright\n2\n2\ntrue\ntrue\ntrue\n4\n1\n1\ntrue\n1\n2\na\nz\ntrue\nfalse\nz\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn configured_organization_unsafe_policy_fails_closed_and_keeps_path() {
+//RS     let dir = isolated_cwd("organization_unsafe");
+//RS     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+//RS     let configured = dir.join("org-policy.jet");
+//RS     let output = Command::new(jet())
+//RS         .args(["check", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env(jet::Syntax::ENV_ORG_UNSAFE_POLICY, &configured)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let stderr = String::from_utf8(output.stderr).unwrap();
+//RS     assert!(
+//RS         stderr.contains("E3109") && stderr.contains(configured.to_str().unwrap()),
+//RS         "{stderr}"
+//RS     );
+//RS     check_snapshot(
+//RS         "unsafe_org_policy.txt",
+//RS         &stderr.replace(configured.to_str().unwrap(), "ORG_POLICY"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn organization_gate_policy_refuses_each_audited_invocation_gate() {
+//RS     let dir = isolated_cwd("organization_gate_ladder");
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "fn run() {\n    #Unsafe(\"org refusal\") {}\n    #Impure(\"org refusal\") {}\n    #Nondeterministic(\"org refusal\") {}\n}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let configured = dir.join("org-policy.jet");
+//RS     fs::write(
+//RS         &configured,
+//RS         "policy: { unsafe: .Forbid, impure: .Forbid, nondeterministic: .Forbid }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args([
+//RS             "run",
+//RS             "--gate",
+//RS             "unsafe=allow",
+//RS             "--gate",
+//RS             "impure=allow",
+//RS             "--gate",
+//RS             "nondeterministic=allow",
+//RS             "main.jet",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .env(jet::Syntax::ENV_ORG_UNSAFE_POLICY, &configured)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let stderr = String::from_utf8(output.stderr).unwrap();
+//RS     check_snapshot(
+//RS         "audited_gate_policy.txt",
+//RS         &scrub(&stderr, &dir.join("main.jet")),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
+//RS     if Command::new("lua").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("lua_bind_e2e");
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let example = root.join("Examples/interop/lua");
+//RS     fs::copy(example.join("ops.lua"), dir.join("ops.lua")).unwrap();
+//RS     fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "lua", "ops.lua", "--pkg", "ops"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "Lua bind failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let cache = dir.join(".jet/bindings/lua");
+//RS     assert!(cache.join("libjet_lua_ops.a").is_file());
+//RS     let provenance = fs::read_to_string(cache.join("ops.provenance")).unwrap();
+//RS     assert!(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"));
+//RS     let generated = fs::read_to_string(cache.join("ops.jet")).unwrap();
+//RS     assert!(
+//RS         generated.contains("pub struct TableView")
+//RS             && generated.contains(
+//RS                 "pub fn counters_view(session: Session, deadline_ms: Int) -> TableView LuaError! ->"
+//RS             )
+//RS             && generated
+//RS                 .contains("pub fn view_get_int(view: TableView, key: String) -> Int LuaError! ->")
+//RS             && generated.contains(
+//RS                 "pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! ->"
+//RS             )
+//RS     );
+//RS     let run = Command::new(jet())
+//RS         .args(["run", "--profile=debug", "main.jet"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         run.status.success(),
+//RS         "embedded Lua binding did not run:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         fs::read_to_string(example.join("expected.out")).unwrap()
+//RS     );
+//RS     fs::copy(
+//RS         root.join("tests/fixtures/lua_lifecycle.c"),
+//RS         dir.join("lifecycle.c"),
+//RS     )
+//RS     .unwrap();
+//RS     let lua_dir = fs::read_to_string(cache.join("ops.lua-path")).unwrap();
+//RS     let lua_dir = lua_dir.trim();
+//RS     let link_dir = format!("-L{lua_dir}");
+//RS     let rpath = format!("-Wl,-rpath,{lua_dir}");
+//RS     let cc = Command::new("cc")
+//RS         .arg("lifecycle.c")
+//RS         .args(["-L.jet/bindings/lua", "-l:libjet_lua_ops.a"])
+//RS         .arg(link_dir)
+//RS         .arg(rpath)
+//RS         .args(["-llua", "-lpthread", "-ldl", "-lm", "-o", "lifecycle"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         cc.status.success(),
+//RS         "Lua lifecycle probe link failed:\n{}",
+//RS         String::from_utf8_lossy(&cc.stderr)
+//RS     );
+//RS     let lifecycle = Command::new(dir.join("lifecycle"))
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         lifecycle.status.success(),
+//RS         "Lua lifecycle probe failed: {:?}",
+//RS         lifecycle.status.code()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lua_bind_discovers_without_executing_and_launders_parse_errors() {
+//RS     if Command::new("luac").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("lua_bind_static");
+//RS     let script = dir.join("static.lua");
+//RS     fs::write(&script,"error('discovery executed source')\n-- function fake(input) end\nlocal function hidden(input) return input end\nfunction visible(input) return input end\n").unwrap();
+//RS     let bind = Command::new(jet())
+//RS         .args(["inspect", "bind", "lua"])
+//RS         .arg(&script)
+//RS         .args(["--pkg", "static_ops"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         bind.status.success(),
+//RS         "static Lua discovery failed:\n{}",
+//RS         String::from_utf8_lossy(&bind.stderr)
+//RS     );
+//RS     let generated = fs::read_to_string(dir.join(".jet/bindings/lua/static_ops.jet")).unwrap();
+//RS     assert!(generated.contains("pub fn visible("));
+//RS     assert!(!generated.contains("pub fn fake(") && !generated.contains("pub fn hidden("));
+//RS     let invalid = dir.join("invalid.lua");
+//RS     fs::write(&invalid, "function broken(input)\n  return {\nend\n").unwrap();
+//RS     let failed = Command::new(jet())
+//RS         .args(["inspect", "bind", "lua"])
+//RS         .arg(&invalid)
+//RS         .args(["--pkg", "bad"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(failed.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS     assert!(stderr.contains("Error [E3208]"));
+//RS     assert!(
+//RS         !stderr.contains("invalid.lua:") && !stderr.contains("near 'end'"),
+//RS         "raw Lua parser detail escaped: {stderr}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn lua_bind_rejects_generated_fixed_abi_names() {
+//RS     if Command::new("luac").arg("-v").output().is_err() {
+//RS         return;
+//RS     }
+//RS     let dir = isolated_cwd("lua_bind_reserved_helpers");
+//RS     for name in ["take_error", "view_release"] {
+//RS         let script = dir.join(format!("{name}.lua"));
+//RS         fs::write(
+//RS             &script,
+//RS             format!("function {name}(input) return input end\n"),
+//RS         )
+//RS         .unwrap();
+//RS         let package = format!("reserved_{name}");
+//RS         let failed = Command::new(jet())
+//RS             .args(["inspect", "bind", "lua"])
+//RS             .arg(&script)
+//RS             .args(["--pkg", &package])
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(failed.status.code(), Some(1));
+//RS         let stderr = String::from_utf8_lossy(&failed.stderr);
+//RS         assert!(
+//RS             stderr.contains("Error [E3208]")
+//RS                 && stderr.contains(&format!("`{name}` cannot be exported")),
+//RS             "{stderr}"
+//RS         );
+//RS         assert!(
+//RS             !stderr.contains("E0105"),
+//RS             "duplicate generated extern escaped binder validation: {stderr}"
+//RS         );
+//RS         assert!(!dir
+//RS             .join(format!(".jet/bindings/lua/{package}.jet"))
+//RS             .exists());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects() {
+//RS     let project = isolated_cwd("jobs_project");
+//RS     fs::write(
+//RS         project.join("package.jet"),
+//RS         "name: \"job_runner\"\nversion: \"0.1.0\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     fs::write(
+//RS         project.join("run.jet"),
+//RS         include_str!("../../Examples/features/devloop/job_runner.jet"),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let listed = Command::new(jet())
+//RS         .arg("jobs")
+//RS         .current_dir(&project)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         listed.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&listed.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8(listed.stdout).unwrap(),
+//RS         format!(
+//RS             "{:<11}  [ship] Say hello from a shipped project job\n{:<11}  [dev] Seed local data (every 5min)\n{:<11}  [internal]\n",
+//RS             "greet", "seed_data", "inspect_job"
+//RS         )
+//RS     );
+//RS 
+//RS     let unknown = Command::new(jet())
+//RS         .args(["run", "run.jet", "--", "missing"])
+//RS         .current_dir(&project)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let unknown_stderr = String::from_utf8_lossy(&unknown.stderr);
+//RS     assert!(!unknown.status.success(), "{unknown_stderr}");
+//RS     assert!(unknown_stderr.contains("E1294"), "{unknown_stderr}");
+//RS     assert!(
+//RS         unknown_stderr.contains("declared jobs: greet, seed_data, inspect_job"),
+//RS         "{unknown_stderr}"
+//RS     );
+//RS 
+//RS     let release = Command::new(jet())
+//RS         .args(["build", "--release", "run.jet"])
+//RS         .current_dir(&project)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         release.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&release.stderr)
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&release.stdout).contains(
+//RS             "stripped 2 dev job(s): seed_data, inspect_job (mark #Job(.Ship) to include)"
+//RS         ),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&release.stdout)
+//RS     );
+//RS     let shipped = Command::new(project.join(".jet/build/run"))
+//RS         .arg("greet")
+//RS         .current_dir(&project)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         shipped.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&shipped.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&shipped.stdout).contains("hello from job"));
+//RS     let stripped = Command::new(project.join(".jet/build/run"))
+//RS         .arg("seed_data")
+//RS         .current_dir(&project)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(!stripped.status.success());
+//RS     // The built binary refuses a stripped job with the same registered E1294
+//RS     // wording the source tier uses, and advertises only what it can dispatch.
+//RS     let stripped_stderr = String::from_utf8_lossy(&stripped.stderr);
+//RS     assert!(stripped_stderr.contains("E1294"), "{stripped_stderr}");
+//RS     assert!(
+//RS         stripped_stderr.contains("no job named `seed_data`"),
+//RS         "{stripped_stderr}"
+//RS     );
+//RS     assert!(
+//RS         stripped_stderr.contains("declared jobs: greet"),
+//RS         "{stripped_stderr}"
+//RS     );
+//RS     assert!(
+//RS         !stripped_stderr.contains("seed_data, inspect_job"),
+//RS         "a release binary must not advertise stripped jobs: {stripped_stderr}"
+//RS     );
+//RS 
+//RS     let help = Command::new(jet()).arg("help").output().unwrap();
+//RS     assert!(help.status.success());
+//RS     assert!(
+//RS         String::from_utf8_lossy(&help.stdout).contains("jet jobs"),
+//RS         "jet help must list job discovery"
+//RS     );
+//RS 
+//RS     let outside = isolated_cwd("jobs_outside_project");
+//RS     let jobs_error = Command::new(jet())
+//RS         .arg("jobs")
+//RS         .current_dir(&outside)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let run_error = Command::new(jet())
+//RS         .arg("run")
+//RS         .current_dir(&outside)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(jobs_error.status.code(), run_error.status.code());
+//RS     assert_eq!(jobs_error.stderr, run_error.stderr);
+//RS 
+//RS     let fixture =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/packages/monorepo");
+//RS     let workspace = isolated_cwd("jobs_workspace");
+//RS     fs::remove_dir_all(&workspace).unwrap();
+//RS     copy_dir_all(&fixture, &workspace);
+//RS     let hello = workspace.join("packages/hello/hello.jet");
+//RS     let mut hello_source = fs::read_to_string(&hello).unwrap();
+//RS     hello_source
+//RS         .push_str("\n#[Job, Doc(\"Say hello from this workspace member\")] fn greet() {}\n");
+//RS     fs::write(&hello, hello_source).unwrap();
+//RS 
+//RS     let ambiguous = Command::new(jet())
+//RS         .arg("jobs")
+//RS         .current_dir(&workspace)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     let ambiguous_stderr = String::from_utf8_lossy(&ambiguous.stderr);
+//RS     assert_eq!(ambiguous.status.code(), Some(2), "{ambiguous_stderr}");
+//RS     assert!(
+//RS         ambiguous_stderr.contains("`jet jobs` is ambiguous"),
+//RS         "{ambiguous_stderr}"
+//RS     );
+//RS     assert!(
+//RS         ambiguous_stderr.contains("hello") && ambiguous_stderr.contains("ranker"),
+//RS         "{ambiguous_stderr}"
+//RS     );
+//RS     assert!(
+//RS         ambiguous_stderr.contains("jet jobs -p <member>") && !ambiguous_stderr.contains("jet run"),
+//RS         "{ambiguous_stderr}"
+//RS     );
+//RS 
+//RS     let selected = Command::new(jet())
+//RS         .args(["jobs", "-p", "hello"])
+//RS         .current_dir(&workspace)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         selected.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&selected.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8(selected.stdout).unwrap(),
+//RS         // A bare `#Job` is `.Dev` (JobScope::default), and `jet jobs` tags every
+//RS         // listing with its scope — same shape as the project listing above.
+//RS         "greet  [dev] Say hello from this workspace member\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
+//RS     let dir = isolated_cwd("project_parts");
+//RS     fs::write(dir.join("main.jet"), "module app { }\nfn run() {}\n").unwrap();
+//RS     fs::write(dir.join("bench.jet"), "module _bench { }\n").unwrap();
+//RS 
+//RS     let skipped = Command::new(jet())
+//RS         .args(["project", "parts", "--skipped"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(skipped.status.code(), Some(0));
+//RS     let stdout = String::from_utf8(skipped.stdout).unwrap();
+//RS     assert!(
+//RS         stdout.contains("skipped") && stdout.contains("_bench"),
+//RS         "{stdout}"
+//RS     );
+//RS     assert!(!stdout.contains("app"), "{stdout}");
+//RS 
+//RS     fs::write(
+//RS         dir.join("main.jet"),
+//RS         "use project._bench\nmodule app { }\nfn run() {}\n",
+//RS     )
+//RS     .unwrap();
+//RS     let explicit = Command::new(jet())
+//RS         .args(["project", "parts", "--json"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(explicit.status.code(), Some(0));
+//RS     let stdout = String::from_utf8(explicit.stdout).unwrap();
+//RS     assert!(
+//RS         stdout.contains("\"name\":\"project._bench\"") && stdout.contains("\"state\":\"explicit\""),
+//RS         "{stdout}"
+//RS     );
+//RS 
+//RS     fs::write(dir.join("other.jet"), "module _bench { }\n").unwrap();
+//RS     let conflict = Command::new(jet())
+//RS         .args(["project", "parts"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(conflict.status.code(), Some(1));
+//RS     let stderr = String::from_utf8_lossy(&conflict.stderr);
+//RS     assert!(stderr.contains("Error [E0606]:"), "{stderr}");
+//RS     assert!(stderr.contains(" Why:"), "{stderr}");
+//RS     assert!(stderr.contains(" Fix:"), "{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn project_parts_lists_plain_source_files() {
+//RS     let dir = isolated_cwd("project_parts_plain_files");
+//RS     for name in ["one", "two", "three", "four", "five"] {
+//RS         fs::write(dir.join(format!("{name}.jet")), "fn run() {}\n").unwrap();
+//RS     }
+//RS 
+//RS     let listed = Command::new(jet())
+//RS         .args(["project", "parts"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(listed.status.code(), Some(0));
+//RS     let stdout = String::from_utf8(listed.stdout).unwrap();
+//RS     assert_eq!(stdout.lines().count(), 5, "{stdout}");
+//RS     for name in ["one", "two", "three", "four", "five"] {
+//RS         assert!(stdout.contains(&format!("project.{name}")), "{stdout}");
+//RS         assert!(stdout.contains(&format!("{name}.jet")), "{stdout}");
+//RS     }
+//RS 
+//RS     let skipped = Command::new(jet())
+//RS         .args(["project", "parts", "--skipped"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(skipped.status.code(), Some(0));
+//RS     assert!(
+//RS         skipped.stdout.is_empty(),
+//RS         "unexpected stdout: {:?}",
+//RS         skipped.stdout
+//RS     );
+//RS 
+//RS     let json = Command::new(jet())
+//RS         .args(["project", "parts", "--json"])
+//RS         .current_dir(&dir)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(json.status.code(), Some(0));
+//RS     let json = String::from_utf8(json.stdout).unwrap();
+//RS     assert!(
+//RS         parse_json(&json).is_ok(),
+//RS         "project parts JSON must parse: {json}"
+//RS     );
+//RS     assert!(
+//RS         json.contains("\"name\":\"project.one\"") && json.contains("\"path\":\"five.jet\""),
+//RS         "{json}"
+//RS     );
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn project_parts_reports_authority_scan_failures() {
+//RS     use std::os::unix::fs::symlink;
+//RS 
+//RS     let dir = isolated_cwd("project_parts_authority_failure");
+//RS     for (name, source) in [
+//RS         ("one.jet", "module one { }\n"),
+//RS         ("two.jet", "module two { }\n"),
+//RS         ("three.jet", "module three { }\n"),
+//RS         ("four.jet", "module four { }\n"),
+//RS         ("five.jet", "module five { }\n"),
+//RS     ] {
+//RS         fs::write(dir.join(name), source).unwrap();
+//RS     }
+//RS     symlink("missing-target", dir.join("result")).unwrap();
+//RS 
+//RS     for args in [
+//RS         ["project", "parts"].as_slice(),
+//RS         ["project", "parts", "--skipped"].as_slice(),
+//RS     ] {
+//RS         let output = Command::new(jet())
+//RS             .args(args)
+//RS             .current_dir(&dir)
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(output.status.code(), Some(1));
+//RS         assert!(
+//RS             output.stdout.is_empty(),
+//RS             "unexpected stdout: {:?}",
+//RS             output.stdout
+//RS         );
+//RS         let stderr = String::from_utf8(output.stderr).unwrap();
+//RS         assert!(
+//RS             stderr.contains("Error [E1334]:") && stderr.contains("result"),
+//RS             "{stderr}"
+//RS         );
+//RS         assert!(
+//RS             stderr.contains(" Why:") && stderr.contains(" Fix:"),
+//RS             "{stderr}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(target_os = "linux")]
+//RS fn isolated_cwd_child_holds_executable() {
+//RS     let Some(ready) = std::env::var_os("JET_CLI_EXECUTABLE_HOLDER_READY") else {
+//RS         return;
+//RS     };
+//RS     fs::write(ready, "ready").unwrap();
+//RS     let mut release = [0];
+//RS     std::io::stdin().read_exact(&mut release).unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS #[cfg(target_os = "linux")]
+//RS fn isolated_cwd_never_reuses_executing_fixture_path() {
+//RS     let first = isolated_cwd("executing_fixture_collision");
+//RS     let executable = first.join("cli-test-holder");
+//RS     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+//RS     let ready = first.join("ready");
+//RS     // libtest's `--exact` filter is the full test path, which includes this
+//RS     // module since the CLI suite was split (tests/cli.rs `mod cli_core`).
+//RS     // Derive it instead of spelling it, so a later move cannot silently
+//RS     // select zero tests and leave the holder unspawned.
+//RS     let child_test = match module_path!().split_once("::") {
+//RS         Some((_, module)) => format!("{module}::isolated_cwd_child_holds_executable"),
+//RS         None => "isolated_cwd_child_holds_executable".to_string(),
+//RS     };
+//RS     let mut child = Command::new(&executable)
+//RS         .args(["--exact", child_test.as_str()])
+//RS         .env("JET_CLI_EXECUTABLE_HOLDER_READY", &ready)
+//RS         .stdin(Stdio::piped())
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS 
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+//RS     let ready_seen = loop {
+//RS         if ready.is_file() {
+//RS             break true;
+//RS         }
+//RS         if child.try_wait().unwrap().is_some() || std::time::Instant::now() >= deadline {
+//RS             break false;
+//RS         }
+//RS         std::thread::sleep(std::time::Duration::from_millis(1));
+//RS     };
+//RS 
+//RS     let second = ready_seen.then(|| isolated_cwd("executing_fixture_collision"));
+//RS     let copy_result = second.as_ref().map(|dir| {
+//RS         fs::copy(
+//RS             std::env::current_exe().unwrap(),
+//RS             dir.join("cli-test-holder"),
+//RS         )
+//RS     });
+//RS     let release_result = child.stdin.as_mut().unwrap().write_all(&[1]);
+//RS     drop(child.stdin.take());
+//RS     let output = child.wait_with_output().unwrap();
+//RS 
+//RS     let _ = fs::remove_dir_all(&first);
+//RS     if let Some(second) = &second {
+//RS         let _ = fs::remove_dir_all(second);
+//RS     }
+//RS 
+//RS     assert!(
+//RS         ready_seen,
+//RS         "holder exited or timed out: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "holder failed: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     release_result.unwrap();
+//RS     let second = second.unwrap();
+//RS     assert_ne!(
+//RS         first, second,
+//RS         "fixture path reused while stale executable was running"
+//RS     );
+//RS     copy_result.unwrap().unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn budget_usage_and_preflight_fail_without_artifacts() {
+//RS     let dir = budget_project("budget_no_artifact", 10);
+//RS     for argv in [
+//RS         vec!["budget", "check", "--unknown"],
+//RS         vec![
+//RS             "budget",
+//RS             "update",
+//RS             "--baseline",
+//RS             "ci/linux",
+//RS             "--reason",
+//RS             "no gate",
+//RS         ],
+//RS         vec!["budget", "report"],
+//RS         vec!["budget", "check", "--json", "--unknown"],
+//RS         vec!["budget", "check", "--unknown", "--json"],
+//RS         vec!["budget", "check", "--json", "--json"],
+//RS         vec!["budget", "check", "--annotations", "gitlab"],
+//RS         vec!["budget", "update", "--baseline", "CI/Linux"],
+//RS         vec![
+//RS             "budget",
+//RS             "update",
+//RS             "--baseline",
+//RS             "ci/linux",
+//RS             "--bootstrap",
+//RS             "--accept-regression",
+//RS             "--reason",
+//RS             "invalid",
+//RS         ],
+//RS         vec!["budget", "update", "--baseline", "ci/linux", "--yes", "-y"],
+//RS     ] {
+//RS         let out = Command::new(jet())
+//RS             .args(argv)
+//RS             .current_dir(&dir)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert_eq!(out.status.code(), Some(2));
+//RS         assert!(out.stdout.is_empty());
+//RS         assert!(
+//RS             !dir.join(".jet").exists(),
+//RS             "usage failure created an artifact"
+//RS         );
+//RS     }
+//RS     fs::write(dir.join("src/run.jet"), "fn run( {\n").unwrap();
+//RS     let out = Command::new(jet())
+//RS         .args(["budget", "check"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(out.status.code(), Some(1));
+//RS     assert!(
+//RS         !dir.join(".jet").exists(),
+//RS         "compiler preflight created an artifact"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
+//RS     let dir = budget_project("budget_check", 10);
+//RS     let out = Command::new(jet())
+//RS         .args(["budget", "check", "--json"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS     let value =
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&out.stdout).unwrap();
+//RS     let text = String::from_utf8(out.stdout).unwrap();
+//RS     assert!(text.contains("\"schema\":\"jet.status/v1\""));
+//RS     assert!(text.contains("\"budget\":{"));
+//RS     assert!(text.contains("\"budget_id\":\"package:public-api\""));
+//RS     assert!(
+//RS         text.contains("\"num\":1"),
+//RS         "public API count must be measured: {text}"
+//RS     );
+//RS     let reports = fs::read_dir(dir.join(".jet/perf/reports"))
+//RS         .unwrap()
+//RS         .collect::<Result<Vec<_>, _>>()
+//RS         .unwrap();
+//RS     assert_eq!(reports.len(), 1);
+//RS     let bytes = fs::read(reports[0].path()).unwrap();
+//RS     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+//RS     let command = match &value {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("command JSON is not an object"),
+//RS     };
+//RS     let report = match canonical_field(&command["budget"], "report") {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("report is not an object"),
+//RS     };
+//RS     let content = match &report["content"] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("content is not an object"),
+//RS     };
+//RS     let tool = match &content["toolchain"] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("toolchain is not an object"),
+//RS     };
+//RS     for key in ["compiler_build_id", "stdlib_id", "runner_id"] {
+//RS         let jet_foundation::PerformanceBudget::CanonicalJson::String(id) = &tool[key] else {
+//RS             panic!("{key} is not text")
+//RS         };
+//RS         assert_eq!(id.len(), 64, "{key} must identify real executable bytes");
+//RS         assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+//RS         assert!(!matches!(id.as_str(), "jet" | "stdlib" | "compiler"));
+//RS     }
+//RS     let subject = match &content["subject"] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("subject is not an object"),
+//RS     };
+//RS     let jet_foundation::PerformanceBudget::CanonicalJson::String(triple) =
+//RS         &subject["target_triple"]
+//RS     else {
+//RS         panic!("target triple is not text")
+//RS     };
+//RS     assert!(
+//RS         triple.split('-').count() >= 3,
+//RS         "target triple must be canonical: {triple}"
+//RS     );
+//RS     let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_start) =
+//RS         &subject["measured_start"]
+//RS     else {
+//RS         panic!("measurement start is not text")
+//RS     };
+//RS     let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_end) =
+//RS         &subject["measured_end"]
+//RS     else {
+//RS         panic!("measurement end is not text")
+//RS     };
+//RS     assert!(
+//RS         measured_start < measured_end,
+//RS         "measurement must cover preflight and evidence: {measured_start}..{measured_end}"
+//RS     );
+//RS     let measurements = match &content["measurements"] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Array(value) => value,
+//RS         _ => panic!("measurements is not an array"),
+//RS     };
+//RS     let measurement = match &measurements[0] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("measurement is not an object"),
+//RS     };
+//RS     let provider = match &measurement["provider"] {
+//RS         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+//RS         _ => panic!("provider is not an object"),
+//RS     };
+//RS     for key in ["cpu_model", "kernel", "power_governor"] {
+//RS         let jet_foundation::PerformanceBudget::CanonicalJson::String(value) = &provider[key] else {
+//RS             panic!("{key} is not text")
+//RS         };
+//RS         assert!(!value.is_empty() && !matches!(value.as_str(), "compiler" | "unknown"));
+//RS     }
+//RS }
+//RS 
+//RS // `budget_check_measures_typed_compile_workloads_and_records_provenance` moved to
+//RS // tests/cli_parts/compile_latency.rs (own Cargo target): its pinned 128 child
+//RS // compiles spent this binary's whole 900s suite guard and aborted every other
+//RS // `cli` case with it.
+//RS 
+//RS #[test]
+//RS fn budget_build_artifact_measures_real_selected_binary() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS     let dir = artifact_budget_project("budget_build_artifact", 100_000_000);
+//RS     let out = Command::new(jet())
+//RS         .args(["budget", "check", "--json"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap()
+//RS     else {
+//RS         panic!("command object")
+//RS     };
+//RS     let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else {
+//RS         panic!("report object")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content object")
+//RS     };
+//RS     let CanonicalJson::Object(subject) = &content["subject"] else {
+//RS         panic!("subject object")
+//RS     };
+//RS     let CanonicalJson::Object(artifact) = &subject["artifact"] else {
+//RS         panic!("artifact identity")
+//RS     };
+//RS     let CanonicalJson::Integer(bytes) = &artifact["bytes"] else {
+//RS         panic!("artifact byte count")
+//RS     };
+//RS     let CanonicalJson::String(digest) = &artifact["sha256"] else {
+//RS         panic!("artifact digest")
+//RS     };
+//RS     let artifact_path = dir.join(".jet/build/run");
+//RS     let metadata = fs::metadata(&artifact_path).unwrap();
+//RS     assert_eq!(bytes, &metadata.len().to_string());
+//RS     assert_eq!(
+//RS         digest,
+//RS         &jet::SHA256::sha256_file_hex(&artifact_path).unwrap()
+//RS     );
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     let CanonicalJson::Object(measurement) = &measurements[0] else {
+//RS         panic!("measurement")
+//RS     };
+//RS     let CanonicalJson::Array(samples) = &measurement["samples"] else {
+//RS         panic!("samples")
+//RS     };
+//RS     let CanonicalJson::Object(sample) = &samples[0] else {
+//RS         panic!("sample")
+//RS     };
+//RS     assert_eq!(
+//RS         sample["num"],
+//RS         CanonicalJson::Integer(metadata.len().to_string())
+//RS     );
+//RS     let CanonicalJson::Object(provider) = &measurement["provider"] else {
+//RS         panic!("provider")
+//RS     };
+//RS     assert_eq!(
+//RS         provider["kind"],
+//RS         CanonicalJson::String("BuildArtifact".into())
+//RS     );
+//RS     assert_eq!(measurement["unit"], CanonicalJson::String("Bytes".into()));
+//RS }
+//RS 
+//RS #[test]
+//RS fn budget_report_collects_mixed_providers_measurement_locally() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS     let dir = mixed_budget_project("budget_mixed_providers");
+//RS     let out = Command::new(jet())
+//RS         .args(["budget", "check", "--json"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         out.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         String::from_utf8_lossy(&out.stderr)
+//RS     );
+//RS     assert!(out.stderr.is_empty());
+//RS     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap()
+//RS     else {
+//RS         panic!("command object")
+//RS     };
+//RS     let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else {
+//RS         panic!("report object")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content object")
+//RS     };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     assert_eq!(measurements.len(), 2);
+//RS     let mut providers = std::collections::BTreeMap::new();
+//RS     for measurement in measurements {
+//RS         let CanonicalJson::Object(measurement) = measurement else {
+//RS             panic!("measurement object")
+//RS         };
+//RS         let CanonicalJson::String(id) = &measurement["budget_id"] else {
+//RS             panic!("budget id")
+//RS         };
+//RS         let CanonicalJson::Object(provider) = &measurement["provider"] else {
+//RS             panic!("provider")
+//RS         };
+//RS         let CanonicalJson::String(kind) = &provider["kind"] else {
+//RS             panic!("provider kind")
+//RS         };
+//RS         let CanonicalJson::Array(samples) = &measurement["samples"] else {
+//RS             panic!("samples")
+//RS         };
+//RS         assert_eq!(samples.len(), 1, "{id} must own its provider sample");
+//RS         providers.insert(id.clone(), kind.clone());
+//RS     }
+//RS     assert_eq!(
+//RS         providers.get("package:binary").map(String::as_str),
+//RS         Some("BuildArtifact")
+//RS     );
+//RS     assert_eq!(
+//RS         providers.get("package:public-api").map(String::as_str),
+//RS         Some("CompilerFacts")
+//RS     );
+//RS     let CanonicalJson::Object(subject) = &content["subject"] else {
+//RS         panic!("subject")
+//RS     };
+//RS     let CanonicalJson::Object(artifact) = &subject["artifact"] else {
+//RS         panic!("shared artifact provenance")
+//RS     };
+//RS     let CanonicalJson::Integer(bytes) = &artifact["bytes"] else {
+//RS         panic!("artifact bytes")
+//RS     };
+//RS     assert_eq!(
+//RS         bytes,
+//RS         &fs::metadata(dir.join(".jet/build/run"))
+//RS             .unwrap()
+//RS             .len()
+//RS             .to_string()
+//RS     );
+//RS     let report_path = fs::read_dir(dir.join(".jet/perf/reports"))
+//RS         .unwrap()
+//RS         .next()
+//RS         .unwrap()
+//RS         .unwrap()
+//RS         .path();
+//RS     jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap())
+//RS         .unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS     let dir = mixed_budget_project("build_budget_gates");
+//RS     let source_path = dir.join("src/run.jet");
+//RS     let passing = fs::read_to_string(&source_path).unwrap();
+//RS     let failing = passing.replace(".AtMost(10)", ".AtMost(0)");
+//RS     fs::write(&source_path, &failing).unwrap();
+//RS 
+//RS     let failed = Command::new(jet())
+//RS         .args(["build", "src/run.jet"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         failed.status.code(),
+//RS         Some(1),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&failed.stdout),
+//RS         String::from_utf8_lossy(&failed.stderr)
+//RS     );
+//RS     assert!(
+//RS         !String::from_utf8_lossy(&failed.stdout).contains("built:"),
+//RS         "failed budget claimed build success"
+//RS     );
+//RS     assert!(
+//RS         String::from_utf8_lossy(&failed.stderr)
+//RS             .contains("Error [E2907]: performance budget public-api regressed"),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&failed.stderr)
+//RS     );
+//RS     let report_dir = dir.join(".jet/perf/reports");
+//RS     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 1);
+//RS 
+//RS     fs::write(&source_path, &passing).unwrap();
+//RS     let passed = Command::new(jet())
+//RS         .args(["build", "src/run.jet"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         passed.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&passed.stdout),
+//RS         String::from_utf8_lossy(&passed.stderr)
+//RS     );
+//RS     assert!(String::from_utf8_lossy(&passed.stderr).contains("budgets: 2 budgets passed · report "));
+//RS     assert_eq!(
+//RS         fs::read_dir(&report_dir).unwrap().count(),
+//RS         2,
+//RS         "source/spec change must refresh evidence"
+//RS     );
+//RS 
+//RS     let reused = Command::new(jet())
+//RS         .args(["build", "src/run.jet"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         reused.status.code(),
+//RS         Some(0),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&reused.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_dir(&report_dir).unwrap().count(),
+//RS         2,
+//RS         "unchanged relevant identity must reuse canonical report"
+//RS     );
+//RS 
+//RS     let ci = Command::new(jet())
+//RS         .args(["build", "src/run.jet", "--profile=ci"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         ci.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&ci.stdout),
+//RS         String::from_utf8_lossy(&ci.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         fs::read_dir(&report_dir).unwrap().count(),
+//RS         3,
+//RS         "CI profile identity must refresh evidence"
+//RS     );
+//RS     let mut profiles = Vec::new();
+//RS     for entry in fs::read_dir(&report_dir).unwrap() {
+//RS         let value =
+//RS             CanonicalJson::parse_canonical(&fs::read(entry.unwrap().path()).unwrap()).unwrap();
+//RS         let CanonicalJson::Object(report) = value else {
+//RS             panic!("report")
+//RS         };
+//RS         let CanonicalJson::Object(content) = &report["content"] else {
+//RS             panic!("content")
+//RS         };
+//RS         let CanonicalJson::Object(subject) = &content["subject"] else {
+//RS             panic!("subject")
+//RS         };
+//RS         let CanonicalJson::String(profile) = &subject["profile"] else {
+//RS             panic!("profile")
+//RS         };
+//RS         profiles.push(profile.clone());
+//RS     }
+//RS     assert!(profiles.iter().any(|profile| profile == "dev"));
+//RS     assert!(profiles.iter().any(|profile| profile == "ci"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
+//RS     use jet_foundation::PerformanceBudget::CanonicalJson;
+//RS     let dir = benchmark_budget_project("budget_bench_measurement");
+//RS     let bootstrap = Command::new(jet())
+//RS         .args([
+//RS             "budget",
+//RS             "update",
+//RS             "--baseline",
+//RS             "ci/linux",
+//RS             "--bootstrap",
+//RS             "--reason",
+//RS             "initial benchmark",
+//RS             "--yes",
+//RS             "--json",
+//RS         ])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert_eq!(
+//RS         bootstrap.status.code(),
+//RS         Some(0),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&bootstrap.stdout),
+//RS         String::from_utf8_lossy(&bootstrap.stderr)
+//RS     );
+//RS     let CanonicalJson::Object(first) = CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap()
+//RS     else {
+//RS         panic!("command")
+//RS     };
+//RS     let CanonicalJson::Object(report) = canonical_field(&first["budget"], "report") else {
+//RS         panic!("report")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content")
+//RS     };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     let CanonicalJson::Object(measurement) = &measurements[0] else {
+//RS         panic!("measurement")
+//RS     };
+//RS     let CanonicalJson::Array(samples) = &measurement["samples"] else {
+//RS         panic!("samples")
+//RS     };
+//RS     assert_eq!(samples.len(), 20);
+//RS     assert!(matches!(
+//RS         measurement["statistics"],
+//RS         CanonicalJson::Object(_)
+//RS     ));
+//RS     assert!(matches!(measurement["policy"], CanonicalJson::Object(_)));
+//RS     assert_eq!(measurement["history"], CanonicalJson::Null);
+//RS     assert_eq!(measurement["baseline"], CanonicalJson::Null);
+//RS     let CanonicalJson::Object(provider) = &measurement["provider"] else {
+//RS         panic!("provider")
+//RS     };
+//RS     assert_eq!(
+//RS         provider["kind"],
+//RS         CanonicalJson::String("BenchMeasurement".into())
+//RS     );
+//RS     assert_eq!(provider["identity"], CanonicalJson::String("parse".into()));
+//RS     let first_id = match &report["report_id"] {
+//RS         CanonicalJson::String(value) => value.clone(),
+//RS         _ => panic!("report id"),
+//RS     };
+//RS 
+//RS     let check = Command::new(jet())
+//RS         .args(["budget", "check", "--json"])
+//RS         .current_dir(&dir)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         matches!(check.status.code(), Some(0) | Some(1)),
+//RS         "stdout: {}\nstderr: {}",
+//RS         String::from_utf8_lossy(&check.stdout),
+//RS         String::from_utf8_lossy(&check.stderr)
+//RS     );
+//RS     let CanonicalJson::Object(second) = CanonicalJson::parse_canonical(&check.stdout).unwrap()
+//RS     else {
+//RS         panic!("command")
+//RS     };
+//RS     let CanonicalJson::Object(report) = canonical_field(&second["budget"], "report") else {
+//RS         panic!("report")
+//RS     };
+//RS     let CanonicalJson::Object(content) = &report["content"] else {
+//RS         panic!("content")
+//RS     };
+//RS     let CanonicalJson::Array(measurements) = &content["measurements"] else {
+//RS         panic!("measurements")
+//RS     };
+//RS     let CanonicalJson::Object(measurement) = &measurements[0] else {
+//RS         panic!("measurement")
+//RS     };
+//RS     let CanonicalJson::Object(history) = &measurement["history"] else {
+//RS         panic!("history")
+//RS     };
+//RS     let CanonicalJson::Array(ids) = &history["report_ids"] else {
+//RS         panic!("ids")
+//RS     };
+//RS     assert_eq!(ids, &vec![CanonicalJson::String(first_id.clone())]);
+//RS     let CanonicalJson::Object(baseline) = &measurement["baseline"] else {
+//RS         panic!("baseline")
+//RS     };
+//RS     let CanonicalJson::Array(pooled) = &baseline["pooled_samples"] else {
+//RS         panic!("pooled")
+//RS     };
+//RS     assert_eq!(pooled.len(), 20);
+//RS     let CanonicalJson::Object(decision) = &measurement["decision"] else {
+//RS         panic!("decision")
+//RS     };
+//RS     assert_ne!(
+//RS         decision["evidence"],
+//RS         CanonicalJson::String("unavailable".into())
+//RS     );
+//RS     let CanonicalJson::Array(results) = canonical_field(&second["budget"], "results") else {
+//RS         panic!("results")
+//RS     };
+//RS     let CanonicalJson::Object(result) = &results[0] else {
+//RS         panic!("result")
+//RS     };
+//RS     assert_eq!(
+//RS         result["baseline_report_ids"],
+//RS         CanonicalJson::Array(vec![CanonicalJson::String(first_id)])
+//RS     );
+//RS     assert_eq!(result["metric"], measurement["metric"]);
+//RS     assert_eq!(result["lower95"], decision["lower95"]);
+//RS     assert_eq!(result["upper95"], decision["upper95"]);
+//RS     assert_eq!(result["trend"], decision["trend"]);
+//RS     assert_eq!(result["reason"], decision["reason"]);
+//RS }
+// END-PORT-PENDING 0995 tests/cli_parts/core.rs:1-1258
+

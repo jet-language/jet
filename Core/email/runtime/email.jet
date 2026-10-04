@@ -1,0 +1,967 @@
+// Email.rs private SMTP/DKIM fragment. Canonical public carriers stay in core.email.
+// Main publication: core.email adds `module runtime { module email }` and imports
+// this fragment for SMTP validation/transaction/state helpers; remove the old
+// private validate_smtp_config/validate_ca_pem bodies, not a second active policy.
+// Transport implementations are NOT supplied by these traits. Email.rs:229–244,
+// 246–313,315–391,762–803,806–943,1077–1084 require the actual canonical native
+// DNS/TCP/TLS/ambient-context/clock/secret owners (#4494/#4483/#4409/#4500).
+// No socket facade, Rust bridge, fabricated Mailer, or successful native placeholder.
+// Allocation/loan gates: String.from_bytes and String.bytes still copy in the host;
+// #4494/#4500 must provide checked retained UTF-8 and consuming byte-buffer finish.
+// Main must retain the original input owner while every View below is live.
+use core as core
+use core.email as email
+use core.email.[EmailError, Address, Attachment, Envelope, Message, Limits, SMTPConfig, SMTPSecurity, RecipientPolicy, TLSTrust, DKIMConfig, RecipientReport, SendReport]
+// Rust configuration_error:109–116 / error:1504–1506 reuse the existing owner.
+// This local import spelling is not a public compatibility alias/re-export.
+use core.email.[email_error as configuration_error]
+use core.text as text
+use core.text.runtime.kernel_unicode_string as unicode
+use core.encoding.runtime.kernel_base_encode as base_encode
+
+// Rust ErrorKind:1473–1477; not a second error payload universe.
+#Equatable
+pub enum ErrorKind { Configuration, DNS, Connect, TLS, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, DeliveryUnknown }
+
+// Rust error_parts:32–70. Projection consumes/moves owned fields, never clones Error.
+pub fn error_parts(error: ^EmailError) -> (String, Int, String, String?, Int?, String) Never! {
+    if error == {
+        .Configuration(operation, server, code, reason) -> ("Configuration", 0, operation, server, code, reason)
+        .DNS(operation, server, code, reason) -> ("DNS", 1, operation, server, code, reason)
+        .Connect(operation, server, code, reason) -> ("Connect", 2, operation, server, code, reason)
+        .TLS(operation, server, code, reason) -> ("TLS", 3, operation, server, code, reason)
+        .Auth(operation, server, code, reason) -> ("Auth", 4, operation, server, code, reason)
+        .Protocol(operation, server, code, reason) -> ("Protocol", 5, operation, server, code, reason)
+        .Rejected(operation, server, code, reason) -> ("Rejected", 6, operation, server, code, reason)
+        .Transient(operation, server, code, reason) -> ("Transient", 7, operation, server, code, reason)
+        .TimedOut(operation, server, code, reason) -> ("TimedOut", 8, operation, server, code, reason)
+        .Cancelled(operation, server, code, reason) -> ("Cancelled", 9, operation, server, code, reason)
+        .DeliveryUnknown(operation, server, code, reason) -> ("DeliveryUnknown", 10, operation, server, code, reason)
+    }
+}
+// Rust error_reason:72–86. Borrowed projection is held behind #4500 loan retention.
+pub fn error_reason(error: EmailError) -> String from error {
+    if error == {
+        .Configuration(_, _, _, reason) | .DNS(_, _, _, reason) | .Connect(_, _, _, reason)
+        | .TLS(_, _, _, reason) | .Auth(_, _, _, reason) | .Protocol(_, _, _, reason)
+        | .Rejected(_, _, _, reason) | .Transient(_, _, _, reason) | .TimedOut(_, _, _, reason)
+        | .Cancelled(_, _, _, reason) | .DeliveryUnknown(_, _, _, reason) -> reason
+    }
+}
+// Rust jet_show:91–101 and jet_display:104–106 share exactly this renderer.
+pub fn error_text(error: EmailError) -> String Never! {
+    out := [U8]{}
+    if error == {
+        .Configuration(operation, server, code, reason) -> render_error(&out, "Configuration", operation, server, code, reason)
+        .DNS(operation, server, code, reason) -> render_error(&out, "DNS", operation, server, code, reason)
+        .Connect(operation, server, code, reason) -> render_error(&out, "Connect", operation, server, code, reason)
+        .TLS(operation, server, code, reason) -> render_error(&out, "TLS", operation, server, code, reason)
+        .Auth(operation, server, code, reason) -> render_error(&out, "Auth", operation, server, code, reason)
+        .Protocol(operation, server, code, reason) -> render_error(&out, "Protocol", operation, server, code, reason)
+        .Rejected(operation, server, code, reason) -> render_error(&out, "Rejected", operation, server, code, reason)
+        .Transient(operation, server, code, reason) -> render_error(&out, "Transient", operation, server, code, reason)
+        .TimedOut(operation, server, code, reason) -> render_error(&out, "TimedOut", operation, server, code, reason)
+        .Cancelled(operation, server, code, reason) -> render_error(&out, "Cancelled", operation, server, code, reason)
+        .DeliveryUnknown(operation, server, code, reason) -> render_error(&out, "DeliveryUnknown", operation, server, code, reason)
+    }
+    String.from_bytes(out) ?? panic("email renderer produced invalid UTF-8")
+}
+fn render_error(out: &[U8], kind: String, operation: String, server: String?, code: Int?, reason: String) Never! {
+    append_text(&out, "email {operation} failed ({kind}): {reason}")
+    if server == .Val(value) -> append_text(&out, " — server {value}")
+    if code == .Val(value) -> append_text(&out, " — code {value}")
+}
+// Rust smtp_error:1479–1502.
+pub fn smtp_error(kind: ErrorKind, operation: String, server: String, code: Int?, reason: String) -> EmailError Never! {
+    if kind == {
+        .Configuration -> EmailError.Configuration{operation: operation, server: Val(server), code: code, reason: reason}
+        .DNS -> EmailError.DNS{operation: operation, server: Val(server), code: code, reason: reason}
+        .Connect -> EmailError.Connect{operation: operation, server: Val(server), code: code, reason: reason}
+        .TLS -> EmailError.TLS{operation: operation, server: Val(server), code: code, reason: reason}
+        .Auth -> EmailError.Auth{operation: operation, server: Val(server), code: code, reason: reason}
+        .Protocol -> EmailError.Protocol{operation: operation, server: Val(server), code: code, reason: reason}
+        .Rejected -> EmailError.Rejected{operation: operation, server: Val(server), code: code, reason: reason}
+        .Transient -> EmailError.Transient{operation: operation, server: Val(server), code: code, reason: reason}
+        .TimedOut -> EmailError.TimedOut{operation: operation, server: Val(server), code: code, reason: reason}
+        .Cancelled -> EmailError.Cancelled{operation: operation, server: Val(server), code: code, reason: reason}
+        .DeliveryUnknown -> EmailError.DeliveryUnknown{operation: operation, server: Val(server), code: code, reason: reason}
+    }
+}
+// Rust with_server:1443–1445 / with_operation_server:1447–1470.
+pub fn with_server(error: EmailError, server: String) -> EmailError Never! { with_operation_server(error, "smtp", server) }
+pub fn with_operation_server(error: EmailError, operation: String, server: String) -> EmailError Never! {
+    if error == {
+        .Configuration(_, _, code, reason) -> smtp_error(ErrorKind.Configuration, operation, server, code, reason)
+        .DNS(_, _, code, reason) -> smtp_error(ErrorKind.DNS, operation, server, code, reason)
+        .Connect(_, _, code, reason) -> smtp_error(ErrorKind.Connect, operation, server, code, reason)
+        .TLS(_, _, code, reason) -> smtp_error(ErrorKind.TLS, operation, server, code, reason)
+        .Auth(_, _, code, reason) -> smtp_error(ErrorKind.Auth, operation, server, code, reason)
+        .Protocol(_, _, code, reason) -> smtp_error(ErrorKind.Protocol, operation, server, code, reason)
+        .Rejected(_, _, code, reason) -> smtp_error(ErrorKind.Rejected, operation, server, code, reason)
+        .Transient(_, _, code, reason) -> smtp_error(ErrorKind.Transient, operation, server, code, reason)
+        .TimedOut(_, _, code, reason) -> smtp_error(ErrorKind.TimedOut, operation, server, code, reason)
+        .Cancelled(_, _, code, reason) -> smtp_error(ErrorKind.Cancelled, operation, server, code, reason)
+        .DeliveryUnknown(_, _, code, reason) -> smtp_error(ErrorKind.DeliveryUnknown, operation, server, code, reason)
+    }
+}
+// Rust Limits::safe:167–176 maps to email.limits (same six values).
+// Rust Limits::validate:178–194: preserve field/error precedence.
+pub fn validate_limits(limits: Limits) EmailError! {
+    validate_limit("max_reply_line_bytes", limits.max_reply_line_bytes, 64, 65536) ?? return Err(err)
+    validate_limit("max_reply_lines", limits.max_reply_lines, 1, 1000) ?? return Err(err)
+    validate_limit("max_capabilities", limits.max_capabilities, 1, 1000) ?? return Err(err)
+    validate_limit("max_recipients", limits.max_recipients, 1, 10000) ?? return Err(err)
+    validate_limit("max_message_bytes", limits.max_message_bytes, 1, 1073741824) ?? return Err(err)
+    validate_limit("max_auth_challenge_bytes", limits.max_auth_challenge_bytes, 1, 65536) ?? return Err(err)
+    Ok(())
+}
+fn validate_limit(field: String, value: Int, min: Int, max: Int) EmailError! {
+    if value < min || value > max -> return Err(configuration_error("smtp", "{field} must be between {min} and {max}; got {value}"))
+    Ok(())
+}
+// Rust validate_smtp_config:393–420. Main removes/repoints the old private parent
+// validator; its auth-first ordering/key-copy is NOT equivalent to this body.
+pub fn validate_smtp_config(config: SMTPConfig) EmailError! {
+    validate_limits(config.limits) ?? return Err(err)
+    host :: config.host.bytes()
+    if host.len() == 0 || host.len() > 253 -> return Err(configuration_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    loop b in host {
+        if b > (U8{127}) || b < (U8{33}) || b == (U8{127}) -> return Err(configuration_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    }
+    if config.port < 1 || config.port > 65535 -> return Err(configuration_error("smtp", "port must be between 1 and 65535"))
+    if config.port == 587 && config.security != SMTPSecurity.StartTLS -> return Err(configuration_error("smtp", "port 587 requires verified STARTTLS"))
+    if config.port == 465 && config.security != SMTPSecurity.TLS -> return Err(configuration_error("smtp", "port 465 requires TLS from connect"))
+    if config.auth == .Password(username, _) {
+        raw :: username.bytes()
+        if raw.len() == 0 || raw.len() > 512 -> return Err(configuration_error("smtp", "SMTP username must contain 1 to 512 bytes without controls"))
+        loop b in raw { if b < (U8{32}) || b == (U8{127}) -> return Err(configuration_error("smtp", "SMTP username must contain 1 to 512 bytes without controls")) }
+    }
+    if config.trust == .SystemPlusCa(pem) -> validate_ca_pem(pem) ?? return Err(err)
+    // Existing qualified body email.validate_dkim_config:629–675 matches Rust
+    // :435–475; Main exposes it to this private sibling, without cloning Secret.
+    if config.dkim == .Val(dkim) {
+        issue :: email.validate_dkim_config(dkim)
+        if issue == .Val(error) -> return Err(error)
+    }
+    Ok(())
+}
+// Rust :478–507: certificate framing accepts Unicode trim outside blocks, while
+// base64 only ignores ASCII whitespace. Do not substitute strict RFC4648 decode.
+pub fn validate_ca_pem(pem: [U8]) EmailError! {
+    if pem.len() == 0 -> return Err(configuration_error("smtp", "custom CA PEM must not be empty"))
+    _ :: String.from_bytes(pem) ?? return Err(configuration_error("smtp", "custom CA PEM must be UTF-8 text"))
+    begin :: "-----BEGIN CERTIFICATE-----".bytes()
+    end :: "-----END CERTIFICATE-----".bytes()
+    cursor := 0
+    certificates := 0
+    loop {
+        start :: find_bytes(pem, cursor, begin)
+        if start == None -> break
+        at :: start ?? panic("present certificate start")
+        prefix := byte_text(pem, cursor, at) // #4303
+        trimmed := prefix.trim() // #4303
+        if text.byte_count(trimmed) != 0 -> return Err(configuration_error("smtp", "custom CA PEM contains data outside certificate blocks"))
+        cursor = at + begin.len()
+        stop :: find_bytes(pem, cursor, end) ?? return Err(configuration_error("smtp", "custom CA PEM has an unterminated certificate"))
+        der :: decode_pem_base64(pem[cursor..<stop]) ?? return Err(err)
+        if der.len() < 4 || der[0] != (U8{48}) -> return Err(configuration_error("smtp", "custom CA PEM does not contain an X.509 DER certificate"))
+        if certificates == Int.from_u64(core.sys.usize_max()) -> return Err(configuration_error("smtp", "custom CA certificate count overflow")) // #4483
+        certificates += 1
+        cursor = stop + end.len()
+    }
+    tail := byte_text(pem, cursor, pem.len()) // #4303
+    trimmed := tail.trim() // #4303
+    if certificates == 0 || text.byte_count(trimmed) != 0 -> return Err(configuration_error("smtp", "custom CA PEM must contain only certificate blocks"))
+    Ok(())
+}
+// Rust decode_pem_base64:509–548 and base64_value:550–559.
+pub fn base64_value(byte: U8) -> U8? Never! {
+    if byte >= (U8{65}) && byte <= (U8{90}) -> return Val(byte - U8{65})
+    if byte >= (U8{97}) && byte <= (U8{122}) -> return Val(byte - U8{97} + U8{26})
+    if byte >= (U8{48}) && byte <= (U8{57}) -> return Val(byte - U8{48} + U8{52})
+    if byte == (U8{43}) -> return Val(U8{62})
+    if byte == (U8{47}) -> return Val(U8{63})
+    None
+}
+pub fn decode_pem_base64(raw: View<U8>) -> [U8] EmailError! {
+    out := [U8]{}
+    quartet := [U8#4]{0, 0, 0, 0}
+    used := 0
+    padded := false
+    loop byte in raw {
+        if ascii_space(byte) -> continue
+        if padded -> return Err(configuration_error("smtp", "custom CA PEM has data after base64 padding"))
+        quartet[used] = byte
+        used += 1
+        if used == 4 {
+            values := [U8#4]{0, 0, 0, 0}
+            pads := 0
+            loop i in 0..<4 {
+                if quartet[i] == (U8{61}) -> pads += 1 else {
+                    if pads != 0 -> return Err(configuration_error("smtp", "custom CA PEM has invalid base64 padding"))
+                    values[i] = base64_value(quartet[i]) ?? return Err(configuration_error("smtp", "custom CA PEM contains invalid base64"))
+                }
+            }
+            if pads > 2 -> return Err(configuration_error("smtp", "custom CA PEM has invalid base64 padding"))
+            &out.push((values[0] << 2) | (values[1] >> 4))
+            if pads < 2 -> &out.push((values[1] << 4) | (values[2] >> 2))
+            if pads == 0 -> &out.push((values[2] << 6) | values[3])
+            padded = pads != 0
+            used = 0
+        }
+    }
+    if used != 0 || out.len() == 0 -> return Err(configuration_error("smtp", "custom CA PEM contains incomplete base64"))
+    Ok(out)
+}
+// Rust decode_dkim_base64:561–594. Every post-allocation refusal wipes output.
+pub fn decode_dkim_base64(raw: View<U8>, wipe: fn(&[U8])) -> [U8] EmailError! {
+    if raw.len() == 0 || raw.len() %% 4 != 0 -> return Err(configuration_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"))
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        last :: at + 4 == raw.len()
+        pads := 0
+        if raw[at + 3] == (U8{61}) -> pads += 1
+        if raw[at + 2] == (U8{61}) -> pads += 1
+        if (!last && pads != 0) || (raw[at + 2] == (U8{61}) && raw[at + 3] != (U8{61})) {
+            wipe(&out)
+            return Err(configuration_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"))
+        }
+        a :: base64_value(raw[at])
+        b :: base64_value(raw[at + 1])
+        c :: if raw[at + 2] == (U8{61}) -> Val(U8{0}) else -> base64_value(raw[at + 2])
+        d :: if raw[at + 3] == (U8{61}) -> Val(U8{0}) else -> base64_value(raw[at + 3])
+        if a == None || b == None || c == None || d == None {
+            wipe(&out)
+            return Err(configuration_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"))
+        }
+        av :: a ?? panic("checked base64 a")
+        bv :: b ?? panic("checked base64 b")
+        cv :: c ?? panic("checked base64 c")
+        dv :: d ?? panic("checked base64 d")
+        if (pads == 2 && (bv & U8{15}) != (U8{0})) || (pads == 1 && (cv & U8{3}) != (U8{0})) {
+            wipe(&out)
+            return Err(configuration_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"))
+        }
+        &out.push((av << 2) | (bv >> 4))
+        if pads < 2 -> &out.push((bv << 4) | (cv >> 2))
+        if pads == 0 -> &out.push((cv << 6) | dv)
+        at += 4
+    }
+    if out.len() != 32 {
+        wipe(&out)
+        return Err(configuration_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"))
+    }
+    Ok(out)
+}
+
+// Rust SMTPReply:596–597 / SMTPCapabilities:645–649 / SMTPState:684–685.
+pub struct SMTPReply {
+    pub code: Int
+    pub lines: [String]
+}
+pub struct SMTPCapabilities {
+    pub names: [String]
+    pub auth_mechanisms: [String]
+}
+pub struct SMTPState {
+    pub greeted: Bool
+    pub ehlo: Bool
+    pub verified_tls: Bool
+    pub authenticated: Bool
+}
+// Read is the source's one-byte prospective-limit operation, not an eager read.
+// Err! is the exact Rust Result<_,String> rail at this private transport seam.
+pub trait SMTPRead {
+    fn read(&self, out: &[U8#1]) -> Int Err!
+}
+pub trait SMTPTransport: SMTPRead {
+    fn write_all(&self, bytes: View<U8>) Err!
+    fn flush(&self) Err!
+    fn verified_tls(self) -> Bool Never!
+    fn start_tls(&self, server: String, trust: TLSTrust) Err!
+    fn close(&self) Never!
+    fn take_stop(&self) -> SMTPStop? Never! { None }
+}
+#[Equatable, Error]
+pub enum SMTPStop { Cancelled, TimedOut }
+// Rust SMTPControl:756–760. Default wipe is the ORIGINAL generic control law;
+// ambient/native control must override it with its real RuntimeFns wipe owner.
+pub trait SMTPControl {
+    fn checkpoint(self, operation: String) SMTPStop!
+    fn accepted_at(self) -> String Never!
+    fn wipe(self, bytes: &[U8]) Never! { loop i in 0..<bytes.len() -> bytes[i] = U8{0} }
+}
+// Rust read_smtp_reply:600–639; no lookahead, exact precedence/read boundaries.
+pub fn read_smtp_reply<T: SMTPRead>(reader: &T, limits: Limits) -> SMTPReply EmailError! {
+    validate_limits(limits) ?? return Err(err)
+    lines := [String]{}
+    expected := no_reply_code()
+    loop {
+        if lines.len() == limits.max_reply_lines -> return Err(protocol_error("reply exceeds max_reply_lines"))
+        line := [U8]{}
+        loop {
+            byte := [U8#1]{0}
+            count :: &reader.read(&byte) ?? return Err(protocol_error("failed reading SMTP reply: {err}"))
+            if count == 0 -> return Err(protocol_error("connection closed inside SMTP reply"))
+            if line.len() == limits.max_reply_line_bytes -> return Err(protocol_error("reply line exceeds max_reply_line_bytes"))
+            &line.push(byte[0])
+            if ends_crlf(line) -> break
+        }
+        if line.len() < 5 || !ascii_digit(line[0]) || !ascii_digit(line[1]) || !ascii_digit(line[2]) || (line[3] != (U8{45}) && line[3] != (U8{32})) -> return Err(protocol_error("SMTP reply must start with three digits and space or hyphen"))
+        code :: Int.from_u8(line[0] - U8{48}) * 100 + Int.from_u8(line[1] - U8{48}) * 10 + Int.from_u8(line[2] - U8{48})
+        if expected == .Val(value) && value != code -> return Err(protocol_error("multiline SMTP reply changed response code"))
+        expected = Val(code)
+        continued :: line[3] == (U8{45})
+        body :: checked_byte_text(line, 4, line.len() - 2) ?? return Err(protocol_error("SMTP reply is not UTF-8"))
+        &lines.push(body)
+        if !continued -> return Ok(SMTPReply{code: code, lines: lines})
+    }
+}
+fn protocol_error(reason: String) -> EmailError Never! { EmailError.Protocol{operation: "smtp_reply", server: None, code: None, reason: reason} }
+// Rust smtp_capabilities:651–682. Ordered lists plus String sets avoid per-item
+// scans; String keys use the existing canonical map/set mechanism (#4499 N/A).
+pub fn smtp_capabilities(reply: SMTPReply, limits: Limits) -> SMTPCapabilities EmailError! {
+    validate_limits(limits) ?? return Err(err)
+    if reply.code != 250 -> return Err(protocol_error("EHLO requires a 250 reply"))
+    names := [String]{}
+    mechanisms := [String]{}
+    seen_names := Set.from([String]{})
+    seen_auth := Set.from([String]{})
+    loop i in 1..<reply.lines.len() {
+        raw :: reply.lines[i].bytes()
+        at := 0
+        loop at < raw.len() && ascii_space(raw[at]) -> at += 1
+        start :: at
+        loop at < raw.len() && !ascii_space(raw[at]) -> at += 1
+        if start == at -> return Err(protocol_error("EHLO feature name is invalid"))
+        loop j in start..<at { if !feature_byte(raw[j]) -> return Err(protocol_error("EHLO feature name is invalid")) }
+        name :: ascii_upper_bytes(raw, start, at)
+        if !seen_names.has(name) {
+            if names.len() == limits.max_capabilities -> return Err(protocol_error("EHLO exceeds max_capabilities"))
+            &seen_names.add(~name)
+            &names.push(~name)
+        }
+        if name == "AUTH" {
+            loop at < raw.len() {
+                loop at < raw.len() && ascii_space(raw[at]) -> at += 1
+                if at == raw.len() -> break
+                first :: at
+                loop at < raw.len() && !ascii_space(raw[at]) -> at += 1
+                loop j in first..<at { if !feature_byte(raw[j]) -> return Err(protocol_error("EHLO AUTH mechanism is invalid")) }
+                mechanism :: ascii_upper_bytes(raw, first, at)
+                if !seen_auth.has(mechanism) {
+                    &seen_auth.add(~mechanism)
+                    &mechanisms.push(mechanism)
+                }
+            }
+        }
+    }
+    Ok(SMTPCapabilities{names: names, auth_mechanisms: mechanisms})
+}
+// Rust SMTPState methods:688–722.
+pub fn state_new() -> SMTPState Never! { SMTPState{greeted: false, ehlo: false, verified_tls: false, authenticated: false} }
+pub fn state_greeting(state: &SMTPState, reply: SMTPReply) EmailError! {
+    if state.greeted || reply.code != 220 -> return Err(protocol_error("expected one SMTP 220 greeting"))
+    state.greeted = true
+    Ok(())
+}
+pub fn state_ehlo(state: &SMTPState, reply: SMTPReply, limits: Limits) -> SMTPCapabilities EmailError! {
+    if !state.greeted -> return Err(protocol_error("EHLO cannot precede greeting"))
+    caps :: smtp_capabilities(reply, limits) ?? return Err(err)
+    state.ehlo = true
+    Ok(caps)
+}
+pub fn state_start_tls(state: &SMTPState, caps: SMTPCapabilities) EmailError! {
+    if !state.ehlo || state.verified_tls || !contains_name(caps.names, "STARTTLS") -> return Err(EmailError.TLS{operation: "starttls", server: None, code: None, reason: "verified STARTTLS requires an advertised feature after EHLO"})
+    state.ehlo = false
+    Ok(())
+}
+pub fn state_verified_tls(state: &SMTPState) Never! { state.verified_tls = true }
+pub fn state_authenticate(state: &SMTPState, auth: String, challenge_bytes: Int, limits: Limits) EmailError! {
+    if !state.verified_tls || !state.ehlo -> return Err(EmailError.Auth{operation: "auth", server: None, code: None, reason: "password authentication requires verified TLS and post-TLS EHLO"})
+    if challenge_bytes > limits.max_auth_challenge_bytes -> return Err(EmailError.Auth{operation: "auth", server: None, code: None, reason: "authentication challenge exceeds max_auth_challenge_bytes"})
+    if auth != "PLAIN" && auth != "LOGIN" -> return Err(EmailError.Auth{operation: "auth", server: None, code: None, reason: "relay does not offer supported password authentication"})
+    state.authenticated = true
+    Ok(())
+}
+
+// Rust relaxed_body:946–960. One forward scan; truncate trailing empty lines
+// by delaying their output, not storing all line views or rescanning prefixes.
+pub fn relaxed_body(body: [U8]) -> [U8] EmailError! {
+    _ :: String.from_bytes(body) ?? return Err(configuration_error("dkim", "serialized message body must be UTF-8"))
+    out := [U8]{}
+    pending := 0
+    start := 0
+    loop {
+        stop := start
+        loop stop + 1 < body.len() && !(body[stop] == (U8{13}) && body[stop + 1] == (U8{10})) -> stop += 1
+        has_break :: stop + 1 < body.len()
+        if !has_break -> stop = body.len()
+        end := stop
+        loop end > start && (body[end - 1] == (U8{32}) || body[end - 1] == (U8{9})) -> end -= 1
+        if end == start -> pending += 1 else {
+            loop i in 0..<pending -> append_crlf(&out)
+            pending = 0
+            append_bytes(&out, body[start..<end])
+            append_crlf(&out)
+        }
+        if !has_break -> break
+        start = stop + 2
+    }
+    if out.len() == 0 -> append_crlf(&out)
+    Ok(out)
+}
+// Rust relaxed_header:962–995: name's check is UTF-8, NOT stricter ASCII.
+pub fn relaxed_header(header: [U8]) -> [U8] EmailError! {
+    colon :: find_byte(header, U8{58}) ?? return Err(configuration_error("dkim", "serialized message contains a malformed header"))
+    _ :: checked_byte_text(header, 0, colon) ?? return Err(configuration_error("dkim", "serialized header name must be ASCII"))
+    out := [U8]{}
+    loop i in 0..<colon -> &out.push(ascii_lower_byte(header[i]))
+    &out.push(U8{58})
+    has_value := false
+    whitespace := false
+    at := colon + 1
+    loop at < header.len() {
+        if at + 2 < header.len() && header[at] == (U8{13}) && header[at + 1] == (U8{10}) && (header[at + 2] == (U8{32}) || header[at + 2] == (U8{9})) {
+            whitespace = true
+            at += 3
+            continue
+        }
+        byte :: header[at]
+        if byte == (U8{32}) || byte == (U8{9}) -> whitespace = true else {
+            if whitespace && has_value -> &out.push(U8{32})
+            whitespace = false
+            &out.push(byte)
+            has_value = true
+        }
+        at += 1
+    }
+    append_crlf(&out)
+    Ok(out)
+}
+// Rust message_headers:997–1015. Body uses a retained byte OFFSET, not a copied
+// body. The original wire remains live and is lent at wire[body_start..<len].
+pub struct MessageHeaders {
+    pub headers: [[U8]]
+    pub body_start: Int
+}
+pub fn message_headers(wire: [U8]) -> MessageHeaders EmailError! {
+    separator :: "\r\n\r\n".bytes()
+    split :: find_bytes(wire, 0, separator) ?? return Err(configuration_error("dkim", "serialized message is missing its header/body boundary"))
+    headers := [[U8]]{}
+    start := 0
+    loop {
+        end := start
+        loop end < split && wire[end] != (U8{10}) -> end += 1
+        last := end
+        if last > start && wire[last - 1] == (U8{13}) -> last -= 1
+        folded :: last > start && (wire[start] == (U8{32}) || wire[start] == (U8{9}))
+        if folded {
+            if headers.len() == 0 -> return Err(configuration_error("dkim", "serialized message starts with a folded header"))
+            previous :: headers.len() - 1
+            append_crlf(&headers[previous])
+            append_bytes(&headers[previous], wire[start..<last])
+        } else {
+            line := [U8]{}
+            append_bytes(&line, wire[start..<last])
+            &headers.push(line)
+        }
+        if end == split -> break
+        start = end + 1
+    }
+    Ok(MessageHeaders{headers: headers, body_start: split + 4})
+}
+// Rust header_name:1017–1020.
+pub fn header_name(header: [U8]) -> String? Never! {
+    colon :: find_byte(header, U8{58}) ?? return None
+    name := checked_byte_text(header, 0, colon) ?? return None // #4303
+    Val(unicode.ascii_lower(name))
+}
+// The exact original RuntimeFns SHA256/Ed25519 callback obligations, not a
+// delivered native signer. No fake signatures; the native implementation gates.
+pub trait DKIMRuntime {
+    fn sha256(self, bytes: View<U8>) -> [U8#32] Never!
+    fn ed25519_sign(self, private_key: View<U8>, digest: [U8#32]) -> [U8] Err!
+}
+// Rust dkim_sign:1022–1055. Last header wins. Indexing preserves the Rust lookup
+// meaning but avoids repeated all-header scans/decodes per signed name.
+pub fn dkim_sign<R: DKIMRuntime>(wire: [U8], dkim: DKIMConfig, key: View<U8>, runtime: R) -> [U8] EmailError! {
+    parsed :: message_headers(wire) ?? return Err(err)
+    last_headers := [String: Int]{}
+    loop i in 0..<parsed.headers.len() {
+        if header_name(parsed.headers[i]) == .Val(name) -> last_headers[name] = i
+    }
+    names := [String]{}
+    signed := [U8]{}
+    loop name in dkim.signed_headers {
+        lower :: unicode.ascii_lower(name)
+        index :: last_headers.get(lower) ?? return Err(configuration_error("dkim", "signed header `{lower}` is absent from the final message"))
+        canonical :: relaxed_header(parsed.headers[index]) ?? return Err(err)
+        append_bytes(&signed, canonical[0..<canonical.len()])
+        &names.push(lower)
+    }
+    body :: relaxed_body_view(wire, parsed.body_start) ?? return Err(err)
+    body_digest :: runtime.sha256(body[0..<body.len()])
+    body_hash :: base_encode.encode64(body_digest[0..<32])
+    header_list :: names.join(":")
+    unsigned :: "DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d={dkim.domain}; s={dkim.selector}; h={header_list}; bh={body_hash}; b=".bytes()
+    canonical :: relaxed_header(unsigned) ?? return Err(err)
+    append_bytes(&signed, canonical[0..<canonical.len()])
+    digest :: runtime.sha256(signed[0..<signed.len()])
+    signature :: runtime.ed25519_sign(key, digest) ?? return Err(configuration_error("dkim", "Ed25519 signing failed"))
+    if signature.len() != 64 -> return Err(configuration_error("dkim", "Ed25519 signer returned an invalid signature"))
+    encoded :: base_encode.encode64(signature[0..<signature.len()])
+    folded :: "DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n d={dkim.domain}; s={dkim.selector};\r\n h={header_list};\r\n bh={body_hash};\r\n b={encoded}\r\n"
+    out := [U8]{}
+    append_text(&out, folded)
+    append_bytes(&out, wire[0..<wire.len()])
+    Ok(out)
+}
+fn relaxed_body_view(wire: [U8], start: Int) -> [U8] EmailError! {
+    // Existing String.from_bytes needs owning [U8] for its UTF8 check; Main must
+    // switch this to the canonical retained UTF8 check when that leaf publishes.
+    // Until then this allocation is an explicit performance/loan gate, not parity.
+    body := [U8]{}
+    append_bytes(&body, wire[start..<wire.len()])
+    relaxed_body(body)
+}
+// Rust io_poll_timeout:889–892 (original textual fallback, in addition to kinds).
+pub fn io_poll_timeout(reason: String) -> Bool Never! {
+    lower :: unicode.ascii_lower(reason)
+    lower.contains("timed out") || lower.contains("would block") || lower.contains("temporarily unavailable")
+}
+// Rust smtp_dot_stuff:1351 / dot_stuff:1353–1374. Selected target max, never host.
+pub fn smtp_dot_stuff(bytes: [U8]) -> [U8] EmailError! { dot_stuff(bytes, Int.from_u64(core.sys.usize_max())) } // #4483
+pub fn dot_stuff(bytes: [U8], max_message_bytes: Int) -> [U8] EmailError! {
+    leading_dots := 0
+    if bytes.len() > 0 && bytes[0] == (U8{46}) -> leading_dots = 1
+    loop i in 2..<bytes.len() {
+        if bytes[i - 2] == (U8{13}) && bytes[i - 1] == (U8{10}) && bytes[i] == (U8{46}) -> leading_dots += 1
+    }
+    final_crlf :: if ends_crlf(bytes) -> 0 else -> 2
+    capacity :: bytes.len() + leading_dots + final_crlf + 3
+    if capacity > Int.from_u64(core.sys.usize_max()) -> return Err(configuration_error("smtp", "dot-stuffed message size overflow")) // #4483
+    if capacity - 3 > max_message_bytes -> return Err(configuration_error("smtp", "dot-stuffed message exceeds configured max_message_bytes"))
+    out := [U8]{}
+    line_start := true
+    loop byte in bytes {
+        if line_start && byte == (U8{46}) -> &out.push(U8{46})
+        &out.push(byte)
+        line_start = ends_crlf(out)
+    }
+    if final_crlf != 0 -> append_crlf(&out)
+    append_text(&out, ".\r\n")
+    Ok(out)
+}
+// Rust stop_error:1385–1396.
+pub fn stop_error(stop: SMTPStop, operation: String, server: String, ambiguous: Bool) -> EmailError Never! {
+    if ambiguous -> return smtp_error(ErrorKind.DeliveryUnknown, operation, server, None, "operation stopped after DATA was transmitted; relay acceptance is unknown")
+    if stop == {
+        .Cancelled -> smtp_error(ErrorKind.Cancelled, operation, server, None, "SMTP operation cancelled")
+        .TimedOut -> smtp_error(ErrorKind.TimedOut, operation, server, None, "SMTP operation timed out")
+    }
+}
+// Rust checkpoint:1376–1383 / transport_failure:1398–1408.
+fn checkpoint<C: SMTPControl>(control: C, operation: String, server: String, ambiguous: Bool) EmailError! {
+    control.checkpoint(operation) ?? return Err(stop_error(err, operation, server, ambiguous))
+    Ok(())
+}
+fn transport_failure<T: SMTPTransport>(transport: &T, operation: String, server: String, ambiguous: Bool, fallback: ErrorKind, reason: String) -> EmailError Never! {
+    if &transport.take_stop() == .Val(stop) -> return stop_error(stop, operation, server, ambiguous)
+    smtp_error(fallback, operation, server, None, reason)
+}
+// Rust expect_success:1410–1420 / expect_code:1422–1432 / reply_failure:1434–1439.
+pub fn expect_success(reply: SMTPReply, operation: String, server: String) EmailError! {
+    if reply.code >= 200 && reply.code <= 299 -> return Ok(())
+    if reply.code >= 400 && reply.code <= 599 -> return Err(reply_failure(operation, server, reply.code, reply_text(reply)))
+    Err(smtp_error(ErrorKind.Protocol, operation, server, Val(reply.code), "SMTP command returned an unexpected response code"))
+}
+pub fn expect_code(reply: SMTPReply, code: Int, operation: String, server: String) EmailError! {
+    if reply.code == code -> return Ok(())
+    if reply.code >= 400 && reply.code <= 599 -> return Err(reply_failure(operation, server, reply.code, reply_text(reply)))
+    Err(smtp_error(ErrorKind.Protocol, operation, server, Val(reply.code), "expected SMTP {code}, got {reply.code}"))
+}
+pub fn reply_failure(operation: String, server: String, code: Int, reason: String) -> EmailError Never! {
+    kind :: if code < 500 -> ErrorKind.Transient else -> ErrorKind.Rejected
+    smtp_error(kind, operation, server, Val(code), reason)
+}
+pub fn reply_text(reply: SMTPReply) -> String Never! { reply.lines.join("\n") }
+// Rust expect_auth_success:1284–1295 / expect_auth_challenge:1297–1306.
+pub fn expect_auth_success(reply: SMTPReply, config: SMTPConfig) EmailError! {
+    if reply.code == 235 -> return Ok(())
+    if reply.code >= 400 && reply.code <= 599 -> return Err(smtp_error(ErrorKind.Auth, "auth", config.host, Val(reply.code), reply_text(reply)))
+    Err(smtp_error(ErrorKind.Protocol, "auth", config.host, Val(reply.code), "expected SMTP 235, got {reply.code}"))
+}
+pub fn expect_auth_challenge(reply: SMTPReply, config: SMTPConfig) EmailError! {
+    expect_code(reply, 334, "auth", config.host) ?? return Err(err)
+    count := 0
+    loop line in reply.lines -> count += text.byte_count(line)
+    if count > config.limits.max_auth_challenge_bytes -> return Err(smtp_error(ErrorKind.Auth, "auth", config.host, Val(reply.code), "authentication challenge exceeds max_auth_challenge_bytes"))
+    Ok(())
+}
+// Rust command:1308–1328 / read_reply:1330–1349.
+fn command<T: SMTPTransport, C: SMTPControl>(transport: &T, control: C, config: SMTPConfig, operation: String, bytes: View<U8>, ambiguous: Bool) EmailError! {
+    checkpoint(control, operation, config.host, ambiguous) ?? return Err(err)
+    fallback :: if ambiguous -> ErrorKind.DeliveryUnknown else -> ErrorKind.Connect
+    &transport.write_all(bytes) ?? return Err(transport_failure(&transport, operation, config.host, ambiguous, fallback, "SMTP write failed: {err}"))
+    &transport.flush() ?? return Err(transport_failure(&transport, operation, config.host, ambiguous, fallback, "SMTP flush failed: {err}"))
+    Ok(())
+}
+fn read_reply<T: SMTPTransport>(transport: &T, config: SMTPConfig, operation: String, ambiguous: Bool) -> SMTPReply EmailError! {
+    read_smtp_reply(&transport, config.limits) ?? {
+        if &transport.take_stop() == .Val(stop) -> return Err(stop_error(stop, operation, config.host, ambiguous))
+        if ambiguous -> return Err(smtp_error(ErrorKind.DeliveryUnknown, operation, config.host, None, "relay acceptance is unknown: {error_reason(err)}"))
+        return Err(with_operation_server(err, operation, config.host))
+    }
+}
+fn ehlo<T: SMTPTransport, C: SMTPControl>(transport: &T, config: SMTPConfig, control: C, state: &SMTPState) -> SMTPCapabilities EmailError! {
+    line :: "EHLO localhost\r\n".bytes()
+    command(&transport, control, config, "ehlo", line[0..<line.len()], false) ?? return Err(err)
+    reply :: read_reply(&transport, config, "ehlo", false) ?? return Err(err)
+    state_ehlo(&state, reply, config.limits) ?? return Err(with_server(err, config.host))
+}
+// Rust authenticate:1229–1282. The password VIEW is the original owned secret
+// extraction retained by Mailer, not another Secret or a public byte-password API.
+// Native extraction/drop/wipe must be activated at the actual canonical owner.
+fn authenticate<T: SMTPTransport, C: SMTPControl>(transport: &T, config: SMTPConfig, password: View<U8>, control: C, state: &SMTPState, capabilities: SMTPCapabilities) EmailError! {
+    if config.auth == .None -> return Ok(())
+    username :: if config.auth == {
+        .None -> panic("checked password auth")
+        .Password(user, _) -> user
+    }
+    mechanism := ""
+    if contains_name(capabilities.auth_mechanisms, "PLAIN") -> mechanism = "PLAIN" else if contains_name(capabilities.auth_mechanisms, "LOGIN") -> mechanism = "LOGIN" else -> return Err(smtp_error(ErrorKind.Auth, "auth", config.host, None, "relay does not offer PLAIN or LOGIN authentication"))
+    state_authenticate(&state, mechanism, 0, config.limits) ?? return Err(with_server(err, config.host))
+    if mechanism == "PLAIN" {
+        payload := [U8]{}
+        &payload.push(U8{0})
+        append_text(&payload, username)
+        &payload.push(U8{0})
+        append_bytes(&payload, password)
+        encoded := base_encode.encode64(payload[0..<payload.len()]).bytes()
+        line := "AUTH PLAIN ".bytes()
+        append_bytes(&line, encoded[0..<encoded.len()])
+        append_crlf(&line)
+        sent :: command(&transport, control, config, "auth", line[0..<line.len()], false)
+        control.wipe(&payload)
+        control.wipe(&encoded)
+        control.wipe(&line)
+        _ :: sent ?? return Err(err)
+        reply :: read_reply(&transport, config, "auth", false) ?? return Err(err)
+        return expect_auth_success(reply, config)
+    }
+    begin :: "AUTH LOGIN\r\n".bytes()
+    command(&transport, control, config, "auth", begin[0..<begin.len()], false) ?? return Err(err)
+    challenge :: read_reply(&transport, config, "auth_username", false) ?? return Err(err)
+    expect_auth_challenge(challenge, config) ?? return Err(err)
+    user_bytes :: username.bytes()
+    line :: "{base_encode.encode64(user_bytes[0..<user_bytes.len()])}\r\n".bytes()
+    command(&transport, control, config, "auth_username", line[0..<line.len()], false) ?? return Err(err)
+    challenge :: read_reply(&transport, config, "auth_password", false) ?? return Err(err)
+    expect_auth_challenge(challenge, config) ?? return Err(err)
+    line := base_encode.encode64(password).bytes()
+    append_crlf(&line)
+    sent :: command(&transport, control, config, "auth_password", line[0..<line.len()], false)
+    control.wipe(&line)
+    _ :: sent ?? return Err(err)
+    reply :: read_reply(&transport, config, "auth", false) ?? return Err(err)
+    expect_auth_success(reply, config)
+}
+// Rust prepare_message:1057–1074. Actual signer is supplied only on Mailer.send;
+// generic smtp_transaction's absent runtime must refuse DKIM exactly as Rust.
+pub fn prepare_message(config: SMTPConfig, message: Message, key_bytes: Int) -> [U8] EmailError! {
+    validate_smtp_config(config) ?? return Err(err)
+    if config.dkim != None && key_bytes != 32 -> return Err(configuration_error("dkim", "private_key must contain exactly 32 bytes"))
+    wire :: email.serialize(message) ?? return Err(err)
+    if config.dkim != None -> return Err(configuration_error("dkim", "signing runtime is unavailable"))
+    check_wire_limit(config, wire) ?? return Err(err)
+    Ok(wire)
+}
+pub fn prepare_signed_message<R: DKIMRuntime>(config: SMTPConfig, message: Message, key: View<U8>, runtime: R) -> [U8] EmailError! {
+    validate_smtp_config(config) ?? return Err(err)
+    if config.dkim != None && key.len() != 32 -> return Err(configuration_error("dkim", "private_key must contain exactly 32 bytes"))
+    wire := email.serialize(message) ?? return Err(err)
+    if config.dkim == .Val(dkim) -> wire = dkim_sign(wire, dkim, key, runtime) ?? return Err(err)
+    check_wire_limit(config, wire) ?? return Err(err)
+    Ok(wire)
+}
+fn check_wire_limit(config: SMTPConfig, wire: [U8]) EmailError! {
+    if wire.len() > config.limits.max_message_bytes -> return Err(smtp_error(ErrorKind.Configuration, "message", config.host, None, "serialized message including DKIM exceeds configured max_message_bytes"))
+    Ok(())
+}
+// Rust smtp_transaction:1087–1097: preparation failures do NOT close transport;
+// every returned inner outcome DOES close exactly once (no retry).
+pub fn smtp_transaction<T: SMTPTransport, C: SMTPControl>(transport: &T, config: SMTPConfig, message: Message, password: [U8], key_bytes: Int, control: C) -> SendReport EmailError! {
+    mime :: prepare_message(config, message, key_bytes) ?? return Err(err)
+    result :: smtp_transaction_inner(&transport, config, message, mime, password, control)
+    &transport.close()
+    result
+}
+// Rust smtp_transaction_inner:1099–1216. Sequential single transaction, exact
+// DATA ambiguity boundary, recipient policy and best-effort QUIT after acceptance.
+pub fn smtp_transaction_inner<T: SMTPTransport, C: SMTPControl>(transport: &T, config: SMTPConfig, message: Message, mime: [U8], password: [U8], control: C) -> SendReport EmailError! {
+    validate_smtp_config(config) ?? return Err(err)
+    if message.envelope.recipients.len() > config.limits.max_recipients -> return Err(smtp_error(ErrorKind.Configuration, "recipients", config.host, None, "envelope exceeds configured max_recipients"))
+    if config.auth != .None { _ :: String.from_bytes(password) ?? return Err(smtp_error(ErrorKind.Configuration, "auth", config.host, None, "SMTP password must be UTF-8")) }
+    checkpoint(control, "greeting", config.host, false) ?? return Err(err)
+    if config.security == SMTPSecurity.TLS && !transport.verified_tls() -> return Err(smtp_error(ErrorKind.TLS, "connect_tls", config.host, None, "implicit TLS transport is not verified"))
+    greeting :: read_reply(&transport, config, "greeting", false) ?? return Err(err)
+    state := state_new()
+    state_greeting(&state, greeting) ?? return Err(with_server(err, config.host))
+    if config.security == SMTPSecurity.TLS -> state_verified_tls(&state)
+    capabilities := ehlo(&transport, config, control, &state) ?? return Err(err)
+    if config.security == SMTPSecurity.StartTLS {
+        state_start_tls(&state, capabilities) ?? return Err(with_server(err, config.host))
+        line :: "STARTTLS\r\n".bytes()
+        command(&transport, control, config, "starttls", line[0..<line.len()], false) ?? return Err(err)
+        reply :: read_reply(&transport, config, "starttls", false) ?? return Err(err)
+        expect_code(reply, 220, "starttls", config.host) ?? return Err(err)
+        checkpoint(control, "tls_handshake", config.host, false) ?? return Err(err)
+        &transport.start_tls(config.host, config.trust) ?? return Err(transport_failure(&transport, "starttls", config.host, false, ErrorKind.TLS, err))
+        if !transport.verified_tls() -> return Err(smtp_error(ErrorKind.TLS, "starttls", config.host, None, "STARTTLS completed without verified peer identity"))
+        state_verified_tls(&state)
+        capabilities = ehlo(&transport, config, control, &state) ?? return Err(err)
+    }
+    authenticate(&transport, config, password[0..<password.len()], control, &state, capabilities) ?? return Err(err)
+    mail :: "MAIL FROM:<{message.envelope.from.mailbox}>\r\n".bytes()
+    command(&transport, control, config, "mail_from", mail[0..<mail.len()], false) ?? return Err(err)
+    reply :: read_reply(&transport, config, "mail_from", false) ?? return Err(err)
+    expect_success(reply, "mail_from", config.host) ?? return Err(err)
+    accepted := [RecipientReport]{}
+    rejected := [RecipientReport]{}
+    loop recipient in message.envelope.recipients {
+        rcpt :: "RCPT TO:<{recipient.mailbox}>\r\n".bytes()
+        command(&transport, control, config, "rcpt_to", rcpt[0..<rcpt.len()], false) ?? return Err(err)
+        reply :: read_reply(&transport, config, "rcpt_to", false) ?? return Err(err)
+        report :: RecipientReport{address: ~recipient, accepted: reply.code == 250 || reply.code == 251 || reply.code == 252, code: reply.code, message: reply_text(reply)}
+        if report.accepted -> &accepted.push(report) else if reply.code >= 400 && reply.code <= 599 -> &rejected.push(report) else -> return Err(smtp_error(ErrorKind.Protocol, "rcpt_to", config.host, Val(reply.code), "RCPT TO returned an unexpected response code"))
+    }
+    if accepted.len() == 0 || (config.recipient_policy == RecipientPolicy.RequireAll && rejected.len() != 0) {
+        if rejected.len() == 0 -> panic("recipient outcome must include a refusal")
+        return Err(reply_failure("rcpt_to", config.host, rejected[0].code, rejected[0].message))
+    }
+    data :: "DATA\r\n".bytes()
+    command(&transport, control, config, "data", data[0..<data.len()], false) ?? return Err(err)
+    reply :: read_reply(&transport, config, "data", false) ?? return Err(err)
+    expect_code(reply, 354, "data", config.host) ?? return Err(err)
+    checkpoint(control, "data_body", config.host, false) ?? return Err(err)
+    wire :: dot_stuff(mime, config.limits.max_message_bytes) ?? return Err(err)
+    &transport.write_all(wire[0..<wire.len()]) ?? return Err(transport_failure(&transport, "data_body", config.host, true, ErrorKind.DeliveryUnknown, "connection failed after DATA began: {err}"))
+    &transport.flush() ?? return Err(transport_failure(&transport, "data_body", config.host, true, ErrorKind.DeliveryUnknown, "connection failed while flushing DATA: {err}"))
+    checkpoint(control, "data_response", config.host, true) ?? return Err(err)
+    final_reply :: read_reply(&transport, config, "data_response", true) ?? return Err(err)
+    expect_success(final_reply, "data_response", config.host) ?? return Err(err)
+    report :: SendReport{server: ~config.host, accepted: accepted, rejected: rejected, response_code: final_reply.code, response: reply_text(final_reply), accepted_at: control.accepted_at()}
+    quit :: "QUIT\r\n".bytes()
+    if command(&transport, control, config, "quit", quit[0..<quit.len()], false) == .Ok(_) { _ :: read_reply(&transport, config, "quit", false) }
+    Ok(report)
+}
+// Rust Message.envelope:1732 / with_envelope:1734–1741, canonical carrier only.
+pub fn message_envelope(message: Message) -> Envelope from message { message.envelope }
+pub fn with_envelope(message: Message, envelope: Envelope) -> Message EmailError! {
+    if envelope.recipients.len() == 0 || envelope.recipients.len() > email.C_MAX_RECIPIENTS -> return Err(configuration_error("with_envelope", "email envelope recipient count is outside the supported range"))
+    result := ~message
+    result.envelope = ~envelope
+    Ok(result)
+}
+
+// Shared byte append/view utilities. No per-byte owner copies or prefix rebuilds.
+fn append_bytes(out: &[U8], bytes: View<U8>) Never! { loop byte in bytes -> &out.push(byte) }
+fn append_text(out: &[U8], value: String) Never! { loop byte in value.bytes() -> &out.push(byte) }
+fn append_crlf(out: &[U8]) Never! {
+    &out.push(U8{13})
+    &out.push(U8{10})
+}
+fn ends_crlf(bytes: [U8]) -> Bool Never! { bytes.len() >= 2 && bytes[bytes.len() - 2] == (U8{13}) && bytes[bytes.len() - 1] == (U8{10}) }
+fn ascii_space(byte: U8) -> Bool Never! { byte == (U8{32}) || (byte >= (U8{9}) && byte <= (U8{13})) }
+fn ascii_digit(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }
+fn feature_byte(byte: U8) -> Bool Never! { ascii_digit(byte) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{45}) }
+fn ascii_lower_byte(byte: U8) -> U8 Never! { if byte >= (U8{65}) && byte <= (U8{90}) -> byte + U8{32} else -> byte }
+fn ascii_upper_bytes(raw: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    loop i in start..<end {
+        b :: raw[i]
+        &out.push(if b >= (U8{97}) && b <= (U8{122}) -> b - U8{32} else -> b)
+    }
+    String.from_bytes(out) ?? panic("ASCII feature encoder produced invalid UTF-8")
+}
+fn contains_name(names: [String], name: String) -> Bool Never! {
+    loop item in names { if item == name -> return true }
+    false
+}
+fn find_byte(raw: [U8], byte: U8) -> Int? Never! {
+    loop i in 0..<raw.len() { if raw[i] == byte -> return Val(i) }
+    None
+}
+fn find_bytes(raw: [U8], start: Int, value: [U8]) -> Int? Never! {
+    at := start
+    loop at + value.len() <= raw.len() {
+        matches := true
+        loop i in 0..<value.len() {
+            if raw[at + i] != value[i] {
+                matches = false
+                break
+            }
+        }
+        if matches -> return Val(at)
+        at += 1
+    }
+    None
+}
+fn checked_byte_text(raw: [U8], start: Int, end: Int) -> String Err! {
+    assert(start >= 0 && start <= end && end <= raw.len())
+    out := [U8]{}
+    append_bytes(&out, raw[start..<end])
+    String.from_bytes(out)
+}
+fn byte_text(raw: [U8], start: Int, end: Int) -> String Never! { checked_byte_text(raw, start, end) ?? panic("checked UTF-8 byte boundary") }
+fn no_reply_code() -> Int? Never! { None }
+
+// Rust checked_add:1768–1771 / saturating usize terms in :1744–1765.
+// #4483 selected target usize, not an assumed host or arbitrary-precision bound.
+pub fn checked_add(total: &Int, add: Int) EmailError! {
+    sum :: total + add
+    if sum > Int.from_u64(core.sys.usize_max()) -> return Err(configuration_error("LimitExceeded", "message size overflow"))
+    total = sum
+    Ok(())
+}
+fn saturating_size(value: Int) -> Int Never! {
+    max :: Int.from_u64(core.sys.usize_max())
+    if value > max -> max else -> value
+}
+// Rust :2001–2008. Encoded output width checks remain selected-target gates.
+pub fn base64_len(bytes: Int) -> Int Never! { (saturating_size(bytes + 2) /% 3) * 4 }
+pub fn base64_lines_len(bytes: Int) -> Int Never! {
+    encoded :: base64_len(bytes)
+    if encoded == 0 -> return 0
+    saturating_size(encoded + (((encoded + 75) /% 76) - 1) * 2)
+}
+// Rust encoded_header_len:1952–1969. Do not allocate the rendered header merely
+// to count it. Input is valid UTF8, byte offsets advance at scalar boundaries.
+pub fn encoded_header_len(value: String) -> Int Never! {
+    raw :: value.bytes()
+    if text.is_ascii(value) -> return raw.len()
+    total := 0
+    start := 0
+    chunks := 0
+    at := 0
+    loop at < raw.len() {
+        width :: unicode.utf8_width_at(raw, at)
+        if at > start && at + width - start > 45 {
+            total = saturating_size(saturating_size(total + 12) + base64_len(at - start))
+            start = at
+            chunks += 1
+        }
+        at += width
+    }
+    if start < raw.len() {
+        total = saturating_size(saturating_size(total + 12) + base64_len(raw.len() - start))
+        chunks += 1
+    }
+    separators :: if chunks == 0 -> 0 else -> saturating_size((chunks - 1) * 3)
+    saturating_size(total + separators)
+}
+// Rust rendered_address_len:1918–1928; reuse the parent's exact atext policy.
+// Main exposes email.is_atext to this private fragment, without copying it.
+pub fn rendered_address_len(address: Address) -> Int Never! {
+    if address.display == .None -> return text.byte_count(address.mailbox)
+    display :: address.display ?? panic("present display name")
+    shown := 0
+    if text.is_ascii(display) {
+        raw :: display.bytes()
+        safe := raw.len() != 0
+        start := 0
+        escaped := 0
+        loop i in 0..<raw.len() {
+            if raw[i] == (U8{32}) {
+                if i == start -> safe = false
+                start = i + 1
+            } else if !email.is_atext(raw[i]) -> safe = false
+            if raw[i] == (U8{92}) || raw[i] == (U8{34}) -> escaped += 1
+        }
+        if start == raw.len() -> safe = false
+        shown = if safe -> raw.len() else -> 2 + escaped + raw.len()
+    } else -> shown = encoded_header_len(display)
+    saturating_size(saturating_size(shown + text.byte_count(address.mailbox)) + 3)
+}
+// Rust percent_encoded_len:2028–2033; retain exact overflow text.
+pub fn percent_encoded_len(value: String) -> Int EmailError! {
+    total := 0
+    loop byte in value.bytes() {
+        add :: if unreserved(byte) -> 1 else -> 3
+        if total + add > Int.from_u64(core.sys.usize_max()) -> return Err(configuration_error("LimitExceeded", "attachment filename encoding length overflow"))
+        total += add
+    }
+    Ok(total)
+}
+fn unreserved(byte: U8) -> Bool Never! {
+    ascii_digit(byte) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+        || byte == (U8{45}) || byte == (U8{95}) || byte == (U8{46}) || byte == (U8{126})
+}
+// Rust prospective_wire_upper:1744–1765.
+pub fn prospective_wire_upper(from: Address, to: [Address], subject: String, plain: String, html: String, attachments: [Attachment]) -> Int EmailError! {
+    total := 4096
+    checked_add(&total, rendered_address_len(from)) ?? return Err(err)
+    loop recipient in to -> checked_add(&total, saturating_size(rendered_address_len(recipient) + 4)) ?? return Err(err)
+    checked_add(&total, saturating_size(encoded_header_len(subject) + 32)) ?? return Err(err)
+    checked_add(&total, saturating_size(base64_lines_len(text.byte_count(plain)) + 256)) ?? return Err(err)
+    checked_add(&total, saturating_size(base64_lines_len(text.byte_count(html)) + 256)) ?? return Err(err)
+    loop item in attachments {
+        checked_add(&total, base64_lines_len(item.bytes.len())) ?? return Err(err)
+        checked_add(&total, text.byte_count(item.mime)) ?? return Err(err)
+        checked_add(&total, percent_encoded_len(item.filename) ?? return Err(err)) ?? return Err(err)
+        checked_add(&total, 512) ?? return Err(err)
+    }
+    checked_add(&total, saturating_size(attachments.len() * 256)) ?? return Err(err)
+    Ok(total)
+}
+// Rust ensure_physical_header_len:1860–1865 / ensure_encoded_header_lines:1867–1877.
+pub fn ensure_physical_header_len(name: String, value_len: Int) EmailError! {
+    size :: saturating_size(saturating_size(text.byte_count(name) + 2) + value_len)
+    if saturating_size(size + 2) > email.C_MAX_HEADER_BYTES -> return Err(configuration_error("LimitExceeded", "{name} physical header line exceeds {email.C_MAX_HEADER_BYTES} bytes"))
+    Ok(())
+}
+pub fn ensure_encoded_header_lines(name: String, value: String) EmailError! {
+    if text.is_ascii(value) -> return ensure_physical_header_len(name, text.byte_count(value))
+    if text.byte_count(name) + 2 + 72 + 2 > email.C_MAX_HEADER_BYTES -> return Err(configuration_error("LimitExceeded", "{name} physical header line exceeds {email.C_MAX_HEADER_BYTES} bytes"))
+    Ok(())
+}
+// Rust validate_folded_header:1838–1858. The old parent Bool validator has a
+// terminal `i == len` loop with no break; Main removes it during this cutover.
+pub fn validate_folded_header(name: String, value: String) EmailError! {
+    raw :: value.bytes()
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{13}) && (i + 2 >= raw.len() || raw[i + 1] != (U8{10}) || (raw[i + 2] != (U8{32}) && raw[i + 2] != (U8{9}))) -> return Err(configuration_error("InvalidHeader", "{name} contains an invalid fold"))
+        if raw[i] == (U8{10}) && (i == 0 || raw[i - 1] != (U8{13})) -> return Err(configuration_error("InvalidHeader", "{name} contains a bare newline"))
+        if raw[i] < (U8{32}) && raw[i] != (U8{13}) && raw[i] != (U8{10}) && raw[i] != (U8{9}) -> return Err(configuration_error("InvalidHeader", "{name} contains a control byte"))
+    }
+    start := 0
+    at := 0
+    prefix := text.byte_count(name) + 2
+    loop {
+        if at == raw.len() || (at + 1 < raw.len() && raw[at] == (U8{13}) && raw[at + 1] == (U8{10})) {
+            if saturating_size(saturating_size(prefix + at - start) + 2) > email.C_MAX_HEADER_BYTES -> return Err(configuration_error("LimitExceeded", "{name} physical header line exceeds {email.C_MAX_HEADER_BYTES} bytes"))
+            if at == raw.len() -> break
+            at += 2
+            start = at
+            prefix = 0
+        } else -> at += 1
+    }
+    Ok(())
+}
+// Rust ensure_rendered_address_header:1879–1882; Main exposes ONLY existing
+// render_addresses, preserving that owner's address/header folding policy.
+pub fn ensure_rendered_address_header(name: String, addresses: [Address]) EmailError! {
+    rendered :: email.render_addresses(addresses, name)
+    validate_folded_header(name, rendered)
+}
+// Rust push_header:1829–1836; rendered output bytes stay in the caller's buffer.
+pub fn push_header(out: &[U8], name: String, value: String) EmailError! {
+    validate_folded_header(name, value) ?? return Err(err)
+    append_text(&out, name)
+    append_text(&out, ": ")
+    append_text(&out, value)
+    append_crlf(&out)
+    Ok(())
+}

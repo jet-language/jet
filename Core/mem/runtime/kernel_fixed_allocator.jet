@@ -1,0 +1,181 @@
+use core.mem as mem
+use core.sys.target.[usize_max]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:1
+// One allocation/metadata/reverse-drop kernel. Adapters acquire backing and
+// observe lifetimes; this kernel never allocates or releases that backing.
+// GATE #4494: typed raw pointer reads/writes/drop dictionaries.
+// GATE #4483: size/alignment/address facts and selected usize arithmetic.
+// The caller lends a live non-null addressable span through reset and ensures
+// no stored value remains reachable when reset begins.
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:16
+EMPTY_HEADER :: prep { usize_max() }
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:18
+pub struct FixedHeader {
+    previous: U64
+    value_offset: U64
+    drop_fn: (fn(mem.Ptr<U8>) Never!)?
+    bytes: U64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:26
+pub struct FixedResetStats { pub live_allocations: U64, pub live_bytes: U64 }
+impl FixedResetStats {
+    fn default() -> FixedResetStats Never! { FixedResetStats{live_allocations: U64{0}, live_bytes: U64{0}} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:32
+pub struct FixedState {
+    ptr: mem.Ptr<U8>
+    capacity: U64
+    used: U64
+    metadata_start: U64
+    last_header: U64
+    live_allocations: U64
+    live_bytes: U64
+    high_water_bytes: U64
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:43
+#Unsafe("ptr is the one initialized T registered by the matching Fixed allocation")
+fn drop_at<T>(ptr: mem.Ptr<U8>) Never! {
+    ptr.cast<T>().drop_in_place()
+}
+
+// Rust checked usize operations are bounded by the selected target, not by
+// Jet's exact Int or an assumed host pointer width. No payload allocation.
+fn word_add(left: U64, right: U64) -> U64? Never! {
+    max :: usize_max()
+    if left > max or right > max - left -> return None
+    Val(left + right)
+}
+fn word_sub(left: U64, right: U64) -> U64? Never! {
+    if left > usize_max() or right > left -> return None
+    Val(left - right)
+}
+fn word_saturating_add(left: U64, right: U64) -> U64 Never! {
+    word_add(left, right).unwrap_or(usize_max())
+}
+
+impl FixedState {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:52
+    // The caller owns backing acquisition and release, whether inline or heap.
+    #Unsafe("caller lends a live non-null span of capacity bytes until reset")
+    pub fn from_raw(ptr: mem.Ptr<U8>, capacity: U64) -> FixedState Never! {
+        assert(capacity > U64{0}, "Fixed allocator needs a non-empty backing buffer")
+        base :: U64{ptr.addr()}
+        assert(word_add(base, capacity).is_some(), "Fixed backing range overflow")
+        assert(not ptr.is_null(), "non-empty Fixed backing buffer was null")
+        FixedState{ptr: ptr, capacity: capacity, used: U64{0}, metadata_start: capacity,
+            last_header: EMPTY_HEADER, live_allocations: U64{0}, live_bytes: U64{0}, high_water_bytes: U64{0}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:69
+    pub fn capacity(self) -> U64 Never! { self.capacity }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:74
+    pub fn used(self) -> U64 Never! { self.used }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:79
+    pub fn live_allocations(self) -> U64 Never! { self.live_allocations }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:84
+    pub fn live_bytes(self) -> U64 Never! { self.live_bytes }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:89
+    pub fn high_water_bytes(self) -> U64 Never! { self.high_water_bytes }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:94
+    fn aligned_offset(base: U64, cursor: U64, align: U64) -> U64? Never! {
+        address :: word_add(base, cursor)?
+        mask :: word_sub(align, U64{1})?
+        aligned :: word_add(address, mask)? & (usize_max() - mask)
+        word_sub(aligned, base)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:102
+    fn aligned_down_offset(base: U64, end: U64, size: U64, align: U64) -> U64? Never! {
+        end_address :: word_add(base, end)?
+        unaligned :: word_sub(end_address, size)?
+        mask :: word_sub(align, U64{1})?
+        aligned :: unaligned & (usize_max() - mask)
+        offset :: word_sub(aligned, base)?
+        header_end :: word_add(offset, size)?
+        if header_end <= end { Val(offset) } else { None }
+    }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:120
+    // Failure returns the original value untouched: no leak or double drop.
+    pub fn try_alloc<T>(self: &FixedState, value: T) -> mem.Ptr<T> T! {
+        value_bytes :: U64{mem.size_of<T>()}
+        reserved_bytes :: value_bytes.max(U64{1})
+        header_bytes :: U64{mem.size_of<FixedHeader>()}
+        header_align :: U64{mem.align_of<FixedHeader>()}
+        base :: U64{self.ptr.addr()}
+        value_offset := U64{0}
+        end := U64{0}
+        if value_bytes == U64{0} {
+            if word_add(self.used, reserved_bytes) is Val(next) {
+                end = next
+            } else { return Err(^value) }
+            // ZST reserves a cursor byte but uses its correctly aligned dangling
+            // typed address rather than a potentially misaligned byte buffer.
+            #Unsafe("aligned dangling ZST address is never dereferenced for payload bytes") {
+                value_offset = U64{mem.Ptr<T>.dangling().addr()}
+            }
+        } else {
+            value_align :: U64{mem.align_of<T>()}.max(U64{1})
+            if Self.aligned_offset(base, self.used, value_align) is Val(offset) {
+                value_offset = offset
+            } else { return Err(^value) }
+            if word_add(value_offset, reserved_bytes) is Val(next) {
+                end = next
+            } else { return Err(^value) }
+        }
+        header_offset := U64{0}
+        if Self.aligned_down_offset(base, self.metadata_start, header_bytes, header_align) is Val(offset) {
+            header_offset = offset
+        } else { return Err(^value) }
+        if end > header_offset -> return Err(^value)
+
+        header_ptr :: #Unsafe("checked header offset and alignment lie in live caller backing") {
+            self.ptr.add(Int{header_offset}).cast<FixedHeader>()
+        }
+        value_ptr :: #Unsafe("payload end fits before metadata, or address is an aligned ZST dangling pointer") {
+            if value_bytes == U64{0} {
+                mem.Ptr<T>.from_addr(Int{value_offset})
+            } else { self.ptr.add(Int{value_offset}).cast<T>() }
+        }
+        drop_fn := None
+        if mem.needs_drop<T>() -> drop_fn = Val(drop_at<T>)
+        #Unsafe("both pointers are aligned; header owns this one typed write and destructor") {
+            header_ptr.write(FixedHeader{previous: self.last_header, value_offset: value_offset,
+                drop_fn: drop_fn, bytes: value_bytes})
+            value_ptr.write(^value)
+        }
+        self.last_header = header_offset
+        self.metadata_start = header_offset
+        self.used = end
+        self.live_allocations = word_saturating_add(self.live_allocations, U64{1})
+        self.live_bytes = word_saturating_add(self.live_bytes, value_bytes)
+        self.high_water_bytes = self.high_water_bytes.max(self.live_bytes)
+        value_ptr
+    }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs:200
+    // Reverse-drop first, then let the adapter observe/quarantine the storage.
+    #Unsafe("caller has withdrawn all stored value loans; each live header was written exactly once")
+    pub fn reset(self: &FixedState, after_drop: fn(mem.Ptr<U8>, U64) Never!) -> FixedResetStats Never! {
+        stats :: FixedResetStats{live_allocations: self.live_allocations, live_bytes: self.live_bytes}
+        base :: self.ptr
+        header_offset := self.last_header
+        loop header_offset != EMPTY_HEADER {
+            header :: base.add(Int{header_offset}).cast<FixedHeader>().read()
+            value_ptr :: if header.bytes == U64{0} {
+                mem.Ptr<U8>.from_addr(Int{header.value_offset})
+            } else { base.add(Int{header.value_offset}) }
+            if header.drop_fn is Val(drop_fn) -> drop_fn(value_ptr)
+            after_drop(value_ptr, header.bytes)
+            header_offset = header.previous
+        }
+        self.used = U64{0}
+        self.metadata_start = self.capacity
+        self.last_header = EMPTY_HEADER
+        self.live_allocations = U64{0}
+        self.live_bytes = U64{0}
+        stats
+    }
+}

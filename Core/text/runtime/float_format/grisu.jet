@@ -1,0 +1,132 @@
+// Pinned core num/imp/flt2dec/strategy/grisu.rs. Optimistic fixed-word
+// generation, conservative interval verification, SAME Dragon fallback.
+use core.text.runtime.float_format.decoded as dec
+use core.text.runtime.float_format.cached as cache
+use core.text.runtime.float_format.dragon as dragon
+
+pub fn max_pow10(x: U64) -> (k: Int, ten: U64) Never! {
+    assert(x > (U64{0}) && x <= (U64{0xffffffff}))
+    k := 0
+    ten := U64{1}
+    loop k < 9 && ten * U64{10} <= x { ten *= U64{10}; k += 1 }
+    (k: k, ten: ten)
+}
+fn weed(buf: &[U8#N], len: Int, exp: Int, remainder: U64, threshold: U64, plus1v: U64, ten: U64, ulp: U64) -> dec.Digits? Never! {
+    down :: plus1v + ulp
+    up :: plus1v - ulp
+    w := remainder
+    loop w < up && threshold - w >= ten && (w + ten < up || up - w >= w + ten - up) {
+        buf[len - 1] -= U8{1}
+        w += ten
+    }
+    if w < down && threshold - w >= ten && (w + ten < down || down - w >= w + ten - down) -> return None
+    if U64{2} * ulp <= w && w <= threshold - U64{4} * ulp -> return Val(dec.Digits{len: len, exp: exp})
+    None
+}
+pub fn shortest_opt(d: &dec.Decoded, buf: &[U8#N]) -> dec.Digits? Never! {
+    plus0 :: dec.normalize(d.mant + d.plus, d.exp)
+    minus0 :: dec.Fp{f: (d.mant - d.minus) << (d.exp - plus0.e), e: plus0.e}
+    v0 :: dec.Fp{f: d.mant << (d.exp - plus0.e), e: plus0.e}
+    cached :: cache.power(-32 - plus0.e - 64)
+    plus :: dec.product(plus0, cached.fp)
+    minus :: dec.product(minus0, cached.fp)
+    v :: dec.product(v0, cached.fp)
+    p :: plus.f + U64{1}
+    m :: minus.f - U64{1}
+    e :: -plus.e
+    mask :: (U64{1} << e) - U64{1}
+    integral :: p >> e
+    fraction :: p & mask
+    powers :: max_pow10(integral)
+    exp :: powers.k - cached.k + 1
+    delta :: p - m
+    len := 0
+    ten := powers.ten
+    rem := integral
+    loop {
+        q :: rem / ten
+        r :: rem % ten
+        buf[len] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))
+        len += 1
+        residual :: (r << e) + fraction
+        if residual < delta -> return weed(buf, len, exp, residual, delta, p - v.f, ten << e, U64{1})
+        if len > powers.k -> break
+        ten /= U64{10}; rem = r
+    }
+    rem = fraction
+    threshold := delta & mask
+    ulp := U64{1}
+    loop {
+        rem *= U64{10}; threshold *= U64{10}; ulp *= U64{10}
+        q :: rem >> e
+        r :: rem & mask
+        buf[len] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))
+        len += 1
+        if r < threshold -> return weed(buf, len, exp, r, threshold, (p - v.f) * ulp, U64{1} << e, ulp)
+        rem = r
+    }
+}
+pub fn shortest(d: &dec.Decoded, buf: &[U8#N]) -> dec.Digits Never! {
+    shortest_opt(d, buf) ?? return dragon.shortest(d, buf)
+}
+fn possibly_round(buf: &[U8#N], length: Int, exponent: Int, capacity: Int, limit: Int, rem: U64, ten: U64, ulp: U64) -> dec.Digits? Never! {
+    if ulp >= ten || ten - ulp <= ulp -> return None
+    if ten - rem > rem && ten - U64{2} * rem >= U64{2} * ulp -> return Val(dec.Digits{len: length, exp: exponent})
+    if rem > ulp && ten - (rem - ulp) <= rem - ulp {
+        len := length
+        exp := exponent
+        carry :: dec.round_up(buf, len)
+        if carry != None {
+            exp += 1
+            if exp > limit && len < capacity {
+                buf[len] = carry ?? panic("carry")
+                len += 1
+            }
+        }
+        return Val(dec.Digits{len: len, exp: exp})
+    }
+    None
+}
+pub fn exact_opt(d: &dec.Decoded, buf: &[U8#N], capacity: Int, limit: Int) -> dec.Digits? Never! {
+    v0 :: dec.normalize(d.mant, d.exp)
+    cached :: cache.power(-32 - v0.e - 64)
+    v :: dec.product(v0, cached.fp)
+    e :: -v.e
+    mask :: (U64{1} << e) - U64{1}
+    integral :: v.f >> e
+    fraction :: v.f & mask
+    powers10 :: [U64#10]{1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000}
+    if fraction == (U64{0}) && (capacity >= 11 || integral < powers10[capacity - 1]) -> return None
+    err := U64{1}
+    powers :: max_pow10(integral)
+    exp :: powers.k - cached.k + 1
+    if exp <= limit -> return possibly_round(buf, 0, exp, capacity, limit, v.f / U64{10}, powers.ten << e, err << e)
+    len :: if exp - limit < capacity -> exp - limit else -> capacity
+    i := 0
+    ten := powers.ten
+    rem := integral
+    loop {
+        q :: rem / ten
+        r :: rem % ten
+        buf[i] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))
+        i += 1
+        if i == len -> return possibly_round(buf, len, exp, capacity, limit, (r << e) + fraction, ten << e, err << e)
+        if i > powers.k -> break
+        ten /= U64{10}; rem = r
+    }
+    rem = fraction
+    maxerr :: U64{1} << (e - 1)
+    loop err < maxerr {
+        rem *= U64{10}; err *= U64{10}
+        q :: rem >> e
+        r :: rem & mask
+        buf[i] = U8{48} + (U8.from_u64(q) ?? panic("Grisu digit"))
+        i += 1
+        if i == len -> return possibly_round(buf, len, exp, capacity, limit, r, U64{1} << e, err)
+        rem = r
+    }
+    None
+}
+pub fn exact(d: &dec.Decoded, buf: &[U8#N], capacity: Int, limit: Int) -> dec.Digits Never! {
+    exact_opt(d, buf, capacity, limit) ?? return dragon.exact(d, buf, capacity, limit)
+}

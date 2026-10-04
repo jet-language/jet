@@ -1,0 +1,66 @@
+// crates/jet-pkg-model/src/Authority.rs:263–270; pinned Rust 1.97.1
+// 8bab26f4f68e0e26f0bb7960be334d5b520ea452 library/{core,std}/src/time
+// and std/src/sys/{time,pal/*/time}: private, allocation-free epoch values.
+// This record is not a public U128 numeric type or an exact Int owner.
+#Equatable
+pub struct UInt128Parts {
+    pub hi: U64
+    pub lo: U64
+}
+
+// Rust u128 PartialEq as used by FileIdentity's derived equality.
+pub fn equals(left: &UInt128Parts, right: &UInt128Parts) -> Bool Never! {
+    left.hi == right.hi && left.lo == right.lo
+}
+
+// The two 32-bit source limbs produce three result limbs. Even for full U32
+// scale/addend, each product-plus-carry is at most 2^64 - 2^32, so ordinary
+// U64 arithmetic never overflows. No allocating exact-number scratch/copy.
+fn scaled_nanoseconds(word: U64, scale: U32, addend: U32) -> UInt128Parts Never! {
+    mask :: U64{4294967295}
+    factor :: U64.from_u32(scale)
+    low :: (word & mask) * factor + U64.from_u32(addend)
+    middle :: (word >> 32) * factor + (low >> 32)
+    UInt128Parts{hi: middle >> 32, lo: ((middle & mask) << 32) | (low & mask)}
+}
+
+// library/core/src/time.rs Duration::as_nanos: seconds*1e9+subsec_nanos.
+// Inputs are the original normalized Duration facts (nanoseconds < 1e9),
+// not a second Duration constructor/normalizer. Full U64 seconds are retained.
+pub fn duration_nanoseconds(seconds: U64, nanoseconds: U32) -> UInt128Parts Never! {
+    scaled_nanoseconds(seconds, U32{1000000000}, nanoseconds)
+}
+
+// sys/fs/unix.rs FileAttr::modified -> SystemTime::new -> Timespec::new,
+// then sub_timespec against (0,0). These are precisely the invalid timestamp
+// and pre-epoch None laws of modified().ok()/duration_since(...).ok(). Apple
+// negative-nanosecond compensation can only yield pre-epoch values, hence None
+// here too; no negative input is clamped, normalized to epoch, or fabricated.
+pub fn unix_epoch_nanoseconds(seconds: I64, nanoseconds: I64) -> UInt128Parts? Never! {
+    if nanoseconds < (I64{0}) || nanoseconds >= (I64{1000000000}) -> return None
+    if seconds < (I64{0}) -> return None
+    whole :: U64.from_i64(seconds) ?? return None
+    subsecond :: U32.from_i64(nanoseconds) ?? return None
+    Val(duration_nanoseconds(whole, subsecond))
+}
+
+// sys/time/windows.rs UNIX_EPOCH = 11_644_473_600*INTERVALS_PER_SEC,
+// sys/pal/windows/time.rs INTERVALS_PER_SEC = 1e9/100. Preserve the FULL raw
+// FILETIME, including its high bit: SystemTime::intervals interprets that bit
+// as the sign of an I64. Values above I64::MAX therefore fail duration_since
+// the positive epoch (None), not silently become later unsigned timestamps.
+pub fn windows_epoch_nanoseconds(filetime: U64) -> UInt128Parts? Never! {
+    epoch :: U64{116444736000000000}
+    if filetime > (U64{9223372036854775807}) || filetime < epoch -> return None
+    // Ordered 32-bit subtraction retains the source difference without any
+    // signed cast or overflow intermediate. Borrow is at most one limb.
+    mask :: U64{4294967295}
+    low :: filetime & mask
+    epoch_low :: epoch & mask
+    borrow :: if low < epoch_low -> U64{1} else -> U64{0}
+    difference_low :: low + (borrow << 32) - epoch_low
+    difference_high :: (filetime >> 32) - (epoch >> 32) - borrow
+    intervals :: (difference_high << 32) | difference_low
+    // intervals2dur(delta).as_nanos() is EXACTLY delta*100, no rounding.
+    Val(scaled_nanoseconds(intervals, U32{100}, U32{0}))
+}

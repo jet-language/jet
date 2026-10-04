@@ -1,0 +1,43 @@
+// RT032 canonical hex consumers: UUID text and token_hex route through the one
+// core.encoding hex law (hex_nibble/hex_value/hex_to_bytes/bytes_to_hex).
+// token_hex draws real CSPRNG bytes; only deterministic shape is asserted.
+use core.crypto.uuid as canonical_hex_uuid
+use core.crypto.random as canonical_hex_random
+
+fn canonical_hex_uuid_error(text: String, expected: String) Never! {
+    _ :: canonical_hex_uuid.parse(text) ?? {
+        assert_eq(err.reason, expected)
+        return
+    }
+    panic("expected UUID parse error")
+}
+
+#Test("uuid v5 RFC namespace vector") {
+    dns :: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    assert_eq(canonical_hex_uuid.v5(dns, "python.org") ?? panic("v5"), "886313e1-3b8a-5372-9b90-0c9aee199e5d")
+    assert_eq(canonical_hex_uuid.uuid5(dns, "python.org") ?? panic("uuid5"), "886313e1-3b8a-5372-9b90-0c9aee199e5d")
+}
+
+#Test("uuid parse mixed case formats lowercase and rejects bad digits") {
+    assert_eq(canonical_hex_uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? panic("upper"), "6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+    assert_eq(canonical_hex_uuid.parse("00000000-0000-0000-0000-000000000000") ?? panic("nil"), "00000000-0000-0000-0000-000000000000")
+    assert_eq(canonical_hex_uuid.parse("ffffffff-ffff-ffff-ffff-ffffffffffff") ?? panic("max"), "ffffffff-ffff-ffff-ffff-ffffffffffff")
+    canonical_hex_uuid_error("6ba7b810-9dad-11d1-80b4-00c04fd430cg", "invalid UUID text")
+    canonical_hex_uuid_error("6ba7b8109dad11d180b400c04fd430c8", "invalid UUID text")
+}
+
+#Test("token_hex lowercase shape and length policy") {
+    assert_eq(canonical_hex_random.token_hex(0) ?? panic("empty token"), "")
+    token :: canonical_hex_random.token_hex(16) ?? panic("token")
+    raw :: token.bytes()
+    assert_eq(raw.len(), 32)
+    loop byte in raw {
+        assert((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{97}) && byte <= (U8{102})))
+    }
+    rejected := false
+    _ :: canonical_hex_random.token_hex(-1) ?? {
+        rejected = true
+        ""
+    }
+    assert(rejected)
+}

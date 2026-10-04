@@ -1,0 +1,35 @@
+// compiled-workload-peer-launcher.rs:391–459, Linux-selected libc prctl
+// imports. No BPF filter/syscall/namespace/no_new_privs policy or helper lives
+// here. This unit must never activate on Darwin or Windows.
+use core.mem as seccomp_mem
+use c.c as seccomp_os
+
+// Linux <linux/filter.h>; sizeof=8 align=4 on both pointer widths.
+#Layout(c)
+pub struct SockFilter {
+    pub code: U16
+    pub jt: U8
+    pub jf: U8
+    pub k: U32
+}
+
+// Linux <linux/filter.h>: pointer offset=4/8, sizeof=8/16, align=4/8.
+// filter borrows a LIVE contiguous SockFilter extent of len elements, and
+// the pointer/program may not escape synchronous prctl. Never address a
+// temporary array or store an exact Int in this raw pointer field.
+// #4494: Sema/FFI.rs318–335 presently rejects this raw-pointer C-safe field.
+#Layout(c)
+pub struct SockFprog {
+    pub len: U16
+    pub filter: *SockFilter
+}
+
+#Import module c.c {
+    // Real libc C variadics. U64 is unsigned long ONLY on Linux LP64;
+    // 32-bit targets require U32 word selection, not truncating pointer casts.
+    fn prctl(option: I32, args: ...U64) -> I32 = "prctl"
+    // Typed pointer specialization of the SAME variadic OS symbol, not a
+    // filter installer/helper. Preserve native variadic calling convention,
+    // borrowed program pointer and zero trailing words through lowering.
+    fn prctl_program(option: I32, mode: U64, program: *SockFprog, args: ...U64) -> I32 = "prctl"
+}

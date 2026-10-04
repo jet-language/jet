@@ -1,0 +1,771 @@
+// GameWorldInspector.rs:1-1287 — canonical bounded paused-world projection.
+// JSON is only the payload of the existing jet.devtools.v1 envelope, not a wire protocol.
+// Main publication: game.jet `module runtime`; runtime assembly
+// `module kernel_game_world_inspector`. No new public game facade.
+// #4392/#4318: canonical utf8_bytes still materializes bytes; retained UTF-8
+// loans are required before claiming allocation/borrow parity. #4483: Int
+// span offsets require selected-target usize bounds at the host ingress.
+use core.text.runtime.kernel_unicode_string as world_text
+use core.sys.runtime.kernel_env_config as world_ascii
+
+// Rust :7-11,726-733.
+pub JET_GAME_WORLD_MAX_ENTITIES :: 4096
+pub JET_GAME_WORLD_MAX_COMPONENTS_PER_ENTITY :: 256
+pub JET_GAME_WORLD_MAX_PROPERTIES_PER_COMPONENT :: 256
+pub JET_GAME_WORLD_MAX_FRAME_FACTS :: 256
+pub JET_GAME_WORLD_MAX_TEXT_BYTES :: 16384
+pub JET_GAME_PAUSED_EVAL_OK :: "ok"
+pub JET_GAME_PAUSED_EVAL_STALE :: "stale"
+pub JET_GAME_PAUSED_EVAL_RUNNING :: "running_frame_rejected"
+pub JET_GAME_PAUSED_EVAL_UNAUTHORIZED :: "authority_rejected"
+pub JET_GAME_PAUSED_EVAL_INVALID :: "invalid_request"
+pub JET_GAME_PAUSED_EVAL_UNSUPPORTED :: "unsupported_expression"
+pub JET_GAME_PAUSED_EVAL_NO_WORLD :: "no_world"
+pub JET_GAME_PAUSED_EVAL_BUDGET :: "budget_exceeded"
+
+// Rust :13-34. Empty fact spans are valid; edits require nonempty spans.
+#Equatable
+pub struct JetGameWorldSourceSpan { pub start: Int, pub end: Int }
+impl JetGameWorldSourceSpan {
+    pub fn new(start: Int, end: Int) -> JetGameWorldSourceSpan JetGameWorldInspectorError! {
+        if start > end -> return Err(JetGameWorldInspectorError.InvalidSourceSpan)
+        JetGameWorldSourceSpan{start, end}
+    }
+    pub fn is_empty(self) -> Bool Never! { self.start >= self.end }
+    pub fn render_json(self) -> String Never! { "{{\"start\":{self.start},\"end\":{self.end}}}" }
+    // Rust derived Ord/PartialOrd: lexicographic (start,end).
+    pub fn compare(self, other: JetGameWorldSourceSpan) -> Ordering Never! {
+        start :: self.start <=> other.start
+        if start != Ordering.Equal -> return start
+        self.end <=> other.end
+    }
+}
+// Rust :36-130, including the exact Display branches; typed errors stay typed.
+#Error
+#Equatable
+pub enum JetGameWorldInspectorError {
+    EmptyText(field: String)
+    TextTooLong(field: String)
+    TooManyEntities
+    TooManyComponents(entity_id: String)
+    TooManyProperties(component_id: String)
+    TooManyFrames
+    DuplicateId(id: String)
+    DuplicateProperty(component_id: String, field: String)
+    MissingParent(child_id: String, parent_id: String)
+    Cycle(id: String)
+    InvalidSourceSpan
+    NoWorld
+    MismatchedWorld(expected: String, actual: String)
+    UnknownEntity(id: String)
+    UnknownComponent(id: String)
+    UnknownProperty(id: String)
+    InvalidSelectionHierarchy
+    NoSelection
+    NotEditable(field: String)
+    InvalidEdit(reason: String)
+    DuplicateEditTarget
+    StaleRevision(expected: String, actual: String)
+    StaleSession(expected: String, actual: String)
+    StaleTier(expected: String, actual: String)
+    InvalidEvaluation(reason: String)
+}
+impl JetGameWorldInspectorError {
+    pub fn show(self) -> String Never! {
+        if self == {
+            .EmptyText(field) -> "game world {field} must not be empty"
+            .TextTooLong(field) -> "game world {field} exceeds the Prelude limit"
+            .TooManyEntities -> "game world entity limit exceeded"
+            .TooManyComponents(id) -> "component limit exceeded for entity `{id}`"
+            .TooManyProperties(id) -> "property limit exceeded for component `{id}`"
+            .TooManyFrames -> "game world frame limit exceeded"
+            .DuplicateId(id) -> "duplicate game world id `{id}`"
+            .DuplicateProperty(id, field) -> "duplicate property `{field}` on component `{id}`"
+            .MissingParent(child, parent) -> "game world parent `{parent}` for `{child}` is missing"
+            .Cycle(id) -> "game world cycle at `{id}`"
+            .InvalidSourceSpan -> "invalid game world source span"
+            .NoWorld -> "game world inspector has no world"
+            .MismatchedWorld(expected, actual) -> "game world selection names `{actual}`, current world is `{expected}`"
+            .UnknownEntity(id) -> "unknown game world entity `{id}`"
+            .UnknownComponent(id) -> "unknown game world component `{id}`"
+            .UnknownProperty(id) -> "unknown game world property `{id}`"
+            .InvalidSelectionHierarchy -> "game world selection does not name a valid hierarchy"
+            .NoSelection -> "game world inspector has no selection"
+            .NotEditable(field) -> "game world property `{field}` is not authored-editable"
+            .InvalidEdit(reason) -> "invalid game world edit: {reason}"
+            .DuplicateEditTarget -> "duplicate game world edit target"
+            .StaleRevision(expected, actual) -> "stale game world revision `{actual}`, current revision is `{expected}`"
+            .StaleSession(expected, actual) -> "stale game world session `{actual}`, current session is `{expected}`"
+            .StaleTier(expected, actual) -> "stale game world tier `{actual}`, current tier is `{expected}`"
+            .InvalidEvaluation(reason) -> "invalid paused game evaluation: {reason}"
+        }
+    }
+}
+// Rust :132-180.
+#Equatable
+pub struct JetGameWorldPropertyFact {
+    pub field: String
+    pub type_name: String
+    pub published_value: String?
+    pub transient: Bool
+    pub source_span: JetGameWorldSourceSpan
+}
+impl JetGameWorldPropertyFact {
+    pub fn new(field: ^String, type_name: ^String, published_value: ^String?, transient: Bool, source_span: JetGameWorldSourceSpan) -> JetGameWorldPropertyFact JetGameWorldInspectorError! {
+        fact :: JetGameWorldPropertyFact{field: ^field, type_name: ^type_name, published_value: ^published_value, transient, source_span}
+        fact.validate() ?? return Err(err)
+        fact
+    }
+    pub fn is_authored(self) -> Bool Never! { !self.transient }
+    pub fn state(self) -> String Never! { if self.transient -> "transient" else -> "authored" }
+    fn validate(self) JetGameWorldInspectorError! {
+        jet_game_world_validate_text(self.field, "property field") ?? return Err(err)
+        jet_game_world_validate_text(self.type_name, "property type") ?? return Err(err)
+        jet_game_world_validate_optional_text(self.published_value, "published value") ?? return Err(err)
+        jet_game_world_validate_fact_span(self.source_span) ?? return Err(err)
+    }
+}
+// Rust :182-228.
+#Equatable
+pub struct JetGameWorldComponentFact {
+    pub component_id: String
+    pub type_name: String
+    pub authored_instance_id: String
+    pub properties: [JetGameWorldPropertyFact]
+}
+impl JetGameWorldComponentFact {
+    pub fn new(component_id: ^String, type_name: ^String, authored_instance_id: ^String, properties: ^[JetGameWorldPropertyFact]) -> JetGameWorldComponentFact JetGameWorldInspectorError! {
+        fact :: JetGameWorldComponentFact{component_id: ^component_id, type_name: ^type_name, authored_instance_id: ^authored_instance_id, properties: ^properties}
+        fact.validate() ?? return Err(err)
+        fact
+    }
+    fn validate(self) JetGameWorldInspectorError! {
+        jet_game_world_validate_text(self.component_id, "component id") ?? return Err(err)
+        jet_game_world_validate_text(self.type_name, "component type") ?? return Err(err)
+        jet_game_world_validate_text(self.authored_instance_id, "authored instance id") ?? return Err(err)
+        if self.properties.len() > JET_GAME_WORLD_MAX_PROPERTIES_PER_COMPONENT -> return Err(JetGameWorldInspectorError.TooManyProperties(~self.component_id))
+        fields := [String: Bool]{}
+        loop property in self.properties {
+            property.validate() ?? return Err(err)
+            if fields.has_key(property.field) -> return Err(JetGameWorldInspectorError.DuplicateProperty(~self.component_id, ~property.field))
+            fields[~property.field] = true
+        }
+    }
+}
+// Rust :230-277.
+#Equatable
+pub struct JetGameWorldEntityFact {
+    pub entity_id: String
+    pub parent_id: String?
+    pub name: String
+    pub components: [JetGameWorldComponentFact]
+}
+impl JetGameWorldEntityFact {
+    pub fn new(entity_id: ^String, parent_id: ^String?, name: ^String, components: ^[JetGameWorldComponentFact]) -> JetGameWorldEntityFact JetGameWorldInspectorError! {
+        fact :: JetGameWorldEntityFact{entity_id: ^entity_id, parent_id: ^parent_id, name: ^name, components: ^components}
+        fact.validate() ?? return Err(err)
+        fact
+    }
+    fn validate(self) JetGameWorldInspectorError! {
+        jet_game_world_validate_text(self.entity_id, "entity id") ?? return Err(err)
+        jet_game_world_validate_text(self.name, "entity name") ?? return Err(err)
+        jet_game_world_validate_optional_text(self.parent_id, "parent id") ?? return Err(err)
+        if self.components.len() > JET_GAME_WORLD_MAX_COMPONENTS_PER_ENTITY -> return Err(JetGameWorldInspectorError.TooManyComponents(~self.entity_id))
+        ids := [String: Bool]{}
+        loop component in self.components {
+            component.validate() ?? return Err(err)
+            if ids.has_key(component.component_id) -> return Err(JetGameWorldInspectorError.DuplicateId(~component.component_id))
+            ids[~component.component_id] = true
+        }
+    }
+}
+// Rust :279-372. Maps retain entity indices, not cloned nested facts.
+#Equatable
+pub struct JetGameWorldFact {
+    pub world_id: String
+    pub frame_id: U64
+    pub source_id: String
+    pub revision: String
+    pub entities: [JetGameWorldEntityFact]
+}
+impl JetGameWorldFact {
+    pub fn new(world_id: ^String, frame_id: U64, source_id: ^String, revision: ^String, entities: ^[JetGameWorldEntityFact]) -> JetGameWorldFact JetGameWorldInspectorError! {
+        fact :: JetGameWorldFact{world_id: ^world_id, frame_id, source_id: ^source_id, revision: ^revision, entities: ^entities}
+        fact.validate() ?? return Err(err)
+        fact
+    }
+    pub fn validate(self) JetGameWorldInspectorError! {
+        jet_game_world_validate_text(self.world_id, "world id") ?? return Err(err)
+        jet_game_world_validate_text(self.source_id, "source id") ?? return Err(err)
+        jet_game_world_validate_text(self.revision, "revision") ?? return Err(err)
+        if self.entities.len() > JET_GAME_WORLD_MAX_ENTITIES -> return Err(JetGameWorldInspectorError.TooManyEntities)
+        ids := [String: Bool]{}
+        parents := [String: Int]{}
+        colors := [Int]{}
+        loop i in 0..<self.entities.len() {
+            self.entities[i].validate() ?? return Err(err)
+            id :: self.entities[i].entity_id
+            if ids.has_key(id) -> return Err(JetGameWorldInspectorError.DuplicateId(~id))
+            ids[~id] = true
+            parents[~id] = i
+            &colors.push(0)
+            loop component in self.entities[i].components {
+                if ids.has_key(component.component_id) -> return Err(JetGameWorldInspectorError.DuplicateId(~component.component_id))
+                ids[~component.component_id] = true
+            }
+        }
+        // Memoized forest walk: each edge visited at most twice. Original entity order,
+        // first repeated ID and originating child in MissingParent are retained.
+        loop root in 0..<self.entities.len() {
+            cursor := root
+            loop true {
+                if colors[cursor] == 2 -> break
+                if colors[cursor] == 1 -> return Err(JetGameWorldInspectorError.Cycle(~self.entities[cursor].entity_id))
+                colors[cursor] = 1
+                if self.entities[cursor].parent_id == .Val(parent) {
+                    if !parents.has_key(parent) -> return Err(JetGameWorldInspectorError.MissingParent(~self.entities[root].entity_id, ~parent))
+                    cursor = parents[parent]
+                } else -> break
+            }
+            cursor = root
+            loop colors[cursor] != 2 {
+                colors[cursor] = 2
+                if self.entities[cursor].parent_id == .Val(parent) -> cursor = parents[parent]
+                else -> break
+            }
+        }
+    }
+    pub fn render_json(self) -> String Never! {
+        order := world_indices(self.entities.len())
+        &order.sort_by((a: Int, b: Int) -> self.entities[a].entity_id <=> self.entities[b].entity_id)
+        rows := [String]{}
+        loop index in order -> &rows.push(jet_game_world_entity_json(self.entities[index]))
+        id :: jet_game_world_json_string(self.world_id)
+        source :: jet_game_world_json_string(self.source_id)
+        revision :: jet_game_world_json_string(self.revision)
+        "{{\"world_id\":{id},\"frame_id\":{self.frame_id},\"source_id\":{source},\"revision\":{revision},\"entities\":[{rows.join(",")}]}}"
+    }
+}
+// Rust :374-422.
+#Equatable
+pub struct JetGameWorldSelection {
+    pub world_id: String
+    pub entity_id: String?
+    pub component_id: String?
+    pub property_id: String?
+}
+impl JetGameWorldSelection {
+    pub fn new(world_id: ^String, entity_id: ^String?, component_id: ^String?, property_id: ^String?) -> JetGameWorldSelection JetGameWorldInspectorError! {
+        selection :: JetGameWorldSelection{world_id: ^world_id, entity_id: ^entity_id, component_id: ^component_id, property_id: ^property_id}
+        jet_game_world_validate_text(selection.world_id, "selection world id") ?? return Err(err)
+        jet_game_world_validate_optional_text(selection.entity_id, "selection entity id") ?? return Err(err)
+        jet_game_world_validate_optional_text(selection.component_id, "selection component id") ?? return Err(err)
+        jet_game_world_validate_optional_text(selection.property_id, "selection property id") ?? return Err(err)
+        if !world_selection_hierarchy(selection) -> return Err(JetGameWorldInspectorError.InvalidSelectionHierarchy)
+        selection
+    }
+    pub fn render_json(self) -> String Never! {
+        world :: jet_game_world_json_string(self.world_id)
+        entity :: jet_game_world_json_option(self.entity_id)
+        component :: jet_game_world_json_option(self.component_id)
+        property :: jet_game_world_json_option(self.property_id)
+        "{{\"world_id\":{world},\"entity_id\":{entity},\"component_id\":{component},\"property_id\":{property}}}"
+    }
+}
+// Rust :424-459. Projection is deliberately owned, as in Rust project().
+#Equatable
+pub struct JetGameWorldSelectionProjection {
+    pub selection: JetGameWorldSelection
+    pub world_id: String
+    pub frame_id: U64
+    pub source_id: String
+    pub revision: String
+    pub entity: JetGameWorldEntityFact?
+    pub component: JetGameWorldComponentFact?
+    pub property: JetGameWorldPropertyFact?
+}
+impl JetGameWorldSelectionProjection {
+    pub fn render_json(self) -> String Never! {
+        selection :: self.selection.render_json()
+        world :: jet_game_world_json_string(self.world_id)
+        source :: jet_game_world_json_string(self.source_id)
+        revision :: jet_game_world_json_string(self.revision)
+        entity := "null"
+        component := "null"
+        property := "null"
+        if self.entity == .Val(fact) -> entity = jet_game_world_entity_json(fact)
+        if self.component == .Val(fact) -> component = jet_game_world_component_json(fact)
+        if self.property == .Val(fact) -> property = jet_game_world_property_json(fact)
+        "{{\"selection\":{selection},\"world_id\":{world},\"frame_id\":{self.frame_id},\"source_id\":{source},\"revision\":{revision},\"entity\":{entity},\"component\":{component},\"property\":{property}}}"
+    }
+}
+// Rust :461-505.
+#Equatable
+pub struct JetGameWorldEditTarget {
+    pub source_id: String
+    pub revision: String
+    pub authored_instance_id: String
+    pub source_span: JetGameWorldSourceSpan
+    pub session_id: String?
+    pub tier: String?
+}
+impl JetGameWorldEditTarget {
+    pub fn new(source_id: ^String, revision: ^String, authored_instance_id: ^String, source_span: JetGameWorldSourceSpan) -> JetGameWorldEditTarget JetGameWorldInspectorError! {
+        target :: JetGameWorldEditTarget{source_id: ^source_id, revision: ^revision, authored_instance_id: ^authored_instance_id, source_span, session_id: None, tier: None}
+        jet_game_world_validate_edit_target(target) ?? return Err(err)
+        target
+    }
+    pub fn with_session_identity(^self, session_id: ^String, tier: ^String) -> JetGameWorldEditTarget JetGameWorldInspectorError! {
+        jet_game_world_validate_text(session_id, "edit session id") ?? return Err(err)
+        jet_game_world_validate_text(tier, "edit tier") ?? return Err(err)
+        target := ^self
+        target.session_id = Val(^session_id)
+        target.tier = Val(^tier)
+        target
+    }
+}
+// Rust :507-582. Sorting indices detects duplicate composite targets without
+// inventing composite map keys (#4499) or the Rust quadratic suffix scan.
+#Equatable
+pub struct JetGameWorldFieldPatch { pub field: String, pub value: String }
+impl JetGameWorldFieldPatch {
+    pub fn new(field: ^String, value: ^String) -> JetGameWorldFieldPatch JetGameWorldInspectorError! {
+        jet_game_world_validate_text(field, "edit field") ?? return Err(err)
+        jet_game_world_validate_text(value, "edit value") ?? return Err(err)
+        JetGameWorldFieldPatch{field: ^field, value: ^value}
+    }
+}
+#Equatable
+pub struct JetGameWorldEditRequest { pub targets: [JetGameWorldEditTarget], pub field_patch: JetGameWorldFieldPatch }
+impl JetGameWorldEditRequest {
+    pub fn new(targets: ^[JetGameWorldEditTarget], field: ^String, value: ^String) -> JetGameWorldEditRequest JetGameWorldInspectorError! {
+        sorted := ^targets
+        &sorted.sort_by((a: JetGameWorldEditTarget, b: JetGameWorldEditTarget) -> jet_game_world_edit_target_cmp(a, b))
+        patch :: JetGameWorldFieldPatch.new(^field, ^value) ?? return Err(err)
+        request :: JetGameWorldEditRequest{targets: ^sorted, field_patch: patch}
+        request.validate() ?? return Err(err)
+        request
+    }
+    pub fn validate(self) JetGameWorldInspectorError! {
+        if self.targets.is_empty() -> return Err(JetGameWorldInspectorError.InvalidEdit("targets must not be empty"))
+        jet_game_world_validate_text(self.field_patch.field, "edit field") ?? return Err(err)
+        jet_game_world_validate_text(self.field_patch.value, "edit value") ?? return Err(err)
+        order := world_indices(self.targets.len())
+        &order.sort_by((a: Int, b: Int) -> {
+            comparison :: jet_game_world_edit_target_cmp(self.targets[a], self.targets[b])
+            if comparison != Ordering.Equal -> return comparison
+            a <=> b
+        })
+        duplicate := [Bool]{}
+        loop _ in self.targets -> &duplicate.push(false)
+        loop i in 1..<order.len() {
+            if self.targets[order[i - 1]] == self.targets[order[i]] -> duplicate[order[i - 1]] = true
+        }
+        loop i in 0..<self.targets.len() {
+            jet_game_world_validate_edit_target(self.targets[i]) ?? return Err(err)
+            if duplicate[i] -> return Err(JetGameWorldInspectorError.DuplicateEditTarget)
+        }
+    }
+    pub fn render_json(self) -> String Never! {
+        rows := [String]{}
+        loop target in self.targets -> &rows.push(jet_game_world_edit_target_json(target))
+        patch :: jet_game_world_field_patch_json(self.field_patch)
+        "{{\"targets\":[{rows.join(",")}],\"field_patch\":{patch}}}"
+    }
+}
+// Rust :584-667.
+#Equatable
+pub struct JetGamePausedEvalRequest {
+    pub request_id: String
+    pub session_id: String
+    pub tier: String
+    pub world_id: String
+    pub frame_id: U64
+    pub entity_id: String
+    pub component_id: String
+    pub expression: String
+    pub required_authority: String
+    pub budget: U64
+}
+impl JetGamePausedEvalRequest {
+    pub fn new(request_id: ^String, session_id: ^String, world_id: ^String, frame_id: U64, entity_id: ^String, component_id: ^String, expression: ^String, required_authority: ^String, budget: U64) -> JetGamePausedEvalRequest JetGameWorldInspectorError! {
+        request :: JetGamePausedEvalRequest{request_id: ^request_id, session_id: ^session_id, tier: "game", world_id: ^world_id, frame_id, entity_id: ^entity_id, component_id: ^component_id, expression: ^expression, required_authority: ^required_authority, budget}
+        request.validate() ?? return Err(err)
+        request
+    }
+    pub fn with_tier(^self, tier: ^String) -> JetGamePausedEvalRequest JetGameWorldInspectorError! {
+        request := ^self
+        request.tier = ^tier
+        request.validate() ?? return Err(err)
+        request
+    }
+    pub fn validate(self) JetGameWorldInspectorError! {
+        jet_game_world_validate_text(self.request_id, "evaluation request id") ?? return Err(err)
+        jet_game_world_validate_text(self.session_id, "evaluation session id") ?? return Err(err)
+        jet_game_world_validate_text(self.tier, "evaluation tier") ?? return Err(err)
+        jet_game_world_validate_text(self.world_id, "evaluation world id") ?? return Err(err)
+        jet_game_world_validate_text(self.entity_id, "evaluation entity id") ?? return Err(err)
+        jet_game_world_validate_text(self.component_id, "evaluation component id") ?? return Err(err)
+        jet_game_world_validate_text(self.expression, "evaluation expression") ?? return Err(err)
+        jet_game_world_validate_text(self.required_authority, "evaluation authority") ?? return Err(err)
+        if self.budget == U64{0} -> return Err(JetGameWorldInspectorError.InvalidEvaluation("budget must be positive"))
+    }
+    pub fn render_json(self) -> String Never! {
+        id :: jet_game_world_json_string(self.request_id)
+        session :: jet_game_world_json_string(self.session_id)
+        tier :: jet_game_world_json_string(self.tier)
+        world :: jet_game_world_json_string(self.world_id)
+        entity :: jet_game_world_json_string(self.entity_id)
+        component :: jet_game_world_json_string(self.component_id)
+        expression :: jet_game_world_json_string(self.expression)
+        authority :: jet_game_world_json_string(self.required_authority)
+        "{{\"request_id\":{id},\"session_id\":{session},\"tier\":{tier},\"world_id\":{world},\"frame_id\":{self.frame_id},\"entity_id\":{entity},\"component_id\":{component},\"expression\":{expression},\"required_authority\":{authority},\"budget\":{self.budget}}}"
+    }
+}
+// Rust :669-724.
+#Equatable
+pub struct JetGamePausedEvalResult {
+    pub request_id: String
+    pub status: String
+    pub type_name: String
+    pub published_value: String?
+    pub source_span: JetGameWorldSourceSpan?
+}
+impl JetGamePausedEvalResult {
+    pub fn new(request_id: ^String, status: ^String, type_name: ^String, published_value: ^String?, source_span: JetGameWorldSourceSpan?) -> JetGamePausedEvalResult JetGameWorldInspectorError! {
+        jet_game_world_validate_text(request_id, "evaluation result id") ?? return Err(err)
+        jet_game_world_validate_text(status, "evaluation result status") ?? return Err(err)
+        if !type_name.is_empty() -> jet_game_world_validate_text(type_name, "evaluation result type") ?? return Err(err)
+        jet_game_world_validate_optional_text(published_value, "evaluation result value") ?? return Err(err)
+        if source_span == .Val(span) -> jet_game_world_validate_fact_span(span) ?? return Err(err)
+        JetGamePausedEvalResult{request_id: ^request_id, status: ^status, type_name: ^type_name, published_value: ^published_value, source_span}
+    }
+    pub fn render_json(self) -> String Never! {
+        id :: jet_game_world_json_string(self.request_id)
+        status :: jet_game_world_json_string(self.status)
+        type_name :: jet_game_world_json_string(self.type_name)
+        value :: jet_game_world_json_option(self.published_value)
+        span := "null"
+        if self.source_span == .Val(source) -> span = source.render_json()
+        "{{\"request_id\":{id},\"status\":{status},\"type_name\":{type_name},\"published_value\":{value},\"source_span\":{span}}}"
+    }
+}
+// Rust :735-1093. A circular frame buffer owns each snapshot once. Its newest
+// slot IS the current world; no nested-world clone or front-shift at ingestion.
+pub struct JetGameWorldInspector {
+    frames: [JetGameWorldFact]
+    head: Int
+    selection: JetGameWorldSelection?
+    session_id: String?
+    tier: String?
+}
+impl JetGameWorldInspector {
+    pub fn default() -> JetGameWorldInspector Never! { JetGameWorldInspector{frames: [JetGameWorldFact]{}, head: 0, selection: None, session_id: None, tier: None} }
+    pub fn new() -> JetGameWorldInspector JetGameWorldInspectorError! { JetGameWorldInspector.default() }
+    // Rust derived Eq/PartialEq compares logical FIFO frame order. A physical
+    // ring-layout #Equatable derivation would make equal inspectors unequal.
+    pub fn equals(self, other: JetGameWorldInspector) -> Bool Never! {
+        if self.selection != other.selection || self.session_id != other.session_id || self.tier != other.tier || self.frames.len() != other.frames.len() -> return false
+        loop i in 0..<self.frames.len() {
+            left :: (self.head + i) %% self.frames.len()
+            right :: (other.head + i) %% other.frames.len()
+            if self.frames[left] != other.frames[right] -> return false
+        }
+        true
+    }
+    pub fn set_session_identity(&self, session_id: ^String, tier: ^String) Never! { self.session_id = Val(^session_id); self.tier = Val(^tier) }
+    pub fn session_identity(self) -> (session_id: @String, tier: @String)? Never! from self {
+        if self.session_id == .Val(session) {
+            if self.tier == .Val(tier) -> return Val((session_id: @session, tier: @tier))
+        }
+        None
+    }
+    pub fn ingest(&self, world: ^JetGameWorldFact) JetGameWorldInspectorError! {
+        world.validate() ?? return Err(err)
+        if self.frames.len() < JET_GAME_WORLD_MAX_FRAME_FACTS -> &self.frames.push(^world)
+        else {
+            self.frames[self.head] = ^world
+            self.head = (self.head + 1) %% JET_GAME_WORLD_MAX_FRAME_FACTS
+        }
+        self.selection = None
+    }
+    pub fn select(&self, selection: ^JetGameWorldSelection) JetGameWorldInspectorError! {
+        if self.frames.is_empty() -> return Err(JetGameWorldInspectorError.NoWorld)
+        current :: world_current_index(self)
+        if selection.world_id != self.frames[current].world_id -> return Err(JetGameWorldInspectorError.MismatchedWorld(~self.frames[current].world_id, ~selection.world_id))
+        if !world_selection_hierarchy(selection) -> return Err(JetGameWorldInspectorError.InvalidSelectionHierarchy)
+        if selection.entity_id == .Val(id) {
+            e :: world_entity_index(self.frames[current], id) ?? return Err(JetGameWorldInspectorError.UnknownEntity(~id))
+            if selection.component_id == .Val(cid) {
+                c :: world_component_index(self.frames[current].entities[e], cid) ?? return Err(JetGameWorldInspectorError.UnknownComponent(~cid))
+                if selection.property_id == .Val(pid) {
+                    _ :: world_property_index(self.frames[current].entities[e].components[c], pid) ?? return Err(JetGameWorldInspectorError.UnknownProperty(~pid))
+                }
+            }
+        }
+        self.selection = Val(^selection)
+    }
+    pub fn project(self) -> JetGameWorldSelectionProjection? Never! {
+        if self.frames.is_empty() -> return None
+        selection :: self.selection ?? return None
+        current :: world_current_index(self)
+        if selection.world_id != self.frames[current].world_id -> return None
+        entity := None as JetGameWorldEntityFact?
+        component := None as JetGameWorldComponentFact?
+        property := None as JetGameWorldPropertyFact?
+        if selection.entity_id == .Val(id) {
+            e :: world_entity_index(self.frames[current], id) ?? return None
+            if selection.component_id == .Val(cid) {
+                c :: world_component_index(self.frames[current].entities[e], cid) ?? return None
+                if selection.property_id == .Val(pid) {
+                    p :: world_property_index(self.frames[current].entities[e].components[c], pid) ?? return None
+                    property = Val(~self.frames[current].entities[e].components[c].properties[p])
+                }
+                component = Val(~self.frames[current].entities[e].components[c])
+            } else if selection.property_id != None -> return None
+            entity = Val(~self.frames[current].entities[e])
+        } else if selection.component_id != None || selection.property_id != None -> return None
+        Val(JetGameWorldSelectionProjection{selection: ~selection, world_id: ~self.frames[current].world_id, frame_id: self.frames[current].frame_id, source_id: ~self.frames[current].source_id, revision: ~self.frames[current].revision, entity: ^entity, component: ^component, property: ^property})
+    }
+    pub fn edit_request(self, field: ^String, value: ^String) -> JetGameWorldEditRequest JetGameWorldInspectorError! {
+        if self.frames.is_empty() -> return Err(JetGameWorldInspectorError.NoWorld)
+        selection :: self.selection ?? return Err(JetGameWorldInspectorError.NoSelection)
+        eid :: selection.entity_id ?? return Err(JetGameWorldInspectorError.InvalidSelectionHierarchy)
+        cid :: selection.component_id ?? return Err(JetGameWorldInspectorError.InvalidSelectionHierarchy)
+        pid :: selection.property_id ?? return Err(JetGameWorldInspectorError.InvalidSelectionHierarchy)
+        current :: world_current_index(self)
+        e :: world_entity_index(self.frames[current], eid) ?? return Err(JetGameWorldInspectorError.UnknownEntity(~eid))
+        c :: world_component_index(self.frames[current].entities[e], cid) ?? return Err(JetGameWorldInspectorError.UnknownComponent(~cid))
+        p :: world_property_index(self.frames[current].entities[e].components[c], pid) ?? return Err(JetGameWorldInspectorError.UnknownProperty(~pid))
+        if self.frames[current].entities[e].components[c].properties[p].field != field || self.frames[current].entities[e].components[c].properties[p].transient -> return Err(JetGameWorldInspectorError.NotEditable(~field))
+        span :: self.frames[current].entities[e].components[c].properties[p].source_span
+        if span.is_empty() -> return Err(JetGameWorldInspectorError.InvalidSourceSpan)
+        target := JetGameWorldEditTarget.new(~self.frames[current].source_id, ~self.frames[current].revision, ~self.frames[current].entities[e].components[c].authored_instance_id, span) ?? return Err(err)
+        if self.session_identity() == .Val(identity) -> target = target.with_session_identity(~identity.session_id, ~identity.tier) ?? return Err(err)
+        JetGameWorldEditRequest.new([JetGameWorldEditTarget]{^target}, ^field, ^value)
+    }
+    pub fn validate_edit_request(self, request: JetGameWorldEditRequest) JetGameWorldInspectorError! {
+        request.validate() ?? return Err(err)
+        if self.frames.is_empty() -> return Err(JetGameWorldInspectorError.NoWorld)
+        current :: world_current_index(self)
+        provenance := [WorldProvenanceIndex]{}
+        indexed := false
+        loop target in request.targets {
+            if target.source_id != self.frames[current].source_id -> return Err(JetGameWorldInspectorError.InvalidEdit("target source is not the current world source"))
+            if target.revision != self.frames[current].revision -> return Err(JetGameWorldInspectorError.StaleRevision(~self.frames[current].revision, ~target.revision))
+            if self.session_identity() == .Val(identity) {
+                if target.session_id != Val(identity.session_id) -> return Err(JetGameWorldInspectorError.StaleSession(~identity.session_id, world_optional_or_empty(target.session_id)))
+                if target.tier != Val(identity.tier) -> return Err(JetGameWorldInspectorError.StaleTier(~identity.tier, world_optional_or_empty(target.tier)))
+            }
+            if !indexed {
+                provenance = world_provenance_index(self.frames[current], request.field_patch.field)
+                indexed = true
+            }
+            if !world_provenance_matches(self.frames[current], provenance, target) -> return Err(JetGameWorldInspectorError.InvalidEdit("target provenance does not name an authored property"))
+        }
+    }
+    pub fn evaluate_request(self, request: ^JetGamePausedEvalRequest) -> JetGamePausedEvalResult Never! {
+        request.validate() ?? return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_INVALID)
+        if jet_game_world_authority_is_running(request.required_authority) -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_RUNNING)
+        if !jet_game_world_authority_is_paused(request.required_authority) -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_UNAUTHORIZED)
+        if self.session_identity() == .Val(identity) {
+            if request.session_id != identity.session_id || request.tier != identity.tier -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_STALE)
+        }
+        if self.frames.is_empty() -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_NO_WORLD)
+        current :: world_current_index(self)
+        frame := -1
+        offset := self.frames.len()
+        loop offset > 0 {
+            offset = offset - 1
+            i :: (self.head + offset) %% self.frames.len()
+            if self.frames[i].world_id == request.world_id && self.frames[i].frame_id == request.frame_id { frame = i; break }
+        }
+        if frame < 0 -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_STALE)
+        if self.frames[frame].source_id != self.frames[current].source_id || self.frames[frame].revision != self.frames[current].revision -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_STALE)
+        e :: world_entity_index(self.frames[frame], request.entity_id) ?? return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+        c :: world_component_index(self.frames[frame].entities[e], request.component_id) ?? return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+        length :: U64.from_int(world_text.utf8_bytes(request.expression).len()) ?? panic("validated game expression length exceeds U64")
+        if length > request.budget -> return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_BUDGET)
+        p :: world_property_index(self.frames[frame].entities[e].components[c], request.expression) ?? return world_eval_invalid(request.request_id, JET_GAME_PAUSED_EVAL_UNSUPPORTED)
+        jet_game_world_eval_result(~request.request_id, JET_GAME_PAUSED_EVAL_OK, self.frames[frame].entities[e].components[c].properties[p].type_name, ~self.frames[frame].entities[e].components[c].properties[p].published_value, Val(self.frames[frame].entities[e].components[c].properties[p].source_span))
+    }
+}
+// Rust :1095-1177.
+fn jet_game_world_eval_result(request_id: ^String, status: String, type_name: String, published_value: ^String?, source_span: JetGameWorldSourceSpan?) -> JetGamePausedEvalResult Never! {
+    JetGamePausedEvalResult{request_id: ^request_id, status: ~status, type_name: ~type_name, published_value: ^published_value, source_span}
+}
+fn world_eval_invalid(request_id: String, status: String) -> JetGamePausedEvalResult Never! { jet_game_world_eval_result(~request_id, status, "", None, None) }
+fn jet_game_world_validate_text(value: String, field: String) JetGameWorldInspectorError! {
+    if value.is_empty() || world_text.is_whitespace(value) -> return Err(JetGameWorldInspectorError.EmptyText(~field))
+    if world_text.utf8_bytes(value).len() > JET_GAME_WORLD_MAX_TEXT_BYTES -> return Err(JetGameWorldInspectorError.TextTooLong(~field))
+}
+fn jet_game_world_validate_optional_text(value: String?, field: String) JetGameWorldInspectorError! {
+    if value == .Val(text) -> jet_game_world_validate_text(text, field) ?? return Err(err)
+}
+fn jet_game_world_validate_fact_span(span: JetGameWorldSourceSpan) JetGameWorldInspectorError! {
+    if span.start > span.end -> return Err(JetGameWorldInspectorError.InvalidSourceSpan)
+}
+fn jet_game_world_validate_edit_target(target: JetGameWorldEditTarget) JetGameWorldInspectorError! {
+    jet_game_world_validate_text(target.source_id, "edit source id") ?? return Err(err)
+    jet_game_world_validate_text(target.revision, "edit revision") ?? return Err(err)
+    jet_game_world_validate_text(target.authored_instance_id, "authored instance id") ?? return Err(err)
+    jet_game_world_validate_optional_text(target.session_id, "edit session id") ?? return Err(err)
+    jet_game_world_validate_optional_text(target.tier, "edit tier") ?? return Err(err)
+    if (target.session_id != None) != (target.tier != None) -> return Err(JetGameWorldInspectorError.InvalidEdit("edit session and tier must be supplied together"))
+    if target.source_span.is_empty() -> return Err(JetGameWorldInspectorError.InvalidSourceSpan)
+}
+fn jet_game_world_edit_target_cmp(left: JetGameWorldEditTarget, right: JetGameWorldEditTarget) -> Ordering Never! {
+    source :: left.source_id <=> right.source_id
+    if source != Ordering.Equal -> return source
+    revision :: left.revision <=> right.revision
+    if revision != Ordering.Equal -> return revision
+    instance :: left.authored_instance_id <=> right.authored_instance_id
+    if instance != Ordering.Equal -> return instance
+    start :: left.source_span.start <=> right.source_span.start
+    if start != Ordering.Equal -> return start
+    end :: left.source_span.end <=> right.source_span.end
+    if end != Ordering.Equal -> return end
+    session :: world_optional_cmp(left.session_id, right.session_id)
+    if session != Ordering.Equal -> return session
+    world_optional_cmp(left.tier, right.tier)
+}
+fn world_optional_cmp(left: String?, right: String?) -> Ordering Never! {
+    if left == .Val(a) {
+        if right == .Val(b) -> return a <=> b
+        return Ordering.Greater
+    }
+    if right != None -> return Ordering.Less
+    Ordering.Equal
+}
+// Rust :1180-1195: ASCII-only case comparison, no Unicode folding.
+fn jet_game_world_authority_is_running(authority: String) -> Bool Never! {
+    world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "running")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "running-frame")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "running_frame")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "live")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "live-frame")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "live_frame")
+}
+fn jet_game_world_authority_is_paused(authority: String) -> Bool Never! {
+    world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "paused")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "paused-frame")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "paused_frame")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "debug.paused")
+        || world_ascii.jet_env_config_eq_ignore_ascii_case(authority, "game.debug.paused")
+}
+// Rust :1197-1267. Sort indices only; never copy nested facts to serialize.
+fn jet_game_world_entity_json(entity: JetGameWorldEntityFact) -> String Never! {
+    order := world_indices(entity.components.len())
+    &order.sort_by((a: Int, b: Int) -> entity.components[a].component_id <=> entity.components[b].component_id)
+    rows := [String]{}
+    loop index in order -> &rows.push(jet_game_world_component_json(entity.components[index]))
+    id :: jet_game_world_json_string(entity.entity_id)
+    parent :: jet_game_world_json_option(entity.parent_id)
+    name :: jet_game_world_json_string(entity.name)
+    "{{\"entity_id\":{id},\"parent_id\":{parent},\"name\":{name},\"components\":[{rows.join(",")}]}}"
+}
+fn jet_game_world_component_json(component: JetGameWorldComponentFact) -> String Never! {
+    order := world_indices(component.properties.len())
+    &order.sort_by((a: Int, b: Int) -> component.properties[a].field <=> component.properties[b].field)
+    rows := [String]{}
+    loop index in order -> &rows.push(jet_game_world_property_json(component.properties[index]))
+    id :: jet_game_world_json_string(component.component_id)
+    type_name :: jet_game_world_json_string(component.type_name)
+    authored :: jet_game_world_json_string(component.authored_instance_id)
+    "{{\"component_id\":{id},\"type_name\":{type_name},\"authored_instance_id\":{authored},\"properties\":[{rows.join(",")}]}}"
+}
+fn jet_game_world_property_json(property: JetGameWorldPropertyFact) -> String Never! {
+    field :: jet_game_world_json_string(property.field)
+    type_name :: jet_game_world_json_string(property.type_name)
+    value :: jet_game_world_json_option(property.published_value)
+    span :: property.source_span.render_json()
+    "{{\"field\":{field},\"type_name\":{type_name},\"published_value\":{value},\"transient\":{property.transient},\"source_span\":{span}}}"
+}
+fn jet_game_world_edit_target_json(target: JetGameWorldEditTarget) -> String Never! {
+    source :: jet_game_world_json_string(target.source_id)
+    revision :: jet_game_world_json_string(target.revision)
+    instance :: jet_game_world_json_string(target.authored_instance_id)
+    span :: target.source_span.render_json()
+    session :: jet_game_world_json_option(target.session_id)
+    tier :: jet_game_world_json_option(target.tier)
+    "{{\"source_id\":{source},\"revision\":{revision},\"authored_instance_id\":{instance},\"source_span\":{span},\"session_id\":{session},\"tier\":{tier}}}"
+}
+fn jet_game_world_field_patch_json(patch: JetGameWorldFieldPatch) -> String Never! {
+    field :: jet_game_world_json_string(patch.field)
+    value :: jet_game_world_json_string(patch.value)
+    "{{\"field\":{field},\"value\":{value}}}"
+}
+fn jet_game_world_json_option(value: String?) -> String Never! {
+    if value == .Val(text) -> return jet_game_world_json_string(text)
+    "null"
+}
+// Rust :1269-1287 requires \u0008/\u000c, unlike generic JSON's \b/\f.
+// One growing byte output, preserving UTF8 bytes and all C0 escaping exactly.
+fn jet_game_world_json_string(value: String) -> String Never! {
+    out := [U8]{U8{34}}
+    hex :: [U8]{48,49,50,51,52,53,54,55,56,57,97,98,99,100,101,102}
+    loop byte in world_text.utf8_bytes(value) {
+        if byte == U8{34} { &out.push(U8{92}); &out.push(U8{34}) }
+        else if byte == U8{92} { &out.push(U8{92}); &out.push(U8{92}) }
+        else if byte == U8{10} { &out.push(U8{92}); &out.push(U8{110}) }
+        else if byte == U8{13} { &out.push(U8{92}); &out.push(U8{114}) }
+        else if byte == U8{9} { &out.push(U8{92}); &out.push(U8{116}) }
+        else if byte < U8{32} {
+            &out.push(U8{92}); &out.push(U8{117}); &out.push(U8{48}); &out.push(U8{48})
+            &out.push(hex[Int.from_u8(byte) /% 16]); &out.push(hex[Int.from_u8(byte) %% 16])
+        } else -> &out.push(byte)
+    }
+    &out.push(U8{34})
+    String.from_bytes(^out) ?? panic("game world JSON must be UTF-8")
+}
+// Internal scalar/index helpers, not alternative fact or provider owners.
+fn world_indices(count: Int) -> [Int] Never! { out := [Int]{}; loop i in 0..<count -> &out.push(i); ^out }
+fn world_current_index(inspector: JetGameWorldInspector) -> Int Never! { (inspector.head + inspector.frames.len() - 1) %% inspector.frames.len() }
+fn world_selection_hierarchy(selection: JetGameWorldSelection) -> Bool Never! { !(selection.property_id != None && selection.component_id == None || selection.component_id != None && selection.entity_id == None) }
+fn world_entity_index(world: JetGameWorldFact, id: String) -> Int? Never! {
+    loop i in 0..<world.entities.len() { if world.entities[i].entity_id == id -> return Val(i) }
+    None
+}
+fn world_component_index(entity: JetGameWorldEntityFact, id: String) -> Int? Never! {
+    loop i in 0..<entity.components.len() { if entity.components[i].component_id == id -> return Val(i) }
+    None
+}
+fn world_property_index(component: JetGameWorldComponentFact, id: String) -> Int? Never! {
+    loop i in 0..<component.properties.len() { if component.properties[i].field == id -> return Val(i) }
+    None
+}
+fn world_optional_or_empty(value: String?) -> String Never! { if value == .Val(text) -> return ~text; "" }
+// A scalar index of authored properties in the current snapshot, never another
+// fact universe or encoded composite map key. Sort once, binary-search targets.
+struct WorldProvenanceIndex { entity: Int, component: Int, property: Int }
+fn world_provenance_index(world: JetGameWorldFact, field: String) -> [WorldProvenanceIndex] Never! {
+    rows := [WorldProvenanceIndex]{}
+    loop e in 0..<world.entities.len() {
+        loop c in 0..<world.entities[e].components.len() {
+            loop p in 0..<world.entities[e].components[c].properties.len() {
+                if world.entities[e].components[c].properties[p].field == field && !world.entities[e].components[c].properties[p].transient -> &rows.push(WorldProvenanceIndex{entity: e, component: c, property: p})
+            }
+        }
+    }
+    &rows.sort_by((a: WorldProvenanceIndex, b: WorldProvenanceIndex) -> {
+        instance :: world.entities[a.entity].components[a.component].authored_instance_id <=> world.entities[b.entity].components[b.component].authored_instance_id
+        if instance != Ordering.Equal -> return instance
+        world.entities[a.entity].components[a.component].properties[a.property].source_span.compare(world.entities[b.entity].components[b.component].properties[b.property].source_span)
+    })
+    ^rows
+}
+fn world_provenance_matches(world: JetGameWorldFact, rows: [WorldProvenanceIndex], target: JetGameWorldEditTarget) -> Bool Never! {
+    low := 0
+    high := rows.len()
+    loop low < high {
+        mid :: low + (high - low) /% 2
+        row :: rows[mid]
+        instance :: world.entities[row.entity].components[row.component].authored_instance_id <=> target.authored_instance_id
+        order := instance
+        if order == Ordering.Equal -> order = world.entities[row.entity].components[row.component].properties[row.property].source_span.compare(target.source_span)
+        if order == Ordering.Equal -> return true
+        if order == Ordering.Less -> low = mid + 1
+        else -> high = mid
+    }
+    false
+}

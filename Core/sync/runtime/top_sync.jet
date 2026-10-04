@@ -1,0 +1,2081 @@
+// PORT-PENDING 0306 crates-jet-codegen-src-prelude-corelib-top-sync: crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1-2077
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
+//RS 
+//RS use super::jet_std;
+//RS use super::{__jet_Decode, __jet_Encode, jet_live_publish_transport, JetDisplay, JetShow};
+//RS 
+//RS pub(crate) const MAX_SYNC_TEXT: usize = 1024 * 1024;
+//RS /// Tombstones outlive the characters they replace, so a document holds more
+//RS /// atoms than it shows.  This bounds the whole atom set, checked before a
+//RS /// write rather than by discarding atoms during a merge.
+//RS pub(crate) const MAX_SYNC_ATOMS: usize = 4 * 1024 * 1024;
+//RS pub(crate) const MAX_SYNC_REPLICAS: usize = 4096;
+//RS pub(crate) const MAX_SYNC_ENTRIES: usize = 100_000;
+//RS pub(crate) const MAX_SYNC_SESSION: usize = 256;
+//RS pub(crate) const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
+//RS 
+//RS /// D-SYNC1: SyncText is a sequence CRDT, not a copy per replica.  Every
+//RS /// character is one atom carrying a unique `(replica, counter)` identity and
+//RS /// the identity of the atom it follows.  Reading order is recomputed from
+//RS /// those identities, so a merge is the union of two atom sets with deletions
+//RS /// winning: commutative, associative, and idempotent.  Two replicas that edit
+//RS /// while apart converge on one document, and neither loses characters.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncText {
+//RS     pub atoms: Vec<JetSyncTextAtom>,
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetSyncTextAtom {
+//RS     pub replica: String,
+//RS     pub counter: u64,
+//RS     /// The atom this one follows.  `None` places it at the document start.
+//RS     pub after: Option<(String, u64)>,
+//RS     pub ch: char,
+//RS     pub deleted: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncCounter {
+//RS     pub counts: Vec<(String, u64, u64)>, // replica_id, positive, negative
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncMap {
+//RS     pub entries: Vec<(String, String, u64, String)>, // key, value, clock, writer
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS /// D-SYNC1: the typed map carrier.  The legacy `JetSyncMap` above remains the
+//RS /// String/String compatibility spelling used by the original fixed Core API.
+//RS /// Generic maps keep their actual Codable key and value instead of erasing
+//RS /// them to text at the runtime boundary.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncMapGeneric<K, V> {
+//RS     pub entries: Vec<(K, V, u64, String)>, // key, value, logical clock, writer
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS /// D-DBPOLICY1=A: the compiled form and the accepted language live in
+//RS /// `jet_std` (`CoreLib/JetStd/RowPolicy.rs`), which every tier includes. This
+//RS /// carrier only holds what the compiler produced, so `expression` is always
+//RS /// the canonical spelling of `compiled`, never a caller's raw string.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetRowPolicy {
+//RS     pub table: String,
+//RS     pub expression: String,
+//RS     compiled: jet_std::JetRowPolicyExpr,
+//RS }
+//RS 
+//RS /// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping the
+//RS /// policy and user on the scope prevents a caller from replacing either one
+//RS /// between SQL operations while retaining the underlying connection handle.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetDbScope {
+//RS     pub handle: u64,
+//RS     pub policy: JetRowPolicy,
+//RS     pub user: String,
+//RS     pub request_id: Option<String>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+//RS         std::cell::RefCell::new(None);
+//RS }
+//RS 
+//RS /// The request identity is installed by the HTTP server for the duration of
+//RS /// handler execution.  DB scopes copy it at construction; no adapter invents
+//RS /// a request identifier.
+//RS pub(crate) fn jet_db_current_request_id() -> Option<String> {
+//RS     JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+//RS }
+//RS 
+//RS pub(crate) struct JetDbRequestScope {
+//RS     previous: Option<String>,
+//RS }
+//RS 
+//RS impl JetDbRequestScope {
+//RS     pub(crate) fn enter(request_id: Option<String>) -> Self {
+//RS         let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+//RS         Self { previous }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetDbRequestScope {
+//RS     fn drop(&mut self) {
+//RS         JET_DB_REQUEST_ID.with(|current| {
+//RS             let _ = current.replace(self.previous.take());
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncList {
+//RS     pub items: Vec<(String, String)>, // replica_id, serialized item
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS /// D-SYNC1: the typed list carrier.  List membership is an add-only CRDT;
+//RS /// identity is the replica plus the canonical Codable item value.
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetSyncListGeneric<T> {
+//RS     pub items: Vec<(String, T)>, // replica_id, item
+//RS     pub(crate) valid: bool,
+//RS }
+//RS 
+//RS /// Reading order (RGA).  Atoms sharing an anchor are ordered by descending
+//RS /// counter, then descending replica, so concurrent inserts at one point land
+//RS /// in the same order on every replica.  An atom whose anchor is absent is
+//RS /// unreachable and stays out of the order rather than moving to the start.
+//RS pub(crate) fn jet_sync_text_order(doc: &JetSyncText) -> Vec<usize> {
+//RS     let mut children: std::collections::BTreeMap<Option<(String, u64)>, Vec<usize>> =
+//RS         std::collections::BTreeMap::new();
+//RS     for (index, atom) in doc.atoms.iter().enumerate() {
+//RS         children.entry(atom.after.clone()).or_default().push(index);
+//RS     }
+//RS     for kids in children.values_mut() {
+//RS         kids.sort_by(|left, right| {
+//RS             let left = &doc.atoms[*left];
+//RS             let right = &doc.atoms[*right];
+//RS             right
+//RS                 .counter
+//RS                 .cmp(&left.counter)
+//RS                 .then_with(|| right.replica.cmp(&left.replica))
+//RS         });
+//RS     }
+//RS     let mut order = Vec::with_capacity(doc.atoms.len());
+//RS     let mut stack: Vec<usize> = Vec::new();
+//RS     if let Some(roots) = children.get(&None) {
+//RS         stack.extend(roots.iter().rev().copied());
+//RS     }
+//RS     while let Some(index) = stack.pop() {
+//RS         order.push(index);
+//RS         let id = Some((doc.atoms[index].replica.clone(), doc.atoms[index].counter));
+//RS         if let Some(kids) = children.get(&id) {
+//RS             stack.extend(kids.iter().rev().copied());
+//RS         }
+//RS     }
+//RS     order
+//RS }
+//RS 
+//RS fn jet_sync_text_visible(doc: &JetSyncText) -> Vec<usize> {
+//RS     jet_sync_text_order(doc)
+//RS         .into_iter()
+//RS         .filter(|index| !doc.atoms[*index].deleted)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_sync_text_read(doc: &JetSyncText) -> String {
+//RS     jet_sync_text_visible(doc)
+//RS         .into_iter()
+//RS         .map(|index| doc.atoms[index].ch)
+//RS         .collect()
+//RS }
+//RS 
+//RS /// The counter is a document-wide Lamport clock, not a per-replica one.  The
+//RS /// sibling rule above compares counters across replicas, so a per-replica
+//RS /// counter would place a new character by how much its own replica had written
+//RS /// rather than by what it was inserted after.
+//RS fn jet_sync_text_next_counter(doc: &JetSyncText) -> u64 {
+//RS     doc.atoms
+//RS         .iter()
+//RS         .map(|atom| atom.counter)
+//RS         .max()
+//RS         .unwrap_or(0)
+//RS         .saturating_add(1)
+//RS }
+//RS 
+//RS /// Would writing `count` more characters run the clock out?  Saturating here
+//RS /// would mint an identity a document already holds, so callers refuse instead.
+//RS fn jet_sync_text_clock_exhausted(doc: &JetSyncText, count: usize) -> bool {
+//RS     u64::try_from(count)
+//RS         .ok()
+//RS         .and_then(|count| jet_sync_text_next_counter(doc).checked_add(count))
+//RS         .is_none()
+//RS }
+//RS 
+//RS /// Write `text` as a chain of atoms following `anchor`.  Each character keeps
+//RS /// its own identity, which is what lets a later insert land between two
+//RS /// existing characters.
+//RS fn jet_sync_text_insert_after(
+//RS     doc: &mut JetSyncText,
+//RS     replica: &str,
+//RS     anchor: Option<(String, u64)>,
+//RS     text: &str,
+//RS ) {
+//RS     let mut anchor = anchor;
+//RS     let mut counter = jet_sync_text_next_counter(doc);
+//RS     for ch in text.chars() {
+//RS         doc.atoms.push(JetSyncTextAtom {
+//RS             replica: replica.to_string(),
+//RS             counter,
+//RS             after: anchor,
+//RS             ch,
+//RS             deleted: false,
+//RS         });
+//RS         anchor = Some((replica.to_string(), counter));
+//RS         counter += 1;
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
+//RS     let mut doc = JetSyncText {
+//RS         atoms: Vec::new(),
+//RS         valid: true,
+//RS     };
+//RS     if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
+//RS         doc.valid = false;
+//RS         return doc;
+//RS     }
+//RS     jet_sync_text_insert_after(&mut doc, &replica, None, &text);
+//RS     doc
+//RS }
+//RS 
+//RS /// Replace the whole document: every visible atom becomes a tombstone and the
+//RS /// new text is written at the start.  The tombstones stay so a replica that
+//RS /// never saw them still converges here after a merge.
+//RS pub(crate) fn jet_sync_text_set(
+//RS     mut doc: JetSyncText,
+//RS     replica: String,
+//RS     text: String,
+//RS ) -> JetSyncText {
+//RS     let inserted = text.chars().count();
+//RS     if !doc.valid
+//RS         || !jet_sync_token_is_valid(&replica)
+//RS         || text.len() > MAX_SYNC_TEXT
+//RS         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
+//RS         || jet_sync_text_clock_exhausted(&doc, inserted)
+//RS     {
+//RS         return doc;
+//RS     }
+//RS     for index in jet_sync_text_visible(&doc) {
+//RS         doc.atoms[index].deleted = true;
+//RS     }
+//RS     jet_sync_text_insert_after(&mut doc, &replica, None, &text);
+//RS     doc
+//RS }
+//RS 
+//RS /// Apply one edit at a visible-character position.  Indices are Unicode scalar
+//RS /// positions, never byte offsets.  The insert anchors to the character before
+//RS /// the replaced range, so it survives a concurrent edit to that range.
+//RS pub(crate) fn jet_sync_text_edit(
+//RS     mut doc: JetSyncText,
+//RS     replica: String,
+//RS     index: i64,
+//RS     delete_count: i64,
+//RS     insert: String,
+//RS ) -> JetSyncText {
+//RS     let inserted = insert.chars().count();
+//RS     if !doc.valid
+//RS         || !jet_sync_token_is_valid(&replica)
+//RS         || index < 0
+//RS         || delete_count < 0
+//RS         || insert.len() > MAX_SYNC_TEXT
+//RS         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
+//RS         || jet_sync_text_clock_exhausted(&doc, inserted)
+//RS     {
+//RS         return doc;
+//RS     }
+//RS     let (Ok(index), Ok(delete_count)) = (usize::try_from(index), usize::try_from(delete_count))
+//RS     else {
+//RS         return doc;
+//RS     };
+//RS     let visible = jet_sync_text_visible(&doc);
+//RS     if index > visible.len() || delete_count > visible.len().saturating_sub(index) {
+//RS         return doc;
+//RS     }
+//RS     let anchor = index.checked_sub(1).map(|before| {
+//RS         let atom = &doc.atoms[visible[before]];
+//RS         (atom.replica.clone(), atom.counter)
+//RS     });
+//RS     for offset in 0..delete_count {
+//RS         doc.atoms[visible[index + offset]].deleted = true;
+//RS     }
+//RS     jet_sync_text_insert_after(&mut doc, &replica, anchor, &insert);
+//RS     doc
+//RS }
+//RS 
+//RS /// Union the two atom sets.  Nothing is dropped: a merge that discarded atoms
+//RS /// to stay under a limit would lose a replica's writing.  A deletion is
+//RS /// monotone, so once either side has seen it the merged atom stays deleted.
+//RS pub(crate) fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncText {
+//RS             atoms: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut merged: std::collections::BTreeMap<(String, u64), JetSyncTextAtom> =
+//RS         std::collections::BTreeMap::new();
+//RS     for atom in a.atoms.iter().chain(&b.atoms) {
+//RS         if !jet_sync_token_is_valid(&atom.replica)
+//RS             || atom.counter == 0
+//RS             || atom.after.as_ref().is_some_and(|(replica, counter)| {
+//RS                 !jet_sync_token_is_valid(replica) || *counter == 0
+//RS             })
+//RS         {
+//RS             return JetSyncText {
+//RS                 atoms: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         let key = (atom.replica.clone(), atom.counter);
+//RS         match merged.get_mut(&key) {
+//RS             Some(existing) => {
+//RS                 // One identity carrying two readings means a replica name was
+//RS                 // used by two writers, or one document was forked and both
+//RS                 // halves edited under the same name.  Refuse the malformed
+//RS                 // merge instead of silently choosing one character or anchor.
+//RS                 if existing.ch != atom.ch || existing.after != atom.after {
+//RS                     return JetSyncText {
+//RS                         atoms: Vec::new(),
+//RS                         valid: false,
+//RS                     };
+//RS                 }
+//RS                 existing.deleted |= atom.deleted;
+//RS             }
+//RS             None => {
+//RS                 merged.insert(key, atom.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS     if merged.len() > MAX_SYNC_ATOMS {
+//RS         return JetSyncText {
+//RS             atoms: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let merged = JetSyncText {
+//RS         atoms: merged.into_values().collect(),
+//RS         valid: true,
+//RS     };
+//RS     // Merging an identity collision can change an atom's anchor. Refuse a
+//RS     // cycle or an orphan rather than letting `show` silently drop the atom.
+//RS     if jet_sync_text_order(&merged).len() != merged.atoms.len() {
+//RS         return JetSyncText {
+//RS             atoms: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     merged
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_text_show(doc: &JetSyncText) -> String {
+//RS     if !doc.valid {
+//RS         return "SyncError(invalid SyncText)".to_string();
+//RS     }
+//RS     format!("SyncText({})", jet_sync_text_read(doc))
+//RS }
+//RS 
+//RS /// The highest counter each replica has written, plus the document clock.
+//RS /// This is not a vector clock: a Lamport counter records when a replica wrote,
+//RS /// never what it had seen, so it orders edits but cannot decide causality.
+//RS pub(crate) fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
+//RS     if !doc.valid {
+//RS         return "SyncError(invalid SyncText)".to_string();
+//RS     }
+//RS     let mut clocks: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+//RS     for atom in &doc.atoms {
+//RS         let slot = clocks.entry(atom.replica.as_str()).or_insert(0);
+//RS         if atom.counter > *slot {
+//RS             *slot = atom.counter;
+//RS         }
+//RS     }
+//RS     let parts = clocks
+//RS         .iter()
+//RS         .map(|(replica, clock)| format!("{replica}={clock}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("LamportClock({parts})")
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
+//RS     if !jet_sync_token_is_valid(&replica) {
+//RS         return JetSyncCounter {
+//RS             counts: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     JetSyncCounter {
+//RS         counts: vec![(
+//RS             replica,
+//RS             if value >= 0 { value as u64 } else { 0 },
+//RS             if value < 0 { value.unsigned_abs() } else { 0 },
+//RS         )],
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_counter_invalid() -> JetSyncCounter {
+//RS     JetSyncCounter {
+//RS         counts: Vec::new(),
+//RS         valid: false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_counter_inc(
+//RS     mut counter: JetSyncCounter,
+//RS     replica: String,
+//RS     delta: i64,
+//RS ) -> JetSyncCounter {
+//RS     if !counter.valid || !jet_sync_token_is_valid(&replica) {
+//RS         return counter;
+//RS     }
+//RS     if let Some((_, positive, negative)) = counter.counts.iter_mut().find(|(r, _, _)| r == &replica)
+//RS     {
+//RS         if delta >= 0 {
+//RS             let Some(next) = positive.checked_add(delta as u64) else {
+//RS                 return jet_sync_counter_invalid();
+//RS             };
+//RS             *positive = next;
+//RS         } else {
+//RS             let Some(next) = negative.checked_add(delta.unsigned_abs()) else {
+//RS                 return jet_sync_counter_invalid();
+//RS             };
+//RS             *negative = next;
+//RS         }
+//RS     } else {
+//RS         if counter.counts.len() >= MAX_SYNC_REPLICAS {
+//RS             return jet_sync_counter_invalid();
+//RS         }
+//RS         counter.counts.push((
+//RS             replica,
+//RS             if delta >= 0 { delta as u64 } else { 0 },
+//RS             if delta < 0 { delta.unsigned_abs() } else { 0 },
+//RS         ));
+//RS     }
+//RS     counter.counts.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     if jet_sync_counter_total(&counter.counts).is_none() {
+//RS         return jet_sync_counter_invalid();
+//RS     }
+//RS     counter
+//RS }
+//RS 
+//RS fn jet_sync_counter_total(counts: &[(String, u64, u64)]) -> Option<i64> {
+//RS     let mut total = 0i128;
+//RS     for (_, positive, negative) in counts {
+//RS         total = total
+//RS             .checked_add(i128::from(*positive))?
+//RS             .checked_sub(i128::from(*negative))?;
+//RS     }
+//RS     i64::try_from(total).ok()
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCounter {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncCounter {
+//RS             counts: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut merged = std::collections::BTreeMap::<String, (u64, u64)>::new();
+//RS     for (replica, positive, negative) in a.counts.iter().chain(&b.counts) {
+//RS         if !jet_sync_token_is_valid(replica) {
+//RS             return JetSyncCounter {
+//RS                 counts: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         let entry = merged.entry(replica.clone()).or_insert((0, 0));
+//RS         entry.0 = entry.0.max(*positive);
+//RS         entry.1 = entry.1.max(*negative);
+//RS     }
+//RS     if merged.len() > MAX_SYNC_REPLICAS {
+//RS         return JetSyncCounter {
+//RS             counts: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let counts = merged
+//RS         .into_iter()
+//RS         .map(|(replica, (positive, negative))| (replica, positive, negative))
+//RS         .collect::<Vec<_>>();
+//RS     if jet_sync_counter_total(&counts).is_none() {
+//RS         return jet_sync_counter_invalid();
+//RS     }
+//RS     JetSyncCounter {
+//RS         counts,
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_counter_value(counter: &JetSyncCounter) -> i64 {
+//RS     if !counter.valid {
+//RS         return 0;
+//RS     }
+//RS     jet_sync_counter_total(&counter.counts).unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_sync_counter_metadata(counter: &JetSyncCounter) -> String {
+//RS     if !counter.valid {
+//RS         return "SyncError(invalid SyncCounter)".to_string();
+//RS     }
+//RS     let parts = counter
+//RS         .counts
+//RS         .iter()
+//RS         .map(|(replica, positive, negative)| format!("{replica}=+{positive}/-{negative}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("PNCounter({parts})")
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_map_new() -> JetSyncMap {
+//RS     JetSyncMap {
+//RS         entries: Vec::new(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_map_set_replica(
+//RS     mut map: JetSyncMap,
+//RS     replica: String,
+//RS     key: String,
+//RS     value: String,
+//RS ) -> JetSyncMap {
+//RS     if !map.valid
+//RS         || !jet_sync_token_is_valid(&replica)
+//RS         || !jet_sync_token_is_valid(&key)
+//RS         || value.len() > MAX_SYNC_TEXT
+//RS     {
+//RS         return map;
+//RS     }
+//RS     // Advance past every observed entry. A write after a remote observation
+//RS     // must not reuse a lower clock and lose to that value on merge.
+//RS     let Some(next_clock) = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(_, _, clock, _)| *clock)
+//RS         .max()
+//RS         .unwrap_or(0)
+//RS         .checked_add(1)
+//RS     else {
+//RS         return JetSyncMap {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     };
+//RS     if let Some((_, v, clock, writer)) = map.entries.iter_mut().find(|(k, _, _, _)| k == &key) {
+//RS         *v = value;
+//RS         *clock = next_clock;
+//RS         *writer = replica;
+//RS     } else {
+//RS         if map.entries.len() >= MAX_SYNC_ENTRIES {
+//RS             return JetSyncMap {
+//RS                 entries: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         map.entries.push((key, value, next_clock, replica));
+//RS     }
+//RS     // Local edits use one canonical order too.  Merge already returns a
+//RS     // BTreeMap order; keeping the local path identical makes show/serialize
+//RS     // deterministic before the first merge and after duplicate delivery.
+//RS     map.entries.sort_by(|left, right| left.0.cmp(&right.0));
+//RS     map
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_map_set(map: JetSyncMap, key: String, value: String) -> JetSyncMap {
+//RS     jet_sync_map_set_replica(map, "local".to_string(), key, value)
+//RS }
+//RS 
+//RS /// D-SYNC1: safe denial is part of the carrier. An invalid map shows nothing —
+//RS /// `show`, `metadata`, and `encode` already deny, and a key read must not be the
+//RS /// one path that answers from a denied replica set.
+//RS pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String> {
+//RS     if !map.valid {
+//RS         return None;
+//RS     }
+//RS     map.entries
+//RS         .iter()
+//RS         .find(|(k, _, _, _)| k == key)
+//RS         .map(|(_, v, _, _)| v.clone())
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncMap {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut merged = std::collections::BTreeMap::<String, (String, u64, String)>::new();
+//RS     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
+//RS         if !jet_sync_token_is_valid(key)
+//RS             || !jet_sync_token_is_valid(writer)
+//RS             || *clock == 0
+//RS             || value.len() > MAX_SYNC_TEXT
+//RS         {
+//RS             return JetSyncMap {
+//RS                 entries: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         let replace =
+//RS             merged
+//RS                 .get(key)
+//RS                 .map_or(true, |(existing, existing_clock, existing_writer)| {
+//RS                     *clock > *existing_clock
+//RS                         || (*clock == *existing_clock
+//RS                             && (writer.as_str(), value.as_str())
+//RS                                 > (existing_writer.as_str(), existing.as_str()))
+//RS                 });
+//RS         if replace {
+//RS             merged.insert(key.clone(), (value.clone(), *clock, writer.clone()));
+//RS         }
+//RS     }
+//RS     if merged.len() > MAX_SYNC_ENTRIES {
+//RS         return JetSyncMap {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     JetSyncMap {
+//RS         entries: merged
+//RS             .into_iter()
+//RS             .map(|(key, (value, clock, writer))| (key, value, clock, writer))
+//RS             .collect(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_map_show(map: &JetSyncMap) -> String {
+//RS     if !map.valid {
+//RS         return "SyncError(invalid SyncMap)".to_string();
+//RS     }
+//RS     let parts = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(k, v, _, _)| {
+//RS             format!(
+//RS                 "{}={}",
+//RS                 jet_sync_escape_display(k),
+//RS                 jet_sync_escape_display(v)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("SyncMap({parts})")
+//RS }
+//RS 
+//RS fn jet_sync_map_metadata(map: &JetSyncMap) -> String {
+//RS     if !map.valid {
+//RS         return "SyncError(invalid SyncMap)".to_string();
+//RS     }
+//RS     let parts = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(key, _, clock, writer)| {
+//RS             format!(
+//RS                 "{}@{}={clock}",
+//RS                 jet_sync_escape_display(key),
+//RS                 jet_sync_escape_display(writer)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("LWWMap({parts})")
+//RS }
+//RS 
+//RS fn jet_sync_value_id<T: __jet_Encode>(value: &T) -> String {
+//RS     // Canonical DataTree JSON is the wire identity.  It is deterministic for
+//RS     // primitive, collection, and user-derived Codable values, so map keys do
+//RS     // not need an invented Rust `Ord` requirement.
+//RS     jet_std::render_datatree_json(&value.jet_encode(), true, 0)
+//RS }
+//RS 
+//RS fn jet_sync_value_show<T: __jet_Encode>(value: &T) -> String {
+//RS     jet_std::render_datatree_json(&value.jet_encode(), false, 0)
+//RS }
+//RS 
+//RS fn jet_sync_map_new_generic<K, V>() -> JetSyncMapGeneric<K, V> {
+//RS     JetSyncMapGeneric {
+//RS         entries: Vec::new(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_map_set_generic<K, V>(
+//RS     mut map: JetSyncMapGeneric<K, V>,
+//RS     replica: String,
+//RS     key: K,
+//RS     value: V,
+//RS ) -> JetSyncMapGeneric<K, V>
+//RS where
+//RS     K: __jet_Encode,
+//RS     V: __jet_Encode,
+//RS {
+//RS     if !map.valid || !jet_sync_token_is_valid(&replica) {
+//RS         return map;
+//RS     }
+//RS     let key_id = jet_sync_value_id(&key);
+//RS     if key_id.len() > MAX_SYNC_TEXT || jet_sync_value_id(&value).len() > MAX_SYNC_TEXT {
+//RS         return map;
+//RS     }
+//RS     let Some(next_clock) = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(_, _, clock, _)| *clock)
+//RS         .max()
+//RS         .unwrap_or(0)
+//RS         .checked_add(1)
+//RS     else {
+//RS         return JetSyncMapGeneric {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     };
+//RS     if let Some((existing_key, existing_value, clock, writer)) = map
+//RS         .entries
+//RS         .iter_mut()
+//RS         .find(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
+//RS     {
+//RS         *existing_key = key;
+//RS         *existing_value = value;
+//RS         *clock = next_clock;
+//RS         *writer = replica;
+//RS     } else if map.entries.len() < MAX_SYNC_ENTRIES {
+//RS         map.entries.push((key, value, next_clock, replica));
+//RS     } else {
+//RS         return JetSyncMapGeneric {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     map.entries.sort_by(|left, right| {
+//RS         let left_id = jet_sync_value_id(&left.0);
+//RS         let right_id = jet_sync_value_id(&right.0);
+//RS         (left_id, left.3.as_str(), left.2).cmp(&(right_id, right.3.as_str(), right.2))
+//RS     });
+//RS     map
+//RS }
+//RS 
+//RS fn jet_sync_map_get_generic<K, V>(map: &JetSyncMapGeneric<K, V>, key: &K) -> Option<V>
+//RS where
+//RS     K: __jet_Encode,
+//RS     V: Clone,
+//RS {
+//RS     // Same denial as the fixed carrier: an invalid map answers no key.
+//RS     if !map.valid {
+//RS         return None;
+//RS     }
+//RS     let key_id = jet_sync_value_id(key);
+//RS     map.entries
+//RS         .iter()
+//RS         .find(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
+//RS         .map(|(_, value, _, _)| value.clone())
+//RS }
+//RS 
+//RS fn jet_sync_map_merge_generic<K, V>(
+//RS     a: &JetSyncMapGeneric<K, V>,
+//RS     b: &JetSyncMapGeneric<K, V>,
+//RS ) -> JetSyncMapGeneric<K, V>
+//RS where
+//RS     K: Clone + __jet_Encode,
+//RS     V: Clone + __jet_Encode,
+//RS {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncMapGeneric {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut merged = std::collections::BTreeMap::<String, (K, V, u64, String)>::new();
+//RS     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
+//RS         if !jet_sync_token_is_valid(writer)
+//RS             || *clock == 0
+//RS             || jet_sync_value_id(key).len() > MAX_SYNC_TEXT
+//RS             || jet_sync_value_id(value).len() > MAX_SYNC_TEXT
+//RS         {
+//RS             return JetSyncMapGeneric {
+//RS                 entries: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         let key_id = jet_sync_value_id(key);
+//RS         let value_id = jet_sync_value_id(value);
+//RS         let replace =
+//RS             merged
+//RS                 .get(&key_id)
+//RS                 .map_or(true, |(_, existing, existing_clock, existing_writer)| {
+//RS                     *clock > *existing_clock
+//RS                         || (*clock == *existing_clock
+//RS                             && (writer.as_str(), value_id.as_str())
+//RS                                 > (
+//RS                                     existing_writer.as_str(),
+//RS                                     jet_sync_value_id(existing).as_str(),
+//RS                                 ))
+//RS                 });
+//RS         if replace {
+//RS             merged.insert(key_id, (key.clone(), value.clone(), *clock, writer.clone()));
+//RS         }
+//RS     }
+//RS     if merged.len() > MAX_SYNC_ENTRIES {
+//RS         return JetSyncMapGeneric {
+//RS             entries: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     JetSyncMapGeneric {
+//RS         entries: merged.into_values().collect(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_map_show_generic<K, V>(map: &JetSyncMapGeneric<K, V>) -> String
+//RS where
+//RS     K: __jet_Encode,
+//RS     V: __jet_Encode,
+//RS {
+//RS     if !map.valid {
+//RS         return "SyncError(invalid SyncMap)".to_string();
+//RS     }
+//RS     let parts = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(key, value, _, _)| {
+//RS             format!(
+//RS                 "{}={}",
+//RS                 jet_sync_escape_display(&jet_sync_value_show(key)),
+//RS                 jet_sync_escape_display(&jet_sync_value_show(value))
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("SyncMap({parts})")
+//RS }
+//RS 
+//RS fn jet_sync_map_metadata_generic<K, V>(map: &JetSyncMapGeneric<K, V>) -> String
+//RS where
+//RS     K: __jet_Encode,
+//RS {
+//RS     if !map.valid {
+//RS         return "SyncError(invalid SyncMap)".to_string();
+//RS     }
+//RS     let parts = map
+//RS         .entries
+//RS         .iter()
+//RS         .map(|(key, _, clock, writer)| {
+//RS             format!(
+//RS                 "{}@{}={clock}",
+//RS                 jet_sync_escape_display(&jet_sync_value_id(key)),
+//RS                 jet_sync_escape_display(writer)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("LWWMap({parts})")
+//RS }
+//RS 
+//RS pub(crate) fn jet_db_policy_new<T: Into<String>, U: Into<String>>(
+//RS     table: T,
+//RS     expression: U,
+//RS ) -> Result<JetRowPolicy, String> {
+//RS     let (table, compiled) = jet_std::jet_db_policy_compile(&table.into(), &expression.into())?;
+//RS     Ok(JetRowPolicy {
+//RS         table,
+//RS         expression: compiled.canonical().to_string(),
+//RS         compiled,
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn jet_db_policy_compiled(policy: &JetRowPolicy) -> jet_std::JetRowPolicyExpr {
+//RS     policy.compiled
+//RS }
+//RS 
+//RS pub(crate) fn jet_db_policy_from_compiled(
+//RS     table: String,
+//RS     compiled: jet_std::JetRowPolicyExpr,
+//RS ) -> Result<JetRowPolicy, String> {
+//RS     let table = jet_std::jet_db_policy_validate_table(&table)?;
+//RS     Ok(JetRowPolicy {
+//RS         table,
+//RS         expression: compiled.canonical().to_string(),
+//RS         compiled,
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_db_policy_allows(
+//RS     policy: &JetRowPolicy,
+//RS     user: &String,
+//RS     row_owner: &String,
+//RS ) -> bool {
+//RS     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
+//RS         return false;
+//RS     }
+//RS     match policy.compiled {
+//RS         jet_std::JetRowPolicyExpr::OwnerEqualsUser => user == row_owner,
+//RS         jet_std::JetRowPolicyExpr::AllowAll => true,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
+//RS     format!(
+//RS         "RowPolicy(table={}, expr={})",
+//RS         policy.table, policy.expression
+//RS     )
+//RS }
+//RS 
+//RS /// D-DBPOLICY1: audit the policy that is active on this bounded scope. The
+//RS /// scope is the authority boundary, so the output includes the bound user and
+//RS /// the compiled SQL predicate used by every DB path.
+//RS pub(crate) fn jet_db_policy_audit(scope: &JetDbScope) -> String {
+//RS     jet_std::jet_db_policy_audit_line(&scope.policy.table, scope.policy.compiled, &scope.user)
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_list_new() -> JetSyncList {
+//RS     JetSyncList {
+//RS         items: Vec::new(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_list_push(
+//RS     mut list: JetSyncList,
+//RS     replica: String,
+//RS     item: String,
+//RS ) -> JetSyncList {
+//RS     if !list.valid || !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
+//RS         return list;
+//RS     }
+//RS     if !list.items.iter().any(|(r, i)| r == &replica && i == &item) {
+//RS         if list.items.len() < MAX_SYNC_ENTRIES {
+//RS             list.items.push((replica, item));
+//RS         } else {
+//RS             return JetSyncList {
+//RS                 items: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS     }
+//RS     list.items
+//RS         .sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+//RS     list
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncList {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncList {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut out = a.clone();
+//RS     for (replica, item) in &b.items {
+//RS         if !out.items.iter().any(|(r, i)| r == replica && i == item) {
+//RS             out.items.push((replica.clone(), item.clone()));
+//RS         }
+//RS     }
+//RS     if out
+//RS         .items
+//RS         .iter()
+//RS         .any(|(replica, item)| !jet_sync_token_is_valid(replica) || item.len() > MAX_SYNC_TEXT)
+//RS     {
+//RS         return JetSyncList {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     out.items.sort_by(|l, r| (&l.0, &l.1).cmp(&(&r.0, &r.1)));
+//RS     if out.items.len() > MAX_SYNC_ENTRIES {
+//RS         return JetSyncList {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
+//RS     !value.trim().is_empty() && value.len() <= MAX_SYNC_TEXT && !value.chars().any(char::is_control)
+//RS }
+//RS 
+//RS pub(crate) fn jet_sync_list_show(list: &JetSyncList) -> String {
+//RS     if !list.valid {
+//RS         return "SyncError(invalid SyncList)".to_string();
+//RS     }
+//RS     let parts = list
+//RS         .items
+//RS         .iter()
+//RS         .map(|(r, i)| {
+//RS             format!(
+//RS                 "{}:{}",
+//RS                 jet_sync_escape_display(r),
+//RS                 jet_sync_escape_display(i)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("|");
+//RS     format!("SyncList({parts})")
+//RS }
+//RS 
+//RS fn jet_sync_list_metadata(list: &JetSyncList) -> String {
+//RS     if !list.valid {
+//RS         return "SyncError(invalid SyncList)".to_string();
+//RS     }
+//RS     format!("GSet(items={})", list.items.len())
+//RS }
+//RS 
+//RS fn jet_sync_list_new_generic<T>() -> JetSyncListGeneric<T> {
+//RS     JetSyncListGeneric {
+//RS         items: Vec::new(),
+//RS         valid: true,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_list_push_generic<T>(
+//RS     mut list: JetSyncListGeneric<T>,
+//RS     replica: String,
+//RS     item: T,
+//RS ) -> JetSyncListGeneric<T>
+//RS where
+//RS     T: __jet_Encode,
+//RS {
+//RS     if !list.valid || !jet_sync_token_is_valid(&replica) {
+//RS         return list;
+//RS     }
+//RS     let item_id = jet_sync_value_id(&item);
+//RS     if item_id.len() > MAX_SYNC_TEXT {
+//RS         return list;
+//RS     }
+//RS     if !list.items.iter().any(|(existing_replica, existing_item)| {
+//RS         existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+//RS     }) && list.items.len() < MAX_SYNC_ENTRIES
+//RS     {
+//RS         list.items.push((replica, item));
+//RS     } else if !list.items.iter().any(|(existing_replica, existing_item)| {
+//RS         existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+//RS     }) {
+//RS         return JetSyncListGeneric {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     list.items.sort_by(|left, right| {
+//RS         let left_id = jet_sync_value_id(&left.1);
+//RS         let right_id = jet_sync_value_id(&right.1);
+//RS         (left.0.as_str(), left_id).cmp(&(right.0.as_str(), right_id))
+//RS     });
+//RS     list
+//RS }
+//RS 
+//RS fn jet_sync_list_merge_generic<T>(
+//RS     a: &JetSyncListGeneric<T>,
+//RS     b: &JetSyncListGeneric<T>,
+//RS ) -> JetSyncListGeneric<T>
+//RS where
+//RS     T: Clone + __jet_Encode,
+//RS {
+//RS     if !a.valid || !b.valid {
+//RS         return JetSyncListGeneric {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     let mut out = a.clone();
+//RS     for (replica, item) in &b.items {
+//RS         if !jet_sync_token_is_valid(replica) || jet_sync_value_id(item).len() > MAX_SYNC_TEXT {
+//RS             return JetSyncListGeneric {
+//RS                 items: Vec::new(),
+//RS                 valid: false,
+//RS             };
+//RS         }
+//RS         let item_id = jet_sync_value_id(item);
+//RS         if !out.items.iter().any(|(existing_replica, existing_item)| {
+//RS             existing_replica == replica && jet_sync_value_id(existing_item) == item_id
+//RS         }) {
+//RS             out.items.push((replica.clone(), item.clone()));
+//RS         }
+//RS     }
+//RS     if out.items.len() > MAX_SYNC_ENTRIES {
+//RS         return JetSyncListGeneric {
+//RS             items: Vec::new(),
+//RS             valid: false,
+//RS         };
+//RS     }
+//RS     out.items.sort_by(|left, right| {
+//RS         let left_id = jet_sync_value_id(&left.1);
+//RS         let right_id = jet_sync_value_id(&right.1);
+//RS         (left.0.as_str(), left_id).cmp(&(right.0.as_str(), right_id))
+//RS     });
+//RS     out
+//RS }
+//RS 
+//RS fn jet_sync_list_show_generic<T>(list: &JetSyncListGeneric<T>) -> String
+//RS where
+//RS     T: __jet_Encode,
+//RS {
+//RS     if !list.valid {
+//RS         return "SyncError(invalid SyncList)".to_string();
+//RS     }
+//RS     let parts = list
+//RS         .items
+//RS         .iter()
+//RS         .map(|(replica, item)| {
+//RS             format!(
+//RS                 "{}:{}",
+//RS                 jet_sync_escape_display(replica),
+//RS                 jet_sync_escape_display(&jet_sync_value_show(item))
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("|");
+//RS     format!("SyncList({parts})")
+//RS }
+//RS 
+//RS fn jet_sync_list_metadata_generic<T>(list: &JetSyncListGeneric<T>) -> String {
+//RS     if !list.valid {
+//RS         return "SyncError(invalid SyncList)".to_string();
+//RS     }
+//RS     format!("GSet(items={})", list.items.len())
+//RS }
+//RS 
+//RS impl JetShow for JetSyncText {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_sync_text_show(self)
+//RS     }
+//RS }
+//RS impl JetDisplay for JetSyncText {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetSyncCounter {
+//RS     fn jet_show(&self) -> String {
+//RS         if !self.valid {
+//RS             return "SyncError(invalid SyncCounter)".to_string();
+//RS         }
+//RS         format!(
+//RS             "{}={}",
+//RS             jet_sync_counter_metadata(self),
+//RS             jet_sync_counter_value(self)
+//RS         )
+//RS     }
+//RS }
+//RS impl JetDisplay for JetSyncCounter {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetSyncMap {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_sync_map_show(self)
+//RS     }
+//RS }
+//RS impl JetDisplay for JetSyncMap {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl<K, V> JetShow for JetSyncMapGeneric<K, V>
+//RS where
+//RS     K: __jet_Encode,
+//RS     V: __jet_Encode,
+//RS {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_sync_map_show_generic(self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetSyncList {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_sync_list_show(self)
+//RS     }
+//RS }
+//RS impl JetDisplay for JetSyncList {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl<T> JetShow for JetSyncListGeneric<T>
+//RS where
+//RS     T: __jet_Encode,
+//RS {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_sync_list_show_generic(self)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_decode_error(message: impl Into<String>) -> Vec<jet_std::FieldError> {
+//RS     jet_std::FieldError::one(message)
+//RS }
+//RS 
+//RS /// Invalid CRDT carriers are an absorbing denial state.  Their codec marker
+//RS /// must round-trip that state instead of turning it into an ordinary shape
+//RS /// error, otherwise a denied value could become an apparent decode failure at
+//RS /// a tier boundary and lose the carrier's algebraic identity.
+//RS fn jet_sync_is_invalid_marker(tree: &jet_std::DataTree) -> bool {
+//RS     matches!(
+//RS         tree,
+//RS         jet_std::DataTree::Object(fields)
+//RS             if fields.len() == 1
+//RS                 && fields[0].0 == "invalid"
+//RS                 && matches!(&fields[0].1, jet_std::DataTree::Bool(true))
+//RS     )
+//RS }
+//RS 
+//RS fn jet_sync_object<'a>(
+//RS     tree: &'a jet_std::DataTree,
+//RS     expected: &[&str],
+//RS     label: &str,
+//RS ) -> Result<&'a Vec<(String, jet_std::DataTree)>, Vec<jet_std::FieldError>> {
+//RS     let jet_std::DataTree::Object(fields) = tree else {
+//RS         return Err(jet_sync_decode_error(format!("{label} must be an object")));
+//RS     };
+//RS     if fields.len() != expected.len()
+//RS         || fields
+//RS             .iter()
+//RS             .any(|(key, _)| !expected.iter().any(|name| *name == key))
+//RS         || expected
+//RS             .iter()
+//RS             .any(|name| !fields.iter().any(|(key, _)| key == name))
+//RS     {
+//RS         return Err(jet_sync_decode_error(format!(
+//RS             "{label} has missing, duplicate, or unknown fields"
+//RS         )));
+//RS     }
+//RS     Ok(fields)
+//RS }
+//RS 
+//RS fn jet_sync_object_field<'a>(
+//RS     fields: &'a [(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS     label: &str,
+//RS ) -> Result<&'a jet_std::DataTree, Vec<jet_std::FieldError>> {
+//RS     fields
+//RS         .iter()
+//RS         .find(|(key, _)| key == name)
+//RS         .map(|(_, value)| value)
+//RS         .ok_or_else(|| jet_sync_decode_error(format!("{label} is missing `{name}`")))
+//RS }
+//RS 
+//RS fn jet_sync_decode_string(
+//RS     tree: &jet_std::DataTree,
+//RS     label: &str,
+//RS ) -> Result<String, Vec<jet_std::FieldError>> {
+//RS     match tree {
+//RS         jet_std::DataTree::Text(value) => Ok(value.clone()),
+//RS         other => Err(jet_sync_decode_error(format!(
+//RS             "{label} must be text, got {}",
+//RS             jet_std::datatree_kind_for(other)
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_decode_u64(
+//RS     tree: &jet_std::DataTree,
+//RS     label: &str,
+//RS ) -> Result<u64, Vec<jet_std::FieldError>> {
+//RS     let value = match tree {
+//RS         jet_std::DataTree::Text(value) => value.clone(),
+//RS         jet_std::DataTree::Int(value) if *value >= 0 => value.to_string(),
+//RS         other => {
+//RS             return Err(jet_sync_decode_error(format!(
+//RS                 "{label} must be a non-negative integer, got {}",
+//RS                 jet_std::datatree_kind_for(other)
+//RS             )))
+//RS         }
+//RS     };
+//RS     if value.is_empty() || (value.len() > 1 && value.starts_with('0')) {
+//RS         return Err(jet_sync_decode_error(format!("{label} is not canonical")));
+//RS     }
+//RS     value
+//RS         .parse::<u64>()
+//RS         .map_err(|_| jet_sync_decode_error(format!("{label} is out of range")))
+//RS }
+//RS 
+//RS fn jet_sync_decode_array<'a>(
+//RS     tree: &'a jet_std::DataTree,
+//RS     label: &str,
+//RS ) -> Result<&'a Vec<jet_std::DataTree>, Vec<jet_std::FieldError>> {
+//RS     match tree {
+//RS         jet_std::DataTree::Array(values) => Ok(values),
+//RS         other => Err(jet_sync_decode_error(format!(
+//RS             "{label} must be an array, got {}",
+//RS             jet_std::datatree_kind_for(other)
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_decode_field<T>(
+//RS     fields: &[(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS     label: &str,
+//RS     errors: &mut Vec<jet_std::FieldError>,
+//RS     decode: impl FnOnce(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+//RS ) -> Option<T> {
+//RS     match jet_sync_object_field(fields, name, label).and_then(decode) {
+//RS         Ok(value) => Some(value),
+//RS         Err(child) => {
+//RS             errors.extend(jet_std::FieldError::under_errors(name, child));
+//RS             None
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sync_frame_entry(
+//RS     errors: &mut Vec<jet_std::FieldError>,
+//RS     index: usize,
+//RS     entry_errors: Vec<jet_std::FieldError>,
+//RS ) {
+//RS     errors.extend(jet_std::FieldError::under_errors(
+//RS         &format!("[{index}]"),
+//RS         entry_errors,
+//RS     ));
+//RS }
+//RS 
+//RS impl __jet_Encode for JetSyncText {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "atoms".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.atoms
+//RS                     .iter()
+//RS                     .map(|atom| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             (
+//RS                                 "replica".to_string(),
+//RS                                 jet_std::DataTree::Text(atom.replica.clone()),
+//RS                             ),
+//RS                             (
+//RS                                 "counter".to_string(),
+//RS                                 jet_std::DataTree::Text(atom.counter.to_string()),
+//RS                             ),
+//RS                             (
+//RS                                 "after".to_string(),
+//RS                                 jet_std::DataTree::Text(match &atom.after {
+//RS                                     Some((replica, counter)) => format!("{replica}:{counter}"),
+//RS                                     None => String::new(),
+//RS                                 }),
+//RS                             ),
+//RS                             (
+//RS                                 "ch".to_string(),
+//RS                                 jet_std::DataTree::Text(atom.ch.to_string()),
+//RS                             ),
+//RS                             ("deleted".to_string(), jet_std::DataTree::Bool(atom.deleted)),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for JetSyncText {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncText {
+//RS                 atoms: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["atoms"], "SyncText")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "atoms", "SyncText")?,
+//RS             "SyncText.atoms",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_ATOMS {
+//RS             return Err(jet_sync_decode_error("SyncText atom limit exceeded"));
+//RS         }
+//RS         let mut atoms: Vec<JetSyncTextAtom> = Vec::with_capacity(values.len());
+//RS         let mut seen: std::collections::BTreeSet<(String, u64)> = std::collections::BTreeSet::new();
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields = match jet_sync_object(
+//RS                 value,
+//RS                 &["replica", "counter", "after", "ch", "deleted"],
+//RS                 "SyncText atom",
+//RS             ) {
+//RS                 Ok(fields) => fields,
+//RS                 Err(entry_errors) => {
+//RS                     jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             let mut entry_errors = Vec::new();
+//RS             let replica = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "replica",
+//RS                 "SyncText atom",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncText.replica"),
+//RS             );
+//RS             let counter = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "counter",
+//RS                 "SyncText atom",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_u64(tree, "SyncText.counter"),
+//RS             );
+//RS             let after = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "after",
+//RS                 "SyncText atom",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncText.after"),
+//RS             );
+//RS             let ch =
+//RS                 jet_sync_decode_field(fields, "ch", "SyncText atom", &mut entry_errors, |tree| {
+//RS                     jet_sync_decode_string(tree, "SyncText.ch")
+//RS                 });
+//RS             let deleted = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "deleted",
+//RS                 "SyncText atom",
+//RS                 &mut entry_errors,
+//RS                 |tree| match tree {
+//RS                     jet_std::DataTree::Bool(value) => Ok(*value),
+//RS                     _ => Err(jet_sync_decode_error("SyncText.deleted expects a Bool")),
+//RS                 },
+//RS             );
+//RS             if let (Some(replica), Some(counter), Some(after), Some(ch), Some(deleted)) =
+//RS                 (replica, counter, after, ch, deleted)
+//RS             {
+//RS                 let anchor = if after.is_empty() {
+//RS                     Ok(None)
+//RS                 } else {
+//RS                     match after.rsplit_once(':') {
+//RS                         Some((replica, counter)) => match counter.parse::<u64>() {
+//RS                             Ok(counter) if jet_sync_token_is_valid(replica) && counter > 0 => {
+//RS                                 Ok(Some((replica.to_string(), counter)))
+//RS                             }
+//RS                             _ => Err(()),
+//RS                         },
+//RS                         None => Err(()),
+//RS                     }
+//RS                 };
+//RS                 let mut chars = ch.chars();
+//RS                 let single = match (chars.next(), chars.next()) {
+//RS                     (Some(ch), None) => Some(ch),
+//RS                     _ => None,
+//RS                 };
+//RS                 match (anchor, single) {
+//RS                     (Ok(anchor), Some(ch)) if jet_sync_token_is_valid(&replica) && counter > 0 => {
+//RS                         if !seen.insert((replica.clone(), counter)) {
+//RS                             entry_errors.extend(jet_sync_decode_error(
+//RS                                 "SyncText contains duplicate atom identities",
+//RS                             ));
+//RS                         } else {
+//RS                             atoms.push(JetSyncTextAtom {
+//RS                                 replica,
+//RS                                 counter,
+//RS                                 after: anchor,
+//RS                                 ch,
+//RS                                 deleted,
+//RS                             });
+//RS                         }
+//RS                     }
+//RS                     _ => {
+//RS                         entry_errors.extend(jet_sync_decode_error("SyncText atom is invalid"));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         // A character the reading order cannot reach would vanish from the
+//RS         // document with no error.  Presence of the anchor is not enough: two
+//RS         // atoms may anchor each other, or one may anchor itself, and both
+//RS         // shapes are unreachable.  So walk the real order and refuse anything
+//RS         // it does not visit.
+//RS         let decoded = JetSyncText {
+//RS             atoms: std::mem::take(&mut atoms),
+//RS             valid: true,
+//RS         };
+//RS         if jet_sync_text_order(&decoded).len() != decoded.atoms.len() {
+//RS             return Err(jet_sync_decode_error(
+//RS                 "SyncText carries a character the document cannot reach",
+//RS             ));
+//RS         }
+//RS         let mut atoms = decoded.atoms;
+//RS         atoms.sort_by(|left, right| {
+//RS             left.replica
+//RS                 .cmp(&right.replica)
+//RS                 .then_with(|| left.counter.cmp(&right.counter))
+//RS         });
+//RS         Ok(JetSyncText { atoms, valid: true })
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for JetSyncCounter {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "counts".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.counts
+//RS                     .iter()
+//RS                     .map(|(replica, positive, negative)| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             (
+//RS                                 "replica".to_string(),
+//RS                                 jet_std::DataTree::Text(replica.clone()),
+//RS                             ),
+//RS                             (
+//RS                                 "positive".to_string(),
+//RS                                 jet_std::DataTree::Text(positive.to_string()),
+//RS                             ),
+//RS                             (
+//RS                                 "negative".to_string(),
+//RS                                 jet_std::DataTree::Text(negative.to_string()),
+//RS                             ),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for JetSyncCounter {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncCounter {
+//RS                 counts: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["counts"], "SyncCounter")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "counts", "SyncCounter")?,
+//RS             "SyncCounter.counts",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_REPLICAS {
+//RS             return Err(jet_sync_decode_error("SyncCounter replica limit exceeded"));
+//RS         }
+//RS         let mut counts = Vec::with_capacity(values.len());
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields = jet_sync_object(
+//RS                 value,
+//RS                 &["replica", "positive", "negative"],
+//RS                 "SyncCounter entry",
+//RS             );
+//RS             let fields = match fields {
+//RS                 Ok(fields) => fields,
+//RS                 Err(entry_errors) => {
+//RS                     jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             let mut entry_errors = Vec::new();
+//RS             let replica = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "replica",
+//RS                 "SyncCounter entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncCounter.replica"),
+//RS             );
+//RS             let positive = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "positive",
+//RS                 "SyncCounter entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_u64(tree, "SyncCounter.positive"),
+//RS             );
+//RS             let negative = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "negative",
+//RS                 "SyncCounter entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_u64(tree, "SyncCounter.negative"),
+//RS             );
+//RS             if let (Some(replica), Some(positive), Some(negative)) = (replica, positive, negative) {
+//RS                 if !jet_sync_token_is_valid(&replica) {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncCounter replica is invalid"));
+//RS                 } else if counts.iter().any(|(existing, _, _)| existing == &replica) {
+//RS                     entry_errors.extend(jet_sync_decode_error(
+//RS                         "SyncCounter contains duplicate replicas",
+//RS                     ));
+//RS                 } else {
+//RS                     counts.push((replica, positive, negative));
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         counts.sort_by(|left, right| left.0.cmp(&right.0));
+//RS         if jet_sync_counter_total(&counts).is_none() {
+//RS             return Err(jet_sync_decode_error(
+//RS                 "SyncCounter value exceeds the signed integer range",
+//RS             ));
+//RS         }
+//RS         Ok(JetSyncCounter {
+//RS             counts,
+//RS             valid: true,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for JetSyncMap {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "entries".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.entries
+//RS                     .iter()
+//RS                     .map(|(key, value, clock, writer)| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             ("key".to_string(), jet_std::DataTree::Text(key.clone())),
+//RS                             ("value".to_string(), jet_std::DataTree::Text(value.clone())),
+//RS                             (
+//RS                                 "clock".to_string(),
+//RS                                 jet_std::DataTree::Text(clock.to_string()),
+//RS                             ),
+//RS                             (
+//RS                                 "writer".to_string(),
+//RS                                 jet_std::DataTree::Text(writer.clone()),
+//RS                             ),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for JetSyncMap {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncMap {
+//RS                 entries: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "entries", "SyncMap")?,
+//RS             "SyncMap.entries",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_ENTRIES {
+//RS             return Err(jet_sync_decode_error("SyncMap entry limit exceeded"));
+//RS         }
+//RS         let mut entries = Vec::with_capacity(values.len());
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields =
+//RS                 match jet_sync_object(value, &["key", "value", "clock", "writer"], "SyncMap entry")
+//RS                 {
+//RS                     Ok(fields) => fields,
+//RS                     Err(entry_errors) => {
+//RS                         jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                         continue;
+//RS                     }
+//RS                 };
+//RS             let mut entry_errors = Vec::new();
+//RS             let key =
+//RS                 jet_sync_decode_field(fields, "key", "SyncMap entry", &mut entry_errors, |tree| {
+//RS                     jet_sync_decode_string(tree, "SyncMap.key")
+//RS                 });
+//RS             let entry_value = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "value",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncMap.value"),
+//RS             );
+//RS             let clock = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "clock",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_u64(tree, "SyncMap.clock"),
+//RS             );
+//RS             let writer = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "writer",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncMap.writer"),
+//RS             );
+//RS             if let (Some(key), Some(entry_value), Some(clock), Some(writer)) =
+//RS                 (key, entry_value, clock, writer)
+//RS             {
+//RS                 if !jet_sync_token_is_valid(&key)
+//RS                     || !jet_sync_token_is_valid(&writer)
+//RS                     || entry_value.len() > MAX_SYNC_TEXT
+//RS                     || clock == 0
+//RS                 {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"));
+//RS                 } else if entries.iter().any(|(existing, _, _, _)| existing == &key) {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncMap contains duplicate keys"));
+//RS                 } else {
+//RS                     entries.push((key, entry_value, clock, writer));
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         entries.sort_by(|left, right| left.0.cmp(&right.0));
+//RS         Ok(JetSyncMap {
+//RS             entries,
+//RS             valid: true,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for JetSyncList {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "items".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.items
+//RS                     .iter()
+//RS                     .map(|(replica, item)| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             (
+//RS                                 "replica".to_string(),
+//RS                                 jet_std::DataTree::Text(replica.clone()),
+//RS                             ),
+//RS                             ("item".to_string(), jet_std::DataTree::Text(item.clone())),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for JetSyncList {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncList {
+//RS                 items: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "items", "SyncList")?,
+//RS             "SyncList.items",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_ENTRIES {
+//RS             return Err(jet_sync_decode_error("SyncList item limit exceeded"));
+//RS         }
+//RS         let mut items = Vec::with_capacity(values.len());
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields = match jet_sync_object(value, &["replica", "item"], "SyncList item") {
+//RS                 Ok(fields) => fields,
+//RS                 Err(entry_errors) => {
+//RS                     jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             let mut entry_errors = Vec::new();
+//RS             let replica = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "replica",
+//RS                 "SyncList item",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncList.replica"),
+//RS             );
+//RS             let item =
+//RS                 jet_sync_decode_field(fields, "item", "SyncList item", &mut entry_errors, |tree| {
+//RS                     jet_sync_decode_string(tree, "SyncList.item")
+//RS                 });
+//RS             if let (Some(replica), Some(item)) = (replica, item) {
+//RS                 if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncList item is invalid"));
+//RS                 } else if items.iter().any(|(existing_replica, existing_item)| {
+//RS                     existing_replica == &replica && existing_item == &item
+//RS                 }) {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncList contains duplicate items"));
+//RS                 } else {
+//RS                     items.push((replica, item));
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+//RS         Ok(JetSyncList { items, valid: true })
+//RS     }
+//RS }
+//RS 
+//RS impl<K, V> __jet_Encode for JetSyncMapGeneric<K, V>
+//RS where
+//RS     K: __jet_Encode,
+//RS     V: __jet_Encode,
+//RS {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "entries".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.entries
+//RS                     .iter()
+//RS                     .map(|(key, value, clock, writer)| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             ("key".to_string(), key.jet_encode()),
+//RS                             ("value".to_string(), value.jet_encode()),
+//RS                             (
+//RS                                 "clock".to_string(),
+//RS                                 jet_std::DataTree::Text(clock.to_string()),
+//RS                             ),
+//RS                             (
+//RS                                 "writer".to_string(),
+//RS                                 jet_std::DataTree::Text(writer.clone()),
+//RS                             ),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl<K, V> __jet_Decode for JetSyncMapGeneric<K, V>
+//RS where
+//RS     K: __jet_Decode + __jet_Encode,
+//RS     V: __jet_Decode + __jet_Encode,
+//RS {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncMapGeneric {
+//RS                 entries: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "entries", "SyncMap")?,
+//RS             "SyncMap.entries",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_ENTRIES {
+//RS             return Err(jet_sync_decode_error("SyncMap entry limit exceeded"));
+//RS         }
+//RS         let mut entries = Vec::with_capacity(values.len());
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields =
+//RS                 match jet_sync_object(value, &["key", "value", "clock", "writer"], "SyncMap entry")
+//RS                 {
+//RS                     Ok(fields) => fields,
+//RS                     Err(entry_errors) => {
+//RS                         jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                         continue;
+//RS                     }
+//RS                 };
+//RS             let mut entry_errors = Vec::new();
+//RS             let key = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "key",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 K::jet_decode,
+//RS             );
+//RS             let entry_value = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "value",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 V::jet_decode,
+//RS             );
+//RS             let clock = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "clock",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_u64(tree, "SyncMap.clock"),
+//RS             );
+//RS             let writer = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "writer",
+//RS                 "SyncMap entry",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncMap.writer"),
+//RS             );
+//RS             if let (Some(key), Some(entry_value), Some(clock), Some(writer)) =
+//RS                 (key, entry_value, clock, writer)
+//RS             {
+//RS                 if !jet_sync_token_is_valid(&writer) || clock == 0 {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"));
+//RS                 } else {
+//RS                     let key_id = jet_sync_value_id(&key);
+//RS                     if entries
+//RS                         .iter()
+//RS                         .any(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
+//RS                     {
+//RS                         entry_errors
+//RS                             .extend(jet_sync_decode_error("SyncMap contains duplicate keys"));
+//RS                     } else {
+//RS                         entries.push((key, entry_value, clock, writer));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         entries.sort_by(|left, right| jet_sync_value_id(&left.0).cmp(&jet_sync_value_id(&right.0)));
+//RS         Ok(JetSyncMapGeneric {
+//RS             entries,
+//RS             valid: true,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl<T> __jet_Encode for JetSyncListGeneric<T>
+//RS where
+//RS     T: __jet_Encode,
+//RS {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if !self.valid {
+//RS             return jet_std::DataTree::Object(vec![(
+//RS                 "invalid".to_string(),
+//RS                 jet_std::DataTree::Bool(true),
+//RS             )]);
+//RS         }
+//RS         jet_std::DataTree::Object(vec![(
+//RS             "items".to_string(),
+//RS             jet_std::DataTree::Array(
+//RS                 self.items
+//RS                     .iter()
+//RS                     .map(|(replica, item)| {
+//RS                         jet_std::DataTree::Object(vec![
+//RS                             (
+//RS                                 "replica".to_string(),
+//RS                                 jet_std::DataTree::Text(replica.clone()),
+//RS                             ),
+//RS                             ("item".to_string(), item.jet_encode()),
+//RS                         ])
+//RS                     })
+//RS                     .collect(),
+//RS             ),
+//RS         )])
+//RS     }
+//RS }
+//RS 
+//RS impl<T> __jet_Decode for JetSyncListGeneric<T>
+//RS where
+//RS     T: __jet_Decode + __jet_Encode,
+//RS {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         if jet_sync_is_invalid_marker(tree) {
+//RS             return Ok(JetSyncListGeneric {
+//RS                 items: Vec::new(),
+//RS                 valid: false,
+//RS             });
+//RS         }
+//RS         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
+//RS         let values = jet_sync_decode_array(
+//RS             jet_sync_object_field(fields, "items", "SyncList")?,
+//RS             "SyncList.items",
+//RS         )?;
+//RS         if values.len() > MAX_SYNC_ENTRIES {
+//RS             return Err(jet_sync_decode_error("SyncList item limit exceeded"));
+//RS         }
+//RS         let mut items = Vec::with_capacity(values.len());
+//RS         let mut errors = Vec::new();
+//RS         for (index, value) in values.iter().enumerate() {
+//RS             let fields = match jet_sync_object(value, &["replica", "item"], "SyncList item") {
+//RS                 Ok(fields) => fields,
+//RS                 Err(entry_errors) => {
+//RS                     jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS                     continue;
+//RS                 }
+//RS             };
+//RS             let mut entry_errors = Vec::new();
+//RS             let replica = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "replica",
+//RS                 "SyncList item",
+//RS                 &mut entry_errors,
+//RS                 |tree| jet_sync_decode_string(tree, "SyncList.replica"),
+//RS             );
+//RS             let item = jet_sync_decode_field(
+//RS                 fields,
+//RS                 "item",
+//RS                 "SyncList item",
+//RS                 &mut entry_errors,
+//RS                 T::jet_decode,
+//RS             );
+//RS             if let (Some(replica), Some(item)) = (replica, item) {
+//RS                 if !jet_sync_token_is_valid(&replica) {
+//RS                     entry_errors.extend(jet_sync_decode_error("SyncList item is invalid"));
+//RS                 } else {
+//RS                     let item_id = jet_sync_value_id(&item);
+//RS                     if items.iter().any(|(existing_replica, existing_item)| {
+//RS                         existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+//RS                     }) {
+//RS                         entry_errors
+//RS                             .extend(jet_sync_decode_error("SyncList contains duplicate items"));
+//RS                     } else {
+//RS                         items.push((replica, item));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if !entry_errors.is_empty() {
+//RS                 jet_sync_frame_entry(&mut errors, index, entry_errors);
+//RS             }
+//RS         }
+//RS         if !errors.is_empty() {
+//RS             return Err(errors);
+//RS         }
+//RS         items.sort_by(|left, right| {
+//RS             let left_id = jet_sync_value_id(&left.1);
+//RS             let right_id = jet_sync_value_id(&right.1);
+//RS             (left.0.as_str(), left_id).cmp(&(right.0.as_str(), right_id))
+//RS         });
+//RS         Ok(JetSyncListGeneric { items, valid: true })
+//RS     }
+//RS }
+//RS 
+//RS include!("../SyncPublish.rs");
+// END-PORT-PENDING 0306 crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs:1-2077
+

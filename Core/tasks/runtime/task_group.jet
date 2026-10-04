@@ -1,0 +1,620 @@
+// PORT-PENDING 0189 crates-jet-codegen-src-prelude-stream-module-group: crates/jet-codegen/src/Prelude/TaskGroup.rs:1-616
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: canonical task-group ownership.
+//RS // This exact Prelude source is compiled for JIT hosts and embedded in AOT
+//RS // programs. Engines supply only representation-specific cancel/join adapters.
+//RS thread_local! {
+//RS     static JET_TASK_DEADLINE_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS pub fn jet_task_deadline_mark_pending() {
+//RS     JET_TASK_DEADLINE_PENDING.with(|pending| pending.set(true));
+//RS }
+//RS 
+//RS pub fn jet_task_deadline_pending() -> bool {
+//RS     JET_TASK_DEADLINE_PENDING.with(|pending| pending.get())
+//RS }
+//RS 
+//RS pub fn jet_task_deadline_clear_pending() {
+//RS     JET_TASK_DEADLINE_PENDING.with(|pending| pending.set(false));
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetTaskCancellation {
+//RS     pub code: &'static str,
+//RS     pub what: &'static str,
+//RS     pub why: &'static str,
+//RS     pub fix: &'static str,
+//RS }
+//RS 
+//RS pub fn jet_task_cancellation() -> JetTaskCancellation {
+//RS     JetTaskCancellation {
+//RS         code: "E3004",
+//RS         what: "task cancelled at a cooperative wait point",
+//RS         why: "The task control plane requested cancellation before this wait completed",
+//RS         fix: "Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait",
+//RS     }
+//RS }
+//RS 
+//RS /// Map an engine's child-completion code onto the canonical failure rail.
+//RS /// The surrounding engine only marshals the resulting enum into its value
+//RS /// representation.
+//RS pub fn jet_task_failure_from_code(code: &str, reason: String) -> JetTaskFailure {
+//RS     match code {
+//RS         "E3004" | "TASK_CANCELLED" => JetTaskFailure::Cancelled,
+//RS         "E3003" => JetTaskFailure::DeadlineBlown,
+//RS         _ => JetTaskFailure::Panicked(reason),
+//RS     }
+//RS }
+//RS 
+//RS /// Flatten the private failure carrier used while a task body propagates with
+//RS /// `?` onto the public task-failure rail. The task engines own only the join
+//RS /// representation; this conversion keeps the task surface identical across
+//RS /// AOT, JIT, and the evaluator.
+//RS pub fn jet_task_flatten_result<T, E: std::fmt::Debug>(
+//RS     result: Result<Result<T, E>, JetTaskFailure>,
+//RS ) -> Result<T, JetTaskFailure> {
+//RS     result.and_then(|value| {
+//RS         value.map_err(|error| jet_task_failure_from_result_error(error))
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_task_failure_from_result_error<E: std::fmt::Debug>(error: E) -> JetTaskFailure {
+//RS     jet_task_failure_from_code("TASK_BODY_FAILED", format!("{error:?}"))
+//RS }
+//RS 
+//RS pub fn jet_task_flatten_results<T, E: std::fmt::Debug>(
+//RS     result: Result<Vec<Result<T, E>>, JetTaskFailure>,
+//RS ) -> Result<Vec<T>, JetTaskFailure> {
+//RS     result.and_then(|values| {
+//RS         values
+//RS             .into_iter()
+//RS             .map(|value| value.map_err(|error| jet_task_failure_from_result_error(error)))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS /// One ABI spelling for the typed failure rail. Engines marshal the canonical
+//RS /// discriminant and optional reason into their own enum representation.
+//RS pub fn jet_task_failure_abi(failure: JetTaskFailure) -> (i64, Option<String>) {
+//RS     match failure {
+//RS         JetTaskFailure::Cancelled => (0, None),
+//RS         JetTaskFailure::DeadlineBlown => (1, None),
+//RS         JetTaskFailure::Panicked(reason) => (2, Some(reason)),
+//RS     }
+//RS }
+//RS 
+//RS /// D-CONC-SPAWN1=D: explicit group limits share one clamping rule on every
+//RS /// execution tier. `None` means no admission bound; an explicit value below
+//RS /// one is the smallest bounded group.
+//RS pub fn jet_task_group_limit_defaulted(limit: Option<i64>) -> Option<usize> {
+//RS     limit.map(|limit| limit.max(1) as usize)
+//RS }
+//RS 
+//RS /// A scheduler-owned wake handle for a blocked bounded-group admission. The
+//RS /// wait policy stays in the shared Prelude scheduler; engines only provide the
+//RS /// representation-specific park call.
+//RS pub trait JetTaskGroupWaiter: Send + Sync {
+//RS     fn wake(&self);
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct JetTaskGroupSlots {
+//RS     limit: usize,
+//RS     active: std::sync::Mutex<usize>,
+//RS     closing: std::sync::atomic::AtomicBool,
+//RS     wake: std::sync::Condvar,
+//RS     waiters: std::sync::Mutex<Vec<std::sync::Weak<dyn JetTaskGroupWaiter>>>,
+//RS }
+//RS 
+//RS impl JetTaskGroupSlots {
+//RS     fn new(limit: usize) -> Self {
+//RS         Self {
+//RS             limit,
+//RS             active: std::sync::Mutex::new(0),
+//RS             closing: std::sync::atomic::AtomicBool::new(false),
+//RS             wake: std::sync::Condvar::new(),
+//RS             waiters: std::sync::Mutex::new(Vec::new()),
+//RS         }
+//RS     }
+//RS 
+//RS     fn close(&self) {
+//RS         {
+//RS             let _active = self.active.lock().unwrap();
+//RS             self.closing
+//RS                 .store(true, std::sync::atomic::Ordering::Release);
+//RS             self.wake.notify_all();
+//RS         }
+//RS         self.wake_waiters();
+//RS     }
+//RS 
+//RS     fn register_waiter(&self, waiter: std::sync::Arc<dyn JetTaskGroupWaiter>) {
+//RS         let mut waiters = self.waiters.lock().unwrap();
+//RS         waiters.retain(|waiter| waiter.upgrade().is_some());
+//RS         waiters.push(std::sync::Arc::downgrade(&waiter));
+//RS     }
+//RS 
+//RS     fn wake_waiters(&self) {
+//RS         let mut waiters = self.waiters.lock().unwrap();
+//RS         waiters.retain(|waiter| {
+//RS             if let Some(waiter) = waiter.upgrade() {
+//RS                 waiter.wake();
+//RS                 true
+//RS             } else {
+//RS                 false
+//RS             }
+//RS         });
+//RS     }
+//RS 
+//RS     fn acquire_with<W, E>(
+//RS         self: &std::sync::Arc<Self>,
+//RS         waiter: std::sync::Arc<W>,
+//RS         mut wait: impl FnMut(&std::sync::Arc<W>) -> Result<(), E>,
+//RS     ) -> Result<Option<JetTaskGroupPermit>, E>
+//RS     where
+//RS         W: JetTaskGroupWaiter + 'static,
+//RS     {
+//RS         let wake_waiter: std::sync::Arc<dyn JetTaskGroupWaiter> = waiter.clone();
+//RS         let mut registered = false;
+//RS         let mut active = self.active.lock().unwrap();
+//RS         loop {
+//RS             if self
+//RS                 .closing
+//RS                 .load(std::sync::atomic::Ordering::Acquire)
+//RS             {
+//RS                 return Ok(None);
+//RS             }
+//RS             if *active < self.limit {
+//RS                 *active += 1;
+//RS                 return Ok(Some(JetTaskGroupPermit {
+//RS                     slots: self.clone(),
+//RS                 }));
+//RS             }
+//RS             if !registered {
+//RS                 self.register_waiter(wake_waiter.clone());
+//RS                 registered = true;
+//RS             }
+//RS             drop(active);
+//RS             wait(&waiter)?;
+//RS             active = self.active.lock().unwrap();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct JetTaskGroupPermit {
+//RS     slots: std::sync::Arc<JetTaskGroupSlots>,
+//RS }
+//RS 
+//RS impl Drop for JetTaskGroupPermit {
+//RS     fn drop(&mut self) {
+//RS         {
+//RS             let mut active = self.slots.active.lock().unwrap();
+//RS             *active = active.saturating_sub(1);
+//RS             self.slots.wake.notify_one();
+//RS         }
+//RS         self.slots.wake_waiters();
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS pub struct JetTaskGroupRuntime<T> {
+//RS     children: std::sync::Mutex<Vec<T>>,
+//RS     slots: Option<std::sync::Arc<JetTaskGroupSlots>>,
+//RS     closing: std::sync::atomic::AtomicBool,
+//RS }
+//RS 
+//RS impl<T> JetTaskGroupRuntime<T> {
+//RS     pub fn new() -> Self {
+//RS         Self::new_defaulted(None)
+//RS     }
+//RS 
+//RS     /// Construct the runtime policy for a canonical `task.group` limit.
+//RS     /// Engines pass the source-level default through this one Prelude symbol.
+//RS     pub fn new_defaulted(limit: Option<i64>) -> Self {
+//RS         Self {
+//RS             children: std::sync::Mutex::new(Vec::new()),
+//RS             slots: jet_task_group_limit_defaulted(limit)
+//RS                 .map(|limit| std::sync::Arc::new(JetTaskGroupSlots::new(limit))),
+//RS             closing: std::sync::atomic::AtomicBool::new(false),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn acquire_with<W, E>(
+//RS         &self,
+//RS         waiter: std::sync::Arc<W>,
+//RS         wait: impl FnMut(&std::sync::Arc<W>) -> Result<(), E>,
+//RS     ) -> Result<Option<JetTaskGroupPermit>, E>
+//RS     where
+//RS         W: JetTaskGroupWaiter + 'static,
+//RS     {
+//RS         match &self.slots {
+//RS             Some(slots) => slots.acquire_with(waiter, wait),
+//RS             None => Ok(None),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register(&self, child: T) {
+//RS         self.children.lock().unwrap().push(child);
+//RS     }
+//RS 
+//RS     fn begin_close(&self) -> bool {
+//RS         if self
+//RS             .closing
+//RS             .swap(true, std::sync::atomic::Ordering::AcqRel)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         if let Some(slots) = &self.slots {
+//RS             // A child that is already being drained may still reach a nested
+//RS             // spawn. Let it register without waiting for the permit held by
+//RS             // the child being drained; the close loop will consume it.
+//RS             slots.close();
+//RS         }
+//RS         true
+//RS     }
+//RS 
+//RS     fn close_with_mode<C, J>(&self, cancel_children: bool, mut cancel: C, mut join: J)
+//RS     where
+//RS         C: FnMut(&T),
+//RS         J: FnMut(T),
+//RS     {
+//RS         if !self.begin_close() {
+//RS             return;
+//RS         }
+//RS         // A child may register another child through the shared lexical group
+//RS         // handle while it is being joined. Drain until the shared queue is
+//RS         // empty so lexical close covers that nested work too.
+//RS         loop {
+//RS             let children = std::mem::take(&mut *self.children.lock().unwrap());
+//RS             if children.is_empty() {
+//RS                 break;
+//RS             }
+//RS             if cancel_children {
+//RS                 for child in &children {
+//RS                     cancel(child);
+//RS                 }
+//RS             }
+//RS             for child in children {
+//RS                 // D-CONC-FAIL1=A: lexical close joins and discards child outcomes.
+//RS                 // A child failure remains observable only through that child's
+//RS                 // explicit `join()`/combinator result; it must not escape the
+//RS                 // group's cleanup boundary or terminate the parent.
+//RS                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| join(child)));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn close_with<J>(&self, join: J)
+//RS     where
+//RS         J: FnMut(T),
+//RS     {
+//RS         self.close_with_mode(false, |_| {}, join);
+//RS     }
+//RS 
+//RS     pub fn close_with_cancel<C, J>(&self, cancel: C, join: J)
+//RS     where
+//RS         C: FnMut(&T),
+//RS         J: FnMut(T),
+//RS     {
+//RS         self.close_with_mode(true, cancel, join);
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS pub enum JetTaskSelectMode {
+//RS     All,
+//RS     Race,
+//RS     Any,
+//RS }
+//RS 
+//RS pub enum JetTaskDecision<T, E> {
+//RS     Wait,
+//RS     Finish(Result<Vec<T>, E>),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetTaskWaitInterrupt<D> {
+//RS     Deadline(D),
+//RS     Cancelled,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetTaskDeadline {
+//RS     pub what: String,
+//RS     pub why: String,
+//RS     pub fix: String,
+//RS }
+//RS 
+//RS impl JetTaskDeadline {
+//RS     pub fn render(&self) -> String {
+//RS         format!(
+//RS             "Error [E3003]: {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/E3003",
+//RS             self.what, self.why, self.fix
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_task_deadline(wait_kind: &str) -> JetTaskDeadline {
+//RS     JetTaskDeadline {
+//RS         what: format!("Deadline exceeded while waiting in {wait_kind}"),
+//RS         why: "This wait point observed the task context deadline from `#Context(deadline: …)`"
+//RS             .to_string(),
+//RS         fix: "Raise the deadline budget or shorten the work before this wait point".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS /// Return the canonical deadline value only when a wait point has expired.
+//RS /// Hosts provide their remaining-time observation; this Prelude owns the
+//RS /// boundary comparison and the resulting wait kind.
+//RS pub fn jet_task_deadline_if_expired(
+//RS     remaining_ms: Option<i64>,
+//RS     wait_kind: &str,
+//RS ) -> Option<JetTaskDeadline> {
+//RS     remaining_ms
+//RS         .filter(|remaining| *remaining <= 0)
+//RS         .map(|_| jet_task_deadline(wait_kind))
+//RS }
+//RS 
+//RS /// Canonical parent wait-point policy. A shield defers both interrupts;
+//RS /// otherwise an expired deadline lands before a pending cancellation.
+//RS pub fn jet_task_wait_policy<D>(
+//RS     deadline: Option<D>,
+//RS     cancelled: bool,
+//RS     shielded: bool,
+//RS ) -> Result<(), JetTaskWaitInterrupt<D>> {
+//RS     if shielded {
+//RS         return Ok(());
+//RS     }
+//RS     if let Some(deadline) = deadline {
+//RS         return Err(JetTaskWaitInterrupt::Deadline(deadline));
+//RS     }
+//RS     if cancelled {
+//RS         return Err(JetTaskWaitInterrupt::Cancelled);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Canonical all/race/any result policy. Engines only report completed task
+//RS /// outcomes and apply cancellation/drain when this policy says to finish.
+//RS pub struct JetTaskSelectPolicy<T, E> {
+//RS     mode: JetTaskSelectMode,
+//RS     pending: usize,
+//RS     values: Vec<Option<T>>,
+//RS     first_error: Option<(u128, usize, E)>,
+//RS }
+//RS 
+//RS impl<T, E> JetTaskSelectPolicy<T, E> {
+//RS     pub fn new(mode: JetTaskSelectMode, count: usize) -> Self {
+//RS         if count == 0 {
+//RS             unreachable!("sema must reject an empty task group combinator");
+//RS         }
+//RS         Self {
+//RS             mode,
+//RS             pending: count,
+//RS             values: (0..count).map(|_| None).collect(),
+//RS             first_error: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn settle(
+//RS         &mut self,
+//RS         order: u128,
+//RS         index: usize,
+//RS         result: Result<T, E>,
+//RS     ) -> JetTaskDecision<T, E> {
+//RS         self.pending -= 1;
+//RS         match self.mode {
+//RS             JetTaskSelectMode::Any => {
+//RS                 JetTaskDecision::Finish(result.map(|value| vec![value]))
+//RS             }
+//RS             JetTaskSelectMode::Race => match result {
+//RS                 Ok(value) => JetTaskDecision::Finish(Ok(vec![value])),
+//RS                 Err(error) => {
+//RS                     if self
+//RS                         .first_error
+//RS                         .as_ref()
+//RS                         .is_none_or(|(first, first_index, _)| {
+//RS                             (order, index) < (*first, *first_index)
+//RS                         })
+//RS                     {
+//RS                         self.first_error = Some((order, index, error));
+//RS                     }
+//RS                     if self.pending == 0 {
+//RS                         JetTaskDecision::Finish(Err(
+//RS                             self.first_error.take().expect("race recorded an error").2,
+//RS                         ))
+//RS                     } else {
+//RS                         JetTaskDecision::Wait
+//RS                     }
+//RS                 }
+//RS             },
+//RS             JetTaskSelectMode::All => match result {
+//RS                 Err(error) => JetTaskDecision::Finish(Err(error)),
+//RS                 Ok(value) => {
+//RS                     self.values[index] = Some(value);
+//RS                     if self.pending == 0 {
+//RS                         JetTaskDecision::Finish(Ok(
+//RS                             self.values
+//RS                                 .iter_mut()
+//RS                                 .map(|value| value.take().expect("all result missing"))
+//RS                                 .collect(),
+//RS                         ))
+//RS                     } else {
+//RS                         JetTaskDecision::Wait
+//RS                     }
+//RS                 }
+//RS             },
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Canonical all/race/any wait loop. Engines only marshal their task handle,
+//RS /// completion, cancellation, and drain operations into these callbacks.
+//RS pub fn jet_task_select<Task, T, E>(
+//RS     tasks: Vec<Task>,
+//RS     mode: JetTaskSelectMode,
+//RS     mut wait_check: impl FnMut() -> Result<(), E>,
+//RS     mut completion_order: impl FnMut(&Task) -> Option<u128>,
+//RS     mut try_complete: impl FnMut(&mut Task) -> Option<Result<T, E>>,
+//RS     mut cancel: impl FnMut(&Task),
+//RS     mut drain: impl FnMut(Task),
+//RS ) -> Result<Vec<T>, E> {
+//RS     if tasks.is_empty() {
+//RS         unreachable!("sema must reject an empty task group combinator");
+//RS     }
+//RS     let mut tasks = tasks.into_iter().map(Some).collect::<Vec<_>>();
+//RS     let mut policy = JetTaskSelectPolicy::new(mode, tasks.len());
+//RS     loop {
+//RS         if let Err(error) = wait_check() {
+//RS             for task in tasks.iter().flatten() {
+//RS                 cancel(task);
+//RS             }
+//RS             for task in tasks.into_iter().flatten() {
+//RS                 drain(task);
+//RS             }
+//RS             return Err(error);
+//RS         }
+//RS         let next = tasks
+//RS             .iter()
+//RS             .enumerate()
+//RS             .filter_map(|(index, task)| {
+//RS                 task.as_ref()
+//RS                     .and_then(&mut completion_order)
+//RS                     .map(|order| (order, index))
+//RS             })
+//RS             .min();
+//RS         if let Some((order, index)) = next {
+//RS             let result = tasks[index].as_mut().and_then(&mut try_complete);
+//RS             if let Some(result) = result {
+//RS                 tasks[index] = None;
+//RS                 if let JetTaskDecision::Finish(result) = policy.settle(order, index, result) {
+//RS                     if result.is_err() || !matches!(mode, JetTaskSelectMode::All) {
+//RS                         for task in tasks.iter().flatten() {
+//RS                             cancel(task);
+//RS                         }
+//RS                     }
+//RS                     for task in tasks.into_iter().flatten() {
+//RS                         drain(task);
+//RS                     }
+//RS                     return result;
+//RS                 }
+//RS             }
+//RS         }
+//RS         std::thread::yield_now();
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod task_group_tests {
+//RS     use super::{
+//RS         jet_task_select, jet_task_wait_policy, JetTaskDecision, JetTaskGroupRuntime,
+//RS         JetTaskSelectMode, JetTaskSelectPolicy, JetTaskWaitInterrupt,
+//RS     };
+//RS     use std::sync::{Arc, Mutex};
+//RS 
+//RS     #[test]
+//RS     fn close_joins_all_without_cancelling() {
+//RS         let group = JetTaskGroupRuntime::new();
+//RS         group.register(1);
+//RS         group.register(2);
+//RS         group.register(3);
+//RS         let events = Arc::new(Mutex::new(Vec::new()));
+//RS         let join_events = events.clone();
+//RS         group.close_with(|child| {
+//RS             join_events.lock().unwrap().push(format!("join {child}"));
+//RS         });
+//RS         assert_eq!(
+//RS             *events.lock().unwrap(),
+//RS             ["join 1", "join 2", "join 3"]
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_selection_policy_preserves_all_order_and_race_any_laws() {
+//RS         let mut all = JetTaskSelectPolicy::new(JetTaskSelectMode::All, 2);
+//RS         assert!(matches!(all.settle(1, 1, Ok::<_, &str>(20)), JetTaskDecision::Wait));
+//RS         match all.settle(2, 0, Ok(10)) {
+//RS             JetTaskDecision::Finish(Ok(values)) => assert_eq!(values, [10, 20]),
+//RS             _ => panic!("all did not finish in input order"),
+//RS         }
+//RS 
+//RS         let mut race = JetTaskSelectPolicy::new(JetTaskSelectMode::Race, 2);
+//RS         assert!(matches!(
+//RS             race.settle(1, 0, Err::<i32, _>("first failed")),
+//RS             JetTaskDecision::Wait
+//RS         ));
+//RS         match race.settle(2, 1, Ok(22)) {
+//RS             JetTaskDecision::Finish(Ok(values)) => assert_eq!(values, [22]),
+//RS             _ => panic!("race did not select its first success"),
+//RS         }
+//RS 
+//RS         let mut any = JetTaskSelectPolicy::new(JetTaskSelectMode::Any, 2);
+//RS         match any.settle(1, 1, Err::<i32, _>("first failed")) {
+//RS             JetTaskDecision::Finish(Err(error)) => assert_eq!(error, "first failed"),
+//RS             _ => panic!("any did not expose its first completion"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn equal_completion_sequences_use_source_order() {
+//RS         let mut race = JetTaskSelectPolicy::new(JetTaskSelectMode::Race, 2);
+//RS         assert!(matches!(
+//RS             race.settle(9, 1, Err::<i32, _>("higher source")),
+//RS             JetTaskDecision::Wait
+//RS         ));
+//RS         match race.settle(9, 0, Err::<i32, _>("lower source")) {
+//RS             JetTaskDecision::Finish(Err(error)) => assert_eq!(error, "lower source"),
+//RS             _ => panic!("equal completion sequence did not use source order"),
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_wait_loop_cancels_and_drains_after_an_error() {
+//RS         struct Task {
+//RS             id: i32,
+//RS             order: u128,
+//RS             result: Option<Result<i32, &'static str>>,
+//RS         }
+//RS         let events = Arc::new(Mutex::new(Vec::new()));
+//RS         let cancel_events = events.clone();
+//RS         let drain_events = events.clone();
+//RS         let result = jet_task_select(
+//RS             vec![
+//RS                 Task {
+//RS                     id: 1,
+//RS                     order: 0,
+//RS                     result: Some(Err("failed")),
+//RS                 },
+//RS                 Task {
+//RS                     id: 2,
+//RS                     order: 1,
+//RS                     result: Some(Ok(2)),
+//RS                 },
+//RS             ],
+//RS             JetTaskSelectMode::All,
+//RS             || Ok(()),
+//RS             |task| Some(task.order),
+//RS             |task| task.result.take(),
+//RS             |task| cancel_events.lock().unwrap().push(("cancel", task.id)),
+//RS             |task| drain_events.lock().unwrap().push(("drain", task.id)),
+//RS         );
+//RS         assert_eq!(result, Err("failed"));
+//RS         assert_eq!(*events.lock().unwrap(), [("cancel", 2), ("drain", 2)]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parent_wait_policy_defers_a_shield_and_prefers_a_deadline() {
+//RS         assert_eq!(
+//RS             jet_task_wait_policy(Some("deadline"), true, false),
+//RS             Err(JetTaskWaitInterrupt::Deadline("deadline"))
+//RS         );
+//RS         assert_eq!(
+//RS             jet_task_wait_policy::<&str>(None, true, false),
+//RS             Err(JetTaskWaitInterrupt::Cancelled)
+//RS         );
+//RS         assert_eq!(jet_task_wait_policy(Some("deadline"), true, true), Ok(()));
+//RS     }
+//RS }
+// END-PORT-PENDING 0189 crates/jet-codegen/src/Prelude/TaskGroup.rs:1-616
+

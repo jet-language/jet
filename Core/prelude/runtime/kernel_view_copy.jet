@@ -1,0 +1,14 @@
+// Native storage leaves are checked specializations, not generic C ABI values.
+// They borrow the original owner for the call; returned copies own their bytes.
+// Clone/drop failures use the shared native stop/unwind rail.
+use kernel_storage_leaves as storage_copy_leaf
+
+// Rust Core/ViewCopy.rs:2–4, jet_view_copy: materialize exactly this extent.
+pub fn jet_view_copy<T: Clone>(view: View<T>) -> [T] Never! {
+    storage_copy_leaf.jet_storage_view_copy<T>(view)
+}
+
+// Rust Core/ViewCopy.rs:6–8, jet_string_view_copy: copy UTF-8 bytes, not scalars.
+pub fn jet_string_view_copy(view: View<str>) -> String Never! {
+    storage_copy_leaf.jet_storage_string_view_copy(view)
+}

@@ -1,0 +1,37 @@
+// std 1.97.1 commit8bab26f4f68e0e26f0bb7960be334d5b520ea452,
+// std/sys/thread/unix.rs:177–208. Physical selected native unit: Linux x86_64
+// LP64/glibc ONLY; Main's checked target/provider row selects this source.
+// Do not import/assemble this unit for Darwin, musl, x32 or Windows.
+use core.sys.runtime.hardware_facts as hardware_policy
+use core.mem as hardware_mem
+use core.sys.host.unix_fd as hardware_unix
+use c.c as hardware_libc
+
+// storage borrows the owner's live zero-initialized 128-byte CPU set; words is
+// an allocation-free 16-U64 loan of THAT SAME contiguous storage. The loans
+// cannot escape this synchronous call. #4494 must provide this real retained
+// field extent; passing a copied word array does not implement this contract.
+// quota is the result of the ACTUAL native hierarchical cgroup walk.
+pub fn linux_x86_64_parallelism(storage: *hardware_unix.LinuxX8664CpuSet, words: View<U64>, quota: U64) -[Env]> hardware_policy.ParallelismResult Never! {
+    #Unsafe("selected glibc sched_getaffinity borrows same-owner initialized CPU set and word loan; immediate per-thread errno before fallback") {
+        assert(words.len() == 16)
+        status :: hardware_libc.sched_getaffinity(I32{0}, U64{128}, storage)
+        if status == (I32{0}) {
+            count :: hardware_policy.affinity_limit(hardware_policy.cpu_mask_count(words), quota)
+            if count == .Val(available) -> return hardware_policy.ParallelismResult.Count(available)
+        } else {
+            // Source ignores affinity failure and deliberately uses sysconf;
+            // capture before any fallback call, never classify a missing ABI
+            // as an OS failure. sysconf failure below owns the returned code.
+            _ :: hardware_mem.volatile_read(hardware_libc.errno_location())
+        }
+        online :: hardware_libc.sysconf(hardware_unix.LINUX_X86_64_SC_NPROCESSORS_ONLN)
+        if online == (I64{-1}) {
+            code :: hardware_mem.volatile_read(hardware_libc.errno_location())
+            return hardware_policy.ParallelismResult.OsError(code)
+        }
+        // POSIX sysconf selector84 returns -1 or a nonnegative processor count.
+        count :: U64.from_i64(online) ?? panic("invalid native sysconf processor count")
+        return hardware_policy.online_limit(count, quota)
+    }
+}

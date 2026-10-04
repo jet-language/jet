@@ -1,0 +1,423 @@
+// FSIgnore.rs:1–362: shared `.gitignore` parsing and matching for filesystem
+// walks. A matcher is an immutable root-to-directory rule stack. Each directory
+// adds its own ignore file after inherited rules, so the last matching rule wins
+// while child files naturally have precedence over parent files.
+//
+// Native gate (#3593/#3598/#4389, Main stage-2 extraction). The directory walk
+// owns the root PathBuf and the retained no-follow ignore-file read of
+// with_directory_rules (:35–53). For each visited directory the leaf supplies:
+//   base: String = directory.strip_prefix(root).unwrap_or(directory)
+//                  .to_string_lossy(), a raw OS path fact with separators as-is;
+//   source: [U8]? = None when symlink_metadata is NotFound or the entry is not a
+//                  regular file (a symlink is never a trusted rule source and is
+//                  never followed); Val(contents) read through that same
+//                  retained no-follow identity, never a check-then-open path.
+// Every other metadata/read failure stays the leaf's raw io::Error, projected
+// by the walk's make_error at the directory path (FSWalk.rs:151–158). Jet owns
+// separator normalization, lossy UTF-8 decoding, line splitting, parsing,
+// stacking and every match decision below.
+//
+// Text is read through the one canonical scalar reader. #4318/#4392: utf8_bytes
+// still materializes a Vec; no allocation/retention parity is claimed until the
+// retained UTF-8 byte-view leaf lands.
+use core.text.runtime.kernel_unicode_string as fs_ignore_text
+
+// Rust JetFsIgnoreRule (:7–14). `base` is the declaring directory relative to
+// the walk root, trimmed of `/`.
+pub struct JetFSIgnoreRule {
+    pub base: String
+    pub pattern: String
+    pub negated: Bool
+    pub directory_only: Bool
+    pub anchored: Bool
+    pub has_separator: Bool
+}
+
+// Rust JetFsIgnoreMatcher (:17–20). Rust shares the immutable stack through
+// Arc<Vec<_>>; Jet value sharing gives each inheriting directory the same
+// snapshot, and a write through one holder never shows in another. The root
+// path is used only by the native base computation described above.
+pub struct JetFSIgnoreMatcher {
+    pub rules: [JetFSIgnoreRule]
+}
+
+// Rust split_components (:169–171) yields borrowed &str parts; these spans
+// borrow the caller's byte buffer the same way instead of copying each part.
+struct FSIgnoreSpan {
+    start: Int
+    end: Int
+}
+
+impl JetFSIgnoreMatcher {
+    // Rust JetFsIgnoreMatcher::new (:23–28): the empty root stack.
+    pub fn new() -> JetFSIgnoreMatcher Never! {
+        JetFSIgnoreMatcher{rules: [JetFSIgnoreRule]{}}
+    }
+
+    // Rust JetFsIgnoreMatcher::with_directory_rules (:30–65) after the native
+    // no-follow leaf. The walk drops its inherited matcher right after this
+    // call (FSWalk.rs:151–160), so the stack is consumed instead of cloned.
+    // Missing or non-regular sources inherit the parent stack unchanged.
+    pub fn with_directory_rules(^self, directory_base: String, source: [U8]?) -> JetFSIgnoreMatcher Never! {
+        bytes :: source ?? return self
+        // Rust String::from_utf8_lossy (:48) and `.replace('\\', "/")` (:53).
+        text :: String.from_bytes_lossy(bytes)
+        base := fs_ignore_trim_slashes(fs_ignore_slashes(fs_ignore_text.utf8_bytes(directory_base)))
+        raw :: fs_ignore_text.utf8_bytes(text)
+        rules := self.rules
+        // Rust str::lines (:56): split at `\n`, dropping one `\r` only before a
+        // `\n`; a final line needs no terminator and a trailing `\n` adds none.
+        start := 0
+        loop start < raw.len() {
+            newline := start
+            loop newline < raw.len() && raw[newline] != (U8{10}) -> newline = newline + 1
+            end := newline
+            if newline < raw.len() && end > start && raw[end - 1] == (U8{13}) -> end = end - 1
+            if fs_ignore_parse_span(raw, start, end, base) == .Val(rule) -> &rules.push(rule)
+            start = newline + 1
+        }
+        JetFSIgnoreMatcher{rules: rules}
+    }
+
+    // Rust JetFsIgnoreMatcher::is_ignored (:67–97).
+    pub fn is_ignored(self, relative: String, is_dir: Bool) -> Bool Never! {
+        raw :: fs_ignore_slashes(fs_ignore_text.utf8_bytes(relative))
+        path_parts :: fs_ignore_split(raw, 0, raw.len())
+        if path_parts.len() == 0 -> return false
+        // A negation cannot re-include a path below an excluded parent
+        // directory. Evaluate each parent as its own directory candidate so
+        // `foo/` blocks `foo/bar`, while a later `!foo/` can reopen the branch.
+        // Rust joins parts[..prefix_len] afresh; one growing buffer holds the
+        // identical `/`-joined bytes.
+        prefix := [U8]{}
+        loop prefix_len in 1..<path_parts.len() {
+            part :: path_parts[prefix_len - 1]
+            if prefix_len > 1 -> &prefix.push(U8{47})
+            loop at in part.start..<part.end -> &prefix.push(raw[at])
+            ignored := false
+            loop rule in self.rules {
+                if fs_ignore_rule_matches(rule, prefix, true) -> ignored = !rule.negated
+            }
+            if ignored -> return true
+        }
+        // Gitignore precedence is ordered: a later negation or ignore replaces
+        // the earlier answer instead of accumulating state. The full candidate
+        // is the normalized text itself, not the re-joined components.
+        ignored := false
+        loop rule in self.rules {
+            if fs_ignore_rule_matches(rule, raw, is_dir) -> ignored = !rule.negated
+        }
+        ignored
+    }
+}
+
+impl JetFSIgnoreRule {
+    // Rust JetFsIgnoreRule::parse (:101–135).
+    pub fn parse(line: String, base: String) -> JetFSIgnoreRule? Never! {
+        raw :: fs_ignore_text.utf8_bytes(line)
+        trimmed := fs_ignore_trim_slashes(fs_ignore_text.utf8_bytes(base))
+        fs_ignore_parse_span(raw, 0, raw.len(), trimmed)
+    }
+
+    // Rust JetFsIgnoreRule::matches (:137–156).
+    pub fn matches(self, relative: String, is_dir: Bool) -> Bool Never! {
+        fs_ignore_rule_matches(self, fs_ignore_text.utf8_bytes(relative), is_dir)
+    }
+}
+
+// Rust JetFsIgnoreRule::parse (:101–135) over raw[start..<end]; `base` is
+// already trimmed of `/`. Every cut is at an ASCII byte, so each kept span is
+// a whole-scalar UTF-8 extent of the original line.
+fn fs_ignore_parse_span(raw: [U8], start: Int, end: Int, base: String) -> JetFSIgnoreRule? Never! {
+    stop := end
+    if stop > start && raw[stop - 1] == (U8{13}) -> stop = stop - 1
+    stop = fs_ignore_trim_spaces(raw, start, stop)
+    if stop == start || raw[start] == (U8{35}) -> return None
+    at := start
+    negated :: raw[at] == (U8{33})
+    if negated -> at = at + 1
+    if at == stop -> return None
+    directory_only :: fs_ignore_ends_unescaped(raw, at, stop, U8{47})
+    if directory_only -> stop = stop - 1
+    anchored :: at < stop && raw[at] == (U8{47})
+    if anchored -> at = at + 1
+    if at == stop -> return None
+    has_separator :: fs_ignore_contains_unescaped(raw, at, stop, U8{47})
+    Val(JetFSIgnoreRule{
+        base: ~base,
+        pattern: fs_ignore_text_of(raw, at, stop),
+        negated: negated,
+        directory_only: directory_only,
+        anchored: anchored,
+        has_separator: has_separator,
+    })
+}
+
+// Rust JetFsIgnoreRule::matches (:137–156) over normalized path bytes.
+fn fs_ignore_rule_matches(rule: JetFSIgnoreRule, relative: [U8], is_dir: Bool) -> Bool Never! {
+    base :: fs_ignore_text.utf8_bytes(rule.base)
+    local :: fs_ignore_under_base(relative, base) ?? return false
+    path_parts :: fs_ignore_split(relative, local, relative.len())
+    if path_parts.len() == 0 -> return false
+    last :: path_parts[path_parts.len() - 1]
+    pattern :: fs_ignore_text.utf8_bytes(rule.pattern)
+    if rule.has_separator || rule.anchored {
+        if rule.directory_only && !is_dir -> return false
+        pattern_parts :: fs_ignore_split(pattern, 0, pattern.len())
+        return fs_ignore_glob_path(pattern, pattern_parts, pattern_parts.len(), relative, path_parts)
+    }
+    if rule.directory_only && !is_dir -> return false
+    fs_ignore_glob_component(pattern, 0, pattern.len(), relative, last.start, last.end)
+}
+
+// Rust relative_under_base (:159–167): byte offset where the local path starts
+// inside `relative`, or None outside `base`. Byte prefix, as str::strip_prefix.
+fn fs_ignore_under_base(relative: [U8], base: [U8]) -> Int? Never! {
+    if base.len() == 0 -> return Val(0)
+    if relative.len() < base.len() -> return None
+    loop i in 0..<base.len() {
+        if relative[i] != base[i] -> return None
+    }
+    if relative.len() == base.len() -> return Val(relative.len())
+    if relative[base.len()] != (U8{47}) -> return None
+    Val(base.len() + 1)
+}
+
+// Rust split_components (:169–171): non-empty `/` parts of raw[start..<end].
+fn fs_ignore_split(raw: [U8], start: Int, end: Int) -> [FSIgnoreSpan] Never! {
+    out := [FSIgnoreSpan]{}
+    part := start
+    at := start
+    loop at < end {
+        if raw[at] == (U8{47}) {
+            if at > part -> &out.push(FSIgnoreSpan{start: part, end: at})
+            part = at + 1
+        }
+        at = at + 1
+    }
+    if end > part -> &out.push(FSIgnoreSpan{start: part, end: end})
+    out
+}
+
+// Rust trim_unescaped_trailing_spaces (:173–190): new end of raw[start..<end].
+// Space and backslash are ASCII, so a backward byte scan visits exactly the
+// scalars Rust's char vector does.
+fn fs_ignore_trim_spaces(raw: [U8], start: Int, end: Int) -> Int Never! {
+    stop := end
+    loop stop > start && raw[stop - 1] == (U8{32}) {
+        backslashes := 0
+        index := stop - 1
+        loop index > start && raw[index - 1] == (U8{92}) {
+            backslashes = backslashes + 1
+            index = index - 1
+        }
+        if backslashes % 2 != 0 -> break
+        stop = stop - 1
+    }
+    stop
+}
+
+// Rust ends_with_unescaped (:192–207) for an ASCII `wanted`.
+fn fs_ignore_ends_unescaped(raw: [U8], start: Int, end: Int, wanted: U8) -> Bool Never! {
+    if end <= start || raw[end - 1] != wanted -> return false
+    backslashes := 0
+    index := end - 1
+    loop index > start && raw[index - 1] == (U8{92}) {
+        backslashes = backslashes + 1
+        index = index - 1
+    }
+    backslashes % 2 == 0
+}
+
+// Rust contains_unescaped (:209–222): a backslash escapes the next scalar.
+fn fs_ignore_contains_unescaped(raw: [U8], start: Int, end: Int, wanted: U8) -> Bool Never! {
+    escaped := false
+    at := start
+    loop at < end {
+        byte :: raw[at]
+        if {
+            escaped -> { escaped = false }
+            byte == (U8{92}) -> { escaped = true }
+            byte == wanted -> return true
+            else -> { escaped = false }
+        }
+        at = at + fs_ignore_text.utf8_width_at(raw, at)
+    }
+    false
+}
+
+fn fs_ignore_globstar(raw: [U8], part: FSIgnoreSpan) -> Bool Never! {
+    part.end - part.start == 2 && raw[part.start] == (U8{42}) && raw[part.start + 1] == (U8{42})
+}
+
+// Rust's `vec![vec![None; ..]; ..]` memo: 0 unknown, 1 false, 2 true.
+fn fs_ignore_memo(cells: Int) -> [U8] Never! {
+    memo := [U8]{}
+    loop _ in 0..<cells -> &memo.push(U8{0})
+    memo
+}
+
+// Rust glob_path_matches (:224–260). `count` bounds the pattern prefix the way
+// Rust reslices &pattern[..len - 1], without copying spans.
+fn fs_ignore_glob_path(pattern: [U8], pattern_parts: [FSIgnoreSpan], count: Int, path: [U8], path_parts: [FSIgnoreSpan]) -> Bool Never! {
+    // A trailing `dir/**` names the contents of `dir`, not the directory
+    // itself. Other `**` positions still accept zero components. Checking the
+    // whole prefix also handles leading globstars such as `**/cache/**`.
+    if count > 1 && fs_ignore_globstar(pattern, pattern_parts[count - 1]) && fs_ignore_glob_path(pattern, pattern_parts, count - 1, path, path_parts) {
+        return false
+    }
+    memo := fs_ignore_memo((count + 1) * (path_parts.len() + 1))
+    fs_ignore_path_visit(pattern, pattern_parts, count, path, path_parts, 0, 0, &memo)
+}
+
+// Rust glob_path_matches::visit (:235–258).
+fn fs_ignore_path_visit(pattern: [U8], pattern_parts: [FSIgnoreSpan], count: Int, path: [U8], path_parts: [FSIgnoreSpan], pattern_index: Int, path_index: Int, memo: &[U8]) -> Bool Never! {
+    cell :: pattern_index * (path_parts.len() + 1) + path_index
+    if memo[cell] != (U8{0}) -> return memo[cell] == (U8{2})
+    more :: path_index < path_parts.len()
+    result := false
+    if {
+        pattern_index == count -> { result = !more }
+        fs_ignore_globstar(pattern, pattern_parts[pattern_index]) -> {
+            result = fs_ignore_path_visit(pattern, pattern_parts, count, path, path_parts, pattern_index + 1, path_index, &memo)
+            if !result && more -> result = fs_ignore_path_visit(pattern, pattern_parts, count, path, path_parts, pattern_index, path_index + 1, &memo)
+        }
+        more -> {
+            want :: pattern_parts[pattern_index]
+            have :: path_parts[path_index]
+            if fs_ignore_glob_component(pattern, want.start, want.end, path, have.start, have.end) {
+                result = fs_ignore_path_visit(pattern, pattern_parts, count, path, path_parts, pattern_index + 1, path_index + 1, &memo)
+            }
+        }
+        else -> { result = false }
+    }
+    memo[cell] = if result -> U8{2} else -> U8{1}
+    result
+}
+
+// Rust `.chars().collect()` (:263–264) through the canonical scalar reader.
+fn fs_ignore_scalars(raw: [U8], start: Int, end: Int) -> [Int] Never! {
+    out := [Int]{}
+    at := start
+    loop at < end {
+        &out.push(fs_ignore_text.scalar_at(raw, at))
+        at = at + fs_ignore_text.utf8_width_at(raw, at)
+    }
+    out
+}
+
+// Rust glob_component_matches (:262–319) on whole Unicode scalars.
+fn fs_ignore_glob_component(pattern_raw: [U8], pattern_start: Int, pattern_end: Int, text_raw: [U8], text_start: Int, text_end: Int) -> Bool Never! {
+    pattern :: fs_ignore_scalars(pattern_raw, pattern_start, pattern_end)
+    text :: fs_ignore_scalars(text_raw, text_start, text_end)
+    memo := fs_ignore_memo((pattern.len() + 1) * (text.len() + 1))
+    fs_ignore_component_visit(pattern, text, 0, 0, &memo)
+}
+
+// Rust glob_component_matches::visit (:266–317). Main-authorized correction
+// of the frozen bracket arm (:299–301): a class consumes one scalar, so it can
+// match only while a text scalar remains. Rust calls visit(next, len + 1) for
+// a negated class at end of text and panics on the memo index; that defect is
+// recorded for the frozen tandem repair, never reproduced here.
+fn fs_ignore_component_visit(pattern: [Int], text: [Int], pattern_index: Int, text_index: Int, memo: &[U8]) -> Bool Never! {
+    cell :: pattern_index * (text.len() + 1) + text_index
+    if memo[cell] != (U8{0}) -> return memo[cell] == (U8{2})
+    more :: text_index < text.len()
+    result := false
+    if pattern_index == pattern.len() {
+        result = !more
+    } else {
+        wanted :: pattern[pattern_index]
+        escaped :: wanted == 92 && pattern_index + 1 < pattern.len()
+        if {
+            wanted == 42 -> {
+                result = fs_ignore_component_visit(pattern, text, pattern_index + 1, text_index, &memo)
+                if !result && more -> result = fs_ignore_component_visit(pattern, text, pattern_index, text_index + 1, &memo)
+            }
+            wanted == 63 -> {
+                if more -> result = fs_ignore_component_visit(pattern, text, pattern_index + 1, text_index + 1, &memo)
+            }
+            escaped -> {
+                if more && pattern[pattern_index + 1] == text[text_index] {
+                    result = fs_ignore_component_visit(pattern, text, pattern_index + 2, text_index + 1, &memo)
+                }
+            }
+            wanted == 91 -> {
+                current :: if more -> text[text_index] else -> -1
+                if fs_ignore_bracket(pattern, pattern_index, more, current) == {
+                    .Val(class) -> {
+                        if class.matched && more {
+                            result = fs_ignore_component_visit(pattern, text, class.next, text_index + 1, &memo)
+                        }
+                    }
+                    else -> {
+                        if more && text[text_index] == 91 {
+                            result = fs_ignore_component_visit(pattern, text, pattern_index + 1, text_index + 1, &memo)
+                        }
+                    }
+                }
+            }
+            else -> {
+                // A literal, including a trailing unpaired backslash (:294–298).
+                if more && text[text_index] == wanted {
+                    result = fs_ignore_component_visit(pattern, text, pattern_index + 1, text_index + 1, &memo)
+                }
+            }
+        }
+    }
+    memo[cell] = if result -> U8{2} else -> U8{1}
+    result
+}
+
+// Rust bracket_match (:321–362). `has_text`/`current` carry Rust's
+// Option<&char>; None means the class is unclosed or empty and `[` is literal.
+fn fs_ignore_bracket(pattern: [Int], start: Int, has_text: Bool, current: Int) -> (matched: Bool, next: Int)? Never! {
+    index := start + 1
+    negated :: index < pattern.len() && (pattern[index] == 33 || pattern[index] == 94)
+    if negated -> index = index + 1
+    matched := false
+    has_item := false
+    loop index < pattern.len() && pattern[index] != 93 {
+        if pattern[index] == 92 && index + 1 < pattern.len() -> index = index + 1
+        first :: pattern[index]
+        index = index + 1
+        has_item = true
+        range :: index + 1 < pattern.len() && pattern[index] == 45 && pattern[index + 1] != 93
+        if range {
+            index = index + 1
+            if pattern[index] == 92 && index + 1 < pattern.len() -> index = index + 1
+            last :: pattern[index]
+            index = index + 1
+            if has_text && first <= current && current <= last -> matched = true
+        }
+        if !range && has_text && first == current -> matched = true
+    }
+    if index >= pattern.len() || !has_item -> return None
+    Val((matched: if negated -> !matched else -> matched, next: index + 1))
+}
+
+// Rust `.replace('\\', "/")` (:53, :68): an owned normalized byte buffer.
+fn fs_ignore_slashes(raw: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    loop byte in raw {
+        if byte == (U8{92}) -> &out.push(U8{47}) else -> &out.push(byte)
+    }
+    out
+}
+
+// Rust `base.trim_matches('/')` (:128), computed once per ignore file.
+fn fs_ignore_trim_slashes(raw: [U8]) -> String Never! {
+    start := 0
+    end := raw.len()
+    loop start < end && raw[start] == (U8{47}) -> start = start + 1
+    loop end > start && raw[end - 1] == (U8{47}) -> end = end - 1
+    fs_ignore_text_of(raw, start, end)
+}
+
+// Owned String for raw[start..<end]; callers cut only at ASCII bytes of valid
+// UTF-8, so a decode failure is an internal invariant violation.
+fn fs_ignore_text_of(raw: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(raw[at])
+    String.from_bytes(out) ?? panic("ignore rule span split a UTF-8 scalar")
+}

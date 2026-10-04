@@ -1,0 +1,74 @@
+// PORT-PENDING 0173 crates-jet-codegen-src-prelude-deadline-module-group: crates/jet-codegen/src/Prelude/Deadline.rs:1-70
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Card #1747: the `#Context(deadline: …)` clock and budget are the same
+//RS // plumbing on every tier — AOT embeds this file into the generated program
+//RS // and `jet_codegen::scheduler` compiles the same source for the Cranelift
+//RS // JIT host, so the two cannot drift. The E3003 raise stays local to each
+//RS // caller (`jet_deadline_exceeded` in `Prelude/CoreLib/Top/MathRandomTime.rs`
+//RS // and `SchedulerHost.rs`): the unwind boundary and process-exit path are
+//RS // real per-tier marshalling (AOT has an interrupt-handler frame and exits
+//RS // through the panic-based `jet_runtime_exit`; the JIT host has no
+//RS // interrupt-handler prelude and exits the resident process directly), but
+//RS // both render the same text through the one E3003 renderer in
+//RS // `Prelude/TaskGroup.rs`.
+//RS 
+//RS pub fn jet_std_time_now() -> i64 {
+//RS     // D-TEST-WORLD1=A: controlled wall time is selected at the shared
+//RS     // provider boundary; replay and host wall time are only fallbacks outside
+//RS     // a deterministic world.
+//RS     if let Some(now) = jet_scheduler_world_now_ms() {
+//RS         return now;
+//RS     }
+//RS     if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
+//RS         if let Ok(n) = s.parse::<i64>() {
+//RS             return n;
+//RS         }
+//RS     }
+//RS     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
+//RS         if let Ok(n) = s.parse::<i64>() {
+//RS             return n;
+//RS         }
+//RS     }
+//RS     std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .unwrap_or_default()
+//RS         .as_millis() as i64
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+//RS }
+//RS 
+//RS pub struct JetDeadlineGuard {
+//RS     saved: Option<i64>,
+//RS }
+//RS 
+//RS impl Drop for JetDeadlineGuard {
+//RS     fn drop(&mut self) {
+//RS         JET_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
+//RS     }
+//RS }
+//RS 
+//RS /// Absolute deadline millis currently installed for this task/thread, if any.
+//RS pub fn jet_ctx_deadline_ms() -> Option<i64> {
+//RS     JET_CTX_DEADLINE_MS.with(|c| c.get())
+//RS }
+//RS 
+//RS /// Push a `#Context(deadline: …)` budget; drop restores the previous value.
+//RS pub fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
+//RS     let saved = JET_CTX_DEADLINE_MS.with(|c| c.replace(Some(deadline_ms)));
+//RS     JetDeadlineGuard { saved }
+//RS }
+//RS 
+//RS /// Tighten the current task deadline without replacing an earlier, shorter
+//RS /// budget. The task-timeout surface uses this Prelude boundary on every tier.
+//RS pub fn jet_ctx_set_deadline_min(deadline_ms: i64) {
+//RS     JET_CTX_DEADLINE_MS.with(|c| {
+//RS         let deadline = c
+//RS             .get()
+//RS             .map_or(deadline_ms, |current| current.min(deadline_ms));
+//RS         c.set(Some(deadline));
+//RS     });
+//RS }
+// END-PORT-PENDING 0173 crates/jet-codegen/src/Prelude/Deadline.rs:1-70
+

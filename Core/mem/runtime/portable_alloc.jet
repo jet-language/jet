@@ -1,0 +1,512 @@
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:1
+// Selected-backend allocation, first-fit fixed heap reuse, and portable Fixed adapter.
+use core.mem.[AllocError]
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent, JetPortableError, jet_panic]
+use core.mem.runtime.kernel_fixed_allocator.[FixedState]
+use core.mem.runtime.mem.[jet_fault_should_fail_allocation]
+use core.sys.target as target
+// GATE #4494 / #4483: selected-width layout, pointers, callbacks, atomics and cell loans.
+use core.alloc.[GlobalAlloc, Layout]
+use core.cell.[RefCell]
+use core.ptr.[NonNull]
+use core.sync.atomic.[AtomicUsize, AtomicBool, Ordering]
+use core.mem as memory
+use core.ptr as ptr
+use core.fmt as fmt
+use alloc.alloc as backing
+use alloc.boxed.[Box]
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:26
+// GATE #4494: linker-owned symbols; accessed only on target_os = none.
+extern "C" { static __jet_heap_start: U8; static __jet_heap_end: U8 }
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:32
+#Repr("C")
+struct JetHeapHeader {
+    base: USize
+    span: USize
+    size: USize
+    next: USize
+    magic: USize
+    state: USize
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:42
+const HEAP_HEADER_MAGIC: USize = USize.MAX - 0x4A45_5448
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:43
+const HEAP_ALLOCATED: USize = 1
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:44
+const HEAP_FREE: USize = 2
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:46
+pub struct JetHeapAllocator {
+    next: AtomicUsize
+    end: AtomicUsize
+    free_head: AtomicUsize
+    lock: AtomicBool
+}
+impl JetHeapAllocator {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:52
+    pub fn new() -> JetHeapAllocator Never! {
+        JetHeapAllocator{next: AtomicUsize.new(0), end: AtomicUsize.new(0),
+            free_head: AtomicUsize.new(0), lock: AtomicBool.new(false)}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:62
+    fn initialize(self) -> (USize, USize)? Never! {
+        current :: self.next.load(Ordering.Acquire)
+        end :: self.end.load(Ordering.Acquire)
+        if current != 0 {
+            if end > current -> return Val((current, end))
+            return None
+        }
+        raw_start := USize{0}
+        limit := USize{0}
+        // GATE #4483: NativeTargetOS.None is the freestanding target fact.
+        if target.selected_os() == .None {
+            #Unsafe("linker supplies the selected freestanding heap bounds") {
+                raw_start = ptr.addr_of(__jet_heap_start).addr()
+                limit = ptr.addr_of(__jet_heap_end).addr()
+            }
+        }
+        start :: JetHeapAllocator.align_up(raw_start, memory.align_of<JetHeapHeader>()) ?? return None
+        if start == 0 || limit <= start -> return None
+        _ :: self.next.compare_exchange(0, start, Ordering.AcqRel, Ordering.Acquire)
+        _ :: self.end.compare_exchange(0, limit, Ordering.AcqRel, Ordering.Acquire)
+        published :: self.next.load(Ordering.Acquire)
+        published_end :: self.end.load(Ordering.Acquire)
+        if published_end > published -> return Val((published, published_end))
+        None
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:96
+    fn acquire(self) Never! {
+        while self.lock.compare_exchange(false, true, Ordering.Acquire, Ordering.Relaxed).is_err() {
+            core.hint.spin_loop() // GATE #4494
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:112
+    fn release(self) Never! { self.lock.store(false, Ordering.Release) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:117
+    fn align_up(value: USize, align: USize) -> USize? Never! {
+        mask :: align.checked_sub(1) ?? return None
+        sum :: value.checked_add(mask) ?? return None
+        Val(sum & ~mask)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:123
+    fn minimum_free_span() -> USize Never! { memory.size_of<JetHeapHeader>().saturating_add(1) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:131
+    fn fit(base: USize, span: USize, size: USize, align: USize) -> (USize, USize, USize)? Never! {
+        header_bytes :: memory.size_of<JetHeapHeader>()
+        block_end :: base.checked_add(span) ?? return None
+        start :: base.checked_add(header_bytes) ?? return None
+        user :: JetHeapAllocator.align_up(start, align) ?? return None
+        header :: user.checked_sub(header_bytes) ?? return None
+        if header < base -> return None
+        payload_end :: user.checked_add(size) ?? return None
+        if payload_end > block_end -> return None
+        aligned_end :: JetHeapAllocator.align_up(payload_end, memory.align_of<JetHeapHeader>()) ?? return None
+        consumed_end :: if aligned_end <= block_end { aligned_end } else { block_end }
+        Val((header, user, consumed_end))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:161
+    fn write_alloc_header(header: USize, base: USize, span: USize, size: USize) Never! {
+        #Unsafe("caller holds heap lock and fit checked the aligned header range; GATE #4494") {
+            ptr.from_addr<JetHeapHeader>(header).write(JetHeapHeader{
+                base: base, span: span, size: size, next: 0, magic: HEAP_HEADER_MAGIC, state: HEAP_ALLOCATED})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:178
+    fn write_free_header(node: USize, span: USize, next: USize) Never! {
+        #Unsafe("caller owns a header-sized aligned free span under heap lock; GATE #4494") {
+            ptr.from_addr<JetHeapHeader>(node).write(JetHeapHeader{
+                base: node, span: span, size: 0, next: next, magic: HEAP_HEADER_MAGIC, state: HEAP_FREE})
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:196
+    fn take_free(self, size: USize, align: USize) -> (*U8)? Never! {
+        #Unsafe("sorted free-list metadata is exclusively held by allocator lock; GATE #4494") {
+            previous := USize{0}
+            node := self.free_head.load(Ordering.Acquire)
+            while node != 0 {
+                current :: ptr.from_addr<JetHeapHeader>(node).as_ref()
+                if current.magic != HEAP_HEADER_MAGIC || current.state != HEAP_FREE || current.base != node -> return None
+                next :: current.next
+                fitted :: JetHeapAllocator.fit(current.base, current.span, size, align)
+                if fitted == None {
+                    previous = node
+                    node = next
+                    continue
+                }
+                (header, user, consumed_end) :: fitted ?? return None
+                block_end :: current.base.checked_add(current.span) ?? return None
+                leading_span :: header.saturating_sub(current.base)
+                keep_leading :: leading_span >= JetHeapAllocator.minimum_free_span()
+                allocation_base :: if keep_leading { header } else { current.base }
+                trailing_span :: block_end.saturating_sub(consumed_end)
+                keep_trailing :: trailing_span >= JetHeapAllocator.minimum_free_span()
+                replacement :: if keep_leading { current.base } else if keep_trailing { consumed_end } else { next }
+                if previous == 0 { self.free_head.store(replacement, Ordering.Release) }
+                else { ptr.from_addr<JetHeapHeader>(previous).as_mut().next = replacement }
+                if keep_trailing { JetHeapAllocator.write_free_header(consumed_end, trailing_span, next) }
+                if keep_leading {
+                    leading_next :: if keep_trailing { consumed_end } else { next }
+                    JetHeapAllocator.write_free_header(current.base, leading_span, leading_next)
+                }
+                allocation_end :: if keep_trailing { consumed_end } else { block_end }
+                allocation_span :: allocation_end.saturating_sub(allocation_base)
+                JetHeapAllocator.write_alloc_header(header, allocation_base, allocation_span, size)
+                return Val(ptr.from_addr<U8>(user))
+            }
+            None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:270
+    fn alloc_locked(self, layout: Layout) -> *U8 Never! {
+        size :: layout.size().max(1)
+        align :: layout.align().max(memory.align_of<JetHeapHeader>())
+        if found :: self.take_free(size, align) { return found }
+        (current, end) :: self.initialize() ?? return ptr.null_mut<U8>()
+        (header, user, consumed_end) :: JetHeapAllocator.fit(current, end.saturating_sub(current), size, align) ?? return ptr.null_mut<U8>()
+        allocation_span :: consumed_end.saturating_sub(current)
+        JetHeapAllocator.write_alloc_header(header, current, allocation_span, size)
+        self.next.store(consumed_end, Ordering.Release)
+        #Unsafe("fit established an aligned live payload address; GATE #4494") { ptr.from_addr<U8>(user) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:295
+    fn insert_free_locked(self, base: USize, span: USize) Never! {
+        #Unsafe("allocator lock protects sorted free metadata and neighbour coalescing; GATE #4494") {
+            previous := USize{0}
+            node := self.free_head.load(Ordering.Acquire)
+            while node != 0 && node < base {
+                current :: ptr.from_addr<JetHeapHeader>(node).as_ref()
+                if current.magic != HEAP_HEADER_MAGIC || current.state != HEAP_FREE -> return
+                previous = node
+                node = current.next
+            }
+            if node == base -> return
+            merge_previous := false
+            if previous != 0 {
+                previous_record :: ptr.from_addr<JetHeapHeader>(previous).as_ref()
+                if previous_record.magic != HEAP_HEADER_MAGIC || previous_record.state != HEAP_FREE -> return
+                previous_end :: previous.checked_add(previous_record.span) ?? return
+                merge_previous = previous_end == base
+            }
+            owner := base
+            if merge_previous {
+                previous_record :: ptr.from_addr<JetHeapHeader>(previous).as_mut()
+                merged_span :: previous_record.span.checked_add(span) ?? return
+                previous_record.span = merged_span
+                previous_record.next = node
+                owner = previous
+            } else {
+                JetHeapAllocator.write_free_header(base, span, node)
+                if previous == 0 { self.free_head.store(base, Ordering.Release) }
+                else { ptr.from_addr<JetHeapHeader>(previous).as_mut().next = base }
+            }
+            owner_end :: owner.checked_add(ptr.from_addr<JetHeapHeader>(owner).as_ref().span) ?? return
+            if node != 0 {
+                next_node :: ptr.from_addr<JetHeapHeader>(node).as_ref()
+                if next_node.magic != HEAP_HEADER_MAGIC || next_node.state != HEAP_FREE -> return
+                if owner_end == next_node.base {
+                    merged_span :: ptr.from_addr<JetHeapHeader>(owner).as_ref().span.checked_add(next_node.span) ?? return
+                    ptr.from_addr<JetHeapHeader>(owner).as_mut().span = merged_span
+                    ptr.from_addr<JetHeapHeader>(owner).as_mut().next = next_node.next
+                }
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:376
+pub struct JetTargetAllocator {
+    alloc: fn(USize, USize) -> *U8 Never!
+    dealloc: fn(*U8, USize, USize) Never!
+}
+impl JetTargetAllocator {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:380
+    pub fn from_callbacks(alloc: fn(USize, USize) -> *U8 Never!, dealloc: fn(*U8, USize, USize) Never!) -> JetTargetAllocator Never! {
+        JetTargetAllocator{alloc: alloc, dealloc: dealloc}
+    }
+}
+impl GlobalAlloc for JetTargetAllocator {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:389
+    fn alloc(self, layout: Layout) -> *U8 Never! {
+        #Unsafe("selected provider callback owns storage; null remains allocation failure; GATE #4494") {
+            (self.alloc)(layout.size().max(1), layout.align())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:393
+    fn dealloc(self, pointer: *U8, layout: Layout) Never! {
+        if pointer.is_null() -> return
+        #Unsafe("release to the same selected provider with original layout; GATE #4494") {
+            (self.dealloc)(pointer, layout.size().max(1), layout.align())
+        }
+    }
+}
+impl GlobalAlloc for JetHeapAllocator {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:401
+    fn alloc(self, layout: Layout) -> *U8 Never! {
+        self.acquire()
+        pointer :: self.alloc_locked(layout)
+        self.release()
+        pointer
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:408
+    fn dealloc(self, pointer: *U8, layout: Layout) Never! {
+        if pointer.is_null() -> return
+        header :: pointer.addr().checked_sub(memory.size_of<JetHeapHeader>()) ?? return
+        self.acquire()
+        #Unsafe("caller supplies allocated pointer; validate header and heap extent under lock; GATE #4494") {
+            record :: ptr.from_addr<JetHeapHeader>(header).as_mut()
+            heap_end :: self.end.load(Ordering.Acquire)
+            block_end :: record.base.checked_add(record.span)
+            header_end :: header.checked_add(memory.size_of<JetHeapHeader>())
+            valid :: record.magic == HEAP_HEADER_MAGIC && record.state == HEAP_ALLOCATED
+                && record.base != 0 && record.span >= memory.size_of<JetHeapHeader>() && header >= record.base
+                && block_end.is_some_and(fn(end) { end <= heap_end })
+                && header_end.is_some_and(fn(end) { block_end.is_some_and(fn(block_limit) { end <= block_limit }) })
+                && header_end == Val(pointer.addr())
+            if valid {
+                base :: record.base
+                span :: record.span
+                // Tombstone makes immediate duplicate deallocation harmless.
+                record.state = HEAP_FREE
+                self.insert_free_locked(base, span)
+            }
+        }
+        self.release()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:448
+    fn alloc_zeroed(self, layout: Layout) -> *U8 Never! {
+        pointer :: self.alloc(layout)
+        if !pointer.is_null() {
+            #Unsafe("new block owns layout.size().max(1) initialized bytes; GATE #4494") {
+                ptr.write_bytes(pointer, 0, layout.size().max(1))
+            }
+        }
+        pointer
+    }
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:456
+    fn realloc(self, pointer: *U8, layout: Layout, new_size: USize) -> *U8 Never! {
+        if pointer.is_null() {
+            new_layout :: match Layout.from_size_align(new_size.max(1), layout.align()) {
+                Ok(value) => value
+                Err(_) => return ptr.null_mut<U8>()
+            }
+            return self.alloc(new_layout)
+        }
+        header :: pointer.addr().checked_sub(memory.size_of<JetHeapHeader>()) ?? return ptr.null_mut<U8>()
+        self.acquire()
+        old_size := None as USize?
+        #Unsafe("validate the original allocated header under exclusive heap lock; GATE #4494") {
+            record :: ptr.from_addr<JetHeapHeader>(header).as_mut()
+            heap_end :: self.end.load(Ordering.Acquire)
+            block_end :: record.base.checked_add(record.span)
+            header_end :: header.checked_add(memory.size_of<JetHeapHeader>())
+            if record.magic == HEAP_HEADER_MAGIC && record.state == HEAP_ALLOCATED
+                && record.base != 0 && record.span >= memory.size_of<JetHeapHeader>() && header >= record.base
+                && block_end.is_some_and(fn(end) { end <= heap_end })
+                && header_end.is_some_and(fn(end) { block_end.is_some_and(fn(block_limit) { end <= block_limit }) })
+                && header_end == Val(pointer.addr()) {
+                previous_size :: record.size.max(1)
+                if new_size <= previous_size { record.size = new_size.max(1) }
+                old_size = Val(previous_size)
+            }
+        }
+        self.release()
+        old_bytes :: old_size ?? return ptr.null_mut<U8>()
+        if new_size <= old_bytes -> return pointer
+        new_layout :: match Layout.from_size_align(new_size.max(1), layout.align()) {
+            Ok(value) => value
+            Err(_) => return ptr.null_mut<U8>()
+        }
+        replacement :: self.alloc(new_layout)
+        if replacement.is_null() -> return ptr.null_mut<U8>()
+        #Unsafe("distinct live blocks have checked extents; copy only old initialized bytes; GATE #4494") {
+            ptr.copy_nonoverlapping(pointer, replacement, old_bytes.min(new_size))
+        }
+        self.dealloc(pointer, layout)
+        replacement
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:530
+// AllocError is the canonical core.mem.AllocError, not a second runtime error.
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:537
+pub fn jet_alloc_error(requested_bytes: USize, allocator: String) -> AllocError Never! {
+    // Rust clamps to i64::MAX after its selected-width usize cast.
+    capped :: requested_bytes.min(USize.from_i64_wrapping(I64.MAX)) // GATE #4483
+    AllocError{requested_bytes: Int.from_usize(capped), allocator: allocator.to_string()}
+}
+impl JetPortableError for AllocError {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:545
+    fn jet_error_bytes(self) -> View<U8> Never! { self.allocator.as_bytes() }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:552
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetErr {
+    message: String
+    code: JetOutcome<String, JetAbsent>
+    cause: JetOutcome<Box<JetErr>, JetAbsent>
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:558
+pub fn jet_err(message: String, code: JetOutcome<String, JetAbsent>, cause: JetOutcome<JetErr, JetAbsent>) -> JetErr Never! {
+    JetErr{message: ^message, code: ^code, cause: cause.map(fn(value) { Box.new(^value) })}
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:571
+pub fn jet_err_from_message(message: String) -> JetErr Never! { jet_err(^message, Err(JetAbsent{}), Err(JetAbsent{})) }
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:576
+pub fn jet_err_message(error: JetErr) -> String Never! { error.message.clone() }
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:581
+pub fn jet_err_code(error: JetErr) -> JetOutcome<String, JetAbsent> Never! { error.code.clone() }
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:586
+pub fn jet_err_cause(error: JetErr) -> JetOutcome<JetErr, JetAbsent> Never! {
+    error.cause.as_ref().map(fn(cause) { cause.as_ref().clone() }).map_err(fn(_) { JetAbsent{} })
+}
+impl JetPortableError for JetErr {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:595
+    fn jet_error_bytes(self) -> View<U8> Never! { self.message.as_bytes() }
+}
+impl JetPortableError for String {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:600
+    fn jet_error_bytes(self) -> View<U8> Never! { self.as_bytes() }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:606
+// Jet's String receiver is borrowed; the same implementation covers Rust &String.
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:613
+pub trait JetShow { fn jet_show(self) -> String Never! }
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:617
+pub trait JetDisplay { fn jet_display(self) -> String Never! }
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:621
+pub trait JetDebug { fn jet_debug(self) -> String Never! }
+impl<T: fmt.Display> JetShow for T {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:625
+    fn jet_show(self) -> String Never! { self.to_string() }
+}
+impl<T: fmt.Display> JetDisplay for T {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:631
+    fn jet_display(self) -> String Never! { self.to_string() }
+}
+impl<T: fmt.Debug> JetDebug for T {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:637
+    fn jet_debug(self) -> String Never! { fmt.format_debug(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:662
+pub type JetMap<K, V> = [K:V]
+impl<K: fmt.Debug + Ord, V: fmt.Debug> JetShow for [K:V] {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:643
+    fn jet_show(self) -> String Never! {
+        keys := self.keys().collect()
+        keys.sort()
+        fmt.format_debug_map(self, keys) // GATE #4499: exact key ordering; no value copies.
+    }
+}
+impl<K: fmt.Debug + Ord, V: fmt.Debug> JetDisplay for [K:V] {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:649
+    fn jet_display(self) -> String Never! {
+        keys := self.keys().collect()
+        keys.sort()
+        fmt.format_debug_map(self, keys) // GATE #4499
+    }
+}
+impl<K: fmt.Debug + Ord, V: fmt.Debug> JetDebug for [K:V] {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:655
+    fn jet_debug(self) -> String Never! {
+        keys := self.keys().collect()
+        keys.sort()
+        fmt.format_debug_map(self, keys) // GATE #4499
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:663
+pub fn jet_outcome_of<T>(value: T?) -> JetOutcome<T, JetAbsent> Never! {
+    match value { Val(item) => Ok(^item) None => Err(JetAbsent{}) }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:672
+pub module jet_mem {
+    // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:675
+    pub struct JetFixed {
+        state: RefCell<FixedState>
+        base: NonNull<U8>
+        capacity: USize
+        owned: Bool
+    }
+    impl JetFixed {
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:681
+        pub fn new(size: USize) -> JetFixed Never! {
+            capacity :: size.max(1)
+            layout :: match Layout.from_size_align(capacity, 1) {
+                Ok(value) => value
+                Err(_) => jet_panic("<core.mem>", 0, "invalid Fixed allocator size")
+            }
+            #Unsafe("selected backend supplies dedicated backing span; GATE #4494") {
+                raw :: backing.alloc(layout)
+                nonnull :: NonNull.new(raw) ?? return jet_panic("<core.mem>", 0, "Fixed allocator exhausted its inline backing buffer")
+                JetFixed.from_raw(nonnull.as_ptr(), capacity, true)
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:696
+        pub fn over(bytes: &ViewMut<U8>) -> JetFixed Never! {
+            if bytes.is_empty() -> return jet_panic("<core.mem>", 0, "Fixed allocator needs backing bytes")
+            JetFixed.from_raw(bytes.as_mut_ptr(), bytes.len(), false)
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:703
+        fn from_raw(raw: *U8, capacity: USize, owned: Bool) -> JetFixed Never! {
+            base :: NonNull.new(raw) ?? return jet_panic("<core.mem>", 0, "Fixed allocator needs backing bytes")
+            #Unsafe("constructors ensure live nonempty backing; kernel checks address arithmetic; GATE #4494") {
+                state :: FixedState.from_raw(base.as_ptr(), capacity)
+                JetFixed{state: RefCell.new(^state), base: base, capacity: capacity, owned: owned}
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:718
+        pub fn alloc<T>(self, value: T) -> &T Never! {
+            pointer :: {
+                state := self.state.borrow_mut()
+                match state.try_alloc(^value) {
+                    Ok(raw) => raw
+                    Err(rejected) => {
+                        memory.drop(^rejected)
+                        jet_panic("<core.mem>", 0, "Fixed allocator exhausted its inline backing buffer")
+                    }
+                }
+            }
+            #Unsafe("kernel placed T and retains it until reset/close; GATE #4494 typed mutable loan") { pointer.as_mut() }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:736
+        pub fn try_alloc<T>(self, value: T) -> &T AllocError! {
+            if jet_fault_should_fail_allocation() -> return Err(jet_alloc_error(memory.size_of<T>().max(1), "Fixed"))
+            size :: memory.size_of<T>().max(1)
+            pointer :: {
+                state := self.state.borrow_mut()
+                state.try_alloc(^value).map_err(fn(_) { jet_alloc_error(size, "Fixed") })?
+            }
+            #Unsafe("shared kernel owns placed T until reset/close; GATE #4494 typed mutable loan") { Ok(pointer.as_mut()) }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:755
+        pub fn reset(self: &JetFixed) Never! {
+            #Unsafe("kernel reverse-drops all owned payloads; caller has ended payload loans; GATE #4494") {
+                _ :: self.state.get_mut().reset(fn(_, _) {})
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:763
+        pub fn capacity(self) -> USize Never! { self.capacity }
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:767
+        pub fn used(self) -> USize Never! { self.state.borrow().used() }
+    }
+    impl Drop for JetFixed {
+        // Rust: crates/jet-codegen/src/Prelude/PortableAlloc.rs:773
+        fn drop(self: &JetFixed) Never! {
+            self.reset()
+            if self.owned {
+                match Layout.from_size_align(self.capacity, 1) {
+                    Ok(layout) => {
+                        #Unsafe("kernel destroyed all values before owned backing release; GATE #4494") {
+                            backing.dealloc(self.base.as_ptr(), layout)
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+}

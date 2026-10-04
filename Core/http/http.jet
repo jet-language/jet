@@ -478,8 +478,10 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     head_end :: header_text_end(raw, split)
     if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
-    body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
+    // #4431: split is the exclusive CRLFCRLF end, bounded by raw.len().
+    // Reject oversize bodies by length after head UTF-8 validation, before copying.
+    body_len :: raw.len() - split
+    if body_len > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
     if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidStatus)
     parsed :: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
@@ -493,8 +495,14 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     if response_forbids_content_length(parsed.status.code) && has_header(h, "content-length") -> return Err(.InvalidFraming)
     expected :: content_length(h)
-    if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len())) -> return Err(.InvalidFraming)
-    if response_forbids_body(parsed.status.code) && body_raw.len() > 0 -> return Err(.InvalidFraming)
+    if parsed.status.code != 304 && (expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len)) -> return Err(.InvalidFraming)
+    if response_forbids_body(parsed.status.code) && body_len > 0 -> return Err(.InvalidFraming)
+    // The only body projection, after every head/framing check, without the
+    // second ~copy that slice_b's return would add.
+    body_raw := [U8]{}
+    loop i in split..<raw.len() {
+        &body_raw.push(raw[i])
+    }
     body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
     response := core.http.server.response(parsed.status.code, body_text)
     loop line in hdr_lines {
@@ -506,6 +514,9 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     Ok(response)
 }
 
+// Rust oracle: HTTPMessage.rs:4,699–716 (body cap before collection)
+// and HTTPServer.rs:5176–5204 (validate framing before body materialization).
+// Preserve this Core parser's existing error priority; byte-body/API parity is #4428.
 pub fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
     split := find_double_crlf(raw)
     if split < 0 -> return Err(.InvalidFraming)
@@ -513,8 +524,10 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
     head_end :: header_text_end(raw, split)
     if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
-    body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
+    // split is the exclusive CRLFCRLF end, bounded by raw.len().
+    // Validate head UTF-8 first, then reject oversize bodies without copying them.
+    body_len :: raw.len() - split
+    if body_len > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
     if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidMethod)
     parts :: split_space_line(lines[0])
@@ -546,7 +559,7 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
     if has_ambiguous_framing(h) -> return Err(.InvalidFraming)
     if has_unsupported_encoding(h) -> return Err(.UnsupportedEncoding)
     expected :: content_length(h)
-    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_raw.len()) || (expected < 0 && body_raw.len() > 0) -> return Err(.InvalidFraming)
+    if expected > C_MAX_BODY_BYTES || (expected >= 0 && expected != body_len) || (expected < 0 && body_len > 0) -> return Err(.InvalidFraming)
     req := core.http.client.request(method_text(method_parse(parts[0])), parts[1])
     loop line in hlines {
         col := index_byte(line.bytes(), 58)
@@ -554,7 +567,13 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
         value :: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         req = &req.header(name, trim(value))
     }
-    if body_raw.len() > 0 {
+    if body_len > 0 {
+        // The only body projection: after all head/framing checks, pass the
+        // bounded buffer without ~copy (slice_b's ~out would copy again).
+        body_raw := [U8]{}
+        loop i in split..<raw.len() {
+            &body_raw.push(raw[i])
+        }
         body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
         req = req.body(body_text)
     }

@@ -1,0 +1,550 @@
+// PORT-PENDING 0271 crates-jet-codegen-src-prelude-corelib-top-fsruntimeops-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs:1-546
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Filesystem operations shared by AOT, JIT, and the interpreter.
+//RS //
+//RS // The surrounding engine supplies `jet_std`, `jet_fault_should_fail`, and the
+//RS // raw `jet_fs_*` kernels. Error classification and fault policy live here.
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_fs_chown
+//RS // AUDIT: this region is the checked POSIX chown ABI adapter. Safe Rust cannot
+//RS // express the libc call; this adapter validates UID/GID bounds and a NUL-free
+//RS // path before calling it, and callers receive only Result<(), IOError>.
+//RS // Violating those checks could transfer ownership to an unintended path or ID.
+//RS #[cfg(unix)]
+//RS extern "C" {
+//RS     fn chown(path: *const std::ffi::c_char, owner: u32, group: u32) -> i32;
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
+//RS     let p = std::path::Path::new(path);
+//RS     let abs = if p.is_absolute() {
+//RS         p.to_path_buf()
+//RS     } else {
+//RS         std::env::current_dir()
+//RS             .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))?
+//RS             .join(p)
+//RS     };
+//RS     Ok(abs.to_string_lossy().to_string())
+//RS }
+//RS 
+//RS /// D-FILES-SCOPE1: capture only the explicit FS.Read resource roots from the
+//RS /// checked Authority. The handle owns that attenuation and never accepts a
+//RS /// caller-supplied root.
+//RS pub(crate) fn jet_std_fs_scope(authority: &JetAuthority) -> JetFileScope {
+//RS     JetFileScope::from_authority(authority)
+//RS }
+//RS 
+//RS /// D-FILES-SCOPE1: read through the descriptor-relative no-follow kernel.
+//RS /// Fault injection and IOError projection stay in this adapter; path policy
+//RS /// and root isolation stay in `jet_fs_scope_read`.
+//RS pub(crate) fn jet_std_fs_scope_read(
+//RS     scope: &JetFileScope,
+//RS     path: &String,
+//RS ) -> Result<String, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let bytes = jet_fs_scope_read(scope, path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+//RS     String::from_utf8(bytes).map_err(|error| {
+//RS         jet_std::io_error_at(
+//RS             jet_std::IOOperation::Read,
+//RS             path,
+//RS             std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
+//RS     t.duration_since(std::time::UNIX_EPOCH)
+//RS         .ok()
+//RS         .map(|d| d.as_millis() as i64)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     jet_fs_rename(from, to)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, from, error))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_read_link_path(path: &String) -> Result<String, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     std::fs::read_link(path)
+//RS         .map(|target| target.to_string_lossy().to_string())
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_hard_link_path(
+//RS     from: &String,
+//RS     to: &String,
+//RS ) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::hard_link(from, to)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, to, error))
+//RS }
+//RS 
+//RS fn jet_std_fs_temp_path(prefix: &String) -> String {
+//RS     let clean: String = prefix
+//RS         .chars()
+//RS         .map(|character| {
+//RS             if character.is_ascii_alphanumeric() {
+//RS                 character
+//RS             } else {
+//RS                 '_'
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     let nanos = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|duration| duration.as_nanos())
+//RS         .unwrap_or(0);
+//RS     std::env::temp_dir()
+//RS         .join(format!("{}_{}_{}", clean, std::process::id(), nanos))
+//RS         .to_string_lossy()
+//RS         .to_string()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_temp_dir_path(prefix: &String) -> Result<String, jet_std::IOError> {
+//RS     let path = jet_std_fs_temp_path(prefix);
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::create_dir(&path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &path, error))?;
+//RS     Ok(path)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_temp_file_path(prefix: &String) -> Result<String, jet_std::IOError> {
+//RS     let path = jet_std_fs_temp_path(prefix);
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::OpenOptions::new()
+//RS         .create_new(true)
+//RS         .write(true)
+//RS         .open(&path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &path, error))?;
+//RS     Ok(path)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_lock_path(path: &String) -> Result<String, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::OpenOptions::new()
+//RS         .create_new(true)
+//RS         .write(true)
+//RS         .open(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+//RS     Ok(path.clone())
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_temp_dir(prefix: &String) -> Result<JetTempDirOwner, jet_std::IOError> {
+//RS     let path = jet_std_fs_temp_dir_path(prefix)?;
+//RS     Ok(JetTempDirOwner {
+//RS         path,
+//RS         cleanup: std::rc::Rc::new(()),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_temp_file(prefix: &String) -> Result<JetTempFileOwner, jet_std::IOError> {
+//RS     let path = jet_std_fs_temp_file_path(prefix)?;
+//RS     Ok(JetTempFileOwner {
+//RS         path,
+//RS         cleanup: std::rc::Rc::new(()),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_lock(path: &String) -> Result<JetFileLockOwner, jet_std::IOError> {
+//RS     let path = jet_std_fs_lock_path(path)?;
+//RS     Ok(JetFileLockOwner {
+//RS         path,
+//RS         cleanup: std::rc::Rc::new(()),
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Flush,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     std::fs::OpenOptions::new()
+//RS         .read(true)
+//RS         .open(path)
+//RS         .and_then(|f| f.sync_all())
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Flush, path, e))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(pattern.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     jet_fs_glob(pattern)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, pattern, error))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     jet_fs_canonicalize(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Resolve, path, error))
+//RS }
+//RS pub(crate) fn jet_fs_remove_path(path: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     jet_fs_remove_entry(path)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
+//RS }
+//RS pub(crate) struct JetFsStat {
+//RS     pub(crate) size: i64,
+//RS     pub(crate) modified_ms: i64,
+//RS     pub(crate) created_ms: i64,
+//RS     pub(crate) readonly: bool,
+//RS     pub(crate) is_file: bool,
+//RS     pub(crate) is_dir: bool,
+//RS     pub(crate) is_symlink: bool,
+//RS     pub(crate) kind: String,
+//RS     pub(crate) mode: i64,
+//RS }
+//RS 
+//RS pub(crate) fn jet_fs_stat(path: &String) -> Result<JetFsStat, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let meta = std::fs::symlink_metadata(path)
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS     let ft = meta.file_type();
+//RS     let modified_ms = meta.modified().ok().and_then(system_time_ms).unwrap_or(0);
+//RS     let created_ms = meta.created().ok().and_then(system_time_ms).unwrap_or(0);
+//RS     let kind = if ft.is_symlink() {
+//RS         "symlink"
+//RS     } else if ft.is_dir() {
+//RS         "dir"
+//RS     } else if ft.is_file() {
+//RS         "file"
+//RS     } else {
+//RS         "other"
+//RS     };
+//RS     Ok(JetFsStat {
+//RS         size: meta.len() as i64,
+//RS         modified_ms,
+//RS         created_ms,
+//RS         readonly: meta.permissions().readonly(),
+//RS         is_file: ft.is_file(),
+//RS         is_dir: ft.is_dir(),
+//RS         is_symlink: ft.is_symlink(),
+//RS         kind: kind.to_string(),
+//RS         mode: mode_of(&meta),
+//RS     })
+//RS }
+//RS pub(crate) fn jet_std_fs_is_fifo(path: &String) -> Result<bool, jet_std::IOError> {
+//RS     Ok((jet_fs_stat(path)?.mode & 0o170000) == 0o010000)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_is_socket(path: &String) -> Result<bool, jet_std::IOError> {
+//RS     Ok((jet_fs_stat(path)?.mode & 0o170000) == 0o140000)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_mktemp_path(prefix: &String) -> String {
+//RS     jet_std_fs_temp_path(prefix)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_chown(
+//RS     path: &String,
+//RS     owner: i64,
+//RS     group: i64,
+//RS ) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::ffi::CString;
+//RS 
+//RS         let owner = if owner == -1 {
+//RS             u32::MAX
+//RS         } else {
+//RS             u32::try_from(owner).map_err(|_| {
+//RS                 jet_std::IOError::other(
+//RS                     jet_std::IOOperation::Write,
+//RS                     Some(path.clone()),
+//RS                     "owner must be -1 or a non-negative u32",
+//RS                 )
+//RS             })?
+//RS         };
+//RS         let group = if group == -1 {
+//RS             u32::MAX
+//RS         } else {
+//RS             u32::try_from(group).map_err(|_| {
+//RS                 jet_std::IOError::other(
+//RS                     jet_std::IOOperation::Write,
+//RS                     Some(path.clone()),
+//RS                     "group must be -1 or a non-negative u32",
+//RS                 )
+//RS             })?
+//RS         };
+//RS         let c_path = CString::new(path.as_bytes()).map_err(|_| {
+//RS             jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 Some(path.clone()),
+//RS                 "path contains an interior NUL",
+//RS             )
+//RS         })?;
+//RS         if unsafe { chown(c_path.as_ptr(), owner, group) } == 0 {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(jet_std::io_error_at(
+//RS                 jet_std::IOOperation::Write,
+//RS                 path,
+//RS                 std::io::Error::last_os_error(),
+//RS             ))
+//RS         }
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (path, owner, group);
+//RS         Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             None,
+//RS             "chown is unavailable on this platform",
+//RS         ))
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_fs_chown
+//RS 
+//RS 
+//RS pub(crate) fn jet_std_fs_set_mode(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if mode < 0 || mode > i64::from(u32::MAX) {
+//RS             return Err(jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 Some(path.clone()),
+//RS                 "file mode must be between 0 and u32::MAX",
+//RS             ));
+//RS         }
+//RS         use std::os::unix::fs::PermissionsExt;
+//RS         let permissions = std::fs::Permissions::from_mode(mode as u32);
+//RS         return std::fs::set_permissions(path, permissions)
+//RS             .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         if mode != 0 && mode != 1 {
+//RS             return Err(jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 Some(path.clone()),
+//RS                 "file mode must contain only the readonly bit on this platform",
+//RS             ));
+//RS         }
+//RS         let mut permissions = std::fs::metadata(path)
+//RS             .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?
+//RS             .permissions();
+//RS         permissions.set_readonly(mode == 1);
+//RS         return std::fs::set_permissions(path, permissions)
+//RS             .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error));
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         std::os::unix::fs::symlink(from, to)
+//RS             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
+//RS     }
+//RS     #[cfg(windows)]
+//RS     {
+//RS         let meta = std::fs::metadata(from)
+//RS             .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, from, e))?;
+//RS         if meta.is_dir() {
+//RS             std::os::windows::fs::symlink_dir(from, to)
+//RS                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
+//RS         } else {
+//RS             std::os::windows::fs::symlink_file(from, to)
+//RS                 .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
+//RS         }
+//RS     }
+//RS     #[cfg(not(any(unix, windows)))]
+//RS     {
+//RS         let _ = from;
+//RS         Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(to.clone()),
+//RS             "symbolic links are unavailable on this platform",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn mode_of(meta: &std::fs::Metadata) -> i64 {
+//RS     use std::os::unix::fs::MetadataExt;
+//RS     meta.mode() as i64
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn mode_of(meta: &std::fs::Metadata) -> i64 {
+//RS     // Non-Unix metadata has no portable permission bits; expose readonly as 0/1.
+//RS     i64::from(u8::from(meta.permissions().readonly()))
+//RS }
+//RS pub(crate) fn jet_std_fs_read_at(
+//RS     path: &String,
+//RS     offset: i64,
+//RS     len: i64,
+//RS ) -> Result<Vec<u8>, jet_std::IOError> {
+//RS     use std::io::{Read, Seek, SeekFrom};
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     let mut f = std::fs::File::open(path)
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS     f.seek(SeekFrom::Start(offset.max(0) as u64))
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS     let mut buf = vec![0u8; len.max(0) as usize];
+//RS     let n = f
+//RS         .read(&mut buf)
+//RS         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+//RS     buf.truncate(n);
+//RS     Ok(buf)
+//RS }
+//RS pub(crate) fn jet_std_fs_read_bytes(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     std::fs::read(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
+//RS }
+//RS 
+//RS /// D-FOUND-VIEW1: open one shared read-only mapping. The adapter owns only
+//RS /// fault classification; native lifetime and path identity stay in JetStd.
+//RS pub(crate) fn jet_std_fs_map(
+//RS     path: &String,
+//RS ) -> Result<jet_std::JetMappedFile, jet_std::IOError> {
+//RS     if jet_fault_should_fail("FS.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some(path.clone()),
+//RS             "fault injected: FS.Read",
+//RS         ));
+//RS     }
+//RS     jet_std::jet_std_files_map(path)
+//RS }
+//RS 
+//RS /// Construct a checked map window without materializing its bytes.
+//RS pub(crate) fn jet_std_fs_map_window(
+//RS     map: &jet_std::JetMappedFile,
+//RS     offset: i64,
+//RS     length: i64,
+//RS ) -> Result<jet_std::JetMappedByteView, jet_std::IOError> {
+//RS     jet_std::jet_std_files_map_window(map, offset, length)
+//RS }
+//RS /// Borrowed half-open byte window; the map owner remains in the returned slice.
+//RS pub(crate) fn jet_std_fs_map_window_view(
+//RS     map: &jet_std::JetMappedFile,
+//RS     start: i64,
+//RS     end: i64,
+//RS ) -> Result<&[u8], jet_std::IOError> {
+//RS     jet_std::jet_std_files_map_window_view(map, start, end)
+//RS }
+//RS 
+//RS /// Borrowed offset/length byte window; no byte buffer is materialized.
+//RS pub(crate) fn jet_std_fs_map_window_len_view(
+//RS     map: &jet_std::JetMappedFile,
+//RS     offset: i64,
+//RS     length: i64,
+//RS ) -> Result<&[u8], jet_std::IOError> {
+//RS     jet_std::jet_std_files_map_window_len_view(map, offset, length)
+//RS }
+//RS 
+//RS /// Borrowed mapped-file lines tie their item lifetime to the map binding.
+//RS pub(crate) fn jet_std_fs_map_lines_view<'a>(
+//RS     map: &'a jet_std::JetMappedFile,
+//RS ) -> JetViewIter<'a, &'a [u8]> {
+//RS     jet_view_iter_from_iter(jet_std::jet_std_files_map_lines_view(map))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_map_len(map: &jet_std::JetMappedFile) -> i64 {
+//RS     map.len()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_fs_map_is_empty(map: &jet_std::JetMappedFile) -> bool {
+//RS     map.is_empty()
+//RS }
+//RS 
+//RS /// Keep mapped line iteration lazy; each yielded carrier pins its map lease.
+//RS pub(crate) fn jet_std_fs_map_lines(map: &jet_std::JetMappedFile) -> jet_std::JetMappedLines {
+//RS     jet_std::jet_std_files_map_lines(map)
+//RS }
+// END-PORT-PENDING 0271 crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs:1-546
+

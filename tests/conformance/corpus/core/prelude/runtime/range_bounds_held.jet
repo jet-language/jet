@@ -1,0 +1,36 @@
+// HELD: full RangeBounds SCC; Foundation StructuralDebug.rs:310–319 must
+// provide jet_debug_range before activating the structural_text delegate.
+// #4262 shared runtime/native consumer cutover; these original routes must not
+// be accepted merely because the isolated source-policy assertions pass.
+use core.prelude.runtime.kernel_range_bounds as range_held_kernel
+
+#Test("held Range structural text delegates canonical Foundation rendering") {
+    assert_eq(range_held_kernel.jet_range_structural_text(I64{-1}, I64{3}, true), "Range { start: -1, end: 3, exclusive: true }")
+    assert_eq(range_held_kernel.jet_range_structural_text(I64{0}, I64{0}, false), "Range { start: 0, end: 0, exclusive: false }")
+}
+
+// #4318/#4392 retained UTF-8 read / Main native builder and caller cutover.
+// OWNED String result, not borrowed String.slice provenance.
+fn range_held_owned_from_scope() -> String {
+    source :: "aé界😀z"
+    source[1..3]
+}
+#Test("held native owned String range slice outlives original String") {
+    owned :: range_held_owned_from_scope()
+    assert_eq(owned, "é界😀")
+}
+
+// tir_collections_and_methods.rs:1288–1299 original builtin/copy route.
+fn range_held_strip_hash(reference: String) -> String {
+    text := ~reference
+    if (~text).starts_with("#") -> text = (~text).slice(1, (~text).len() - 1)
+    return text
+}
+#Test("held copied string slice original Unicode builtin expectation") {
+    assert_eq(range_held_strip_hash("#é🙂"), "é🙂")
+}
+
+// ownership.rs:4671–4685: keep the dynamic construction rail and exact text.
+// This deliberate stop case belongs in Main's expected-failure harness, not a
+// passing focused #Test body: values := [1]; outside :: [&values[2..2]]
+// Stop [E3001]: `panic: can't view 1 items from 2 to 2 (inclusive)`

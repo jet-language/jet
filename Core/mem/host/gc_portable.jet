@@ -1,0 +1,84 @@
+use core.mem.runtime.gc_core as gc_facts
+use core.mem.runtime.gc_host_policy as gc_trace_policy
+use core.mem.host.gc_host.[GCFailureExit]
+
+// __gc_portable.rs:14–145 requires inline typed storage and guard loans,
+// not an exemption to keep the implementation in Rust. The portable provider
+// must use the sole atomic_word substrate: Acquire load, strong CAS with
+// Acquire success/Relaxed failure, Release store, static addresses and spin.
+// Public Atomic<T> is not a primitive for implementing its own runtime.
+//
+// #4494: the required compiler-owned contracts for lock/once bodies are:
+// :14–47 mutable inline T behind a shared mutex, guard-retained &T/&mut T
+// projections, and Release unlock on every guard cleanup edge; no owned copy.
+// :64–108 const initialization, consuming T extraction and exclusive get_mut.
+// :111–144 plain inline uninitialized T (not Option<T> or zeroed T), one write
+// by the CAS(0,1) winner, Release publication of state 2, Acquire observation
+// before lending &'static T, and a consuming-once initializer callback.
+// Both containers need generated checked Send/Sync/layout/drop dictionaries.
+// The canonical Uninit readiness bitmap cannot supply these typed leaves.
+// :147–154 also needs a single statically addressable mutex initialized to 1;
+// gc_portable_take_object_id below is only the transition under its held lock.
+// :156–165 needs the canonical consuming-once callback/panic owner and an
+// output-free target exit(101); stderr_exit("",101) is not equivalent.
+// No fake lock, boxed initialized placeholder, new erased graph or algorithm
+// hidden behind a foreign Rust/C function is a substitute for these contracts.
+
+// Rust GcPoisonError (:50–55). This carrier owns its payload, including a guard
+// when supplied by a real mutex. Portable locks never produce poison.
+#Error
+pub struct GCPoisonError<T> {
+    pub value: T
+}
+pub fn gc_portable_poison_into_inner<T>(error: ^GCPoisonError<T>) -> T Never! {
+    error.value
+}
+
+// Rust GcTryLockError (:58–61). WouldBlock owns no guard; Poisoned owns T.
+#Error
+pub enum GCTryLockError<T> {
+    WouldBlock
+    Poisoned(T)
+}
+
+// Rust gc_next_object_id (:151–153), with the exclusive lock loan supplied
+// by its caller. Do not publish a result or change the counter on exhaustion.
+// Rust refuses MAX itself: computing its successor fails before Ok(id).
+// This full-U64, allocation-free transition is not the global synchronization
+// provider and does not claim concurrent identity allocation.
+pub fn gc_portable_take_object_id(next: &U64) -> U64 gc_facts.GCFault! {
+    if next == (U64{18446744073709551615}) -> return Err(gc_facts.GCFault.IDExhausted)
+    id :: next
+    next = next + (U64{1})
+    Ok(id)
+}
+
+// Rust gc_initialize_trace/gc_trace_promotion/gc_trace_collection
+// (:167–170,181–187): trace unavailable is explicit target policy, not a
+// successful substitute for collection. The collector is unchanged and runs.
+pub fn gc_portable_trace_available() -> Bool Never! { false }
+
+// Rust gc_record_memory_ledger (:177–179): no hosted ledger capability.
+pub fn gc_portable_ledger_available() -> Bool Never! { false }
+
+// Rust gc_initialize_trace (:167–170): successful target-specific absence of
+// tracing, never a substitute for initializing/running the collector.
+pub fn gc_portable_initialize_trace() gc_facts.GCFault! {}
+
+// Rust gc_record_memory_ledger (:177–179): no configured hosted ledger.
+// site borrows the caller's static provenance; no copy or allocation is needed.
+pub fn gc_portable_record_memory_ledger(site: gc_facts.GCPromotionSite) Never! {}
+
+// Rust gc_trace_promotion (:181–183), gc_trace_collection (:185–187).
+// Both return success without trace side effects on the no-host target.
+// The collection extent remains borrowed; these do not collect/reclaim objects.
+pub fn gc_portable_trace_promotion(id: gc_facts.GCObjectID, site: gc_facts.GCPromotionSite) gc_facts.GCFault! {}
+pub fn gc_portable_trace_collection(reclaimed: View<gc_facts.GCObjectID>) gc_facts.GCFault! {}
+
+// Rust gc_runtime_or_exit (:173–175). The sole E2110 formatter is shared.
+// #4405: ordinary generic trait Never calls currently lose divergence.
+// Retain the real terminal provider contract; do not substitute panic/spin.
+pub fn gc_portable_failure<E: GCFailureExit>(fault: gc_facts.GCFault, exit: E) -> Never Never! {
+    text :: gc_trace_policy.gc_failure_text(fault)
+    exit.stderr_exit(text, 1)
+}

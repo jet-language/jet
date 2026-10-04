@@ -1,0 +1,208 @@
+use core.net.runtime.lib as net
+use core.files.[OSPath]
+use core.sys.target as target
+use jetpack.foundation.net.fetch_error as policy
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.io as io
+use std.io.[Read, IOError, ErrorKind]
+use std.net.[TcpListener, IpAddr]
+use std.thread as thread
+use std.time.[Duration]
+use std.sync.[Arc, AtomicBool, Ordering]
+
+// Native fixtures require GATE #4494; these are the original real-provider
+// socket/filesystem/concurrent journeys, not alternate production providers.
+// Rust: crates/jet-net/src/lib.rs:961
+#Test("file_fetch_still_works_without_network") {
+    path :: env.temp_dir().join(OSPath.from_text("jet-net-file-fetch-{process.id()}"))
+    fs.write(path,"fixture".bytes()).expect("write temp fixture")
+    url :: "file://{path.display()}"
+    bytes :: net.fetch_in_root(url,path.parent().unwrap()).expect("file fetch")
+    assert(bytes == "fixture".bytes())
+    _ :: fs.remove_file(^path)
+}
+// Rust: crates/jet-net/src/lib.rs:973
+#Test("fetch_in_root_rejects_a_sparse_over_limit_file_at_the_shared_cap") {
+    root :: env.temp_dir().join(OSPath.from_text("jet-net-fetch-over-limit-root-{process.id()}"))
+    path :: root.join(OSPath.from_text("over-limit"))
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create source root")
+    file :: fs.File.create(path).expect("create sparse fixture")
+    file.set_len(U64{net.MAX_FETCH_BYTES} + U64{1}).expect("size sparse fixture")
+    file.close().expect("close sparse fixture")
+    error :: net.fetch_in_root("file://over-limit",root).expect_err("over-limit file must fail at the shared cap")
+    assert(error.to_string() == "fetch response exceeds {net.MAX_FETCH_BYTES} bytes")
+    _ :: fs.remove_dir_all(^root)
+}
+// Rust: crates/jet-net/src/lib.rs:997
+#Test("comptime_file_fetch_rejects_paths_outside_source_root") {
+    root :: env.temp_dir().join(OSPath.from_text("jet-net-fetch-root-{process.id()}"))
+    outside :: env.temp_dir().join(OSPath.from_text("jet-net-fetch-outside-{process.id()}"))
+    _ :: fs.remove_dir_all(root); _ :: fs.remove_file(outside)
+    fs.create_dir_all(root).expect("create source root")
+    fs.write(outside,"private fixture".bytes()).expect("write outside fixture")
+    error :: net.fetch_in_root("file://{outside.display()}",root).expect_err("absolute path outside source root must fail")
+    assert(error.to_string().contains("outside the compile-time source directory"))
+    if target.selected_family() == .Unix {
+        link :: root.join(OSPath.from_text("outside-link"))
+        fs.symlink(outside,link).expect("create escape symlink")
+        error :: net.fetch_in_root("file://outside-link",root).expect_err("symlink outside source root must fail")
+        assert(error.to_string().contains("outside the compile-time source directory"))
+        _ :: fs.remove_file(^link)
+    }
+    _ :: fs.remove_dir_all(^root); _ :: fs.remove_file(^outside)
+}
+// Rust: crates/jet-net/src/lib.rs:1032
+#Test("comptime_file_fetch_is_race_safe_against_symlink_swap") {
+    os :: target.selected_os()
+    if os != .Linux && os != .Android && os != .MacOS && os != .IOS -> return
+    root :: env.temp_dir().join(OSPath.from_text("jet-net-fetch-race-root-{process.id()}"))
+    outside :: env.temp_dir().join(OSPath.from_text("jet-net-fetch-race-outside-{process.id()}"))
+    target_path :: root.join(OSPath.from_text("target"))
+    safe_slot :: root.join(OSPath.from_text("safe-slot"))
+    _ :: fs.remove_dir_all(root); _ :: fs.remove_file(outside)
+    fs.create_dir_all(root).expect("create source root")
+    fs.write(target_path,"inside".bytes()).expect("write source fixture")
+    fs.write(outside,"outside".bytes()).expect("write outside fixture")
+    stop :: Arc.new(AtomicBool.new(false))
+    mutator_stop :: stop.clone()
+    mutator_outside :: outside.clone()
+    mutator :: thread.spawn(fn() {
+        loop !mutator_stop.load(Ordering.Relaxed) {
+            fs.rename(target_path,safe_slot).expect("move source fixture aside")
+            fs.symlink(mutator_outside,target_path).expect("install escape symlink")
+            fs.remove_file(target_path).expect("remove escape symlink")
+            fs.rename(safe_slot,target_path).expect("restore source fixture")
+        }
+    })
+    loop i in 0..<2048 {
+        if net.fetch_in_root("file://target",root) == .Ok(bytes) {
+            assert(bytes == "inside".bytes(),"a file fetch followed the escape symlink")
+        }
+    }
+    stop.store(true,Ordering.Relaxed)
+    mutator.join().expect("source mutator joins")
+    _ :: fs.remove_dir_all(^root); _ :: fs.remove_file(^outside)
+}
+// Rust: crates/jet-net/src/lib.rs:1080
+#Test("comptime_http_fetch_rejects_loopback_before_connecting") {
+    listener :: TcpListener.bind(("127.0.0.1",U16{0})).expect("bind loopback fixture")
+    port :: listener.local_addr().expect("loopback address").port()
+    error :: net.fetch("http://127.0.0.1:{port}/secret").expect_err("loopback destination must fail")
+    assert(error.debug().contains("not public"),"unexpected error: {error.debug()}")
+    listener.set_nonblocking(true).expect("make listener nonblocking")
+    if listener.accept() == { .Err(error) -> assert(error.kind() == ErrorKind.WouldBlock); .Ok(_) -> assert(false,"a connection reached the denied listener") }
+}
+// Rust: crates/jet-net/src/lib.rs:1094
+#Test("public_destination_policy_rejects_reserved_ipv4_space") {
+    loop address in [String]{"192.0.0.1","192.0.0.9","192.0.0.255"} {
+        ip :: IpAddr.from_str(address).expect("reserved IPv4 fixture")
+        assert(!net.is_public_ip(ip),"reserved address was accepted: {address}")
+    }
+    assert(net.is_public_ip(IpAddr.from_str("8.8.8.8").expect("public IPv4 fixture")))
+}
+// Rust: crates/jet-net/src/lib.rs:1103
+#Test("redirect_policy_hook_is_applied_to_each_hop") {
+    listener :: TcpListener.bind(("127.0.0.1",U16{0})).expect("bind redirect fixture")
+    address :: listener.local_addr().expect("redirect fixture address")
+    server :: thread.spawn(fn() {
+        loop fixture in [(String,String?)]{("/one",Val("/two")),("/two",Val("/done")),("/done",None)} {
+            expected_path :: fixture.0; location :: fixture.1
+            (stream,_) :: listener.accept().expect("accept redirect request")
+            request := [U8#1024]{uninit}
+            loop i in 0..<1024 -> request[i] = U8{0}
+            length :: stream.read(&request).expect("read redirect request")
+            text :: String.from_utf8_lossy(request[0..<length])
+            assert(text.starts_with("GET {expected_path} HTTP/1.1"),"unexpected request: {text}")
+            response :: if location == {
+                .Val(value) -> "HTTP/1.1 302 Found\r\nLocation: {value}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .None -> "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone"
+            }
+            stream.write_all(response.bytes()).expect("write redirect response")
+        }
+    })
+    hops := [(String,String)]{}
+    body :: net.fetch_bounded_with_redirect_policy("http://{address}/one",Duration.from_secs(U64{1}),5,U64{16},fn(current,location) {
+        hops.push((current.clone(),location.clone()))
+        policy.foundation_fetch_resolve_redirect(current,location).map_err(fn(error) { error.to_string() })
+    }).expect("redirect chain fetch")
+    assert(body == "done".bytes()); assert(hops.len() == 2)
+    assert(hops[0].1 == "/two"); assert(hops[1].1 == "/done")
+    server.join().expect("redirect fixture joins")
+}
+// Rust: crates/jet-net/src/lib.rs:1155
+#Test("unsupported_scheme_names_allowed_schemes") {
+    error :: net.fetch("ftp://example.invalid/data").expect_err("ftp is rejected")
+    assert(error.to_string().contains("expected `file://`, `http://`, or `https://`"))
+}
+// Rust: crates/jet-net/src/lib.rs:1164
+#Test("fetch_reader_rejects_an_endless_response_at_the_boundary") {
+    error :: net.read_limited(io.repeat(U8{0}),8).expect_err("reader must be bounded")
+    assert(error.kind() == ErrorKind.InvalidData)
+}
+// Rust: crates/jet-net/src/lib.rs:1170
+#Test("fetch_in_root_rejects_an_endless_http_stream_at_the_shared_cap") {
+    url :: "http://fixture.invalid/endless"
+    timeout :: Duration.from_millis(U64{25})
+    error :: net.fetch_with_root_timeout_and_http(url,timeout,OSPath.from_text("."),fn(stream_url,stream_timeout) {
+        assert(stream_url == url); assert(stream_timeout == timeout)
+        Ok(net.StreamResponse{status_value:U16{200},content_length_value:None,location_value:None,reader:Box.new(io.repeat(U8{0}))})
+    }).expect_err("endless HTTP stream must fail at the shared cap")
+    assert(error.to_string() == "fetch response exceeds {net.MAX_FETCH_BYTES} bytes")
+}
+// Rust: crates/jet-net/src/lib.rs:1198
+struct ReadMustNotBeCalled {}
+impl ReadMustNotBeCalled.Read {
+    pub fn read(self: &ReadMustNotBeCalled, buffer: &View<U8>) -> Int IOError! {
+        panic("over-limit Content-Length was not rejected before reading")
+    }
+}
+// Rust: crates/jet-net/src/lib.rs:1197
+#Test("fetch_in_root_rejects_an_over_limit_http_content_length_before_reading") {
+    url :: "http://fixture.invalid/declared-over-limit"
+    error :: net.fetch_with_root_timeout_and_http(url,Duration.from_millis(U64{25}),OSPath.from_text("."),fn(_,_) {
+        Ok(net.StreamResponse{status_value:U16{200},content_length_value:Val(U64{net.MAX_FETCH_BYTES} + U64{1}),location_value:None,reader:Box.new(ReadMustNotBeCalled{})})
+    }).expect_err("over-limit Content-Length must fail at the shared cap")
+    assert(error.to_string() == "response exceeds its size bound")
+}
+// Rust: crates/jet-net/src/lib.rs:1227
+#Test("https_default_build_has_tls_backend") {
+    #If(feature("tls")) {
+        listener :: TcpListener.bind(("127.0.0.1",U16{0})).expect("bind local fixture")
+        address :: listener.local_addr().expect("local addr")
+        server :: thread.spawn(fn() {
+            (stream,_) :: listener.accept().expect("accept one client")
+            buffer := [U8#8]{0,0,0,0,0,0,0,0}
+            _ :: stream.read(&buffer)
+            _ :: stream.write_all("not tls".bytes())
+        })
+        result :: net.get_stream_with_timeout("https://localhost:{address.port()}",Duration.from_millis(U64{500}))
+        assert(result.is_err(),"fixture is not a TLS server")
+        server.join().expect("fixture server joins")
+        error :: result.err().unwrap()
+        assert(error.diagnostic_code() == "E4201",error.debug())
+        assert(error.to_string() == "TLS handshake failed")
+    }
+}
+// Rust: crates/jet-net/src/lib.rs:1250
+#Test("tls_error_classifier_names_certificate_failures") {
+    error :: policy.foundation_fetch_http_error("https://api.example.test/data","Connection Failed: invalid peer certificate: UnknownIssuer")
+    assert(error.diagnostic_code() == "E4202")
+    assert(error.diagnostic_what("https://api.example.test/data").contains("api.example.test"))
+}
+// Rust: crates/jet-net/src/lib.rs:1263
+#Test("tls_error_classifier_names_missing_trust_roots") {
+    error :: policy.foundation_fetch_http_error("https://api.example.test/data","no valid certificates loaded by rustls-native-certs")
+    assert(error.diagnostic_code() == "E4203")
+    assert(error.diagnostic_fix().contains("ca-certificates"))
+}
+// Rust: crates/jet-net/src/lib.rs:1274
+#Test("tls_fixture_pems_are_checked_in_for_future_handshake_tests") {
+    cert :: include_str("tests/fixtures/tls/localhost.cert.pem")
+    key :: include_str("tests/fixtures/tls/localhost.key.pem")
+    assert(cert.contains("BEGIN CERTIFICATE"))
+    assert(cert.contains("DNS:localhost") || cert.contains("MIID"))
+    assert(key.contains("BEGIN PRIVATE KEY"))
+}

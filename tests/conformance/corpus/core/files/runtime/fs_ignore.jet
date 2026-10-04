@@ -1,0 +1,215 @@
+// Prelude/Core/FSIgnore.rs:1–362 ordered `.gitignore` policy. The retained
+// no-follow ignore-file read and root strip stay native (#3593/#3598/#4389);
+// these cases feed the leaf's documented results (base text, `[U8]?` source).
+use core.files.runtime.kernel_fs_ignore as fs_ignore_kernel
+
+fn fs_ignore_test_parse(line: String) -> fs_ignore_kernel.JetFSIgnoreRule? Never! {
+    fs_ignore_kernel.JetFSIgnoreRule.parse(line, "")
+}
+
+fn fs_ignore_test_rule(line: String) -> fs_ignore_kernel.JetFSIgnoreRule Never! {
+    fs_ignore_test_parse(line) ?? panic("expected an ignore rule")
+}
+
+fn fs_ignore_test_glob(pattern: String, name: String) -> Bool Never! {
+    fs_ignore_test_rule(pattern).matches(name, false)
+}
+
+fn fs_ignore_test_empty() -> fs_ignore_kernel.JetFSIgnoreMatcher Never! {
+    fs_ignore_kernel.JetFSIgnoreMatcher.new()
+}
+
+fn fs_ignore_test_root(text: String) -> fs_ignore_kernel.JetFSIgnoreMatcher Never! {
+    fs_ignore_test_empty().with_directory_rules("", Val(text.bytes()))
+}
+
+// Jet text has no `\r` escape; carriage returns are spelled as bytes.
+fn fs_ignore_test_bytes(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("test text is UTF-8")
+}
+
+#Test("parse skips blanks, comments and bare negation or slash lines") {
+    assert(fs_ignore_test_parse("") == None)
+    assert(fs_ignore_test_parse("   ") == None)
+    assert(fs_ignore_test_parse(fs_ignore_test_bytes([U8]{13})) == None)
+    assert(fs_ignore_test_parse("# comment") == None)
+    assert(fs_ignore_test_parse("!") == None)
+    assert(fs_ignore_test_parse("/") == None)
+    assert(fs_ignore_test_parse("//") == None)
+    assert(fs_ignore_test_parse("!/") == None)
+}
+
+#Test("parse records negation, directory, anchor and separator flags") {
+    rule :: fs_ignore_test_rule("!/build/out/")
+    assert_eq(rule.pattern, "build/out")
+    assert(rule.negated)
+    assert(rule.directory_only)
+    assert(rule.anchored)
+    assert(rule.has_separator)
+    plain :: fs_ignore_test_rule("*.log")
+    assert(!plain.negated && !plain.directory_only && !plain.anchored && !plain.has_separator)
+    escaped_bang :: fs_ignore_test_rule("\\!important")
+    assert(!escaped_bang.negated)
+    assert_eq(escaped_bang.pattern, "\\!important")
+    escaped_hash :: fs_ignore_test_rule("\\#notes")
+    assert_eq(escaped_hash.pattern, "\\#notes")
+    escaped_slash :: fs_ignore_test_rule("dir\\/")
+    assert(!escaped_slash.directory_only)
+    assert(!escaped_slash.has_separator)
+    assert_eq(escaped_slash.pattern, "dir\\/")
+    scoped :: fs_ignore_kernel.JetFSIgnoreRule.parse("x", "/sub/dir/") ?? panic("rule")
+    assert_eq(scoped.base, "sub/dir")
+}
+
+#Test("parse trims only unescaped trailing spaces and one carriage return") {
+    assert_eq(fs_ignore_test_rule("foo   ").pattern, "foo")
+    assert_eq(fs_ignore_test_rule("foo\\ ").pattern, "foo\\ ")
+    assert_eq(fs_ignore_test_rule("foo\\  ").pattern, "foo\\ ")
+    assert_eq(fs_ignore_test_rule("foo\\\\ ").pattern, "foo\\\\")
+    assert_eq(fs_ignore_test_rule(fs_ignore_test_bytes([U8]{102, 111, 111, 13})).pattern, "foo")
+    assert_eq(fs_ignore_test_rule(fs_ignore_test_bytes([U8]{102, 111, 111, 32, 13})).pattern, "foo")
+    assert_eq(fs_ignore_test_rule(fs_ignore_test_bytes([U8]{102, 111, 111, 13, 13})).pattern, fs_ignore_test_bytes([U8]{102, 111, 111, 13}))
+    assert(fs_ignore_test_glob("foo\\ ", "foo "))
+    assert(!fs_ignore_test_glob("foo\\ ", "foo"))
+    assert(fs_ignore_test_glob("foo\\\\ ", "foo\\"))
+}
+
+#Test("component glob matches stars, question marks and escapes per scalar") {
+    assert(fs_ignore_test_glob("*.log", "a.log"))
+    assert(fs_ignore_test_glob("*.log", ".log"))
+    assert(!fs_ignore_test_glob("*.log", "a.log.txt"))
+    composed :: String.from_bytes([U8]{99, 97, 102, 195, 169}) ?? panic("U+00E9")
+    assert(fs_ignore_test_glob("caf?", composed))
+    decomposed :: String.from_bytes([U8]{99, 97, 102, 101, 204, 129}) ?? panic("e + U+0301")
+    assert(!fs_ignore_test_glob("caf?", decomposed))
+    assert(fs_ignore_test_glob("caf??", decomposed))
+    assert(fs_ignore_test_glob("?", "🙂"))
+    assert(fs_ignore_test_glob("\\*", "*"))
+    assert(!fs_ignore_test_glob("\\*", "a"))
+    assert(fs_ignore_test_glob("\\#notes", "#notes"))
+    assert(fs_ignore_test_glob("\\!important", "!important"))
+    assert(fs_ignore_test_glob("a\\", "a\\"))
+    assert(!fs_ignore_test_glob("a\\", "a"))
+}
+
+#Test("bracket classes support ranges, negation, escapes and literal fallbacks") {
+    assert(fs_ignore_test_glob("[a-c]x", "bx"))
+    assert(!fs_ignore_test_glob("[a-c]x", "dx"))
+    assert(fs_ignore_test_glob("[!a]", "b"))
+    assert(!fs_ignore_test_glob("[!a]", "a"))
+    assert(fs_ignore_test_glob("[^a]", "b"))
+    assert(fs_ignore_test_glob("[α-ω]x", "βx"))
+    assert(!fs_ignore_test_glob("[α-ω]x", "Βx"))
+    assert(fs_ignore_test_glob("[\\]]", "]"))
+    assert(fs_ignore_test_glob("[a-]", "-"))
+    assert(fs_ignore_test_glob("[a-]", "a"))
+    assert(fs_ignore_test_glob("[Z-\\]]", "]"))
+    assert(fs_ignore_test_glob("[Z-\\]]", "\\"))
+    assert(!fs_ignore_test_glob("[a-\\]]", "]"))
+    assert(fs_ignore_test_glob("\\[x\\]", "[x]"))
+    assert(fs_ignore_test_glob("[ab", "[ab"))
+    assert(!fs_ignore_test_glob("[ab", "a"))
+    assert(fs_ignore_test_glob("[]", "[]"))
+}
+
+// Main-authorized correction of FSIgnore.rs:299–301: Rust panics on its memo
+// index here; a bracket class needs a remaining scalar and otherwise fails.
+#Test("negated bracket class at end of text does not match") {
+    assert(!fs_ignore_test_glob("foo[!x]", "foo"))
+    assert(!fs_ignore_test_glob("a*[!b]", "a"))
+    assert(fs_ignore_test_glob("foo[!x]", "fooy"))
+    assert(fs_ignore_test_glob("a*[!b]", "aaac"))
+    matcher :: fs_ignore_test_root("foo[!x]\n")
+    assert(!matcher.is_ignored("foo", false))
+    assert(!matcher.is_ignored("foo/bar", false))
+}
+
+#Test("separator and anchored rules match whole paths with globstars") {
+    matcher :: fs_ignore_test_root("/build\na/**/b\n**/cache/**\nlogs/**\n")
+    assert(matcher.is_ignored("build", true))
+    assert(!matcher.is_ignored("src/build", true))
+    assert(matcher.is_ignored("a/b", false))
+    assert(matcher.is_ignored("a/x/y/b", false))
+    assert(!matcher.is_ignored("cache", true))
+    assert(matcher.is_ignored("cache/x", false))
+    assert(matcher.is_ignored("deep/cache/x", false))
+    assert(!matcher.is_ignored("logs", true))
+    assert(matcher.is_ignored("logs/today.txt", false))
+    unanchored :: fs_ignore_test_root("*.tmp\n")
+    assert(unanchored.is_ignored("x.tmp", false))
+    assert(unanchored.is_ignored("deep/dir/x.tmp", false))
+}
+
+#Test("directory-only rules apply to directories and their contents only") {
+    matcher :: fs_ignore_test_root("out/\n")
+    assert(matcher.is_ignored("out", true))
+    assert(!matcher.is_ignored("out", false))
+    assert(matcher.is_ignored("out/file", false))
+    assert(matcher.is_ignored("src/out/file", false))
+}
+
+#Test("last matching rule wins in order") {
+    matcher :: fs_ignore_test_root("*.log\n!keep.log\n")
+    assert(matcher.is_ignored("a.log", false))
+    assert(!matcher.is_ignored("keep.log", false))
+    reversed :: fs_ignore_test_root("!keep.log\n*.log\n")
+    assert(reversed.is_ignored("keep.log", false))
+}
+
+#Test("an excluded parent blocks child re-inclusion until the parent reopens") {
+    blocked :: fs_ignore_test_root("foo/\n!foo/bar\n")
+    assert(blocked.is_ignored("foo/bar", false))
+    reopened :: fs_ignore_test_root("foo/\n!foo/\n")
+    assert(!reopened.is_ignored("foo/bar", false))
+    assert(!reopened.is_ignored("foo", true))
+    contents :: fs_ignore_test_root("build/*\n!build/keep\n")
+    assert(!contents.is_ignored("build/keep", false))
+    assert(contents.is_ignored("build/other", false))
+}
+
+#Test("child ignore files stack after inherited rules and stay base-scoped") {
+    root :: fs_ignore_test_root("*.log\n")
+    child :: (~root).with_directory_rules("sub", Val("!keep.log\n".bytes()))
+    assert(!child.is_ignored("sub/keep.log", false))
+    assert(child.is_ignored("other/keep.log", false))
+    assert(child.is_ignored("subx/keep.log", false))
+    assert(child.is_ignored("sub/a.log", false))
+    assert(root.is_ignored("sub/keep.log", false))
+    assert_eq(root.rules.len(), 1)
+    assert_eq(child.rules.len(), 2)
+    windows :: fs_ignore_test_empty().with_directory_rules("\\sub\\inner\\", Val("x\n".bytes()))
+    assert_eq(windows.rules[0].base, "sub/inner")
+    assert(windows.is_ignored("sub\\inner\\x", false))
+    anchored :: fs_ignore_test_empty().with_directory_rules("sub", Val("/only\n".bytes()))
+    assert(anchored.is_ignored("sub/only", false))
+    assert(!anchored.is_ignored("sub/deeper/only", false))
+}
+
+#Test("missing or non-regular ignore sources inherit the parent stack") {
+    root :: fs_ignore_test_root("*.log\n")
+    child :: (~root).with_directory_rules("sub", None)
+    assert_eq(child.rules.len(), 1)
+    assert(child.is_ignored("sub/a.log", false))
+    empty :: fs_ignore_test_empty()
+    assert(!empty.is_ignored("anything", false))
+    assert(!root.is_ignored("", true))
+    assert(!root.is_ignored("/", true))
+}
+
+#Test("ignore text uses lines, CRLF and lossy UTF-8 decoding") {
+    // Bytes of "# header", CRLF, "*.o", CRLF, CRLF, "last", CR, CRLF: str::lines
+    // drops one CR before each LF and parse drops one more trailing CR.
+    source :: [U8]{35, 32, 104, 101, 97, 100, 101, 114, 13, 10, 42, 46, 111, 13, 10, 13, 10, 108, 97, 115, 116, 13, 13, 10}
+    matcher :: fs_ignore_test_empty().with_directory_rules("", Val(source))
+    assert_eq(matcher.rules.len(), 2)
+    assert_eq(matcher.rules[0].pattern, "*.o")
+    assert_eq(matcher.rules[1].pattern, "last")
+    tail :: fs_ignore_test_root("a\nb")
+    assert_eq(tail.rules.len(), 2)
+    assert_eq(tail.rules[1].pattern, "b")
+    lossy :: fs_ignore_test_empty().with_directory_rules("", Val([U8]{42, 255, 10}))
+    replacement :: String.from_bytes([U8]{42, 239, 191, 189}) ?? panic("U+FFFD")
+    assert_eq(lossy.rules[0].pattern, replacement)
+    candidate :: String.from_bytes([U8]{97, 239, 191, 189}) ?? panic("a + U+FFFD")
+    assert(lossy.is_ignored(candidate, false))
+}

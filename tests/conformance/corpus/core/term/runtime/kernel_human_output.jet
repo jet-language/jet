@@ -1,0 +1,221 @@
+use core.term.runtime.kernel_human_output as output
+use core.text.runtime.kernel_unicode_string as unicode
+
+// HumanOutput.rs:1437 original shared fixture.
+fn terminal_profile(channel: output.JetOutputChannel) -> output.JetOutputCapabilities Never! {
+    output.jet_output_capabilities_with_mode(channel, .Auto, true, true, true, Val("xterm-256color"), false, false, 80, 24, true)
+}
+// HumanOutput.rs:1454, all original substantive assertions/fixtures.
+#Test("auto_color_uses_no_color_then_force_color_then_tty") {
+    redirected :: output.jet_output_capabilities_with_mode(.HumanStdout, .Auto, false, false, false, Val("xterm-256color"), false, false, 80, 24, true)
+    assert(!redirected.color_enabled)
+    forced :: output.jet_output_capabilities_with_mode(.HumanStdout, .Auto, false, false, false, Val("xterm-256color"), false, true, 80, 24, true)
+    assert(forced.color_enabled)
+    no_color :: output.jet_output_capabilities_with_mode(.HumanStdout, .Auto, false, true, true, Val("xterm-256color"), true, false, 80, 24, true)
+    assert(!no_color.color_enabled)
+    explicit :: output.jet_output_capabilities_with_mode(.HumanStdout, .Always, false, false, false, Val("dumb"), true, false, 80, 24, true)
+    assert(explicit.color_enabled)
+    assert(!explicit.progress_enabled)
+}
+// HumanOutput.rs:1518.
+#Test("machine_profile_hides_human_kinds_and_ansi") {
+    profile :: terminal_profile(.MachineStdout)
+    assert(profile.machine())
+    assert(profile.json)
+    assert(!profile.color_enabled)
+    assert(!profile.progress_enabled)
+    human_kinds :: [output.JetOutputKind]{.Renderable, .Status, .Log, .Progress}
+    loop kind in human_kinds -> assert(profile.channel_for(kind) == .Hidden)
+    assert(profile.channel_for(.Machine) == .MachineStdout)
+    renderable :: output.JetHumanRenderable.Text("\u{001b}[31msecret\u{001b}[0m")
+    assert(output.jet_output_human_only(.MachineStdout, renderable, 80, true) == None)
+    table :: output.JetOutputTable.new([String]{"key"}, [[String]]{[String]{"\u{001b}[32mvalue\u{001b}[0m"}})
+    json :: output.jet_output_machine_table_only(.MachineStdout, table) ?? panic("machine table")
+    assert(!json.contains("\u{001b}"))
+}
+// HumanOutput.rs:1551.
+#Test("redirected_profile_is_plain_and_progress_free") {
+    profile :: output.jet_output_capabilities_from_host(.HumanStdout, .Auto, false, Val("xterm"), false, false, None, true)
+    assert(!profile.color_enabled)
+    assert(!profile.unicode_enabled)
+    assert(!profile.progress_enabled)
+    text :: output.JetHumanRenderable.Text("\u{001b}[31mplain\u{001b}[0m")
+    assert(output.jet_output_render(profile, .Renderable, text) == Val("plain"))
+    snapshot :: output.JetOutputProgressSnapshot.new()
+    assert(output.jet_output_progress_render_if_enabled(profile, snapshot) == None)
+}
+// HumanOutput.rs:1575. Original width fixtures, including combining scalar.
+#Test("visible_width_and_narrow_table_use_unicode_cells") {
+    assert(output.jet_output_visible_width("\u{001b}[1m東京\u{001b}[0m") == 4)
+    assert(output.jet_output_visible_width("e\u{0301}") == 1)
+    wrapped :: output.jet_output_wrap("東京abc", 4)
+    assert(wrapped == [String]{"東京", "abc"})
+    table :: output.JetOutputTable.new([String]{"name", "value"}, [[String]]{[String]{"東京", "a long value"}})
+    rendered :: output.jet_output_table_human(table, 16, true)
+    assert(!rendered.contains("\u{001b}"))
+    loop line in rendered.split("\n") -> assert(output.jet_output_visible_width(line) <= 16)
+    narrow :: output.jet_output_table_human(table, 6, false)
+    loop line in narrow.split("\n") -> assert(output.jet_output_visible_width(line) <= 6)
+}
+// HumanOutput.rs:1596. Real state mutation, same bounded deterministic facts.
+#Test("progress_snapshot_has_bounded_deterministic_frames") {
+    profile :: terminal_profile(.HumanStdout)
+    running := output.JetOutputProgressTask.new("compile", "Compile", Val(10))
+    &running.update(4, 1.5)
+    &running.set_column("phase", "codegen")
+    unknown := output.JetOutputProgressTask.new("upload", "Upload", None)
+    &unknown.update(2, 0.25)
+    transient := output.JetOutputProgressTask.new("done", "Done", Val(1))
+    &transient.complete()
+    &transient.set_transient(true)
+    snapshot := output.JetOutputProgressSnapshot.new()
+    &snapshot.upsert(^running)
+    &snapshot.upsert(^unknown)
+    &snapshot.upsert(^transient)
+    frame :: output.jet_output_progress_frame(profile, U64{7}, 3, snapshot) ?? panic("progress frame")
+    assert(frame.sequence == U64{7})
+    assert(frame.clear_lines == 3)
+    assert(!frame.final_frame)
+    assert(!frame.text().contains("Done"))
+    assert(frame.text().contains("Compile"))
+    assert(frame.text().contains("phase=codegen"))
+    assert(frame.lines.len() <= output.JET_OUTPUT_MAX_FRAME_LINES)
+    assert(frame.text().count_bytes() <= output.JET_OUTPUT_MAX_FRAME_BYTES)
+    json :: output.jet_output_machine_progress_only(.MachineStdout, snapshot) ?? panic("machine progress")
+    assert(json.contains("\"state\":\"running\""))
+    assert(!json.contains("\u{001b}"))
+}
+
+#Test("channel routing and explicit color ladder retain all branches") {
+    assert(output.JetOutputColorMode.default() == .Auto)
+    assert(output.JetOutputColorMode.parse("always").as_str() == "always")
+    assert(output.JetOutputColorMode.parse("never").as_str() == "never")
+    assert(output.JetOutputColorMode.parse("ALWAYS").as_str() == "auto")
+    human :: terminal_profile(.HumanStderr)
+    assert(human.human() && human.human_enabled() && !human.machine_enabled())
+    assert(human.ansi_enabled() && human.unicode_enabled() && human.progress_enabled())
+    assert(human.channel(.Renderable) == .HumanStdout)
+    stderr_kinds :: [output.JetOutputKind]{.Status, .Log, .Progress}
+    loop kind in stderr_kinds -> assert(human.channel_for(kind) == .HumanStderr)
+    assert(!human.allows(.Machine))
+    hidden :: terminal_profile(.Hidden)
+    all_kinds :: [output.JetOutputKind]{.Renderable, .Status, .Log, .Progress, .Machine}
+    loop kind in all_kinds -> assert(!hidden.allows(kind))
+    off :: output.jet_output_capabilities_with_mode(.HumanStderr, .Never, true, true, true, None, false, true, 0, -1, true)
+    assert(!off.color_enabled)
+    assert(off.width == 80 && off.height == 24)
+    both :: output.jet_output_capabilities_with_mode(.HumanStdout, .Auto, true, true, true, None, true, true, 80, 24, true)
+    assert(!both.color_enabled)
+    text :: output.JetHumanRenderable.Text("\u{001b}[32mcolor\u{001b}[0m")
+    assert(output.jet_output_render(human, .Renderable, text) == Val("\u{001b}[32mcolor\u{001b}[0m"))
+    assert(output.jet_output_render(terminal_profile(.MachineStdout), .Machine, text) == Val("{{\"text\":\"color\"}}"))
+}
+#Test("ANSI CSI OSC BEL ST and partial escape consumption are exact") {
+    assert(output.jet_output_strip_ansi("a\u{001b}[31mb\u{001b}[0mc") == "abc")
+    assert(output.jet_output_strip_ansi("a\u{001b}]title\u{0007}b") == "ab")
+    assert(output.jet_output_strip_ansi("a\u{001b}]title\u{001b}\\b") == "ab")
+    assert(output.jet_output_strip_ansi("a\u{001b}Xb") == "ab")
+    assert(output.jet_output_strip_ansi("a\u{001b}[31") == "a")
+    assert(output.jet_output_strip_ansi("a\u{001b}]x\u{001b}!z\u{0007}b") == "ab")
+}
+#Test("Unicode cursor preserves flags joiners zero-width and oversize clusters") {
+    assert(output.jet_output_visible_width("🇺🇸") == 2)
+    assert(output.jet_output_visible_width("👩\u{200d}💻") == 2)
+    assert(output.jet_output_visible_width("👍🏽") == 2)
+    assert(output.jet_output_visible_width("e\u{0301}\n東京") == 4)
+    assert(output.jet_output_wrap("東京", 1) == [String]{"?", "?"})
+    assert(output.jet_output_wrap("e\u{0301}", 1) == [String]{"e\u{0301}"})
+    assert(output.jet_output_wrap("", 0) == [String]{""})
+    assert(output.jet_output_wrap("a\n", 4) == [String]{"a", ""})
+    assert(output.jet_output_char_width(0x0085) == 0)
+    assert(output.jet_output_char_width(0x200d) == 1)
+}
+#Test("status and table structured projection use exact escape and bounds") {
+    empty :: output.JetOutputStatus.new("", "")
+    assert(output.jet_output_status_human(empty) == "")
+    assert(output.jet_output_status_human(output.JetOutputStatus.new("label", "")) == "label")
+    assert(output.jet_output_status_human(output.JetOutputStatus.new("", "value")) == "value")
+    status :: output.JetOutputStatus.new("\u{001b}[1mkey\u{001b}[0m", "\"\\\n\r\t\u{0000}\u{0085}")
+    assert(output.jet_output_status_json(status) == "{{\"label\":\"key\",\"value\":\"\\\"\\\\\\n\\r\\t\\u0000\\u0085\"}}")
+    assert(output.jet_output_machine_table_only(.HumanStdout, output.JetOutputTable.new([String]{}, [[String]]{})) == None)
+    assert(output.jet_output_table_human(output.JetOutputTable.new([String]{}, [[String]]{}), 80, true) == "")
+    assert(output.jet_output_table_json(output.JetOutputTable.new([String]{"h"}, [[String]]{[String]{"v"}})) == "{{\"headers\":[\"h\"],\"rows\":[[\"v\"]]}}")
+    headers := [String]{}
+    rows := [[String]]{}
+    loop i in 0..<65 -> &headers.push("h")
+    loop i in 0..<4097 -> &rows.push([String]{"v"})
+    bounded :: output.JetOutputTable.new(^headers, ^rows)
+    assert(bounded.headers.len() == 64)
+    assert(bounded.rows.len() == 4096)
+    raw := [U8]{}
+    loop i in 0..<257 -> unicode.append_cp(&raw, 0x6771)
+    long :: String.from_bytes(^raw) ?? panic("UTF8 fixture")
+    bound :: output.JetOutputStatus.new(long, "")
+    assert(bound.label.count_bytes() == 256 * 3)
+}
+#Test("task update completion failure transient and stable snapshot mutation") {
+    task := output.JetOutputProgressTask.new("a", "A", Val(3))
+    &task.update(7, -1.0)
+    assert(task.state == .Complete && task.count == 3 && task.elapsed == 0.0)
+    &task.update(1, Float.NAN)
+    assert(task.count == 3 && task.elapsed == 0.0)
+    &task.fail()
+    &task.update(1, 1.0)
+    assert(task.state == .Failed && task.count == 1)
+    &task.set_column("", "ignored")
+    assert(task.columns.is_empty())
+    loop i in 0..<9 -> &task.set_column("key-{i}", "old")
+    assert(task.columns.len() == 8)
+    &task.set_column("key-0", "new")
+    assert(task.columns[0].value == "new")
+    zero :: output.JetOutputProgressTask.new("zero", "Zero", Val(0))
+    assert(zero.state == .Complete)
+    snap := output.JetOutputProgressSnapshot.new()
+    &snap.upsert(^task)
+    &snap.upsert(^zero)
+    &snap.upsert(output.JetOutputProgressTask.new("a", "Replaced", None))
+    assert(snap.tasks.len() == 2 && snap.tasks[0].description == "Replaced")
+    removed :: &snap.remove("a") ?? panic("remove present")
+    assert(removed.description == "Replaced" && snap.tasks[0].id == "zero")
+    assert(&snap.remove("missing") == None)
+    frame :: output.jet_output_progress_frame(terminal_profile(.HumanStdout), U64{9}, 999, snap) ?? panic("final frame")
+    assert(frame.final_frame && frame.clear_lines == 64)
+    assert(frame.text().contains("✓"))
+    assert(snap.render(80, false).contains("done"))
+}
+#Test("snapshot task bound and frame line height width clamps") {
+    snap := output.JetOutputProgressSnapshot.new()
+    loop i in 0..<65 -> &snap.upsert(output.JetOutputProgressTask.new("task-{i}", "Task", None))
+    assert(snap.tasks.len() == 64)
+    profile := terminal_profile(.HumanStdout)
+    profile.width = 999
+    profile.height = 999
+    frame :: output.jet_output_progress_frame(profile, U64{1}, 0, snap) ?? panic("frame")
+    assert(frame.width == 256 && frame.height == 64)
+    assert(frame.lines.len() <= 64 && frame.text().count_bytes() <= 16384)
+    profile.width = 0
+    profile.height = 0
+    tiny :: output.jet_output_progress_frame(profile, U64{2}, 0, snap) ?? panic("tiny frame")
+    assert(tiny.width == 1 && tiny.height == 1 && tiny.lines.len() <= 1)
+}
+
+// Fixed2 and Display provider tests remain real consumers of RtW41; pending
+// ABI reconciliation/publication, never a fake formatter fixture/provider.
+#Test("legacy progress preserves sequential templates rate remaining and fixed2") {
+    assert(output.jet_output_progress_legacy("Build", "", 4, Val(10), 1.5, false) == "Build 40% 4/10 elapsed 1.50s remaining 2.25s rate 2.67/s")
+    assert(output.jet_output_progress_legacy("Upload", "", 2, None, 0.0, false) == "Upload ?% 2/? elapsed 0.00s remaining ? rate ?/s")
+    assert(output.jet_output_progress_legacy("Zero", "{{percent}} {{remaining}}", 9, Val(0), 0.0, false) == "100 0.00s")
+    assert(output.jet_output_progress_legacy("{{percent}}", "{{description}}", 1, Val(2), 1.0, false) == "50")
+    assert(output.jet_output_progress_legacy("A", "{{elapsed}}", 0, None, 1.125, false) == "1.12s")
+    assert(output.jet_output_progress_legacy("A", "{{elapsed}}", 0, None, Float.NAN, false) == "0.00s")
+    assert(output.jet_output_progress_legacy("\u{001b}[31mA\u{001b}[0m", "{{description}}", 0, None, 0.0, false) == "A")
+    assert(output.jet_output_progress_legacy("\u{001b}[31mA\u{001b}[0m", "{{description}}", 0, None, 0.0, true) == "\u{001b}[31mA\u{001b}[0m")
+}
+#Test("percent multiplication retains full selected usize range without Float") {
+    // Full64 facts: Main must select this row only on a 64-bit usize target.
+    // #4483 is selected-target admission, not host architecture inference.
+    maximum :: Int.from_u64(U64{18446744073709551615})
+    assert(output.jet_output_progress_legacy("A", "{{percent}}", maximum, Val(maximum), 0.0, false) == "100")
+    assert(output.jet_output_progress_legacy("A", "{{percent}}", maximum - 1, Val(maximum), 0.0, false) == "99")
+    assert(output.jet_output_progress_legacy("A", "{{percent}}", maximum /% 2, Val(maximum), 0.0, false) == "49")
+}

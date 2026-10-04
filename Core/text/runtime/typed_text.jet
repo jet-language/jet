@@ -1,0 +1,214 @@
+// PORT-PENDING 2162 crates-jet-codegen-src-prelude-typedtext: crates/jet-codegen/src/Prelude/TypedText.rs:1-210
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TYPEDTEXT1=D: one typed-text semantic core for AOT, JIT, and TIR
+//RS // adapters. SQL keeps its binding element type at the adapter boundary so the
+//RS // checked SQL carrier can use `DBValue` while the standalone kernel stays
+//RS // independent of the database wire module.
+//RS 
+//RS pub fn jet_typed_sql_raw<T>(template: String) -> (String, Vec<T>) {
+//RS     (template, Vec::new())
+//RS }
+//RS 
+//RS pub fn jet_typed_sql_interpolate<T>(
+//RS     literals: &[&str],
+//RS     holes: Vec<T>,
+//RS ) -> (String, Vec<T>) {
+//RS     let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+//RS         + holes.len();
+//RS     let mut template = String::with_capacity(capacity);
+//RS     for (index, literal) in literals.iter().enumerate() {
+//RS         template.push_str(literal);
+//RS         if index < holes.len() {
+//RS             template.push('?');
+//RS         }
+//RS     }
+//RS     (template, holes)
+//RS }
+//RS 
+//RS pub fn jet_typed_sql_template<T>(value: &(String, Vec<T>)) -> String {
+//RS     value.0.clone()
+//RS }
+//RS 
+//RS pub fn jet_typed_sql_params<T: Clone>(value: &(String, Vec<T>)) -> Vec<T> {
+//RS     value.1.clone()
+//RS }
+//RS 
+//RS pub fn jet_typed_html_raw(value: String) -> String {
+//RS     value
+//RS }
+//RS 
+//RS pub fn jet_typed_html_text(value: String) -> String {
+//RS     value
+//RS }
+//RS 
+//RS pub fn jet_typed_html_escape(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '&' => out.push_str("&amp;"),
+//RS             '<' => out.push_str("&lt;"),
+//RS             '>' => out.push_str("&gt;"),
+//RS             '"' => out.push_str("&quot;"),
+//RS             '\'' => out.push_str("&#39;"),
+//RS             _ => out.push(ch),
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub fn jet_typed_html_interpolate(
+//RS     literals: &[&str],
+//RS     holes: Vec<String>,
+//RS     trusted_html: &[bool],
+//RS ) -> String {
+//RS     let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+//RS         + holes.iter().map(String::len).sum::<usize>();
+//RS     let mut out = String::with_capacity(capacity);
+//RS     let mut holes = holes.into_iter();
+//RS     for (index, literal) in literals.iter().enumerate() {
+//RS         out.push_str(literal);
+//RS         if let Some(hole) = holes.next() {
+//RS             if trusted_html.get(index).copied().unwrap_or(false) {
+//RS                 out.push_str(&hole);
+//RS             } else {
+//RS                 out.push_str(&jet_typed_html_escape(&hole));
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub fn jet_typed_sh_raw(value: String) -> Vec<String> {
+//RS     value.split_whitespace().map(str::to_string).collect()
+//RS }
+//RS 
+//RS pub fn jet_typed_sh_interpolate(literals: &[&str], holes: Vec<String>) -> Vec<String> {
+//RS     let mut argv = Vec::with_capacity(holes.len());
+//RS     let mut holes = holes.into_iter();
+//RS     for literal in literals {
+//RS         argv.extend(literal.split_whitespace().map(str::to_string));
+//RS         if let Some(hole) = holes.next() {
+//RS             argv.push(hole);
+//RS         }
+//RS     }
+//RS     argv
+//RS }
+//RS 
+//RS // D-BOUND-HEAD1=A: checked boundary heads use this same interpolation kernel
+//RS // in AOT, JIT, interpreter, and comptime adapters. The adapters marshal lists
+//RS // and nominal values; they do not decide encoding or traversal policy.
+//RS 
+//RS pub fn jet_typed_path_interpolate(literals: &[&str], holes: &[String]) -> String {
+//RS     interpolate_typed_head(literals, holes, encode_path_component)
+//RS }
+//RS 
+//RS pub fn jet_typed_datetime_interpolate(literals: &[&str], holes: &[String]) -> String {
+//RS     interpolate_typed_head(literals, holes, |hole| hole.to_string())
+//RS }
+//RS 
+//RS pub fn jet_validate_typed_path_literal(literals: &[&str]) -> Result<(), String> {
+//RS     if literals.iter().any(|literal| literal.contains('\0')) {
+//RS         Err("a Path cannot contain a NUL character".to_string())
+//RS     } else {
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn interpolate_typed_head(
+//RS     literals: &[&str],
+//RS     holes: &[String],
+//RS     encode_hole: impl Fn(&str) -> String,
+//RS ) -> String {
+//RS     let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+//RS         + holes.iter().map(String::len).sum::<usize>();
+//RS     let mut out = String::with_capacity(capacity);
+//RS     for (index, literal) in literals.iter().enumerate() {
+//RS         out.push_str(literal);
+//RS         if let Some(hole) = holes.get(index) {
+//RS             out.push_str(&encode_hole(hole));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn encode_path_component(value: &str) -> String {
+//RS     // Separators and control bytes are encoded, so a hole contributes one
+//RS     // filesystem component. Encode the two traversal spellings as well;
+//RS     // `..` must never become a parent component after interpolation.
+//RS     if matches!(value, "." | "..") {
+//RS         return value
+//RS             .as_bytes()
+//RS             .iter()
+//RS             .map(|byte| format!("%{byte:02X}"))
+//RS             .collect();
+//RS     }
+//RS     percent_encode_path(value)
+//RS }
+//RS 
+//RS fn percent_encode_path(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for &byte in value.as_bytes() {
+//RS         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+//RS             out.push(char::from(byte));
+//RS         } else {
+//RS             out.push('%');
+//RS             out.push(typed_text_hex_digit(byte >> 4));
+//RS             out.push(typed_text_hex_digit(byte & 0x0f));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn typed_text_hex_digit(nibble: u8) -> char {
+//RS     match nibble {
+//RS         0..=9 => char::from(b'0' + nibble),
+//RS         10..=15 => char::from(b'A' + nibble - 10),
+//RS         _ => unreachable!("percent hex nibble is always four bits"),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod typed_boundary_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn html_interpolation_escapes_text_and_composes_html() {
+//RS         assert_eq!(
+//RS             jet_typed_html_interpolate(
+//RS                 &["<p>", "</p>", ""],
+//RS                 vec!["<script>&".to_string(), "<strong>safe</strong>".to_string(),],
+//RS                 &[false, true],
+//RS             ),
+//RS             "<p>&lt;script&gt;&amp;</p><strong>safe</strong>"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn missing_html_trust_flags_default_to_escaped() {
+//RS         assert_eq!(
+//RS             jet_typed_html_interpolate(&["", ""], vec!["<em>text</em>".to_string()], &[]),
+//RS             "&lt;em&gt;text&lt;/em&gt;"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn path_holes_are_one_component() {
+//RS         assert_eq!(
+//RS             jet_typed_path_interpolate(&["/data/", ".json"], &["ada/../etc".to_string()],),
+//RS             "/data/ada%2F..%2Fetc.json"
+//RS         );
+//RS         assert_eq!(
+//RS             jet_typed_path_interpolate(&["/data/", ""], &["..".to_string()]),
+//RS             "/data/%2E%2E"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn path_literal_validation_rejects_nul() {
+//RS         assert!(jet_validate_typed_path_literal(&["/data/log"]).is_ok());
+//RS         assert!(jet_validate_typed_path_literal(&["/data/\0log"]).is_err());
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2162 crates/jet-codegen/src/Prelude/TypedText.rs:1-210
+

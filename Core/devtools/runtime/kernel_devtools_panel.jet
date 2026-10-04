@@ -1,0 +1,146 @@
+// PORT-PENDING 0145 crates-jet-codegen-src-prelude-core-devtoolspanel-module-group: crates/jet-codegen/src/Prelude/Core/DevtoolsPanel.rs:1-142
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-PLUGIN1=D / card #2424: the Core side of a panel is typed and
+//RS // payload-light. Discovery remains a compiler fact; this file supplies the
+//RS // portable value/render seams and the one explicit publication gate.
+//RS 
+//RS /// The function shape every discovered panel must satisfy after sema has
+//RS /// checked its `State` parameter and `UiNode` result.
+//RS pub type JetDevtoolsPanelRender<State> = fn(State) -> JetUiNode;
+//RS 
+//RS /// A typed panel handle for host adapters. It contains no startup registration
+//RS /// state: the compiler's panel catalog supplies the handles to each host.
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetDevtoolsPanel<State> {
+//RS     pub identity: &'static str,
+//RS     pub render: JetDevtoolsPanelRender<State>,
+//RS }
+//RS 
+//RS impl<State> JetDevtoolsPanel<State> {
+//RS     pub const fn new(identity: &'static str, render: JetDevtoolsPanelRender<State>) -> Self {
+//RS         Self { identity, render }
+//RS     }
+//RS 
+//RS     pub fn render(&self, state: State) -> JetUiNode {
+//RS         (self.render)(state)
+//RS     }
+//RS }
+//RS 
+//RS /// A value that may cross the explicit `value:` publication gate. The closed
+//RS /// protocol value set keeps every host on the same payload vocabulary.
+//RS pub trait JetDevtoolsPublishValue {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue;
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for JetDevtoolsValue {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for bool {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Bool(self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for i64 {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Int(self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for i32 {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Int(i64::from(self))
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for usize {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Int(self as i64)
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for f64 {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Float(self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for String {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Text(self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetDevtoolsPublishValue for &str {
+//RS     fn into_jet_devtools_value(self) -> JetDevtoolsValue {
+//RS         JetDevtoolsValue::Text(self.to_string())
+//RS     }
+//RS }
+//RS 
+//RS /// Publish one checked panel state value through the canonical global sink.
+//RS /// The compiler supplies package/module/panel identity as hidden ABI strings;
+//RS /// source code exposes only `field:` and `value:` labels.
+//RS pub fn jet_devtools_publish<Value>(
+//RS     package: impl Into<String>,
+//RS     module: impl Into<String>,
+//RS     panel: impl Into<String>,
+//RS     field: impl Into<String>,
+//RS     value: Value,
+//RS ) where
+//RS     Value: JetDevtoolsPublishValue,
+//RS {
+//RS     let package = package.into();
+//RS     let module = module.into();
+//RS     let panel = panel.into();
+//RS     let field = field.into();
+//RS     let source = format!("{package}::{module}");
+//RS     let entity = format!("{package}::{module}::{panel}");
+//RS     let fields = format!(
+//RS         "{{\"package\":\"{}\",\"module\":\"{}\",\"panel\":\"{}\",\"field\":\"{}\"}}",
+//RS         jet_devtools_panel_json_escape(&package),
+//RS         jet_devtools_panel_json_escape(&module),
+//RS         jet_devtools_panel_json_escape(&panel),
+//RS         jet_devtools_panel_json_escape(&field),
+//RS     );
+//RS     let payload = JetDevtoolsPayload::one(field, value.into_jet_devtools_value());
+//RS     let timestamp = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+//RS         .unwrap_or(0);
+//RS     let Ok(event) = JetDevtoolsEvent::from_parts_with_payload(
+//RS         timestamp,
+//RS         source,
+//RS         "Custom",
+//RS         entity,
+//RS         fields,
+//RS         None,
+//RS     )
+//RS     .and_then(|event| event.publish(payload)) else {
+//RS         return;
+//RS     };
+//RS     jet_devtools_publish_event(event);
+//RS }
+//RS 
+//RS fn jet_devtools_panel_json_escape(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => escaped.push_str("\\\""),
+//RS             '\\' => escaped.push_str("\\\\"),
+//RS             '\n' => escaped.push_str("\\n"),
+//RS             '\r' => escaped.push_str("\\r"),
+//RS             '\t' => escaped.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 use std::fmt::Write as _;
+//RS                 let _ = write!(escaped, "\\u{:04x}", character as u32);
+//RS             }
+//RS             character => escaped.push(character),
+//RS         }
+//RS     }
+//RS     escaped
+//RS }
+// END-PORT-PENDING 0145 crates/jet-codegen/src/Prelude/Core/DevtoolsPanel.rs:1-142
+

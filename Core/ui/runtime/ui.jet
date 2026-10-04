@@ -1,0 +1,795 @@
+// PORT-PENDING 0179 crates-jet-codegen-src-prelude-layout-module-group-slice-1: crates/jet-codegen/src/Prelude/Ui.rs:1802-2592
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub fn paint_node(&self, node: JetUiNode) {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::paint(&mut *state, &node);
+//RS     }
+//RS 
+//RS     /// D-UI-MOUNT1=A: measure → layout → paint in one call.
+//RS     pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+//RS         let size = self.measure_node(node.clone(), constraint);
+//RS         self.layout_node(
+//RS             node.clone(),
+//RS             jet_ui_rect(0.0, 0.0, size.width, size.height),
+//RS         );
+//RS         self.paint_node(node);
+//RS     }
+//RS 
+//RS     pub fn mount_node_default(&self, node: JetUiNode) {
+//RS         self.mount_node(
+//RS             node,
+//RS             jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+//RS         );
+//RS     }
+//RS 
+//RS     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::on_event(&mut *state, event)
+//RS     }
+//RS 
+//RS     pub fn frame_lines(&self) -> Vec<String> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap()
+//RS             .grid
+//RS             .iter()
+//RS             .map(|row| row.iter().collect::<String>().trim_end().to_string())
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn render_count(&self) -> i64 {
+//RS         self.state.lock().unwrap().render_count as i64
+//RS     }
+//RS }
+//RS 
+//RS impl Default for JetTuiBackend {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS impl JetBackend for JetTuiBackendState {
+//RS     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+//RS         let size = jet_ui_measure_tree(node, constraint);
+//RS         self.measured = Some(size);
+//RS         size
+//RS     }
+//RS 
+//RS     fn layout(&mut self, node: &JetUiNode, frame: JetRect) {
+//RS         let _ = node;
+//RS         self.layout_frame = Some(frame);
+//RS         let (cols, rows) = tui_grid_dims(&frame);
+//RS         self.grid_cols = cols;
+//RS         self.grid_rows = rows;
+//RS         self.grid = tui_blank_grid(cols, rows);
+//RS     }
+//RS 
+//RS     fn paint(&mut self, node: &JetUiNode) {
+//RS         self.render_count += 1;
+//RS         self.last_node = Some(node.clone());
+//RS         let frame = self.layout_frame.unwrap_or(JetRect {
+//RS             x: 0.0,
+//RS             y: 0.0,
+//RS             width: node.width,
+//RS             height: node.height,
+//RS         });
+//RS         if self.grid.is_empty() {
+//RS             let (cols, rows) = tui_grid_dims(&frame);
+//RS             self.grid_cols = cols;
+//RS             self.grid_rows = rows;
+//RS             self.grid = tui_blank_grid(cols, rows);
+//RS         }
+//RS         for row in self.grid.iter_mut() {
+//RS             for cell in row.iter_mut() {
+//RS                 *cell = ' ';
+//RS             }
+//RS         }
+//RS         let capabilities = self.capabilities.clone();
+//RS         jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
+//RS             tui_write_label(
+//RS                 &mut self.grid,
+//RS                 &leaf_frame,
+//RS                 &leaf.label,
+//RS                 leaf.style.as_ref(),
+//RS                 &capabilities,
+//RS             );
+//RS         });
+//RS         jet_ui_bind_tree_clicks(node, "tui#0");
+//RS         let mut focus = Vec::new();
+//RS         jet_ui_collect_focus(node, &mut focus);
+//RS         if !focus.is_empty() {
+//RS             self.focused_index = Some(0);
+//RS             self.focus_nodes = focus;
+//RS         }
+//RS     }
+//RS 
+//RS     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+//RS         if let JetInputEvent::Key { code } = &event {
+//RS             if let Some(result) =
+//RS                 jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code, 0)
+//RS             {
+//RS                 self.last_event = Some(result);
+//RS                 return result;
+//RS             }
+//RS         }
+//RS         let result = match &event {
+//RS             JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
+//RS             JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
+//RS                 JetEventResult::Ignored
+//RS             }
+//RS             JetInputEvent::Resize { size } => {
+//RS                 let frame = JetRect {
+//RS                     x: 0.0,
+//RS                     y: 0.0,
+//RS                     width: size.width,
+//RS                     height: size.height,
+//RS                 };
+//RS                 let (cols, rows) = tui_grid_dims(&frame);
+//RS                 self.layout_frame = Some(frame);
+//RS                 self.grid_cols = cols;
+//RS                 self.grid_rows = rows;
+//RS                 self.grid = tui_blank_grid(cols, rows);
+//RS                 JetEventResult::Handled
+//RS             }
+//RS             _ => JetEventResult::Handled,
+//RS         };
+//RS         self.last_event = Some(result);
+//RS         result
+//RS     }
+//RS     fn on_tui_event(&mut self, event: JetTuiEvent) -> JetEventResult {
+//RS         match event {
+//RS             JetTuiEvent::Key { code, modifiers } => {
+//RS                 if let Some(result) = jet_ui_advance_focus(
+//RS                     &self.focus_nodes,
+//RS                     &mut self.focused_index,
+//RS                     &code,
+//RS                     modifiers,
+//RS                 ) {
+//RS                     self.last_event = Some(result);
+//RS                     return result;
+//RS                 }
+//RS                 let result = if code.is_empty() {
+//RS                     JetEventResult::Ignored
+//RS                 } else {
+//RS                     JetEventResult::Handled
+//RS                 };
+//RS                 self.last_event = Some(result);
+//RS                 result
+//RS             }
+//RS             JetTuiEvent::Resize { size } => {
+//RS                 let result = self.on_event(JetInputEvent::Resize { size });
+//RS                 if result == JetEventResult::Handled {
+//RS                     if let Some(node) = self.last_node.clone() {
+//RS                         let frame = self.layout_frame.unwrap_or(JetRect {
+//RS                             x: 0.0,
+//RS                             y: 0.0,
+//RS                             width: size.width,
+//RS                             height: size.height,
+//RS                         });
+//RS                         self.layout(&node, frame);
+//RS                         self.paint(&node);
+//RS                     }
+//RS                 }
+//RS                 result
+//RS             }
+//RS             event => {
+//RS                 let result = JetBackend::on_tui_event(self, event);
+//RS                 self.last_event = Some(result);
+//RS                 result
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS impl JetTuiRenderTarget for JetNullBackend {
+//RS     fn mount_tui(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+//RS         self.mount_node(node, constraint);
+//RS     }
+//RS 
+//RS     fn dispatch_tui(&self, event: JetInputEvent) -> JetEventResult {
+//RS         self.dispatch_event(event)
+//RS     }
+//RS     fn dispatch_tui_event(&self, event: JetTuiEvent) -> JetEventResult {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::on_tui_event(&mut *state, event)
+//RS     }
+//RS 
+//RS     fn frame_lines_tui(&self) -> Vec<String> {
+//RS         self.paint_commands()
+//RS     }
+//RS }
+//RS 
+//RS impl JetTuiRenderTarget for JetTuiBackend {
+//RS     fn mount_tui(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+//RS         self.mount_node(node, constraint);
+//RS     }
+//RS 
+//RS     fn dispatch_tui(&self, event: JetInputEvent) -> JetEventResult {
+//RS         self.dispatch_event(event)
+//RS     }
+//RS     fn dispatch_tui_event(&self, event: JetTuiEvent) -> JetEventResult {
+//RS         let mut state = self.state.lock().unwrap();
+//RS         JetBackend::on_tui_event(&mut *state, event)
+//RS     }
+//RS 
+//RS     fn frame_lines_tui(&self) -> Vec<String> {
+//RS         self.frame_lines()
+//RS     }
+//RS }
+//RS 
+//RS /// Reactive UI render loop — re-runs the body when signals change.
+//RS pub fn jet_ui_reactive_render<F: Fn() + Send + Sync + 'static>(body: F) {
+//RS     jet_std::jet_reactive_effect_rooted(body);
+//RS }
+//RS 
+//RS pub fn jet_ui_null() -> JetNullBackend {
+//RS     JetNullBackend::new()
+//RS }
+//RS 
+//RS pub fn jet_ui_tui() -> JetTuiBackend {
+//RS     JetTuiBackend::new()
+//RS }
+//RS 
+//RS pub fn jet_ui_point(x: f64, y: f64) -> JetPoint {
+//RS     JetPoint { x, y }
+//RS }
+//RS 
+//RS pub fn jet_ui_size(width: f64, height: f64) -> JetSize {
+//RS     JetSize { width, height }
+//RS }
+//RS 
+//RS pub fn jet_ui_rect(x: f64, y: f64, width: f64, height: f64) -> JetRect {
+//RS     JetRect {
+//RS         x,
+//RS         y,
+//RS         width,
+//RS         height,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_constraint(
+//RS     min_width: f64,
+//RS     min_height: f64,
+//RS     max_width: f64,
+//RS     max_height: f64,
+//RS ) -> JetSizeConstraint {
+//RS     JetSizeConstraint {
+//RS         min_width,
+//RS         min_height,
+//RS         max_width,
+//RS         max_height,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
+//RS     JetUiNode {
+//RS         label: label.to_string(),
+//RS         width,
+//RS         height,
+//RS         role: None,
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: None,
+//RS         style: None,
+//RS         kind: JetUiNodeKind::Custom,
+//RS         children: Vec::new(),
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-A11YGATE1=B (c134 Phase 6): construct a `UiNode` with an explicit
+//RS /// accessible role — the entry point for interactive controls that
+//RS /// `jet lint --a11y` checks (E2930 unlabeled control, E2931 duplicate label).
+//RS pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetUiAriaRole) -> JetUiNode {
+//RS     JetUiNode {
+//RS         label: label.to_string(),
+//RS         width,
+//RS         height,
+//RS         role: Some(role),
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: None,
+//RS         style: None,
+//RS         kind: if role == JetUiAriaRole::Button {
+//RS             JetUiNodeKind::Button
+//RS         } else if role == JetUiAriaRole::TextInput {
+//RS             JetUiNodeKind::TextInput
+//RS         } else {
+//RS             JetUiNodeKind::Custom
+//RS         },
+//RS         children: Vec::new(),
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-STYLESHAPE1=A (c134 Phase 3/7 wiring): construct a `UiNode` with an
+//RS /// explicit fill color — makes the typed `Style`/`Color` built in Phase 3
+//RS /// actually reach the paint pipeline instead of the hardcoded `#000000`.
+//RS pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> JetUiNode {
+//RS     JetUiNode {
+//RS         label: label.to_string(),
+//RS         width,
+//RS         height,
+//RS         // A styled node still presents text. Keep that semantic in the
+//RS         // canonical tree so every backend exposes the same accessible name.
+//RS         role: Some(JetUiAriaRole::Label),
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: Some(color.to_string()),
+//RS         style: None,
+//RS         kind: JetUiNodeKind::Custom,
+//RS         children: Vec::new(),
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_node_style(mut node: JetUiNode, style: JetTuiStyle) -> JetUiNode {
+//RS     node.style = Some(style);
+//RS     node
+//RS }
+//RS 
+//RS /// D-UITREE1=A: canonical typed beginner constructors. Component-kit source,
+//RS /// native, web, and TUI all hand this exact tree to `JetBackend`.
+//RS pub fn jet_ui_text(text: &str) -> JetUiNode {
+//RS     JetUiNode {
+//RS         label: text.to_string(),
+//RS         width: jet_tui_display_width(text) as f64,
+//RS         height: 1.0,
+//RS         role: Some(JetUiAriaRole::Label),
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: None,
+//RS         style: None,
+//RS         kind: JetUiNodeKind::Text,
+//RS         children: Vec::new(),
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_button(label: &str) -> JetUiNode {
+//RS     JetUiNode {
+//RS         label: label.to_string(),
+//RS         width: jet_tui_display_width(label) as f64 + 4.0,
+//RS         height: 1.0,
+//RS         role: Some(JetUiAriaRole::Button),
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: None,
+//RS         style: None,
+//RS         kind: JetUiNodeKind::Button,
+//RS         children: Vec::new(),
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS /// D-UI-CLOSURE1=A: shared constructor facts for button metadata. The
+//RS /// callback-taking route and interpreter adapter both use this before adding
+//RS /// their tier-local callback carrier.
+//RS pub fn jet_ui_button_with_metadata(
+//RS     label: &str,
+//RS     shortcut: JetOutcome<JetUiShortcut, JetAbsent>,
+//RS     accessible_label: JetOutcome<String, JetAbsent>,
+//RS ) -> JetUiNode {
+//RS     let mut node = jet_ui_button(label);
+//RS     node.shortcut = shortcut.ok();
+//RS     if let Ok(name) = accessible_label {
+//RS         node.accessibility = Some(JetUiAccessibility {
+//RS             name: Some(name),
+//RS             description: None,
+//RS             states: Vec::new(),
+//RS         });
+//RS     }
+//RS     node
+//RS }
+//RS 
+//RS /// D-UI-CLOSURE1=A: fixed `(display, shortcut, accessible_label, closure)`
+//RS /// callback ABI. Optional metadata uses the shared `JetOutcome` carrier, so
+//RS /// omitted labels are represented by `Err(JetAbsent)` before this seam.
+//RS pub fn jet_ui_button_on_click<F: Fn() + Send + Sync + 'static>(
+//RS     label: &str,
+//RS     shortcut: JetOutcome<JetUiShortcut, JetAbsent>,
+//RS     accessible_label: JetOutcome<String, JetAbsent>,
+//RS     handler: F,
+//RS ) -> JetUiNode {
+//RS     let mut node = jet_ui_button_with_metadata(label, shortcut, accessible_label);
+//RS     node.on_click = Some(jet_ui_register_click(handler));
+//RS     node
+//RS }
+//RS 
+//RS 
+//RS pub fn jet_ui_box(children: Vec<JetUiNode>) -> JetUiNode {
+//RS     let width = children
+//RS         .iter()
+//RS         .map(|child| child.width)
+//RS         .fold(0.0_f64, f64::max);
+//RS     let height = children.iter().map(|child| child.height).sum();
+//RS     JetUiNode {
+//RS         label: String::new(),
+//RS         width,
+//RS         height,
+//RS         role: Some(JetUiAriaRole::Container),
+//RS         accessibility: None,
+//RS         ime: None,
+//RS         color: None,
+//RS         style: None,
+//RS         kind: JetUiNodeKind::Box,
+//RS         children,
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut: None,
+//RS     }
+//RS }
+//RS 
+//RS /// Resolve the stable identity used by host projections and event bindings.
+//RS /// Author keys take precedence over render paths, matching every backend's
+//RS /// canonical tree traversal.
+//RS pub fn jet_ui_node_id(
+//RS     node: &JetUiNode,
+//RS     path: &str,
+//RS ) -> Result<JetUiNodeId, JetUiHostError> {
+//RS     let identity = match &node.key {
+//RS         Some(key) if !key.is_empty() => format!("key:{key}"),
+//RS         _ => path.to_string(),
+//RS     };
+//RS     JetUiNodeId::new(&identity)
+//RS }
+//RS 
+//RS // ── D-UI-EVT-DISP1=E: O(1) node-keyed click slots ───────────────────────────
+//RS 
+//RS type JetUiClickHandler = std::sync::Arc<dyn Fn() + Send + Sync + 'static>;
+//RS 
+//RS fn jet_ui_click_slots() -> &'static std::sync::Mutex<std::collections::HashMap<i64, JetUiClickHandler>>
+//RS {
+//RS     static SLOTS: std::sync::LazyLock<
+//RS         std::sync::Mutex<std::collections::HashMap<i64, JetUiClickHandler>>,
+//RS     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+//RS     &SLOTS
+//RS }
+//RS 
+//RS fn jet_ui_click_bindings()
+//RS -> &'static std::sync::Mutex<std::collections::HashMap<JetUiNodeId, i64>> {
+//RS     static BINDINGS: std::sync::LazyLock<
+//RS         std::sync::Mutex<std::collections::HashMap<JetUiNodeId, i64>>,
+//RS     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+//RS     &BINDINGS
+//RS }
+//RS 
+//RS fn jet_ui_next_click_id() -> i64 {
+//RS     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+//RS     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+//RS }
+//RS 
+//RS pub fn jet_ui_register_click<F: Fn() + Send + Sync + 'static>(handler: F) -> i64 {
+//RS     let id = jet_ui_next_click_id();
+//RS     jet_ui_click_slots()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .insert(id, std::sync::Arc::new(handler));
+//RS     id
+//RS }
+//RS 
+//RS /// Bind a typed node identity to a handler slot (paint/mount).
+//RS pub fn jet_ui_bind_click(identity: JetUiNodeId, slot: i64) {
+//RS     jet_ui_click_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .insert(identity, slot);
+//RS }
+//RS 
+//RS /// Clear the handler binding for an unmounted identity.
+//RS pub fn jet_ui_unbind_click(identity: &JetUiNodeId) {
+//RS     jet_ui_click_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .remove(identity);
+//RS }
+//RS 
+//RS /// D-UI-EVT-DISP1=E: O(1) dispatch by stable typed node identity.
+//RS pub fn jet_ui_dispatch(identity: &JetUiNodeId) {
+//RS     let slot = jet_ui_click_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .get(identity)
+//RS         .copied();
+//RS     let Some(slot) = slot else {
+//RS         return;
+//RS     };
+//RS     let handler = jet_ui_click_slots()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .get(&slot)
+//RS         .cloned();
+//RS     if let Some(handler) = handler {
+//RS         handler();
+//RS     }
+//RS }
+//RS // ── D-UI-DROP1=A: O(1) node-keyed drop slots ─────────────────────────────────
+//RS 
+//RS type JetUiDropHandler = std::sync::Arc<dyn Fn(Vec<JetUiDropItem>) + Send + Sync + 'static>;
+//RS 
+//RS fn jet_ui_drop_slots()
+//RS -> &'static std::sync::Mutex<std::collections::HashMap<i64, JetUiDropHandler>> {
+//RS     static SLOTS: std::sync::LazyLock<
+//RS         std::sync::Mutex<std::collections::HashMap<i64, JetUiDropHandler>>,
+//RS     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+//RS     &SLOTS
+//RS }
+//RS 
+//RS fn jet_ui_drop_bindings()
+//RS -> &'static std::sync::Mutex<std::collections::HashMap<JetUiNodeId, i64>> {
+//RS     static BINDINGS: std::sync::LazyLock<
+//RS         std::sync::Mutex<std::collections::HashMap<JetUiNodeId, i64>>,
+//RS     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+//RS     &BINDINGS
+//RS }
+//RS 
+//RS fn jet_ui_next_drop_id() -> i64 {
+//RS     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+//RS     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+//RS }
+//RS 
+//RS pub fn jet_ui_register_drop<F: Fn(Vec<JetUiDropItem>) + Send + Sync + 'static>(
+//RS     handler: F,
+//RS ) -> i64 {
+//RS     let id = jet_ui_next_drop_id();
+//RS     jet_ui_drop_slots()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .insert(id, std::sync::Arc::new(handler));
+//RS     id
+//RS }
+//RS 
+//RS pub fn jet_ui_bind_drop(identity: JetUiNodeId, slot: i64) {
+//RS     jet_ui_drop_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .insert(identity, slot);
+//RS }
+//RS 
+//RS pub fn jet_ui_unbind_drop(identity: &JetUiNodeId) {
+//RS     jet_ui_drop_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .remove(identity);
+//RS }
+//RS 
+//RS pub fn jet_ui_dispatch_drop(identity: &JetUiNodeId, items: Vec<JetUiDropItem>) {
+//RS     let slot = jet_ui_drop_bindings()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .get(identity)
+//RS         .copied();
+//RS     let Some(slot) = slot else {
+//RS         return;
+//RS     };
+//RS     let handler = jet_ui_drop_slots()
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .get(&slot)
+//RS         .cloned();
+//RS     if let Some(handler) = handler {
+//RS         handler(items);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Walk a freshly painted tree and bind each event slot to its identity.
+//RS pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
+//RS     let Ok(identity) = jet_ui_node_id(node, path) else {
+//RS         return;
+//RS     };
+//RS     if let Some(slot) = node.on_click {
+//RS         jet_ui_bind_click(identity.clone(), slot);
+//RS     }
+//RS     if let Some(slot) = node.on_drop {
+//RS         jet_ui_bind_drop(identity, slot);
+//RS     }
+//RS     if node.kind == JetUiNodeKind::Box {
+//RS         for (index, child) in node.children.iter().enumerate() {
+//RS             jet_ui_bind_tree_clicks(child, &format!("{path}/{index}"));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_aria_role_button() -> JetUiAriaRole {
+//RS     JetUiAriaRole::Button
+//RS }
+//RS 
+//RS pub fn jet_ui_aria_role_text_input() -> JetUiAriaRole {
+//RS     JetUiAriaRole::TextInput
+//RS }
+//RS 
+//RS pub fn jet_ui_aria_role_label() -> JetUiAriaRole {
+//RS     JetUiAriaRole::Label
+//RS }
+//RS 
+//RS pub fn jet_ui_aria_role_container() -> JetUiAriaRole {
+//RS     JetUiAriaRole::Container
+//RS }
+//RS 
+//RS pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
+//RS     JetInputEvent::Key {
+//RS         code: code.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_ui_resize_event(width: f64, height: f64) -> JetInputEvent {
+//RS     JetInputEvent::Resize {
+//RS         size: JetSize { width, height },
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetPoint {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("{{x:{},y:{}}}", self.x, self.y)
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetSize {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("{{w:{},h:{}}}", self.width, self.height)
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetRect {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "{{x:{},y:{},w:{},h:{}}}",
+//RS             self.x, self.y, self.width, self.height
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetEventResult {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             JetEventResult::Handled => "Handled".to_string(),
+//RS             JetEventResult::Ignored => "Ignored".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetUiAriaRole {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             JetUiAriaRole::Button => "Button".to_string(),
+//RS             JetUiAriaRole::TextInput => "TextInput".to_string(),
+//RS             JetUiAriaRole::Label => "Label".to_string(),
+//RS             JetUiAriaRole::Container => "Container".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod ui_backend_tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn null_backend_measure_layout_paint_roundtrip() {
+//RS         let backend = JetNullBackend::new();
+//RS         let node = jet_ui_node("hello", 100.0, 20.0);
+//RS         let constraint = jet_ui_constraint(0.0, 0.0, 200.0, 100.0);
+//RS         let size = backend.measure_node(node.clone(), constraint);
+//RS         assert_eq!(size.width, 100.0);
+//RS         assert_eq!(size.height, 20.0);
+//RS 
+//RS         let frame = jet_ui_rect(0.0, 0.0, size.width, size.height);
+//RS         backend.layout_node(node.clone(), frame);
+//RS         backend.paint_node(node);
+//RS 
+//RS         let cmds = backend.paint_commands();
+//RS         assert_eq!(cmds.len(), 2);
+//RS         assert!(cmds[0].starts_with("fill("));
+//RS         assert!(cmds[1].contains("hello"));
+//RS 
+//RS         let key = jet_ui_key_event("enter");
+//RS         assert_eq!(backend.dispatch_event(key), JetEventResult::Handled);
+//RS         let bad = jet_ui_key_event("");
+//RS         assert_eq!(backend.dispatch_event(bad), JetEventResult::Ignored);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn tui_backend_reactive_paint_is_deterministic() {
+//RS         let backend = JetTuiBackend::new();
+//RS         let node = jet_ui_node("hi", 2.0, 1.0);
+//RS         let constraint = jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS);
+//RS         let size = backend.measure_node(node.clone(), constraint);
+//RS         let frame = jet_ui_rect(0.0, 0.0, size.width, size.height);
+//RS         backend.layout_node(node.clone(), frame);
+//RS         backend.paint_node(node);
+//RS         assert_eq!(backend.render_count(), 1);
+//RS         assert_eq!(backend.frame_lines(), vec!["hi".to_string()]);
+//RS     }
+//RS 
+//RS     // D-A11YGATE1=B (c134 Phase 6): keyboard focus routing.
+//RS     #[test]
+//RS     fn focus_group_tab_cycles_and_wraps() {
+//RS         let backend = JetNullBackend::new();
+//RS         let save = jet_ui_node_role("Save", 40.0, 10.0, JetUiAriaRole::Button);
+//RS         let cancel = jet_ui_node_role("Cancel", 40.0, 10.0, JetUiAriaRole::Button);
+//RS         assert_eq!(backend.focused_label(), "");
+//RS 
+//RS         backend.set_focus_group(vec![save, cancel]);
+//RS         assert_eq!(backend.focused_label(), "Save");
+//RS 
+//RS         let tab = jet_ui_key_event("Tab");
+//RS         assert_eq!(backend.dispatch_event(tab.clone()), JetEventResult::Handled);
+//RS         assert_eq!(backend.focused_label(), "Cancel");
+//RS 
+//RS         assert_eq!(backend.dispatch_event(tab.clone()), JetEventResult::Handled);
+//RS         assert_eq!(backend.focused_label(), "Save");
+//RS 
+//RS         // A non-Tab key doesn't disturb focus.
+//RS         let enter = jet_ui_key_event("enter");
+//RS         assert_eq!(backend.dispatch_event(enter), JetEventResult::Handled);
+//RS         assert_eq!(backend.focused_label(), "Save");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn aria_role_button_is_interactive_label_is_not() {
+//RS         assert!(JetUiAriaRole::Button.is_interactive());
+//RS         assert!(JetUiAriaRole::TextInput.is_interactive());
+//RS         assert!(!JetUiAriaRole::Label.is_interactive());
+//RS         assert!(!JetUiAriaRole::Container.is_interactive());
+//RS     }
+//RS 
+//RS     // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: paint binds identity→slot; dispatch runs it.
+//RS     #[test]
+//RS     fn portable_button_on_click_dispatches_after_paint() {
+//RS         use std::sync::atomic::{AtomicUsize, Ordering};
+//RS         static HITS: AtomicUsize = AtomicUsize::new(0);
+//RS         HITS.store(0, Ordering::SeqCst);
+//RS 
+//RS         let backend = JetNullBackend::new();
+//RS         let button = jet_ui_button_on_click("Go", Err(JetAbsent), Err(JetAbsent), || {
+//RS             HITS.fetch_add(1, Ordering::SeqCst);
+//RS         });
+//RS         let tree = jet_ui_box(vec![button]);
+//RS         backend.mount_node(
+//RS             tree,
+//RS             jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+//RS         );
+//RS         let button_id = JetUiNodeId::new("null#0/0").unwrap();
+//RS         jet_ui_dispatch(&button_id);
+//RS         assert_eq!(HITS.load(Ordering::SeqCst), 1);
+//RS         let missing_id = JetUiNodeId::new("missing").unwrap();
+//RS         jet_ui_dispatch(&missing_id);
+//RS         assert_eq!(HITS.load(Ordering::SeqCst), 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn accessibility_attachment_projects_by_stable_identity() {
+//RS         let mut node = jet_ui_button("Save");
+//RS         assert_eq!(node.accessibility, None);
+//RS         assert_eq!(node.role, Some(JetUiAriaRole::Button));
+//RS 
+//RS         let metadata = JetUiAccessibility::new(Some("Save note"), Some("Writes the current note"))
+//RS             .unwrap()
+//RS             .with_state(JetUiAccessibilityState::Disabled);
+//RS         node.attach_jet_ui_accessibility(metadata.clone()).unwrap();
+//RS 
+//RS         let node_id = JetUiNodeId::new("key:save").unwrap();
+//RS         let first = jet_ui_accessibility_project(&node, node_id.clone()).unwrap();
+//RS         let second = jet_ui_accessibility_project(&node, node_id.clone()).unwrap();
+//RS         assert_eq!(first, second);
+//RS         assert_eq!(first.node(), &node_id);
+//RS         assert_eq!(first.metadata(), &metadata);
+//RS     }
+//RS }
+// END-PORT-PENDING 0179 crates/jet-codegen/src/Prelude/Ui.rs:1802-2592
+

@@ -1,0 +1,61 @@
+// PORT-PENDING 0144 crates-jet-codegen-src-prelude-core-collections-module-group-slice-1797: crates/jet-codegen/src/Prelude/Core/SortKernel.rs:1-57
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn jet_list_try_sort_by_key_kernel<T, K, E, F, C>(
+//RS     xs: &mut [T],
+//RS     mut key: F,
+//RS     mut compare: C,
+//RS ) -> Result<(), E>
+//RS where
+//RS     F: FnMut(&T) -> Result<K, E>,
+//RS     C: FnMut(&K, &K) -> std::cmp::Ordering,
+//RS {
+//RS     // Evaluate each key once; a failed key leaves the receiver untouched.
+//RS     let mut keyed = xs
+//RS         .iter()
+//RS         .enumerate()
+//RS         .map(|(index, item)| key(item).map(|key| (index, key)))
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     keyed.sort_by(|left, right| compare(&left.1, &right.1));
+//RS 
+//RS     // Follow previously applied swaps instead of copying the receiver.
+//RS     for target in 0..keyed.len() {
+//RS         let mut source = keyed[target].0;
+//RS         while source < target {
+//RS             source = keyed[source].0;
+//RS         }
+//RS         keyed[target].0 = source;
+//RS         if source != target {
+//RS             xs.swap(target, source);
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn jet_list_sort_by_compare_kernel<T, F>(xs: &mut [T], compare: F)
+//RS where
+//RS     F: FnMut(&T, &T) -> std::cmp::Ordering,
+//RS {
+//RS     xs.sort_by(compare);
+//RS }
+//RS 
+//RS pub(crate) fn jet_list_try_partition_kernel<T, E, F, I>(
+//RS     xs: I,
+//RS     mut predicate: F,
+//RS ) -> Result<(Vec<T>, Vec<T>), E>
+//RS where
+//RS     I: IntoIterator<Item = T>,
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     let mut yes = Vec::new();
+//RS     let mut no = Vec::new();
+//RS     for item in xs {
+//RS         if predicate(&item)? {
+//RS             yes.push(item);
+//RS         } else {
+//RS             no.push(item);
+//RS         }
+//RS     }
+//RS     Ok((yes, no))
+//RS }
+// END-PORT-PENDING 0144 crates/jet-codegen/src/Prelude/Core/SortKernel.rs:1-57
+

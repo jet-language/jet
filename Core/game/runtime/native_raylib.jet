@@ -1,0 +1,277 @@
+// PORT-PENDING 0218 crates-jet-jit-src-game-module-group: crates/jet-jit/src/Raylib.rs:1-273
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-RAYLIB1 / D-FLAGSHIP-RAYLIB1: resident-JIT `core.game.raylib` bridge.
+//RS //! Mirrors prelude `HandlesRaylib.rs` — headless by default (`JET_RAYLIB_DISPLAY=1`
+//RS //! enables native when the dynamic raylib API is available).
+//RS 
+//RS use super::Concurrency;
+//RS use crate::runtime_host::JitRuntime;
+//RS 
+//RS #[allow(dead_code)]
+//RS mod raylib_kernel {
+//RS     include!("../../jet-codegen/src/Prelude/Core/Raylib.rs");
+//RS }
+//RS 
+//RS pub(crate) use raylib_kernel::JetRaylibSpriteDrawCall;
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct RaylibWindowState {
+//RS     pub(crate) width: i64,
+//RS     pub(crate) height: i64,
+//RS     pub(crate) title: String,
+//RS     pub(crate) native: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS pub(crate) struct RaylibColorState {
+//RS     pub(crate) r: i64,
+//RS     pub(crate) g: i64,
+//RS     pub(crate) b: i64,
+//RS     pub(crate) a: i64,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct RaylibSoundState {
+//RS     pub(crate) path: String,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct RaylibTextureAtlasState {
+//RS     spec: raylib_kernel::JetRaylibAtlasSpec,
+//RS }
+//RS 
+//RS fn with_rt<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut JitRuntime) -> R,
+//RS     R: Default,
+//RS {
+//RS     Concurrency::with_runtime_mut(f)
+//RS }
+//RS 
+//RS /// Register the Raylib interpreter adapter in the shared ambient context.
+//RS ///
+//RS /// The callback delegates directly to the Comptime Raylib adapter rather than
+//RS /// re-entering the public ambient dispatcher.
+//RS pub(crate) fn register_interpreter_ambient(context: &mut crate::InterpreterAmbientContext) {
+//RS     context.register_core_call(jet_raylib_ambient_core_call);
+//RS }
+//RS 
+//RS fn jet_raylib_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<jet_foundation::AST::CtValue>,
+//RS     span: jet_foundation::Diagnostics::Span,
+//RS     resolved_ret: Option<jet_foundation::AST::Type>,
+//RS     sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Option<
+//RS     Result<
+//RS         jet_foundation::AST::CtValue,
+//RS         jet_foundation::Diagnostics::Diagnostic,
+//RS     >,
+//RS > {
+//RS     jet_codegen::Comptime::apply_raylib_ambient_core_call(
+//RS         module,
+//RS         method,
+//RS         args,
+//RS         span,
+//RS         resolved_ret,
+//RS         sink,
+//RS     )
+//RS }
+//RS 
+//RS fn display_enabled() -> bool {
+//RS     std::env::var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1")
+//RS }
+//RS 
+//RS fn jet_jit_raylib_window_open(width: i64, height: i64, title: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let title_s = rt.heap.clone_string(title).unwrap_or_default();
+//RS         // Headless unless display is explicitly requested. Native init lives in
+//RS         // the AOT prelude bridge; JIT keeps the same default transcript.
+//RS         let native = display_enabled() && false;
+//RS         let _ = (native, width, height);
+//RS         rt.raylib_windows.push(RaylibWindowState {
+//RS             width,
+//RS             height,
+//RS             title: title_s,
+//RS             native: false,
+//RS         });
+//RS         rt.raylib_windows.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_color(r: i64, g: i64, b: i64, a: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.raylib_colors.push(RaylibColorState { r, g, b, a });
+//RS         rt.raylib_colors.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_set_target_fps(_fps: i64) {}
+//RS 
+//RS fn jet_jit_raylib_key_down(name: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let _ = rt.heap.clone_string(name);
+//RS         // Headless bridge never reports keys pressed.
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_begin_drawing(_window: i64) {}
+//RS fn jet_jit_raylib_clear_background(_color: i64) {}
+//RS fn jet_jit_raylib_draw_rectangle(_x: i64, _y: i64, _w: i64, _h: i64, _color: i64) {}
+//RS fn jet_jit_raylib_draw_text(_text: i64, _x: i64, _y: i64, _size: i64, _color: i64) {}
+//RS fn jet_jit_raylib_end_drawing() {}
+//RS fn jet_jit_raylib_close_window(_window: i64) {}
+//RS 
+//RS fn jet_jit_raylib_window_should_close(window: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let native = rt
+//RS             .raylib_windows
+//RS             .get(window.saturating_sub(1) as usize)
+//RS             .map(|w| w.native)
+//RS             .unwrap_or(false);
+//RS         // Headless windows always report closed after open (matches Prelude).
+//RS         i8::from(!native)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_window_ready(window: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let native = rt
+//RS             .raylib_windows
+//RS             .get(window.saturating_sub(1) as usize)
+//RS             .map(|w| w.native)
+//RS             .unwrap_or(false);
+//RS         i8::from(native)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_load_sound(path: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let path_s = rt.heap.clone_string(path).unwrap_or_default();
+//RS         rt.raylib_sounds.push(RaylibSoundState { path: path_s });
+//RS         rt.raylib_sounds.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let ok = rt
+//RS             .raylib_sounds
+//RS             .get(sound.saturating_sub(1) as usize)
+//RS             .map(|s| !s.path.is_empty())
+//RS             .unwrap_or(false);
+//RS         i8::from(ok)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_gamepad_down(gamepad: i64, button: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let Some(button) = rt.heap.clone_string(button) else {
+//RS             return 0;
+//RS         };
+//RS         if gamepad < 0
+//RS             || i32::try_from(gamepad).is_err()
+//RS             || raylib_kernel::jet_raylib_button_code(&button).is_none()
+//RS         {
+//RS             return 0;
+//RS         }
+//RS         // The resident JIT adapter is headless; native input remains owned by
+//RS         // the AOT bridge. Validated input still has the same no-input result.
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_gamepad_axis(gamepad: i64, axis: i64) -> f64 {
+//RS     with_rt(|rt| {
+//RS         let Some(axis) = rt.heap.clone_string(axis) else {
+//RS             return 0.0;
+//RS         };
+//RS         if gamepad < 0
+//RS             || i32::try_from(gamepad).is_err()
+//RS             || raylib_kernel::jet_raylib_axis_code(&axis).is_none()
+//RS         {
+//RS             return 0.0;
+//RS         }
+//RS         0.0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_load_texture_atlas(path: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let path = rt.heap.clone_string(path).unwrap_or_default();
+//RS         let spec = raylib_kernel::jet_raylib_load_texture_atlas_spec(&path);
+//RS         rt.raylib_atlases
+//RS             .push(RaylibTextureAtlasState { spec });
+//RS         rt.raylib_atlases.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_raylib_draw_sprite(atlas: i64, region: i64, x: i64, y: i64) {
+//RS     with_rt(|rt| {
+//RS         let Some(atlas) = rt
+//RS             .raylib_atlases
+//RS             .get(atlas.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS         else {
+//RS             return;
+//RS         };
+//RS         let Some(region) = rt.heap.clone_string(region) else {
+//RS             return;
+//RS         };
+//RS         let Some(call) = raylib_kernel::jet_raylib_sprite_draw_call(
+//RS             &atlas.spec.name,
+//RS             &atlas.spec.regions,
+//RS             &region,
+//RS             x,
+//RS             y,
+//RS         ) else {
+//RS             return;
+//RS         };
+//RS         rt.raylib_draw_calls.push(call.clone());
+//RS         raylib_kernel::jet_raylib_record_draw_call(call);
+//RS     })
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct RaylibHostFns;
+//RS     register: register_raylib_symbols;
+//RS     declare: declare_raylib_host_fns(module) {
+//RS         use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS 
+//RS         let mut sig = |n_params: usize, ret: Option<cranelift_codegen::ir::Type>| {
+//RS             let mut s = Signature::new(cc);
+//RS             for _ in 0..n_params {
+//RS                 s.params.push(AbiParam::new(types::I64));
+//RS             }
+//RS             if let Some(r) = ret {
+//RS                 s.returns.push(AbiParam::new(r));
+//RS             }
+//RS             s
+//RS         };
+//RS 
+//RS     }
+//RS     window_open: "jet_jit_raylib_window_open" => jet_jit_raylib_window_open: sig(3, Some(types::I64));
+//RS     color: "jet_jit_raylib_color" => jet_jit_raylib_color: sig(4, Some(types::I64));
+//RS     set_target_fps: "jet_jit_raylib_set_target_fps" => jet_jit_raylib_set_target_fps: sig(1, None);
+//RS     key_down: "jet_jit_raylib_key_down" => jet_jit_raylib_key_down: sig(1, Some(types::I8));
+//RS     begin_drawing: "jet_jit_raylib_begin_drawing" => jet_jit_raylib_begin_drawing: sig(1, None);
+//RS     clear_background: "jet_jit_raylib_clear_background" => jet_jit_raylib_clear_background: sig(1, None);
+//RS     draw_rectangle: "jet_jit_raylib_draw_rectangle" => jet_jit_raylib_draw_rectangle: sig(5, None);
+//RS     draw_text: "jet_jit_raylib_draw_text" => jet_jit_raylib_draw_text: sig(5, None);
+//RS     end_drawing: "jet_jit_raylib_end_drawing" => jet_jit_raylib_end_drawing: sig(0, None);
+//RS     close_window: "jet_jit_raylib_close_window" => jet_jit_raylib_close_window: sig(1, None);
+//RS     window_should_close: "jet_jit_raylib_window_should_close" => jet_jit_raylib_window_should_close: sig(1, Some(types::I8));
+//RS     window_ready: "jet_jit_raylib_window_ready" => jet_jit_raylib_window_ready: sig(1, Some(types::I8));
+//RS     load_sound: "jet_jit_raylib_load_sound" => jet_jit_raylib_load_sound: sig(1, Some(types::I64));
+//RS     play_sound: "jet_jit_raylib_play_sound" => jet_jit_raylib_play_sound: sig(1, Some(types::I8));
+//RS     gamepad_down: "jet_jit_raylib_gamepad_down" => jet_jit_raylib_gamepad_down: sig(2, Some(types::I8));
+//RS     gamepad_axis: "jet_jit_raylib_gamepad_axis" => jet_jit_raylib_gamepad_axis: sig(2, Some(types::F64));
+//RS     load_texture_atlas: "jet_jit_raylib_load_texture_atlas" => jet_jit_raylib_load_texture_atlas: sig(1, Some(types::I64));
+//RS     draw_sprite: "jet_jit_raylib_draw_sprite" => jet_jit_raylib_draw_sprite: sig(4, None);
+//RS }
+// END-PORT-PENDING 0218 crates/jet-jit/src/Raylib.rs:1-273
+

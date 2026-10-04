@@ -1,0 +1,858 @@
+// DevtoolsRequestPanel.rs:1–1627. Bounded request facts and deterministic projections.
+// Publication is opt-in; metadata constructors never retain values. The event,
+// value validator and JSON renderer have ONE owner: runtime.devtools (Wave0176).
+// Main publishes module kernel_devtools_request_panel in core.devtools.runtime.
+// No native substrate, selected-target fact, composite key or IO-kind dependency
+// occurs in this fragment (#4494/#4483/#4499/#4409 not applicable).
+// Compiler gates: #4392 original payload/collection retaining loans; #4500
+// indexed in-place ownership transfer (@T links). Gated lines below preserve
+// required semantics, not clone-based substitutes. Main owns their proof.
+// #4392/#4318: text.isprintable reuses the canonical Unicode UTF-8 leaf;
+// allocation parity requires that owner's retained-byte loan cutover.
+use core.devtools.runtime.devtools as d
+use core.text.runtime.kernel_unicode_string as text
+
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS :: d.JET_DEVTOOLS_MAX_HISTORY
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_ROUTE_INPUTS :: 64
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_ACCESS_EVENTS :: 256
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_QUERIES :: 256
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_EXCEPTIONS :: 64
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES :: 64
+pub JET_DEVTOOLS_REQUEST_PANEL_MAX_LINKS :: 128
+
+pub enum JetDevtoolsRequestPanelFreshness {
+    Fresh
+    Stale
+}
+impl JetDevtoolsRequestPanelFreshness {
+    pub fn default() -> JetDevtoolsRequestPanelFreshness Never! { .Fresh }
+    pub fn is_fresh(self) -> Bool Never! { self == .Fresh }
+    pub fn is_stale(self) -> Bool Never! { self == .Stale }
+}
+// Rust :34–61; an absent optional value is the redacted default.
+pub struct JetDevtoolsRequestPanelValue { value: d.JetDevtoolsValue? }
+impl JetDevtoolsRequestPanelValue {
+    pub fn default() -> JetDevtoolsRequestPanelValue Never! { JetDevtoolsRequestPanelValue{value: None} }
+    pub fn published_value(value: ^d.JetDevtoolsValue) -> JetDevtoolsRequestPanelValue Never! { JetDevtoolsRequestPanelValue{value: Val(^value)} }
+    pub fn is_published(self) -> Bool Never! { self.value != .None }
+    // #4392/#4500: Option<&Value>, not an owned publication copy.
+    pub fn value(self) -> (@d.JetDevtoolsValue)? Never! from self {
+        if self.value == .Val(value) -> return Val(@value)
+        None
+    }
+    fn validate(self, field: String) Err! {
+        if self.value == .Val(value) -> value.validate() ?? return Err("{field}: {err.message}")
+        Ok()
+    }
+}
+pub struct JetDevtoolsRouteInput {
+    pub name: String
+    value: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsRouteInput {
+    pub fn new(name: ^String) -> JetDevtoolsRouteInput Never! { JetDevtoolsRouteInput{name: ^name, value: JetDevtoolsRequestPanelValue.default()} }
+    pub fn published_value(name: ^String, value: ^d.JetDevtoolsValue) -> JetDevtoolsRouteInput Never! { JetDevtoolsRouteInput{name: ^name, value: JetDevtoolsRequestPanelValue.published_value(^value)} }
+    pub fn value(self) -> (@d.JetDevtoolsValue)? Never! from self { self.value.value() }
+    pub fn is_published(self) -> Bool Never! { self.value.is_published() }
+}
+pub struct JetDevtoolsRequestFact {
+    pub id: String
+    pub method: String
+    pub route: String
+    pub started_at_ms: U64
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    pub route_inputs: [JetDevtoolsRouteInput]
+    payload: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsRequestFact {
+    pub fn new(id: ^String, method: ^String, route: ^String, started_at_ms: U64) -> JetDevtoolsRequestFact Never! {
+        JetDevtoolsRequestFact{id: ^id, method: ^method, route: ^route, started_at_ms: started_at_ms, freshness: .Fresh, route_inputs: [JetDevtoolsRouteInput]{}, payload: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_route_input(^self, input: ^JetDevtoolsRouteInput) -> JetDevtoolsRequestFact Never! { &self.route_inputs.push(^input); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsRequestFact Never! { self.freshness = freshness; ^self }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsRequestFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
+    pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_request(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(self.started_at_ms, source, "Request", ~self.id, jet_devtools_request_panel_request_fields(self) ?? return Err(err), jet_devtools_request_panel_request_payload(self) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsResponseFact {
+    pub request_id: String
+    pub status: U16
+    pub size_bytes: U64
+    pub duration_ms: U64
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    payload: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsResponseFact {
+    pub fn new(request_id: ^String, status: U16, size_bytes: U64, duration_ms: U64) -> JetDevtoolsResponseFact Never! {
+        JetDevtoolsResponseFact{request_id: ^request_id, status: status, size_bytes: size_bytes, duration_ms: duration_ms, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsResponseFact Never! { self.freshness = freshness; ^self }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsResponseFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
+    pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_response(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(U64{0}, source, "Response", ~self.request_id, jet_devtools_request_panel_response_fields(self) ?? return Err(err), jet_devtools_request_panel_payload([(String, (@d.JetDevtoolsValue)?)]{("value", self.payload())}) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsAccessEvent {
+    pub id: String
+    pub request_id: String
+    pub operation: String
+    pub target: String
+    pub at_ms: U64
+    pub allowed: Bool
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    payload: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsAccessEvent {
+    pub fn new(id: ^String, request_id: ^String, operation: ^String, target: ^String, at_ms: U64, allowed: Bool) -> JetDevtoolsAccessEvent Never! {
+        JetDevtoolsAccessEvent{id: ^id, request_id: ^request_id, operation: ^operation, target: ^target, at_ms: at_ms, allowed: allowed, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsAccessEvent Never! { self.freshness = freshness; ^self }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsAccessEvent Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
+    pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_access(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(self.at_ms, source, "Access", ~self.id, jet_devtools_request_panel_access_fields(self) ?? return Err(err), jet_devtools_request_panel_payload([(String, (@d.JetDevtoolsValue)?)]{("value", self.payload())}) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsQueryFact {
+    pub id: String
+    pub request_id: String
+    pub name: String
+    pub started_at_ms: U64
+    pub duration_ms: U64
+    pub source_identity: String
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    payload: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsQueryFact {
+    pub fn new(id: ^String, request_id: ^String, name: ^String, started_at_ms: U64, duration_ms: U64, source_identity: ^String) -> JetDevtoolsQueryFact Never! {
+        JetDevtoolsQueryFact{id: ^id, request_id: ^request_id, name: ^name, started_at_ms: started_at_ms, duration_ms: duration_ms, source_identity: ^source_identity, freshness: .Fresh, payload: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsQueryFact Never! { self.freshness = freshness; ^self }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsQueryFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
+    pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_query(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(self.started_at_ms, source, "Query", ~self.id, jet_devtools_request_panel_query_fields(self) ?? return Err(err), jet_devtools_request_panel_payload([(String, (@d.JetDevtoolsValue)?)]{("value", self.payload())}) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsExceptionFact {
+    pub id: String
+    pub request_id: String
+    pub kind: String
+    pub code: String
+    pub at_ms: U64
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    source_frames: [JetDevtoolsSourceFrame]
+    message: JetDevtoolsRequestPanelValue
+    payload: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsExceptionFact {
+    pub fn new(id: ^String, request_id: ^String, kind: ^String, code: ^String, at_ms: U64) -> JetDevtoolsExceptionFact Never! {
+        JetDevtoolsExceptionFact{id: ^id, request_id: ^request_id, kind: ^kind, code: ^code, at_ms: at_ms, freshness: .Fresh, source_frames: [JetDevtoolsSourceFrame]{}, message: JetDevtoolsRequestPanelValue.default(), payload: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_source_frame(^self, frame: ^JetDevtoolsSourceFrame) -> JetDevtoolsExceptionFact Never! { &self.source_frames.push(^frame); ^self }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsExceptionFact Never! { self.freshness = freshness; ^self }
+    pub fn with_published_message(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! { self.message = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn with_published_value(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsExceptionFact Never! { self.payload = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn source_frames(self) -> @[JetDevtoolsSourceFrame] Never! from self { @self.source_frames }
+    pub fn message(self) -> (@d.JetDevtoolsValue)? Never! from self { self.message.value() }
+    pub fn payload(self) -> (@d.JetDevtoolsValue)? Never! from self { self.payload.value() }
+    pub fn message_is_published(self) -> Bool Never! { self.message.is_published() }
+    pub fn payload_is_published(self) -> Bool Never! { self.payload.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_exception(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(self.at_ms, source, "Exception", ~self.id, jet_devtools_request_panel_exception_fields(self) ?? return Err(err), jet_devtools_request_panel_payload([(String, (@d.JetDevtoolsValue)?)]{("message", self.message()), ("value", self.payload())}) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsSourceFrame {
+    pub id: String
+    pub request_id: String
+    pub function: String
+    pub file: String
+    pub line: U32
+    pub column: U32
+    pub frame_index: U32
+    pub freshness: JetDevtoolsRequestPanelFreshness
+    source_line: JetDevtoolsRequestPanelValue
+}
+impl JetDevtoolsSourceFrame {
+    pub fn new(id: ^String, request_id: ^String, function: ^String, file: ^String, line: U32, column: U32, frame_index: U32) -> JetDevtoolsSourceFrame Never! {
+        JetDevtoolsSourceFrame{id: ^id, request_id: ^request_id, function: ^function, file: ^file, line: line, column: column, frame_index: frame_index, freshness: .Fresh, source_line: JetDevtoolsRequestPanelValue.default()}
+    }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsSourceFrame Never! { self.freshness = freshness; ^self }
+    pub fn with_published_source_line(^self, value: ^d.JetDevtoolsValue) -> JetDevtoolsSourceFrame Never! { self.source_line = JetDevtoolsRequestPanelValue.published_value(^value); ^self }
+    pub fn source_line(self) -> (@d.JetDevtoolsValue)? Never! from self { self.source_line.value() }
+    pub fn source_line_is_published(self) -> Bool Never! { self.source_line.is_published() }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_source_frame(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts_with_payload(U64{0}, source, "Frame", ~self.id, jet_devtools_request_panel_source_frame_fields(self) ?? return Err(err), jet_devtools_request_panel_payload([(String, (@d.JetDevtoolsValue)?)]{("source_line", self.source_line())}) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsLogLink {
+    pub id: String
+    pub request_id: String
+    pub target: String
+    pub at_ms: U64
+    pub freshness: JetDevtoolsRequestPanelFreshness
+}
+impl JetDevtoolsLogLink {
+    pub fn new(id: ^String, request_id: ^String, target: ^String, at_ms: U64) -> JetDevtoolsLogLink Never! { JetDevtoolsLogLink{id: ^id, request_id: ^request_id, target: ^target, at_ms: at_ms, freshness: .Fresh} }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsLogLink Never! { self.freshness = freshness; ^self }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_log_link(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts(self.at_ms, source, "LogLink", ~self.id, jet_devtools_request_panel_log_link_fields(self) ?? return Err(err))
+    }
+}
+pub struct JetDevtoolsTraceLink {
+    pub id: String
+    pub request_id: String
+    pub span_id: String
+    pub target: String
+    pub at_ms: U64
+    pub duration_ms: U64
+    pub freshness: JetDevtoolsRequestPanelFreshness
+}
+impl JetDevtoolsTraceLink {
+    pub fn new(id: ^String, request_id: ^String, span_id: ^String, target: ^String, at_ms: U64, duration_ms: U64) -> JetDevtoolsTraceLink Never! { JetDevtoolsTraceLink{id: ^id, request_id: ^request_id, span_id: ^span_id, target: ^target, at_ms: at_ms, duration_ms: duration_ms, freshness: .Fresh} }
+    pub fn with_freshness(^self, freshness: JetDevtoolsRequestPanelFreshness) -> JetDevtoolsTraceLink Never! { self.freshness = freshness; ^self }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        jet_devtools_request_panel_validate_trace_link(self) ?? return Err(err)
+        d.JetDevtoolsEvent.from_parts(self.at_ms, source, "TraceLink", ~self.id, jet_devtools_request_panel_trace_link_fields(self) ?? return Err(err))
+    }
+}
+pub enum JetDevtoolsRequestPanelFact {
+    Request(JetDevtoolsRequestFact)
+    Response(JetDevtoolsResponseFact)
+    Access(JetDevtoolsAccessEvent)
+    Query(JetDevtoolsQueryFact)
+    Exception(JetDevtoolsExceptionFact)
+    SourceFrame(JetDevtoolsSourceFrame)
+    LogLink(JetDevtoolsLogLink)
+    TraceLink(JetDevtoolsTraceLink)
+}
+impl JetDevtoolsRequestPanelFact {
+    pub fn request_id(self) -> @String Never! from self {
+        if self == {
+            .Request(fact) -> @fact.id
+            .Response(fact) -> @fact.request_id
+            .Access(fact) -> @fact.request_id
+            .Query(fact) -> @fact.request_id
+            .Exception(fact) -> @fact.request_id
+            .SourceFrame(fact) -> @fact.request_id
+            .LogLink(fact) -> @fact.request_id
+            .TraceLink(fact) -> @fact.request_id
+        }
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        if self == {
+            .Request(fact) -> fact.to_protocol_event(source)
+            .Response(fact) -> fact.to_protocol_event(source)
+            .Access(fact) -> fact.to_protocol_event(source)
+            .Query(fact) -> fact.to_protocol_event(source)
+            .Exception(fact) -> fact.to_protocol_event(source)
+            .SourceFrame(fact) -> fact.to_protocol_event(source)
+            .LogLink(fact) -> fact.to_protocol_event(source)
+            .TraceLink(fact) -> fact.to_protocol_event(source)
+        }
+    }
+}
+
+// Rust :691–961. Field order and separate payload boundary are wire laws.
+fn jet_devtools_request_panel_request_fields(fact: JetDevtoolsRequestFact) -> String Err! {
+    fields := [String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("method", fact.method) ?? return Err(err),
+        jet_devtools_request_panel_text_field("route", fact.route) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("started_at_ms", fact.started_at_ms),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }
+    inputs :: jet_devtools_request_panel_route_inputs(fact.route_inputs) ?? return Err(err)
+    &fields.push("\"route_inputs\":{inputs}")
+    Ok(jet_devtools_request_panel_object(fields))
+}
+fn jet_devtools_request_panel_response_fields(fact: JetDevtoolsResponseFact) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("status", U64{fact.status}),
+        jet_devtools_request_panel_u64_field("size_bytes", fact.size_bytes),
+        jet_devtools_request_panel_u64_field("duration_ms", fact.duration_ms),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_access_fields(fact: JetDevtoolsAccessEvent) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("operation", fact.operation) ?? return Err(err),
+        jet_devtools_request_panel_text_field("target", fact.target) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("at_ms", fact.at_ms),
+        jet_devtools_request_panel_bool_field("allowed", fact.allowed),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_query_fields(fact: JetDevtoolsQueryFact) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("name", fact.name) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("started_at_ms", fact.started_at_ms),
+        jet_devtools_request_panel_u64_field("duration_ms", fact.duration_ms),
+        jet_devtools_request_panel_text_field("source_identity", fact.source_identity) ?? return Err(err),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_exception_fields(fact: JetDevtoolsExceptionFact) -> String Err! {
+    fields := [String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("kind", fact.kind) ?? return Err(err),
+        jet_devtools_request_panel_text_field("code", fact.code) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("at_ms", fact.at_ms),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }
+    frames :: jet_devtools_request_panel_source_frames(fact.source_frames) ?? return Err(err)
+    &fields.push("\"source_frames\":{frames}")
+    Ok(jet_devtools_request_panel_object(fields))
+}
+fn jet_devtools_request_panel_source_frame_fields(fact: JetDevtoolsSourceFrame) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("function", fact.function) ?? return Err(err),
+        jet_devtools_request_panel_text_field("file", fact.file) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("line", U64{fact.line}),
+        jet_devtools_request_panel_u64_field("column", U64{fact.column}),
+        jet_devtools_request_panel_u64_field("frame_index", U64{fact.frame_index}),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_log_link_fields(fact: JetDevtoolsLogLink) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("target", fact.target) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("at_ms", fact.at_ms),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_trace_link_fields(fact: JetDevtoolsTraceLink) -> String Err! {
+    Ok(jet_devtools_request_panel_object([String]{
+        jet_devtools_request_panel_text_field("id", fact.id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("request_id", fact.request_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("span_id", fact.span_id) ?? return Err(err),
+        jet_devtools_request_panel_text_field("target", fact.target) ?? return Err(err),
+        jet_devtools_request_panel_u64_field("at_ms", fact.at_ms),
+        jet_devtools_request_panel_u64_field("duration_ms", fact.duration_ms),
+        jet_devtools_request_panel_text_field("freshness", jet_devtools_request_panel_freshness(fact.freshness)) ?? return Err(err)
+    }))
+}
+fn jet_devtools_request_panel_route_inputs(inputs: [JetDevtoolsRouteInput]) -> String Err! {
+    values := [String]{}
+    loop input in inputs {
+        name :: jet_devtools_request_panel_text_field("name", input.name) ?? return Err(err)
+        &values.push(jet_devtools_request_panel_object([String]{name}))
+    }
+    Ok("[{values.join(",")}]")
+}
+fn jet_devtools_request_panel_request_payload(fact: JetDevtoolsRequestFact) -> String? Err! {
+    fields := [String]{}
+    if fact.payload() == .Val(value) {
+        key :: jet_devtools_request_panel_json_string("value") ?? return Err(err)
+        rendered :: jet_devtools_request_panel_value_json(value) ?? return Err(err)
+        &fields.push("{key}:{rendered}")
+    }
+    route_inputs :: jet_devtools_request_panel_published_route_inputs(fact.route_inputs) ?? return Err(err)
+    if route_inputs == .Val(inputs) {
+        key :: jet_devtools_request_panel_json_string("route_inputs") ?? return Err(err)
+        &fields.push("{key}:{inputs}")
+    }
+    if fields.is_empty() -> return Ok(None)
+    Ok(Val(jet_devtools_request_panel_object(fields)))
+}
+fn jet_devtools_request_panel_published_route_inputs(inputs: [JetDevtoolsRouteInput]) -> String? Err! {
+    values := [String]{}
+    loop input in inputs {
+        if input.value() == .Val(value) {
+            name :: jet_devtools_request_panel_text_field("name", input.name) ?? return Err(err)
+            key :: jet_devtools_request_panel_json_string("value") ?? return Err(err)
+            rendered :: jet_devtools_request_panel_value_json(value) ?? return Err(err)
+            &values.push(jet_devtools_request_panel_object([String]{name, "{key}:{rendered}"}))
+        }
+    }
+    if values.is_empty() -> return Ok(None)
+    Ok(Val("[{values.join(",")}]"))
+}
+fn jet_devtools_request_panel_source_frames(frames: [JetDevtoolsSourceFrame]) -> String Err! {
+    values := [String]{}
+    loop frame in frames -> &values.push(jet_devtools_request_panel_source_frame_fields(frame) ?? return Err(err))
+    Ok("[{values.join(",")}]")
+}
+fn jet_devtools_request_panel_payload(values: [(String, (@d.JetDevtoolsValue)?)]) -> String? Err! {
+    fields := [String]{}
+    loop (key, optional) in values {
+        if optional == .Val(value) {
+            name :: jet_devtools_request_panel_json_string(key) ?? return Err(err)
+            rendered :: jet_devtools_request_panel_value_json(value) ?? return Err(err)
+            &fields.push("{name}:{rendered}")
+        }
+    }
+    if fields.is_empty() -> return Ok(None)
+    Ok(Val(jet_devtools_request_panel_object(fields)))
+}
+fn jet_devtools_request_panel_value_json(value: d.JetDevtoolsValue) -> String Err! {
+    out := [U8]{}
+    d.render_value(value, &out) ?? return Err(err)
+    Ok(String.from_bytes(out) ?? panic("devtools value writer preserves UTF-8"))
+}
+fn jet_devtools_request_panel_text_field(key: String, value: String) -> String Err! {
+    name :: jet_devtools_request_panel_json_string(key) ?? return Err(err)
+    rendered :: jet_devtools_request_panel_json_string(value) ?? return Err(err)
+    Ok("{name}:{rendered}")
+}
+fn jet_devtools_request_panel_u64_field(key: String, value: U64) -> String Never! { "\"{key}\":{value}" }
+fn jet_devtools_request_panel_bool_field(key: String, value: Bool) -> String Never! {
+    rendered :: if value -> "true" else -> "false"
+    "\"{key}\":{rendered}"
+}
+fn jet_devtools_request_panel_freshness(freshness: JetDevtoolsRequestPanelFreshness) -> String Never! {
+    if freshness.is_stale() -> "stale" else -> "fresh"
+}
+fn jet_devtools_request_panel_object(fields: [String]) -> String Never! { "{{{fields.join(",")}}}" }
+fn jet_devtools_request_panel_json_string(value: String) -> String Err! {
+    out := [U8]{}
+    d.render_text(value, &out) ?? return Err(err)
+    Ok(String.from_bytes(out) ?? panic("devtools text writer preserves UTF-8"))
+}
+
+// Rust :963–989. Projection owns the deliberate snapshot copies; row does not.
+pub struct JetDevtoolsRequestPanelProjection {
+    pub request_id: String
+    pub request: JetDevtoolsRequestFact?
+    pub response: JetDevtoolsResponseFact?
+    pub access_events: [JetDevtoolsAccessEvent]
+    pub queries: [JetDevtoolsQueryFact]
+    pub exceptions: [JetDevtoolsExceptionFact]
+    pub source_frames: [JetDevtoolsSourceFrame]
+    pub log_links: [JetDevtoolsLogLink]
+    pub trace_links: [JetDevtoolsTraceLink]
+    pub freshness: JetDevtoolsRequestPanelFreshness
+}
+struct JetDevtoolsRequestPanelRow {
+    request: JetDevtoolsRequestFact?
+    response: JetDevtoolsResponseFact?
+    access_events: [JetDevtoolsAccessEvent]
+    queries: [JetDevtoolsQueryFact]
+    exceptions: [JetDevtoolsExceptionFact]
+    source_frames: [JetDevtoolsSourceFrame]
+    log_links: [JetDevtoolsLogLink]
+    trace_links: [JetDevtoolsTraceLink]
+}
+impl JetDevtoolsRequestPanelRow {
+    fn default() -> JetDevtoolsRequestPanelRow Never! {
+        JetDevtoolsRequestPanelRow{request: None, response: None, access_events: [JetDevtoolsAccessEvent]{}, queries: [JetDevtoolsQueryFact]{}, exceptions: [JetDevtoolsExceptionFact]{}, source_frames: [JetDevtoolsSourceFrame]{}, log_links: [JetDevtoolsLogLink]{}, trace_links: [JetDevtoolsTraceLink]{}}
+    }
+    // #4392: mutable .Val binding must retain the original optional owner.
+    fn set_freshness(&self, freshness: JetDevtoolsRequestPanelFreshness) Never! {
+        if &self.request == .Val(request) -> request.freshness = freshness
+        if &self.response == .Val(response) -> response.freshness = freshness
+        loop i in 0..<self.access_events.len() -> self.access_events[i].freshness = freshness
+        loop i in 0..<self.queries.len() -> self.queries[i].freshness = freshness
+        loop i in 0..<self.exceptions.len() {
+            self.exceptions[i].freshness = freshness
+            loop j in 0..<self.exceptions[i].source_frames.len() -> self.exceptions[i].source_frames[j].freshness = freshness
+        }
+        loop i in 0..<self.source_frames.len() -> self.source_frames[i].freshness = freshness
+        loop i in 0..<self.log_links.len() -> self.log_links[i].freshness = freshness
+        loop i in 0..<self.trace_links.len() -> self.trace_links[i].freshness = freshness
+    }
+    fn mark_stale(&self) Never! { &self.set_freshness(.Stale) }
+    fn mark_fresh(&self) Never! { &self.set_freshness(.Fresh) }
+    fn freshness(self) -> JetDevtoolsRequestPanelFreshness Never! {
+        if self.request == .Val(fact) { if fact.freshness.is_stale() -> return .Stale }
+        if self.response == .Val(fact) { if fact.freshness.is_stale() -> return .Stale }
+        loop fact in self.access_events { if fact.freshness.is_stale() -> return .Stale }
+        loop fact in self.queries { if fact.freshness.is_stale() -> return .Stale }
+        loop fact in self.exceptions {
+            if fact.freshness.is_stale() -> return .Stale
+            loop frame in fact.source_frames { if frame.freshness.is_stale() -> return .Stale }
+        }
+        loop fact in self.source_frames { if fact.freshness.is_stale() -> return .Stale }
+        loop fact in self.log_links { if fact.freshness.is_stale() -> return .Stale }
+        loop fact in self.trace_links { if fact.freshness.is_stale() -> return .Stale }
+        .Fresh
+    }
+}
+// Rust :1081–1353. String-keyed built-in map preserves keyed lookup complexity.
+// FIFO order uses the canonical Queue, not an array queue. #4500 retaining
+// indexed read and #4392 map-field loans must not lower to cloned snapshots.
+pub struct JetDevtoolsRequestPanelState {
+    capacity: Int
+    rows: [String: JetDevtoolsRequestPanelRow]
+    order: Queue<String>
+    selected_request_id: String?
+}
+impl JetDevtoolsRequestPanelState {
+    pub fn default() -> JetDevtoolsRequestPanelState Never! { JetDevtoolsRequestPanelState.new() }
+    pub fn new() -> JetDevtoolsRequestPanelState Never! { JetDevtoolsRequestPanelState.with_capacity(JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS) }
+    pub fn with_capacity(capacity: Int) -> JetDevtoolsRequestPanelState Never! {
+        bounded := capacity
+        if bounded < 1 -> bounded = 1
+        if bounded > JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS -> bounded = JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS
+        JetDevtoolsRequestPanelState{capacity: bounded, rows: [String: JetDevtoolsRequestPanelRow]{}, order: Queue.new(), selected_request_id: None}
+    }
+    pub fn capacity(self) -> Int Never! { self.capacity }
+    pub fn len(self) -> Int Never! { self.rows.len() }
+    pub fn is_empty(self) -> Bool Never! { self.rows.is_empty() }
+    pub fn request_ids(self) -> [String] Never! {
+        keys := self.rows.keys().to_list()
+        &keys.sort()
+        keys
+    }
+    pub fn ingest(&self, fact: ^JetDevtoolsRequestPanelFact) Err! {
+        if fact == {
+            .Request(value) -> &self.ingest_request(^value)
+            .Response(value) -> &self.ingest_response(^value)
+            .Access(value) -> &self.ingest_access(^value)
+            .Query(value) -> &self.ingest_query(^value)
+            .Exception(value) -> &self.ingest_exception(^value)
+            .SourceFrame(value) -> &self.ingest_source_frame(^value)
+            .LogLink(value) -> &self.ingest_log_link(^value)
+            .TraceLink(value) -> &self.ingest_trace_link(^value)
+        }
+    }
+    pub fn ingest_request(&self, fact: ^JetDevtoolsRequestFact) Err! {
+        jet_devtools_request_panel_validate_request(fact) ?? return Err(err)
+        &fact.route_inputs.sort_by((left: JetDevtoolsRouteInput, right: JetDevtoolsRouteInput) -> left.name <=> right.name)
+        id :: ~fact.id
+        &self.ensure_row(id)
+        self.rows[id].request = Val(^fact)
+        Ok()
+    }
+    pub fn ingest_response(&self, fact: ^JetDevtoolsResponseFact) Err! {
+        jet_devtools_request_panel_validate_response(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        self.rows[id].response = Val(^fact)
+        Ok()
+    }
+    pub fn ingest_access(&self, fact: ^JetDevtoolsAccessEvent) Err! {
+        jet_devtools_request_panel_validate_access(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_access(&self.rows[id].access_events, ^fact)
+        Ok()
+    }
+    pub fn ingest_query(&self, fact: ^JetDevtoolsQueryFact) Err! {
+        jet_devtools_request_panel_validate_query(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_query(&self.rows[id].queries, ^fact)
+        Ok()
+    }
+    pub fn ingest_exception(&self, fact: ^JetDevtoolsExceptionFact) Err! {
+        jet_devtools_request_panel_validate_exception(fact) ?? return Err(err)
+        jet_devtools_request_panel_normalize_frames(&fact.source_frames)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_exception(&self.rows[id].exceptions, ^fact)
+        Ok()
+    }
+    pub fn ingest_source_frame(&self, fact: ^JetDevtoolsSourceFrame) Err! {
+        jet_devtools_request_panel_validate_source_frame(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_source_frame(&self.rows[id].source_frames, ^fact)
+        Ok()
+    }
+    pub fn ingest_log_link(&self, fact: ^JetDevtoolsLogLink) Err! {
+        jet_devtools_request_panel_validate_log_link(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_log_link(&self.rows[id].log_links, ^fact)
+        Ok()
+    }
+    pub fn ingest_trace_link(&self, fact: ^JetDevtoolsTraceLink) Err! {
+        jet_devtools_request_panel_validate_trace_link(fact) ?? return Err(err)
+        id :: ~fact.request_id
+        &self.ensure_row(id)
+        jet_devtools_request_panel_upsert_trace_link(&self.rows[id].trace_links, ^fact)
+        Ok()
+    }
+    pub fn project(self, request_id: String) -> JetDevtoolsRequestPanelProjection? Never! {
+        if !self.rows.has_key(request_id) -> return None
+        frames := ~self.rows[request_id].source_frames
+        loop exception in self.rows[request_id].exceptions -> jet_devtools_request_panel_merge_frames(&frames, exception.source_frames)
+        jet_devtools_request_panel_normalize_frames(&frames)
+        Val(JetDevtoolsRequestPanelProjection{
+            request_id: ~request_id, request: ~self.rows[request_id].request, response: ~self.rows[request_id].response,
+            access_events: ~self.rows[request_id].access_events, queries: ~self.rows[request_id].queries,
+            exceptions: ~self.rows[request_id].exceptions, source_frames: frames,
+            log_links: ~self.rows[request_id].log_links, trace_links: ~self.rows[request_id].trace_links,
+            freshness: self.rows[request_id].freshness()
+        })
+    }
+    pub fn select(self, request_id: String) -> JetDevtoolsRequestPanelProjection? Never! { self.project(request_id) }
+    pub fn project_all(self) -> [JetDevtoolsRequestPanelProjection] Never! {
+        out := [JetDevtoolsRequestPanelProjection]{}
+        loop id in self.request_ids() {
+            if self.project(id) == .Val(projection) -> &out.push(projection)
+        }
+        out
+    }
+    pub fn rows(self) -> [JetDevtoolsRequestPanelProjection] Never! { self.project_all() }
+    pub fn set_selection(&self, request_id: String?) -> Bool Never! {
+        if request_id == .None { self.selected_request_id = None; return true }
+        if request_id == .Val(id) {
+            if !self.rows.has_key(id) -> return false
+            self.selected_request_id = request_id
+            return true
+        }
+        false
+    }
+    pub fn selected_request_id(self) -> (@String)? Never! from self {
+        if self.selected_request_id == .Val(id) -> return Val(@id)
+        None
+    }
+    pub fn selected(self) -> JetDevtoolsRequestPanelProjection? Never! {
+        id :: self.selected_request_id ?? return None
+        self.project(id)
+    }
+    pub fn freshness(self, request_id: String) -> JetDevtoolsRequestPanelFreshness? Never! {
+        if !self.rows.has_key(request_id) -> return None
+        Val(self.rows[request_id].freshness())
+    }
+    pub fn mark_stale(&self) Never! {
+        loop id in self.rows.keys() -> &self.rows[id].mark_stale()
+    }
+    pub fn mark_fresh(&self, request_id: String) -> Bool Never! {
+        if !self.rows.has_key(request_id) -> return false
+        &self.rows[request_id].mark_fresh()
+        true
+    }
+    pub fn to_protocol_events(self, source: String) -> [d.JetDevtoolsEvent] Err! {
+        events := [d.JetDevtoolsEvent]{}
+        loop i in 0..<self.order.len() {
+            id :: self.order[i] // #4500: retaining Queue element loan.
+            if !self.rows.has_key(id) -> continue
+            if self.rows[id].request == .Val(fact) -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            if self.rows[id].response == .Val(fact) -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].access_events -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].queries -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].exceptions -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].source_frames -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].log_links -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+            loop fact in self.rows[id].trace_links -> &events.push(fact.to_protocol_event(~source) ?? return Err(err))
+        }
+        Ok(events)
+    }
+    pub fn protocol_events(self, source: String) -> [d.JetDevtoolsEvent] Err! { self.to_protocol_events(source) }
+    // ensure_row's mutable row return is fused into each indexed caller above.
+    fn ensure_row(&self, request_id: String) Never! {
+        if self.rows.has_key(request_id) -> return
+        if self.rows.len() == self.capacity {
+            if &self.order.pop_front() == .Val(evicted) {
+                _ :: &self.rows.remove(evicted)
+                if self.selected_request_id == .Val(evicted) -> self.selected_request_id = None
+            }
+        }
+        &self.order.push_back(~request_id)
+        self.rows[~request_id] = JetDevtoolsRequestPanelRow.default()
+    }
+}
+pub fn jet_devtools_request_panel_ingest(state: &JetDevtoolsRequestPanelState, fact: ^JetDevtoolsRequestPanelFact) Err! { &state.ingest(^fact) }
+pub fn jet_devtools_request_panel_select(state: JetDevtoolsRequestPanelState, request_id: String) -> JetDevtoolsRequestPanelProjection? Never! { state.select(request_id) }
+pub fn jet_devtools_request_panel_project(state: JetDevtoolsRequestPanelState, request_id: String) -> JetDevtoolsRequestPanelProjection? Never! { state.project(request_id) }
+
+// Rust :1376–1499. Validation is BEFORE any state mutation, including eviction.
+fn jet_devtools_request_panel_validate_request(fact: JetDevtoolsRequestFact) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.method, "request method", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.route, "request route", true) ?? return Err(err)
+    if fact.route_inputs.len() > JET_DEVTOOLS_REQUEST_PANEL_MAX_ROUTE_INPUTS -> return Err("jet.devtools.v1 request panel route inputs exceed the Prelude limit")
+    // Last positions preserve Rust's earliest duplicate/error precedence without
+    // a suffix scan for each input. The prepass does not validate or publish.
+    last := [String: Int]{}
+    loop i in 0..<fact.route_inputs.len() -> last[~fact.route_inputs[i].name] = i
+    loop i in 0..<fact.route_inputs.len() {
+        jet_devtools_request_panel_validate_text(fact.route_inputs[i].name, "route input name", true) ?? return Err(err)
+        fact.route_inputs[i].value.validate("route input {i}") ?? return Err(err)
+        if last[fact.route_inputs[i].name] > i -> return Err("jet.devtools.v1 request panel contains duplicate route input `{fact.route_inputs[i].name}`")
+    }
+    fact.payload.validate("request payload")
+}
+fn jet_devtools_request_panel_validate_response(fact: JetDevtoolsResponseFact) Err! {
+    jet_devtools_request_panel_validate_text(fact.request_id, "response request id", true) ?? return Err(err)
+    fact.payload.validate("response payload")
+}
+fn jet_devtools_request_panel_validate_access(fact: JetDevtoolsAccessEvent) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "access id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "access request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.operation, "access operation", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.target, "access target", true) ?? return Err(err)
+    fact.payload.validate("access payload")
+}
+fn jet_devtools_request_panel_validate_query(fact: JetDevtoolsQueryFact) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "query id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "query request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.name, "query name", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.source_identity, "query source identity", true) ?? return Err(err)
+    fact.payload.validate("query payload")
+}
+fn jet_devtools_request_panel_validate_exception(fact: JetDevtoolsExceptionFact) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "exception id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "exception request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.kind, "exception kind", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.code, "exception code", false) ?? return Err(err)
+    if fact.source_frames.len() > JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES -> return Err("jet.devtools.v1 request panel exception frames exceed the Prelude limit")
+    loop frame in fact.source_frames {
+        jet_devtools_request_panel_validate_source_frame(frame) ?? return Err(err)
+        if frame.request_id != fact.request_id -> return Err("jet.devtools.v1 request panel exception frame request id does not match")
+    }
+    fact.message.validate("exception message") ?? return Err(err)
+    fact.payload.validate("exception payload")
+}
+fn jet_devtools_request_panel_validate_source_frame(fact: JetDevtoolsSourceFrame) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "source frame id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "source frame request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.function, "source frame function", false) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.file, "source frame file", true) ?? return Err(err)
+    fact.source_line.validate("source frame line")
+}
+fn jet_devtools_request_panel_validate_log_link(fact: JetDevtoolsLogLink) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "log link id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "log link request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.target, "log link target", true)
+}
+fn jet_devtools_request_panel_validate_trace_link(fact: JetDevtoolsTraceLink) Err! {
+    jet_devtools_request_panel_validate_text(fact.id, "trace link id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.request_id, "trace link request id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.span_id, "trace span id", true) ?? return Err(err)
+    jet_devtools_request_panel_validate_text(fact.target, "trace link target", true)
+}
+fn jet_devtools_request_panel_validate_text(value: String, field: String, required: Bool) Err! {
+    if required && value.is_empty() -> return Err("jet.devtools.v1 request panel {field} is empty")
+    if value.count_bytes() > d.JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 request panel {field} exceeds the Prelude limit")
+    if !text.isprintable(value) -> return Err("jet.devtools.v1 request panel {field} contains a control character")
+    Ok()
+}
+// Rust :1501–1509: stable sort THEN adjacent-ID dedup, not global-ID dedup.
+// Duplicates separated by another frame_index intentionally remain. Compaction
+// consumes slots rather than cloning frames or repeatedly shifting suffixes.
+fn jet_devtools_request_panel_normalize_frames(frames: &[JetDevtoolsSourceFrame]) Never! {
+    &frames.sort_by((left: JetDevtoolsSourceFrame, right: JetDevtoolsSourceFrame) -> request_panel_frame_order(left, right))
+    write := 0
+    loop read in 0..<frames.len() {
+        if write == 0 || frames[write - 1].id != frames[read].id {
+            // #4500 (@T links) / #4392: disjoint slot transfer, no clone.
+            if write != read -> frames[write] = ^frames[read]
+            write = write + 1
+        }
+    }
+    if write > JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES -> write = JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES
+    loop frames.len() > write -> _ :: &frames.pop()
+}
+fn request_panel_frame_order(left: JetDevtoolsSourceFrame, right: JetDevtoolsSourceFrame) -> Ordering Never! {
+    index :: left.frame_index <=> right.frame_index
+    if index != .Equal -> return index
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_merge_frames(destination: &[JetDevtoolsSourceFrame], incoming: [JetDevtoolsSourceFrame]) Never! {
+    // Match the first original ID even when normalize kept nonadjacent repeated
+    // IDs. Each exception normalizes separately, preserving replacement order.
+    positions := [String: Int]{}
+    loop i in 0..<destination.len() {
+        if !positions.has_key(destination[i].id) -> positions[~destination[i].id] = i
+    }
+    loop frame in incoming {
+        if positions.has_key(frame.id) {
+            destination[positions[frame.id]] = ~frame
+        } else {
+            positions[~frame.id] = destination.len()
+            &destination.push(~frame)
+        }
+    }
+    jet_devtools_request_panel_normalize_frames(&destination)
+}
+fn jet_devtools_request_panel_upsert_access(values: &[JetDevtoolsAccessEvent], value: ^JetDevtoolsAccessEvent) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    &values.sort_by((left: JetDevtoolsAccessEvent, right: JetDevtoolsAccessEvent) -> request_panel_access_order(left, right))
+    jet_devtools_request_panel_trim_tail(&values, JET_DEVTOOLS_REQUEST_PANEL_MAX_ACCESS_EVENTS)
+}
+fn request_panel_access_order(left: JetDevtoolsAccessEvent, right: JetDevtoolsAccessEvent) -> Ordering Never! {
+    time :: left.at_ms <=> right.at_ms
+    if time != .Equal -> return time
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_upsert_query(values: &[JetDevtoolsQueryFact], value: ^JetDevtoolsQueryFact) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    &values.sort_by((left: JetDevtoolsQueryFact, right: JetDevtoolsQueryFact) -> request_panel_query_order(left, right))
+    jet_devtools_request_panel_trim_tail(&values, JET_DEVTOOLS_REQUEST_PANEL_MAX_QUERIES)
+}
+fn request_panel_query_order(left: JetDevtoolsQueryFact, right: JetDevtoolsQueryFact) -> Ordering Never! {
+    time :: left.started_at_ms <=> right.started_at_ms
+    if time != .Equal -> return time
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_upsert_exception(values: &[JetDevtoolsExceptionFact], value: ^JetDevtoolsExceptionFact) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    &values.sort_by((left: JetDevtoolsExceptionFact, right: JetDevtoolsExceptionFact) -> request_panel_exception_order(left, right))
+    jet_devtools_request_panel_trim_tail(&values, JET_DEVTOOLS_REQUEST_PANEL_MAX_EXCEPTIONS)
+}
+fn request_panel_exception_order(left: JetDevtoolsExceptionFact, right: JetDevtoolsExceptionFact) -> Ordering Never! {
+    time :: left.at_ms <=> right.at_ms
+    if time != .Equal -> return time
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_upsert_source_frame(values: &[JetDevtoolsSourceFrame], value: ^JetDevtoolsSourceFrame) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    jet_devtools_request_panel_normalize_frames(&values)
+}
+fn jet_devtools_request_panel_upsert_log_link(values: &[JetDevtoolsLogLink], value: ^JetDevtoolsLogLink) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    &values.sort_by((left: JetDevtoolsLogLink, right: JetDevtoolsLogLink) -> request_panel_log_order(left, right))
+    jet_devtools_request_panel_trim_tail(&values, JET_DEVTOOLS_REQUEST_PANEL_MAX_LINKS)
+}
+fn request_panel_log_order(left: JetDevtoolsLogLink, right: JetDevtoolsLogLink) -> Ordering Never! {
+    time :: left.at_ms <=> right.at_ms
+    if time != .Equal -> return time
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_upsert_trace_link(values: &[JetDevtoolsTraceLink], value: ^JetDevtoolsTraceLink) Never! {
+    at := 0
+    loop at < values.len() && values[at].id != value.id -> at = at + 1
+    if at < values.len() { values[at] = ^value } else { &values.push(^value) }
+    &values.sort_by((left: JetDevtoolsTraceLink, right: JetDevtoolsTraceLink) -> request_panel_trace_order(left, right))
+    jet_devtools_request_panel_trim_tail(&values, JET_DEVTOOLS_REQUEST_PANEL_MAX_LINKS)
+}
+fn request_panel_trace_order(left: JetDevtoolsTraceLink, right: JetDevtoolsTraceLink) -> Ordering Never! {
+    time :: left.at_ms <=> right.at_ms
+    if time != .Equal -> return time
+    left.id <=> right.id
+}
+fn jet_devtools_request_panel_trim_tail<T>(values: &[T], limit: Int) Never! {
+    remove :: values.len() - limit
+    if remove <= 0 -> return
+    // #4500 (@T links) / #4392: disjoint slot transfer, then suffix cleanup.
+    loop i in 0..<limit -> values[i] = ^values[i + remove]
+    loop values.len() > limit -> _ :: &values.pop()
+}

@@ -8,6 +8,8 @@ package {
         time: .Library{ entry: time }
     }
 }
+module runtime
+
 use core as core
 
 
@@ -111,6 +113,9 @@ pub fn isoformat_time(t: LocalTime) -> String Never! {
 
 pub fn isoformat(dt: DateTime) -> String Never! { "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}" }
 
+// Copy literal UTF-8 bytes unchanged; only complete output is decoded.
+// Native cutover still requires borrowed String.bytes and consuming from_bytes
+// ownership; bootstrap materialization is not allocation/retention parity.
 pub fn strftime(format: String, dt: DateTime) -> String Never! {
     days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     days_long :: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -119,19 +124,18 @@ pub fn strftime(format: String, dt: DateTime) -> String Never! {
     date :: dt.date()
     day :: date.weekday()
     day_of_year :: date.day_of_year()
-    jan1_sun0 :: core.time.new(date.year(), 1, 1).weekday()
-    jan1_mon0 :: (jan1_sun0 + 6) %% 7
     raw :: format.bytes()
-    out := ""
+    out := [U8]{}
     i := 0
     loop i < raw.len() {
         if raw[i] != (U8{37}) {
-            out = "{out}{String.from_bytes([U8]{raw[i]}) ?? ""}"
-            i = i + 1
+            start :: i
+            loop i < raw.len() && raw[i] != (U8{37}) -> i = i + 1
+            loop j in start..<i -> &out.push(raw[j])
             next
         }
         if i + 1 >= raw.len() {
-            out = "{out}%"
+            &out.push(U8{37})
             break
         }
         code :: raw[i + 1]
@@ -149,18 +153,27 @@ pub fn strftime(format: String, dt: DateTime) -> String Never! {
             106 -> pad2(day_of_year, 3)
             109 -> pad2(date.month(), 2)
             77 -> pad2(dt.minute(), 2)
-            85 -> pad2((day_of_year - 1 + jan1_sun0) /% 7, 2)
-            87 -> pad2((day_of_year - 1 + jan1_mon0) /% 7, 2)
+            // #4458: C/POSIX week numbers. Days before the year's first Sunday
+            // (%U) or Monday (%W) are week 00; day is Sunday=0 weekday.
+            85 -> pad2((day_of_year + 6 - day) /% 7, 2)
+            87 -> pad2((day_of_year + 6 - (day + 6) %% 7) /% 7, 2)
             119 -> "{day}"
             121 -> pad2(date.year() %% 100, 2)
             89 -> "{date.year()}"
             90 -> "UTC"
-            else -> "%{String.from_bytes([U8]{code}) ?? ""}"
+            else -> {
+                // An unsupported directive may start a multi-byte scalar.
+                // Keep both original bytes; the literal run keeps its remainder.
+                &out.push(raw[i])
+                &out.push(code)
+                ""
+            }
         }
-        out = "{out}{piece}"
+        piece_raw :: piece.bytes()
+        loop b in piece_raw -> &out.push(b)
         i = i + 2
     }
-    out
+    String.from_bytes(out) ?? panic("strftime produced invalid UTF-8")
 }
 
 

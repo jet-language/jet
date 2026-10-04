@@ -1,0 +1,1580 @@
+// PORT-PENDING 0298 crates-jet-codegen-src-prelude-corelib-top-processwindowssandbox: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:1-1576
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[cfg(target_os = "windows")]
+//RS mod jet_process_windows_sandbox {
+//RS     //! Native Windows AppContainer backend for build actions.
+//RS     //!
+//RS     //! The child is created with a default-deny AppContainer token, only the
+//RS     //! declared capability set, a per-run ACL projection, and a Job Object. It is
+//RS     //! created suspended, joined to the Job Object, and resumed only after every
+//RS     //! boundary is ready. Any preparation failure is returned before the build
+//RS     //! tool can execute.
+//RS 
+//RS     use std::collections::{BTreeMap, HashSet};
+//RS     use std::ffi::c_void;
+//RS     use std::fs::{self, File};
+//RS     use std::io::{self, Read};
+//RS     use std::os::windows::fs::MetadataExt;
+//RS     use std::os::windows::io::{FromRawHandle, RawHandle};
+//RS     use std::os::windows::process::ExitStatusExt;
+//RS     use std::path::{Path, PathBuf};
+//RS     use std::process::{ExitStatus, Output};
+//RS     use std::sync::atomic::{AtomicU64, Ordering};
+//RS     use std::thread;
+//RS     use std::time::{Duration, Instant};
+//RS 
+//RS     use super::ReadOnlyMount;
+//RS 
+//RS     const MECHANISM: &str = "windows-appcontainer";
+//RS     const PROC_THREAD_ATTRIBUTE_HANDLE_LIST: usize = 0x0002_0002;
+//RS     const PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: usize = 0x0002_0009;
+//RS     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
+//RS     const CREATE_SUSPENDED: u32 = 0x0000_0004;
+//RS     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
+//RS     const STARTF_USESTDHANDLES: u32 = 0x0000_0100;
+//RS     const INFINITE: u32 = 0xffff_ffff;
+//RS     const WAIT_FAILED: u32 = 0xffff_ffff;
+//RS     const INVALID_THREAD_RESUME: u32 = 0xffff_ffff;
+//RS     const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
+//RS     const GENERIC_READ: u32 = 0x8000_0000;
+//RS     const GENERIC_WRITE: u32 = 0x4000_0000;
+//RS     const GENERIC_EXECUTE: u32 = 0x2000_0000;
+//RS     const DELETE: u32 = 0x0001_0000;
+//RS     const WRITE_DAC: u32 = 0x0004_0000;
+//RS     const WRITE_OWNER: u32 = 0x0008_0000;
+//RS     const FILE_SHARE_READ: u32 = 0x0000_0001;
+//RS     const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+//RS     const OPEN_EXISTING: u32 = 3;
+//RS     const FILE_ATTRIBUTE_NORMAL: u32 = 0x0000_0080;
+//RS     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+//RS     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+//RS     const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
+//RS     const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
+//RS     const JOB_OBJECT_LIMIT_JOB_MEMORY: u32 = 0x0000_0200;
+//RS     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+//RS     const ACTIVE_PROCESS_LIMIT: u32 = 256;
+//RS     const MEMORY_LIMIT: usize = 2 * 1024 * 1024 * 1024;
+//RS     const SE_FILE_OBJECT: u32 = 1;
+//RS     const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+//RS     const SET_ACCESS: u32 = 2;
+//RS     const DENY_ACCESS: u32 = 3;
+//RS     const REVOKE_ACCESS: u32 = 4;
+//RS     const NO_MULTIPLE_TRUSTEE: u32 = 0;
+//RS     const TRUSTEE_IS_SID: u32 = 0;
+//RS     const TRUSTEE_IS_UNKNOWN: u32 = 0;
+//RS     const SUB_CONTAINERS_AND_OBJECTS_INHERIT: u32 = 0x0000_0003;
+//RS     const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+//RS     const PROFILE_ALREADY_EXISTS: i32 = 0x8007_00b7_u32 as i32;
+//RS 
+//RS     type Handle = *mut c_void;
+//RS     type Sid = *mut c_void;
+//RS 
+//RS     fn null_handle() -> Handle {
+//RS         std::ptr::null_mut()
+//RS     }
+//RS 
+//RS     fn invalid_handle(handle: Handle) -> bool {
+//RS         handle.is_null() || handle == (-1isize as Handle)
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct SecurityAttributes {
+//RS         n_length: u32,
+//RS         lp_security_descriptor: *mut c_void,
+//RS         b_inherit_handle: i32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct StartupInfoW {
+//RS         cb: u32,
+//RS         lp_reserved: *mut u16,
+//RS         lp_desktop: *mut u16,
+//RS         lp_title: *mut u16,
+//RS         dw_x: u32,
+//RS         dw_y: u32,
+//RS         dw_x_size: u32,
+//RS         dw_y_size: u32,
+//RS         dw_x_count_chars: u32,
+//RS         dw_y_count_chars: u32,
+//RS         dw_fill_attribute: u32,
+//RS         dw_flags: u32,
+//RS         w_show_window: u16,
+//RS         cb_reserved2: u16,
+//RS         lp_reserved2: *mut u8,
+//RS         h_std_input: Handle,
+//RS         h_std_output: Handle,
+//RS         h_std_error: Handle,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct StartupInfoExW {
+//RS         startup_info: StartupInfoW,
+//RS         attribute_list: *mut c_void,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct ProcessInformation {
+//RS         h_process: Handle,
+//RS         h_thread: Handle,
+//RS         dw_process_id: u32,
+//RS         dw_thread_id: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct SidAndAttributes {
+//RS         sid: Sid,
+//RS         attributes: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct SecurityCapabilities {
+//RS         app_container_sid: Sid,
+//RS         capabilities: *mut SidAndAttributes,
+//RS         capability_count: u32,
+//RS         reserved: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct BasicLimitInformation {
+//RS         per_process_user_time_limit: i64,
+//RS         per_job_user_time_limit: i64,
+//RS         limit_flags: u32,
+//RS         minimum_working_set_size: usize,
+//RS         maximum_working_set_size: usize,
+//RS         active_process_limit: u32,
+//RS         affinity: usize,
+//RS         priority_class: u32,
+//RS         scheduling_class: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct IoCounters {
+//RS         read_operations: u64,
+//RS         write_operations: u64,
+//RS         other_operations: u64,
+//RS         read_bytes: u64,
+//RS         write_bytes: u64,
+//RS         other_bytes: u64,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct ExtendedLimitInformation {
+//RS         basic: BasicLimitInformation,
+//RS         io: IoCounters,
+//RS         process_memory_limit: usize,
+//RS         job_memory_limit: usize,
+//RS         peak_process_memory_used: usize,
+//RS         peak_job_memory_used: usize,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct TrusteeW {
+//RS         multiple_trustee: *mut TrusteeW,
+//RS         multiple_trustee_operation: u32,
+//RS         trustee_form: u32,
+//RS         trustee_type: u32,
+//RS         name: *mut u16,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct ExplicitAccessW {
+//RS         access_permissions: u32,
+//RS         access_mode: u32,
+//RS         inheritance: u32,
+//RS         trustee: TrusteeW,
+//RS     }
+//RS 
+//RS     #[link(name = "kernel32")]
+//RS     unsafe extern "system" {
+//RS         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+//RS         fn CloseHandle(handle: Handle) -> i32;
+//RS         fn CreateFileW(
+//RS             name: *const u16,
+//RS             desired_access: u32,
+//RS             share_mode: u32,
+//RS             security_attributes: *mut SecurityAttributes,
+//RS             creation_disposition: u32,
+//RS             flags_and_attributes: u32,
+//RS             template_file: Handle,
+//RS         ) -> Handle;
+//RS         fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
+//RS         fn CreatePipe(
+//RS             read_pipe: *mut Handle,
+//RS             write_pipe: *mut Handle,
+//RS             attributes: *mut SecurityAttributes,
+//RS             size: u32,
+//RS         ) -> i32;
+//RS         fn CreateProcessW(
+//RS             application_name: *const u16,
+//RS             command_line: *mut u16,
+//RS             process_attributes: *mut c_void,
+//RS             thread_attributes: *mut c_void,
+//RS             inherit_handles: i32,
+//RS             creation_flags: u32,
+//RS             environment: *mut c_void,
+//RS             current_directory: *const u16,
+//RS             startup_info: *mut StartupInfoW,
+//RS             process_information: *mut ProcessInformation,
+//RS         ) -> i32;
+//RS         fn DeleteProcThreadAttributeList(attribute_list: *mut c_void);
+//RS         fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
+//RS         fn InitializeProcThreadAttributeList(
+//RS             attribute_list: *mut c_void,
+//RS             attribute_count: u32,
+//RS             flags: u32,
+//RS             size: *mut usize,
+//RS         ) -> i32;
+//RS         fn LocalFree(memory: *mut c_void) -> *mut c_void;
+//RS         fn ResumeThread(thread: Handle) -> u32;
+//RS         fn SetHandleInformation(handle: Handle, mask: u32, flags: u32) -> i32;
+//RS         fn SetInformationJobObject(
+//RS             job: Handle,
+//RS             information_class: u32,
+//RS             information: *mut c_void,
+//RS             length: u32,
+//RS         ) -> i32;
+//RS         fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
+//RS         fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
+//RS         fn UpdateProcThreadAttribute(
+//RS             attribute_list: *mut c_void,
+//RS             flags: u32,
+//RS             attribute: usize,
+//RS             value: *const c_void,
+//RS             size: usize,
+//RS             previous_value: *mut c_void,
+//RS             return_size: *mut usize,
+//RS         ) -> i32;
+//RS         fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
+//RS     }
+//RS 
+//RS     #[link(name = "advapi32")]
+//RS     unsafe extern "system" {
+//RS         fn ConvertStringSidToSidW(string_sid: *const u16, sid: *mut Sid) -> i32;
+//RS         fn FreeSid(sid: Sid) -> Sid;
+//RS         fn GetNamedSecurityInfoW(
+//RS             object_name: *const u16,
+//RS             object_type: u32,
+//RS             security_info: u32,
+//RS             owner: *mut Sid,
+//RS             group: *mut Sid,
+//RS             dacl: *mut *mut c_void,
+//RS             sacl: *mut *mut c_void,
+//RS             security_descriptor: *mut *mut c_void,
+//RS         ) -> u32;
+//RS         fn SetEntriesInAclW(
+//RS             count: u32,
+//RS             entries: *const ExplicitAccessW,
+//RS             old_acl: *mut c_void,
+//RS             new_acl: *mut *mut c_void,
+//RS         ) -> u32;
+//RS         fn SetNamedSecurityInfoW(
+//RS             object_name: *mut u16,
+//RS             object_type: u32,
+//RS             security_info: u32,
+//RS             owner: Sid,
+//RS             group: Sid,
+//RS             dacl: *mut c_void,
+//RS             sacl: *mut c_void,
+//RS         ) -> u32;
+//RS     }
+//RS 
+//RS     #[link(name = "userenv")]
+//RS     unsafe extern "system" {
+//RS         fn CreateAppContainerProfile(
+//RS             profile_name: *const u16,
+//RS             display_name: *const u16,
+//RS             description: *const u16,
+//RS             capabilities: *mut SidAndAttributes,
+//RS             capability_count: u32,
+//RS             app_container_sid: *mut Sid,
+//RS         ) -> i32;
+//RS         fn DeriveAppContainerSidFromAppContainerName(
+//RS             profile_name: *const u16,
+//RS             app_container_sid: *mut Sid,
+//RS         ) -> i32;
+//RS         fn DeleteAppContainerProfile(profile_name: *const u16) -> i32;
+//RS     }
+//RS 
+//RS     static PROFILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+//RS 
+//RS     pub(crate) struct BackendStatus {
+//RS         pub available: bool,
+//RS         pub mechanism: String,
+//RS         pub policy: String,
+//RS         pub reason: String,
+//RS     }
+//RS 
+//RS     pub(crate) struct BackendOutput {
+//RS         pub output: Output,
+//RS         pub mechanism: String,
+//RS         pub policy: String,
+//RS         pub timed_out: bool,
+//RS         pub pid: i64,
+//RS     }
+//RS 
+//RS     #[derive(Debug)]
+//RS     pub(crate) enum WindowsSandboxError {
+//RS         Unsupported(String),
+//RS         Io(String),
+//RS     }
+//RS 
+//RS     fn wide(value: &str) -> io::Result<Vec<u16>> {
+//RS         if value.contains('\0') {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "Windows sandbox path or argument contains NUL",
+//RS             ));
+//RS         }
+//RS         Ok(value.encode_utf16().chain(std::iter::once(0)).collect())
+//RS     }
+//RS 
+//RS     fn hresult_error(name: &str, status: i32) -> io::Error {
+//RS         io::Error::new(
+//RS             io::ErrorKind::Other,
+//RS             format!("{name} failed with HRESULT 0x{:08x}", status as u32),
+//RS         )
+//RS     }
+//RS 
+//RS     struct HandleGuard(Handle);
+//RS 
+//RS     impl HandleGuard {
+//RS         fn new(handle: Handle) -> io::Result<Self> {
+//RS             if invalid_handle(handle) {
+//RS                 Err(io::Error::last_os_error())
+//RS             } else {
+//RS                 Ok(Self(handle))
+//RS             }
+//RS         }
+//RS 
+//RS         fn raw(&self) -> Handle {
+//RS             self.0
+//RS         }
+//RS 
+//RS         fn into_raw(mut self) -> RawHandle {
+//RS             let handle = self.0;
+//RS             self.0 = null_handle();
+//RS             handle as RawHandle
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for HandleGuard {
+//RS         fn drop(&mut self) {
+//RS             if !invalid_handle(self.0) {
+//RS                 // SAFETY: the guard owns this live Win32 handle and closes it once.
+//RS                 unsafe { CloseHandle(self.0) };
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct AppContainer {
+//RS         name: Vec<u16>,
+//RS         sid: Sid,
+//RS     }
+//RS 
+//RS     impl AppContainer {
+//RS         fn create(capability: Option<&mut SidAndAttributes>) -> io::Result<Self> {
+//RS             let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+//RS             let name = wide(&format!("JetpackBuild-{}-{id}", std::process::id()))?;
+//RS             let display = wide("Jetpack package")?;
+//RS             let description = wide("One-shot Jetpack package isolation")?;
+//RS             let mut sid = null_handle();
+//RS             let (capabilities, capability_count) = capability
+//RS                 .map_or((std::ptr::null_mut(), 0), |value| {
+//RS                     (value as *mut SidAndAttributes, 1)
+//RS                 });
+//RS             // SAFETY: all strings and the optional capability live through the
+//RS             // call; Windows allocates the returned profile SID.
+//RS             let status = unsafe {
+//RS                 CreateAppContainerProfile(
+//RS                     name.as_ptr(),
+//RS                     display.as_ptr(),
+//RS                     description.as_ptr(),
+//RS                     capabilities,
+//RS                     capability_count,
+//RS                     &mut sid,
+//RS                 )
+//RS             };
+//RS             if status == PROFILE_ALREADY_EXISTS {
+//RS                 // A killed build can leave its profile behind. Reuse its SID by
+//RS                 // name instead of treating that recoverable state as "sandbox
+//RS                 // unavailable".
+//RS                 let derive_status =
+//RS                     unsafe { DeriveAppContainerSidFromAppContainerName(name.as_ptr(), &mut sid) };
+//RS                 if derive_status != 0 {
+//RS                     return Err(hresult_error(
+//RS                         "DeriveAppContainerSidFromAppContainerName",
+//RS                         derive_status,
+//RS                     ));
+//RS                 }
+//RS             } else if status != 0 {
+//RS                 return Err(hresult_error("CreateAppContainerProfile", status));
+//RS             }
+//RS             if sid.is_null() {
+//RS                 return Err(io::Error::new(
+//RS                     io::ErrorKind::Other,
+//RS                     "CreateAppContainerProfile returned no AppContainer SID",
+//RS                 ));
+//RS             }
+//RS             Ok(Self { name, sid })
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for AppContainer {
+//RS         fn drop(&mut self) {
+//RS             // SAFETY: the profile and SID were created by this guard and are
+//RS             // released after ACLs and child handles have been dropped.
+//RS             unsafe {
+//RS                 DeleteAppContainerProfile(self.name.as_ptr());
+//RS                 FreeSid(self.sid);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct CapabilitySid(Sid);
+//RS 
+//RS     impl CapabilitySid {
+//RS         fn internet_client() -> io::Result<Self> {
+//RS             let text = wide("S-1-15-3-1")?;
+//RS             let mut sid = null_handle();
+//RS             // SAFETY: Windows allocates the SID and writes only the output slot.
+//RS             if unsafe { ConvertStringSidToSidW(text.as_ptr(), &mut sid) } == 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(Self(sid))
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for CapabilitySid {
+//RS         fn drop(&mut self) {
+//RS             // SAFETY: ConvertStringSidToSidW allocated this SID with LocalAlloc.
+//RS             unsafe { LocalFree(self.0) };
+//RS         }
+//RS     }
+//RS 
+//RS     struct AttributeList {
+//RS         list: *mut c_void,
+//RS         storage: Vec<u8>,
+//RS     }
+//RS 
+//RS     impl AttributeList {
+//RS         fn create() -> io::Result<Self> {
+//RS             let mut size = 0;
+//RS             // SAFETY: this is the documented size probe.
+//RS             unsafe {
+//RS                 InitializeProcThreadAttributeList(std::ptr::null_mut(), 2, 0, &mut size);
+//RS             }
+//RS             if size == 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             let mut storage = vec![0_u8; size];
+//RS             let list = storage.as_mut_ptr().cast::<c_void>();
+//RS             // SAFETY: storage is the exact size requested by Windows and remains
+//RS             // live while the process is created.
+//RS             if unsafe { InitializeProcThreadAttributeList(list, 2, 0, &mut size) } == 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(Self { list, storage })
+//RS         }
+//RS 
+//RS         fn update(
+//RS             &mut self,
+//RS             attribute: usize,
+//RS             value: *const c_void,
+//RS             size: usize,
+//RS         ) -> io::Result<()> {
+//RS             // SAFETY: `value` points to a live, correctly sized value for this
+//RS             // call; Windows copies the attribute metadata into the list.
+//RS             if unsafe {
+//RS                 UpdateProcThreadAttribute(
+//RS                     self.list,
+//RS                     0,
+//RS                     attribute,
+//RS                     value,
+//RS                     size,
+//RS                     std::ptr::null_mut(),
+//RS                     std::ptr::null_mut(),
+//RS                 )
+//RS             } == 0
+//RS             {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for AttributeList {
+//RS         fn drop(&mut self) {
+//RS             // SAFETY: the list was initialized successfully and storage remains
+//RS             // live until this Drop call returns.
+//RS             unsafe { DeleteProcThreadAttributeList(self.list) };
+//RS             let _ = &self.storage;
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy)]
+//RS     struct Grant {
+//RS         access: u32,
+//RS         inheritance: u32,
+//RS         mode: u32,
+//RS         sid: Sid,
+//RS     }
+//RS 
+//RS     struct AclProjection {
+//RS         grants: Vec<(PathBuf, Grant)>,
+//RS         sid: Sid,
+//RS     }
+//RS 
+//RS     impl AclProjection {
+//RS         fn create(
+//RS             sid: Sid,
+//RS             source_dir: &Path,
+//RS             output_dir: Option<&Path>,
+//RS             executable: &Path,
+//RS             source_readable: bool,
+//RS             source_writable: bool,
+//RS             mounts: &[PathBuf],
+//RS         ) -> io::Result<Self> {
+//RS             let mut projection = Self {
+//RS                 grants: Vec::new(),
+//RS                 sid,
+//RS             };
+//RS             let mut seen = HashSet::new();
+//RS             projection.add_parent(source_dir, &mut seen)?;
+//RS             if !source_writable {
+//RS                 projection.add_with_inheritance(
+//RS                     source_dir,
+//RS                     (if source_readable { 0 } else { GENERIC_READ })
+//RS                         | GENERIC_WRITE
+//RS                         | DELETE
+//RS                         | WRITE_DAC
+//RS                         | WRITE_OWNER,
+//RS                     SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                     DENY_ACCESS,
+//RS                     &mut seen,
+//RS                 )?;
+//RS             }
+//RS             projection.add_with_inheritance(
+//RS                 source_dir,
+//RS                 if source_writable {
+//RS                     GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE
+//RS                 } else if source_readable {
+//RS                     GENERIC_READ | GENERIC_EXECUTE
+//RS                 } else {
+//RS                     GENERIC_EXECUTE
+//RS                 },
+//RS                 SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                 SET_ACCESS,
+//RS                 &mut seen,
+//RS             )?;
+//RS             if let Some(output_dir) = output_dir {
+//RS                 projection.add_parent(output_dir, &mut seen)?;
+//RS                 projection.add_with_inheritance(
+//RS                     output_dir,
+//RS                     GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE,
+//RS                     SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                     SET_ACCESS,
+//RS                     &mut seen,
+//RS                 )?;
+//RS             }
+//RS             if !is_system_path(executable) {
+//RS                 if let Some(parent) = executable.parent() {
+//RS                     projection.add_parent(parent, &mut seen)?;
+//RS                     projection.add_with_inheritance(
+//RS                         parent,
+//RS                         GENERIC_READ | GENERIC_EXECUTE,
+//RS                         SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                         SET_ACCESS,
+//RS                         &mut seen,
+//RS                     )?;
+//RS                 }
+//RS             }
+//RS             for mount in mounts {
+//RS                 projection.add_parent(mount, &mut seen)?;
+//RS                 projection.add_with_inheritance(
+//RS                     mount,
+//RS                     GENERIC_WRITE | DELETE | WRITE_DAC | WRITE_OWNER,
+//RS                     SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                     DENY_ACCESS,
+//RS                     &mut seen,
+//RS                 )?;
+//RS                 projection.add_with_inheritance(
+//RS                     mount,
+//RS                     GENERIC_READ | GENERIC_EXECUTE,
+//RS                     SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+//RS                     SET_ACCESS,
+//RS                     &mut seen,
+//RS                 )?;
+//RS             }
+//RS             Ok(projection)
+//RS         }
+//RS 
+//RS         fn add_parent(
+//RS             &mut self,
+//RS             path: &Path,
+//RS             seen: &mut HashSet<(PathBuf, u32, u32, u32)>,
+//RS         ) -> io::Result<()> {
+//RS             let user_profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
+//RS             let mut parent = path.parent();
+//RS             while let Some(current) = parent {
+//RS                 if is_system_path(current) {
+//RS                     break;
+//RS                 }
+//RS                 self.add_with_inheritance(current, GENERIC_EXECUTE, 0, SET_ACCESS, seen)?;
+//RS                 if user_profile
+//RS                     .as_deref()
+//RS                     .is_some_and(|root| same_windows_path(current, root))
+//RS                 {
+//RS                     break;
+//RS                 }
+//RS                 let Some(next) = current.parent() else {
+//RS                     break;
+//RS                 };
+//RS                 if next == current || next.parent().is_none() {
+//RS                     break;
+//RS                 }
+//RS                 parent = Some(next);
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn add_with_inheritance(
+//RS             &mut self,
+//RS             path: &Path,
+//RS             access: u32,
+//RS             inheritance: u32,
+//RS             mode: u32,
+//RS             seen: &mut HashSet<(PathBuf, u32, u32, u32)>,
+//RS         ) -> io::Result<()> {
+//RS             let key = (path.to_path_buf(), access, inheritance, mode);
+//RS             if !seen.insert(key) {
+//RS                 return Ok(());
+//RS             }
+//RS             let mut object_name = wide(&path.to_string_lossy())?;
+//RS             let mut old_dacl = null_handle();
+//RS             let mut security_descriptor = null_handle();
+//RS             // SAFETY: output pointers and the NUL-terminated object name are live
+//RS             // for the duration of the call. Windows allocates the descriptor.
+//RS             let status = unsafe {
+//RS                 GetNamedSecurityInfoW(
+//RS                     object_name.as_ptr(),
+//RS                     SE_FILE_OBJECT,
+//RS                     DACL_SECURITY_INFORMATION,
+//RS                     std::ptr::null_mut(),
+//RS                     std::ptr::null_mut(),
+//RS                     &mut old_dacl,
+//RS                     std::ptr::null_mut(),
+//RS                     &mut security_descriptor,
+//RS                 )
+//RS             };
+//RS             if status != 0 {
+//RS                 return Err(io::Error::from_raw_os_error(status as i32));
+//RS             }
+//RS             let entry = ExplicitAccessW {
+//RS                 access_permissions: access,
+//RS                 access_mode: mode,
+//RS                 inheritance,
+//RS                 trustee: TrusteeW {
+//RS                     multiple_trustee: std::ptr::null_mut(),
+//RS                     multiple_trustee_operation: NO_MULTIPLE_TRUSTEE,
+//RS                     trustee_form: TRUSTEE_IS_SID,
+//RS                     trustee_type: TRUSTEE_IS_UNKNOWN,
+//RS                     name: self.sid.cast(),
+//RS                 },
+//RS             };
+//RS             let mut new_acl = null_handle();
+//RS             // SAFETY: the old ACL came from Windows and the trustee SID remains
+//RS             // live for the call.
+//RS             let status = unsafe { SetEntriesInAclW(1, &entry, old_dacl, &mut new_acl) };
+//RS             if status != 0 {
+//RS                 unsafe { LocalFree(security_descriptor) };
+//RS                 return Err(io::Error::from_raw_os_error(status as i32));
+//RS             }
+//RS             // SAFETY: Windows consumes the merged ACL for this named object.
+//RS             let status = unsafe {
+//RS                 SetNamedSecurityInfoW(
+//RS                     object_name.as_mut_ptr(),
+//RS                     SE_FILE_OBJECT,
+//RS                     DACL_SECURITY_INFORMATION,
+//RS                     null_handle(),
+//RS                     null_handle(),
+//RS                     new_acl,
+//RS                     null_handle(),
+//RS                 )
+//RS             };
+//RS             unsafe {
+//RS                 LocalFree(new_acl);
+//RS                 LocalFree(security_descriptor);
+//RS             }
+//RS             if status != 0 {
+//RS                 return Err(io::Error::from_raw_os_error(status as i32));
+//RS             }
+//RS             self.grants.push((
+//RS                 path.to_path_buf(),
+//RS                 Grant {
+//RS                     access,
+//RS                     inheritance,
+//RS                     mode,
+//RS                     sid: self.sid,
+//RS                 },
+//RS             ));
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for AclProjection {
+//RS         fn drop(&mut self) {
+//RS             for (path, grant) in self.grants.iter().rev() {
+//RS                 let Ok(mut object_name) = wide(&path.to_string_lossy()) else {
+//RS                     continue;
+//RS                 };
+//RS                 let mut old_dacl = null_handle();
+//RS                 let mut security_descriptor = null_handle();
+//RS                 // SAFETY: this cleanup only targets the unique SID inserted by
+//RS                 // this guard. A failed cleanup cannot widen the child boundary.
+//RS                 if unsafe {
+//RS                     GetNamedSecurityInfoW(
+//RS                         object_name.as_ptr(),
+//RS                         SE_FILE_OBJECT,
+//RS                         DACL_SECURITY_INFORMATION,
+//RS                         std::ptr::null_mut(),
+//RS                         std::ptr::null_mut(),
+//RS                         &mut old_dacl,
+//RS                         std::ptr::null_mut(),
+//RS                         &mut security_descriptor,
+//RS                     )
+//RS                 } != 0
+//RS                 {
+//RS                     continue;
+//RS                 }
+//RS                 let entry = ExplicitAccessW {
+//RS                     access_permissions: grant.access,
+//RS                     access_mode: REVOKE_ACCESS,
+//RS                     inheritance: grant.inheritance,
+//RS                     trustee: TrusteeW {
+//RS                         multiple_trustee: std::ptr::null_mut(),
+//RS                         multiple_trustee_operation: NO_MULTIPLE_TRUSTEE,
+//RS                         trustee_form: TRUSTEE_IS_SID,
+//RS                         trustee_type: TRUSTEE_IS_UNKNOWN,
+//RS                         name: grant.sid.cast(),
+//RS                     },
+//RS                 };
+//RS                 let mut new_acl = null_handle();
+//RS                 if unsafe { SetEntriesInAclW(1, &entry, old_dacl, &mut new_acl) } == 0 {
+//RS                     unsafe {
+//RS                         SetNamedSecurityInfoW(
+//RS                             object_name.as_mut_ptr(),
+//RS                             SE_FILE_OBJECT,
+//RS                             DACL_SECURITY_INFORMATION,
+//RS                             null_handle(),
+//RS                             null_handle(),
+//RS                             new_acl,
+//RS                             null_handle(),
+//RS                         );
+//RS                         LocalFree(new_acl);
+//RS                     }
+//RS                 }
+//RS                 unsafe { LocalFree(security_descriptor) };
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct Job(HandleGuard);
+//RS 
+//RS     impl Job {
+//RS         fn create() -> io::Result<Self> {
+//RS             // SAFETY: null attributes/name create one private unnamed Job Object.
+//RS             let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+//RS             let guard = HandleGuard::new(handle)?;
+//RS             let mut limits = ExtendedLimitInformation {
+//RS                 basic: BasicLimitInformation {
+//RS                     per_process_user_time_limit: 0,
+//RS                     per_job_user_time_limit: 0,
+//RS                     limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+//RS                         | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+//RS                         | JOB_OBJECT_LIMIT_PROCESS_MEMORY
+//RS                         | JOB_OBJECT_LIMIT_JOB_MEMORY,
+//RS                     minimum_working_set_size: 0,
+//RS                     maximum_working_set_size: 0,
+//RS                     active_process_limit: ACTIVE_PROCESS_LIMIT,
+//RS                     affinity: 0,
+//RS                     priority_class: 0,
+//RS                     scheduling_class: 0,
+//RS                 },
+//RS                 io: IoCounters {
+//RS                     read_operations: 0,
+//RS                     write_operations: 0,
+//RS                     other_operations: 0,
+//RS                     read_bytes: 0,
+//RS                     write_bytes: 0,
+//RS                     other_bytes: 0,
+//RS                 },
+//RS                 process_memory_limit: MEMORY_LIMIT,
+//RS                 job_memory_limit: MEMORY_LIMIT,
+//RS                 peak_process_memory_used: 0,
+//RS                 peak_job_memory_used: 0,
+//RS             };
+//RS             // SAFETY: the structure and byte length match the documented Job
+//RS             // Object information class and remain live through the call.
+//RS             if unsafe {
+//RS                 SetInformationJobObject(
+//RS                     guard.raw(),
+//RS                     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+//RS                     (&mut limits as *mut ExtendedLimitInformation).cast(),
+//RS                     std::mem::size_of::<ExtendedLimitInformation>() as u32,
+//RS                 )
+//RS             } == 0
+//RS             {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(Self(guard))
+//RS         }
+//RS 
+//RS         fn assign(&self, process: Handle) -> io::Result<()> {
+//RS             // SAFETY: both handles are live and owned by their guards.
+//RS             if unsafe { AssignProcessToJobObject(self.0.raw(), process) } == 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn terminate(&self) -> io::Result<()> {
+//RS             // SAFETY: this job handle is live and owns the complete child tree.
+//RS             if unsafe { TerminateJobObject(self.0.raw(), 1) } == 0 {
+//RS                 return Err(io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS 
+//RS     fn create_pipe() -> io::Result<(HandleGuard, HandleGuard)> {
+//RS         let mut read_pipe = null_handle();
+//RS         let mut write_pipe = null_handle();
+//RS         let mut attributes = SecurityAttributes {
+//RS             n_length: std::mem::size_of::<SecurityAttributes>() as u32,
+//RS             lp_security_descriptor: std::ptr::null_mut(),
+//RS             b_inherit_handle: 1,
+//RS         };
+//RS         // SAFETY: output handles and security attributes are valid for this call.
+//RS         if unsafe { CreatePipe(&mut read_pipe, &mut write_pipe, &mut attributes, 0) } == 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         let read_guard = HandleGuard::new(read_pipe)?;
+//RS         let write_guard = HandleGuard::new(write_pipe)?;
+//RS         // SAFETY: only the child write side belongs in the inherited handle list.
+//RS         if unsafe { SetHandleInformation(read_guard.raw(), HANDLE_FLAG_INHERIT, 0) } == 0 {
+//RS             return Err(io::Error::last_os_error());
+//RS         }
+//RS         Ok((read_guard, write_guard))
+//RS     }
+//RS 
+//RS     fn create_stdin() -> io::Result<HandleGuard> {
+//RS         let name = wide("NUL")?;
+//RS         let mut attributes = SecurityAttributes {
+//RS             n_length: std::mem::size_of::<SecurityAttributes>() as u32,
+//RS             lp_security_descriptor: std::ptr::null_mut(),
+//RS             b_inherit_handle: 1,
+//RS         };
+//RS         // SAFETY: NUL is a system device and the returned inheritable handle is
+//RS         // owned by the guard.
+//RS         let handle = unsafe {
+//RS             CreateFileW(
+//RS                 name.as_ptr(),
+//RS                 GENERIC_READ,
+//RS                 FILE_SHARE_READ | FILE_SHARE_WRITE,
+//RS                 &mut attributes,
+//RS                 OPEN_EXISTING,
+//RS                 FILE_ATTRIBUTE_NORMAL,
+//RS                 null_handle(),
+//RS             )
+//RS         };
+//RS         HandleGuard::new(handle)
+//RS     }
+//RS 
+//RS     fn quote_arg(value: &str) -> io::Result<Vec<u16>> {
+//RS         if value.contains('\0') {
+//RS             return Err(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 "Windows sandbox argument contains NUL",
+//RS             ));
+//RS         }
+//RS         let needs_quotes =
+//RS             value.is_empty() || value.chars().any(char::is_whitespace) || value.contains('"');
+//RS         let mut text = String::new();
+//RS         if needs_quotes {
+//RS             text.push('"');
+//RS         }
+//RS         let mut slashes = 0;
+//RS         for character in value.chars() {
+//RS             if character == '\\' {
+//RS                 slashes += 1;
+//RS                 continue;
+//RS             }
+//RS             if character == '"' {
+//RS                 text.extend(std::iter::repeat('\\').take(slashes * 2 + 1));
+//RS                 text.push(character);
+//RS             } else {
+//RS                 text.extend(std::iter::repeat('\\').take(slashes));
+//RS                 text.push(character);
+//RS             }
+//RS             slashes = 0;
+//RS         }
+//RS         if needs_quotes {
+//RS             text.extend(std::iter::repeat('\\').take(slashes * 2));
+//RS             text.push('"');
+//RS         } else {
+//RS             text.extend(std::iter::repeat('\\').take(slashes));
+//RS         }
+//RS         wide(&text)
+//RS     }
+//RS 
+//RS     fn command_line(executable: &Path, args: &[String]) -> io::Result<Vec<u16>> {
+//RS         let mut line = quote_arg(&executable.to_string_lossy())?;
+//RS         line.pop();
+//RS         for arg in args {
+//RS             line.push(' ' as u16);
+//RS             let mut quoted = quote_arg(arg)?;
+//RS             quoted.pop();
+//RS             line.append(&mut quoted);
+//RS         }
+//RS         line.push(0);
+//RS         Ok(line)
+//RS     }
+//RS 
+//RS     fn environment_block(
+//RS         output_dir: Option<&Path>,
+//RS         env: &BTreeMap<String, String>,
+//RS     ) -> io::Result<Vec<u16>> {
+//RS         let mut values = env.clone();
+//RS         if let Some(output_dir) = output_dir {
+//RS             let output = output_dir.to_str().ok_or_else(|| {
+//RS                 io::Error::new(
+//RS                     io::ErrorKind::InvalidInput,
+//RS                     "Windows sandbox output path is not valid UTF-16 text",
+//RS                 )
+//RS             })?;
+//RS             values.insert("JET_BUILD_OUTPUT".to_string(), output.to_string());
+//RS         }
+//RS         let mut block = Vec::new();
+//RS         for (name, value) in values {
+//RS             block.extend(wide(&format!("{name}={value}"))?);
+//RS         }
+//RS         if block.is_empty() {
+//RS             block.extend([0, 0]);
+//RS         } else {
+//RS             block.push(0);
+//RS         }
+//RS         Ok(block)
+//RS     }
+//RS 
+//RS     fn read_pipe(
+//RS         handle: RawHandle,
+//RS         limit: Option<usize>,
+//RS         budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+//RS         limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS     ) -> thread::JoinHandle<io::Result<(Vec<u8>, bool)>> {
+//RS         let handle = handle as usize;
+//RS         thread::spawn(move || {
+//RS             // SAFETY: ownership of the read handle moves into this File exactly
+//RS             // once after the parent closes its copy.
+//RS             let mut file = unsafe { File::from_raw_handle(handle as RawHandle) };
+//RS             let mut bytes = Vec::new();
+//RS             let mut exceeded = false;
+//RS             let mut chunk = [0_u8; 8192];
+//RS             loop {
+//RS                 let count = file.read(&mut chunk)?;
+//RS                 if count == 0 {
+//RS                     break;
+//RS                 }
+//RS                 let kept = match limit {
+//RS                     None => {
+//RS                         bytes.extend_from_slice(&chunk[..count]);
+//RS                         count
+//RS                     }
+//RS                     Some(limit) => {
+//RS                         let budget = budget
+//RS                             .as_ref()
+//RS                             .expect("bounded Windows sandbox output needs a shared budget");
+//RS                         let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
+//RS                         loop {
+//RS                             let available = limit.saturating_sub(used);
+//RS                             let kept = available.min(count);
+//RS                             match budget.compare_exchange(
+//RS                                 used,
+//RS                                 used + kept,
+//RS                                 std::sync::atomic::Ordering::AcqRel,
+//RS                                 std::sync::atomic::Ordering::Acquire,
+//RS                             ) {
+//RS                                 Ok(_) => {
+//RS                                     bytes.extend_from_slice(&chunk[..kept]);
+//RS                                     break kept;
+//RS                                 }
+//RS                                 Err(next) => used = next,
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                 };
+//RS                 if kept < count {
+//RS                     exceeded = true;
+//RS                     limit_hit.store(true, std::sync::atomic::Ordering::Release);
+//RS                     // Stop draining once the shared budget is exhausted. The
+//RS                     // parent observes `limit_hit`, terminates the Job Object,
+//RS                     // and joins this reader; continuing here would let an
+//RS                     // untrusted child turn an output-limit failure into an
+//RS                     // unbounded parent allocation.
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             Ok((bytes, exceeded))
+//RS         })
+//RS     }
+//RS 
+//RS     fn is_system_path(path: &Path) -> bool {
+//RS         let normalized = normalized_windows_path(path);
+//RS         let root = std::env::var("WINDIR")
+//RS             .unwrap_or_else(|_| String::from(r"C:\Windows"))
+//RS             .replace('/', "\\")
+//RS             .to_ascii_lowercase();
+//RS         normalized == root
+//RS             || normalized
+//RS                 .strip_prefix(&root)
+//RS                 .is_some_and(|rest| rest.starts_with('\\'))
+//RS     }
+//RS 
+//RS     fn normalized_windows_path(path: &Path) -> String {
+//RS         let normalized = path
+//RS             .to_string_lossy()
+//RS             .replace('/', "\\")
+//RS             .to_ascii_lowercase();
+//RS         normalized
+//RS             .strip_prefix("\\\\?\\")
+//RS             .or_else(|| normalized.strip_prefix("\\\\.\\"))
+//RS             .unwrap_or(&normalized)
+//RS             .to_string()
+//RS     }
+//RS 
+//RS     fn same_windows_path(left: &Path, right: &Path) -> bool {
+//RS         normalized_windows_path(left) == normalized_windows_path(right)
+//RS     }
+//RS 
+//RS     fn backend_policy(
+//RS         output_dir: Option<&Path>,
+//RS         share_network: bool,
+//RS         source_readable: bool,
+//RS         source_writable: bool,
+//RS     ) -> String {
+//RS         format!(
+//RS         "filesystem={};process=appcontainer+job-kill-on-close+active-process=256;network={};environment=clear+declared;devices=appcontainer-default-deny;resources=memory-2GiB+active-process-256",
+//RS         match (source_readable, source_writable, output_dir.is_some()) {
+//RS             (true, true, false) => "private-workspace-readwrite",
+//RS             (true, false, true) => "source-readonly,output-readwrite",
+//RS             (true, false, false) => "source-readonly",
+//RS             (false, false, _) => "filesystem-none",
+//RS             (false, true, _) => "filesystem-write-only",
+//RS         },
+//RS         if share_network {
+//RS             "declared-internet-client"
+//RS         } else {
+//RS             "denied"
+//RS         },
+//RS     )
+//RS     }
+//RS 
+//RS     pub(crate) fn status() -> BackendStatus {
+//RS         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+//RS             return BackendStatus {
+//RS                 available: false,
+//RS                 mechanism: format!("{MECHANISM}-unavailable"),
+//RS                 policy: "not-enforced".to_string(),
+//RS                 reason: "test sandbox override prevents the native Windows backend probe"
+//RS                     .to_string(),
+//RS             };
+//RS         }
+//RS         let root = std::env::temp_dir().join(format!(
+//RS             ".jetpack-sandbox-probe-{}-{}",
+//RS             std::process::id(),
+//RS             PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+//RS         ));
+//RS         let source = root.join("source");
+//RS         let output = root.join("output");
+//RS         if let Err(error) = fs::create_dir_all(&source).and_then(|_| fs::create_dir_all(&output)) {
+//RS             let _ = fs::remove_dir_all(&root);
+//RS             return BackendStatus {
+//RS                 available: false,
+//RS                 mechanism: format!("{MECHANISM}-unavailable"),
+//RS                 policy: "not-enforced".to_string(),
+//RS                 reason: format!(
+//RS                     "native Windows sandbox probe workspace could not be created: {error}"
+//RS                 ),
+//RS             };
+//RS         }
+//RS         let executable = PathBuf::from(
+//RS             std::env::var_os("WINDIR").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows")),
+//RS         )
+//RS         .join("System32")
+//RS         .join("cmd.exe");
+//RS         let args = [String::from("/C"), String::from("exit"), String::from("0")];
+//RS         let probe = run(
+//RS             &executable,
+//RS             &args,
+//RS             &source,
+//RS             Some(&output),
+//RS             &BTreeMap::new(),
+//RS             false,
+//RS             true,
+//RS             false,
+//RS             None,
+//RS             None,
+//RS         );
+//RS         let _ = fs::remove_dir_all(&root);
+//RS         match probe {
+//RS         Ok(result) if result.output.status.success() => BackendStatus {
+//RS             available: true,
+//RS             mechanism: result.mechanism,
+//RS             policy: result.policy,
+//RS             reason: "native AppContainer launch, ACL projection, inherited-handle list, and Job Object probe succeeded".to_string(),
+//RS         },
+//RS         Ok(result) => BackendStatus {
+//RS             available: false,
+//RS             mechanism: format!("{MECHANISM}-unavailable"),
+//RS             policy: "not-enforced".to_string(),
+//RS             reason: format!(
+//RS                 "native Windows sandbox probe exited with {}",
+//RS                 result.output.status
+//RS             ),
+//RS         },
+//RS         Err(WindowsSandboxError::Unsupported(detail))
+//RS         | Err(WindowsSandboxError::Io(detail)) => BackendStatus {
+//RS             available: false,
+//RS             mechanism: format!("{MECHANISM}-unavailable"),
+//RS             policy: "not-enforced".to_string(),
+//RS             reason: format!("native Windows sandbox probe failed: {detail}"),
+//RS         },
+//RS     }
+//RS     }
+//RS 
+//RS     pub(crate) fn run(
+//RS         executable: &Path,
+//RS         args: &[String],
+//RS         source_dir: &Path,
+//RS         output_dir: Option<&Path>,
+//RS         env: &BTreeMap<String, String>,
+//RS         share_network: bool,
+//RS         source_readable: bool,
+//RS         source_writable: bool,
+//RS         timeout_ms: Option<i64>,
+//RS         output_limit: Option<i64>,
+//RS     ) -> Result<BackendOutput, WindowsSandboxError> {
+//RS         run_with_read_only_mounts(
+//RS             executable,
+//RS             args,
+//RS             source_dir,
+//RS             output_dir,
+//RS             env,
+//RS             share_network,
+//RS             source_readable,
+//RS             source_writable,
+//RS             &[],
+//RS             timeout_ms,
+//RS             output_limit,
+//RS         )
+//RS     }
+//RS 
+//RS     pub(crate) fn run_with_read_only_mounts(
+//RS         executable: &Path,
+//RS         args: &[String],
+//RS         source_dir: &Path,
+//RS         output_dir: Option<&Path>,
+//RS         env: &BTreeMap<String, String>,
+//RS         share_network: bool,
+//RS         source_readable: bool,
+//RS         source_writable: bool,
+//RS         mounts: &[ReadOnlyMount],
+//RS         timeout_ms: Option<i64>,
+//RS         output_limit: Option<i64>,
+//RS     ) -> Result<BackendOutput, WindowsSandboxError> {
+//RS         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+//RS             return Err(WindowsSandboxError::Unsupported(
+//RS                 "test sandbox override prevents child execution".to_string(),
+//RS             ));
+//RS         }
+//RS         let executable = real_executable(executable)?;
+//RS         let source_dir = real_directory(source_dir)?;
+//RS         let output_dir = output_dir.map(real_directory).transpose()?;
+//RS         let mounts = mounts
+//RS             .iter()
+//RS             .map(|mount| {
+//RS                 if !mount.destination.is_absolute()
+//RS                     || mount.destination.components().any(|component| {
+//RS                         matches!(
+//RS                             component,
+//RS                             std::path::Component::CurDir | std::path::Component::ParentDir
+//RS                         )
+//RS                     })
+//RS                 {
+//RS                     return Err(WindowsSandboxError::Unsupported(format!(
+//RS                         "sandbox mount destination `{}` is not an absolute, normalized path",
+//RS                         mount.destination.display()
+//RS                     )));
+//RS                 }
+//RS                 real_directory(&mount.source)
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let network_capability = if share_network {
+//RS             Some(CapabilitySid::internet_client().map_err(io_error)?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let mut capability = network_capability.as_ref().map(|sid| SidAndAttributes {
+//RS             sid: sid.0,
+//RS             attributes: SE_GROUP_ENABLED,
+//RS         });
+//RS         let profile = AppContainer::create(capability.as_mut()).map_err(io_error)?;
+//RS         let _acl = AclProjection::create(
+//RS             profile.sid,
+//RS             &source_dir,
+//RS             output_dir.as_deref(),
+//RS             &executable,
+//RS             source_readable,
+//RS             source_writable,
+//RS             &mounts,
+//RS         )
+//RS         .map_err(io_error)?;
+//RS         let security = SecurityCapabilities {
+//RS             app_container_sid: profile.sid,
+//RS             capabilities: capability
+//RS                 .as_mut()
+//RS                 .map_or(std::ptr::null_mut(), |value| value as *mut SidAndAttributes),
+//RS             capability_count: if capability.is_some() { 1 } else { 0 },
+//RS             reserved: 0,
+//RS         };
+//RS         let job = Job::create().map_err(io_error)?;
+//RS         let stdin = create_stdin().map_err(io_error)?;
+//RS         let (stdout_read, stdout_write) = create_pipe().map_err(io_error)?;
+//RS         let (stderr_read, stderr_write) = create_pipe().map_err(io_error)?;
+//RS         let application_name = wide(&executable.to_string_lossy()).map_err(io_error)?;
+//RS         let current_directory = wide(&source_dir.to_string_lossy()).map_err(io_error)?;
+//RS         let mut command_line = command_line(&executable, args).map_err(io_error)?;
+//RS         let mut environment = environment_block(output_dir.as_deref(), env).map_err(io_error)?;
+//RS         let mut attributes = AttributeList::create().map_err(io_error)?;
+//RS         attributes
+//RS             .update(
+//RS                 PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+//RS                 (&security as *const SecurityCapabilities).cast(),
+//RS                 std::mem::size_of::<SecurityCapabilities>(),
+//RS             )
+//RS             .map_err(io_error)?;
+//RS         let handles = [stdin.raw(), stdout_write.raw(), stderr_write.raw()];
+//RS         attributes
+//RS             .update(
+//RS                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+//RS                 handles.as_ptr().cast(),
+//RS                 std::mem::size_of_val(&handles),
+//RS             )
+//RS             .map_err(io_error)?;
+//RS         let mut startup = StartupInfoExW {
+//RS             startup_info: StartupInfoW {
+//RS                 cb: std::mem::size_of::<StartupInfoExW>() as u32,
+//RS                 lp_reserved: std::ptr::null_mut(),
+//RS                 lp_desktop: std::ptr::null_mut(),
+//RS                 lp_title: std::ptr::null_mut(),
+//RS                 dw_x: 0,
+//RS                 dw_y: 0,
+//RS                 dw_x_size: 0,
+//RS                 dw_y_size: 0,
+//RS                 dw_x_count_chars: 0,
+//RS                 dw_y_count_chars: 0,
+//RS                 dw_fill_attribute: 0,
+//RS                 dw_flags: STARTF_USESTDHANDLES,
+//RS                 w_show_window: 0,
+//RS                 cb_reserved2: 0,
+//RS                 lp_reserved2: std::ptr::null_mut(),
+//RS                 h_std_input: stdin.raw(),
+//RS                 h_std_output: stdout_write.raw(),
+//RS                 h_std_error: stderr_write.raw(),
+//RS             },
+//RS             attribute_list: attributes.list,
+//RS         };
+//RS         let mut process_information = ProcessInformation {
+//RS             h_process: null_handle(),
+//RS             h_thread: null_handle(),
+//RS             dw_process_id: 0,
+//RS             dw_thread_id: 0,
+//RS         };
+//RS         // SAFETY: all pointers reference live values for the complete call; the
+//RS         // process is suspended until it has joined the Job Object.
+//RS         if unsafe {
+//RS             CreateProcessW(
+//RS                 application_name.as_ptr(),
+//RS                 command_line.as_mut_ptr(),
+//RS                 std::ptr::null_mut(),
+//RS                 std::ptr::null_mut(),
+//RS                 1,
+//RS                 EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+//RS                 environment.as_mut_ptr().cast(),
+//RS                 current_directory.as_ptr(),
+//RS                 &mut startup.startup_info,
+//RS                 &mut process_information,
+//RS             )
+//RS         } == 0
+//RS         {
+//RS             return Err(io_error(io::Error::last_os_error()));
+//RS         }
+//RS         let process = HandleGuard::new(process_information.h_process).map_err(io_error)?;
+//RS         let thread_handle = match HandleGuard::new(process_information.h_thread) {
+//RS             Ok(handle) => handle,
+//RS             Err(error) => {
+//RS                 unsafe { TerminateProcess(process.raw(), 1) };
+//RS                 unsafe { WaitForSingleObject(process.raw(), INFINITE) };
+//RS                 return Err(io_error(error));
+//RS             }
+//RS         };
+//RS         drop(attributes);
+//RS         drop(stdin);
+//RS         drop(stdout_write);
+//RS         drop(stderr_write);
+//RS         if let Err(error) = job.assign(process.raw()) {
+//RS             unsafe { TerminateProcess(process.raw(), 1) };
+//RS             unsafe { WaitForSingleObject(process.raw(), INFINITE) };
+//RS             return Err(io_error(error));
+//RS         }
+//RS         if unsafe { ResumeThread(thread_handle.raw()) } == INVALID_THREAD_RESUME {
+//RS             unsafe { TerminateProcess(process.raw(), 1) };
+//RS             unsafe { WaitForSingleObject(process.raw(), INFINITE) };
+//RS             return Err(io_error(io::Error::last_os_error()));
+//RS         }
+//RS         let output_limit = output_limit.map(|limit| limit.max(0) as usize);
+//RS         let output_budget =
+//RS             output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+//RS         let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let stdout_thread = read_pipe(
+//RS             stdout_read.into_raw(),
+//RS             output_limit,
+//RS             output_budget.clone(),
+//RS             output_limit_hit.clone(),
+//RS         );
+//RS         let stderr_thread = read_pipe(
+//RS             stderr_read.into_raw(),
+//RS             output_limit,
+//RS             output_budget,
+//RS             output_limit_hit.clone(),
+//RS         );
+//RS         let deadline =
+//RS             timeout_ms.map(|timeout| Instant::now() + Duration::from_millis(timeout.max(0) as u64));
+//RS         let mut timed_out = false;
+//RS         let mut wait_error = None;
+//RS         let mut process_done = false;
+//RS         loop {
+//RS             let result = unsafe { WaitForSingleObject(process.raw(), 50) };
+//RS             if result == 0 {
+//RS                 process_done = true;
+//RS                 break;
+//RS             }
+//RS             if result == WAIT_FAILED {
+//RS                 wait_error = Some(io::Error::last_os_error());
+//RS                 break;
+//RS             }
+//RS             if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+//RS                 break;
+//RS             }
+//RS             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+//RS                 timed_out = true;
+//RS                 break;
+//RS             }
+//RS         }
+//RS         // Always close the process tree, including after the leader exits: a
+//RS         // descendant can keep the stdio pipes open. If TerminateJobObject
+//RS         // itself fails, dropping the handle invokes the Job Object's
+//RS         // kill-on-close rule before waiting, so this path cannot wait forever
+//RS         // on an escaped child.
+//RS         let mut job = Some(job);
+//RS         let terminate_error = if process_done {
+//RS             drop(job.take());
+//RS             None
+//RS         } else {
+//RS             match job.as_ref().expect("job guard exists").terminate() {
+//RS                 Ok(()) => None,
+//RS                 Err(error) => {
+//RS                     drop(job.take());
+//RS                     Some(error)
+//RS                 }
+//RS             }
+//RS         };
+//RS         if !process_done && unsafe { WaitForSingleObject(process.raw(), INFINITE) } == WAIT_FAILED {
+//RS             wait_error.get_or_insert_with(io::Error::last_os_error);
+//RS         }
+//RS         let mut exit_code = 1;
+//RS         let exit_error = if unsafe { GetExitCodeProcess(process.raw(), &mut exit_code) } == 0 {
+//RS             Some(io::Error::last_os_error())
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let (stdout, stdout_exceeded) = stdout_thread
+//RS             .join()
+//RS             .map_err(|_| io::Error::new(io::ErrorKind::Other, "stdout reader panicked"))
+//RS             .and_then(|result| result)
+//RS             .map_err(io_error)?;
+//RS         let (stderr, stderr_exceeded) = stderr_thread
+//RS             .join()
+//RS             .map_err(|_| io::Error::new(io::ErrorKind::Other, "stderr reader panicked"))
+//RS             .and_then(|result| result)
+//RS             .map_err(io_error)?;
+//RS         if let Some(error) = wait_error.or(terminate_error).or(exit_error) {
+//RS             return Err(io_error(error));
+//RS         }
+//RS         if stdout_exceeded || stderr_exceeded {
+//RS             return Err(WindowsSandboxError::Io(
+//RS                 "process output exceeded output_limit".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(BackendOutput {
+//RS             output: Output {
+//RS                 status: ExitStatus::from_raw(exit_code),
+//RS                 stdout,
+//RS                 stderr,
+//RS             },
+//RS             mechanism: MECHANISM.to_string(),
+//RS             policy: backend_policy(
+//RS                 output_dir.as_deref(),
+//RS                 share_network,
+//RS                 source_readable,
+//RS                 source_writable,
+//RS             ),
+//RS             timed_out,
+//RS             pid: process_information.dw_process_id as i64,
+//RS         })
+//RS     }
+//RS 
+//RS     fn io_error(error: io::Error) -> WindowsSandboxError {
+//RS         WindowsSandboxError::Io(error.to_string())
+//RS     }
+//RS 
+//RS     fn reject_reparse_components(path: &Path, kind: &str) -> Result<(), WindowsSandboxError> {
+//RS         let mut current = path;
+//RS         loop {
+//RS             let metadata = fs::symlink_metadata(current).map_err(|error| {
+//RS                 io_error(io::Error::new(
+//RS                     io::ErrorKind::Other,
+//RS                     format!("sandbox {kind} `{}`: {error}", current.display()),
+//RS                 ))
+//RS             })?;
+//RS             if metadata.file_type().is_symlink()
+//RS                 || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+//RS             {
+//RS                 return Err(io_error(io::Error::new(
+//RS                     io::ErrorKind::PermissionDenied,
+//RS                     format!(
+//RS                         "sandbox {kind} `{}` contains a symlink or reparse point at `{}`",
+//RS                         path.display(),
+//RS                         current.display()
+//RS                     ),
+//RS                 )));
+//RS             }
+//RS             let Some(parent) = current.parent() else {
+//RS                 break;
+//RS             };
+//RS             if parent == current || parent.as_os_str().is_empty() {
+//RS                 break;
+//RS             }
+//RS             current = parent;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn real_directory(path: &Path) -> Result<PathBuf, WindowsSandboxError> {
+//RS         reject_reparse_components(path, "directory")?;
+//RS         let metadata = fs::symlink_metadata(path).map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox directory `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         if metadata.file_type().is_symlink()
+//RS             || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+//RS         {
+//RS             return Err(io_error(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 format!(
+//RS                     "sandbox path `{}` is a symlink or reparse point",
+//RS                     path.display()
+//RS                 ),
+//RS             )));
+//RS         }
+//RS         let canonical = path.canonicalize().map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox directory `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         reject_reparse_components(&canonical, "directory")?;
+//RS         let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox directory `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         if canonical_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+//RS             || !canonical_metadata.is_dir()
+//RS         {
+//RS             return Err(io_error(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 format!("sandbox path `{}` is not a directory", path.display()),
+//RS             )));
+//RS         }
+//RS         Ok(canonical)
+//RS     }
+//RS 
+//RS     fn real_executable(path: &Path) -> Result<PathBuf, WindowsSandboxError> {
+//RS         reject_reparse_components(path, "executable")?;
+//RS         let metadata = fs::symlink_metadata(path).map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox executable `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         if metadata.file_type().is_symlink()
+//RS             || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+//RS         {
+//RS             return Err(io_error(io::Error::new(
+//RS                 io::ErrorKind::PermissionDenied,
+//RS                 format!(
+//RS                     "sandbox executable `{}` is a symlink or reparse point",
+//RS                     path.display()
+//RS                 ),
+//RS             )));
+//RS         }
+//RS         let canonical = path.canonicalize().map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox executable `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         reject_reparse_components(&canonical, "executable")?;
+//RS         let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
+//RS             io_error(io::Error::new(
+//RS                 io::ErrorKind::Other,
+//RS                 format!("sandbox executable `{}`: {error}", path.display()),
+//RS             ))
+//RS         })?;
+//RS         if canonical_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+//RS             || !canonical_metadata.is_file()
+//RS         {
+//RS             return Err(io_error(io::Error::new(
+//RS                 io::ErrorKind::InvalidInput,
+//RS                 format!(
+//RS                     "sandbox executable `{}` is not a regular file",
+//RS                     path.display()
+//RS                 ),
+//RS             )));
+//RS         }
+//RS         Ok(canonical)
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "windows")]
+//RS pub(crate) use jet_process_windows_sandbox::{
+//RS     run as windows_output, run_with_read_only_mounts as windows_output_with_read_only_mounts,
+//RS     status as windows_status, BackendOutput as WindowsSandboxOutput,
+//RS     BackendStatus as WindowsSandboxStatus, WindowsSandboxError,
+//RS };
+// END-PORT-PENDING 0298 crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:1-1576
+

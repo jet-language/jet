@@ -1,0 +1,178 @@
+// SqlQuery.rs:8–74,176–384,410–435 independent leaves, NOT full SQL parsing.
+// #4483 keeps original Query/group/schema/parse route and target-width tests.
+// Rust borrowed field:60–69 assertions remain in held-original-route.rs #4392;
+// no owning field() surrogate is exercised or exposed by this staged owner.
+// Cited oracle audit: data_hostile.rs asserts statistics/join output (not SQL
+// grammar); data_bridges.rs asserts provider availability (not SQL grammar);
+// corelib_http_data.rs includes corelib_parts/http_data.rs with no SQL parser
+// assertions. golden.rs discovers features; parser-dependent original features
+// serde/analytics_query.jet:25 and tooling/typed_query.jet:52,62 stay retained,
+// as do io/db* driver/execution assertions. None are replaced by mock rows.
+// The tests below pin exact independent original branches/errors and the real
+// SQL token streams from those two features, not a third/restricted parser.
+use core.db.runtime.kernel_sql_query as sql_parser
+
+fn sql_parser_tokens(sql: String) -> [String] Never! {
+    sql_parser.sql_tokens(sql) ?? panic("SQL tokenization failed")
+}
+fn sql_parser_cr() -> String Never! {
+    String.from_bytes([U8]{13}) ?? panic("CR literal")
+}
+fn sql_parser_token_error(sql: String, expected: String) Never! {
+    _ :: sql_parser.sql_tokens(sql) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected SQL tokenizer error")
+}
+fn sql_parser_identifier_error(value: String?, role: String, expected: String) Never! {
+    _ :: sql_parser.identifier(value, role) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected SQL identifier error")
+}
+fn sql_parser_item(sql: String) -> sql_parser.JetSQLSelectItem Never! {
+    tokens :: sql_parser_tokens(sql)
+    parsed :: sql_parser.parse_select_item(tokens, 0) ?? panic("SELECT item failed")
+    assert_eq(parsed.cursor, tokens.len())
+    parsed.item
+}
+fn sql_parser_item_error(sql: String, expected: String) Never! {
+    tokens :: sql_parser_tokens(sql)
+    _ :: sql_parser.parse_select_item(tokens, 0) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected SELECT item error")
+}
+
+#Test("SQL original golden feature token streams") {
+    assert_eq(sql_parser_tokens("SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"), [String]{"SELECT", "*", "FROM", "sales", "WHERE", "qty", ">", "1", "ORDER", "BY", "qty", "DESC", "LIMIT", "2"})
+    assert_eq(sql_parser_tokens("SELECT * FROM sales WHERE cents > 50 ORDER BY item"), [String]{"SELECT", "*", "FROM", "sales", "WHERE", "cents", ">", "50", "ORDER", "BY", "item"})
+}
+
+#Test("SQL UTF8 whitespace comments and delimiters") {
+    assert_eq(sql_parser_tokens(" SELECT/*from--hidden*/name,--discard\nCOUNT(*) FROM sales; --tail"), [String]{"SELECT", "name", ",", "COUNT", "(", "*", ")", "FROM", "sales", ";"})
+    assert_eq(sql_parser_tokens("a/*outer/*nested*/b--comment{sql_parser_cr()}c\nd"), [String]{"a", "b", "d"})
+    assert_eq(sql_parser_tokens("--empty at EOF"), [String]{})
+    assert_eq(sql_parser_tokens("/*empty*/ \t{sql_parser_cr()}\n"), [String]{})
+    assert_eq(sql_parser_tokens("a;b;;"), [String]{"a", ";", "b", ";", ";"})
+}
+
+#Test("SQL quotes protect punctuation comments and doubled quotes") {
+    assert_eq(sql_parser_tokens("'é;--/*' \"β,,\" 'a''b' \"c\"\"d\""), [String]{"'é;--/*'", "\"β,,\"", "'a''b'", "\"c\"\"d\""})
+    assert_eq(sql_parser_tokens("pre'x y'post"), [String]{"pre'x y'post"})
+    assert_eq(sql_parser.unquote("'a''b''c'"), "a'b'c")
+    assert_eq(sql_parser.unquote("\"é\"\"β\""), "é\"β")
+    assert_eq(sql_parser.unquote("''"), "")
+    assert_eq(sql_parser.unquote("'"), "'")
+    assert_eq(sql_parser.unquote("'a\""), "'a\"")
+    assert_eq(sql_parser.unquote("plain"), "plain")
+    assert_eq(sql_parser.unquote("'a\\b'"), "a\\b")
+}
+
+#Test("SQL tokenizer exact error priority") {
+    sql_parser_token_error("'unterminated /*", "SQL string literal is missing its closing quote")
+    sql_parser_token_error("\"unterminated --", "SQL string literal is missing its closing quote")
+    sql_parser_token_error("/* 'unterminated", "SQL block comment is missing its closing `*/`")
+    sql_parser_token_error("/*nested /* */ '", "SQL string literal is missing its closing quote")
+    sql_parser_token_error("'a''", "SQL string literal is missing its closing quote")
+}
+
+#Test("SQL tokenization preserves all WHERE operators without inventing literals") {
+    assert_eq(sql_parser_tokens("n=1 n!=2 n>3 n>=4 n<5 n<=6 n!7 n<>8 n==9"), [String]{"n", "=", "1", "n", "!=", "2", "n", ">", "3", "n", ">=", "4", "n", "<", "5", "n", "<=", "6", "n", "!", "7", "n", "<", ">", "8", "n", "==", "9"})
+    assert_eq(sql_parser_tokens("null true FALSE +1 -1 1.5 '?'"), [String]{"null", "true", "FALSE", "+1", "-1", "1.5", "'?'"})
+}
+
+#Test("SQL identifier first scalar and quoted exemption match Rust") {
+    assert_eq(sql_parser.identifier(Val(" sales.id$2 "), "source") ?? panic("identifier"), "sales.id$2")
+    assert_eq(sql_parser.identifier(Val("_x"), "source") ?? panic("identifier"), "_x")
+    assert_eq(sql_parser.identifier(Val("'  1name  '"), "source") ?? panic("quoted"), "1name")
+    assert_eq(sql_parser.identifier(Val("\"éx\""), "source") ?? panic("quoted scalar"), "éx")
+    assert_eq(sql_parser.identifier(Val("'.x'"), "source") ?? panic("quoted punctuation"), ".x")
+    sql_parser_identifier_error(None, "WHERE field", "SQL WHERE field is missing")
+    sql_parser_identifier_error(Val("''"), "source", "SQL source must be an identifier")
+    sql_parser_identifier_error(Val("1name"), "source", "SQL source must be an identifier")
+    sql_parser_identifier_error(Val("éx"), "source", "SQL source must be an identifier")
+    sql_parser_identifier_error(Val("'xé'"), "source", "SQL source must be an identifier")
+    sql_parser_identifier_error(Val("'a''b'"), "source", "SQL source must be an identifier")
+    sql_parser_identifier_error(Val("'two words'"), "source", "SQL source must be an identifier")
+}
+
+#Test("SQL aliases stop at comma clauses and retain cursor") {
+    tokens :: [String]{"aS", "result", ","}
+    explicit :: sql_parser.parse_alias(tokens, 0) ?? panic("alias")
+    assert_eq(explicit.alias, Val("result"))
+    assert_eq(explicit.cursor, 2)
+    implicit :: sql_parser.parse_alias([String]{"result", "FROM"}, 0) ?? panic("alias")
+    assert_eq(implicit.alias, Val("result"))
+    assert_eq(implicit.cursor, 1)
+    stops :: [String]{",", "FrOm", "WHERE", "GROUP", "ORDER", "LIMIT", ";"}
+    loop stop in stops {
+        parsed :: sql_parser.parse_alias([String]{stop}, 0) ?? panic("clause alias")
+        assert(parsed.alias == None)
+        assert_eq(parsed.cursor, 0)
+    }
+    assert(!sql_parser.clause_keyword("by"))
+    assert(!sql_parser.clause_keyword("select"))
+    assert(!sql_parser.clause_keyword("fröm"))
+    _ :: sql_parser.parse_alias([String]{"AS"}, 0) ?? {
+        assert_eq(err.message, "SQL SELECT alias is missing")
+        return
+    }
+    panic("missing alias accepted")
+}
+
+#Test("SQL aggregate field wildcard aliases and default output names") {
+    wildcard :: sql_parser_item("*")
+    assert_eq(wildcard.output_name(), "*")
+    assert(!wildcard.is_aggregate())
+    named :: sql_parser_item("sales.qty AS amount")
+    assert_eq(named.output_name(), "amount")
+    assert(!named.is_aggregate())
+    assert_eq(sql_parser_item("qty amount").output_name(), "amount")
+    assert_eq(sql_parser_item("qty").output_name(), "qty")
+    assert_eq(sql_parser_item("COUNT(*)").output_name(), "count")
+    aggregates :: [String]{"COUNT", "SUM", "AVG", "AVERAGE", "MIN", "MAX"}
+    expected :: [String]{"count_qty", "sum_qty", "avg_qty", "avg_qty", "min_qty", "max_qty"}
+    loop i in 0..<aggregates.len() {
+        item :: sql_parser_item("{aggregates[i]}(qty)")
+        assert_eq(item.output_name(), expected[i])
+        assert(item.is_aggregate())
+        alias :: sql_parser_item("{aggregates[i]}(qty) total")
+        assert_eq(alias.output_name(), "total")
+    }
+}
+
+#Test("SQL select exact errors and aggregate error priority") {
+    sql_parser_item_error("", "SQL SELECT needs a projection")
+    sql_parser_item_error("* AS name", "SQL wildcard projection cannot have an alias")
+    sql_parser_item_error("MEDIAN(*)", "unsupported SQL aggregate `MEDIAN`; accepted functions are COUNT, SUM, AVG, MIN, and MAX")
+    sql_parser_item_error("SUM(*)", "SQL `*` is only valid inside COUNT(*)")
+    sql_parser_item_error("SUM(*", "SQL `*` is only valid inside COUNT(*)")
+    sql_parser_item_error("COUNT(", "SQL aggregate column is missing")
+    sql_parser_item_error("COUNT()", "SQL aggregate column must be an identifier")
+    sql_parser_item_error("COUNT(qty", "SQL aggregate call is missing its closing `)`")
+    sql_parser_item_error("COUNT(qty, other)", "SQL aggregate call is missing its closing `)`")
+    sql_parser_item_error("qty AS", "SQL SELECT alias is missing")
+    sql_parser_item_error("qty AS 1bad", "SQL SELECT alias must be an identifier")
+    tokens :: sql_parser_tokens("* name")
+    parsed :: sql_parser.parse_select_item(tokens, 0) ?? panic("wildcard")
+    assert_eq(parsed.cursor, 1) // implicit wildcard alias is NOT consumed.
+}
+
+#Test("SQL projection shape prefix preserves priority and case sensitive names") {
+    assert_eq(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{}, false), Val("SQL SELECT needs at least one projection"))
+    wildcard :: sql_parser_item("*")
+    assert(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{wildcard}, false) == None)
+    assert_eq(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{wildcard}, true), Val("SQL GROUP BY needs explicit projected columns"))
+    column :: sql_parser_item("qty")
+    assert_eq(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{wildcard, column}, true), Val("SQL wildcard projection cannot be combined with another projection"))
+    count :: sql_parser_item("COUNT(qty)")
+    aliased :: sql_parser_item("qty AS count_qty")
+    assert_eq(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{count, aliased}, false), Val("SQL SELECT repeats output column `count_qty`"))
+    repeated :: [sql_parser.JetSQLSelectItem]{sql_parser_item("a x"), sql_parser_item("b y"), sql_parser_item("c x"), sql_parser_item("d y")}
+    assert_eq(sql_parser.projection_shape_error(repeated, false), Val("SQL SELECT repeats output column `x`"))
+    assert(sql_parser.projection_shape_error([sql_parser.JetSQLSelectItem]{sql_parser_item("a x"), sql_parser_item("b X")}, false) == None)
+}

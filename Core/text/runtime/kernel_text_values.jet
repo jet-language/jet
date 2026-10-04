@@ -1,0 +1,257 @@
+// PORT-PENDING 2158 crates-jet-codegen-src-prelude-core-textvalues: crates/jet-codegen/src/Prelude/Core/TextValues.rs:1-253
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DISPLAYDBG1 / I9: one Display/Debug value formatter for every Rust-backed
+//RS // execution seam. Engines may marshal a carrier into these impls, but they do
+//RS // not choose a container shape or re-encode an outcome's clean/told meaning.
+//RS 
+//RS fn jet_text_list<I>(values: I) -> String
+//RS where
+//RS     I: IntoIterator<Item = String>,
+//RS {
+//RS     let mut out = String::from("[");
+//RS     let mut first = true;
+//RS     for value in values {
+//RS         if !first {
+//RS             out.push_str(", ");
+//RS         }
+//RS         out.push_str(&value);
+//RS         first = false;
+//RS     }
+//RS     out.push(']');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_text_map<I>(entries: I) -> String
+//RS where
+//RS     I: IntoIterator<Item = (String, String)>,
+//RS {
+//RS     let mut out = String::from("[");
+//RS     let mut first = true;
+//RS     for (key, value) in entries {
+//RS         if !first {
+//RS             out.push_str(", ");
+//RS         }
+//RS         out.push_str(&key);
+//RS         out.push_str(": ");
+//RS         out.push_str(&value);
+//RS         first = false;
+//RS     }
+//RS     if first {
+//RS         "[:]".to_string()
+//RS     } else {
+//RS         out.push(']');
+//RS         out
+//RS     }
+//RS }
+//RS 
+//RS fn jet_text_debug_optional(payload: Option<String>) -> String {
+//RS     match payload {
+//RS         Some(payload) => {
+//RS             let mut out = String::with_capacity(payload.len() + 5);
+//RS             out.push_str("Val(");
+//RS             out.push_str(&payload);
+//RS             out.push(')');
+//RS             out
+//RS         }
+//RS         None => "None".to_string(),
+//RS     }
+//RS }
+//RS 
+//RS // `?Sized`: a Core-layer text value is `&'static str`, so `&str` must render.
+//RS impl<T: JetDisplay + ?Sized> JetDisplay for &T {
+//RS     fn jet_display(&self) -> String {
+//RS         (**self).jet_display()
+//RS     }
+//RS }
+//RS impl<T: JetDebug + ?Sized> JetDebug for &T {
+//RS     fn jet_debug(&self) -> String {
+//RS         (**self).jet_debug()
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay> JetDisplay for [T] {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_display()))
+//RS     }
+//RS }
+//RS impl<T: JetDebug> JetDebug for [T] {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_debug()))
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay> JetDisplay for Vec<T> {
+//RS     fn jet_display(&self) -> String {
+//RS         self.as_slice().jet_display()
+//RS     }
+//RS }
+//RS impl<T: JetDebug> JetDebug for Vec<T> {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.as_slice().jet_debug()
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay, const N: usize> JetDisplay for [T; N] {
+//RS     fn jet_display(&self) -> String {
+//RS         self.as_slice().jet_display()
+//RS     }
+//RS }
+//RS impl<T: JetDebug, const N: usize> JetDebug for [T; N] {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.as_slice().jet_debug()
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay> JetDisplay for std::collections::HashSet<T> {
+//RS     fn jet_display(&self) -> String {
+//RS         let mut parts: Vec<String> = self.iter().map(|value| value.jet_display()).collect();
+//RS         parts.sort();
+//RS         jet_text_list(parts)
+//RS     }
+//RS }
+//RS impl<T: JetDebug> JetDebug for std::collections::HashSet<T> {
+//RS     fn jet_debug(&self) -> String {
+//RS         let mut parts: Vec<String> = self.iter().map(|value| value.jet_debug()).collect();
+//RS         parts.sort();
+//RS         jet_text_list(parts)
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Ord + JetDisplay> JetDisplay for std::collections::BTreeSet<T> {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_display()))
+//RS     }
+//RS }
+//RS impl<T: Ord + JetDebug> JetDebug for std::collections::BTreeSet<T> {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_debug()))
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Ord + Clone + JetDisplay> JetDisplay for std::collections::BinaryHeap<T> {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_text_list(
+//RS             self.clone()
+//RS                 .into_sorted_vec()
+//RS                 .into_iter()
+//RS                 .rev()
+//RS                 .map(|value| value.jet_display()),
+//RS         )
+//RS     }
+//RS }
+//RS impl<T: Ord + Clone + JetDebug> JetDebug for std::collections::BinaryHeap<T> {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_text_list(
+//RS             self.clone()
+//RS                 .into_sorted_vec()
+//RS                 .into_iter()
+//RS                 .rev()
+//RS                 .map(|value| value.jet_debug()),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_display()))
+//RS     }
+//RS }
+//RS impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_text_list(self.iter().map(|value| value.jet_debug()))
+//RS     }
+//RS }
+//RS 
+//RS impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for std::collections::BTreeMap<K, V> {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_text_map(
+//RS             self.iter()
+//RS                 .map(|(key, value)| (key.jet_display(), value.jet_display())),
+//RS         )
+//RS     }
+//RS }
+//RS impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, V> {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_text_map(
+//RS             self.iter()
+//RS                 .map(|(key, value)| (key.jet_debug(), value.jet_debug())),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS // D-FAIL-CARRIER1=A: the clean report is the optional carrier's absence. The
+//RS // same carrier is a told result for every other error type.
+//RS impl JetDisplay for JetAbsent {
+//RS     fn jet_display(&self) -> String {
+//RS         "null".to_string()
+//RS     }
+//RS 
+//RS     fn jet_report_is_clean() -> bool {
+//RS         true
+//RS     }
+//RS }
+//RS impl JetDebug for JetAbsent {
+//RS     fn jet_debug(&self) -> String {
+//RS         "null".to_string()
+//RS     }
+//RS 
+//RS     fn jet_report_is_clean() -> bool {
+//RS         true
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for std::convert::Infallible {
+//RS     fn jet_display(&self) -> String {
+//RS         match *self {}
+//RS     }
+//RS }
+//RS impl JetDebug for std::convert::Infallible {
+//RS     fn jet_debug(&self) -> String {
+//RS         match *self {}
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetTaskFailure {
+//RS     fn jet_display(&self) -> String {
+//RS         match self {
+//RS             JetTaskFailure::Cancelled => "Cancelled".to_string(),
+//RS             JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+//RS             JetTaskFailure::Panicked(reason) => format!("Panicked({reason})"),
+//RS         }
+//RS     }
+//RS }
+//RS impl JetDebug for JetTaskFailure {
+//RS     fn jet_debug(&self) -> String {
+//RS         match self {
+//RS             JetTaskFailure::Cancelled => "Cancelled".to_string(),
+//RS             JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+//RS             JetTaskFailure::Panicked(reason) => format!("Panicked({reason:?})"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetDisplay, E: JetDisplay> JetDisplay for JetOutcome<T, E> {
+//RS     fn jet_display(&self) -> String {
+//RS         let clean = <E as JetDisplay>::jet_report_is_clean();
+//RS         match self {
+//RS             Ok(value) if clean => value.jet_display(),
+//RS             Ok(value) => format!("Ok({})", value.jet_display()),
+//RS             Err(error) if clean => error.jet_display(),
+//RS             Err(error) => format!("Err({})", error.jet_display()),
+//RS         }
+//RS     }
+//RS }
+//RS impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
+//RS     fn jet_debug(&self) -> String {
+//RS         let clean = <E as JetDebug>::jet_report_is_clean();
+//RS         match self {
+//RS             Ok(value) if clean => jet_text_debug_optional(Some(value.jet_debug())),
+//RS             Ok(value) => format!("Ok({})", value.jet_debug()),
+//RS             Err(_) if clean => jet_text_debug_optional(None),
+//RS             Err(error) => format!("Err({})", error.jet_debug()),
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2158 crates/jet-codegen/src/Prelude/Core/TextValues.rs:1-253
+

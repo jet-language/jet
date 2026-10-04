@@ -1,0 +1,466 @@
+// PORT-PENDING 2146 crates-jet-codegen-src-prelude-core-fmt: crates/jet-codegen/src/Prelude/Core/Fmt.rs:1-462
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FMT1: pure formatting value kernel shared by AOT, JIT, and comptime.
+//RS 
+//RS pub(crate) fn jet_fmt_number(value: i64) -> String {
+//RS     comma_int(value)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
+//RS     let precision = precision.max(0) as usize;
+//RS     format!("{:.*}", precision, value)
+//RS }
+//RS 
+//RS /// D-QUANTITY-PRINT1: quantity display trims only the incidental `.0` from
+//RS /// ordinary Float spelling; fractional magnitudes retain their digits.
+//RS pub(crate) fn jet_fmt_quantity(value: f64) -> String {
+//RS     let mut text = format!("{:?}", value);
+//RS     if text.ends_with(".0") {
+//RS         text.truncate(text.len() - 2);
+//RS     }
+//RS     text
+//RS }
+//RS 
+//RS /// D-FMT-PLAIN1=A: explicit human grouping keeps the former decimal display.
+//RS pub(crate) fn jet_fmt_grouped(value: f64, precision: i64) -> String {
+//RS     let precision = precision.max(0) as usize;
+//RS     comma_decimal(format!("{:.*}", precision, value))
+//RS }
+//RS 
+//RS /// D-FMT-INTERP3=B: format an exact integer with fixed decimal places. The
+//RS /// caller supplies the carrier's decimal spelling so native and spilled `Int`
+//RS /// values use one kernel without a lossy float conversion.
+//RS pub(crate) fn jet_fmt_decimal_int(value: &str, precision: i64) -> String {
+//RS     format_decimal_int(value, precision, false)
+//RS }
+//RS 
+//RS /// D-FMT-PLAIN1=A: the grouped integer rail uses the same exact-int kernel as
+//RS /// `jet_fmt_decimal_int`; only the explicit grouping policy differs.
+//RS pub(crate) fn jet_fmt_grouped_int(value: &str, precision: i64) -> String {
+//RS     format_decimal_int(value, precision, true)
+//RS }
+//RS 
+//RS fn format_decimal_int(value: &str, precision: i64, grouped: bool) -> String {
+//RS     let precision = precision.max(0) as usize;
+//RS     let value = value.trim();
+//RS     let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
+//RS         (true, rest)
+//RS     } else if let Some(rest) = value.strip_prefix('+') {
+//RS         (false, rest)
+//RS     } else {
+//RS         (false, value)
+//RS     };
+//RS     if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
+//RS         return value.to_string();
+//RS     }
+//RS     let digits = digits.trim_start_matches('0');
+//RS     let digits = if digits.is_empty() { "0" } else { digits };
+//RS     let sign = if negative && digits != "0" { "-" } else { "" };
+//RS     let grouped_digits = if grouped {
+//RS         Some(group_decimal_digits(digits))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let whole = grouped_digits.as_deref().unwrap_or(digits);
+//RS     let mut out = String::with_capacity(
+//RS         sign.len() + whole.len() + usize::from(precision > 0) + precision,
+//RS     );
+//RS     out.push_str(sign);
+//RS     out.push_str(whole);
+//RS     if precision > 0 {
+//RS         out.push('.');
+//RS         for _ in 0..precision {
+//RS             out.push('0');
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS /// D-FMT-INTERP3=B: convert an exact decimal integer spelling to lowercase
+//RS /// hexadecimal, then zero-pad its digits to the requested width. The caller
+//RS /// supplies the carrier's decimal spelling so the same kernel handles native
+//RS /// small and spilled `Int` values.
+//RS pub(crate) fn jet_fmt_hex_decimal(value: &str, width: i64) -> String {
+//RS     jet_fmt_radix_decimal(value, 16, width)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_bin_decimal(value: &str) -> String {
+//RS     jet_fmt_radix_decimal(value, 2, 0)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_oct_decimal(value: &str) -> String {
+//RS     jet_fmt_radix_decimal(value, 8, 0)
+//RS }
+//RS 
+//RS fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
+//RS     let value = value.trim();
+//RS     let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
+//RS         (true, rest)
+//RS     } else if let Some(rest) = value.strip_prefix('+') {
+//RS         (false, rest)
+//RS     } else {
+//RS         (false, value)
+//RS     };
+//RS     let mut decimal = Vec::with_capacity(digits.len());
+//RS     for digit in digits.bytes() {
+//RS         let digit = digit.wrapping_sub(b'0');
+//RS         if digit > 9 {
+//RS             return value.to_string();
+//RS         }
+//RS         if digit != 0 || !decimal.is_empty() {
+//RS             decimal.push(digit);
+//RS         }
+//RS     }
+//RS     if decimal.is_empty() {
+//RS         if digits.is_empty() {
+//RS             return value.to_string();
+//RS         }
+//RS         decimal.push(0);
+//RS     }
+//RS 
+//RS     let mut converted = Vec::with_capacity(decimal.len());
+//RS     while decimal.iter().any(|digit| *digit != 0) {
+//RS         let mut carry = 0u16;
+//RS         let mut quotient = Vec::with_capacity(decimal.len());
+//RS         for digit in decimal {
+//RS             let current = carry * 10 + u16::from(digit);
+//RS             let next = current / radix;
+//RS             carry = current % radix;
+//RS             if !quotient.is_empty() || next != 0 {
+//RS                 quotient.push(next as u8);
+//RS             }
+//RS         }
+//RS         converted.push(b"0123456789abcdef"[carry as usize] as char);
+//RS         decimal = quotient;
+//RS     }
+//RS     if converted.is_empty() {
+//RS         converted.push('0');
+//RS     } else {
+//RS         converted.reverse();
+//RS     }
+//RS     let padding = (width.max(0) as usize).saturating_sub(converted.len());
+//RS     let zero = converted.len() == 1 && converted[0] == '0';
+//RS     let signed = negative && !zero;
+//RS     let mut out = String::with_capacity(usize::from(signed) + padding + converted.len());
+//RS     if signed {
+//RS         out.push('-');
+//RS     }
+//RS     for _ in 0..padding {
+//RS         out.push('0');
+//RS     }
+//RS     out.extend(converted);
+//RS     out
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
+//RS     let precision = precision.max(0) as usize;
+//RS     format!("{:.*e}", precision, value)
+//RS }
+//RS 
+//RS /// D-FMT-PRETTY1=A: expand canonical Debug text without inspecting terminal
+//RS /// width. Strings are skipped while scanning, so braces in a string value do
+//RS /// not become structure. The canonical Debug renderer already owns field
+//RS /// order, redaction, and collection ordering; this kernel only lays it out.
+//RS pub(crate) fn jet_fmt_pretty(value: &str) -> String {
+//RS     pretty_fragment(value, 0)
+//RS }
+//RS 
+//RS fn pretty_fragment(value: &str, indent: usize) -> String {
+//RS     let value = value.trim();
+//RS     let Some((open_at, open, close)) = first_structure(value) else {
+//RS         return value.to_string();
+//RS     };
+//RS     let Some(end) = matching_close(value, open, close) else {
+//RS         return value.to_string();
+//RS     };
+//RS     if !value[end + close.len_utf8()..].trim().is_empty() {
+//RS         return value.to_string();
+//RS     }
+//RS     let prefix = value[..open_at].trim_end();
+//RS     let body = &value[open_at + open.len_utf8()..end];
+//RS     if body.trim().is_empty() {
+//RS         return format!("{prefix} {open}{close}").trim_start().to_string();
+//RS     }
+//RS     if open == '['
+//RS         && (body.trim() == ":" || body.trim().eq_ignore_ascii_case("redacted"))
+//RS     {
+//RS         return value.to_string();
+//RS     }
+//RS     let mut out = String::new();
+//RS     if !prefix.is_empty() {
+//RS         out.push_str(prefix);
+//RS         out.push(' ');
+//RS     }
+//RS     out.push(open);
+//RS     for item in split_top_level(body) {
+//RS         out.push('\n');
+//RS         out.push_str(&" ".repeat(indent + 2));
+//RS         out.push_str(&pretty_fragment(item, indent + 2));
+//RS     }
+//RS     out.push('\n');
+//RS     out.push_str(&" ".repeat(indent));
+//RS     out.push(close);
+//RS     out
+//RS }
+//RS 
+//RS /// Returns the byte offset of the first structural opener plus its pair. The
+//RS /// offset is what the caller slices with, so it must come from the scan rather
+//RS /// than being recomputed from the char.
+//RS fn first_structure(value: &str) -> Option<(usize, char, char)> {
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     for (offset, ch) in value.char_indices() {
+//RS         if quoted {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if ch == '\\' {
+//RS                 escaped = true;
+//RS             } else if ch == '"' {
+//RS                 quoted = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if ch == '"' {
+//RS             quoted = true;
+//RS         } else if let Some(close) = close_for(ch) {
+//RS             return Some((offset, ch, close));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn close_for(open: char) -> Option<char> {
+//RS     match open {
+//RS         '{' => Some('}'),
+//RS         '[' => Some(']'),
+//RS         '(' => Some(')'),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn matching_close(value: &str, start: char, expected: char) -> Option<usize> {
+//RS     let mut stack = vec![expected];
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     let mut seen_start = false;
+//RS     for (index, ch) in value.char_indices() {
+//RS         if !seen_start {
+//RS             if ch == start {
+//RS                 seen_start = true;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if quoted {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if ch == '\\' {
+//RS                 escaped = true;
+//RS             } else if ch == '"' {
+//RS                 quoted = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if ch == '"' {
+//RS             quoted = true;
+//RS             continue;
+//RS         }
+//RS         if let Some(close) = close_for(ch) {
+//RS             stack.push(close);
+//RS         } else if stack.last().copied() == Some(ch) {
+//RS             stack.pop();
+//RS             if stack.is_empty() {
+//RS                 return Some(index);
+//RS             }
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn split_top_level(value: &str) -> Vec<&str> {
+//RS     let mut items = Vec::new();
+//RS     let mut start = 0;
+//RS     let mut stack = Vec::new();
+//RS     let mut quoted = false;
+//RS     let mut escaped = false;
+//RS     for (index, ch) in value.char_indices() {
+//RS         if quoted {
+//RS             if escaped {
+//RS                 escaped = false;
+//RS             } else if ch == '\\' {
+//RS                 escaped = true;
+//RS             } else if ch == '"' {
+//RS                 quoted = false;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if ch == '"' {
+//RS             quoted = true;
+//RS         } else if let Some(close) = close_for(ch) {
+//RS             stack.push(close);
+//RS         } else if stack.last().copied() == Some(ch) {
+//RS             stack.pop();
+//RS         } else if ch == ',' && stack.is_empty() {
+//RS             if !value[start..index].trim().is_empty() {
+//RS                 items.push(value[start..index].trim());
+//RS             }
+//RS             start = index + ch.len_utf8();
+//RS         }
+//RS     }
+//RS     if !value[start..].trim().is_empty() {
+//RS         items.push(value[start..].trim());
+//RS     }
+//RS     items
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_percent(value: f64, precision: i64) -> String {
+//RS     format!("{}%", jet_fmt_grouped(value * 100.0, precision))
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_bytes(value: i64) -> String {
+//RS     let sign = if value < 0 { "-" } else { "" };
+//RS     let mut size = (value as f64).abs();
+//RS     let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+//RS     let mut unit = 0usize;
+//RS     while size >= 1000.0 && unit + 1 < units.len() {
+//RS         size /= 1000.0;
+//RS         unit += 1;
+//RS     }
+//RS     if unit == 0 {
+//RS         format!("{}{} {}", sign, size as i64, units[unit])
+//RS     } else if size >= 10.0 {
+//RS         format!("{}{} {}", sign, size.round() as i64, units[unit])
+//RS     } else {
+//RS         let shown = format!("{:.1}", size);
+//RS         format!("{}{} {}", sign, shown.trim_end_matches(".0"), units[unit])
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_duration(ms: i64) -> String {
+//RS     let sign = if ms < 0 { "-" } else { "" };
+//RS     let mut rest = ms.abs();
+//RS     if rest < 1000 {
+//RS         return format!("{}{}ms", sign, rest);
+//RS     }
+//RS     let days = rest / 86_400_000;
+//RS     rest %= 86_400_000;
+//RS     let hours = rest / 3_600_000;
+//RS     rest %= 3_600_000;
+//RS     let minutes = rest / 60_000;
+//RS     rest %= 60_000;
+//RS     let seconds = rest / 1000;
+//RS     let mut parts = Vec::new();
+//RS     if days > 0 {
+//RS         parts.push(format!("{}d", days));
+//RS     }
+//RS     if hours > 0 {
+//RS         parts.push(format!("{}h", hours));
+//RS     }
+//RS     if minutes > 0 {
+//RS         parts.push(format!("{}m", minutes));
+//RS     }
+//RS     if seconds > 0 || parts.is_empty() {
+//RS         parts.push(format!("{}s", seconds));
+//RS     }
+//RS     format!("{}{}", sign, parts.into_iter().take(3).collect::<Vec<_>>().join(" "))
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_ordinal(value: i64) -> String {
+//RS     let n = value.abs();
+//RS     let suffix = if (11..=13).contains(&(n % 100)) {
+//RS         "th"
+//RS     } else {
+//RS         match n % 10 {
+//RS             1 => "st",
+//RS             2 => "nd",
+//RS             3 => "rd",
+//RS             _ => "th",
+//RS         }
+//RS     };
+//RS     format!("{}{}", comma_int(value), suffix)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_plural(count: i64, singular: &String, plural: &String) -> String {
+//RS     let word = if count.abs() == 1 { singular } else { plural };
+//RS     format!("{} {}", comma_int(count), word)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_pad(text: &String, width: i64, fill: &String) -> String {
+//RS     jet_fmt_pad_right(text, width, fill)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_pad_left(text: &String, width: i64, fill: &String) -> String {
+//RS     let need = pad_need(text, width);
+//RS     format!("{}{}", pad_fill(fill, need), text)
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_pad_right(text: &String, width: i64, fill: &String) -> String {
+//RS     let need = pad_need(text, width);
+//RS     format!("{}{}", text, pad_fill(fill, need))
+//RS }
+//RS 
+//RS pub(crate) fn jet_fmt_pad_center(text: &String, width: i64, fill: &String) -> String {
+//RS     let need = pad_need(text, width);
+//RS     let left = need / 2;
+//RS     let right = need - left;
+//RS     format!("{}{}{}", pad_fill(fill, left), text, pad_fill(fill, right))
+//RS }
+//RS 
+//RS fn pad_need(text: &str, width: i64) -> usize {
+//RS     (width.max(0) as usize).saturating_sub(text.chars().count())
+//RS }
+//RS 
+//RS fn pad_fill(fill: &str, len: usize) -> String {
+//RS     if len == 0 {
+//RS         return String::new();
+//RS     }
+//RS     let fill = if fill.is_empty() { " " } else { fill };
+//RS     let mut out = String::new();
+//RS     while out.chars().count() < len {
+//RS         out.push_str(fill);
+//RS     }
+//RS     out.chars().take(len).collect()
+//RS }
+//RS 
+//RS fn comma_int(value: i64) -> String {
+//RS     group_decimal_digits(&value.to_string())
+//RS }
+//RS 
+//RS fn group_decimal_digits(raw: &str) -> String {
+//RS     let (sign, digits) = if let Some(rest) = raw.strip_prefix('-') {
+//RS         ("-", rest)
+//RS     } else if let Some(rest) = raw.strip_prefix('+') {
+//RS         ("+", rest)
+//RS     } else {
+//RS         ("", raw)
+//RS     };
+//RS     let count = digits.chars().count();
+//RS     let mut out = String::with_capacity(
+//RS         sign.len() + digits.len() + count.saturating_sub(1) / 3,
+//RS     );
+//RS     out.push_str(sign);
+//RS     for (index, ch) in digits.chars().enumerate() {
+//RS         if index > 0 && (count - index) % 3 == 0 {
+//RS             out.push(',');
+//RS         }
+//RS         out.push(ch);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn comma_decimal(raw: String) -> String {
+//RS     let (sign, rest) = raw.strip_prefix('-').map_or(("", raw.as_str()), |s| ("-", s));
+//RS     let mut split = rest.splitn(2, '.');
+//RS     let whole = split.next().unwrap_or("0");
+//RS     let frac = split.next();
+//RS     // Keep the formatted value as decimal text. Parsing the whole part as an
+//RS     // i64 turns values above i64::MAX into zero, which made 1e21 render as
+//RS     // 0.00 and also discarded large exact integer spellings.
+//RS     let whole_text = group_decimal_digits(whole);
+//RS     match frac {
+//RS         Some(frac) => format!("{}{}.{}", sign, whole_text, frac),
+//RS         None => format!("{}{}", sign, whole_text),
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2146 crates/jet-codegen/src/Prelude/Core/Fmt.rs:1-462
+

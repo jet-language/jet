@@ -1,0 +1,451 @@
+// Literal oracle from Rust 1.97.1 8bab26f4f68e0e26f0bb7960be334d5b520ea452:
+// library/coretests/tests/fmt/float.rs (f64 default/fixed cases), and
+// num/flt2dec/mod.rs f64_shortest_sanity_test, f64_exact_sanity_test,
+// to_shortest_str_test, to_shortest_exp_str_test, to_exact_fixed_str_test.
+// No expected byte is obtained from a float formatter or candidate parser.
+// Unexercised compiler/storage gates are retained: generic fixed buffers and
+// initialized-prefix loans #4494, private source graph #4500, usize target #4483.
+use core.mem
+use core.math.runtime.kernel_float_policy as bits_policy
+use core.text.runtime.kernel_float_format as fmt
+use core.text.runtime.float_format.decoded as dec
+use core.text.runtime.float_format.grisu as grisu
+use core.text.runtime.float_format.dragon as dragon
+use core.text.runtime.float_format.big as big
+use core.text.runtime.float_format.cached as cache
+// Same canonical native unwind seam as Foundation/Tests/CompilerStack.jet.
+// #4494: real same-thread panic capture/payload, not a simulated refusal.
+use std.panic as unwind
+
+fn raw(word: U64) -> F64 Never! { bits_policy.float_policy_from_bits(word) }
+fn text(buf: &[U8#N], len: Int) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<len -> &out.push(buf[i])
+    String.from_bytes(^out) ?? panic("ASCII fixture")
+}
+fn zeros(prefix: String, n: Int, suffix: String) -> String Never! {
+    out := [U8]{}
+    loop b in prefix.bytes() -> &out.push(b)
+    loop i in 0..<n -> &out.push(U8{48})
+    loop b in suffix.bytes() -> &out.push(b)
+    String.from_bytes(^out) ?? panic("literal zero run")
+}
+fn defaults(value: F64, display: String, debug: String) Never! {
+    assert_eq(fmt.display(value), display)
+    assert_eq(fmt.debug(value), debug)
+    assert_eq(fmt.display(-value), "-{display}")
+    assert_eq(fmt.debug(-value), "-{debug}")
+}
+fn fixed(value: F64, precision: Int, expected: String) Never! {
+    assert_eq(fmt.fixed(value, precision), expected)
+    assert_eq(fmt.fixed(-value, precision), "-{expected}")
+}
+fn shortest(value: F64, expected: String, exp: Int) Never! {
+    d :: dec.finite(bits_policy.float_policy_to_bits(value))
+    b := [U8#17]{uninit}
+    g :: grisu.shortest(&d, &b)
+    assert_eq(text(&b, g.len), expected)
+    assert_eq(g.exp, exp)
+    r :: dragon.shortest(&d, &b)
+    assert_eq(text(&b, r.len), expected)
+    assert_eq(r.exp, exp)
+}
+#Test("all pinned f64 shortest sanity rows and Dragon tie fallback") {
+    shortest(F64{0.1}, "1", 0)
+    shortest(F64{100.0}, "1", 3)
+    shortest(F64{1.0} / F64{3.0}, "3333333333333333", 0)
+    shortest(F64{1.00000762939453125}, "10000076293945313", 1)
+    shortest(F64{3.141592}, "3141592", 1)
+    shortest(F64{3.141592e17}, "3141592", 18)
+    shortest(raw(U64{0x43f0000000000000}), "18446744073709552", 20)
+    shortest(F64{1e23}, "1", 24)
+    shortest(raw(U64{0x7fefffffffffffff}), "17976931348623157", 309)
+    shortest(raw(U64{0x0010000000000000}), "22250738585072014", -307)
+    shortest(raw(U64{1}), "5", -323)
+    d :: dec.finite(bits_policy.float_policy_to_bits(F64{1.00000762939453125}))
+    b := [U8#17]{uninit}
+    assert_eq(grisu.shortest_opt(&d, &b), None)
+}
+#Test("pinned synthetic inclusive/exclusive shortest carry cases") {
+    b := [U8#17]{uninit}
+    d := dec.Decoded{mant: U64{99999999999999999}, minus: U64{1}, plus: U64{1}, exp: 0, inclusive: true}
+    r :: grisu.shortest(&d, &b)
+    assert_eq(text(&b, r.len), "1")
+    assert_eq(r.exp, 18)
+    d.inclusive = false
+    q :: grisu.shortest(&d, &b)
+    assert_eq(text(&b, q.len), "99999999999999999")
+    assert_eq(q.exp, 17)
+}
+#Test("default signed zeros infinities all NaN signs and payloads") {
+    assert_eq(fmt.display(raw(U64{0})), "0")
+    assert_eq(fmt.display(raw(U64{0x8000000000000000})), "-0")
+    assert_eq(fmt.debug(raw(U64{0})), "0.0")
+    assert_eq(fmt.debug(raw(U64{0x8000000000000000})), "-0.0")
+    loop bits in [U64]{0x7ff0000000000001,0x7ff8000000000000,0x7fffffffffffffff,0xfff0000000000001,0xfff8000000000000,0xffffffffffffffff} {
+        assert_eq(fmt.display(raw(bits)), "NaN")
+        assert_eq(fmt.debug(raw(bits)), "NaN")
+        loop p in [Int]{0,1,2,64,1025} -> assert_eq(fmt.fixed(raw(bits), p), "NaN")
+    }
+    assert_eq(fmt.display(raw(U64{0x7ff0000000000000})), "inf")
+    assert_eq(fmt.debug(raw(U64{0xfff0000000000000})), "-inf")
+    loop p in [Int]{0,1,2,64,1025} {
+        assert_eq(fmt.fixed(raw(U64{0x7ff0000000000000}), p), "inf")
+        assert_eq(fmt.fixed(raw(U64{0xfff0000000000000}), p), "-inf")
+        fixed(F64{0.0}, p, if p == 0 -> "0" else -> zeros("0.", p, ""))
+    }
+}
+#Test("default Display decimal expansion Debug thresholds BOTH signs") {
+    defaults(F64{1.01}, "1.01", "1.01")
+    defaults(F64{3.0}, "3", "3.0")
+    defaults(F64{3.14}, "3.14", "3.14")
+    defaults(F64{0.1}, "0.1", "0.1")
+    defaults(F64{0.00009}, "0.00009", "9e-5")
+    defaults(F64{7.5e-11}, "0.000000000075", "7.5e-11")
+    defaults(F64{1.9971e20}, "199710000000000000000", "1.9971e20")
+    defaults(F64{1e23}, zeros("1", 23, ""), "1e23")
+    defaults(raw(U64{0x7fefffffffffffff}), zeros("17976931348623157", 292, ""), "1.7976931348623157e308")
+    defaults(raw(U64{1}), zeros("0.", 323, "5"), "5e-324")
+    defaults(raw(U64{0x000fffffffffffff}), zeros("0.", 307, "2225073858507201"), "2.225073858507201e-308")
+    defaults(raw(U64{0x0010000000000000}), zeros("0.", 307, "22250738585072014"), "2.2250738585072014e-308")
+    defaults(raw(U64{0x0010000000000001}), zeros("0.", 307, "2225073858507202"), "2.225073858507202e-308")
+    defaults(raw(U64{0x3f1a36e2eb1c432c}), "0.00009999999999999999", "9.999999999999999e-5")
+    defaults(raw(U64{0x3f1a36e2eb1c432d}), "0.0001", "0.0001")
+    defaults(raw(U64{0x3f1a36e2eb1c432e}), "0.00010000000000000002", "0.00010000000000000002")
+    defaults(raw(U64{0x4341c37937e07fff}), "9999999999999998", "9999999999999998.0")
+    defaults(raw(U64{0x4341c37937e08000}), "10000000000000000", "1e16")
+    defaults(raw(U64{0x4341c37937e08001}), "10000000000000002", "1.0000000000000002e16")
+}
+#Test("all pinned fmt float f64 decimal precision rows ties BOTH signs") {
+    fixed(F64{1.0}, 0, "1")
+    fixed(F64{9.4}, 0, "9")
+    fixed(F64{9.9}, 0, "10")
+    fixed(F64{9.849}, 1, "9.8")
+    fixed(F64{9.851}, 1, "9.9")
+    fixed(F64{1234567.89}, 1, "1234567.9")
+    fixed(F64{1234.56789}, 1, "1234.6")
+    fixed(F64{0.5}, 0, "0")
+    fixed(F64{1.5}, 0, "2")
+    fixed(F64{2.5}, 0, "2")
+    fixed(F64{3.5}, 0, "4")
+    fixed(F64{4.5}, 0, "4")
+    fixed(F64{5.5}, 0, "6")
+    fixed(F64{127.5}, 0, "128")
+    fixed(F64{128.5}, 0, "128")
+    fixed(F64{0.25}, 1, "0.2")
+    fixed(F64{0.75}, 1, "0.8")
+    fixed(F64{0.125}, 2, "0.12")
+    fixed(F64{0.875}, 2, "0.88")
+    fixed(F64{0.062}, 3, "0.062")
+}
+#Test("all pinned flt2dec exact fixed f64 ordinary rows BOTH signs") {
+    fixed(F64{3.14}, 0, "3")
+    fixed(F64{3.14}, 1, "3.1")
+    fixed(F64{3.14}, 2, "3.14")
+    fixed(F64{3.14}, 4, "3.1400")
+    fixed(F64{3.14}, 8, "3.14000000")
+    fixed(F64{0.195}, 0, "0")
+    fixed(F64{0.195}, 1, "0.2")
+    fixed(F64{0.195}, 2, "0.20")
+    fixed(F64{0.195}, 4, "0.1950")
+    fixed(F64{0.195}, 5, "0.19500")
+    fixed(F64{0.195}, 6, "0.195000")
+    fixed(F64{0.195}, 8, "0.19500000")
+    fixed(F64{999.5}, 0, "1000")
+    fixed(F64{999.5}, 1, "999.5")
+    fixed(F64{999.5}, 2, "999.50")
+    fixed(F64{999.5}, 3, "999.500")
+    fixed(F64{999.5}, 30, "999.500000000000000000000000000000")
+    fixed(F64{0.5}, 1, "0.5")
+    fixed(F64{0.5}, 2, "0.50")
+    fixed(F64{0.5}, 3, "0.500")
+    fixed(F64{0.95}, 0, "1")
+    fixed(F64{0.95}, 1, "0.9")
+    fixed(F64{0.95}, 2, "0.95")
+    fixed(F64{0.95}, 3, "0.950")
+    fixed(F64{0.95}, 10, "0.9500000000")
+    fixed(F64{0.95}, 30, "0.949999999999999955591079014994")
+    fixed(F64{0.095}, 0, "0")
+    fixed(F64{0.095}, 1, "0.1")
+    fixed(F64{0.095}, 2, "0.10")
+    fixed(F64{0.095}, 3, "0.095")
+    fixed(F64{0.095}, 4, "0.0950")
+    fixed(F64{0.095}, 10, "0.0950000000")
+    fixed(F64{0.095}, 30, "0.095000000000000001110223024625")
+    fixed(F64{0.0095}, 0, "0")
+    fixed(F64{0.0095}, 1, "0.0")
+    fixed(F64{0.0095}, 2, "0.01")
+    fixed(F64{0.0095}, 3, "0.009")
+    fixed(F64{0.0095}, 4, "0.0095")
+    fixed(F64{0.0095}, 5, "0.00950")
+    fixed(F64{0.0095}, 10, "0.0095000000")
+    fixed(F64{0.0095}, 30, "0.009499999999999999764077607267")
+    fixed(F64{7.5e-11}, 0, "0")
+    fixed(F64{7.5e-11}, 3, "0.000")
+    fixed(F64{7.5e-11}, 10, "0.0000000001")
+    fixed(F64{7.5e-11}, 11, "0.00000000007")
+    fixed(F64{7.5e-11}, 12, "0.000000000075")
+    fixed(F64{7.5e-11}, 13, "0.0000000000750")
+    fixed(F64{7.5e-11}, 20, "0.00000000007500000000")
+    fixed(F64{7.5e-11}, 30, "0.000000000074999999999999999501")
+    fixed(F64{1e25}, 0, "10000000000000000905969664")
+    fixed(F64{1e25}, 1, "10000000000000000905969664.0")
+    fixed(F64{1e25}, 3, "10000000000000000905969664.000")
+    fixed(F64{1e-6}, 0, "0")
+    fixed(F64{1e-6}, 3, "0.000")
+    fixed(F64{1e-6}, 6, "0.000001")
+    fixed(F64{1e-6}, 9, "0.000001000")
+    fixed(F64{1e-6}, 12, "0.000001000000")
+    fixed(F64{1e-6}, 22, "0.0000010000000000000000")
+    fixed(F64{1e-6}, 23, "0.00000099999999999999995")
+    fixed(F64{1e-6}, 24, "0.000000999999999999999955")
+    fixed(F64{1e-6}, 25, "0.0000009999999999999999547")
+    fixed(F64{1e-6}, 35, "0.00000099999999999999995474811182589")
+    fixed(F64{1e-6}, 45, "0.000000999999999999999954748111825886258685614")
+    fixed(F64{1e-6}, 55, "0.0000009999999999999999547481118258862586856139387236908")
+    fixed(F64{1e-6}, 65, "0.00000099999999999999995474811182588625868561393872369080781936646")
+    fixed(F64{1e-6}, 75, "0.000000999999999999999954748111825886258685613938723690807819366455078125000")
+}
+#Test("all pinned fixed f64 extreme and unlimited zero-run rows BOTH signs") {
+    maximum :: raw(U64{0x7fefffffffffffff})
+    integer :: "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368"
+    fixed(maximum, 0, integer)
+    fixed(maximum, 10, "{integer}.0000000000")
+    minimum :: raw(U64{1})
+    fixed(minimum, 0, "0")
+    fixed(minimum, 1, "0.0")
+    fixed(minimum, 10, "0.0000000000")
+    fixed(minimum, 100, zeros("0.", 100, ""))
+    fixed(minimum, 1000, zeros("0.", 323, "4940656458412465441765687928682213723650598026143247644255856825006755072702087518652998363616359923797965646954457177309266567103559397963987747960107818781263007131903114045278458171678489821036887186360569987307230500063874091535649843873124733972731696151400317153853980741262385655911710266585566867681870395603106249319452715914924553293054565440112748012970999954193198940908041656332452475714786901472678015935523861155013480352649347201937902681071074917033322268447533357208324319360923828934583680601060115061698097530783422773183292479049825247307763759272478746560847782037344696995336470179726777175851256605511991315048911014510378627381672509558373897335989937"))
+    fixed(F64{0.0}, 50000, zeros("0.", 50000, ""))
+    fixed(F64{10.0}, 50000, zeros("10.", 50000, ""))
+    fixed(F64{1.0}, 50000, zeros("1.", 50000, ""))
+    fixed(F64{0.1}, 50000, zeros("0.1000000000000000055511151231257827021181583404541015625", 49945, ""))
+    fixed(F64{1e-20}, 50000, zeros("0.00000000000000000000999999999999999945153271454209571651729503702787392447107715776066783064379706047475337982177734375", 49881, ""))
+    // Exact pinned formatter MAX precision, not a scratch-size clamp.
+    fixed(F64{1.0}, 65535, zeros("1.", 65535, ""))
+}
+
+// Source check_exact / check_exact_one, including every original f64 Paxson
+// Table3/Table4 row. The oracle rounds the literal decimal fixture, not value.
+fn check_digits(d: &dec.Decoded, capacity: Int, limit: Int, expected: String, exponent: Int) Never! {
+    b := [U8#1024]{uninit}
+    g :: grisu.exact(d, &b, capacity, limit)
+    assert_eq(text(&b, g.len), expected)
+    assert_eq(g.exp, exponent)
+    r :: dragon.exact(d, &b, capacity, limit)
+    assert_eq(text(&b, r.len), expected)
+    assert_eq(r.exp, exponent)
+}
+fn exact_case(value: F64, literal: String, exponent: Int) Never! {
+    d :: dec.finite(bits_policy.float_policy_to_bits(value))
+    fixture :: literal.bytes()
+    cut := fixture.len()
+    loop i in 0..<fixture.len() {
+        if fixture[i] == (U8{32}) { cut = i; break }
+    }
+    last :: if cut < fixture.len() -> cut else -> fixture.len() - 1
+    loop len in 1..<last {
+        expected := [U8]{}
+        loop i in 0..<len -> &expected.push(fixture[i])
+        k := exponent
+        tie :: fixture[len] == (U8{53}) && (fixture[len - 1] & U8{1}) == (U8{0}) && len + 1 < fixture.len() && fixture[len + 1] == (U8{32})
+        if fixture[len] >= (U8{53}) && !tie {
+            j := len
+            loop j > 0 && expected[j - 1] == (U8{57}) { j -= 1; expected[j] = U8{48} }
+            if j == 0 { expected[0] = U8{49}; k += 1 } else { expected[j - 1] += U8{1} }
+        }
+        oracle :: String.from_bytes(^expected) ?? panic("literal oracle")
+        check_digits(&d, len, -32768, oracle, k)
+        check_digits(&d, 1024, k - len, oracle, k)
+        if k - len <= 0 -> fixed(value, len - k, if k <= 0 -> zeros("0.", -k, oracle) else -> decimal_oracle(oracle, k))
+    }
+    if fixture[0] > (U8{53}) -> check_digits(&d, 1024, exponent, "1", exponent + 1)
+    if cut < fixture.len() {
+        prefix := [U8]{}
+        loop i in 0..<cut -> &prefix.push(fixture[i])
+        literal_prefix :: String.from_bytes(^prefix) ?? panic("literal prefix")
+        loop len in cut..<(fixture.len() - 1) {
+            oracle :: zeros(literal_prefix, len - cut, "")
+            check_digits(&d, len, -32768, oracle, exponent)
+            check_digits(&d, 1024, exponent - len, oracle, exponent)
+        }
+    }
+}
+fn decimal_oracle(literal: String, exp: Int) -> String Never! {
+    fixture :: literal.bytes()
+    out := [U8]{}
+    loop i in 0..<fixture.len() {
+        if i == exp -> &out.push(U8{46})
+        &out.push(fixture[i])
+    }
+    String.from_bytes(^out) ?? panic("literal decimal")
+}
+#Test("all pinned exact f64 sanity literal rows at every requested digit") {
+    exact_case(F64{0.1}, "1000000000000000055511151231257827021181", 0)
+    exact_case(F64{0.45}, "4500000000000000111022302462515654042363", 0)
+    exact_case(F64{0.5}, "5                                       ", 0)
+    exact_case(F64{0.95}, "9499999999999999555910790149937383830547", 0)
+    exact_case(F64{100.0}, "1                                       ", 3)
+    exact_case(F64{999.5}, "9995000000000000000000000000000000000000", 3)
+    exact_case(F64{1.0}/F64{3.0}, "3333333333333333148296162562473909929394", 0)
+    exact_case(F64{3.141592}, "3141592000000000162174274009885266423225", 1)
+    exact_case(F64{3.141592e17}, "3141592                                 ", 18)
+    exact_case(F64{1e23}, "99999999999999991611392                 ", 23)
+    exact_case(raw(U64{0x7fefffffffffffff}), "1797693134862315708145274237317043567980", 309)
+    exact_case(raw(U64{0x0010000000000000}), "2225073858507201383090232717332404064219", -307)
+    exact_case(raw(U64{1}), "494065645841246544176568792868221372365059802614324764425585682500675507270208751865299836361635992379796564695445717730926656710355939796398774796010781878126300713190311404527845817167848982103688718636056998730723050006387409153564984387312473397273169615140031715385398074126238565591171026658556686768187039560310624931945271591492455329305456544011274801297099995419319894090804165633245247571478690147267801593552386115501348035264934720193790268107107491703332226844753335720832431936092382893458368060106011506169809753078342277318329247904982524730776375927247874656084778203734469699533647017972677717585125660551199131504891101451037862738167250955837389733598993664809941164205702637090279242767544565229087538682506419718265533447265625         ", -323)
+}
+fn stress(mant: U64, exp: Int, literal: String, exponent: Int) Never! {
+    // Every pinned stress mantissa has 53 significant bits; no libm ldexp.
+    bits :: ((U64.from_int(exp + 1075) ?? panic("fixture exponent")) << 52) | (mant & U64{0xfffffffffffff})
+    d :: dec.finite(bits)
+    check_digits(&d, literal.bytes().len(), -32768, literal, exponent)
+    check_digits(&d, 1024, exponent - literal.bytes().len(), literal, exponent)
+}
+#Test("all 44 pinned f64 Paxson exact rounding stress rows") {
+    stress(U64{8511030020275656}, -342, "9", -87)
+    stress(U64{5201988407066741}, -824, "46", -232)
+    stress(U64{6406892948269899}, 237, "141", 88)
+    stress(U64{8431154198732492}, 72, "3981", 38)
+    stress(U64{6475049196144587}, 99, "41040", 46)
+    stress(U64{8274307542972842}, 726, "292084", 235)
+    stress(U64{5381065484265332}, -456, "2891946", -121)
+    stress(U64{6761728585499734}, -1057, "43787718", -302)
+    stress(U64{7976538478610756}, 376, "122770163", 130)
+    stress(U64{5982403858958067}, 377, "1841552452", 130)
+    stress(U64{5536995190630837}, 93, "54835744350", 44)
+    stress(U64{7225450889282194}, 710, "389190181146", 230)
+    stress(U64{7225450889282194}, 709, "1945950905732", 230)
+    stress(U64{8703372741147379}, 117, "14460958381605", 52)
+    stress(U64{8944262675275217}, -1001, "417367747458531", -285)
+    stress(U64{7459803696087692}, -707, "1107950772878888", -196)
+    stress(U64{6080469016670379}, -381, "12345501366327440", -98)
+    stress(U64{8385515147034757}, 721, "925031711960365024", 233)
+    stress(U64{7514216811389786}, -828, "4198047150284889840", -233)
+    stress(U64{8397297803260511}, -345, "11716315319786511046", -87)
+    stress(U64{6733459239310543}, 202, "432810072844612493629", 77)
+    stress(U64{8091450587292794}, -473, "3317710118160031081518", -126)
+    stress(U64{6567258882077402}, 952, "3", 303)
+    stress(U64{6712731423444934}, 535, "76", 177)
+    stress(U64{6712731423444934}, 534, "378", 177)
+    stress(U64{5298405411573037}, -957, "4350", -272)
+    stress(U64{5137311167659507}, -144, "23037", -27)
+    stress(U64{6722280709661868}, 363, "126301", 126)
+    stress(U64{5344436398034927}, -169, "7142211", -35)
+    stress(U64{8369123604277281}, -853, "13934574", -240)
+    stress(U64{8995822108487663}, -780, "141463449", -218)
+    stress(U64{8942832835564782}, -383, "4539277920", -99)
+    stress(U64{8942832835564782}, -384, "22696389598", -99)
+    stress(U64{8942832835564782}, -385, "113481947988", -99)
+    stress(U64{6965949469487146}, -249, "7700366561890", -59)
+    stress(U64{6965949469487146}, -250, "38501832809448", -59)
+    stress(U64{6965949469487146}, -251, "192509164047238", -59)
+    stress(U64{7487252720986826}, 548, "6898586531774201", 181)
+    stress(U64{5592117679628511}, 164, "13076622631878654", 66)
+    stress(U64{8887055249355788}, 665, "136052020756121240", 217)
+    stress(U64{6994187472632449}, 690, "3592810217475959676", 224)
+    stress(U64{8797576579012143}, 588, "89125197712484551899", 193)
+    stress(U64{7363326733505337}, 272, "558769757362301140950", 98)
+    stress(U64{8549497411294502}, -448, "1176257830728540379990", -118)
+}
+
+// Adjacent IEEE words straddle exact binary ties. Literal decimal oracles are
+// round-to-nearest, ties-to-even, independent of either formatter strategy.
+#Test("fixed adjacent-bit half-even ties preserve both signs") {
+    fixed(raw(U64{0x3fdfffffffffffff}), 0, "0")
+    fixed(raw(U64{0x3fe0000000000000}), 0, "0")
+    fixed(raw(U64{0x3fe0000000000001}), 0, "1")
+    fixed(raw(U64{0x3ff7ffffffffffff}), 0, "1")
+    fixed(raw(U64{0x3ff8000000000000}), 0, "2")
+    fixed(raw(U64{0x3ff8000000000001}), 0, "2")
+    fixed(raw(U64{0x4003ffffffffffff}), 0, "2")
+    fixed(raw(U64{0x4004000000000000}), 0, "2")
+    fixed(raw(U64{0x4004000000000001}), 0, "3")
+    fixed(raw(U64{0x3fbfffffffffffff}), 2, "0.12")
+    fixed(raw(U64{0x3fc0000000000000}), 2, "0.12")
+    fixed(raw(U64{0x3fc0000000000001}), 2, "0.13")
+    fixed(raw(U64{0x3febffffffffffff}), 2, "0.87")
+    fixed(raw(U64{0x3fec000000000000}), 2, "0.88")
+    fixed(raw(U64{0x3fec000000000001}), 2, "0.88")
+}
+
+// Exact boundary values are (2^52-1)/2^1074, 2^52/2^1074,
+// (2^52+1)/2^1074, and 1/2^1074. Leading zeros are literal runs, not
+// expected values obtained by running a candidate formatter/parser.
+#Test("fixed normal subnormal boundary precision rows preserve both signs") {
+    loop word in [U64]{0x000fffffffffffff,0x0010000000000000,0x0010000000000001} {
+        fixed(raw(word), 307, zeros("0.", 307, ""))
+        fixed(raw(word), 308, zeros("0.", 307, "2"))
+        fixed(raw(word), 309, zeros("0.", 307, "22"))
+        fixed(raw(word), 310, zeros("0.", 307, "223"))
+    }
+    fixed(raw(U64{0x000fffffffffffff}), 324, zeros("0.", 307, "22250738585072009"))
+    fixed(raw(U64{0x0010000000000000}), 324, zeros("0.", 307, "22250738585072014"))
+    fixed(raw(U64{0x0010000000000001}), 324, zeros("0.", 307, "22250738585072019"))
+    fixed(raw(U64{1}), 323, zeros("0.", 323, ""))
+    fixed(raw(U64{1}), 324, zeros("0.", 323, "5"))
+    fixed(raw(U64{1}), 325, zeros("0.", 323, "49"))
+    fixed(raw(U64{2}), 323, zeros("0.", 322, "1"))
+    fixed(raw(U64{2}), 324, zeros("0.", 322, "10"))
+    fixed(raw(U64{2}), 325, zeros("0.", 323, "99"))
+}
+
+// Original coretests/tests/num/flt2dec/strategy/grisu.rs tests:
+// test_cached_power and test_max_pow10_no_more_than, full f64 range.
+#Test("pinned Grisu cached powers cover every f64 exponent interval") {
+    first :: cache.power(-1087)
+    last :: cache.power(1039)
+    assert_eq(first.k, -308)
+    assert_eq(first.fp.e, -1087)
+    assert_eq(last.k, 332)
+    assert_eq(last.fp.e, 1039)
+    loop exponent in -1137..<961 {
+        low :: -60 - exponent - 64
+        high :: -32 - exponent - 64
+        selected :: cache.power(high)
+        assert(low <= selected.fp.e && selected.fp.e <= high)
+    }
+}
+#Test("pinned Grisu max pow10 covers each decimal transition") {
+    previous := U64{1}
+    loop k in 1..<10 {
+        ten :: previous * U64{10}
+        below :: grisu.max_pow10(ten - U64{1})
+        exact :: grisu.max_pow10(ten)
+        assert_eq(below.k, k - 1)
+        assert_eq(below.ten, previous)
+        assert_eq(exact.k, k)
+        assert_eq(exact.ten, ten)
+        previous = ten
+    }
+}
+
+// Original coretests/tests/num/flt2dec/strategy/dragon.rs::test_mul_pow10.
+#Test("pinned Dragon cached pow10 agrees with incremental powers through 339") {
+    previous := big.from_word(U64{1})
+    loop exponent in 1..<340 {
+        current := big.from_word(U64{1})
+        big.pow10(&current, exponent)
+        big.mul_small(&previous, U64{10})
+        assert_eq(big.compare(&current, &previous), I32{0})
+        previous = ^current
+    }
+}
+
+// The public fmt Count(u16) gateway rejects 65536 before reading specials.
+// Exercise the real stop and exact payload; #4494 remains an activation gate.
+#Test("fixed precision above u16 refuses finite zeros infinities and NaNs before rendering") {
+    loop word in [U64]{0,0x8000000000000000,0x3ff0000000000000,0xbff0000000000000,
+        0x7ff0000000000000,0xfff0000000000000,0x7ff8000000000000,0xfff8000000000001} {
+        loop precision in [Int]{65536,65537} {
+            outcome :: unwind.catch_unwind(unwind.AssertUnwindSafe(fn() {
+                fmt.fixed(raw(word), precision)
+            }))
+            if outcome == {
+                .Ok(_) -> panic("out-of-range precision was accepted")
+                .Err(payload) -> assert_eq(payload.downcast_ref<String>(), Val("Formatting argument out of range"))
+            }
+        }
+    }
+}

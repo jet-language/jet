@@ -1,0 +1,1142 @@
+// DevtoolsTelemetryPanel.rs:1-2050. One typed, bounded observation model.
+// Integration: core.devtools.runtime.kernel_devtools_telemetry_panel; no new envelope.
+// Queue iteration/indexing below requires retaining read/mutable element loans
+// (#4500). Never replace these with cloned get()/to_list() or an array queue.
+// Protocol constructors belong ONLY to packet 0176's devtools runtime owner.
+use core.devtools.runtime.devtools as d
+use core.text.runtime.kernel_unicode_string as text
+use core.text.runtime.unicode_assets as asset
+use core.text.runtime.assets.unicode_general_category as category
+use core.encoding as encoding
+use core.math as math
+
+// Rust:9-17. Capacities are selected-independent bounded counts, not OS facts.
+pub JET_DEVTOOLS_TELEMETRY_MAX_TAGS :: 16
+pub JET_DEVTOOLS_TELEMETRY_MAX_TEXT_BYTES :: 16384
+pub JET_DEVTOOLS_TELEMETRY_MAX_METRIC_SERIES :: 64
+pub JET_DEVTOOLS_TELEMETRY_MAX_METRIC_POINTS :: 256
+pub JET_DEVTOOLS_TELEMETRY_MAX_LOG_RECORDS :: 256
+pub JET_DEVTOOLS_TELEMETRY_MAX_TRACE_SPANS :: 256
+pub JET_DEVTOOLS_TELEMETRY_MAX_LINKED_LOGS :: 32
+pub JET_DEVTOOLS_TELEMETRY_MAX_SLOW_WORK_ROWS :: 256
+pub JET_DEVTOOLS_TELEMETRY_DEFAULT_SLOW_WORK_NS :: U64{100000000}
+
+// Rust:23-69; default is the same development fact.
+pub struct JetDevtoolsTelemetryRetention {
+    pub metric_series: Int
+    pub metric_points: Int
+    pub log_records: Int
+    pub trace_spans: Int
+    pub linked_logs: Int
+    pub slow_work_rows: Int
+}
+fn bounded_count(value: Int, maximum: Int) -> Int Never! {
+    if value < 1 -> return 1
+    if value > maximum -> return maximum
+    value
+}
+impl JetDevtoolsTelemetryRetention {
+    pub fn development() -> JetDevtoolsTelemetryRetention Never! {
+        JetDevtoolsTelemetryRetention{metric_series: 64, metric_points: 256, log_records: 256, trace_spans: 256, linked_logs: 32, slow_work_rows: 256}
+    }
+    pub fn default() -> JetDevtoolsTelemetryRetention Never! { JetDevtoolsTelemetryRetention.development() }
+    pub fn bounded(metric_series: Int, metric_points: Int, log_records: Int, trace_spans: Int, linked_logs: Int, slow_work_rows: Int) -> JetDevtoolsTelemetryRetention Never! {
+        JetDevtoolsTelemetryRetention{metric_series: bounded_count(metric_series, 64), metric_points: bounded_count(metric_points, 256), log_records: bounded_count(log_records, 256), trace_spans: bounded_count(trace_spans, 256), linked_logs: bounded_count(linked_logs, 32), slow_work_rows: bounded_count(slow_work_rows, 256)}
+    }
+}
+
+// Rust:72-157. Typed errors retain their exact payloads; message is Display.
+#Error
+pub enum JetDevtoolsTelemetryError {
+    TextTooLong(field: String)
+    EmptyIdentity(field: String)
+    DuplicateTag(key: String)
+    InvalidMetricValue
+    InvalidLogValue
+    TooManyTags
+    TooManyFields
+    CapacityExceeded(signal: String)
+    UnknownInstrument(name: String)
+    DuplicateInstrument(name: String)
+    InstrumentMismatch(expected: String, actual: String)
+    NonMonotonicTimestamp(previous: U64, actual: U64)
+    TraceContextIncomplete
+    TraceIdentityMismatch
+    SpanIdentityMismatch
+    InvalidSpanBounds(start_ns: U64, end_ns: U64)
+    TooManyLinkedLogs
+    SequenceExhausted(signal: String)
+}
+impl JetDevtoolsTelemetryError {
+    pub fn message(self) -> String Never! {
+        if self == {
+            .TextTooLong(field) -> "devtools telemetry {field} exceeds 16384 bytes"
+            .EmptyIdentity(field) -> "devtools telemetry {field} must not be empty"
+            .DuplicateTag(key) -> "devtools telemetry tag `{key}` is duplicated"
+            .InvalidMetricValue -> "devtools telemetry metric value must be finite"
+            .InvalidLogValue -> "devtools telemetry log value must be finite"
+            .TooManyTags -> "devtools telemetry metric has more than 16 tags"
+            .TooManyFields -> "devtools telemetry log has more than 16 fields"
+            .CapacityExceeded(signal) -> "devtools telemetry {signal} retention capacity is exhausted"
+            .UnknownInstrument(name) -> "devtools telemetry instrument `{name}` is not registered"
+            .DuplicateInstrument(name) -> "devtools telemetry instrument `{name}` is registered twice"
+            .InstrumentMismatch(expected, actual) -> "devtools telemetry point names instrument `{actual}`, expected `{expected}`"
+            .NonMonotonicTimestamp(previous, actual) -> "devtools telemetry timestamp moved backward from {previous} to {actual}"
+            .TraceContextIncomplete -> "devtools telemetry trace and span ids must be present together"
+            .TraceIdentityMismatch -> "devtools telemetry log and span trace ids do not match"
+            .SpanIdentityMismatch -> "devtools telemetry log and span ids do not match"
+            .InvalidSpanBounds(start_ns, end_ns) -> "devtools telemetry span ends at {end_ns} before start {start_ns}"
+            .TooManyLinkedLogs -> "devtools telemetry span has more than 32 linked logs"
+            .SequenceExhausted(signal) -> "devtools telemetry {signal} sequence is exhausted"
+        }
+    }
+    // Rust Display::fmt:152; #Error supplies the typed Error identity.
+    pub fn show(self) -> String Never! { self.message() }
+}
+
+// Rust:162-192.
+#[Equatable, Comparable]
+pub struct JetDevtoolsSourceIdentity {
+    pub source_id: String
+    pub file: String
+    pub line: U32
+    pub column: U32
+    pub function: String
+}
+impl JetDevtoolsSourceIdentity {
+    pub fn new(source_id: String, file: String, line: U32, column: U32, function: String) -> JetDevtoolsSourceIdentity Never! {
+        JetDevtoolsSourceIdentity{source_id: source_id, file: file, line: line, column: column, function: function}
+    }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.source_id, "source id") ?? return Err(err)
+        jet_devtools_telemetry_require_text(self.file, "source file") ?? return Err(err)
+        jet_devtools_telemetry_require_text(self.function, "source function")
+    }
+}
+// Rust:197-242. Neither trace ID is invented when untraced.
+pub struct JetDevtoolsTelemetryContext {
+    pub source: JetDevtoolsSourceIdentity
+    pub trace_id: String?
+    pub span_id: String?
+    pub request_id: String?
+}
+impl JetDevtoolsTelemetryContext {
+    pub fn new(source: JetDevtoolsSourceIdentity, trace_id: String?, span_id: String?, request_id: String?) -> JetDevtoolsTelemetryContext Never! {
+        JetDevtoolsTelemetryContext{source: source, trace_id: trace_id, span_id: span_id, request_id: request_id}
+    }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        self.source.validate() ?? return Err(err)
+        if self.trace_id == .Val(trace) {
+            span :: self.span_id ?? return Err(JetDevtoolsTelemetryError.TraceContextIncomplete)
+            jet_devtools_telemetry_require_text(trace, "trace id") ?? return Err(err)
+            jet_devtools_telemetry_require_text(span, "span id") ?? return Err(err)
+        } else if self.span_id != None {
+            return Err(JetDevtoolsTelemetryError.TraceContextIncomplete)
+        }
+        if self.request_id == .Val(request) -> jet_devtools_telemetry_require_text(request, "request id") ?? return Err(err)
+        Ok()
+    }
+    pub fn source_id(self) -> @String Never! from self { @self.source.source_id }
+    pub fn is_traced(self) -> Bool Never! { self.trace_id != None }
+}
+
+// Rust:245-325.
+#[Equatable, Comparable]
+pub enum JetDevtoolsMetricKind {
+    Counter
+    Gauge
+    Histogram
+    UpDownCounter
+}
+impl JetDevtoolsMetricKind {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Counter -> "counter"
+            .Gauge -> "gauge"
+            .Histogram -> "histogram"
+            .UpDownCounter -> "up_down_counter"
+        }
+    }
+}
+#Equatable
+pub enum JetDevtoolsMetricValue {
+    Integer(value: I64)
+    Float(value: Float)
+}
+impl JetDevtoolsMetricValue {
+    pub fn integer(value: I64) -> JetDevtoolsMetricValue Never! { JetDevtoolsMetricValue.Integer(value) }
+    pub fn float(value: Float) -> JetDevtoolsMetricValue Never! { JetDevtoolsMetricValue.Float(value) }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        if self == .Float(value) {
+            if !math.is_finite(value) -> return Err(JetDevtoolsTelemetryError.InvalidMetricValue)
+        }
+        Ok()
+    }
+}
+#Equatable
+pub enum JetDevtoolsMetricTagValue {
+    Boolean(value: Bool)
+    Integer(value: I64)
+    Text(value: String)
+}
+pub struct JetDevtoolsMetricTag {
+    pub key: String
+    pub value: JetDevtoolsMetricTagValue
+}
+impl JetDevtoolsMetricTag {
+    pub fn new(key: String, value: JetDevtoolsMetricTagValue) -> JetDevtoolsMetricTag Never! { JetDevtoolsMetricTag{key: key, value: value} }
+    pub fn text(key: String, value: String) -> JetDevtoolsMetricTag Never! { JetDevtoolsMetricTag.new(key, JetDevtoolsMetricTagValue.Text(value)) }
+    pub fn integer(key: String, value: I64) -> JetDevtoolsMetricTag Never! { JetDevtoolsMetricTag.new(key, JetDevtoolsMetricTagValue.Integer(value)) }
+    pub fn boolean(key: String, value: Bool) -> JetDevtoolsMetricTag Never! { JetDevtoolsMetricTag.new(key, JetDevtoolsMetricTagValue.Boolean(value)) }
+    fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.key, "metric tag key") ?? return Err(err)
+        if self.value == .Text(value) -> jet_devtools_telemetry_require_text(value, "metric tag value") ?? return Err(err)
+        Ok()
+    }
+}
+
+// Rust:329-417.
+pub struct JetDevtoolsMetricInstrument {
+    pub name: String
+    pub kind: JetDevtoolsMetricKind
+    pub unit: String
+    pub description: String
+    pub source: JetDevtoolsSourceIdentity
+}
+impl JetDevtoolsMetricInstrument {
+    pub fn new(name: String, kind: JetDevtoolsMetricKind, unit: String, description: String, source: JetDevtoolsSourceIdentity) -> JetDevtoolsMetricInstrument Never! {
+        JetDevtoolsMetricInstrument{name: name, kind: kind, unit: unit, description: description, source: source}
+    }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.name, "metric instrument name") ?? return Err(err)
+        if !self.unit.is_empty() -> jet_devtools_telemetry_require_text(self.unit, "metric instrument unit") ?? return Err(err)
+        if !self.description.is_empty() -> jet_devtools_telemetry_require_text(self.description, "metric instrument description") ?? return Err(err)
+        self.source.validate()
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        self.validate() ?? return Err(err.message())
+        d.JetDevtoolsEvent.from_parts(U64{0}, source, "Metric", self.name, jet_devtools_telemetry_metric_instrument_fields(self))
+    }
+}
+fn jet_devtools_telemetry_metric_instrument_fields(instrument: JetDevtoolsMetricInstrument) -> String Never! {
+    fields := [String]{json_field("name", jet_devtools_telemetry_json_string(instrument.name)), json_field("kind", jet_devtools_telemetry_json_string(instrument.kind.as_str())), json_field("unit", jet_devtools_telemetry_json_string(instrument.unit)), json_field("description", jet_devtools_telemetry_json_string(instrument.description))}
+    push_source_json(instrument.source, &fields)
+    json_object(fields)
+}
+
+// Rust:423-551. Constructor and record both normalize tag order.
+pub struct JetDevtoolsMetricPoint {
+    pub index: U64
+    pub timestamp_ns: U64
+    pub instrument: String
+    pub tags: [JetDevtoolsMetricTag]
+    pub identity: JetDevtoolsTelemetryContext
+    pub value: JetDevtoolsMetricValue?
+}
+impl JetDevtoolsMetricPoint {
+    pub fn new(timestamp_ns: U64, instrument: String, ^tags: [JetDevtoolsMetricTag], identity: JetDevtoolsTelemetryContext) -> JetDevtoolsMetricPoint Never! {
+        ordered := ^tags
+        &ordered.sort_by(tag -> tag.key)
+        JetDevtoolsMetricPoint{index: U64{0}, timestamp_ns: timestamp_ns, instrument: instrument, tags: ^ordered, identity: identity, value: None}
+    }
+    pub fn publish(^self, value: JetDevtoolsMetricValue) -> JetDevtoolsMetricPoint Never! {
+        point := ^self
+        value.validate() ?? return ^point
+        point.value = Val(value)
+        ^point
+    }
+    pub fn is_published(self) -> Bool Never! { self.value != None }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.instrument, "metric instrument") ?? return Err(err)
+        self.identity.validate() ?? return Err(err)
+        if self.tags.len() > 16 -> return Err(JetDevtoolsTelemetryError.TooManyTags)
+        // Preserve validation-before-duplicate precedence even for public unsorted tags.
+        // String-key map gives linear expected work; never quadratic suffix scans.
+        counts := [String: Int]{}
+        loop tag in self.tags -> counts[tag.key] = (counts.get(tag.key) ?? 0) + 1
+        loop tag in self.tags {
+            tag.validate() ?? return Err(err)
+            if counts[tag.key] > 1 -> return Err(JetDevtoolsTelemetryError.DuplicateTag(tag.key))
+        }
+        if self.value == .Val(value) -> value.validate() ?? return Err(err)
+        Ok()
+    }
+    fn chart_point(self) -> JetDevtoolsMetricChartPoint Never! {
+        JetDevtoolsMetricChartPoint{index: self.index, timestamp_ns: self.timestamp_ns, instrument: self.instrument, value: self.value, identity: self.identity}
+    }
+    fn table_row(self) -> JetDevtoolsMetricTableRow Never! {
+        JetDevtoolsMetricTableRow{index: self.index, timestamp_ns: self.timestamp_ns, instrument: self.instrument, tags: self.tags, value: self.value, identity: self.identity}
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        self.validate() ?? return Err(err.message())
+        payload := None
+        if self.value != None -> payload = Val(self.table_row().payload_json())
+        d.JetDevtoolsEvent.from_parts_with_payload(self.timestamp_ns / U64{1000000}, source, "Metric", self.instrument, jet_devtools_telemetry_metric_fields(self), payload)
+    }
+}
+fn jet_devtools_telemetry_metric_fields(point: JetDevtoolsMetricPoint) -> String Never! {
+    fields := [String]{json_field("index", "{point.index}"), json_field("timestamp_ns", "{point.timestamp_ns}"), json_field("instrument", jet_devtools_telemetry_json_string(point.instrument))}
+    push_source_json(point.identity.source, &fields)
+    &fields.push(json_field("tags", jet_devtools_telemetry_tags_json(point.tags)))
+    jet_devtools_telemetry_push_context_json(point.identity, &fields)
+    json_object(fields)
+}
+
+// Rust:555-628. Projections own only their requested result, not a copied store.
+pub struct JetDevtoolsMetricChartPoint {
+    pub index: U64
+    pub timestamp_ns: U64
+    pub instrument: String
+    pub value: JetDevtoolsMetricValue?
+    pub identity: JetDevtoolsTelemetryContext
+}
+impl JetDevtoolsMetricChartPoint {
+    pub fn source_id(self) -> @String Never! from self { self.identity.source_id() }
+    pub fn trace_id(self) -> (@String)? Never! from self {
+        if self.identity.trace_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn span_id(self) -> (@String)? Never! from self {
+        if self.identity.span_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn payload_json(self) -> String Never! { metric_payload(self.index, self.timestamp_ns, self.instrument, self.identity, None, self.value) }
+}
+pub struct JetDevtoolsMetricTableRow {
+    pub index: U64
+    pub timestamp_ns: U64
+    pub instrument: String
+    pub tags: [JetDevtoolsMetricTag]
+    pub value: JetDevtoolsMetricValue?
+    pub identity: JetDevtoolsTelemetryContext
+}
+impl JetDevtoolsMetricTableRow {
+    pub fn source_id(self) -> @String Never! from self { self.identity.source_id() }
+    pub fn trace_id(self) -> (@String)? Never! from self {
+        if self.identity.trace_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn span_id(self) -> (@String)? Never! from self {
+        if self.identity.span_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn payload_json(self) -> String Never! { metric_payload(self.index, self.timestamp_ns, self.instrument, self.identity, Val(self.tags), self.value) }
+}
+fn metric_payload(index: U64, timestamp_ns: U64, instrument: String, identity: JetDevtoolsTelemetryContext, tags: [JetDevtoolsMetricTag]?, value: JetDevtoolsMetricValue?) -> String Never! {
+    fields := [String]{json_field("index", "{index}"), json_field("timestamp_ns", "{timestamp_ns}"), json_field("instrument", jet_devtools_telemetry_json_string(instrument)), json_field("source_id", jet_devtools_telemetry_json_string(identity.source_id()))}
+    if tags == .Val(present) -> &fields.push(json_field("tags", jet_devtools_telemetry_tags_json(present)))
+    jet_devtools_telemetry_push_context_json(identity, &fields)
+    if value == .Val(published) -> &fields.push(json_field("value", jet_devtools_telemetry_metric_value_json(published)))
+    json_object(fields)
+}
+
+// Rust:633-709. Queue is the canonical bounded double-ended collection.
+pub struct JetDevtoolsMetricSeries {
+    pub instrument: JetDevtoolsMetricInstrument
+    capacity_value: Int
+    retained_points: Queue<JetDevtoolsMetricPoint>
+    next_index: U64
+}
+impl JetDevtoolsMetricSeries {
+    pub fn new(instrument: JetDevtoolsMetricInstrument, capacity: Int) -> JetDevtoolsMetricSeries Never! {
+        JetDevtoolsMetricSeries{instrument: instrument, capacity_value: bounded_count(capacity, 256), retained_points: Queue.new<JetDevtoolsMetricPoint>(), next_index: U64{1}}
+    }
+    pub fn capacity(self) -> Int Never! { self.capacity_value }
+    pub fn len(self) -> Int Never! { self.retained_points.len() }
+    pub fn is_empty(self) -> Bool Never! { self.retained_points.is_empty() }
+    // #4500: retaining Queue loan, not a contiguous slice of a wrapped deque.
+    pub fn points(self) -> @Queue<JetDevtoolsMetricPoint> Never! from self { @self.retained_points }
+    pub fn record(&self, ^point: JetDevtoolsMetricPoint) -> U64 JetDevtoolsTelemetryError! {
+        incoming := ^point
+        &incoming.tags.sort_by(tag -> tag.key)
+        self.instrument.validate() ?? return Err(err)
+        incoming.validate() ?? return Err(err)
+        if incoming.instrument != self.instrument.name -> return Err(JetDevtoolsTelemetryError.InstrumentMismatch(self.instrument.name, incoming.instrument))
+        if !self.retained_points.is_empty() {
+            previous :: self.retained_points[self.retained_points.len() - 1].timestamp_ns // #4500
+            if incoming.timestamp_ns < previous -> return Err(JetDevtoolsTelemetryError.NonMonotonicTimestamp(previous, incoming.timestamp_ns))
+        }
+        if self.next_index == (U64{18446744073709551615}) -> return Err(JetDevtoolsTelemetryError.SequenceExhausted("metric point"))
+        index :: self.next_index
+        incoming.index = index
+        self.next_index = index + U64{1}
+        if self.retained_points.len() == self.capacity_value -> _ :: &self.retained_points.pop_front()
+        &self.retained_points.push_back(^incoming)
+        Ok(index)
+    }
+    pub fn chart_points(self) -> [JetDevtoolsMetricChartPoint] Never! {
+        rows := [JetDevtoolsMetricChartPoint]{}
+        loop point in self.points() -> &rows.push(point.chart_point())
+        rows
+    }
+    pub fn table_rows(self) -> [JetDevtoolsMetricTableRow] Never! {
+        rows := [JetDevtoolsMetricTableRow]{}
+        loop point in self.points() -> &rows.push(point.table_row())
+        rows
+    }
+}
+// Rust:714-774. Name order remains deterministic.
+pub struct JetDevtoolsMetricStore {
+    capacity: Int
+    max_series: Int
+    retained_series: [JetDevtoolsMetricSeries]
+}
+impl JetDevtoolsMetricStore {
+    pub fn new(retention: JetDevtoolsTelemetryRetention) -> JetDevtoolsMetricStore Never! {
+        JetDevtoolsMetricStore{capacity: retention.metric_points, max_series: retention.metric_series, retained_series: [JetDevtoolsMetricSeries]{}}
+    }
+    pub fn register(&self, instrument: JetDevtoolsMetricInstrument) JetDevtoolsTelemetryError! {
+        instrument.validate() ?? return Err(err)
+        loop series in self.retained_series {
+            if series.instrument.name == instrument.name -> return Err(JetDevtoolsTelemetryError.DuplicateInstrument(instrument.name))
+        }
+        if self.retained_series.len() == self.max_series -> return Err(JetDevtoolsTelemetryError.CapacityExceeded("metric series"))
+        &self.retained_series.push(JetDevtoolsMetricSeries.new(instrument, self.capacity))
+        &self.retained_series.sort_by(series -> series.instrument.name)
+        Ok()
+    }
+    pub fn series(self) -> View<JetDevtoolsMetricSeries> Never! from self { self.retained_series[0..<self.retained_series.len()] }
+    pub fn record(&self, ^point: JetDevtoolsMetricPoint) -> U64 JetDevtoolsTelemetryError! {
+        loop i in 0..<self.retained_series.len() {
+            if self.retained_series[i].instrument.name == point.instrument -> return &self.retained_series[i].record(^point)
+        }
+        Err(JetDevtoolsTelemetryError.UnknownInstrument(point.instrument))
+    }
+    pub fn chart_points(self, instrument: String) -> [JetDevtoolsMetricChartPoint] Never! {
+        loop series in self.retained_series {
+            if series.instrument.name == instrument -> return series.chart_points()
+        }
+        [JetDevtoolsMetricChartPoint]{}
+    }
+    pub fn table_rows(self, instrument: String?) -> [JetDevtoolsMetricTableRow] Never! {
+        rows := [JetDevtoolsMetricTableRow]{}
+        loop series in self.retained_series {
+            if instrument == .Val(name) {
+                if name != series.instrument.name -> continue
+            }
+            loop point in series.points() -> &rows.push(point.table_row())
+        }
+        rows
+    }
+}
+
+// Rust:777-884.
+#[Equatable, Comparable]
+pub enum JetDevtoolsLogLevel {
+    Trace
+    Debug
+    Info
+    Warn
+    Error
+    Fatal
+}
+impl JetDevtoolsLogLevel {
+    pub fn rank(self) -> U8 Never! {
+        if self == {
+            .Trace -> U8{0}
+            .Debug -> U8{1}
+            .Info -> U8{2}
+            .Warn -> U8{3}
+            .Error -> U8{4}
+            .Fatal -> U8{5}
+        }
+    }
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Trace -> "trace"
+            .Debug -> "debug"
+            .Info -> "info"
+            .Warn -> "warn"
+            .Error -> "error"
+            .Fatal -> "fatal"
+        }
+    }
+}
+#Equatable
+pub enum JetDevtoolsLogValue {
+    Boolean(value: Bool)
+    Integer(value: I64)
+    Float(value: Float)
+    Text(value: String)
+}
+impl JetDevtoolsLogValue {
+    pub fn boolean(value: Bool) -> JetDevtoolsLogValue Never! { JetDevtoolsLogValue.Boolean(value) }
+    pub fn integer(value: I64) -> JetDevtoolsLogValue Never! { JetDevtoolsLogValue.Integer(value) }
+    pub fn float(value: Float) -> JetDevtoolsLogValue Never! { JetDevtoolsLogValue.Float(value) }
+    pub fn text(value: String) -> JetDevtoolsLogValue Never! { JetDevtoolsLogValue.Text(value) }
+    fn validate(self) JetDevtoolsTelemetryError! {
+        if self == {
+            .Float(value) -> { if !math.is_finite(value) -> return Err(JetDevtoolsTelemetryError.InvalidLogValue) }
+            .Text(value) -> jet_devtools_telemetry_require_text(value, "log value") ?? return Err(err)
+            _ -> {}
+        }
+        Ok()
+    }
+}
+pub struct JetDevtoolsLogField {
+    pub key: String
+    pub value: JetDevtoolsLogValue?
+    pub redacted: Bool
+}
+impl JetDevtoolsLogField {
+    pub fn new(key: String) -> JetDevtoolsLogField Never! { JetDevtoolsLogField{key: key, value: None, redacted: false} }
+    pub fn publish(^self, value: JetDevtoolsLogValue) -> JetDevtoolsLogField Never! {
+        field := ^self
+        value.validate() ?? return ^field
+        if !field.redacted -> field.value = Val(value)
+        ^field
+    }
+    pub fn redact(^self) -> JetDevtoolsLogField Never! {
+        field := ^self
+        field.value = None
+        field.redacted = true
+        ^field
+    }
+    fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.key, "log field key") ?? return Err(err)
+        if self.value == .Val(value) -> value.validate() ?? return Err(err)
+        Ok()
+    }
+}
+
+// Rust:889-1062.
+pub struct JetDevtoolsLogRecord {
+    pub index: U64
+    pub timestamp_ns: U64
+    pub level: JetDevtoolsLogLevel
+    pub body: String?
+    pub fields: [JetDevtoolsLogField]
+    pub identity: JetDevtoolsTelemetryContext
+}
+impl JetDevtoolsLogRecord {
+    pub fn new(timestamp_ns: U64, level: JetDevtoolsLogLevel, identity: JetDevtoolsTelemetryContext) -> JetDevtoolsLogRecord Never! {
+        JetDevtoolsLogRecord{index: U64{0}, timestamp_ns: timestamp_ns, level: level, body: None, fields: [JetDevtoolsLogField]{}, identity: identity}
+    }
+    pub fn publish_body(^self, body: String) -> JetDevtoolsLogRecord Never! {
+        record := ^self
+        record.body = Val(body)
+        ^record
+    }
+    pub fn with_field(^self, field: JetDevtoolsLogField) -> JetDevtoolsLogRecord Never! {
+        record := ^self
+        field.validate() ?? return ^record
+        if record.fields.len() < 16 {
+            loop existing in record.fields {
+                if existing.key == field.key -> return ^record
+            }
+            &record.fields.push(field)
+            &record.fields.sort_by(item -> item.key)
+        }
+        ^record
+    }
+    pub fn source_id(self) -> @String Never! from self { self.identity.source_id() }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        self.identity.validate() ?? return Err(err)
+        if self.body == .Val(body) -> jet_devtools_telemetry_require_text(body, "log body") ?? return Err(err)
+        if self.fields.len() > 16 -> return Err(JetDevtoolsTelemetryError.TooManyFields)
+        counts := [String: Int]{}
+        loop field in self.fields -> counts[field.key] = (counts.get(field.key) ?? 0) + 1
+        loop field in self.fields {
+            field.validate() ?? return Err(err)
+            if counts[field.key] > 1 -> return Err(JetDevtoolsTelemetryError.DuplicateTag(field.key))
+        }
+        Ok()
+    }
+    fn query_row(self) -> JetDevtoolsLogQueryRow Never! {
+        JetDevtoolsLogQueryRow{index: self.index, timestamp_ns: self.timestamp_ns, level: self.level, body: self.body, fields: self.fields, identity: self.identity}
+    }
+    pub fn payload_json(self) -> String Never! { log_payload(self.index, self.timestamp_ns, self.level, self.body, self.fields, self.identity) }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        self.validate() ?? return Err(err.message())
+        published := self.body != None
+        loop field in self.fields {
+            if field.value != None -> published = true
+        }
+        payload := None
+        if published -> payload = Val(self.payload_json())
+        d.JetDevtoolsEvent.from_parts_with_payload(self.timestamp_ns / U64{1000000}, source, "Log", "{self.index}", jet_devtools_telemetry_log_fields(self), payload)
+    }
+}
+fn jet_devtools_telemetry_log_fields(record: JetDevtoolsLogRecord) -> String Never! {
+    fields := [String]{json_field("index", "{record.index}"), json_field("timestamp_ns", "{record.timestamp_ns}"), json_field("level", jet_devtools_telemetry_json_string(record.level.as_str()))}
+    push_source_json(record.identity.source, &fields)
+    &fields.push(json_field("fields", jet_devtools_telemetry_log_metadata_fields_json(record.fields)))
+    jet_devtools_telemetry_push_context_json(record.identity, &fields)
+    json_object(fields)
+}
+fn jet_devtools_telemetry_log_metadata_fields_json(fields: [JetDevtoolsLogField]) -> String Never! {
+    values := [String]{}
+    loop field in fields {
+        parts := [String]{json_field("key", jet_devtools_telemetry_json_string(field.key))}
+        if field.redacted -> &parts.push("\"redacted\":true")
+        &values.push(json_object(parts))
+    }
+    json_array(values)
+}
+
+// Rust:1066-1201.
+pub struct JetDevtoolsLogQueryRow {
+    pub index: U64
+    pub timestamp_ns: U64
+    pub level: JetDevtoolsLogLevel
+    pub body: String?
+    pub fields: [JetDevtoolsLogField]
+    pub identity: JetDevtoolsTelemetryContext
+}
+impl JetDevtoolsLogQueryRow {
+    pub fn source_id(self) -> @String Never! from self { self.identity.source_id() }
+    pub fn trace_id(self) -> (@String)? Never! from self {
+        if self.identity.trace_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn span_id(self) -> (@String)? Never! from self {
+        if self.identity.span_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn payload_json(self) -> String Never! { log_payload(self.index, self.timestamp_ns, self.level, self.body, self.fields, self.identity) }
+}
+fn log_payload(index: U64, timestamp_ns: U64, level: JetDevtoolsLogLevel, body: String?, log_fields: [JetDevtoolsLogField], identity: JetDevtoolsTelemetryContext) -> String Never! {
+    fields := [String]{json_field("index", "{index}"), json_field("timestamp_ns", "{timestamp_ns}"), json_field("level", jet_devtools_telemetry_json_string(level.as_str())), json_field("source_id", jet_devtools_telemetry_json_string(identity.source_id()))}
+    jet_devtools_telemetry_push_context_json(identity, &fields)
+    if body == .Val(published) -> &fields.push(json_field("body", jet_devtools_telemetry_json_string(published)))
+    &fields.push(json_field("fields", jet_devtools_telemetry_log_fields_json(log_fields)))
+    json_object(fields)
+}
+pub struct JetDevtoolsLogQuery {
+    pub minimum_level: JetDevtoolsLogLevel?
+    pub source_id: String?
+    pub trace_id: String?
+    pub span_id: String?
+    pub request_id: String?
+    pub field_key: String?
+    pub field_value: JetDevtoolsLogValue?
+    pub contains: String?
+    pub from_ns: U64?
+    pub to_ns: U64?
+    pub limit: Int
+}
+impl JetDevtoolsLogQuery {
+    pub fn default() -> JetDevtoolsLogQuery Never! {
+        JetDevtoolsLogQuery{minimum_level: None, source_id: None, trace_id: None, span_id: None, request_id: None, field_key: None, field_value: None, contains: None, from_ns: None, to_ns: None, limit: 256}
+    }
+    pub fn matches(self, record: JetDevtoolsLogRecord) -> Bool Never! {
+        if self.minimum_level == .Val(level) { if record.level.rank() < level.rank() -> return false }
+        if self.source_id == .Val(source) { if source != record.source_id() -> return false }
+        if self.trace_id == .Val(trace) { if record.identity.trace_id != Val(trace) -> return false }
+        if self.span_id == .Val(span) { if record.identity.span_id != Val(span) -> return false }
+        if self.request_id == .Val(request) { if record.identity.request_id != Val(request) -> return false }
+        if self.field_key == .Val(key) {
+            found := false
+            loop field in record.fields {
+                if field.key == key {
+                    found = true
+                    if self.field_value == .Val(value) { if field.value != Val(value) -> return false }
+                    break
+                }
+            }
+            if !found -> return false
+        } else if self.field_value != None {
+            return false
+        }
+        if self.from_ns == .Val(from) { if record.timestamp_ns < from -> return false }
+        if self.to_ns == .Val(to) { if record.timestamp_ns > to -> return false }
+        if self.contains == .Val(needle) {
+            body :: record.body ?? return false
+            if !body.contains(needle) -> return false
+        }
+        true
+    }
+}
+
+// Rust:1204-1258.
+pub struct JetDevtoolsLogRing {
+    capacity: Int
+    retained_records: Queue<JetDevtoolsLogRecord>
+    next_index: U64
+}
+impl JetDevtoolsLogRing {
+    pub fn new(retention: JetDevtoolsTelemetryRetention) -> JetDevtoolsLogRing Never! {
+        JetDevtoolsLogRing{capacity: retention.log_records, retained_records: Queue.new<JetDevtoolsLogRecord>(), next_index: U64{1}}
+    }
+    pub fn len(self) -> Int Never! { self.retained_records.len() }
+    pub fn records(self) -> @Queue<JetDevtoolsLogRecord> Never! from self { @self.retained_records } // #4500
+    pub fn append(&self, ^record: JetDevtoolsLogRecord) -> U64 JetDevtoolsTelemetryError! {
+        incoming := ^record
+        &incoming.fields.sort_by(field -> field.key)
+        incoming.validate() ?? return Err(err)
+        if !self.retained_records.is_empty() {
+            previous :: self.retained_records[self.retained_records.len() - 1].timestamp_ns // #4500
+            if incoming.timestamp_ns < previous -> return Err(JetDevtoolsTelemetryError.NonMonotonicTimestamp(previous, incoming.timestamp_ns))
+        }
+        if self.next_index == (U64{18446744073709551615}) -> return Err(JetDevtoolsTelemetryError.SequenceExhausted("log record"))
+        index :: self.next_index
+        incoming.index = index
+        self.next_index = index + U64{1}
+        if self.retained_records.len() == self.capacity -> _ :: &self.retained_records.pop_front()
+        &self.retained_records.push_back(^incoming)
+        Ok(index)
+    }
+    pub fn query(self, query: JetDevtoolsLogQuery) -> [JetDevtoolsLogQueryRow] Never! {
+        rows := [JetDevtoolsLogQueryRow]{}
+        limit := query.limit
+        if limit > 256 -> limit = 256
+        loop record in self.records() {
+            if rows.len() == limit -> break
+            if query.matches(record) -> &rows.push(record.query_row())
+        }
+        rows
+    }
+}
+
+// Rust:1261-1295.
+#[Equatable, Comparable]
+pub enum JetDevtoolsSpanKind {
+    Internal
+    Server
+    Client
+    Producer
+    Consumer
+}
+impl JetDevtoolsSpanKind {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Internal -> "internal"
+            .Server -> "server"
+            .Client -> "client"
+            .Producer -> "producer"
+            .Consumer -> "consumer"
+        }
+    }
+}
+#[Equatable, Comparable]
+pub enum JetDevtoolsSpanStatus {
+    Unset
+    Ok
+    Error
+}
+impl JetDevtoolsSpanStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == {
+            .Unset -> "unset"
+            .Ok -> "ok"
+            .Error -> "error"
+        }
+    }
+}
+
+// Rust:1300-1455.
+pub struct JetDevtoolsTraceSpan {
+    pub index: U64
+    pub name: String
+    pub kind: JetDevtoolsSpanKind
+    pub parent_span_id: String?
+    pub start_ns: U64
+    pub end_ns: U64?
+    pub status: JetDevtoolsSpanStatus
+    pub identity: JetDevtoolsTelemetryContext
+    pub linked_log_indexes: [U64]
+}
+impl JetDevtoolsTraceSpan {
+    pub fn new(name: String, kind: JetDevtoolsSpanKind, start_ns: U64, identity: JetDevtoolsTelemetryContext) -> JetDevtoolsTraceSpan Never! {
+        JetDevtoolsTraceSpan{index: U64{0}, name: name, kind: kind, parent_span_id: None, start_ns: start_ns, end_ns: None, status: JetDevtoolsSpanStatus.Unset, identity: identity, linked_log_indexes: [U64]{}}
+    }
+    pub fn with_parent_span(^self, parent_span_id: String) -> JetDevtoolsTraceSpan Never! {
+        span := ^self
+        span.parent_span_id = Val(parent_span_id)
+        ^span
+    }
+    pub fn finish(&self, end_ns: U64, status: JetDevtoolsSpanStatus) JetDevtoolsTelemetryError! {
+        if end_ns < self.start_ns -> return Err(JetDevtoolsTelemetryError.InvalidSpanBounds(self.start_ns, end_ns))
+        self.end_ns = Val(end_ns)
+        self.status = status
+        Ok()
+    }
+    pub fn duration_ns(self) -> U64? Never! {
+        end :: self.end_ns ?? return None
+        Val(end - self.start_ns)
+    }
+    pub fn source_id(self) -> @String Never! from self { self.identity.source_id() }
+    pub fn trace_id(self) -> (@String)? Never! from self {
+        if self.identity.trace_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn span_id(self) -> (@String)? Never! from self {
+        if self.identity.span_id == .Val(value) -> return Val(@value)
+        None
+    }
+    pub fn validate(self) JetDevtoolsTelemetryError! {
+        jet_devtools_telemetry_require_text(self.name, "span name") ?? return Err(err)
+        self.identity.validate() ?? return Err(err)
+        if self.parent_span_id == .Val(parent) -> jet_devtools_telemetry_require_text(parent, "parent span id") ?? return Err(err)
+        if self.identity.trace_id == None || self.identity.span_id == None -> return Err(JetDevtoolsTelemetryError.TraceContextIncomplete)
+        if self.end_ns == .Val(end) {
+            if end < self.start_ns -> return Err(JetDevtoolsTelemetryError.InvalidSpanBounds(self.start_ns, end))
+        }
+        if self.linked_log_indexes.len() > 32 -> return Err(JetDevtoolsTelemetryError.TooManyLinkedLogs)
+        Ok()
+    }
+    pub fn link_log(&self, record: JetDevtoolsLogRecord) JetDevtoolsTelemetryError! { &self.link_log_with_limit(record, 32) }
+    fn link_log_with_limit(&self, record: JetDevtoolsLogRecord, limit: Int) JetDevtoolsTelemetryError! {
+        if self.identity.trace_id != record.identity.trace_id -> return Err(JetDevtoolsTelemetryError.TraceIdentityMismatch)
+        if self.identity.span_id != record.identity.span_id -> return Err(JetDevtoolsTelemetryError.SpanIdentityMismatch)
+        if self.linked_log_indexes.contains(record.index) -> return Ok()
+        if self.linked_log_indexes.len() == limit -> return Err(JetDevtoolsTelemetryError.TooManyLinkedLogs)
+        &self.linked_log_indexes.push(record.index)
+        &self.linked_log_indexes.sort()
+        Ok()
+    }
+    fn row(self) -> JetDevtoolsTraceRow Never! {
+        JetDevtoolsTraceRow{index: self.index, name: self.name, kind: self.kind, parent_span_id: self.parent_span_id, start_ns: self.start_ns, end_ns: self.end_ns, duration_ns: self.duration_ns(), status: self.status, trace_id: self.identity.trace_id, span_id: self.identity.span_id, source: self.identity.source, request_id: self.identity.request_id, linked_log_indexes: self.linked_log_indexes}
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        self.validate() ?? return Err(err.message())
+        entity :: self.span_id() ?? "{self.index}"
+        d.JetDevtoolsEvent.from_parts(self.start_ns / U64{1000000}, source, "Trace", entity, self.row().payload_json())
+    }
+}
+
+// Rust:1458-1502.
+pub struct JetDevtoolsTraceRow {
+    pub index: U64
+    pub name: String
+    pub kind: JetDevtoolsSpanKind
+    pub parent_span_id: String?
+    pub start_ns: U64
+    pub end_ns: U64?
+    pub duration_ns: U64?
+    pub status: JetDevtoolsSpanStatus
+    pub trace_id: String?
+    pub span_id: String?
+    pub source: JetDevtoolsSourceIdentity
+    pub request_id: String?
+    pub linked_log_indexes: [U64]
+}
+impl JetDevtoolsTraceRow {
+    pub fn source_id(self) -> @String Never! from self { @self.source.source_id }
+    pub fn payload_json(self) -> String Never! {
+        fields := [String]{json_field("index", "{self.index}"), json_field("name", jet_devtools_telemetry_json_string(self.name)), json_field("kind", jet_devtools_telemetry_json_string(self.kind.as_str())), json_field("parent_span_id", jet_devtools_telemetry_optional_string_json(self.parent_span_id)), json_field("start_ns", "{self.start_ns}"), json_field("status", jet_devtools_telemetry_json_string(self.status.as_str())), json_field("trace_id", jet_devtools_telemetry_optional_string_json(self.trace_id)), json_field("span_id", jet_devtools_telemetry_optional_string_json(self.span_id)), json_field("source_id", jet_devtools_telemetry_json_string(self.source_id())), json_field("linked_log_indexes", jet_devtools_telemetry_u64_array_json(self.linked_log_indexes))}
+        if self.end_ns == .Val(end) -> &fields.push(json_field("end_ns", "{end}"))
+        if self.duration_ns == .Val(duration) -> &fields.push(json_field("duration_ns", "{duration}"))
+        if self.request_id == .Val(request) -> &fields.push(json_field("request_id", jet_devtools_telemetry_json_string(request)))
+        json_object(fields)
+    }
+}
+
+// Rust:1505-1562.
+pub struct JetDevtoolsTraceLogLink {
+    pub span_index: U64
+    pub log_index: U64
+    pub trace_id: String?
+    pub span_id: String?
+    pub span_source_id: String
+    pub log_source_id: String
+    pub timestamp_ns: U64
+    pub level: JetDevtoolsLogLevel
+    pub body: String?
+}
+impl JetDevtoolsTraceLogLink {
+    pub fn payload_json(self) -> String Never! {
+        fields := trace_link_parts(self)
+        if self.body == .Val(body) -> &fields.push(json_field("body", jet_devtools_telemetry_json_string(body)))
+        json_object(fields)
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        payload := None
+        if self.body != None -> payload = Val(self.payload_json())
+        d.JetDevtoolsEvent.from_parts_with_payload(self.timestamp_ns / U64{1000000}, source, "TraceLink", "{self.span_index}:{self.log_index}", jet_devtools_telemetry_trace_link_fields(self), payload)
+    }
+}
+fn trace_link_parts(link: JetDevtoolsTraceLogLink) -> [String] Never! {
+    [String]{json_field("span_index", "{link.span_index}"), json_field("log_index", "{link.log_index}"), json_field("trace_id", jet_devtools_telemetry_optional_string_json(link.trace_id)), json_field("span_id", jet_devtools_telemetry_optional_string_json(link.span_id)), json_field("span_source_id", jet_devtools_telemetry_json_string(link.span_source_id)), json_field("log_source_id", jet_devtools_telemetry_json_string(link.log_source_id)), json_field("timestamp_ns", "{link.timestamp_ns}"), json_field("level", jet_devtools_telemetry_json_string(link.level.as_str()))}
+}
+fn jet_devtools_telemetry_trace_link_fields(link: JetDevtoolsTraceLogLink) -> String Never! { json_object(trace_link_parts(link)) }
+
+// Rust:1565-1644.
+pub struct JetDevtoolsTraceRing {
+    capacity: Int
+    linked_logs_limit: Int
+    retained_spans: Queue<JetDevtoolsTraceSpan>
+    next_index: U64
+}
+impl JetDevtoolsTraceRing {
+    pub fn new(retention: JetDevtoolsTelemetryRetention) -> JetDevtoolsTraceRing Never! {
+        JetDevtoolsTraceRing{capacity: retention.trace_spans, linked_logs_limit: retention.linked_logs, retained_spans: Queue.new<JetDevtoolsTraceSpan>(), next_index: U64{1}}
+    }
+    pub fn spans(self) -> @Queue<JetDevtoolsTraceSpan> Never! from self { @self.retained_spans } // #4500
+    pub fn rows(self) -> [JetDevtoolsTraceRow] Never! {
+        rows := [JetDevtoolsTraceRow]{}
+        loop span in self.spans() -> &rows.push(span.row())
+        rows
+    }
+    pub fn append(&self, ^span: JetDevtoolsTraceSpan) -> U64 JetDevtoolsTelemetryError! {
+        incoming := ^span
+        &incoming.linked_log_indexes.sort()
+        incoming.validate() ?? return Err(err)
+        if self.next_index == (U64{18446744073709551615}) -> return Err(JetDevtoolsTelemetryError.SequenceExhausted("trace span"))
+        index :: self.next_index
+        incoming.index = index
+        self.next_index = index + U64{1}
+        if self.retained_spans.len() == self.capacity -> _ :: &self.retained_spans.pop_front()
+        &self.retained_spans.push_back(^incoming)
+        Ok(index)
+    }
+    pub fn link_log(&self, span_index: U64, record: JetDevtoolsLogRecord) JetDevtoolsTelemetryError! {
+        loop i in 0..<self.retained_spans.len() {
+            if self.retained_spans[i].index == span_index -> return &self.retained_spans[i].link_log_with_limit(record, self.linked_logs_limit) // #4500 mutable element loan
+        }
+        Err(JetDevtoolsTelemetryError.CapacityExceeded("trace span link"))
+    }
+    pub fn linked_logs(self, span_index: U64, logs: JetDevtoolsLogRing) -> [JetDevtoolsTraceLogLink] Never! {
+        loop span in self.spans() {
+            if span.index == span_index -> return linked_logs_for_span(span, logs)
+        }
+        [JetDevtoolsTraceLogLink]{}
+    }
+}
+
+// Queue eviction preserves contiguous assigned indexes. Lookup is direct and
+// borrowed, not a per-linked-ID scan or copied table. Duplicate public link IDs
+// still produce duplicate result rows, as Rust filter_map does.
+fn linked_logs_for_span(span: JetDevtoolsTraceSpan, logs: JetDevtoolsLogRing) -> [JetDevtoolsTraceLogLink] Never! {
+    links := [JetDevtoolsTraceLogLink]{}
+    if logs.len() == 0 -> return links
+    first :: logs.retained_records[0].index // #4500
+    last :: logs.retained_records[logs.len() - 1].index // #4500
+    loop log_index in span.linked_log_indexes {
+        if log_index < first || log_index > last -> continue
+        offset :: Int.from_u64(log_index - first) // bounded by retained count
+        record :: logs.retained_records[offset] // #4500 retaining loan
+        &links.push(JetDevtoolsTraceLogLink{span_index: span.index, log_index: record.index, trace_id: span.identity.trace_id, span_id: span.identity.span_id, span_source_id: span.source_id(), log_source_id: record.source_id(), timestamp_ns: record.timestamp_ns, level: record.level, body: record.body})
+    }
+    links
+}
+
+// Rust:1649-1732.
+pub struct JetDevtoolsSlowWorkThreshold {
+    pub operation: String
+    pub threshold_ns: U64
+}
+impl JetDevtoolsSlowWorkThreshold {
+    pub fn new(operation: String, threshold_ns: U64) -> JetDevtoolsSlowWorkThreshold Never! { JetDevtoolsSlowWorkThreshold{operation: operation, threshold_ns: threshold_ns} }
+    pub fn default_for(operation: String) -> JetDevtoolsSlowWorkThreshold Never! { JetDevtoolsSlowWorkThreshold.new(operation, JET_DEVTOOLS_TELEMETRY_DEFAULT_SLOW_WORK_NS) }
+    pub fn matches(self, duration_ns: U64) -> Bool Never! { duration_ns >= self.threshold_ns }
+    pub fn fact(self) -> JetDevtoolsSlowWorkThresholdFact Never! { JetDevtoolsSlowWorkThresholdFact{operation: self.operation, threshold_ns: self.threshold_ns} }
+}
+pub struct JetDevtoolsSlowWorkThresholdFact {
+    pub operation: String
+    pub threshold_ns: U64
+}
+pub struct JetDevtoolsSlowWorkRow {
+    pub index: U64
+    pub operation: String
+    pub threshold_ns: U64
+    pub duration_ns: U64
+    pub start_ns: U64
+    pub end_ns: U64
+    pub trace_id: String?
+    pub span_id: String?
+    pub source: JetDevtoolsSourceIdentity
+    pub request_id: String?
+}
+impl JetDevtoolsSlowWorkRow {
+    pub fn source_id(self) -> @String Never! from self { @self.source.source_id }
+    pub fn payload_json(self) -> String Never! {
+        fields := [String]{json_field("index", "{self.index}"), json_field("operation", jet_devtools_telemetry_json_string(self.operation)), json_field("threshold_ns", "{self.threshold_ns}"), json_field("duration_ns", "{self.duration_ns}"), json_field("start_ns", "{self.start_ns}"), json_field("end_ns", "{self.end_ns}"), json_field("trace_id", jet_devtools_telemetry_optional_string_json(self.trace_id)), json_field("span_id", jet_devtools_telemetry_optional_string_json(self.span_id)), json_field("source_id", jet_devtools_telemetry_json_string(self.source_id()))}
+        if self.request_id == .Val(request) -> &fields.push(json_field("request_id", jet_devtools_telemetry_json_string(request)))
+        json_object(fields)
+    }
+    pub fn to_protocol_event(self, source: String) -> d.JetDevtoolsEvent Err! {
+        d.JetDevtoolsEvent.from_parts(self.start_ns / U64{1000000}, source, "SlowWork", "{self.index}", self.payload_json())
+    }
+}
+
+// Rust:1735-1794.
+pub struct JetDevtoolsSlowWorkRing {
+    capacity: Int
+    retained_rows: Queue<JetDevtoolsSlowWorkRow>
+    next_index: U64
+}
+impl JetDevtoolsSlowWorkRing {
+    pub fn new(retention: JetDevtoolsTelemetryRetention) -> JetDevtoolsSlowWorkRing Never! {
+        JetDevtoolsSlowWorkRing{capacity: retention.slow_work_rows, retained_rows: Queue.new<JetDevtoolsSlowWorkRow>(), next_index: U64{1}}
+    }
+    pub fn rows(self) -> @Queue<JetDevtoolsSlowWorkRow> Never! from self { @self.retained_rows } // #4500
+    pub fn record(&self, span: JetDevtoolsTraceSpan, threshold: JetDevtoolsSlowWorkThreshold) -> U64? JetDevtoolsTelemetryError! {
+        span.validate() ?? return Err(err)
+        jet_devtools_telemetry_require_text(threshold.operation, "slow-work operation") ?? return Err(err)
+        if threshold.operation != span.name -> return Ok(None)
+        end :: span.end_ns ?? return Ok(None)
+        duration :: end - span.start_ns
+        if !threshold.matches(duration) -> return Ok(None)
+        if self.next_index == (U64{18446744073709551615}) -> return Err(JetDevtoolsTelemetryError.SequenceExhausted("slow-work row"))
+        index :: self.next_index
+        self.next_index = index + U64{1}
+        row :: JetDevtoolsSlowWorkRow{index: index, operation: threshold.operation, threshold_ns: threshold.threshold_ns, duration_ns: duration, start_ns: span.start_ns, end_ns: end, trace_id: span.identity.trace_id, span_id: span.identity.span_id, source: span.identity.source, request_id: span.identity.request_id}
+        if self.retained_rows.len() == self.capacity -> _ :: &self.retained_rows.pop_front()
+        &self.retained_rows.push_back(row)
+        Ok(Val(index))
+    }
+}
+
+// Rust:1799-1927. Signals enter ONLY the canonical devtools envelope.
+pub struct JetDevtoolsTelemetryPanelState {
+    pub retention: JetDevtoolsTelemetryRetention
+    pub metrics: JetDevtoolsMetricStore
+    pub logs: JetDevtoolsLogRing
+    pub traces: JetDevtoolsTraceRing
+    pub slow_work: JetDevtoolsSlowWorkRing
+}
+impl JetDevtoolsTelemetryPanelState {
+    pub fn new(retention: JetDevtoolsTelemetryRetention) -> JetDevtoolsTelemetryPanelState Never! {
+        JetDevtoolsTelemetryPanelState{retention: retention, metrics: JetDevtoolsMetricStore.new(retention), logs: JetDevtoolsLogRing.new(retention), traces: JetDevtoolsTraceRing.new(retention), slow_work: JetDevtoolsSlowWorkRing.new(retention)}
+    }
+    pub fn record_metric(&self, ^point: JetDevtoolsMetricPoint) -> U64 JetDevtoolsTelemetryError! { &self.metrics.record(^point) }
+    pub fn record_log(&self, ^record: JetDevtoolsLogRecord) -> U64 JetDevtoolsTelemetryError! { &self.logs.append(^record) }
+    pub fn record_span(&self, ^span: JetDevtoolsTraceSpan) -> U64 JetDevtoolsTelemetryError! { &self.traces.append(^span) }
+    pub fn link_log(&self, span_index: U64, log_index: U64) JetDevtoolsTelemetryError! {
+        loop record in self.logs.records() {
+            if record.index == log_index -> return &self.traces.link_log(span_index, record)
+        }
+        Err(JetDevtoolsTelemetryError.CapacityExceeded("log link"))
+    }
+    pub fn record_slow_work(&self, span_index: U64, threshold: JetDevtoolsSlowWorkThreshold) -> U64? JetDevtoolsTelemetryError! {
+        loop span in self.traces.spans() {
+            if span.index == span_index -> return &self.slow_work.record(span, threshold)
+        }
+        Err(JetDevtoolsTelemetryError.CapacityExceeded("slow-work span"))
+    }
+    pub fn metric_chart_points(self, instrument: String) -> [JetDevtoolsMetricChartPoint] Never! { self.metrics.chart_points(instrument) }
+    pub fn metric_table_rows(self, instrument: String?) -> [JetDevtoolsMetricTableRow] Never! { self.metrics.table_rows(instrument) }
+    pub fn query_logs(self, query: JetDevtoolsLogQuery) -> [JetDevtoolsLogQueryRow] Never! { self.logs.query(query) }
+    pub fn trace_rows(self) -> [JetDevtoolsTraceRow] Never! { self.traces.rows() }
+    pub fn trace_log_links(self, span_index: U64) -> [JetDevtoolsTraceLogLink] Never! { self.traces.linked_logs(span_index, self.logs) }
+    pub fn slow_work_rows(self) -> [JetDevtoolsSlowWorkRow] Never! {
+        rows := [JetDevtoolsSlowWorkRow]{}
+        loop row in self.slow_work.rows() -> &rows.push(row)
+        rows
+    }
+    pub fn to_protocol_events(self, source: String) -> [d.JetDevtoolsEvent] Err! {
+        events := [d.JetDevtoolsEvent]{}
+        loop series in self.metrics.series() {
+            &events.push(series.instrument.to_protocol_event(source) ?? return Err(err))
+            loop point in series.points() -> &events.push(point.to_protocol_event(source) ?? return Err(err))
+        }
+        loop record in self.logs.records() -> &events.push(record.to_protocol_event(source) ?? return Err(err))
+        loop span in self.traces.spans() {
+            &events.push(span.to_protocol_event(source) ?? return Err(err))
+            loop link in linked_logs_for_span(span, self.logs) -> &events.push(link.to_protocol_event(source) ?? return Err(err))
+        }
+        loop row in self.slow_work.rows() -> &events.push(row.to_protocol_event(source) ?? return Err(err))
+        Ok(events)
+    }
+    pub fn protocol_events(self, source: String) -> [d.JetDevtoolsEvent] Err! { self.to_protocol_events(source) }
+}
+
+// Rust:1929-2050. Object field fragments join once: no growing-string loops.
+fn jet_devtools_telemetry_require_text(value: String, field: String) JetDevtoolsTelemetryError! {
+    if value.is_empty() -> return Err(JetDevtoolsTelemetryError.EmptyIdentity(field))
+    if value.count_bytes() > 16384 -> return Err(JetDevtoolsTelemetryError.TextTooLong(field))
+    Ok()
+}
+fn json_field(key: String, rendered: String) -> String Never! { "\"{key}\":{rendered}" }
+fn json_object(fields: [String]) -> String Never! { "{{{fields.join(",")}}}" }
+fn json_array(values: [String]) -> String Never! { "[{values.join(",")}]" }
+fn push_source_json(source: JetDevtoolsSourceIdentity, fields: &[String]) Never! {
+    &fields.push(json_field("source_id", jet_devtools_telemetry_json_string(source.source_id)))
+    &fields.push(json_field("source_file", jet_devtools_telemetry_json_string(source.file)))
+    &fields.push(json_field("source_line", "{source.line}"))
+    &fields.push(json_field("source_column", "{source.column}"))
+    &fields.push(json_field("source_function", jet_devtools_telemetry_json_string(source.function)))
+}
+fn jet_devtools_telemetry_push_context_json(identity: JetDevtoolsTelemetryContext, fields: &[String]) Never! {
+    if identity.trace_id == .Val(trace) -> &fields.push(json_field("trace_id", jet_devtools_telemetry_json_string(trace)))
+    if identity.span_id == .Val(span) -> &fields.push(json_field("span_id", jet_devtools_telemetry_json_string(span)))
+    if identity.request_id == .Val(request) -> &fields.push(json_field("request_id", jet_devtools_telemetry_json_string(request)))
+}
+fn jet_devtools_telemetry_metric_value_json(value: JetDevtoolsMetricValue) -> String Never! {
+    if value == {
+        .Integer(number) -> "{number}"
+        .Float(number) -> "{number}"
+    }
+}
+fn jet_devtools_telemetry_metric_tag_value_json(value: JetDevtoolsMetricTagValue) -> String Never! {
+    if value == {
+        .Boolean(boolean) -> "{boolean}"
+        .Integer(number) -> "{number}"
+        .Text(string) -> jet_devtools_telemetry_json_string(string)
+    }
+}
+fn jet_devtools_telemetry_tags_json(tags: [JetDevtoolsMetricTag]) -> String Never! {
+    rows := [String]{}
+    loop tag in tags -> &rows.push(json_object([String]{json_field("key", jet_devtools_telemetry_json_string(tag.key)), json_field("value", jet_devtools_telemetry_metric_tag_value_json(tag.value))}))
+    json_array(rows)
+}
+fn jet_devtools_telemetry_log_value_json(value: JetDevtoolsLogValue) -> String Never! {
+    if value == {
+        .Boolean(boolean) -> "{boolean}"
+        .Integer(number) -> "{number}"
+        .Float(number) -> "{number}"
+        .Text(string) -> jet_devtools_telemetry_json_string(string)
+    }
+}
+fn jet_devtools_telemetry_log_fields_json(fields: [JetDevtoolsLogField]) -> String Never! {
+    rows := [String]{}
+    loop field in fields {
+        parts := [String]{json_field("key", jet_devtools_telemetry_json_string(field.key))}
+        if field.value == .Val(value) -> &parts.push(json_field("value", jet_devtools_telemetry_log_value_json(value)))
+        if field.redacted -> &parts.push("\"redacted\":true")
+        &rows.push(json_object(parts))
+    }
+    json_array(rows)
+}
+fn jet_devtools_telemetry_optional_string_json(value: String?) -> String Never! {
+    if value == .Val(string) -> return jet_devtools_telemetry_json_string(string)
+    "null"
+}
+fn jet_devtools_telemetry_u64_array_json(values: [U64]) -> String Never! {
+    rows := [String]{}
+    loop value in values -> &rows.push("{value}")
+    json_array(rows)
+}
+fn jet_devtools_telemetry_json_string(value: String) -> String Never! {
+    // Rust char::is_control is Unicode General_Category Cc, including DEL/C1.
+    // Sole byte-read seam currently materializes (#4318/#4392); allocation
+    // parity is gated on its retaining borrowed-result cutover, not claimed here.
+    raw :: text.utf8_bytes(value)
+    out := [U8]{U8{34}}
+    at := 0
+    loop at < raw.len() {
+        cp :: text.scalar_at(raw, at)
+        if cp == 34 || cp == 92 {
+            &out.push(U8{92})
+            text.append_cp(&out, cp)
+        } else if cp == 10 {
+            &out.push(U8{92})
+            &out.push(U8{110})
+        } else if cp == 13 {
+            &out.push(U8{92})
+            &out.push(U8{114})
+        } else if cp == 9 {
+            &out.push(U8{92})
+            &out.push(U8{116})
+        } else if cp == 8 {
+            &out.push(U8{92})
+            &out.push(U8{98})
+        } else if cp == 12 {
+            &out.push(U8{92})
+            &out.push(U8{102})
+        } else if asset.asset_tag(category.UNICODE_GENERAL_CATEGORY, cp, 8) == 0 {
+            &out.push(U8{92})
+            &out.push(U8{117})
+            &out.push(encoding.hex_nibble((cp >> 12) & 15))
+            &out.push(encoding.hex_nibble((cp >> 8) & 15))
+            &out.push(encoding.hex_nibble((cp >> 4) & 15))
+            &out.push(encoding.hex_nibble(cp & 15))
+        } else {
+            text.append_cp(&out, cp)
+        }
+        at = at + text.utf8_width_at(raw, at)
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? panic("telemetry JSON string produced invalid UTF-8")
+}

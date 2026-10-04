@@ -1,0 +1,843 @@
+// PORT-PENDING 0151 crates-jet-codegen-src-prelude-core-lazytableplan-module-group-slice-1805: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1805-2643
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     pub fn append_filter(
+//RS         &mut self,
+//RS         schema: JetTableSchema,
+//RS         callable: JetTableCallable,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.append_unary(JetTableOperation::Filter, schema, Some(callable))
+//RS     }
+//RS 
+//RS     pub fn append_map(
+//RS         &mut self,
+//RS         schema: JetTableSchema,
+//RS         callable: JetTableCallable,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.append_unary(JetTableOperation::Map, schema, Some(callable))
+//RS     }
+//RS 
+//RS     pub fn append_sort(
+//RS         &mut self,
+//RS         schema: JetTableSchema,
+//RS         callable: JetTableCallable,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.append_unary(JetTableOperation::Sort, schema, Some(callable))
+//RS     }
+//RS 
+//RS     pub fn append_limit(
+//RS         &mut self,
+//RS         schema: JetTableSchema,
+//RS         limit: u128,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.validate()?;
+//RS         let id = JetTableNodeId::new(self.nodes.len());
+//RS         let input = self.output_node().ok_or(JetTablePlanError::InvalidOutput(self.output))?;
+//RS         let node = JetTableNode::new(id, JetTableOperation::Limit, vec![self.output], schema)
+//RS             .with_limit(limit)
+//RS             .with_facts(jet_table_derive_facts(
+//RS                 JetTableOperation::Limit,
+//RS                 &[input],
+//RS                 Some(limit),
+//RS             ));
+//RS         self.append_node(node)
+//RS     }
+//RS 
+//RS     pub fn append_select(
+//RS         &mut self,
+//RS         schema: JetTableSchema,
+//RS         columns: Vec<JetTableColumnId>,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.validate()?;
+//RS         let id = JetTableNodeId::new(self.nodes.len());
+//RS         let input = self.output_node().ok_or(JetTablePlanError::InvalidOutput(self.output))?;
+//RS         let node = JetTableNode::new(id, JetTableOperation::Select, vec![self.output], schema)
+//RS             .with_selected_columns(columns)
+//RS             .with_facts(jet_table_derive_facts(
+//RS                 JetTableOperation::Select,
+//RS                 &[input],
+//RS                 None,
+//RS             ));
+//RS         self.append_node(node)
+//RS     }
+//RS 
+//RS     pub fn append_join(
+//RS         &mut self,
+//RS         right: JetTableNodeId,
+//RS         schema: JetTableSchema,
+//RS         kind: JetTableJoinKind,
+//RS         keys: Vec<(JetTableColumnId, JetTableColumnId)>,
+//RS     ) -> Result<JetTableNodeId, JetTablePlanError> {
+//RS         self.validate()?;
+//RS         let id = JetTableNodeId::new(self.nodes.len());
+//RS         let left_node = self
+//RS             .output_node()
+//RS             .ok_or(JetTablePlanError::InvalidOutput(self.output))?;
+//RS         let right_node = self
+//RS             .nodes
+//RS             .get(right.index())
+//RS             .ok_or(JetTablePlanError::UnknownInput {
+//RS                 node: id,
+//RS                 input: right,
+//RS             })?;
+//RS         let node = JetTableNode::new(
+//RS             id,
+//RS             JetTableOperation::Join,
+//RS             vec![left_node.id, right],
+//RS             schema,
+//RS         )
+//RS         .with_join_kind(kind)
+//RS         .with_join_keys(keys)
+//RS         .with_facts(jet_table_derive_facts(
+//RS             JetTableOperation::Join,
+//RS             &[left_node, right_node],
+//RS             None,
+//RS         ));
+//RS         self.append_node(node)
+//RS     }
+//RS 
+//RS     /// Validate every identity, schema, graph edge, callable type, operation
+//RS     /// shape, stream boundary, and exact-fact shape before any consumer runs.
+//RS     pub fn validate(&self) -> Result<(), JetTablePlanError> {
+//RS         self.id.validate().map_err(JetTablePlanError::Identity)?;
+//RS         self.source.validate()?;
+//RS         if self.nodes.is_empty() {
+//RS             return Err(JetTablePlanError::EmptyPlan);
+//RS         }
+//RS         if self.output.index() >= self.nodes.len() {
+//RS             return Err(JetTablePlanError::InvalidOutput(self.output));
+//RS         }
+//RS         let first = &self.nodes[0];
+//RS         if first.operation != JetTableOperation::Scan {
+//RS             return Err(JetTablePlanError::MissingScan);
+//RS         }
+//RS         if first.source.as_ref() != Some(&self.source.id) || first.schema != self.source.schema {
+//RS             return Err(JetTablePlanError::SourceMismatch);
+//RS         }
+//RS         jet_table_detect_cycle(&self.nodes)?;
+//RS         for (index, node) in self.nodes.iter().enumerate() {
+//RS             if node.id.index() != index {
+//RS                 return Err(JetTablePlanError::NodeIdMismatch {
+//RS                     expected: index,
+//RS                     actual: node.id,
+//RS                 });
+//RS             }
+//RS             node.schema
+//RS                 .validate()
+//RS                 .map_err(JetTablePlanError::Schema)?;
+//RS             node.stream.validate().map_err(JetTablePlanError::Stream)?;
+//RS             node.facts
+//RS                 .validate(node.inputs.len())
+//RS                 .map_err(JetTablePlanError::Facts)?;
+//RS             if node.note.chars().any(char::is_control) {
+//RS                 return Err(JetTablePlanError::InvalidNote(node.id));
+//RS             }
+//RS             if node.operation != JetTableOperation::Limit && node.limit.is_some() {
+//RS                 return Err(JetTablePlanError::UnexpectedLimit(node.id));
+//RS             }
+//RS             if node.operation != JetTableOperation::Select && node.selected_columns.is_some() {
+//RS                 return Err(JetTablePlanError::UnexpectedSelection(node.id));
+//RS             }
+//RS             if node.operation != JetTableOperation::Join
+//RS                 && (node.join_kind.is_some() || !node.join_keys.is_empty())
+//RS             {
+//RS                 return Err(JetTablePlanError::UnexpectedJoinMetadata(node.id));
+//RS             }
+//RS             for input in &node.inputs {
+//RS                 if input.index() >= self.nodes.len() {
+//RS                     return Err(JetTablePlanError::UnknownInput {
+//RS                         node: node.id,
+//RS                         input: *input,
+//RS                     });
+//RS                 }
+//RS                 if input.index() >= index {
+//RS                     return Err(JetTablePlanError::InputNotEarlier {
+//RS                         node: node.id,
+//RS                         input: *input,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             self.validate_node(node)?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_node(&self, node: &JetTableNode) -> Result<(), JetTablePlanError> {
+//RS         let expected = node.operation.input_arity().unwrap_or(node.inputs.len());
+//RS         if node.inputs.len() != expected {
+//RS             return Err(JetTablePlanError::WrongInputArity {
+//RS                 node: node.id,
+//RS                 operation: node.operation,
+//RS                 expected,
+//RS                 actual: node.inputs.len(),
+//RS             });
+//RS         }
+//RS         match node.operation {
+//RS             JetTableOperation::Scan => {
+//RS                 if node.id.index() == 0 {
+//RS                     if node.source.is_none() {
+//RS                         return Err(JetTablePlanError::MissingSource(node.id));
+//RS                     }
+//RS                 } else if node.source.is_none() {
+//RS                     return Err(JetTablePlanError::MissingSource(node.id));
+//RS                 }
+//RS                 if node.callable.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedCallable(node.id));
+//RS                 }
+//RS             }
+//RS             JetTableOperation::Select => {
+//RS                 let input = self.unary_input(node)?;
+//RS                 if node.source.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedSource(node.id));
+//RS                 }
+//RS                 if node.callable.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedCallable(node.id));
+//RS                 }
+//RS                 if let Some(columns) = &node.selected_columns {
+//RS                     if node.schema.columns.len() != columns.len() {
+//RS                         return Err(JetTablePlanError::SelectionSchemaMismatch(node.id));
+//RS                     }
+//RS                     for (output, column) in node.schema.columns.iter().zip(columns) {
+//RS                         let Some(input_column) = input.schema.column(column) else {
+//RS                             return Err(JetTablePlanError::UnknownSelectedColumn {
+//RS                                 node: node.id,
+//RS                                 column: column.clone(),
+//RS                             });
+//RS                         };
+//RS                         if output != input_column {
+//RS                             return Err(JetTablePlanError::SelectionSchemaMismatch(node.id));
+//RS                         }
+//RS                     }
+//RS                 } else if node.schema != input.schema {
+//RS                     return Err(JetTablePlanError::SchemaMismatch {
+//RS                         node: node.id,
+//RS                         input: input.id,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             JetTableOperation::Filter => {
+//RS                 self.validate_unary_schema(node)?;
+//RS                 self.validate_callable(node, JetTableTypeId::boolean(), true)?;
+//RS             }
+//RS             JetTableOperation::Map => {
+//RS                 if node.source.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedSource(node.id));
+//RS                 }
+//RS                 let input = self.unary_input(node)?;
+//RS                 let callable = node
+//RS                     .callable
+//RS                     .as_ref()
+//RS                     .ok_or(JetTablePlanError::MissingCallable(node.id))?;
+//RS                 callable.validate()?;
+//RS                 if callable.parameter != input.schema.row_type {
+//RS                     return Err(JetTablePlanError::CallableParameterMismatch {
+//RS                         node: node.id,
+//RS                         expected: input.schema.row_type.clone(),
+//RS                         actual: callable.parameter.clone(),
+//RS                     });
+//RS                 }
+//RS                 if callable.result != node.schema.row_type {
+//RS                     return Err(JetTablePlanError::CallableResultMismatch {
+//RS                         node: node.id,
+//RS                         expected: node.schema.row_type.clone(),
+//RS                         actual: callable.result.clone(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             JetTableOperation::Sort => {
+//RS                 self.validate_unary_schema(node)?;
+//RS                 self.validate_callable(node, JetTableTypeId::string(), true)?;
+//RS             }
+//RS             JetTableOperation::Group => {
+//RS                 if node.source.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedSource(node.id));
+//RS                 }
+//RS                 let input = self.unary_input(node)?;
+//RS                 let callable = node
+//RS                     .callable
+//RS                     .as_ref()
+//RS                     .ok_or(JetTablePlanError::MissingCallable(node.id))?;
+//RS                 callable.validate()?;
+//RS                 if callable.parameter != input.schema.row_type {
+//RS                     return Err(JetTablePlanError::CallableParameterMismatch {
+//RS                         node: node.id,
+//RS                         expected: input.schema.row_type.clone(),
+//RS                         actual: callable.parameter.clone(),
+//RS                     });
+//RS                 }
+//RS             }
+//RS             JetTableOperation::Join => {
+//RS                 if node.source.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedSource(node.id));
+//RS                 }
+//RS                 let _ = node
+//RS                     .join_kind
+//RS                     .ok_or(JetTablePlanError::MissingJoinKind(node.id))?;
+//RS                 let left = &self.nodes[node.inputs[0].index()];
+//RS                 let right = &self.nodes[node.inputs[1].index()];
+//RS                 for (left_key, right_key) in &node.join_keys {
+//RS                     let Some(left_column) = left.schema.column(left_key) else {
+//RS                         return Err(JetTablePlanError::InvalidJoinKey {
+//RS                             node: node.id,
+//RS                             left: left_key.clone(),
+//RS                             right: right_key.clone(),
+//RS                         });
+//RS                     };
+//RS                     let Some(right_column) = right.schema.column(right_key) else {
+//RS                         return Err(JetTablePlanError::InvalidJoinKey {
+//RS                             node: node.id,
+//RS                             left: left_key.clone(),
+//RS                             right: right_key.clone(),
+//RS                         });
+//RS                     };
+//RS                     if left_column.ty != right_column.ty {
+//RS                         return Err(JetTablePlanError::InvalidJoinKey {
+//RS                             node: node.id,
+//RS                             left: left_key.clone(),
+//RS                             right: right_key.clone(),
+//RS                         });
+//RS                     }
+//RS                 }
+//RS                 if node.callable.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedCallable(node.id));
+//RS                 }
+//RS             }
+//RS             JetTableOperation::Limit => {
+//RS                 self.validate_unary_schema(node)?;
+//RS                 if node.limit.is_none() {
+//RS                     return Err(JetTablePlanError::MissingLimit(node.id));
+//RS                 }
+//RS                 if node.callable.is_some() {
+//RS                     return Err(JetTablePlanError::UnexpectedCallable(node.id));
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn unary_input(&self, node: &JetTableNode) -> Result<&JetTableNode, JetTablePlanError> {
+//RS         node.inputs
+//RS             .first()
+//RS             .and_then(|input| self.nodes.get(input.index()))
+//RS             .ok_or(JetTablePlanError::WrongInputArity {
+//RS                 node: node.id,
+//RS                 operation: node.operation,
+//RS                 expected: 1,
+//RS                 actual: node.inputs.len(),
+//RS             })
+//RS     }
+//RS 
+//RS     fn validate_unary_schema(&self, node: &JetTableNode) -> Result<(), JetTablePlanError> {
+//RS         if node.source.is_some() {
+//RS             return Err(JetTablePlanError::UnexpectedSource(node.id));
+//RS         }
+//RS         let input = self.unary_input(node)?;
+//RS         if input.schema != node.schema
+//RS             && matches!(
+//RS                 node.operation,
+//RS                 JetTableOperation::Filter | JetTableOperation::Sort | JetTableOperation::Limit
+//RS             )
+//RS         {
+//RS             return Err(JetTablePlanError::SchemaMismatch {
+//RS                 node: node.id,
+//RS                 input: input.id,
+//RS             });
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn validate_callable(
+//RS         &self,
+//RS         node: &JetTableNode,
+//RS         expected_result: JetTableTypeId,
+//RS         result_is_fixed: bool,
+//RS     ) -> Result<(), JetTablePlanError> {
+//RS         let input = self.unary_input(node)?;
+//RS         let callable = node
+//RS             .callable
+//RS             .as_ref()
+//RS             .ok_or(JetTablePlanError::MissingCallable(node.id))?;
+//RS         callable.validate()?;
+//RS         if callable.parameter != input.schema.row_type {
+//RS             return Err(JetTablePlanError::CallableParameterMismatch {
+//RS                 node: node.id,
+//RS                 expected: input.schema.row_type.clone(),
+//RS                 actual: callable.parameter.clone(),
+//RS             });
+//RS         }
+//RS         if result_is_fixed && callable.result != expected_result {
+//RS             return Err(JetTablePlanError::CallableResultMismatch {
+//RS                 node: node.id,
+//RS                 expected: expected_result,
+//RS                 actual: callable.result.clone(),
+//RS             });
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "version={};plan={};source={};output={};nodes=[{}]",
+//RS             JET_LAZY_TABLE_PLAN_SCHEMA_VERSION,
+//RS             jet_table_escape(self.id.as_str()),
+//RS             self.source.canonical_key(),
+//RS             self.output.index(),
+//RS             self.nodes
+//RS                 .iter()
+//RS                 .map(JetTableNode::canonical_key)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("|")
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn inspect(&self) -> Result<JetTablePlanInspection, JetTablePlanError> {
+//RS         self.validate()?;
+//RS         Ok(JetTablePlanInspection {
+//RS             plan_id: self.id.clone(),
+//RS             source: self.source.clone(),
+//RS             output: self.output,
+//RS             nodes: self.nodes.clone(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn inspect_text(&self) -> Result<String, JetTablePlanError> {
+//RS         Ok(self.inspect()?.to_text())
+//RS     }
+//RS 
+//RS     pub fn inspect_json(&self) -> Result<String, JetTablePlanError> {
+//RS         Ok(self.inspect()?.to_json())
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS 
+//RS /// A deterministic, owned inspection projection.  It preserves node order and
+//RS /// all typed identities exactly; it does not sort the graph or collapse nodes.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetTablePlanInspection {
+//RS     pub plan_id: JetTablePlanId,
+//RS     pub source: JetTableSource,
+//RS     pub output: JetTableNodeId,
+//RS     pub nodes: Vec<JetTableNode>,
+//RS }
+//RS 
+//RS impl JetTablePlanInspection {
+//RS     pub fn canonical_key(&self) -> String {
+//RS         format!(
+//RS             "version={};plan={};source={};output={};nodes=[{}]",
+//RS             JET_LAZY_TABLE_PLAN_SCHEMA_VERSION,
+//RS             jet_table_escape(self.plan_id.as_str()),
+//RS             self.source.canonical_key(),
+//RS             self.output.index(),
+//RS             self.nodes
+//RS                 .iter()
+//RS                 .map(JetTableNode::canonical_key)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("|")
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn to_text(&self) -> String {
+//RS         let mut lines = Vec::with_capacity(self.nodes.len().saturating_add(1));
+//RS         lines.push(format!(
+//RS             "plan {} source={} output={} version={}",
+//RS             jet_table_escape(self.plan_id.as_str()),
+//RS             self.source.canonical_key(),
+//RS             self.output.index(),
+//RS             JET_LAZY_TABLE_PLAN_SCHEMA_VERSION
+//RS         ));
+//RS         lines.extend(self.nodes.iter().map(JetTableNode::text));
+//RS         lines.join("\n")
+//RS     }
+//RS 
+//RS     pub fn to_json(&self) -> String {
+//RS         format!(
+//RS             "{{\"version\":{},\"plan_id\":{},\"source\":{},\"output\":{},\"nodes\":[{}]}}",
+//RS             JET_LAZY_TABLE_PLAN_SCHEMA_VERSION,
+//RS             jet_table_json_string(self.plan_id.as_str()),
+//RS             jet_table_json_string(&self.source.canonical_key()),
+//RS             self.output.index(),
+//RS             self.nodes
+//RS                 .iter()
+//RS                 .map(JetTableNode::json)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",")
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS fn jet_table_detect_cycle(nodes: &[JetTableNode]) -> Result<(), JetTablePlanError> {
+//RS     let mut colors = vec![0_u8; nodes.len()];
+//RS     for start in 0..nodes.len() {
+//RS         if colors[start] != 0 {
+//RS             continue;
+//RS         }
+//RS         colors[start] = 1;
+//RS         let mut stack = vec![(start, 0_usize)];
+//RS         while let Some((node, next_input)) = stack.last_mut() {
+//RS             if *next_input >= nodes[*node].inputs.len() {
+//RS                 colors[*node] = 2;
+//RS                 stack.pop();
+//RS                 continue;
+//RS             }
+//RS             let input = nodes[*node].inputs[*next_input];
+//RS             *next_input += 1;
+//RS             let input_index = input.index();
+//RS             if input_index >= nodes.len() {
+//RS                 continue;
+//RS             }
+//RS             match colors[input_index] {
+//RS                 0 => {
+//RS                     colors[input_index] = 1;
+//RS                     stack.push((input_index, 0));
+//RS                 }
+//RS                 1 => return Err(JetTablePlanError::Cycle(input)),
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// A batch descriptor is metadata only.  `rows` says how many rows a backend
+//RS /// accepted; it does not contain those rows.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetTableBatch {
+//RS     pub sequence: u128,
+//RS     pub rows: u128,
+//RS     pub truncated: bool,
+//RS }
+//RS 
+//RS impl JetTableBatch {
+//RS     pub fn new(sequence: u128, rows: u128) -> Self {
+//RS         Self {
+//RS             sequence,
+//RS             rows,
+//RS             truncated: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetTableBatchOffer {
+//RS     Accepted(JetTableBatch),
+//RS     Truncated {
+//RS         batch: Option<JetTableBatch>,
+//RS         dropped_rows: u128,
+//RS     },
+//RS     Backpressure,
+//RS     Cancelled,
+//RS     Closed,
+//RS     ArithmeticOverflow,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetTableBatchStatus {
+//RS     Open,
+//RS     Backpressure,
+//RS     Truncated,
+//RS     Cancelled,
+//RS     Closed,
+//RS     Drained,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetTableBatchSnapshot {
+//RS     pub capacity: usize,
+//RS     pub queued_batches: usize,
+//RS     pub queued_rows: JetTableEstimate<u128>,
+//RS     pub accepted_rows: u128,
+//RS     pub emitted_rows: u128,
+//RS     pub dropped_rows: u128,
+//RS     pub backpressure_events: u128,
+//RS     pub next_sequence: u128,
+//RS     pub truncated: bool,
+//RS     pub cancelled: bool,
+//RS     pub closed: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetTableBatchError {
+//RS     ZeroCapacity,
+//RS     ZeroBatchRows,
+//RS }
+//RS 
+//RS impl fmt::Display for JetTableBatchError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::ZeroCapacity => {
+//RS                 formatter.write_str("table batch capacity must be greater than zero")
+//RS             }
+//RS             Self::ZeroBatchRows => {
+//RS                 formatter.write_str("table batch row bound must be greater than zero")
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS impl std::error::Error for JetTableBatchError {}
+//RS 
+//RS /// Bounded producer/consumer control state.  The queue stores at most
+//RS /// `capacity` descriptors, reports backpressure instead of blocking, and has a
+//RS /// terminal cancellation path.  Actual row buffers belong to the adapter.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetTableBatchState {
+//RS     capacity: usize,
+//RS     max_batch_rows: Option<u128>,
+//RS     max_rows: Option<u128>,
+//RS     queue: VecDeque<JetTableBatch>,
+//RS     next_sequence: u128,
+//RS     accepted_rows: u128,
+//RS     emitted_rows: u128,
+//RS     dropped_rows: u128,
+//RS     backpressure_events: u128,
+//RS     truncated: bool,
+//RS     cancelled: Option<String>,
+//RS     closed: bool,
+//RS }
+//RS 
+//RS impl JetTableBatchState {
+//RS     pub fn new(capacity: usize) -> Result<Self, JetTableBatchError> {
+//RS         Self::with_limits(capacity, None, None)
+//RS     }
+//RS 
+//RS     pub fn with_limits(
+//RS         capacity: usize,
+//RS         max_batch_rows: Option<u128>,
+//RS         max_rows: Option<u128>,
+//RS     ) -> Result<Self, JetTableBatchError> {
+//RS         if capacity == 0 {
+//RS             return Err(JetTableBatchError::ZeroCapacity);
+//RS         }
+//RS         if max_batch_rows == Some(0) {
+//RS             return Err(JetTableBatchError::ZeroBatchRows);
+//RS         }
+//RS         Ok(Self {
+//RS             capacity,
+//RS             max_batch_rows,
+//RS             max_rows,
+//RS             queue: VecDeque::with_capacity(capacity),
+//RS             next_sequence: 0,
+//RS             accepted_rows: 0,
+//RS             emitted_rows: 0,
+//RS             dropped_rows: 0,
+//RS             backpressure_events: 0,
+//RS             truncated: false,
+//RS             cancelled: None,
+//RS             closed: false,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn capacity(&self) -> usize {
+//RS         self.capacity
+//RS     }
+//RS 
+//RS     pub fn max_batch_rows(&self) -> Option<u128> {
+//RS         self.max_batch_rows
+//RS     }
+//RS 
+//RS     pub fn max_rows(&self) -> Option<u128> {
+//RS         self.max_rows
+//RS     }
+//RS 
+//RS     pub fn queued_batches(&self) -> usize {
+//RS         self.queue.len()
+//RS     }
+//RS 
+//RS     pub fn accepted_rows(&self) -> u128 {
+//RS         self.accepted_rows
+//RS     }
+//RS 
+//RS     pub fn emitted_rows(&self) -> u128 {
+//RS         self.emitted_rows
+//RS     }
+//RS 
+//RS     pub fn dropped_rows(&self) -> u128 {
+//RS         self.dropped_rows
+//RS     }
+//RS 
+//RS     pub fn backpressure_events(&self) -> u128 {
+//RS         self.backpressure_events
+//RS     }
+//RS 
+//RS     pub fn is_backpressured(&self) -> bool {
+//RS         !self.is_cancelled() && !self.closed && self.queue.len() >= self.capacity
+//RS     }
+//RS 
+//RS     pub fn is_cancelled(&self) -> bool {
+//RS         self.cancelled.is_some()
+//RS     }
+//RS 
+//RS     pub fn is_closed(&self) -> bool {
+//RS         self.closed
+//RS     }
+//RS 
+//RS     pub fn status(&self) -> JetTableBatchStatus {
+//RS         if self.cancelled.is_some() {
+//RS             JetTableBatchStatus::Cancelled
+//RS         } else if self.truncated {
+//RS             if self.queue.is_empty() {
+//RS                 JetTableBatchStatus::Drained
+//RS             } else {
+//RS                 JetTableBatchStatus::Truncated
+//RS             }
+//RS         } else if self.closed {
+//RS             if self.queue.is_empty() {
+//RS                 JetTableBatchStatus::Drained
+//RS             } else {
+//RS                 JetTableBatchStatus::Closed
+//RS             }
+//RS         } else if self.is_backpressured() {
+//RS             JetTableBatchStatus::Backpressure
+//RS         } else {
+//RS             JetTableBatchStatus::Open
+//RS         }
+//RS     }
+//RS 
+//RS     /// Offer only a count.  A full queue returns `Backpressure` without
+//RS     /// blocking or consuming input.  A row/batch bound returns `Truncated` and
+//RS     /// closes the state so dropped rows are never silently accepted later.
+//RS     pub fn offer_rows(&mut self, rows: u128) -> JetTableBatchOffer {
+//RS         if self.is_cancelled() {
+//RS             return JetTableBatchOffer::Cancelled;
+//RS         }
+//RS         if self.closed {
+//RS             return JetTableBatchOffer::Closed;
+//RS         }
+//RS         if self.queue.len() >= self.capacity {
+//RS             self.backpressure_events = match self.backpressure_events.checked_add(1) {
+//RS                 Some(value) => value,
+//RS                 None => return JetTableBatchOffer::ArithmeticOverflow,
+//RS             };
+//RS             return JetTableBatchOffer::Backpressure;
+//RS         }
+//RS 
+//RS         let mut accepted = rows;
+//RS         let mut dropped = 0_u128;
+//RS         if let Some(max_batch_rows) = self.max_batch_rows {
+//RS             if accepted > max_batch_rows {
+//RS                 dropped = accepted - max_batch_rows;
+//RS                 accepted = max_batch_rows;
+//RS             }
+//RS         }
+//RS         if let Some(max_rows) = self.max_rows {
+//RS             if self.accepted_rows > max_rows {
+//RS                 return JetTableBatchOffer::ArithmeticOverflow;
+//RS             }
+//RS             let remaining = max_rows - self.accepted_rows;
+//RS             if accepted > remaining {
+//RS                 let newly_dropped = accepted - remaining;
+//RS                 dropped = match dropped.checked_add(newly_dropped) {
+//RS                     Some(value) => value,
+//RS                     None => return JetTableBatchOffer::ArithmeticOverflow,
+//RS                 };
+//RS                 accepted = remaining;
+//RS             }
+//RS         }
+//RS         let dropped_rows = match self.dropped_rows.checked_add(dropped) {
+//RS             Some(value) => value,
+//RS             None => return JetTableBatchOffer::ArithmeticOverflow,
+//RS         };
+//RS         if accepted == 0 {
+//RS             if dropped > 0 {
+//RS                 self.truncated = true;
+//RS                 self.closed = true;
+//RS                 self.dropped_rows = dropped_rows;
+//RS             }
+//RS             return JetTableBatchOffer::Truncated {
+//RS                 batch: None,
+//RS                 dropped_rows: dropped,
+//RS             };
+//RS         }
+//RS 
+//RS         let sequence = self.next_sequence;
+//RS         let Some(next_sequence) = self.next_sequence.checked_add(1) else {
+//RS             return JetTableBatchOffer::ArithmeticOverflow;
+//RS         };
+//RS         let Some(accepted_rows) = self.accepted_rows.checked_add(accepted) else {
+//RS             return JetTableBatchOffer::ArithmeticOverflow;
+//RS         };
+//RS 
+//RS         self.next_sequence = next_sequence;
+//RS         self.accepted_rows = accepted_rows;
+//RS         if dropped > 0 {
+//RS             self.truncated = true;
+//RS             self.closed = true;
+//RS             self.dropped_rows = dropped_rows;
+//RS         }
+//RS         let batch = JetTableBatch {
+//RS             sequence,
+//RS             rows: accepted,
+//RS             truncated: dropped > 0,
+//RS         };
+//RS         self.queue.push_back(batch);
+//RS         if dropped > 0 {
+//RS             JetTableBatchOffer::Truncated {
+//RS                 batch: Some(batch),
+//RS                 dropped_rows: dropped,
+//RS             }
+//RS         } else {
+//RS             JetTableBatchOffer::Accepted(batch)
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn push(&mut self, rows: u128) -> JetTableBatchOffer {
+//RS         self.offer_rows(rows)
+//RS     }
+//RS 
+//RS     pub fn pop(&mut self) -> Option<JetTableBatch> {
+//RS         if self.is_cancelled() {
+//RS             return None;
+//RS         }
+//RS         let batch = self.queue.pop_front()?;
+//RS         self.emitted_rows = self
+//RS             .emitted_rows
+//RS             .checked_add(batch.rows)
+//RS             .expect("accepted/emitted row counters cannot overflow");
+//RS         Some(batch)
+//RS     }
+//RS     pub fn close(&mut self) {
+//RS         if !self.is_cancelled() {
+//RS             self.closed = true;
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn finish(&mut self) {
+//RS         self.close();
+//RS     }
+//RS 
+//RS     pub fn cancel(&mut self, reason: impl Into<String>) {
+//RS         if self.cancelled.is_none() {
+//RS             let reason = reason.into();
+//RS             self.cancelled = Some(if reason.trim().is_empty() {
+//RS                 "cancelled".to_string()
+//RS             } else {
+//RS                 reason
+//RS             });
+//RS             self.queue.clear();
+//RS             self.closed = true;
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn snapshot(&self) -> JetTableBatchSnapshot {
+//RS         let queued_rows = self.queue.iter().try_fold(0_u128, |total, batch| {
+//RS             total.checked_add(batch.rows)
+//RS         });
+//RS         JetTableBatchSnapshot {
+//RS             capacity: self.capacity,
+//RS             queued_batches: self.queue.len(),
+//RS             queued_rows: queued_rows
+//RS                 .map(JetTableEstimate::exact)
+//RS                 .unwrap_or_else(|| JetTableEstimate::unavailable("queued row count overflow")),
+//RS             accepted_rows: self.accepted_rows,
+//RS             emitted_rows: self.emitted_rows,
+//RS             dropped_rows: self.dropped_rows,
+//RS             backpressure_events: self.backpressure_events,
+//RS             next_sequence: self.next_sequence,
+//RS             truncated: self.truncated,
+//RS             cancelled: self.is_cancelled(),
+//RS             closed: self.closed,
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0151 crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1805-2643
+

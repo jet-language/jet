@@ -1,0 +1,1769 @@
+// PORT-PENDING 1073 tests-http-server-lifecycle-slice-1779: tests/http_server_lifecycle.rs:1779-3543
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let post_calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = post_calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/echo",
+//RS         std::sync::Arc::new(move |req| {
+//RS             let body = req.body.text(1024 * 1024)?;
+//RS             handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS             let length = body.len();
+//RS             let preview = (length <= 32).then_some(body.as_str()).unwrap_or("");
+//RS             Ok(jet_http_srv_response(200, &format!("{length}:{preview}")))
+//RS         }),
+//RS     );
+//RS     jet_http_mux_add(&mux, "GET", "/next", |_| {
+//RS         jet_http_srv_response(200, &"next".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     options.read_header_timeout = std::time::Duration::from_secs(1);
+//RS     options.read_idle_timeout = std::time::Duration::from_secs(1);
+//RS     options.read_body_timeout = std::time::Duration::from_secs(1);
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     let pipelined = exchange(
+//RS         addr,
+//RS         b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: ChUnKeD\r\n\r\n4;name=value\r\nWiki\r\n5;note=\"quoted value\"\r\npedia\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         pipelined.matches("HTTP/1.1 200 OK").count(),
+//RS         2,
+//RS         "{pipelined}"
+//RS     );
+//RS     let echoed = pipelined
+//RS         .find("\r\n\r\n9:Wikipedia")
+//RS         .expect("decoded chunked body");
+//RS     let next = pipelined
+//RS         .rfind("\r\n\r\nnext")
+//RS         .expect("pipelined next response");
+//RS     assert!(echoed < next, "pipeline order changed: {pipelined}");
+//RS 
+//RS     let split_codepoint = exchange(
+//RS         addr,
+//RS         b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n\xc3\r\n1\r\n\xa9\r\n1\r\n!\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         split_codepoint.matches("HTTP/1.1 200 OK").count(),
+//RS         2,
+//RS         "{split_codepoint}"
+//RS     );
+//RS     let split_body = split_codepoint
+//RS         .find("\r\n\r\n3:é!")
+//RS         .expect("split UTF-8 codepoint");
+//RS     let split_next = split_codepoint
+//RS         .rfind("\r\n\r\nnext")
+//RS         .expect("split pipeline tail");
+//RS     assert!(
+//RS         split_body < split_next,
+//RS         "split-codepoint pipeline order changed: {split_codepoint}"
+//RS     );
+//RS 
+//RS     let limit = 1024 * 1024;
+//RS     let exact_request = format!(
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{limit:x}\r\n{}\r\n0\r\n\r\n",
+//RS         "x".repeat(limit),
+//RS     );
+//RS     let exact = exchange(addr, exact_request.as_bytes());
+//RS     assert!(
+//RS         exact.ends_with(&format!("\r\n\r\n{limit}:")),
+//RS         "exact limit failed: {exact}"
+//RS     );
+//RS 
+//RS     let over_limit_request = format!(
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100001\r\n{}\r\n0\r\n\r\n",
+//RS         "x".repeat(1024 * 1024 + 1),
+//RS     );
+//RS     let over_limit = exchange(addr, over_limit_request.as_bytes());
+//RS     assert!(
+//RS         over_limit.starts_with("HTTP/1.1 413 Payload Too Large"),
+//RS         "{over_limit}"
+//RS     );
+//RS 
+//RS     for invalid in [
+//RS         "POST /echo HTTP/1.0\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n+1\r\nx\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1;bad=\"unterminated\r\nx\r\n0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nxX0\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Trailer: hidden\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n",
+//RS     ] {
+//RS         let response = exchange(addr, invalid.as_bytes());
+//RS         assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "{response}");
+//RS         assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid framing persisted: {response}");
+//RS         assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+//RS     }
+//RS 
+//RS     for invalid_whitespace in [
+//RS         "Content-Length:\u{000b}0",
+//RS         "Content-Length:\u{000c}0",
+//RS         "Content-Length:\u{00a0}0",
+//RS         "Transfer-Encoding:\u{00a0}chunked",
+//RS         "X-Invalid:\u{007f}",
+//RS     ] {
+//RS         let request = format!(
+//RS             "POST /echo HTTP/1.1\r\nHost: local\r\n{invalid_whitespace}\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "{response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid whitespace reused connection: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid whitespace reached a handler: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let excessive_framing = format!(
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n{}0\r\n\r\n",
+//RS         "1\r\nx\r\n".repeat(7_000),
+//RS     );
+//RS     let excessive = exchange(addr, excessive_framing.as_bytes());
+//RS     assert!(
+//RS         excessive.starts_with("HTTP/1.1 413 Payload Too Large"),
+//RS         "{excessive}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         post_calls.load(Ordering::Acquire),
+//RS         3,
+//RS         "invalid framing reached handler"
+//RS     );
+//RS     shutdown.store(true, std::sync::atomic::Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 19);
+//RS     assert_eq!(report.user_completed, 19);
+//RS }
+//RS 
+//RS #[test]
+//RS fn gzip_content_encoding_is_transparent_bounded_and_strict() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     fn request_with_body(headers: &str, body: &[u8]) -> Vec<u8> {
+//RS         let mut request =
+//RS             format!("POST /echo HTTP/1.1\r\nHost: local\r\n{headers}\r\n").into_bytes();
+//RS         request.extend_from_slice(body);
+//RS         request
+//RS     }
+//RS 
+//RS     fn dynamic_empty_gzip(complete_code_tree: bool) -> Vec<u8> {
+//RS         fn bits(output: &mut Vec<u8>, cursor: &mut usize, value: u32, count: usize) {
+//RS             for offset in 0..count {
+//RS                 if *cursor / 8 == output.len() {
+//RS                     output.push(0);
+//RS                 }
+//RS                 output[*cursor / 8] |= ((value >> offset) as u8 & 1) << (*cursor % 8);
+//RS                 *cursor += 1;
+//RS             }
+//RS         }
+//RS 
+//RS         const ORDER: [usize; 18] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1];
+//RS         let mut deflate = Vec::new();
+//RS         let mut cursor = 0usize;
+//RS         bits(&mut deflate, &mut cursor, 1, 1); // final block
+//RS         bits(&mut deflate, &mut cursor, 2, 2); // dynamic Huffman
+//RS         bits(&mut deflate, &mut cursor, 0, 5); // 257 literal codes
+//RS         bits(&mut deflate, &mut cursor, 0, 5); // one distance code
+//RS         bits(&mut deflate, &mut cursor, 14, 4); // 18 code-length codes
+//RS         for symbol in ORDER {
+//RS             let length = if symbol == 18 {
+//RS                 if complete_code_tree {
+//RS                     1
+//RS                 } else {
+//RS                     2
+//RS                 }
+//RS             } else if matches!(symbol, 0 | 1) {
+//RS                 2
+//RS             } else {
+//RS                 0
+//RS             };
+//RS             bits(&mut deflate, &mut cursor, length, 3);
+//RS         }
+//RS         let (repeat_code, repeat_bits, one_code) = if complete_code_tree {
+//RS             (0, 1, 3)
+//RS         } else {
+//RS             (1, 2, 2)
+//RS         };
+//RS         bits(&mut deflate, &mut cursor, repeat_code, repeat_bits);
+//RS         bits(&mut deflate, &mut cursor, 127, 7); // 138 zero lengths
+//RS         bits(&mut deflate, &mut cursor, repeat_code, repeat_bits);
+//RS         bits(&mut deflate, &mut cursor, 107, 7); // 118 zero lengths
+//RS         bits(&mut deflate, &mut cursor, one_code, 2); // end-of-block length 1
+//RS         bits(&mut deflate, &mut cursor, one_code, 2); // distance length 1
+//RS         bits(&mut deflate, &mut cursor, 0, 1); // end-of-block symbol
+//RS         let mut gzip = vec![31, 139, 8, 0, 0, 0, 0, 0, 0, 3];
+//RS         gzip.extend(deflate);
+//RS         gzip.extend([0; 8]); // empty body CRC32 and ISIZE
+//RS         gzip
+//RS     }
+//RS 
+//RS     let stored = [
+//RS         31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 1, 3, 0, 252, 255, b'a', b'b', b'c', 194, 65, 36, 53, 3,
+//RS         0, 0, 0,
+//RS     ];
+//RS     assert_eq!(jet_http_gzip_decode(&stored, 3).unwrap(), b"abc");
+//RS     let dynamic = jet_http_gzip_decode(GZIP_DYNAMIC, 300).unwrap();
+//RS     assert_eq!(dynamic.len(), 300);
+//RS     assert!(dynamic.starts_with(b"# AGENTS.md"));
+//RS     assert_eq!(
+//RS         jet_http_gzip_decode(&dynamic_empty_gzip(true), 0).unwrap(),
+//RS         b""
+//RS     );
+//RS     assert_eq!(
+//RS         jet_http_gzip_decode(&dynamic_empty_gzip(false), 0)
+//RS             .unwrap_err()
+//RS             .status,
+//RS         400,
+//RS         "an incomplete dynamic code-length tree must not be accepted",
+//RS     );
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/echo",
+//RS         std::sync::Arc::new(move |req| {
+//RS             assert_eq!(req.headers.first("content-encoding"), None);
+//RS             assert_eq!(req.headers.first("content-length"), None);
+//RS             let body = req.body.text(100)?;
+//RS             handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS             Ok(jet_http_srv_response(200, &body))
+//RS         }),
+//RS     );
+//RS     jet_http_mux_add(&mux, "GET", "/next", |_| {
+//RS         jet_http_srv_response(200, &"next".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.max_body_bytes = 100;
+//RS     options.workers = 1;
+//RS     options.admission_queue = 8;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     let encoded = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             &format!(
+//RS                 "Content-Encoding: GZip\r\nContent-Length: {}\r\nConnection: close\r\n",
+//RS                 HELLO_GZIP.len()
+//RS             ),
+//RS             HELLO_GZIP,
+//RS         ),
+//RS     );
+//RS     assert!(encoded.starts_with("HTTP/1.1 200 OK"), "{encoded}");
+//RS     assert!(encoded.ends_with("\r\n\r\nhello gzip"), "{encoded}");
+//RS 
+//RS     let mut chunks = Vec::new();
+//RS     for chunk in HELLO_GZIP.chunks(7) {
+//RS         chunks.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+//RS         chunks.extend_from_slice(chunk);
+//RS         chunks.extend_from_slice(b"\r\n");
+//RS     }
+//RS     chunks.extend_from_slice(
+//RS         b"0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     let chunked = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             "Content-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n",
+//RS             &chunks,
+//RS         ),
+//RS     );
+//RS     assert_eq!(chunked.matches("HTTP/1.1 200 OK").count(), 2, "{chunked}");
+//RS     assert!(chunked.find("\r\n\r\nhello gzip").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap());
+//RS 
+//RS     let unsupported = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             "Content-Encoding: br\r\nContent-Length: 0\r\nConnection: close\r\n",
+//RS             &[],
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         unsupported.starts_with("HTTP/1.1 415 Unsupported Media Type"),
+//RS         "{unsupported}"
+//RS     );
+//RS 
+//RS     let mixed = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             "Content-Encoding: gzip, br\r\nContent-Length: 0\r\nConnection: close\r\n",
+//RS             &[],
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         mixed.starts_with("HTTP/1.1 415 Unsupported Media Type"),
+//RS         "{mixed}"
+//RS     );
+//RS 
+//RS     let mut corrupt = HELLO_GZIP.to_vec();
+//RS     corrupt[HELLO_GZIP.len() - 8] ^= 1;
+//RS     let malformed = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             &format!(
+//RS                 "Content-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n",
+//RS                 corrupt.len()
+//RS             ),
+//RS             &corrupt,
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         malformed.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{malformed}"
+//RS     );
+//RS 
+//RS     let expansion = exchange(
+//RS         addr,
+//RS         &request_with_body(
+//RS             &format!(
+//RS                 "Content-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n",
+//RS                 GZIP_EXPANSION.len()
+//RS             ),
+//RS             GZIP_EXPANSION,
+//RS         ),
+//RS     );
+//RS     assert!(
+//RS         expansion.starts_with("HTTP/1.1 413 Payload Too Large"),
+//RS         "{expansion}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         2,
+//RS         "rejected encoding reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 6);
+//RS     assert_eq!(report.user_completed, 6);
+//RS }
+//RS 
+//RS #[test]
+//RS fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn read_rest(stream: &mut std::net::TcpStream) -> String {
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         read_rest(&mut stream)
+//RS     }
+//RS 
+//RS     fn continue_exchange(addr: std::net::SocketAddr, head: &[u8], body_and_tail: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream
+//RS             .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+//RS             .expect("timeout");
+//RS         stream.write_all(head).expect("request head");
+//RS         let expected = b"HTTP/1.1 100 Continue\r\n\r\n";
+//RS         let mut interim = vec![0u8; expected.len()];
+//RS         stream.read_exact(&mut interim).expect("100 Continue");
+//RS         assert_eq!(interim, expected);
+//RS         stream.write_all(body_and_tail).expect("request body");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let response = read_rest(&mut stream);
+//RS         assert!(
+//RS             !response.contains("100 Continue"),
+//RS             "server sent a second interim response: {response}"
+//RS         );
+//RS         response
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mut arrived_content_length =
+//RS         std::net::TcpStream::connect(addr).expect("pre-arrived CL connect");
+//RS     arrived_content_length
+//RS         .write_all(b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\nearly")
+//RS         .expect("pre-arrived CL write");
+//RS     arrived_content_length
+//RS         .shutdown(std::net::Shutdown::Write)
+//RS         .expect("pre-arrived CL finish");
+//RS     let mut arrived_chunked =
+//RS         std::net::TcpStream::connect(addr).expect("pre-arrived chunked connect");
+//RS     arrived_chunked
+//RS         .write_all(b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n5\r\nearly\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+//RS         .expect("pre-arrived chunked write");
+//RS     arrived_chunked
+//RS         .shutdown(std::net::Shutdown::Write)
+//RS         .expect("pre-arrived chunked finish");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let post_calls = calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/echo",
+//RS         std::sync::Arc::new(move |req| {
+//RS             let body = req.body.text(1024 * 1024)?;
+//RS             post_calls.fetch_add(1, Ordering::AcqRel);
+//RS             Ok(jet_http_srv_response(200, &body))
+//RS         }),
+//RS     );
+//RS     let get_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/next", move |_| {
+//RS         get_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"next".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 8;
+//RS     options.read_header_timeout = std::time::Duration::from_millis(200);
+//RS     options.read_idle_timeout = std::time::Duration::from_millis(200);
+//RS     options.read_body_timeout = std::time::Duration::from_millis(200);
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     let arrived_content_length = read_rest(&mut arrived_content_length);
+//RS     assert_eq!(
+//RS         arrived_content_length.matches("HTTP/1.1 200 OK").count(),
+//RS         1,
+//RS         "{arrived_content_length}"
+//RS     );
+//RS     assert!(
+//RS         !arrived_content_length.contains("100 Continue"),
+//RS         "fully arrived CL received interim: {arrived_content_length}"
+//RS     );
+//RS     assert!(
+//RS         arrived_content_length.ends_with("\r\n\r\nearly"),
+//RS         "{arrived_content_length}"
+//RS     );
+//RS     let arrived_chunked = read_rest(&mut arrived_chunked);
+//RS     assert_eq!(
+//RS         arrived_chunked.matches("HTTP/1.1 200 OK").count(),
+//RS         2,
+//RS         "{arrived_chunked}"
+//RS     );
+//RS     assert!(
+//RS         !arrived_chunked.contains("100 Continue"),
+//RS         "fully arrived chunked request received interim: {arrived_chunked}"
+//RS     );
+//RS     assert!(
+//RS         arrived_chunked.find("\r\n\r\nearly").unwrap()
+//RS             < arrived_chunked.rfind("\r\n\r\nnext").unwrap()
+//RS     );
+//RS 
+//RS     let content_length = continue_exchange(
+//RS         addr,
+//RS         b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n",
+//RS         b"helloGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         content_length.matches("HTTP/1.1 200 OK").count(),
+//RS         2,
+//RS         "{content_length}"
+//RS     );
+//RS     assert!(
+//RS         content_length.find("\r\n\r\nhello").unwrap()
+//RS             < content_length.rfind("\r\n\r\nnext").unwrap()
+//RS     );
+//RS 
+//RS     let chunked = continue_exchange(
+//RS         addr,
+//RS         b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n",
+//RS         b"5\r\nworld\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(chunked.matches("HTTP/1.1 200 OK").count(), 2, "{chunked}");
+//RS     assert!(chunked.find("\r\n\r\nworld").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap());
+//RS 
+//RS     let oversized = exchange(
+//RS         addr,
+//RS         b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         oversized.starts_with("HTTP/1.1 413 Payload Too Large"),
+//RS         "{oversized}"
+//RS     );
+//RS     assert!(
+//RS         !oversized.contains("100 Continue"),
+//RS         "oversized body was invited: {oversized}"
+//RS     );
+//RS 
+//RS     for invalid in [
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: fancy\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+//RS         "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+//RS         "POST /echo HTTP/1.0\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+//RS     ] {
+//RS         let response = exchange(addr, invalid.as_bytes());
+//RS         assert!(response.starts_with("HTTP/1.1 417 Expectation Failed"), "{response}");
+//RS         assert!(!response.contains("100 Continue"), "invalid expectation was invited: {response}");
+//RS         assert!(!response.contains("200 OK"), "invalid expectation dispatched or reused: {response}");
+//RS         assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         7,
+//RS         "rejected expectation reached a handler"
+//RS     );
+//RS     shutdown.store(true, std::sync::atomic::Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 8);
+//RS     assert_eq!(report.user_completed, 8);
+//RS }
+//RS 
+//RS #[test]
+//RS fn host_authority_is_single_valid_and_required_for_http11() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/", move |_| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"ok".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 24;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     for valid in [
+//RS         "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.1\r\nHost: example.com:8080\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.1\r\nHost: 127.0.0.1:80\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.1\r\nHost: percent%2Dname.example\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.1\r\nHost: [v1.fe80::a]:80\r\nConnection: close\r\n\r\n",
+//RS         "GET / HTTP/1.0\r\nConnection: close\r\n\r\n",
+//RS     ] {
+//RS         let response = exchange(addr, valid.as_bytes());
+//RS         assert!(
+//RS             response.contains("200 OK"),
+//RS             "valid authority rejected: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for invalid_host in [
+//RS         "",
+//RS         "Host:\r\n",
+//RS         "Host: one\r\nHost: two\r\n",
+//RS         "Host: one,two\r\n",
+//RS         "Host: user@local\r\n",
+//RS         "Host: local/path\r\n",
+//RS         "Host: ::1\r\n",
+//RS         "Host: [::1\r\n",
+//RS         "Host: []\r\n",
+//RS         "Host: [127.0.0.1]\r\n",
+//RS         "Host: [v.fe]\r\n",
+//RS         "Host: [v1.]\r\n",
+//RS         "Host: local:abc\r\n",
+//RS         "Host: local:65536\r\n",
+//RS         "Host: bad host\r\n",
+//RS         "Host: bad%ZZ\r\n",
+//RS     ] {
+//RS         let request = format!(
+//RS             "GET / HTTP/1.1\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "accepted invalid Host {invalid_host:?}: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid Host dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid Host reused connection: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with("Connection: close\r\n\r\n"),
+//RS             "{response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for invalid_host in ["Host: bad host\r\n", "Host: one\r\nHost: two\r\n"] {
+//RS         let request = format!(
+//RS             "GET / HTTP/1.0\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "HTTP/1.0 accepted invalid Host {invalid_host:?}: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid HTTP/1.0 Host dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid HTTP/1.0 Host reused connection: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with("Connection: close\r\n\r\n"),
+//RS             "{response}"
+//RS         );
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         7,
+//RS         "invalid Host reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 25);
+//RS     assert_eq!(report.user_completed, 25);
+//RS }
+//RS 
+//RS #[test]
+//RS fn absolute_form_target_matches_host_before_routing() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/resource", move |req| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &req.path)
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     for (request, expected_path) in [
+//RS         ("GET http://local/resource?x=1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=1"),
+//RS         ("GET HTTP://EXAMPLE.COM:80/resource HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", "/resource"),
+//RS         ("GET http://local:8080/resource HTTP/1.1\r\nHost: local:8080\r\nConnection: close\r\n\r\n", "/resource"),
+//RS         ("GET https://[::1]/resource HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "/resource"),
+//RS         ("GET http://percent%2Dname.example/resource HTTP/1.1\r\nHost: percent%2dname.example:80\r\nConnection: close\r\n\r\n", "/resource"),
+//RS         ("GET http://local/resource HTTP/1.0\r\nConnection: close\r\n\r\n", "/resource"),
+//RS         ("GET /resource?x=%2F:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2F:@!$&'()*+,;=~._-/?"),
+//RS         ("GET http://local/resource?x=%2f:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2f:@!$&'()*+,;=~._-/?"),
+//RS     ] {
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"), "valid absolute-form rejected: {response}");
+//RS         assert!(response.ends_with(&format!("\r\n\r\n{expected_path}")), "target was not normalized once: {response}");
+//RS     }
+//RS 
+//RS     for invalid_target in [
+//RS         "GET http://one/resource HTTP/1.1\r\nHost: two\r\n",
+//RS         "GET http://local:8080/resource HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET http://user@local/resource HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET http://local/resource#fragment HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET ftp://local/resource HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET relative HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET http://local\t/resource HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET http:///resource HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET /resource% HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET http://local/resource%zz HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET /resource\\evil HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET /resource?x=<bad> HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET /resource?x=é HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET /resource#fragment HTTP/1.1\r\nHost: local\r\n",
+//RS         "GET * HTTP/1.1\r\nHost: local\r\n",
+//RS     ] {
+//RS         let request = format!(
+//RS             "{invalid_target}\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "accepted invalid target: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid target dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid target reused connection: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let mismatched_expect = exchange(
+//RS         addr,
+//RS         b"POST http://one/resource HTTP/1.1\r\nHost: two\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{mismatched_expect}"
+//RS     );
+//RS     assert!(
+//RS         !mismatched_expect.contains("100 Continue"),
+//RS         "mismatch received body permission: {mismatched_expect}"
+//RS     );
+//RS 
+//RS     let malformed_expect = exchange(
+//RS         addr,
+//RS         b"POST /resource?x=%zz HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         malformed_expect.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{malformed_expect}"
+//RS     );
+//RS     assert!(
+//RS         !malformed_expect.contains("100 Continue"),
+//RS         "malformed target received body permission: {malformed_expect}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         8,
+//RS         "invalid target reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 25);
+//RS     assert_eq!(report.user_completed, 25);
+//RS }
+//RS 
+//RS #[test]
+//RS fn connect_authority_form_matches_host_before_routing() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "CONNECT", "/:authority", move |req| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &req.path)
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     for (request, expected_path) in [
+//RS         (
+//RS             "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n",
+//RS             "example.com:443",
+//RS         ),
+//RS         (
+//RS             "CONNECT EXAMPLE.COM:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n",
+//RS             "example.com:443",
+//RS         ),
+//RS         (
+//RS             "CONNECT percent%2dname.example:8443 HTTP/1.1\r\nHost: percent%2Dname.example:8443\r\nConnection: close\r\n\r\n",
+//RS             "percent%2Dname.example:8443",
+//RS         ),
+//RS         (
+//RS             "CONNECT [::1]:443 HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n",
+//RS             "[::1]:443",
+//RS         ),
+//RS         (
+//RS             "CONNECT [v1.fe80::a]:80 HTTP/1.1\r\nHost: [v1.fe80::a]:80\r\nConnection: close\r\n\r\n",
+//RS             "[v1.fe80::a]:80",
+//RS         ),
+//RS         (
+//RS             "CONNECT example.com:443 HTTP/1.0\r\nConnection: close\r\n\r\n",
+//RS             "example.com:443",
+//RS         ),
+//RS         (
+//RS             "CONNECT example.com HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
+//RS             "example.com",
+//RS         ),
+//RS     ] {
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"),
+//RS             "valid CONNECT authority-form rejected: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with(&format!("\r\n\r\n{expected_path}")),
+//RS             "CONNECT authority was not normalized once: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for invalid_target in [
+//RS         "CONNECT /tunnel HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT http://example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT * HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT example.com:443 HTTP/1.1\r\nHost: other.com:443\r\n",
+//RS         "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n",
+//RS         "CONNECT example.com HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT user@example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT example.com:443/path HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "CONNECT example.com:abc HTTP/1.1\r\nHost: example.com:abc\r\n",
+//RS         "CONNECT [::1 HTTP/1.1\r\nHost: [::1\r\n",
+//RS         "GET example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS         "OPTIONS example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n",
+//RS     ] {
+//RS         let request = format!(
+//RS             "{invalid_target}\r\nCONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "accepted invalid CONNECT target: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid CONNECT dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid CONNECT reused connection: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let mismatched_expect = exchange(
+//RS         addr,
+//RS         b"CONNECT one:443 HTTP/1.1\r\nHost: two:443\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{mismatched_expect}"
+//RS     );
+//RS     assert!(
+//RS         !mismatched_expect.contains("100 Continue"),
+//RS         "mismatch received body permission: {mismatched_expect}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         7,
+//RS         "invalid CONNECT reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 20);
+//RS     assert_eq!(report.user_completed, 20);
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_connect_omits_path_and_routes_authority() {
+//RS     use std::io::Write;
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn empty_body() -> JetHTTPBody {
+//RS         JetHTTPBody::from_bytes(Vec::new())
+//RS     }
+//RS 
+//RS     for (authority, expected) in [
+//RS         ("example.com:443", "example.com:443"),
+//RS         ("EXAMPLE.COM:443", "example.com:443"),
+//RS         ("percent%2dname.example:8443", "percent%2Dname.example:8443"),
+//RS         ("[::1]:443", "[::1]:443"),
+//RS         ("[v1.fe80::a]:80", "[v1.fe80::a]:80"),
+//RS         ("example.com", "example.com"),
+//RS     ] {
+//RS         let (request, _) = jet_http2_request(
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), authority.into()),
+//RS             ],
+//RS             empty_body(),
+//RS         )
+//RS         .unwrap_or_else(|error| panic!("valid CONNECT rejected for {authority}: {error}"));
+//RS         assert_eq!(request.method, "CONNECT");
+//RS         assert_eq!(request.path, expected, "authority {authority}");
+//RS         assert_eq!(
+//RS             request.headers.get("host").map(String::as_str),
+//RS             Some(expected)
+//RS         );
+//RS     }
+//RS 
+//RS     let with_host = jet_http2_request(
+//RS         vec![
+//RS             (":method".into(), "CONNECT".into()),
+//RS             (":authority".into(), "Example.COM:443".into()),
+//RS             ("host".into(), "example.com:443".into()),
+//RS         ],
+//RS         empty_body(),
+//RS     )
+//RS     .expect("matching host");
+//RS     assert_eq!(with_host.0.path, "example.com:443");
+//RS 
+//RS     for (label, headers) in [
+//RS         (
+//RS             "with :path",
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), "example.com:443".into()),
+//RS                 (":path".into(), "/".into()),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "with :scheme",
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), "example.com:443".into()),
+//RS                 (":scheme".into(), "https".into()),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "missing :authority",
+//RS             vec![(":method".into(), "CONNECT".into())],
+//RS         ),
+//RS         (
+//RS             "host mismatch",
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), "example.com:443".into()),
+//RS                 ("host".into(), "other.com:443".into()),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "port mismatch",
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), "example.com:443".into()),
+//RS                 ("host".into(), "example.com".into()),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "malformed authority",
+//RS             vec![
+//RS                 (":method".into(), "CONNECT".into()),
+//RS                 (":authority".into(), "user@example.com:443".into()),
+//RS             ],
+//RS         ),
+//RS         (
+//RS             "GET without :path",
+//RS             vec![
+//RS                 (":method".into(), "GET".into()),
+//RS                 (":scheme".into(), "https".into()),
+//RS                 (":authority".into(), "example.com".into()),
+//RS             ],
+//RS         ),
+//RS     ] {
+//RS         let error = jet_http2_request(headers, empty_body())
+//RS             .err()
+//RS             .unwrap_or_else(|| panic!("accepted invalid CONNECT case: {label}"));
+//RS         assert!(
+//RS             error.contains("CONNECT")
+//RS                 || error.contains("path is missing")
+//RS                 || error.contains("authority")
+//RS                 || error.contains("host"),
+//RS             "{label}: {error}"
+//RS         );
+//RS     }
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "CONNECT", "/:authority", move |req| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &req.path)
+//RS     });
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS     let (mut server, _) = listener.accept().unwrap();
+//RS     let options = JetHTTPServerOptions::safe();
+//RS     let worker = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server,
+//RS             &mux,
+//RS             &options,
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS 
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 1, &h2_connect_headers("EXAMPLE.COM:443")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let mut saw_headers = false;
+//RS     let mut body = Vec::new();
+//RS     loop {
+//RS         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+//RS         if kind == 4 && flags & 0x1 == 0 {
+//RS             client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+//RS             continue;
+//RS         }
+//RS         if kind == 1 && stream == 1 {
+//RS             saw_headers = true;
+//RS             let decoded = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &payload).unwrap();
+//RS             assert!(
+//RS                 decoded
+//RS                     .iter()
+//RS                     .any(|(name, value)| name == ":status" && value == "200"),
+//RS                 "CONNECT missing 200: {decoded:?}"
+//RS             );
+//RS             if flags & 0x1 != 0 {
+//RS                 break;
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if kind == 0 && stream == 1 {
+//RS             body.extend_from_slice(&payload);
+//RS             if flags & 0x1 != 0 {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(saw_headers, "CONNECT response headers missing");
+//RS     assert_eq!(String::from_utf8(body).unwrap(), "example.com:443");
+//RS     assert_eq!(calls.load(Ordering::Acquire), 1);
+//RS     client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+//RS     client.flush().unwrap();
+//RS     assert!(worker.join().unwrap().is_ok());
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_mux_add(&mux, "CONNECT", "/:authority", |_| {
+//RS         jet_http_srv_response(200, &"no".to_string())
+//RS     });
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS     let (mut server, _) = listener.accept().unwrap();
+//RS     let options = JetHTTPServerOptions::safe();
+//RS     let worker = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server,
+//RS             &mux,
+//RS             &options,
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     let mut bad = h2_connect_headers("example.com:443");
+//RS     bad.extend_from_slice(&h2_literal_header(0x04, "/tunnel"));
+//RS     client.write_all(&h2_frame(1, 0x5, 1, &bad)).unwrap();
+//RS     client.flush().unwrap();
+//RS     let result = worker.join().unwrap();
+//RS     assert!(
+//RS         result
+//RS             .as_ref()
+//RS             .err()
+//RS             .is_some_and(|error| error.contains("CONNECT must omit :path")),
+//RS         "CONNECT with :path survived: {result:?}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn request_method_is_one_http_token_before_body_or_dispatch() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+//RS         let handler_calls = calls.clone();
+//RS         jet_http_mux_add(&mux, method, "/resource", move |req| {
+//RS             handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS             jet_http_srv_response(200, &req.method)
+//RS         });
+//RS     }
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+//RS         let response = exchange(
+//RS             addr,
+//RS             format!("{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+//RS                 .as_bytes(),
+//RS         );
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 200 OK"),
+//RS             "valid method rejected: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with(&format!("\r\n\r\n{method}")),
+//RS             "method changed before dispatch: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for invalid_method in [
+//RS         "G/ET", "G:ET", "G\\ET", "GÉT", "GET\t", "GE(T", "", "\x7fGET",
+//RS     ] {
+//RS         let request = format!(
+//RS             "{invalid_method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "accepted invalid method: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid method dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid method reused connection: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let invalid_expect = exchange(
+//RS         addr,
+//RS         b"G/ET /resource HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         invalid_expect.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{invalid_expect}"
+//RS     );
+//RS     assert!(
+//RS         !invalid_expect.contains("100 Continue"),
+//RS         "invalid method received body permission: {invalid_expect}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         3,
+//RS         "invalid method reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 12);
+//RS     assert_eq!(report.user_completed, 12);
+//RS }
+//RS 
+//RS #[test]
+//RS fn request_methods_are_case_sensitive_during_routing() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/resource", move |_| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"GET".to_string())
+//RS     });
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "get", "/resource", move |_| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"get".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     for method in ["GET", "get"] {
+//RS         let response = exchange(
+//RS             addr,
+//RS             format!("{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+//RS                 .as_bytes(),
+//RS         );
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 200 OK"),
+//RS             "case-distinct route rejected: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with(&format!("\r\n\r\n{method}")),
+//RS             "wrong case-distinct route dispatched: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     for method in ["GeT", "head", "options"] {
+//RS         let response = exchange(
+//RS             addr,
+//RS             format!(
+//RS                 "{method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS             )
+//RS             .as_bytes(),
+//RS         );
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 405 Method Not Allowed"),
+//RS             "{method} matched uppercase semantics: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.contains("Allow: GET, HEAD, OPTIONS, get\r\n"),
+//RS             "wrong exact Allow methods: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1 200 OK").count(),
+//RS             1,
+//RS             "valid unmatched method broke reuse: {response}"
+//RS         );
+//RS         assert!(
+//RS             response.ends_with("\r\n\r\nGET"),
+//RS             "uppercase successor did not dispatch: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         5,
+//RS         "method case changed before routing"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 5);
+//RS     assert_eq!(report.user_completed, 5);
+//RS }
+//RS 
+//RS #[test]
+//RS fn options_asterisk_reports_server_methods_without_dispatch() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     for (method, pattern) in [("GET", "/one"), ("POST", "/two"), ("get", "/three")] {
+//RS         let handler_calls = calls.clone();
+//RS         jet_http_mux_add(&mux, method, pattern, move |_| {
+//RS             handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS             jet_http_srv_response(200, &"handled".to_string())
+//RS         });
+//RS     }
+//RS     let middleware_calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let middleware_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+//RS     let wrapper_calls = middleware_calls.clone();
+//RS     let wrapper_events = middleware_events.clone();
+//RS     jet_http_mux_middleware(
+//RS         &mux,
+//RS         std::sync::Arc::new(move |next: JetHTTPHandler| -> JetHTTPHandler {
+//RS             let calls = wrapper_calls.clone();
+//RS             let events = wrapper_events.clone();
+//RS             std::sync::Arc::new(
+//RS                 move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+//RS                     calls.fetch_add(1, Ordering::AcqRel);
+//RS                     events
+//RS                         .lock()
+//RS                         .unwrap()
+//RS                         .push(format!("{}:{}", req.method, req.path));
+//RS                     next(req).map(|response| {
+//RS                         jet_http_srv_response_header(
+//RS                             response,
+//RS                             &"X-Middleware".to_string(),
+//RS                             &"observed".to_string(),
+//RS                         )
+//RS                     })
+//RS                 },
+//RS             )
+//RS         }) as JetHTTPMiddleware,
+//RS     );
+//RS     jet_http_mux_middleware(
+//RS         &mux,
+//RS         std::sync::Arc::new(move |next: JetHTTPHandler| -> JetHTTPHandler {
+//RS             std::sync::Arc::new(
+//RS                 move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+//RS                     if jet_http_srv_req_header(&req, &"X-Block".to_string()).is_some() {
+//RS                         Ok(jet_http_srv_response(403, &"blocked".to_string()))
+//RS                     } else {
+//RS                         next(req)
+//RS                     }
+//RS                 },
+//RS             )
+//RS         }) as JetHTTPMiddleware,
+//RS     );
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     let standalone = exchange(
+//RS         addr,
+//RS         b"OPTIONS * HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         standalone.starts_with("HTTP/1.1 204 No Content"),
+//RS         "server-wide OPTIONS rejected: {standalone}"
+//RS     );
+//RS     assert!(
+//RS         standalone.contains("Allow: GET, HEAD, OPTIONS, POST, get\r\n"),
+//RS         "wrong server-wide Allow: {standalone}"
+//RS     );
+//RS     assert_eq!(
+//RS         standalone.matches("X-Middleware: observed\r\n").count(),
+//RS         1,
+//RS         "middleware did not wrap OPTIONS exactly once: {standalone}"
+//RS     );
+//RS 
+//RS     let path_local = exchange(
+//RS         addr,
+//RS         b"OPTIONS /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         path_local.starts_with("HTTP/1.1 204 No Content"),
+//RS         "path OPTIONS rejected: {path_local}"
+//RS     );
+//RS     assert!(
+//RS         path_local.contains("Allow: GET, HEAD, OPTIONS\r\n"),
+//RS         "wrong path Allow: {path_local}"
+//RS     );
+//RS     assert_eq!(
+//RS         path_local.matches("X-Middleware: observed\r\n").count(),
+//RS         1,
+//RS         "middleware did not wrap path OPTIONS exactly once: {path_local}"
+//RS     );
+//RS 
+//RS     let blocked = exchange(
+//RS         addr,
+//RS         b"OPTIONS * HTTP/1.1\r\nHost: local\r\nX-Block: yes\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         blocked.starts_with("HTTP/1.1 403 Forbidden"),
+//RS         "middleware could not reject OPTIONS: {blocked}"
+//RS     );
+//RS     assert!(
+//RS         !blocked.contains("Allow:"),
+//RS         "rejected OPTIONS leaked method inventory: {blocked}"
+//RS     );
+//RS     assert_eq!(
+//RS         blocked.matches("X-Middleware: observed\r\n").count(),
+//RS         1,
+//RS         "rejection was not wrapped exactly once: {blocked}"
+//RS     );
+//RS 
+//RS     let response = exchange(
+//RS         addr,
+//RS         b"OPTIONS * HTTP/1.1\r\nHost: local\r\n\r\nGET /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         response.starts_with("HTTP/1.1 204 No Content"),
+//RS         "server-wide OPTIONS rejected: {response}"
+//RS     );
+//RS     assert!(
+//RS         response.contains("Allow: GET, HEAD, OPTIONS, POST, get\r\n"),
+//RS         "wrong server-wide Allow: {response}"
+//RS     );
+//RS     assert_eq!(
+//RS         response.matches("X-Middleware: observed\r\n").count(),
+//RS         2,
+//RS         "middleware did not wrap each pipelined request once: {response}"
+//RS     );
+//RS     assert_eq!(
+//RS         response.matches("HTTP/1.1 200 OK").count(),
+//RS         1,
+//RS         "OPTIONS * broke pipeline reuse: {response}"
+//RS     );
+//RS     assert!(
+//RS         response.ends_with("\r\n\r\nhandled"),
+//RS         "successor request did not dispatch: {response}"
+//RS     );
+//RS 
+//RS     for request_target in ["GET *", "GeT *", "OPTIONS **", "OPTIONS *?query"] {
+//RS         let request = format!(
+//RS             "{request_target} HTTP/1.1\r\nHost: local\r\n\r\nGET /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "invalid asterisk-form accepted: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid asterisk-form dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid asterisk-form reused connection: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         1,
+//RS         "OPTIONS or invalid asterisk-form invoked a handler"
+//RS     );
+//RS     assert_eq!(
+//RS         middleware_calls.load(Ordering::Acquire),
+//RS         5,
+//RS         "OPTIONS middleware count changed"
+//RS     );
+//RS     assert_eq!(
+//RS         &*middleware_events.lock().unwrap(),
+//RS         &[
+//RS             "OPTIONS:*",
+//RS             "OPTIONS:/one",
+//RS             "OPTIONS:*",
+//RS             "OPTIONS:*",
+//RS             "GET:/one",
+//RS         ]
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 8);
+//RS     assert_eq!(report.user_completed, 8);
+//RS }
+//RS 
+//RS #[test]
+//RS fn connection_options_are_tokens_before_reuse_or_body_permission() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+//RS         let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+//RS         stream.write_all(request).expect("request write");
+//RS         stream
+//RS             .shutdown(std::net::Shutdown::Write)
+//RS             .expect("finish request");
+//RS         let mut response = Vec::new();
+//RS         let mut buf = [0u8; 1024];
+//RS         loop {
+//RS             match stream.read(&mut buf) {
+//RS                 Ok(0) => break,
+//RS                 Ok(read) => response.extend_from_slice(&buf[..read]),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+//RS                 Err(error) => panic!("response read: {error}"),
+//RS             }
+//RS         }
+//RS         String::from_utf8(response).expect("response UTF-8")
+//RS     }
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+//RS     let addr = listener.local_addr().expect("address");
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/resource", move |_| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"ok".to_string())
+//RS     });
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let mut options = JetHTTPServerOptions::safe();
+//RS     options.workers = 1;
+//RS     options.admission_queue = 16;
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+//RS             .expect("server")
+//RS     });
+//RS 
+//RS     let http10_extensions = exchange(
+//RS         addr,
+//RS         b"GET /resource HTTP/1.0\r\nHost: local\r\nConnection: custom!#$%&'*+-.^_`|~\r\nConnection:\tKEEP-ALIVE \t\r\n\r\nGET /resource HTTP/1.0\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         http10_extensions.matches("HTTP/1.0 200 OK").count(),
+//RS         2,
+//RS         "{http10_extensions}"
+//RS     );
+//RS 
+//RS     let empty_members = exchange(
+//RS         addr,
+//RS         b"GET /resource HTTP/1.1\r\nHost: local\r\nConnection: , ,\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         empty_members.matches("HTTP/1.1 200 OK").count(),
+//RS         2,
+//RS         "{empty_members}"
+//RS     );
+//RS 
+//RS     let close_dominates = exchange(
+//RS         addr,
+//RS         b"GET /resource HTTP/1.1\r\nHost: local\r\nConnection: keep-alive, extension, CLOSE\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+//RS     );
+//RS     assert_eq!(
+//RS         close_dominates.matches("HTTP/1.1 200 OK").count(),
+//RS         1,
+//RS         "{close_dominates}"
+//RS     );
+//RS     assert!(
+//RS         close_dominates.contains("Connection: close"),
+//RS         "{close_dominates}"
+//RS     );
+//RS 
+//RS     for invalid_connection in [
+//RS         "Connection: \"close\"",
+//RS         "Connection: bad/option",
+//RS         "Connection: bad;option",
+//RS         "Connection: bad option",
+//RS         "Connection: café",
+//RS         "Connection: keep-alive\r\nConnection: bad/option",
+//RS     ] {
+//RS         let request = format!(
+//RS             "GET /resource HTTP/1.1\r\nHost: local\r\n{invalid_connection}\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+//RS         );
+//RS         let response = exchange(addr, request.as_bytes());
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 400 Bad Request"),
+//RS             "accepted invalid Connection: {response}"
+//RS         );
+//RS         assert!(
+//RS             !response.contains("200 OK"),
+//RS             "invalid Connection dispatched or reused: {response}"
+//RS         );
+//RS         assert_eq!(
+//RS             response.matches("HTTP/1.1").count(),
+//RS             1,
+//RS             "invalid Connection reused socket: {response}"
+//RS         );
+//RS     }
+//RS 
+//RS     let invalid_expect = exchange(
+//RS         addr,
+//RS         b"GET /resource HTTP/1.1\r\nHost: local\r\nConnection: bad/option\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+//RS     );
+//RS     assert!(
+//RS         invalid_expect.starts_with("HTTP/1.1 400 Bad Request"),
+//RS         "{invalid_expect}"
+//RS     );
+//RS     assert!(
+//RS         !invalid_expect.contains("100 Continue"),
+//RS         "invalid Connection received body permission: {invalid_expect}"
+//RS     );
+//RS 
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         5,
+//RS         "invalid Connection reached handler"
+//RS     );
+//RS     shutdown.store(true, Ordering::Release);
+//RS     let report = server.join().expect("server join");
+//RS     assert_eq!(report.user_accepted, 10);
+//RS     assert_eq!(report.user_completed, 10);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1073 tests/http_server_lifecycle.rs:1779-3543
+

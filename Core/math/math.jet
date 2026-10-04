@@ -8,13 +8,24 @@ package {
         math: .Library{ entry: math }
     }
 }
+module runtime
+
 use core as core
+use core.math.runtime.kernel_float_policy as math_float_policy
 fn round_provider(n: Float) -> Int { core.math.round(n) }
+// Exact Int abs is not MathLibPure.rs::jet_std_math_abs_i64: that fixed-width
+// native row remains held (#4422) on the checked fixed primitive/ABI route,
+// including i64::MIN overflow. Never narrow this exact Int owner to i64.
 pub fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
 }
 
+// MathLibPure.rs::jet_std_math_abs_f64 (also the fabs entry below).
+// jet_std_math_abs_f32 maps to the compiler's typed core.math.abs(F32) leaf,
+// currently held by the source-owned Int signature (#4422). Float/float32
+// wrappers do not supply that f32 ABI or rounding semantics. The evaluator's
+// Float/F32 sign-clearing route is also held on #4422; this is not tier proof.
 pub fn abs_float(n: Float) -> Float Never! { core.math.fabs(n) }
 
 
@@ -85,31 +96,37 @@ pub fn lcm(a: Int, b: Int) -> Int Never! {
     if a == 0 || b == 0 -> return 0
     abs(a /% gcd(a, b) * b)
 }
-// Floating-point entry points remain thin Jet APIs over the existing
-// deterministic Core primitives.  Keeping the call qualified is deliberate:
-// inside this source package it selects the primitive Core route rather than
-// recursively calling the source implementation being defined.
+// Native scalar entry points remain thin APIs over the existing libm/IEEE
+// primitives. Their qualified calls select native leaves, not source recursion.
+// Non-statistical compound float policy below calls the single private owner.
 pub fn acos(n: Float) -> Float Never! { core.math.acos(n) }
+// MathLibPure.rs::jet_std_math_acosh; native libm leaf, not a portable body.
 pub fn acosh(n: Float) -> Float Never! { core.math.acosh(n) }
 pub fn asin(n: Float) -> Float Never! { core.math.asin(n) }
+// MathLibPure.rs::jet_std_math_asinh; native libm leaf, not a portable body.
 pub fn asinh(n: Float) -> Float Never! { core.math.asinh(n) }
 pub fn atan(n: Float) -> Float Never! { core.math.atan(n) }
 pub fn atan2(a: Float, b: Float) -> Float Never! { core.math.atan2(a, b) }
+// MathLibPure.rs::jet_std_math_atanh; native libm leaf, not a portable body.
 pub fn atanh(n: Float) -> Float Never! { core.math.atanh(n) }
+// MathLibPure.rs::jet_std_math_cbrt; native libm leaf, not a portable body.
 pub fn cbrt(n: Float) -> Float Never! { core.math.cbrt(n) }
 pub fn cos(n: Float) -> Float Never! { core.math.cos(n) }
 pub fn cosh(n: Float) -> Float Never! { core.math.cosh(n) }
+// MathLibPure.rs::jet_std_math_exp; native libm leaf, not a portable body.
 pub fn exp(n: Float) -> Float Never! { core.math.exp(n) }
+// MathLibPure.rs::jet_std_math_exp2; native libm leaf, not a portable body.
 pub fn exp2(n: Float) -> Float Never! { core.math.exp2(n) }
+// MathLibPure.rs::jet_std_math_exp_m1; native libm leaf, not a portable body.
 pub fn exp_m1(n: Float) -> Float Never! { core.math.exp_m1(n) }
 pub fn expm1(n: Float) -> Float Never! { exp_m1(n) }
-pub fn erf(n: Float) -> Float Never! { core.math.erf(n) }
-pub fn erfc(n: Float) -> Float Never! { core.math.erfc(n) }
+pub fn erf(n: Float) -> Float Never! { math_float_policy.jet_std_math_erf(n) }
+pub fn erfc(n: Float) -> Float Never! { math_float_policy.jet_std_math_erfc(n) }
 pub fn floor(n: Float) -> Float Never! { core.math.floor(n) }
 pub fn ceil(n: Float) -> Float Never! { core.math.ceil(n) }
 pub fn fract(n: Float) -> Float Never! { core.math.fract(n) }
-pub fn gamma(n: Float) -> Float Never! { core.math.gamma(n) }
-pub fn lgamma(n: Float) -> Float Never! { core.math.lgamma(n) }
+pub fn gamma(n: Float) -> Float Never! { math_float_policy.jet_std_math_gamma(n) }
+pub fn lgamma(n: Float) -> Float Never! { math_float_policy.jet_std_math_lgamma(n) }
 pub fn hypot(a: Float, b: Float) -> Float Never! { core.math.hypot(a, b) }
 pub fn ln(n: Float) -> Float Never! { core.math.ln(n) }
 pub fn ln_1p(n: Float) -> Float Never! { core.math.ln_1p(n) }
@@ -117,7 +134,7 @@ pub fn log1p(n: Float) -> Float Never! { ln_1p(n) }
 pub fn log(n: Float, base: Float) -> Float Never! { core.math.log(n, base) }
 pub fn log10(n: Float) -> Float Never! { core.math.log10(n) }
 pub fn log2(n: Float) -> Float Never! { core.math.log2(n) }
-pub fn logb(n: Float) -> Float Never! { core.math.logb(n) }
+pub fn logb(n: Float) -> Float Never! { math_float_policy.jet_std_math_logb(n) }
 pub fn pow(a: Float, b: Float) -> Float Never! { core.math.pow(a, b) }
 pub fn sin(n: Float) -> Float Never! { core.math.sin(n) }
 pub fn sinh(n: Float) -> Float Never! { core.math.sinh(n) }
@@ -140,13 +157,17 @@ pub fn radians(n: Float) -> Float Never! { core.math.radians(n) }
 pub fn lerp(a: Float, b: Float, t: Float) -> Float Never! { core.math.lerp(a, b, t) }
 pub fn float32(n: Float) -> Float Never! { core.math.float32(n) }
 pub fn float64(n: Float) -> Float Never! { core.math.float64(n) }
+// MathLibPure.rs::jet_std_math_abs_f64; native IEEE sign-clearing leaf.
 pub fn fabs(n: Float) -> Float Never! { core.math.fabs(n) }
 pub fn real(n: Float) -> Float Never! { n }
 pub fn imag(n: Float) -> Float Never! { Float{0.0} }
 pub fn conj(n: Float) -> Float Never! { n }
 
+// MathLibPure.rs::jet_std_math_is_nan.
 pub fn is_nan(n: Float) -> Bool Never! { core.math.is_nan(n) }
+// MathLibPure.rs::jet_std_math_is_infinite.
 pub fn is_inf(n: Float) -> Bool Never! { core.math.is_inf(n) }
+// MathLibPure.rs::jet_std_math_is_finite.
 pub fn is_finite(n: Float) -> Bool Never! { core.math.is_finite(n) }
 pub fn isnan(n: Float) -> Bool Never! { is_nan(n) }
 pub fn isinf(n: Float) -> Bool Never! { is_inf(n) }
@@ -162,16 +183,27 @@ pub fn sign_bit(n: Float) -> Bool Never! { core.math.sign_bit(n) }
 pub fn next_up(n: Float) -> Float Never! { core.math.next_up(n) }
 pub fn next_down(n: Float) -> Float Never! { core.math.next_down(n) }
 pub fn next_after(n: Float, toward: Float) -> Float Never! {
-    core.math.next_after(n, toward)
+    math_float_policy.jet_std_math_next_after(n, toward)
 }
 pub fn nextafter(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
-pub fn significand(n: Float) -> Float Never! { core.math.significand(n) }
-pub fn ulp(n: Float) -> Float Never! { core.math.ulp(n) }
-pub fn ilogb(n: Float) -> Int? Never! { core.math.ilogb(n) }
-pub fn ldexp(n: Float, exponent: Int) -> Float Never! { core.math.ldexp(n, exponent) }
+pub fn significand(n: Float) -> Float Never! { math_float_policy.jet_std_math_significand(n) }
+pub fn ulp(n: Float) -> Float Never! { math_float_policy.jet_std_math_ulp(n) }
+pub fn ilogb(n: Float) -> Int? Never! {
+    exponent :: math_float_policy.jet_std_math_ilogb(n) ?? return None
+    Val(Int.from_i64(exponent))
+}
+pub fn ldexp(n: Float, exponent: Int) -> Float Never! {
+    // Keep the public exact exponent losslessly until the source clamp. Only
+    // the resulting small scalar crosses the private native powi boundary.
+    if exponent < -2099 -> return math_float_policy.jet_std_math_ldexp(n, I64{-2099})
+    if exponent > 2099 -> return math_float_policy.jet_std_math_ldexp(n, I64{2099})
+    fixed :: I64.from_int(exponent) ?? panic("clamped ldexp exponent")
+    math_float_policy.jet_std_math_ldexp(n, fixed)
+}
 pub fn scaleb(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
 pub fn radix(n: Float) -> Int Never! { core.math.radix(n) }
 
+// MathLibPure.rs::jet_std_math_pi.
 pub fn pi() -> Float Never! { Float{3.14159265358979323846264338327950288} }
 pub fn e() -> Float Never! { Float{2.7182818284590452354} }
 pub fn tau() -> Float Never! { Float{6.2831853071795864769} }
@@ -373,14 +405,16 @@ pub fn prod_int(values: [Int]) -> Int Never! {
 }
 
 pub fn prod(values: [Int]) -> Int Never! { prod_int(values) }
+// MathLibPure.rs::jet_std_math_fmod (:1425): genuine native f64/libm scalar
+// primitive, also the remainder kernel's parity leaf; not compound Jet policy.
 pub fn fmod(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
-pub fn remainder(a: Float, b: Float) -> Float Never! { core.math.remainder(a, b) }
+pub fn remainder(a: Float, b: Float) -> Float Never! { math_float_policy.jet_std_math_remainder(a, b) }
 pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
-    core.math.isclose(a, b, rel_tol, abs_tol)
+    math_float_policy.jet_std_math_isclose(a, b, rel_tol, abs_tol)
 }
 
 pub fn dist(left: [Float], right: [Float]) -> Float Never! {
-    core.math.dist(left, right)
+    math_float_policy.jet_std_math_dist(left, right)
 }
 
 pub fn hypot3(a: Float, b: Float, c: Float) -> Float Never! {
@@ -395,6 +429,11 @@ pub fn min_float(a: Float, b: Float) -> Float Never! { core.math.min_float(a, b)
 pub fn max_float(a: Float, b: Float) -> Float Never! { core.math.max_float(a, b) }
 pub fn midpoint(a: Float, b: Float) -> Float Never! { core.math.midpoint(a, b) }
 
+// MathLibPure.rs::jet_std_math_fsum: preserve this left-to-right recurrence.
+// The source consumes Vec<f64>; the compiled [Float] ownership/drop adapter is
+// still an integration prerequisite. The scalar loop creates no second list.
+// Do not replace it with a partials/Neumaier sum or special-case NaN/Inf:
+// one infinity returns infinity, but a following value observes NaN compensation.
 pub fn fsum(values: [Float]) -> Float Never! {
     total := Float{0.0}
     compensation := Float{0.0}

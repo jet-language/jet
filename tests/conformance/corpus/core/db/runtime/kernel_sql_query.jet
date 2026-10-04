@@ -1,0 +1,272 @@
+// SqlQuery.rs:1–1086 has no inline/included/macro-generated tests.
+// Behavioral controls for its actual parser and caller-owned row kernel;
+// these are not a native DB provider substitute. Existing sql_query.jet pins
+// :8–74,176–384,410–435 and remains independently queued/unchanged.
+// Main activates this corpus with the private kernel; #4483/#4500 remain gates.
+use core.db.runtime.kernel_sql_query as sql
+use core.sys as sql_test_sys
+
+fn query(text: String) -> sql.JetSQLQuery Never! {
+    sql.parse_sql_query(text) ?? panic("SQL query parse failed")
+}
+fn query_error(text: String, expected: String) Never! {
+    _ :: sql.parse_sql_query(text) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("invalid SQL query accepted")
+}
+fn run_values(text: String, fields: [String], rows: [[String: sql.JetSQLValue]]) -> [sql.JetSQLResultRow] Err! {
+    plan :: query(text)
+    sql.execute_sql_rows(fields, U64.from_int(rows.len()) ?? panic("test row count"), plan, (index: U64, field: String) -> rows[Int.from_u64(index)].get(field))
+}
+fn aggregate(function: sql.JetSQLAggregate, values: [sql.JetSQLValue], star: Bool) -> sql.JetSQLValue Never! {
+    indices := [U64]{}
+    loop at in 0..<values.len() -> &indices.push(U64.from_int(at) ?? panic("test index"))
+    sql.sql_aggregate_value(indices, function, if star -> None else -> Val("value"), (index: U64, field: String) -> Val(values[Int.from_u64(index)]))
+}
+
+#Test("SQL checked query carrier methods and full clause grammar") {
+    identity :: query(" SELECT * FROM sales; ")
+    assert_eq(identity.source, "sales")
+    assert(identity.is_identity_projection())
+    assert(!identity.has_aggregate())
+    assert(!identity.needs_projection_execution())
+    plan :: query("SELECT item AS name, SUM(qty) AS total, COUNT(*) FROM sales WHERE qty >= 2 GROUP BY 1 ORDER BY total DESC LIMIT +3;")
+    assert_eq(plan.projection.len(), 3)
+    assert_eq(plan.group_by, [sql.JetSQLGroupKey]{.Ordinal(U64{1})})
+    assert_eq(plan.filter, Val((field: "qty", operator: ">=", value: "2")))
+    assert_eq(plan.order, Val((field: "total", descending: true)))
+    assert_eq(plan.limit, Val(U64{3}))
+    assert(plan.has_aggregate())
+    assert(plan.needs_projection_execution())
+    assert_eq(sql.group_field(plan, plan.group_by[0]) ?? panic("group field"), "item")
+    assert_eq(query("sElEcT item fRoM sales oRdEr bY +0001 aSc LiMiT 0000").limit, Val(U64{0}))
+    assert_eq(query("SELECT item FROM sales GROUP BY item, 1").group_by.len(), 2) // Different enum keys may name the same field.
+}
+
+#Test("SQL exact parser clause errors and precedence") {
+    query_error(" -- empty", "SQL query is empty")
+    query_error("UPDATE sales", "SQL query needs a SELECT statement")
+    query_error("SELECT", "SQL SELECT needs a projection")
+    query_error("SELECT x", "SQL query needs `FROM source` after its projection")
+    query_error("SELECT x, from t", "SQL SELECT has a trailing comma")
+    query_error("SELECT x, FROM t", "SQL query needs `FROM source` after its projection")
+    query_error("SELECT x FROM", "SQL source after FROM is missing")
+    query_error("SELECT * FROM t LIMIT 2 WHERE x = 1", "SQL query has an out-of-order or repeated WHERE clause")
+    query_error("SELECT * FROM t WHERE x = 1 WHERE x = 2", "SQL query has an out-of-order or repeated WHERE clause")
+    query_error("SELECT * FROM t WHERE", "SQL WHERE field is missing")
+    query_error("SELECT * FROM t WHERE x", "SQL WHERE needs `field operator value`")
+    query_error("SELECT * FROM t WHERE x ! 2", "SQL WHERE operator must be one of `=`, `!=`, `>`, `>=`, `<`, or `<=`")
+    query_error("SELECT * FROM t WHERE x =", "SQL WHERE needs `field operator value`")
+    query_error("SELECT * FROM t WHERE x = LIMIT", "SQL WHERE needs a literal value")
+    query_error("SELECT * FROM t WHERE x = )", "SQL WHERE needs a literal value")
+    query_error("SELECT x FROM t GROUP x", "SQL GROUP BY needs `GROUP BY field[, field]`")
+    query_error("SELECT x FROM t GROUP BY", "SQL GROUP BY needs a field or ordinal")
+    query_error("SELECT x FROM t GROUP BY x, ORDER BY x", "SQL GROUP BY needs a field or ordinal")
+    query_error("SELECT x FROM t GROUP BY 0", "SQL GROUP BY ordinals start at one")
+    query_error("SELECT x FROM t GROUP BY -1", "SQL GROUP BY field must be an identifier")
+    query_error("SELECT x FROM t GROUP BY 1 GROUP BY x", "SQL query has an out-of-order or repeated GROUP BY clause")
+    query_error("SELECT x FROM t ORDER BY x GROUP BY x", "SQL query has an out-of-order or repeated GROUP BY clause")
+    query_error("SELECT x FROM t ORDER x", "SQL ORDER BY needs `ORDER BY field [ASC|DESC]`")
+    query_error("SELECT x FROM t ORDER BY", "SQL ORDER BY needs a field")
+    query_error("SELECT x FROM t ORDER BY x sideways", "SQL ORDER BY direction must be `ASC` or `DESC`")
+    query_error("SELECT x FROM t ORDER BY x ORDER BY x", "SQL query has an out-of-order or repeated ORDER BY clause")
+    query_error("SELECT x FROM t LIMIT", "SQL LIMIT needs a non-negative integer")
+    query_error("SELECT x FROM t LIMIT -0", "SQL LIMIT needs a non-negative integer")
+    query_error("SELECT x FROM t LIMIT 1_0", "SQL LIMIT needs a non-negative integer")
+    query_error("SELECT x FROM t LIMIT 1 LIMIT 2", "SQL query has an out-of-order or repeated LIMIT clause")
+    query_error("SELECT x FROM t;;", "SQL statement has more than one terminator")
+    query_error("SELECT x FROM t JOIN u", "unsupported SQL clause `JOIN`; accepted clauses are WHERE, GROUP BY, ORDER BY, and LIMIT")
+    query_error("SELECT * FROM t /*", "SQL block comment is missing its closing `*/`")
+}
+
+#Test("SQL target usize bound governs LIMIT GROUP and ORDER schema exclusion") {
+    bound :: sql_test_sys.usize_max() // #4483: selected target, not host.
+    assert_eq(query("SELECT x FROM t LIMIT {bound}").limit, Val(bound))
+    too_large :: Int.from_u64(bound) + 1 // Test formatting only, not kernel arithmetic.
+    query_error("SELECT x FROM t LIMIT {too_large}", "SQL LIMIT needs a non-negative integer")
+    query_error("SELECT x FROM t GROUP BY {too_large}", "SQL GROUP BY field must be an identifier")
+    query_error("SELECT x FROM t ORDER BY {too_large}", "SQL ORDER BY field must be an identifier")
+    query_error("SELECT x FROM t LIMIT +", "SQL LIMIT needs a non-negative integer")
+    query_error("SELECT x FROM t LIMIT 0x10", "SQL LIMIT needs a non-negative integer")
+}
+
+#Test("SQL shape validation retains grouping error priority and enum key identity") {
+    query_error("SELECT *, x FROM t GROUP BY 0", "SQL GROUP BY ordinals start at one") // Parse before shape.
+    query_error("SELECT *, x FROM t GROUP BY 1", "SQL wildcard projection cannot be combined with another projection")
+    query_error("SELECT * FROM t GROUP BY 1", "SQL GROUP BY needs explicit projected columns")
+    query_error("SELECT x a, y a FROM t GROUP BY 100", "SQL SELECT repeats output column `a`")
+    query_error("SELECT x FROM t GROUP BY 2", "SQL GROUP BY ordinal 2 is outside the SELECT list")
+    query_error("SELECT SUM(x) FROM t GROUP BY 1", "SQL GROUP BY ordinal must reference a non-aggregate projection")
+    query_error("SELECT x FROM t GROUP BY 1, 1", "SQL GROUP BY repeats a grouping key")
+    query_error("SELECT x FROM t GROUP BY x, x", "SQL GROUP BY repeats a grouping key")
+    query_error("SELECT x, COUNT(*) FROM t", "SQL SELECT column `x` must appear in GROUP BY when an aggregate is selected")
+    query_error("SELECT x, y FROM t GROUP BY x", "SQL SELECT column `y` must appear in GROUP BY")
+    manual := query("SELECT * FROM t")
+    manual.group_by = [sql.JetSQLGroupKey]{.Ordinal(U64{0})}
+    _ :: sql.group_field(manual, manual.group_by[0]) ?? {
+        assert_eq(err.message, "SQL GROUP BY ordinal 0 is outside the SELECT list")
+        manual.group_by = [sql.JetSQLGroupKey]{.Ordinal(U64{1})}
+        _ :: sql.group_field(manual, manual.group_by[0]) ?? {
+            assert_eq(err.message, "SQL GROUP BY ordinal cannot reference a wildcard projection")
+            return
+        }
+        panic("wildcard group ordinal accepted")
+    }
+    panic("zero group ordinal accepted")
+}
+
+#Test("SQL borrowed item fields and schema callback ordering") {
+    plan :: query("SELECT item AS name, SUM(qty) total FROM t WHERE price > 0 GROUP BY 1 ORDER BY total")
+    assert_eq(plan.projection[0].field() ?? panic("field loan"), "item")
+    assert_eq(plan.projection[1].field() ?? panic("aggregate field loan"), "qty")
+    count :: query("SELECT COUNT(*) FROM t")
+    assert(count.projection[0].field() == None)
+    wildcard :: query("SELECT * FROM t")
+    assert(wildcard.projection[0].field() == None)
+    visited := [String]{}
+    sql.sql_query_fields(plan, (field: String) -> &visited.push(~field))
+    assert_eq(visited, [String]{"item", "qty", "item", "price"})
+    ordered :: query("SELECT item FROM t ORDER BY price")
+    visited = [String]{}
+    sql.sql_query_fields(ordered, (field: String) -> &visited.push(~field))
+    assert_eq(visited, [String]{"item", "price"})
+    ordinal :: query("SELECT item FROM t ORDER BY 0")
+    visited = [String]{}
+    sql.sql_query_fields(ordinal, (field: String) -> &visited.push(~field))
+    assert_eq(visited, [String]{"item"})
+    calls := [String]{}
+    _ :: sql.validate_sql_query_schema(plan, (field: String) -> {
+        &calls.push(~field)
+        field == "item"
+    }, "table") ?? {
+        assert_eq(err.message, "table references unknown field `qty`")
+        assert_eq(calls, [String]{"item", "qty"})
+        sql.validate_sql_query_schema(plan, (field: String) -> true, "table") ?? panic("valid schema rejected")
+        return
+    }
+    panic("missing schema field accepted")
+}
+
+#Test("SQL literal fixed width boundaries strict decimal and float policy") {
+    assert_eq(sql.JetSQLValue.literal("  NULL  "), sql.JetSQLValue.Null)
+    assert_eq(sql.JetSQLValue.literal("TrUe"), sql.JetSQLValue.Bool(true))
+    assert_eq(sql.JetSQLValue.literal("FALSE"), sql.JetSQLValue.Bool(false))
+    assert_eq(sql.JetSQLValue.literal("+0001"), sql.JetSQLValue.Int(I64{1}))
+    assert_eq(sql.JetSQLValue.literal("-0"), sql.JetSQLValue.Int(I64{0}))
+    assert_eq(sql.JetSQLValue.literal("9223372036854775807"), sql.JetSQLValue.Int(I64{9223372036854775807}))
+    assert_eq(sql.JetSQLValue.literal("-9223372036854775808"), sql.JetSQLValue.Int(I64{-9223372036854775807} - I64{1}))
+    assert_eq(sql.JetSQLValue.literal("9223372036854775808"), sql.JetSQLValue.Float(9223372036854775808.0))
+    assert_eq(sql.JetSQLValue.literal("'1'"), sql.JetSQLValue.Text("1"))
+    assert_eq(sql.JetSQLValue.literal("'a''b'"), sql.JetSQLValue.Text("a'b"))
+    assert_eq(sql.JetSQLValue.literal("1_0"), sql.JetSQLValue.Text("1_0"))
+    assert_eq(sql.JetSQLValue.literal("0x10"), sql.JetSQLValue.Text("0x10"))
+    assert_eq(sql.JetSQLValue.literal("1.25e+2"), sql.JetSQLValue.Float(125.0))
+    assert_eq(sql.sql_number(-0.0), "0")
+    assert_eq(sql.sql_number(Float.INFINITY), "inf")
+    assert_eq(sql.sql_number(-Float.INFINITY), "-inf")
+    assert_eq(sql.sql_number(Float.NAN), "NaN")
+    assert_eq(sql.sql_escape("a\\|=é"), "a\\\\\\|\\=é")
+    assert_eq(sql.JetSQLValue.Text("a|b").canonical_key(), "text:a\\|b")
+    assert_eq(sql.JetSQLValue.Null.display_text(), "")
+    assert_eq(sql.JetSQLValue.Int(I64{-2}).number(), Val(-2.0))
+    assert(sql.JetSQLValue.Bool(true).number() == None)
+}
+
+#Test("SQL comparisons null NaN numeric coercion and textual controls") {
+    assert_eq(sql.sql_compare_values(sql.JetSQLValue.Null, sql.JetSQLValue.Null), Ordering.Equal)
+    assert_eq(sql.sql_compare_values(sql.JetSQLValue.Null, sql.JetSQLValue.Int(I64{0})), Ordering.Less)
+    assert_eq(sql.sql_compare_values(sql.JetSQLValue.Int(I64{0}), sql.JetSQLValue.Null), Ordering.Greater)
+    assert(!sql.sql_compare(sql.JetSQLValue.Null, "=", sql.JetSQLValue.Null))
+    assert(!sql.sql_compare(sql.JetSQLValue.Int(I64{1}), "unknown", sql.JetSQLValue.Int(I64{1})))
+    assert_eq(sql.sql_compare_values(sql.JetSQLValue.Float(Float.NAN), sql.JetSQLValue.Int(I64{10})), Ordering.Equal)
+    assert_eq(sql.sql_compare_values(sql.JetSQLValue.Bool(false), sql.JetSQLValue.Bool(true)), Ordering.Less)
+    assert(sql.compare_sql_cell("10", ">", "2"))
+    assert(!sql.compare_sql_cell("10", ">", "'2'")) // Lexical control.
+    assert(sql.compare_sql_cell("10", ">=", "10.0"))
+    assert(sql.compare_sql_cell("true", "=", "TRUE"))
+    assert(!sql.compare_sql_cell("TRUE", "=", "true")) // Rust bool::from_str is case-sensitive.
+    assert(!sql.compare_sql_cell("2", "=", "NULL"))
+    assert(!sql.compare_sql_cell(" 2 ", "=", "2")) // Raw cells do not trim.
+    assert(!sql.compare_sql_cell(" 2 ", "=", "2.0"))
+    assert_eq(sql.compare_sql_order_values("10", "2"), Ordering.Greater)
+    assert_eq(sql.compare_sql_order_values(" 10", "2"), Ordering.Less)
+    assert_eq(sql.compare_sql_order_values("NaN", "2"), Ordering.Equal)
+}
+
+#Test("SQL aggregates wide integer cancellation null count min max and finite filtering") {
+    values :: [sql.JetSQLValue]{.Int(I64{9223372036854775807}), .Int(I64{1}), .Int(I64{-9223372036854775807})}
+    assert_eq(aggregate(sql.JetSQLAggregate.Sum, values, false), sql.JetSQLValue.Int(I64{1}))
+    negative :: [sql.JetSQLValue]{.Int(I64{-9223372036854775807} - I64{1}), .Int(I64{-1}), .Int(I64{9223372036854775807})}
+    assert_eq(aggregate(sql.JetSQLAggregate.Sum, negative, false), sql.JetSQLValue.Int(I64{-2}))
+    assert_eq(aggregate(sql.JetSQLAggregate.Sum, [sql.JetSQLValue]{.Int(I64{9223372036854775807}), .Int(I64{1})}, false), sql.JetSQLValue.Float(9223372036854775808.0))
+    assert_eq(aggregate(sql.JetSQLAggregate.Sum, [sql.JetSQLValue]{.Int(I64{2}), .Float(0.5), .Text("ignored"), .Null}, false), sql.JetSQLValue.Float(2.5))
+    assert_eq(aggregate(sql.JetSQLAggregate.Avg, [sql.JetSQLValue]{.Int(I64{2}), .Int(I64{4}), .Null}, false), sql.JetSQLValue.Float(3.0))
+    assert_eq(aggregate(sql.JetSQLAggregate.Count, [sql.JetSQLValue]{.Null, .Float(Float.NAN), .Bool(false), .Text("")}, false), sql.JetSQLValue.Int(I64{3}))
+    assert_eq(aggregate(sql.JetSQLAggregate.Count, [sql.JetSQLValue]{.Null, .Null}, true), sql.JetSQLValue.Int(I64{2}))
+    assert_eq(aggregate(sql.JetSQLAggregate.Count, [sql.JetSQLValue]{}, true), sql.JetSQLValue.Int(I64{0}))
+    assert_eq(aggregate(sql.JetSQLAggregate.Sum, [sql.JetSQLValue]{.Text("x"), .Bool(true), .Null}, false), sql.JetSQLValue.Null)
+    assert_eq(aggregate(sql.JetSQLAggregate.Min, [sql.JetSQLValue]{.Float(Float.NAN), .Float(Float.INFINITY), .Int(I64{3}), .Int(I64{1})}, false), sql.JetSQLValue.Int(I64{1}))
+    assert_eq(aggregate(sql.JetSQLAggregate.Max, [sql.JetSQLValue]{.Text("b"), .Text("a"), .Null}, false), sql.JetSQLValue.Text("b"))
+    assert_eq(aggregate(sql.JetSQLAggregate.Min, [sql.JetSQLValue]{.Bool(true), .Bool(false)}, false), sql.JetSQLValue.Bool(false))
+    assert_eq(aggregate(sql.JetSQLAggregate.Min, [sql.JetSQLValue]{.Float(Float.NAN)}, false), sql.JetSQLValue.Null)
+}
+
+#Test("SQL execution real typed row access projection grouping sorting and limit") {
+    rows :: [[String: sql.JetSQLValue]]{
+        [String: sql.JetSQLValue]{"item": .Text("b"), "qty": .Int(I64{2})},
+        [String: sql.JetSQLValue]{"item": .Text("a"), "qty": .Int(I64{3})},
+        [String: sql.JetSQLValue]{"item": .Text("b"), "qty": .Int(I64{4})}
+    }
+    projected :: run_values("SELECT item name, SUM(qty) total, COUNT(*) count FROM t WHERE qty > 1 GROUP BY 1 ORDER BY total DESC LIMIT 1", [String]{"item", "qty"}, rows) ?? panic("execution")
+    assert_eq(projected.len(), 1)
+    assert_eq(projected[0].fields, [(String, sql.JetSQLValue)]{("name", .Text("b")), ("total", .Int(I64{6})), ("count", .Int(I64{2}))})
+    assert_eq(projected[0].source_indices, [U64]{U64{0}, U64{2}})
+    grouped :: run_values("SELECT item FROM t GROUP BY item", [String]{"item", "qty"}, rows) ?? panic("grouped")
+    assert_eq(grouped[0].fields[0].1, sql.JetSQLValue.Text("a")) // BTreeMap lexical group-key order.
+    wildcard :: run_values("SELECT * FROM t ORDER BY qty DESC LIMIT 2", [String]{"qty", "item"}, rows) ?? panic("wildcard")
+    assert_eq(wildcard[0].fields[0], ("qty", sql.JetSQLValue.Int(I64{4})))
+    assert_eq(wildcard[1].source_indices, [U64]{U64{1}})
+    fallback :: run_values("SELECT item FROM t ORDER BY qty", [String]{"item", "qty"}, rows) ?? panic("order fallback")
+    assert_eq(fallback[0].source_indices, [U64]{U64{0}})
+    empty :: run_values("SELECT COUNT(*) n, SUM(qty) total FROM t WHERE missing = 1", [String]{"qty"}, rows) ?? panic("empty aggregate")
+    assert_eq(empty.len(), 1)
+    assert_eq(empty[0].fields, [(String, sql.JetSQLValue)]{("n", .Int(I64{0})), ("total", .Null)})
+    assert_eq(empty[0].source_indices, [U64]{})
+    none :: run_values("SELECT item FROM t WHERE missing = 1 GROUP BY item", [String]{"item"}, rows) ?? panic("empty groups")
+    assert_eq(none.len(), 0)
+}
+
+#Test("SQL projected ordering tie stays ascending positions while selection DESC reverses ties") {
+    typed :: [[String: sql.JetSQLValue]]{[String: sql.JetSQLValue]{"x": .Int(I64{1})}, [String: sql.JetSQLValue]{"x": .Int(I64{1})}}
+    rows :: run_values("SELECT x FROM t ORDER BY x DESC", [String]{"x"}, typed) ?? panic("projected tie")
+    assert_eq(rows[0].source_indices, [U64]{U64{0}})
+    assert_eq(rows[1].source_indices, [U64]{U64{1}})
+    plan :: query("SELECT * FROM t ORDER BY x DESC")
+    selected :: sql.select_sql_indices(U64{2}, plan, (index: U64, field: String) -> Val("1"))
+    assert_eq(selected, [U64]{U64{1}, U64{0}})
+    filtered :: query("SELECT * FROM t WHERE x > 1 ORDER BY x LIMIT 1")
+    values :: [String]{"10", "2", "0"}
+    assert_eq(sql.select_sql_indices(U64{3}, filtered, (index: U64, field: String) -> Val(values[Int.from_u64(index)])), [U64]{U64{1}})
+}
+
+#Test("SQL output ordinals and nonfinite refusal happen before LIMIT") {
+    row :: sql.JetSQLResultRow{fields: [(String, sql.JetSQLValue)]{("0", .Text("zero")), ("x", .Int(I64{1}))}, source_indices: [U64]{}}
+    assert(sql.sql_output_value(row, "0") == None)
+    assert(sql.sql_output_value(row, "3") == None)
+    assert_eq(sql.sql_output_value(row, "+2"), Val(sql.JetSQLValue.Int(I64{1})))
+    assert_eq(sql.sql_output_value(row, "x"), Val(sql.JetSQLValue.Int(I64{1})))
+    calls := 0
+    plan :: query("SELECT x FROM t ORDER BY missing LIMIT 0")
+    _ :: sql.execute_sql_rows([String]{"x"}, U64{2}, plan, (index: U64, field: String) -> {
+        calls += 1
+        if field == "x" -> return Val(sql.JetSQLValue.Float(Float.INFINITY))
+        None
+    }) ?? {
+        assert_eq(err.message, "SQL query produced a non-finite numeric value")
+        assert_eq(calls, 4) // Every projected cell and ORDER fallback is visited.
+        return
+    }
+    panic("nonfinite result hidden by LIMIT")
+}

@@ -1,0 +1,511 @@
+// PORT-PENDING 0223 crates-jet-jit-src-mathextra-module-group: crates/jet-jit/src/Random.rs:1-507
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.math.random` ambient + `Rng` handle host shims (#729).
+//RS //! Ambient and seeded draws call the shared Prelude kernels; this module only
+//RS //! marshals Cranelift ABI values and runtime-heap handles.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS 
+//RS mod seeded_random_kernel {
+//RS     include!("../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
+//RS }
+//RS 
+//RS mod fake_data_kernel {
+//RS     pub(crate) mod jet_std {
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub(crate) struct Fake {
+//RS             pub(crate) state: u64,
+//RS             pub(crate) locale: u8,
+//RS         }
+//RS     }
+//RS 
+//RS     use super::seeded_random_kernel::jet_seeded_rng_int;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS mod ambient_random_kernel {
+//RS     pub(crate) mod jet_std {
+//RS         #[derive(Clone)]
+//RS         pub(crate) struct Rng {
+//RS             pub(crate) state: u64,
+//RS         }
+//RS     }
+//RS 
+//RS     // The JIT uses the same scheduler-owned provider as AOT. Absence is
+//RS     // meaningful only outside a deterministic world, where MathRandomFns
+//RS     // falls back to its ordinary per-thread stream.
+//RS     fn jet_scheduler_world_rng_next() -> Option<u64> {
+//RS         jet_codegen::scheduler::jet_scheduler_world_rng_next()
+//RS     }
+//RS     fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
+//RS         jet_codegen::scheduler::jet_scheduler_world_rng_seed(seed)
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
+//RS 
+//RS     pub(crate) fn seed(seed: i64) {
+//RS         jet_std_random_seed(seed);
+//RS     }
+//RS     pub(crate) fn getrandbits(bits: i64) -> i64 {
+//RS         jet_std_random_getrandbits(bits)
+//RS     }
+//RS     pub(crate) fn bool_p(p: f64) -> bool {
+//RS         jet_std_random_bool(p)
+//RS     }
+//RS     pub(crate) fn int(low: i64, high: i64) -> i64 {
+//RS         jet_std_random_int(low, high)
+//RS     }
+//RS 
+//RS     pub(crate) fn float() -> f64 {
+//RS         jet_std_random_float()
+//RS     }
+//RS     pub(crate) fn split(seed: i64) -> jet_std::Rng {
+//RS         jet_std_random_split(seed)
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn ambient_int(low: i64, high: i64) -> i64 {
+//RS     ambient_random_kernel::int(low, high)
+//RS }
+//RS 
+//RS pub(crate) fn ambient_float() -> f64 {
+//RS     ambient_random_kernel::float()
+//RS }
+//RS 
+//RS pub(crate) fn ambient_bool(p: f64) -> bool {
+//RS     ambient_random_kernel::bool_p(p)
+//RS }
+//RS 
+//RS fn read_list<T>(list: i64, read: impl Fn(&jet_rt::JetArena, i64) -> Option<T>) -> Option<Vec<T>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         (0..len).map(|index| read(&rt.heap, index)).collect()
+//RS     })
+//RS }
+//RS 
+//RS fn write_list<T>(
+//RS     _list: i64,
+//RS     values: Vec<T>,
+//RS     write: impl Fn(&mut jet_rt::JetArena, i64, T) -> Option<()>,
+//RS ) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             let _ = write(&mut rt.heap, index as i64, value);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn alloc_list<T>(
+//RS     values: Vec<T>,
+//RS     push: impl Fn(&mut jet_rt::JetArena, i64, T) -> Option<()>,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for value in values {
+//RS             let _ = push(&mut rt.heap, list, value);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn list_is_float(list: i64) -> bool {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap.list_len(list).is_some_and(|len| len > 0)
+//RS             && rt.heap.list_get_float(list, 0).is_some()
+//RS     })
+//RS }
+//RS /// Read one checked JIT `Int` word as the host kernel's `i64`. A value outside
+//RS /// the host range stops with the same report AOT raises for a native argument.
+//RS fn int_arg(raw: i64) -> i64 {
+//RS     if let Some(value) = Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(raw)) {
+//RS         return value;
+//RS     }
+//RS     let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
+//RS     Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
+//RS     std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+//RS }
+//RS 
+//RS fn jet_jit_random_seed(n: i64) {
+//RS     ambient_random_kernel::seed(n);
+//RS }
+//RS fn jet_jit_random_getrandbits(k: i64) -> i64 {
+//RS     ambient_random_kernel::getrandbits(k)
+//RS }
+//RS 
+//RS fn jet_jit_random_float() -> f64 {
+//RS     ambient_random_kernel::float()
+//RS }
+//RS 
+//RS fn jet_jit_random_split(seed: i64) -> i64 {
+//RS     let state = ambient_random_kernel::split(seed).state;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.rngs.push(RngState { state });
+//RS         rt.rngs.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn pack_option_i64(opt: Option<i64>) -> i64 {
+//RS     match opt {
+//RS         Some(h) => h.wrapping_add(1),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn pack_option_float(opt: Option<f64>) -> i64 {
+//RS     match opt {
+//RS         Some(value) => (value.to_bits() as i64).wrapping_add(1),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS // ── Rng handle (MathRandomTime.rs SplitMix64) ────────────────────────────────
+//RS 
+//RS pub(crate) struct RngState {
+//RS     pub(crate) state: u64,
+//RS }
+//RS 
+//RS fn rng_float(r: &mut RngState) -> f64 {
+//RS     seeded_random_kernel::jet_seeded_rng_float(&mut r.state)
+//RS }
+//RS 
+//RS fn rng_int(r: &mut RngState, lo: i64, hi: i64) -> Result<i64, &'static str> {
+//RS     seeded_random_kernel::jet_seeded_rng_int_checked(&mut r.state, lo, hi)
+//RS }
+//RS 
+//RS fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let r = rt
+//RS             .rngs
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit rng: bad handle");
+//RS         f(r)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_new(seed: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.rngs.push(RngState { state: seed as u64 });
+//RS         rt.rngs.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
+//RS     let (lo, hi) = (int_arg(lo), int_arg(hi));
+//RS     let result = Concurrency::with_runtime_mut(|rt| {
+//RS         let r = rt
+//RS             .rngs
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit rng: bad handle");
+//RS         Some(rng_int(r, lo, hi))
+//RS     });
+//RS     match result {
+//RS         Some(Ok(value)) => Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)),
+//RS         Some(Err(message)) => {
+//RS             let report = crate::runtime_host::contract_kernel::jet_runtime_stop_report(
+//RS                 "E3010", "", 0, "", "", 1, 1, message, "",
+//RS             );
+//RS             let rendered = report.rendered;
+//RS             let exit_code = report.exit_code;
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(rendered, exit_code));
+//RS             std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+//RS         }
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_rng_float(handle: i64) -> f64 {
+//RS     with_rng(handle, rng_float)
+//RS }
+//RS 
+//RS fn jet_jit_rng_float_range(handle: i64, low: f64, high: f64) -> f64 {
+//RS     with_rng(handle, |r| {
+//RS         seeded_random_kernel::jet_seeded_rng_float_range(&mut r.state, low, high)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_bool_p(handle: i64, p: f64) -> i8 {
+//RS     with_rng(handle, |r| {
+//RS         i8::from(seeded_random_kernel::jet_seeded_rng_bool_p(&mut r.state, p))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_bool(handle: i64) -> i8 {
+//RS     // Match AOT `jet_rng_bool` / comptime seeded rng: LSB of SplitMix64 next.
+//RS     with_rng(handle, |r| {
+//RS         i8::from(seeded_random_kernel::jet_seeded_rng_bool(&mut r.state))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_normal(handle: i64, mean: f64, stddev: f64) -> f64 {
+//RS     with_rng(handle, |r| {
+//RS         seeded_random_kernel::jet_seeded_rng_normal(&mut r.state, mean, stddev)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_exponential(handle: i64, lambda: f64) -> f64 {
+//RS     with_rng(handle, |r| {
+//RS         seeded_random_kernel::jet_seeded_rng_exponential(&mut r.state, lambda)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
+//RS     if list_is_float(items) {
+//RS         let values =
+//RS             read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
+//RS         let value = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_pick(&mut rng.state, &values)
+//RS         });
+//RS         pack_option_float(value)
+//RS     } else {
+//RS         let values =
+//RS             read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
+//RS         let value = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_pick(&mut rng.state, &values)
+//RS         });
+//RS         pack_option_i64(value)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_rng_shuffle(handle: i64, items: i64) {
+//RS     if list_is_float(items) {
+//RS         let mut values =
+//RS             read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
+//RS         with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_shuffle(&mut rng.state, &mut values)
+//RS         });
+//RS         write_list(items, values, |heap, index, value| {
+//RS             heap.list_set_float(items, index, value)
+//RS         });
+//RS     } else {
+//RS         let mut values =
+//RS             read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
+//RS         with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_shuffle(&mut rng.state, &mut values)
+//RS         });
+//RS         write_list(items, values, |heap, index, value| {
+//RS             heap.list_set_int(items, index, value)
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_rng_weighted_pick(handle: i64, items: i64, weights: i64) -> i64 {
+//RS     let Some(ws) = read_list(weights, |heap, index| heap.list_get_float(weights, index)) else {
+//RS         return pack_option_i64(None);
+//RS     };
+//RS     if list_is_float(items) {
+//RS         let Some(values) = read_list(items, |heap, index| heap.list_get_float(items, index)) else {
+//RS             return pack_option_float(None);
+//RS         };
+//RS         let value = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_weighted_pick(&mut rng.state, &values, &ws)
+//RS         });
+//RS         pack_option_float(value)
+//RS     } else {
+//RS         let Some(values) = read_list(items, |heap, index| heap.list_get_int(items, index)) else {
+//RS             return pack_option_i64(None);
+//RS         };
+//RS         let value = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_weighted_pick(&mut rng.state, &values, &ws)
+//RS         });
+//RS         pack_option_i64(value)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_rng_sample(handle: i64, items: i64, k: i64) -> i64 {
+//RS     if list_is_float(items) {
+//RS         let values =
+//RS             read_list(items, |heap, index| heap.list_get_float(items, index)).unwrap_or_default();
+//RS         let sample = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_sample(&mut rng.state, &values, k)
+//RS         });
+//RS         alloc_list(sample, |heap, list, value| {
+//RS             heap.list_push_float(list, value)
+//RS         })
+//RS     } else {
+//RS         let values =
+//RS             read_list(items, |heap, index| heap.list_get_int(items, index)).unwrap_or_default();
+//RS         let sample = with_rng(handle, |rng| {
+//RS             seeded_random_kernel::jet_seeded_rng_sample(&mut rng.state, &values, k)
+//RS         });
+//RS         alloc_list(sample, |heap, list, value| heap.list_push_int(list, value))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_rng_bytes(handle: i64, n: i64) -> i64 {
+//RS     let n = n.max(0);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         let r = rt
+//RS             .rngs
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit rng bytes: bad handle");
+//RS         for b in seeded_random_kernel::jet_seeded_rng_bytes(&mut r.state, n) {
+//RS             let _ = rt.heap.list_push_int(list, b as i64);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_rng_split(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let state = {
+//RS             let r = rt
+//RS                 .rngs
+//RS                 .get_mut(handle.saturating_sub(1) as usize)
+//RS                 .expect("jit rng split: bad handle");
+//RS             seeded_random_kernel::jet_seeded_rng_split(&mut r.state)
+//RS         };
+//RS         rt.rngs.push(RngState { state });
+//RS         rt.rngs.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) type FakeState = fake_data_kernel::jet_std::Fake;
+//RS 
+//RS fn jet_jit_fake_new(seed: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.fakes.push(fake_data_kernel::jet_testing_fake_new(seed));
+//RS         rt.fakes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_fake_locale(handle: i64, locale: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let locale = rt.heap.clone_string(locale).unwrap_or_default();
+//RS         let next = fake_data_kernel::jet_fake_locale(
+//RS             rt.fakes
+//RS                 .get(handle.saturating_sub(1) as usize)
+//RS                 .expect("jit fake-data: bad handle"),
+//RS             &locale,
+//RS         );
+//RS         rt.fakes.push(next);
+//RS         rt.fakes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_fake_text(handle: i64, draw: fn(&mut FakeState) -> String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let text = draw(
+//RS             rt.fakes
+//RS                 .get_mut(handle.saturating_sub(1) as usize)
+//RS                 .expect("jit fake-data: bad handle"),
+//RS         );
+//RS         rt.heap.alloc_string(text)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_fake_name(handle: i64) -> i64 {
+//RS     jet_jit_fake_text(handle, fake_data_kernel::jet_fake_name)
+//RS }
+//RS 
+//RS fn jet_jit_fake_email(handle: i64) -> i64 {
+//RS     jet_jit_fake_text(handle, fake_data_kernel::jet_fake_email)
+//RS }
+//RS 
+//RS fn jet_jit_fake_host(handle: i64) -> i64 {
+//RS     jet_jit_fake_text(handle, fake_data_kernel::jet_fake_host)
+//RS }
+//RS 
+//RS fn jet_jit_fake_address(handle: i64) -> i64 {
+//RS     jet_jit_fake_text(handle, fake_data_kernel::jet_fake_address)
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct RandomHostFns;
+//RS     register: register_random_symbols;
+//RS     declare: declare_random_host_fns(module) {
+//RS         use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS 
+//RS         let mut sig_void_i64 = Signature::new(cc);
+//RS         sig_void_i64.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_void_i64_i64 = Signature::new(cc);
+//RS         sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_noarg_f64 = Signature::new(cc);
+//RS         sig_noarg_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_i64_i64 = Signature::new(cc);
+//RS         sig_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_i64_i64_i64 = Signature::new(cc);
+//RS         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+//RS         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_rng_fr = Signature::new(cc);
+//RS         sig_rng_fr.params.push(AbiParam::new(types::I64));
+//RS         sig_rng_fr.params.push(AbiParam::new(types::F64));
+//RS         sig_rng_fr.params.push(AbiParam::new(types::F64));
+//RS         sig_rng_fr.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_rng_f = Signature::new(cc);
+//RS         sig_rng_f.params.push(AbiParam::new(types::I64));
+//RS         sig_rng_f.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_rng_exp = Signature::new(cc);
+//RS         sig_rng_exp.params.push(AbiParam::new(types::I64));
+//RS         sig_rng_exp.params.push(AbiParam::new(types::F64));
+//RS         sig_rng_exp.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_rng_bool = Signature::new(cc);
+//RS         sig_rng_bool.params.push(AbiParam::new(types::I64));
+//RS         sig_rng_bool.params.push(AbiParam::new(types::F64));
+//RS         sig_rng_bool.returns.push(AbiParam::new(types::I8));
+//RS         let mut sig_rng_bool_default = Signature::new(cc);
+//RS         sig_rng_bool_default.params.push(AbiParam::new(types::I64));
+//RS         sig_rng_bool_default.returns.push(AbiParam::new(types::I8));
+//RS 
+//RS     }
+//RS     seed: "jet_jit_random_seed" => jet_jit_random_seed: sig_void_i64;
+//RS     float: "jet_jit_random_float" => jet_jit_random_float: sig_noarg_f64;
+//RS     float_prelude: "jet_std_random_float" => jet_jit_random_float: sig_noarg_f64;
+//RS     getrandbits: "jet_jit_random_getrandbits" => jet_jit_random_getrandbits: sig_i64_i64;
+//RS     split: "jet_jit_random_split" => jet_jit_random_split: sig_i64_i64;
+//RS     rng_new: "jet_jit_rng_new" => jet_jit_rng_new: sig_i64_i64;
+//RS     rng_int: "jet_jit_rng_int" => jet_jit_rng_int: sig_i64_i64_i64_i64;
+//RS     rng_float: "jet_jit_rng_float" => jet_jit_rng_float: sig_rng_f;
+//RS     rng_float_range: "jet_jit_rng_float_range" => jet_jit_rng_float_range: sig_rng_fr;
+//RS     rng_bool: "jet_jit_rng_bool" => jet_jit_rng_bool: sig_rng_bool_default;
+//RS     rng_bool_p: "jet_jit_rng_bool_p" => jet_jit_rng_bool_p: sig_rng_bool;
+//RS     rng_normal: "jet_jit_rng_normal" => jet_jit_rng_normal: sig_rng_fr;
+//RS     rng_exponential: "jet_jit_rng_exponential" => jet_jit_rng_exponential: sig_rng_exp;
+//RS     rng_pick: "jet_jit_rng_pick" => jet_jit_rng_pick: sig_i64_i64_i64;
+//RS     rng_shuffle: "jet_jit_rng_shuffle" => jet_jit_rng_shuffle: sig_void_i64_i64;
+//RS     rng_weighted_pick: "jet_jit_rng_weighted_pick" => jet_jit_rng_weighted_pick: sig_i64_i64_i64_i64;
+//RS     rng_sample: "jet_jit_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
+//RS     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
+//RS     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
+//RS     rng_int_prelude: "jet_rng_int" => jet_jit_rng_int: sig_i64_i64_i64_i64;
+//RS     rng_float_prelude: "jet_rng_float" => jet_jit_rng_float: sig_rng_f;
+//RS     rng_float_range_prelude: "jet_rng_float_range" => jet_jit_rng_float_range: sig_rng_fr;
+//RS     rng_bool_prelude: "jet_rng_bool" => jet_jit_rng_bool: sig_rng_bool_default;
+//RS     rng_bool_p_prelude: "jet_rng_bool_p" => jet_jit_rng_bool_p: sig_rng_bool;
+//RS     rng_normal_prelude: "jet_rng_normal" => jet_jit_rng_normal: sig_rng_fr;
+//RS     rng_exponential_prelude: "jet_rng_exponential" => jet_jit_rng_exponential: sig_rng_exp;
+//RS     rng_bytes_prelude: "jet_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
+//RS     rng_split_prelude: "jet_rng_split" => jet_jit_rng_split: sig_i64_i64;
+//RS     rng_pick_prelude: "jet_rng_pick" => jet_jit_rng_pick: sig_i64_i64_i64;
+//RS     rng_weighted_pick_prelude: "jet_rng_weighted_pick" => jet_jit_rng_weighted_pick: sig_i64_i64_i64_i64;
+//RS     rng_sample_prelude: "jet_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
+//RS     rng_shuffle_prelude: "jet_rng_shuffle" => jet_jit_rng_shuffle: sig_void_i64_i64;
+//RS     fake_new: "jet_jit_fake_new" => jet_jit_fake_new: sig_i64_i64;
+//RS     fake_locale: "jet_jit_fake_locale" => jet_jit_fake_locale: sig_i64_i64_i64;
+//RS     fake_name: "jet_jit_fake_name" => jet_jit_fake_name: sig_i64_i64;
+//RS     fake_email: "jet_jit_fake_email" => jet_jit_fake_email: sig_i64_i64;
+//RS     fake_host: "jet_jit_fake_host" => jet_jit_fake_host: sig_i64_i64;
+//RS     fake_address: "jet_jit_fake_address" => jet_jit_fake_address: sig_i64_i64;
+//RS     fake_locale_prelude: "jet_fake_locale" => jet_jit_fake_locale: sig_i64_i64_i64;
+//RS     fake_name_prelude: "jet_fake_name" => jet_jit_fake_name: sig_i64_i64;
+//RS     fake_email_prelude: "jet_fake_email" => jet_jit_fake_email: sig_i64_i64;
+//RS     fake_host_prelude: "jet_fake_host" => jet_jit_fake_host: sig_i64_i64;
+//RS     fake_address_prelude: "jet_fake_address" => jet_jit_fake_address: sig_i64_i64;
+//RS }
+// END-PORT-PENDING 0223 crates/jet-jit/src/Random.rs:1-507
+

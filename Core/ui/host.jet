@@ -35,26 +35,23 @@ pub enum UIFSAccess {
 
 #Error
 pub enum UIHostError {
-    Cancelled
-    Headless
-    Denied
-    Missing
-    InvalidRequest
-    CapabilityUnavailable
-    CapabilityDenied
-    HostFailure
-    ResourceDenied
-    ShortcutConflict
-    QueueFull
+    Cancelled(reason: UICancellation)
+    CapabilityUnavailable(capability: String)
+    CapabilityDenied(capability: UICapability)
+    InvalidRequest(message: String)
+    HostFailure(service: String, message: String)
+    ResourceDenied(message: String)
+    ShortcutConflict(shortcut: UIShortcut, existing_action: String)
+    QueueFull(service: String)
 }
 
 pub struct UICapabilityFact {
     pub capability: UICapability
-    pub available: Bool
+    pub granted: Bool
 }
 
 pub struct UICapabilityFacts {
-    pub facts: [UICapabilityFact]
+    pub bits: U8
 }
 
 pub struct UIFSRights {
@@ -92,8 +89,16 @@ pub struct UIFileDialogSelection {
     pub files: [UIGrantedPath]
 }
 
+pub enum UIShortcutModifier {
+    Control
+    Alt
+    Shift
+    Meta
+    Command
+}
+
 pub struct UIShortcutModifiers {
-    pub bits: Int
+    pub bits: U8
 }
 
 pub struct UIShortcut {
@@ -118,8 +123,25 @@ pub struct UINodeID {
     pub value: String
 }
 
+pub enum UIAccessibilityState {
+    Disabled
+    Busy
+    Expanded(value: Bool)
+    Checked(value: Bool)
+    Selected(value: Bool)
+    Required
+    Value(value: String)
+}
+
+pub struct UIAccessibility {
+    pub name: String?
+    pub description: String?
+    pub states: [UIAccessibilityState]
+}
+
 pub struct UIAccessibilityProjection {
-    pub lines: [String]
+    pub node: UINodeID
+    pub metadata: UIAccessibility
 }
 pub struct UIShortcutBinding {
     pub shortcut: UIShortcut
@@ -144,45 +166,38 @@ pub fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHo
     core.ui.host.save_file(request)
 }
 
-pub fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
-    core.ui.host.open_request(grant)
+pub fn open_request(grant: ^UIFSGrant) -> UIFileDialogRequest Never! {
+    core.ui.runtime.kernel_host_services.open_request(^grant)
 }
 
-pub fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
-    core.ui.host.save_request(grant)
+pub fn save_request(grant: ^UIFSGrant) -> UIFileDialogRequest Never! {
+    core.ui.runtime.kernel_host_services.save_request(^grant)
 }
 
 pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
-    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest)
-    loop extension in extensions {
-        if extension.len() == 0 -> return Err(UIHostError.InvalidRequest)
-    }
-    loop mime in mime_types {
-        if mime.len() == 0 -> return Err(UIHostError.InvalidRequest)
-    }
-    core.ui.host.file_filter(label, extensions, mime_types)
+    core.ui.runtime.kernel_host_services.file_filter(label, extensions, mime_types)
 }
 
 pub fn file_filter_text() -> UIFileFilter Never! {
-    core.ui.host.file_filter_text()
+    core.ui.runtime.kernel_host_services.file_filter_text()
 }
 
 pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
-    if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UIHostError.InvalidRequest)
+    // Empty rights are valid; only lexical path validation can reject construction.
     core.ui.host.fs_grant(path, rights)
 }
 
-pub fn fs_rights_read() -> UIFSRights Never! { core.ui.host.fs_rights_read() }
-pub fn fs_rights_write() -> UIFSRights Never! { core.ui.host.fs_rights_write() }
-pub fn fs_rights_read_write() -> UIFSRights Never! { core.ui.host.fs_rights_read_write() }
+pub fn fs_rights_read() -> UIFSRights Never! { core.ui.runtime.kernel_host_services.fs_rights_read() }
+pub fn fs_rights_write() -> UIFSRights Never! { core.ui.runtime.kernel_host_services.fs_rights_write() }
+pub fn fs_rights_read_write() -> UIFSRights Never! { core.ui.runtime.kernel_host_services.fs_rights_read_write() }
 
 pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
-    if key.trim() == "" -> return Err(UIHostError.InvalidRequest)
-    core.ui.host.shortcut(key, modifiers)
+    core.ui.runtime.kernel_host_services.shortcut(key, modifiers)
 }
 
-pub fn accessibility(role: String, label: String) -[IO]> UIAccessibility UIHostError! {
-    if role.trim() == "" || label.trim() == "" -> return Err(UIHostError.InvalidRequest)
-    core.ui.host.accessibility(role, label)
+pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
+    optional_description := None as String?
+    if description != "" -> optional_description = Val(description)
+    core.ui.runtime.kernel_host_services.accessibility_new(Val(name), optional_description)
 }
 

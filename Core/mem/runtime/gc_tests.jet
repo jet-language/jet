@@ -1,0 +1,225 @@
+// Focused locked-graph policy assertions for __gc_core.rs. These exercise the
+// real portable graph. Payload facts below are a TEST-ONLY native-seam double;
+// they do not prove thread/weak-handle/stop/drop transport or native integration.
+use core.mem.runtime.gc_core as gc_facts
+use core.mem.runtime.gc_core_02 as gc_graph
+
+struct GCTestObject { owners: Int, value: Int }
+
+fn gc_test_id(value: U64) -> gc_facts.GCObjectID Never! { gc_facts.GCObjectID{value: value} }
+fn gc_test_object(value: Int) -> GCTestObject Never! {
+    GCTestObject{owners: 1, value: value}
+}
+fn gc_test_count(object: GCTestObject) -> Int Never! { object.owners }
+fn gc_test_payload_facts() -> gc_graph.GCPayloadFacts<GCTestObject> Never! {
+    gc_graph.GCPayloadFacts<GCTestObject>{strong_count: gc_test_count}
+}
+fn gc_test_sweep(state: &gc_graph.GCState<GCTestObject>) -> gc_graph.GCSweep<GCTestObject> gc_facts.GCFault! {
+    gc_graph.gc_mark_remove(&state, gc_test_payload_facts())
+}
+
+#Test("GC locked graph roots and cycles collect at safepoints") {
+    // gc_collector.rs:9–23, using the real state policy under a held lock.
+    state := gc_graph.gc_state<GCTestObject>(18446744073709551615)
+    a :: gc_test_id(U64{1})
+    b :: gc_test_id(U64{2})
+    gc_graph.gc_insert_allocated(&state, a, gc_test_object(1))
+    gc_graph.gc_insert_allocated(&state, b, gc_test_object(2))
+    gc_graph.gc_replace_edges(&state, a, [gc_facts.GCObjectID]{b}) ?? panic("a edges")
+    gc_graph.gc_replace_edges(&state, b, [gc_facts.GCObjectID]{a}) ?? panic("b edges")
+    before :: gc_test_sweep(&state) ?? panic("before")
+    assert_eq(before.removed.len(), 0)
+    gc_graph.gc_root_release(&state, a)
+    gc_graph.gc_root_release(&state, b)
+    after :: gc_test_sweep(&state) ?? panic("after")
+    assert_eq(after.removed.map(item -> ~item.id), [gc_facts.GCObjectID]{a, b})
+    assert_eq(gc_graph.gc_live_count(state), 0)
+}
+
+#Test("GC locked graph malformed edges leave previous graph intact") {
+    // gc_collector.rs:55–86. Input-cap validation precedes dedup/source checks.
+    state := gc_graph.gc_state<GCTestObject>(18446744073709551615)
+    parent :: gc_test_id(U64{1})
+    old :: gc_test_id(U64{2})
+    missing :: gc_test_id(U64{3})
+    gc_graph.gc_insert_allocated(&state, parent, gc_test_object(7))
+    gc_graph.gc_insert_allocated(&state, old, gc_test_object(9))
+    gc_graph.gc_replace_edges(&state, parent, [gc_facts.GCObjectID]{old}) ?? panic("initial")
+    version :: state.entries[parent.value].version
+    failed := false
+    gc_graph.gc_replace_edges(&state, parent, [gc_facts.GCObjectID]{missing}) ?? {
+        failed = true
+        assert_eq(err, gc_facts.GCFault.UnknownObject(missing))
+        ()
+    }
+    assert(failed)
+    assert_eq(state.entries[parent.value].edges, [gc_facts.GCObjectID]{old})
+    assert_eq(state.entries[parent.value].version, version)
+    oversized := [gc_facts.GCObjectID]{}
+    loop _ in 0..<65537 -> &oversized.push(~parent)
+    capped := false
+    gc_graph.gc_replace_edges(&state, parent, oversized) ?? {
+        capped = true
+        assert_eq(err, gc_facts.GCFault.TooManyEdges{count: 65537, limit: 65536})
+        ()
+    }
+    assert(capped)
+    assert_eq(state.entries[parent.value].version, version)
+}
+
+#Test("GC locked graph reserved rewrites fail closed and rollback unpins") {
+    // gc_collector.rs:214–247 and the graph portion of :251–304.
+    state := gc_graph.gc_state<GCTestObject>(18446744073709551615)
+    old :: gc_test_id(U64{1})
+    new :: gc_test_id(U64{2})
+    parent :: gc_test_id(U64{3})
+    gc_graph.gc_insert_allocated(&state, old, gc_test_object(2))
+    gc_graph.gc_insert_allocated(&state, new, gc_test_object(3))
+    gc_graph.gc_insert_allocated(&state, parent, gc_test_object(1))
+    gc_graph.gc_replace_edges(&state, parent, [gc_facts.GCObjectID]{old}) ?? panic("initial")
+    gc_graph.gc_root_release(&state, old)
+    gc_graph.gc_root_release(&state, new)
+    reservation := gc_graph.gc_reserve_mutation(&state, parent, [gc_facts.GCObjectID]{new}) ?? panic("reserve")
+    conflict := false
+    gc_graph.gc_replace_edges(&state, parent, [gc_facts.GCObjectID]{new}) ?? {
+        conflict = true
+        assert_eq(err, gc_facts.GCFault.MutationConflict(parent))
+        ()
+    }
+    assert(conflict)
+    assert_eq(state.entries[parent.value].edges, [gc_facts.GCObjectID]{old})
+    during :: gc_test_sweep(&state) ?? panic("during")
+    assert_eq(during.removed.len(), 0)
+    assert_eq(during.collection.reachable, 3)
+    gc_graph.gc_rollback_mutation(&state, &reservation)
+    assert(!reservation.active)
+    assert(!state.entries[parent.value].reserved)
+    assert_eq(state.entries[old.value].pins, 0)
+    assert_eq(state.entries[new.value].pins, 0)
+    after :: gc_test_sweep(&state) ?? panic("after")
+    assert_eq(after.removed.map(item -> ~item.id), [gc_facts.GCObjectID]{new})
+    assert_eq(after.collection.reachable, 2)
+    gc_graph.gc_root_release(&state, parent)
+    last :: gc_test_sweep(&state) ?? panic("last")
+    assert_eq(last.removed.map(item -> ~item.id), [gc_facts.GCObjectID]{old, parent})
+}
+
+#Test("GC locked graph retained active parent marks transitive children") {
+    // gc_collector.rs:116–150; native lifetime/thread transport is not mocked.
+    state := gc_graph.gc_state<GCTestObject>(18446744073709551615)
+    parent :: gc_test_id(U64{1})
+    child :: gc_test_id(U64{2})
+    gc_graph.gc_insert_allocated(&state, parent, gc_test_object(3))
+    gc_graph.gc_insert_allocated(&state, child, gc_test_object(4))
+    gc_graph.gc_replace_edges(&state, parent, [gc_facts.GCObjectID]{child}) ?? panic("initial")
+    gc_graph.gc_root_release(&state, parent)
+    gc_graph.gc_root_release(&state, child)
+    state.entries[parent.value].object.owners = 2
+    first :: gc_test_sweep(&state) ?? panic("first")
+    assert_eq(first.removed.len(), 0)
+    assert_eq(first.collection.reachable, 2)
+    assert_eq(first.collection.deferred.len(), 0)
+    state.entries[parent.value].object.owners = 1
+    last :: gc_test_sweep(&state) ?? panic("last")
+    assert_eq(last.removed.map(item -> ~item.id), [gc_facts.GCObjectID]{parent, child})
+}
+
+
+#Test("GC full64 normalization and preflight overflow are lossless") {
+    high :: gc_test_id(U64{18446744073709551615})
+    low :: gc_test_id(U64{1})
+    normalized :: gc_graph.gc_normalize_edges([gc_facts.GCObjectID]{high, low, high}) ?? panic("normalize")
+    assert_eq(normalized, [gc_facts.GCObjectID]{low, high})
+    failed := false
+    gc_graph.gc_next_version(high, high.value) ?? {
+        failed = true
+        assert_eq(err, gc_facts.GCFault.VersionOverflow(high))
+        U64{0}
+    }
+    assert(failed)
+    state := gc_graph.gc_state<GCTestObject>(1)
+    gc_graph.gc_insert_allocated(&state, low, gc_test_object(1))
+    capped := false
+    gc_graph.gc_root_retain(&state, low) ?? {
+        capped = true
+        assert_eq(err, gc_facts.GCFault.RootCountOverflow(low))
+        ()
+    }
+    assert(capped)
+    assert_eq(state.entries[low.value].roots, 1)
+}
+
+#Test("GC Fault text preserves Rust identity and struct debug spelling") {
+    id :: gc_test_id(U64{18446744073709551615})
+    assert_eq(gc_facts.gc_fault_text(gc_facts.GCFault.UnknownObject(id)), "collector invariant failed: UnknownObject(ObjectId(18446744073709551615))")
+    assert_eq(gc_facts.gc_fault_text(gc_facts.GCFault.TooManyEdges{count: 65537, limit: 65536}), "collector invariant failed: TooManyEdges {{ count: 65537, limit: 65536 }}")
+    assert_eq(gc_facts.gc_fault_text(gc_facts.GCFault.TraceIO("bad\n\"path")), "collector invariant failed: TraceIo(\"bad\\n\\\"path\")")
+}
+
+#Test("GC automatic edge slot proposals retain groups and normalize identities") {
+    a :: gc_test_id(U64{1})
+    b :: gc_test_id(U64{2})
+    inputs :: [gc_graph.GCSlotEdge]{
+        gc_graph.GCSlotEdge{slot: "child", group: 2, id: b},
+        gc_graph.GCSlotEdge{slot: "child", group: 2, id: a},
+        gc_graph.GCSlotEdge{slot: "other", group: 0, id: b},
+    }
+    initial :: gc_graph.gc_build_edge_slots(inputs, Val(4))
+    assert_eq(initial["child"].len(), 3)
+    assert_eq(initial["collection"].len(), 4)
+    assert_eq(gc_graph.gc_flatten_edge_slots(initial), [gc_facts.GCObjectID]{a, b})
+    indexed :: gc_graph.gc_edge_slot_index(initial, "child", 0, [gc_facts.GCObjectID]{a})
+    assert_eq(initial["child"][0].len(), 0)
+    assert_eq(indexed["child"][0], [gc_facts.GCObjectID]{a})
+    added :: gc_graph.gc_edge_slot_additive(indexed, "child", [gc_facts.GCObjectID]{b})
+    assert_eq(added["child"].len(), 4)
+    inserted :: gc_graph.gc_edge_slot_insert(added, "child", 99, [gc_facts.GCObjectID]{a})
+    assert_eq(inserted["child"].len(), 5)
+    prepended :: gc_graph.gc_edge_slot_insert(inserted, "child", 0, [gc_facts.GCObjectID]{b})
+    assert_eq(prepended["child"][0], [gc_facts.GCObjectID]{b})
+    removed :: gc_graph.gc_edge_slot_remove(prepended, "child", 0)
+    assert_eq(removed["child"][0], [gc_facts.GCObjectID]{a})
+    popped :: gc_graph.gc_edge_slot_pop(removed, "child")
+    assert_eq(popped["child"].len(), 4)
+    cleared :: gc_graph.gc_edge_slot_replace(popped, "child", [gc_facts.GCObjectID]{})
+    assert(!cleared.has_key("child"))
+    assert(cleared.has_key("collection"))
+}
+
+#Test("GC normalization accepts the exact raw edge boundary without editing input") {
+    id :: gc_test_id(U64{18446744073709551615})
+    edges := [gc_facts.GCObjectID]{}
+    loop _ in 0..<65536 -> &edges.push(~id)
+    normalized :: gc_graph.gc_normalize_edges(edges) ?? panic("boundary")
+    assert_eq(normalized, [gc_facts.GCObjectID]{id})
+    assert_eq(edges.len(), 65536)
+    assert_eq(edges[0], id)
+    empty :: gc_graph.gc_normalize_edges([gc_facts.GCObjectID]{}) ?? panic("empty")
+    assert_eq(empty.len(), 0)
+}
+
+#Test("GC every Fault preserves the original diagnostic spelling") {
+    a :: gc_test_id(U64{1})
+    b :: gc_test_id(U64{2})
+    faults :: [gc_facts.GCFault]{
+        .HeapPoisoned, .IDExhausted, .ObjectLimit,
+        .TooManyEdges{count: 65537, limit: 65536},
+        .UnknownObject(a), .DanglingEdge{from: a, to: b},
+        .RootCountOverflow(a), .PinCountOverflow(a), .MutationConflict(a),
+        .VersionOverflow(a), .PayloadPoisoned(a), .BorrowConflict(a),
+        .TypeMismatch(a), .HeapGone, .TracePoisoned, .TraceIO("bad\n\"path"),
+    }
+    expected :: [String]{
+        "HeapPoisoned", "IdExhausted", "ObjectLimit",
+        "TooManyEdges {{ count: 65537, limit: 65536 }}",
+        "UnknownObject(ObjectId(1))", "DanglingEdge {{ from: ObjectId(1), to: ObjectId(2) }}",
+        "RootCountOverflow(ObjectId(1))", "PinCountOverflow(ObjectId(1))", "MutationConflict(ObjectId(1))",
+        "VersionOverflow(ObjectId(1))", "PayloadPoisoned(ObjectId(1))", "BorrowConflict(ObjectId(1))",
+        "TypeMismatch(ObjectId(1))", "HeapGone", "TracePoisoned", "TraceIo(\"bad\\n\\\"path\")",
+    }
+    assert_eq(faults.len(), expected.len())
+    loop index in 0..<faults.len() {
+        diagnostic :: "collector invariant failed: {expected[index]}"
+        assert_eq(gc_facts.gc_fault_text(faults[index]), diagnostic)
+    }
+}

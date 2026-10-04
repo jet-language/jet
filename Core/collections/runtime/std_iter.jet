@@ -1,0 +1,175 @@
+// PORT-PENDING 0182 crates-jet-codegen-src-prelude-memo-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:1-171
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// Shared zip-family policy. Engines only marshal values into this policy;
+//RS /// length selection, strict mismatch, and padding indexes stay identical.
+//RS fn jet_sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+//RS     match method {
+//RS         "take" | "skip" if value < 0 => Some("sequence count must be nonnegative"),
+//RS         "step_by" if value <= 0 => Some("step_by requires a positive step"),
+//RS         "chunks" if value <= 0 => Some("chunks requires a positive size"),
+//RS         "windows" if value <= 0 => Some("windows requires a positive size"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
+//RS     if lengths.is_empty() {
+//RS         return Some(0);
+//RS     }
+//RS     if mode == 1 && lengths.iter().any(|length| *length != lengths[0]) {
+//RS         return None;
+//RS     }
+//RS     Some(match mode {
+//RS         2 => lengths.iter().copied().max().unwrap_or(0),
+//RS         _ => lengths.iter().copied().min().unwrap_or(0),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_zip_column_index(row: usize, length: usize) -> Option<usize> {
+//RS     (row < length).then_some(row)
+//RS }
+//RS 
+//RS fn jet_zip_fill_at<T: Clone>(
+//RS     fill_mode: u8,
+//RS     common_fills: &[T],
+//RS     column_fills: &[T],
+//RS     default: T,
+//RS     column: usize,
+//RS ) -> T {
+//RS     match fill_mode {
+//RS         1 => common_fills.get(column).cloned().unwrap_or(default),
+//RS         2 => column_fills.get(column).cloned().unwrap_or(default),
+//RS         _ => default,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_zip_rows<T: Clone, Read, Fill>(
+//RS     lengths: &[usize],
+//RS     mode: u8,
+//RS     mut read: Read,
+//RS     mut fill: Fill,
+//RS ) -> Option<Vec<Vec<T>>>
+//RS where
+//RS     Read: FnMut(usize, usize) -> Option<T>,
+//RS     Fill: FnMut(usize) -> T,
+//RS {
+//RS     let row_count = jet_zip_row_count(lengths, mode)?;
+//RS     Some(
+//RS         (0..row_count)
+//RS             .map(|row| {
+//RS                 lengths
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(column, length)| {
+//RS                         jet_zip_column_index(row, *length)
+//RS                             .and_then(|index| read(column, index))
+//RS                             .unwrap_or_else(|| fill(column))
+//RS                     })
+//RS                     .collect()
+//RS             })
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_zip_strict_step<A, B>(left: Option<A>, right: Option<B>) -> Result<Option<(A, B)>, ()> {
+//RS     match (left, right) {
+//RS         (Some(left), Some(right)) => Ok(Some((left, right))),
+//RS         (None, None) => Ok(None),
+//RS         (None, Some(_)) | (Some(_), None) => Err(()),
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_zip_short_step<A, B>(
+//RS     left: Option<A>,
+//RS     right: impl FnOnce() -> Option<B>,
+//RS ) -> Option<(A, B)> {
+//RS     match left {
+//RS         Some(left) => right().map(|right| (left, right)),
+//RS         None => None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_zip_pad_step<A: Clone, B: Clone>(
+//RS     left: Option<A>,
+//RS     right: Option<B>,
+//RS     left_fill: A,
+//RS     right_fill: B,
+//RS ) -> Option<(A, B)> {
+//RS     match (left, right) {
+//RS         (Some(left), Some(right)) => Some((left, right)),
+//RS         (Some(left), None) => Some((left, right_fill)),
+//RS         (None, Some(right)) => Some((left_fill, right)),
+//RS         (None, None) => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Shared predicate count kernel for eager List adapters.
+//RS fn jet_list_count_where_kernel<T, F>(xs: &[T], mut predicate: F) -> i64
+//RS where
+//RS     F: FnMut(&T) -> bool,
+//RS {
+//RS     let mut count = 0_i64;
+//RS     for item in xs {
+//RS         if predicate(item) {
+//RS             count += 1;
+//RS         }
+//RS     }
+//RS     count
+//RS }
+//RS 
+//RS /// Shared first-match replacement kernel for eager List adapters.
+//RS fn jet_list_update_first_kernel<T, F>(
+//RS     xs: &mut Vec<T>,
+//RS     mut predicate: F,
+//RS     replacement: T,
+//RS ) -> bool
+//RS where
+//RS     F: FnMut(&T) -> bool,
+//RS {
+//RS     for index in 0..xs.len() {
+//RS         if predicate(&xs[index]) {
+//RS             xs[index] = replacement;
+//RS             return true;
+//RS         }
+//RS     }
+//RS     false
+//RS }
+//RS 
+//RS /// Error-propagating form used by the reference evaluator's callback ABI.
+//RS pub(crate) fn jet_list_count_where_result_kernel<T, E, F>(
+//RS     xs: &[T],
+//RS     mut predicate: F,
+//RS ) -> Result<i64, E>
+//RS where
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     let mut count = 0_i64;
+//RS     for item in xs {
+//RS         if predicate(item)? {
+//RS             count += 1;
+//RS         }
+//RS     }
+//RS     Ok(count)
+//RS }
+//RS 
+//RS /// Error-propagating first-match replacement kernel for the reference
+//RS /// evaluator. Replacement is moved only after a successful predicate.
+//RS pub(crate) fn jet_list_update_first_result_kernel<T, E, F>(
+//RS     xs: &mut Vec<T>,
+//RS     mut predicate: F,
+//RS     replacement: T,
+//RS ) -> Result<bool, E>
+//RS where
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     for index in 0..xs.len() {
+//RS         if predicate(&xs[index])? {
+//RS             xs[index] = replacement;
+//RS             return Ok(true);
+//RS         }
+//RS     }
+//RS     Ok(false)
+//RS }
+// END-PORT-PENDING 0182 crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs:1-171
+

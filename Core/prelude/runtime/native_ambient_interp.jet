@@ -1,0 +1,2304 @@
+// PORT-PENDING 0240 crates-jet-jit-src-ambient-interp: crates/jet-jit/src/ambient_interp.rs:1-2300
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Canonical typed ambient host context for interpreter/deopt execution.
+//RS //!
+//RS //! The comptime interpreter owns callback storage. This module owns the one
+//RS //! adapter context that composes feature services and installs those callbacks
+//RS //! for a run. Feature modules register function pointers here; they do not
+//RS //! create their own thread-local hooks or reimplement MIR marshalling.
+//RS 
+//RS use std::cell::RefCell;
+//RS use std::collections::HashMap;
+//RS use std::io::{Read, Write};
+//RS use std::net::{TcpListener, TcpStream};
+//RS use std::sync::{Arc, Mutex, MutexGuard};
+//RS 
+//RS use jet_codegen::Comptime::{
+//RS     AmbientCoreCall, AmbientCoreClosureCall, AmbientExternCall, AmbientHandle,
+//RS     AmbientMirExternCall, AmbientMirExternResult, AmbientMirHandle, AmbientMirHandleResult, DevSink,
+//RS };
+//RS use jet_codegen::embedded_hardware::{
+//RS     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
+//RS };
+//RS use jet_foundation::AST::{CtValue, Type};
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::MIR::{
+//RS     MirConstKey, MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
+//RS     MirType,
+//RS     MirTypeKind,
+//RS };
+//RS use jet_foundation::TargetMachine::TargetHardwareFacts;
+//RS fn hardware_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E3001",
+//RS         message.into(),
+//RS         "the interpreter hardware adapter rejected the checked operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS struct InterpreterHardwareHost {
+//RS     profile_id: String,
+//RS     replay: SharedHardwareReplayHost<TargetHardwareFacts>,
+//RS }
+//RS 
+//RS impl InterpreterHardwareHost {
+//RS     fn new(profile_id: impl Into<String>, facts: TargetHardwareFacts) -> Self {
+//RS         Self {
+//RS             profile_id: profile_id.into(),
+//RS             replay: SharedHardwareReplayHost::new(facts),
+//RS         }
+//RS     }
+//RS 
+//RS     fn dispatch(
+//RS         &mut self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         let malformed = |message: &str| Some(Err(hardware_diag(message, span)));
+//RS         match operation {
+//RS             "jet_hardware_setup" => {
+//RS                 if handle.is_some() {
+//RS                     return malformed("interpreter hardware setup received a handle");
+//RS                 }
+//RS                 let [
+//RS                     MirRuntimeValue::String(profile),
+//RS                     MirRuntimeValue::String(setup_kind),
+//RS                     MirRuntimeValue::String(item),
+//RS                     MirRuntimeValue::Int(width_or_vector),
+//RS                     MirRuntimeValue::String(ownership_or_handler),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return malformed("interpreter hardware setup arguments do not match the checked ABI");
+//RS                 };
+//RS                 if profile != &self.profile_id {
+//RS                     return malformed("interpreter hardware setup profile disagrees with checked facts");
+//RS                 }
+//RS                 let status = self.replay.setup(
+//RS                     profile,
+//RS                     setup_kind,
+//RS                     item,
+//RS                     *width_or_vector,
+//RS                     ownership_or_handler,
+//RS                 );
+//RS                 if status == 0 {
+//RS                     Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS                 } else {
+//RS                     malformed("interpreter hardware setup replay rejected checked facts")
+//RS                 }
+//RS             }
+//RS             "jet_hardware_register_read" => {
+//RS                 if handle.is_some() {
+//RS                     return malformed("interpreter hardware register read received a handle");
+//RS                 }
+//RS                 let [
+//RS                     MirRuntimeValue::String(profile),
+//RS                     MirRuntimeValue::String(block),
+//RS                     MirRuntimeValue::String(register),
+//RS                     MirRuntimeValue::Int(width),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return malformed(
+//RS                         "interpreter hardware register read arguments do not match the checked ABI",
+//RS                     );
+//RS                 };
+//RS                 if profile != &self.profile_id {
+//RS                     return malformed(
+//RS                         "interpreter hardware register read profile disagrees with checked facts",
+//RS                     );
+//RS                 }
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Int(
+//RS                     self.replay
+//RS                         .register_read(profile, block, register, *width),
+//RS                 ))))
+//RS             }
+//RS             "jet_hardware_register_write" => {
+//RS                 if handle.is_some() {
+//RS                     return malformed("interpreter hardware register write received a handle");
+//RS                 }
+//RS                 let [
+//RS                     MirRuntimeValue::String(profile),
+//RS                     MirRuntimeValue::String(block),
+//RS                     MirRuntimeValue::String(register),
+//RS                     MirRuntimeValue::Int(width),
+//RS                     MirRuntimeValue::Int(value),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return malformed(
+//RS                         "interpreter hardware register write arguments do not match the checked ABI",
+//RS                     );
+//RS                 };
+//RS                 if profile != &self.profile_id {
+//RS                     return malformed(
+//RS                         "interpreter hardware register write profile disagrees with checked facts",
+//RS                     );
+//RS                 }
+//RS                 let status = self
+//RS                     .replay
+//RS                     .register_write(profile, block, register, *width, *value);
+//RS                 if status == 0 {
+//RS                     Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS                 } else {
+//RS                     malformed("interpreter hardware register write replay rejected checked facts")
+//RS                 }
+//RS             }
+//RS             "jet_hardware_dma_start" => {
+//RS                 if handle.is_some() {
+//RS                     return malformed("interpreter hardware DMA start received a handle");
+//RS                 }
+//RS                 let [
+//RS                     MirRuntimeValue::String(profile),
+//RS                     MirRuntimeValue::String(channel),
+//RS                     MirRuntimeValue::Int(address),
+//RS                     MirRuntimeValue::Int(bytes),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return malformed(
+//RS                         "interpreter hardware DMA start arguments do not match the checked ABI",
+//RS                     );
+//RS                 };
+//RS                 if profile != &self.profile_id {
+//RS                     return malformed(
+//RS                         "interpreter hardware DMA start profile disagrees with checked facts",
+//RS                     );
+//RS                 }
+//RS                 let (Ok(address), Ok(bytes)) = (u64::try_from(*address), u64::try_from(*bytes))
+//RS                 else {
+//RS                     return malformed("interpreter hardware DMA start carrier has a negative address or length");
+//RS                 };
+//RS                 Some(Ok(AmbientMirHandleResult::Handle(
+//RS                     self.replay.dma_start(profile, channel, address, bytes),
+//RS                 )))
+//RS             }
+//RS             "jet_hardware_dma_wait" => {
+//RS                 let Some(token) = handle else {
+//RS                     return malformed("interpreter hardware DMA wait has no transfer token");
+//RS                 };
+//RS                 let [
+//RS                     MirRuntimeValue::String(profile),
+//RS                     MirRuntimeValue::String(channel),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return malformed(
+//RS                         "interpreter hardware DMA wait arguments do not match the checked ABI",
+//RS                     );
+//RS                 };
+//RS                 if profile != &self.profile_id {
+//RS                     return malformed(
+//RS                         "interpreter hardware DMA wait profile disagrees with checked facts",
+//RS                     );
+//RS                 }
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Int(
+//RS                     self.replay.dma_wait(profile, channel, token),
+//RS                 ))))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug)]
+//RS struct InterpreterHttpRoute {
+//RS     method: String,
+//RS     pattern: String,
+//RS     parsed_pattern: crate::net_http_rt::JetHTTPRoutePattern,
+//RS     handler: MirRuntimeValue,
+//RS     handler_param_names: Vec<String>,
+//RS     contract_json: String,
+//RS }
+//RS #[derive(Clone, Debug, Default)]
+//RS struct InterpreterHttpRouter {
+//RS     routes: Vec<InterpreterHttpRoute>,
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct InterpreterHttpPending {
+//RS     stream: TcpStream,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default)]
+//RS struct InterpreterHttpMux {
+//RS     routes: Vec<InterpreterHttpRoute>,
+//RS }
+//RS 
+//RS #[derive(Debug, Default)]
+//RS struct InterpreterHttpTransport {
+//RS     listeners: HashMap<i64, TcpListener>,
+//RS     pending: HashMap<i64, InterpreterHttpPending>,
+//RS     next_listener: i64,
+//RS     next_pending: i64,
+//RS }
+//RS 
+//RS fn http_mux_invocation(
+//RS     route: &InterpreterHttpRoute,
+//RS     request: &MirRuntimeValue,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     let (method, path, _body) = http_route_request(request)?;
+//RS     if !route.method.eq_ignore_ascii_case(method)
+//RS         || !crate::net_http_rt::jet_http_route_matches_path(&route.parsed_pattern, path)
+//RS     {
+//RS         return Err("HTTP mux route was selected for a non-matching request".to_string());
+//RS     }
+//RS     if route.handler_param_names.len() > 1 {
+//RS         return Err("HTTP mux handler accepts at most one request parameter".to_string());
+//RS     }
+//RS     let mut request = request.clone();
+//RS     if let MirRuntimeValue::Struct { fields, .. } = &mut request {
+//RS         let params = crate::net_http_rt::jet_http_route_params_path(&route.parsed_pattern, path)?
+//RS             .into_iter()
+//RS             .map(|(name, value)| (MirConstKey::String(name), MirRuntimeValue::String(value)))
+//RS             .collect();
+//RS         if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "params") {
+//RS             *value = MirRuntimeValue::Map(params);
+//RS         } else {
+//RS             fields.push(("params".to_string(), MirRuntimeValue::Map(params)));
+//RS         }
+//RS     }
+//RS     let args = if route.handler_param_names.is_empty() {
+//RS         Vec::new()
+//RS     } else {
+//RS         vec![request]
+//RS     };
+//RS     Ok(MirRuntimeValue::Struct {
+//RS         type_name: "HTTPRouteInvocation".to_string(),
+//RS         fields: vec![
+//RS             ("handler".to_string(), route.handler.clone()),
+//RS             ("args".to_string(), MirRuntimeValue::List(args)),
+//RS         ],
+//RS     })
+//RS }
+//RS 
+//RS fn http_router_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E2805",
+//RS         message.into(),
+//RS         "the interpreter HTTPRouter adapter rejected the checked route operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS type HttpTree = crate::net_http_rt::jet_std::DataTree;
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct InterpreterHttpParameter {
+//RS     name: String,
+//RS     location: String,
+//RS     required: bool,
+//RS     schema: HttpTree,
+//RS }
+//RS 
+//RS fn http_object(value: &HttpTree) -> Option<&[(String, HttpTree)]> {
+//RS     match value {
+//RS         HttpTree::Object(fields) => Some(fields.as_slice()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn http_field<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a HttpTree> {
+//RS     object
+//RS         .iter()
+//RS         .find_map(|(field, value)| (field == name).then_some(value))
+//RS }
+//RS 
+//RS fn http_text<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a str> {
+//RS     match http_field(object, name)? {
+//RS         HttpTree::Text(value) | HttpTree::TypedText(value) => Some(value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn http_bool(object: &[(String, HttpTree)], name: &str) -> Option<bool> {
+//RS     match http_field(object, name)? {
+//RS         HttpTree::Bool(value) => Some(*value),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn http_request_field<'a>(
+//RS     request: &'a MirRuntimeValue,
+//RS     name: &str,
+//RS ) -> Option<&'a MirRuntimeValue> {
+//RS     match request {
+//RS         MirRuntimeValue::Struct { fields, .. } => {
+//RS             fields.iter().find_map(|(field, value)| (field == name).then_some(value))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn http_decode_query_component(value: &str) -> Result<String, String> {
+//RS     crate::net_http_rt::jet_http_route_decode_path_segment(&value.replace('+', " "))
+//RS         .map(|decoded| decoded.into_owned())
+//RS }
+//RS fn http_query_param(path: &str, name: &str) -> Result<Option<String>, String> {
+//RS     let Some(query) = path.split_once('?').map(|(_, query)| query) else {
+//RS         return Ok(None);
+//RS     };
+//RS     for pair in query.split('&') {
+//RS         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS         let key = http_decode_query_component(raw_key)?;
+//RS         if key != name {
+//RS             continue;
+//RS         }
+//RS         let value = http_decode_query_component(raw_value)?;
+//RS         return Ok(Some(value));
+//RS     }
+//RS     Ok(None)
+//RS }
+//RS 
+//RS fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
+//RS     match value {
+//RS         HttpTree::Null => MirRuntimeValue::Unit,
+//RS         HttpTree::Bool(value) => MirRuntimeValue::Bool(*value),
+//RS         HttpTree::Int(value) => MirRuntimeValue::Int(*value),
+//RS         HttpTree::Float(value) => MirRuntimeValue::Float {
+//RS             value: *value,
+//RS             f32: false,
+//RS         },
+//RS         HttpTree::Number(value) => value
+//RS             .parse::<i64>()
+//RS             .map(MirRuntimeValue::Int)
+//RS             .or_else(|_| value.parse::<f64>().map(|value| MirRuntimeValue::Float {
+//RS                 value,
+//RS                 f32: false,
+//RS             }))
+//RS             .unwrap_or_else(|_| MirRuntimeValue::String(value.clone())),
+//RS         HttpTree::TypedText(value) | HttpTree::Text(value) => {
+//RS             MirRuntimeValue::String(value.clone())
+//RS         }
+//RS         HttpTree::Bytes(value) => MirRuntimeValue::Bytes(value.clone()),
+//RS         HttpTree::Array(values) => {
+//RS             MirRuntimeValue::List(values.iter().map(http_tree_runtime).collect())
+//RS         }
+//RS         HttpTree::Object(fields) => MirRuntimeValue::Struct {
+//RS             type_name: "Body".to_string(),
+//RS             fields: fields
+//RS                 .iter()
+//RS                 .map(|(name, value)| (name.clone(), http_tree_runtime(value)))
+//RS                 .collect(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn http_schema_type<'a>(schema: &'a HttpTree) -> Option<&'a str> {
+//RS     http_object(schema).and_then(|object| http_text(object, "type"))
+//RS }
+//RS 
+//RS fn http_absent(schema: &HttpTree) -> MirRuntimeValue {
+//RS     let kind = match http_schema_type(schema) {
+//RS         Some("integer") => MirTypeKind::Int,
+//RS         Some("number") => MirTypeKind::Float,
+//RS         Some("boolean") => MirTypeKind::Bool,
+//RS         Some("array") => MirTypeKind::List(Box::new(MirType::from_kind(MirTypeKind::String))),
+//RS         Some("object") => MirTypeKind::Map {
+//RS             key: Box::new(MirType::from_kind(MirTypeKind::String)),
+//RS             value: Box::new(MirType::from_kind(MirTypeKind::String)),
+//RS         },
+//RS         _ => MirTypeKind::String,
+//RS     };
+//RS     MirRuntimeValue::Absent {
+//RS         element: MirType::from_kind(kind),
+//RS     }
+//RS }
+//RS 
+//RS fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeValue, String> {
+//RS     let Some(object) = http_object(schema) else {
+//RS         return Err("HTTP route parameter schema is not an object".to_string());
+//RS     };
+//RS     if let Some(nullable) = http_field(object, "nullable") {
+//RS         if matches!(nullable, HttpTree::Bool(true)) && raw == "null" {
+//RS             return Ok(MirRuntimeValue::Unit);
+//RS         }
+//RS     }
+//RS     for key in ["anyOf", "oneOf"] {
+//RS         if let Some(HttpTree::Array(options)) = http_field(object, key) {
+//RS             for option in options {
+//RS                 if let Ok(value) = http_decode_route_value(raw, option) {
+//RS                     return Ok(value);
+//RS                 }
+//RS             }
+//RS             return Err("HTTP route parameter does not match its checked schema".to_string());
+//RS         }
+//RS     }
+//RS     let kind = http_schema_type(schema).unwrap_or("string");
+//RS     let tree = match kind {
+//RS         "string" => HttpTree::Text(raw.to_string()),
+//RS         "integer" => HttpTree::Int(
+//RS             raw.parse::<i64>()
+//RS                 .map_err(|_| "HTTP route integer parameter is invalid".to_string())?,
+//RS         ),
+//RS         "number" => HttpTree::Float(
+//RS             raw.parse::<f64>()
+//RS                 .map_err(|_| "HTTP route number parameter is invalid".to_string())?,
+//RS         ),
+//RS         "boolean" => HttpTree::Bool(match raw {
+//RS             "true" => true,
+//RS             "false" => false,
+//RS             _ => return Err("HTTP route boolean parameter is invalid".to_string()),
+//RS         }),
+//RS         "null" => {
+//RS             if raw != "null" {
+//RS                 return Err("HTTP route null parameter is invalid".to_string());
+//RS             }
+//RS             HttpTree::Null
+//RS         }
+//RS         "array" | "object" => crate::net_http_rt::jet_std::parse_json_typed_datatree(raw)
+//RS             .map_err(|_| "HTTP route structured parameter is invalid JSON".to_string())?,
+//RS         _ => crate::net_http_rt::jet_std::parse_json_typed_datatree(raw)
+//RS             .unwrap_or_else(|_| HttpTree::Text(raw.to_string())),
+//RS     };
+//RS     if !crate::net_http_rt::jet_http_route_schema_matches(&tree, schema) {
+//RS         return Err("HTTP route parameter does not match its checked schema".to_string());
+//RS     }
+//RS     Ok(http_tree_runtime(&tree))
+//RS }
+//RS 
+//RS fn http_contract_parts(
+//RS     contract_json: &str,
+//RS ) -> Result<(Vec<InterpreterHttpParameter>, Option<(bool, HttpTree)>), String> {
+//RS     let contract = crate::net_http_rt::jet_std::parse_json_typed_datatree(contract_json)
+//RS         .map_err(|_| "HTTP route contract is not valid JSON".to_string())?;
+//RS     let object = http_object(&contract)
+//RS         .ok_or_else(|| "HTTP route contract is not a JSON object".to_string())?;
+//RS     for field in [
+//RS         "method",
+//RS         "pattern",
+//RS         "path",
+//RS         "operation_id",
+//RS         "summary",
+//RS         "parameters",
+//RS         "request_body",
+//RS         "responses",
+//RS         "security",
+//RS         "provenance",
+//RS     ] {
+//RS         if http_field(object, field).is_none() {
+//RS             return Err("HTTP route contract is incomplete".to_string());
+//RS         }
+//RS     }
+//RS     let Some(HttpTree::Array(responses)) = http_field(object, "responses") else {
+//RS         return Err("HTTP route contract responses are not an array".to_string());
+//RS     };
+//RS     if responses.is_empty() {
+//RS         return Err("HTTP route contract has no responses".to_string());
+//RS     }
+//RS     if !matches!(http_field(object, "security"), Some(HttpTree::Array(_))) {
+//RS         return Err("HTTP route contract security is not an array".to_string());
+//RS     }
+//RS     match http_field(object, "request_body") {
+//RS         Some(HttpTree::Null) => {}
+//RS         Some(value) => {
+//RS             let body = http_object(value)
+//RS                 .ok_or_else(|| "HTTP route request body is not an object".to_string())?;
+//RS             if http_bool(body, "required").is_none()
+//RS                 || http_text(body, "content_type").is_none_or(|value| value.is_empty())
+//RS                 || !http_field(body, "schema").is_some_and(|schema| http_object(schema).is_some())
+//RS             {
+//RS                 return Err("HTTP route request body is incomplete".to_string());
+//RS             }
+//RS         }
+//RS         None => return Err("HTTP route contract has no request body field".to_string()),
+//RS     }
+//RS     let parameters = match http_field(object, "parameters") {
+//RS         Some(HttpTree::Array(items)) => items
+//RS             .iter()
+//RS             .map(|item| {
+//RS                 let item = http_object(item)
+//RS                     .ok_or_else(|| "HTTP route contract parameter is not an object".to_string())?;
+//RS                 let name = http_text(item, "name")
+//RS                     .ok_or_else(|| "HTTP route contract parameter has no name".to_string())?;
+//RS                 let location = http_text(item, "in")
+//RS                     .ok_or_else(|| "HTTP route contract parameter has no location".to_string())?;
+//RS                 let required = http_bool(item, "required")
+//RS                     .ok_or_else(|| "HTTP route contract parameter has no required flag".to_string())?;
+//RS                 let schema = http_field(item, "schema")
+//RS                     .cloned()
+//RS                     .ok_or_else(|| "HTTP route contract parameter has no schema".to_string())?;
+//RS                 Ok(InterpreterHttpParameter {
+//RS                     name: name.to_string(),
+//RS                     location: location.to_string(),
+//RS                     required,
+//RS                     schema,
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, String>>()?,
+//RS         _ => return Err("HTTP route contract parameters are not an array".to_string()),
+//RS     };
+//RS     let request_body = match http_field(object, "request_body") {
+//RS         None | Some(HttpTree::Null) => None,
+//RS         Some(value) => {
+//RS             let body = http_object(value)
+//RS                 .ok_or_else(|| "HTTP route request body is not an object".to_string())?;
+//RS             let required = http_bool(body, "required")
+//RS                 .ok_or_else(|| "HTTP route request body has no required flag".to_string())?;
+//RS 
+//RS             let schema = http_field(body, "schema")
+//RS                 .cloned()
+//RS                 .ok_or_else(|| "HTTP route request body has no schema".to_string())?;
+//RS             Some((required, schema))
+//RS         }
+//RS     };
+//RS     Ok((parameters, request_body))
+//RS }
+//RS 
+//RS fn http_route_request(
+//RS     request: &MirRuntimeValue,
+//RS ) -> Result<(&str, &str, &[u8]), String> {
+//RS     let method = match http_request_field(request, "method") {
+//RS         Some(MirRuntimeValue::String(value)) => value.as_str(),
+//RS         _ => return Err("HTTP route request has no method".to_string()),
+//RS     };
+//RS     let path = match http_request_field(request, "path") {
+//RS         Some(MirRuntimeValue::String(value)) => value.as_str(),
+//RS         _ => return Err("HTTP route request has no path".to_string()),
+//RS     };
+//RS     let body = match http_request_field(request, "body") {
+//RS         Some(MirRuntimeValue::Bytes(value)) => value.as_slice(),
+//RS         Some(MirRuntimeValue::String(value)) => value.as_bytes(),
+//RS         _ => return Err("HTTP route request has no body".to_string()),
+//RS     };
+//RS     Ok((method, path, body))
+//RS }
+//RS fn http_response(status: i64, body: &str) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Struct {
+//RS         type_name: "HTTPResponse".to_string(),
+//RS         fields: vec![
+//RS             ("status".to_string(), MirRuntimeValue::Int(status)),
+//RS             (
+//RS                 "version".to_string(),
+//RS                 MirRuntimeValue::String("HTTP/1.1".to_string()),
+//RS             ),
+//RS             (
+//RS                 "headers".to_string(),
+//RS                 MirRuntimeValue::Struct {
+//RS                     type_name: "Headers".to_string(),
+//RS                     fields: Vec::new(),
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "body".to_string(),
+//RS                 MirRuntimeValue::Struct {
+//RS                     type_name: "Body".to_string(),
+//RS                     fields: vec![(
+//RS                         "bytes".to_string(),
+//RS                         MirRuntimeValue::Bytes(body.as_bytes().to_vec()),
+//RS                     )],
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "trailers".to_string(),
+//RS                 MirRuntimeValue::Struct {
+//RS                     type_name: "Headers".to_string(),
+//RS                     fields: Vec::new(),
+//RS                 },
+//RS             ),
+//RS             (
+//RS                 "protocol".to_string(),
+//RS                 MirRuntimeValue::String("HTTP/1.1".to_string()),
+//RS             ),
+//RS             (
+//RS                 "remote_address".to_string(),
+//RS                 MirRuntimeValue::String(String::new()),
+//RS             ),
+//RS             (
+//RS                 "redirect_history".to_string(),
+//RS                 MirRuntimeValue::List(Vec::new()),
+//RS             ),
+//RS             ("timings_ms".to_string(), MirRuntimeValue::List(Vec::new())),
+//RS             ("reused_connection".to_string(), MirRuntimeValue::Bool(false)),
+//RS             (
+//RS                 "raw_content_encoding".to_string(),
+//RS                 MirRuntimeValue::Absent {
+//RS                     element: MirType::from_kind(MirTypeKind::String),
+//RS                 },
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS fn http_route_error_response(error: &str) -> MirRuntimeValue {
+//RS     let body = if error.contains("request body") {
+//RS         "invalid request body"
+//RS     } else if error.contains("selected for a non-matching request") {
+//RS         "400 bad request"
+//RS     } else {
+//RS         "invalid route parameter"
+//RS     };
+//RS     http_response(400, body)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn http_parse_request_carrier(raw: &str) -> MirRuntimeValue {
+//RS     let (method, path, headers, body) =
+//RS         crate::net_http_rt::jet_http_parse_request_carrier(raw);
+//RS     MirRuntimeValue::Struct {
+//RS         type_name: "HTTPRequest".to_string(),
+//RS         fields: vec![
+//RS             ("method".to_string(), MirRuntimeValue::String(method)),
+//RS             ("path".to_string(), MirRuntimeValue::String(path)),
+//RS             (
+//RS                 "headers".to_string(),
+//RS                 MirRuntimeValue::Map(
+//RS                     headers
+//RS                         .into_iter()
+//RS                         .map(|(key, value)| {
+//RS                             (MirConstKey::String(key), MirRuntimeValue::String(value))
+//RS                         })
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             ("body".to_string(), MirRuntimeValue::Bytes(body)),
+//RS         ],
+//RS     }
+//RS }
+//RS fn http_read_one(stream: &mut TcpStream) -> Result<String, String> {
+//RS     let mut bytes = Vec::new();
+//RS     let mut chunk = [0u8; 4096];
+//RS     let header_end;
+//RS     loop {
+//RS         let count = stream.read(&mut chunk).map_err(|error| format!("HTTP read failed: {error}"))?;
+//RS         if count == 0 {
+//RS             return Err("HTTP request ended before headers".to_string());
+//RS         }
+//RS         bytes.extend_from_slice(&chunk[..count]);
+//RS         if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+//RS             header_end = index + 4;
+//RS             break;
+//RS         }
+//RS         if bytes.len() > 32 * 1024 {
+//RS             return Err("HTTP request headers are too large".to_string());
+//RS         }
+//RS     }
+//RS     let head = std::str::from_utf8(&bytes[..header_end])
+//RS         .map_err(|_| "HTTP request headers are not UTF-8".to_string())?;
+//RS     let content_length = head
+//RS         .lines()
+//RS         .find_map(|line| {
+//RS             let (name, value) = line.split_once(':')?;
+//RS             name.eq_ignore_ascii_case("content-length")
+//RS                 .then(|| value.trim().parse::<usize>().ok())
+//RS                 .flatten()
+//RS         })
+//RS         .unwrap_or(0);
+//RS     let total = header_end.saturating_add(content_length);
+//RS     while bytes.len() < total {
+//RS         let count = stream.read(&mut chunk).map_err(|error| format!("HTTP body read failed: {error}"))?;
+//RS         if count == 0 {
+//RS             return Err("HTTP request ended before its body".to_string());
+//RS         }
+//RS         bytes.extend_from_slice(&chunk[..count]);
+//RS     }
+//RS     String::from_utf8(bytes).map_err(|_| "HTTP request is not UTF-8".to_string())
+//RS }
+//RS fn http_client_send(request: &MirRuntimeValue) -> Result<MirRuntimeValue, String> {
+//RS     let method = match http_request_field(request, "method") {
+//RS         Some(MirRuntimeValue::String(value)) => value,
+//RS         _ => return Err("HTTP client request has no method".to_string()),
+//RS     };
+//RS     let url = match http_request_field(request, "url") {
+//RS         Some(MirRuntimeValue::String(value)) => value,
+//RS         _ => return Err("HTTP client request has no URL".to_string()),
+//RS     };
+//RS     let authority_and_path = url
+//RS         .strip_prefix("http://")
+//RS         .ok_or_else(|| "interpreter HTTP client requires an http:// URL".to_string())?;
+//RS     let (authority, path) = authority_and_path
+//RS         .split_once('/')
+//RS         .map(|(authority, path)| (authority, format!("/{path}")))
+//RS         .unwrap_or((authority_and_path, "/".to_string()));
+//RS     let address = if authority.contains(':') {
+//RS         authority.to_string()
+//RS     } else {
+//RS         format!("{authority}:80")
+//RS     };
+//RS     let body = match http_request_field(request, "body") {
+//RS         Some(MirRuntimeValue::Bytes(value)) => value.clone(),
+//RS         Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+//RS         Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+//RS             return Err("HTTP request body cannot carry a native runtime resource".to_string());
+//RS         }
+//RS         _ => Vec::new(),
+//RS     };
+//RS     let mut wire = format!(
+//RS         "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nContent-Length: {}\r\nConnection: close\r\n",
+//RS         body.len()
+//RS     )
+//RS     .into_bytes();
+//RS     if let Some(MirRuntimeValue::Map(headers)) = http_request_field(request, "headers") {
+//RS         for (name, value) in headers {
+//RS             match (name, value) {
+//RS                 (MirConstKey::String(name), MirRuntimeValue::String(value)) => {
+//RS                     wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+//RS                 }
+//RS                 (_, MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+//RS                     return Err(
+//RS                         "HTTP request headers cannot carry a native runtime resource".to_string()
+//RS                     );
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     wire.extend_from_slice(b"\r\n");
+//RS     wire.extend_from_slice(&body);
+//RS     let mut stream =
+//RS         TcpStream::connect(address).map_err(|error| format!("HTTP connect failed: {error}"))?;
+//RS     stream
+//RS         .write_all(&wire)
+//RS         .map_err(|error| format!("HTTP write failed: {error}"))?;
+//RS     let raw = http_read_one(&mut stream)?;
+//RS     let (head, body) = raw
+//RS         .split_once("\r\n\r\n")
+//RS         .ok_or_else(|| "HTTP response has no header terminator".to_string())?;
+//RS     let status = head
+//RS         .lines()
+//RS         .next()
+//RS         .and_then(|line| line.split_whitespace().nth(1))
+//RS         .and_then(|status| status.parse::<i64>().ok())
+//RS         .ok_or_else(|| "HTTP response has no valid status".to_string())?;
+//RS     Ok(http_response(status, body))
+//RS }
+//RS 
+//RS fn http_response_wire(response: &MirRuntimeValue) -> Result<Vec<u8>, String> {
+//RS     let status = match http_request_field(response, "status") {
+//RS         Some(MirRuntimeValue::Int(value)) => *value,
+//RS         _ => return Err("HTTP handler returned a response without status".to_string()),
+//RS     };
+//RS     let body = match http_request_field(response, "body") {
+//RS         Some(MirRuntimeValue::Struct { fields, .. }) => match http_field_runtime(fields, "bytes") {
+//RS             Some(MirRuntimeValue::Bytes(value)) => value.clone(),
+//RS             Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+//RS             Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+//RS                 return Err("HTTP response body cannot carry a native runtime resource".to_string());
+//RS             }
+//RS             _ => Vec::new(),
+//RS         },
+//RS         Some(MirRuntimeValue::Bytes(value)) => value.clone(),
+//RS         Some(MirRuntimeValue::String(value)) => value.as_bytes().to_vec(),
+//RS         Some(MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_)) => {
+//RS             return Err("HTTP response body cannot carry a native runtime resource".to_string());
+//RS         }
+//RS         _ => Vec::new(),
+//RS     };
+//RS     let reason = match status {
+//RS         200 => "OK",
+//RS         400 => "Bad Request",
+//RS         404 => "Not Found",
+//RS         405 => "Method Not Allowed",
+//RS         500 => "Internal Server Error",
+//RS         _ => "OK",
+//RS     };
+//RS     let mut wire = format!(
+//RS         "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n",
+//RS         body.len()
+//RS     )
+//RS     .into_bytes();
+//RS     if let Some(MirRuntimeValue::Struct { fields, .. }) = http_request_field(response, "headers") {
+//RS         for (name, value) in fields {
+//RS             match value {
+//RS                 MirRuntimeValue::String(value) => {
+//RS                     wire.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+//RS                 }
+//RS                 MirRuntimeValue::NativeCursor(_) | MirRuntimeValue::NativeOwned(_) => {
+//RS                     return Err(
+//RS                         "HTTP response headers cannot carry a native runtime resource".to_string()
+//RS                     );
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS     }
+//RS     wire.extend_from_slice(b"\r\n");
+//RS     wire.extend_from_slice(&body);
+//RS     Ok(wire)
+//RS }
+//RS 
+//RS fn http_field_runtime<'a>(
+//RS     fields: &'a [(String, MirRuntimeValue)],
+//RS     name: &str,
+//RS ) -> Option<&'a MirRuntimeValue> {
+//RS     fields.iter().find_map(|(field, value)| (field == name).then_some(value))
+//RS }
+//RS 
+//RS fn http_route_invocation(
+//RS     route: &InterpreterHttpRoute,
+//RS     request: &MirRuntimeValue,
+//RS ) -> Result<MirRuntimeValue, String> {
+//RS     let (method, path, body) = http_route_request(request)?;
+//RS     if !route.method.eq_ignore_ascii_case(method)
+//RS         || !crate::net_http_rt::jet_http_route_matches_path(&route.parsed_pattern, path)
+//RS     {
+//RS         return Err("HTTP route was selected for a non-matching request".to_string());
+//RS     }
+//RS     let path_params =
+//RS         crate::net_http_rt::jet_http_route_params_path(&route.parsed_pattern, path)?;
+//RS     let (parameters, request_body) = http_contract_parts(&route.contract_json)?;
+//RS     if let Some((required, schema)) = request_body {
+//RS         if body.is_empty() {
+//RS             if required {
+//RS                 return Err("HTTP route request body is required".to_string());
+//RS             }
+//RS         } else {
+//RS             let text = std::str::from_utf8(body)
+//RS                 .map_err(|_| "HTTP route request body is not UTF-8".to_string())?;
+//RS             let tree = crate::net_http_rt::jet_std::parse_json_typed_datatree(text)
+//RS                 .map_err(|_| "HTTP route request body is invalid JSON".to_string())?;
+//RS             if !crate::net_http_rt::jet_http_route_schema_matches(&tree, &schema) {
+//RS                 return Err("HTTP route request body does not match its checked schema".to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     let mut args = Vec::with_capacity(route.handler_param_names.len());
+//RS     let mut request_seen = false;
+//RS     for name in &route.handler_param_names {
+//RS         let parameter = parameters.iter().find(|parameter| &parameter.name == name);
+//RS         let Some(parameter) = parameter else {
+//RS             if request_seen {
+//RS                 return Err("HTTP route has more than one unbound handler parameter".to_string());
+//RS             }
+//RS             request_seen = true;
+//RS             args.push(request.clone());
+//RS             continue;
+//RS         };
+//RS         let raw = match parameter.location.as_str() {
+//RS             "path" => path_params.get(name).cloned(),
+//RS             "query" => http_query_param(path, name)?,
+//RS             _ => None,
+//RS         };
+//RS         let Some(raw) = raw else {
+//RS             if parameter.required {
+//RS                 return Err(format!("HTTP route parameter `{name}` is missing"));
+//RS             }
+//RS             args.push(http_absent(&parameter.schema));
+//RS             continue;
+//RS         };
+//RS         let value = http_decode_route_value(&raw, &parameter.schema)?;
+//RS         args.push(if parameter.required {
+//RS             value
+//RS         } else {
+//RS             MirRuntimeValue::Present(Box::new(value))
+//RS         });
+//RS     }
+//RS     Ok(MirRuntimeValue::Struct {
+//RS         type_name: "HTTPRouteInvocation".to_string(),
+//RS         fields: vec![
+//RS             ("handler".to_string(), route.handler.clone()),
+//RS             ("args".to_string(), MirRuntimeValue::List(args)),
+//RS         ],
+//RS     })
+//RS }
+//RS 
+//RS /// One lazy interpreter line source remains associated with its cursor until
+//RS /// explicit close or ambient scope teardown. Each call reads at most one line.
+//RS enum InterpreterLineReader {
+//RS     Stdin,
+//RS }
+//RS 
+//RS impl InterpreterLineReader {
+//RS     fn stdin() -> Self {
+//RS         Self::Stdin
+//RS     }
+//RS 
+//RS     fn next(&mut self) -> Result<Option<String>, String> {
+//RS         if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+//RS             return Err("fault injected: IO.Read".to_string());
+//RS         }
+//RS         crate::IO::term_prelude::jet_term_read_stdin_line()
+//RS             .map_err(|error| format!("read stdin: {error}"))
+//RS             .map(|line| match line {
+//RS                 crate::IO::term_prelude::JetTermRead::Line(line) => Some(line),
+//RS                 crate::IO::term_prelude::JetTermRead::EndOfInput => None,
+//RS             })
+//RS     }
+//RS }
+//RS 
+//RS fn line_reader_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter line-reader adapter rejected the checked operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn mir_absent_string() -> MirRuntimeValue {
+//RS     MirRuntimeValue::Absent {
+//RS         element: MirType::from_kind(MirTypeKind::String),
+//RS     }
+//RS }
+//RS 
+//RS /// Typed callback collection and resident typed handles for one interpreter
+//RS /// or deopt scope.
+//RS #[derive(Default)]
+//RS struct InterpreterAmbientState {
+//RS     core_calls: Vec<AmbientCoreCall>,
+//RS     core_closure_calls: Vec<AmbientCoreClosureCall>,
+//RS     handles: Vec<AmbientHandle>,
+//RS     extern_calls: Vec<AmbientExternCall>,
+//RS     mir_extern_calls: Vec<AmbientMirExternCall>,
+//RS     mir_handles: Vec<AmbientMirHandle>,
+//RS     line_readers: HashMap<i64, InterpreterLineReader>,
+//RS     next_line_reader: i64,
+//RS     http_routers: HashMap<i64, InterpreterHttpRouter>,
+//RS     next_http_router: i64,
+//RS     http_muxes: HashMap<i64, InterpreterHttpMux>,
+//RS     next_http_mux: i64,
+//RS     http_transport: InterpreterHttpTransport,
+//RS     hardware_host: Option<InterpreterHardwareHost>,
+//RS }
+//RS /// Typed callback collection and resident typed handles for one interpreter
+//RS /// or deopt scope.
+//RS #[derive(Clone, Default)]
+//RS pub struct InterpreterAmbientContext {
+//RS     state: Arc<Mutex<InterpreterAmbientState>>,
+//RS }
+//RS 
+//RS impl InterpreterAmbientContext {
+//RS     fn state(&self) -> MutexGuard<'_, InterpreterAmbientState> {
+//RS         self.state.lock().expect("interpreter ambient state poisoned")
+//RS     }
+//RS 
+//RS     /// Register a typed plain Core-call adapter.
+//RS     pub fn register_core_call(&mut self, callback: AmbientCoreCall) {
+//RS         self.state().core_calls.push(callback);
+//RS     }
+//RS 
+//RS     /// Register a typed closure-taking Core-call adapter.
+//RS     pub fn register_core_closure_call(&mut self, callback: AmbientCoreClosureCall) {
+//RS         self.state().core_closure_calls.push(callback);
+//RS     }
+//RS 
+//RS     /// Register a typed receiver/handle adapter.
+//RS     pub fn register_handle(&mut self, callback: AmbientHandle) {
+//RS         self.state().handles.push(callback);
+//RS     }
+//RS 
+//RS     /// Register a typed canonical MIR foreign adapter.
+//RS     pub fn register_mir_extern(&mut self, callback: AmbientMirExternCall) {
+//RS         self.state().mir_extern_calls.push(callback);
+//RS     }
+//RS 
+//RS     /// Register a typed MIR handle operation adapter.
+//RS     pub fn register_mir_handle(&mut self, callback: AmbientMirHandle) {
+//RS         self.state().mir_handles.push(callback);
+//RS     }
+//RS 
+//RS     /// Install the selected checked target profile for interpreter hardware
+//RS     /// operations. The replay host is scoped to this ambient run.
+//RS     pub fn register_hardware_host(
+//RS         &mut self,
+//RS         profile_id: impl Into<String>,
+//RS         facts: TargetHardwareFacts,
+//RS     ) {
+//RS         self.state().hardware_host = Some(InterpreterHardwareHost::new(profile_id, facts));
+//RS     }
+//RS 
+//RS     fn core_call(&self, index: usize) -> Option<AmbientCoreCall> {
+//RS         self.state().core_calls.get(index).copied()
+//RS     }
+//RS 
+//RS     fn core_closure_call(&self, index: usize) -> Option<AmbientCoreClosureCall> {
+//RS         self.state().core_closure_calls.get(index).copied()
+//RS     }
+//RS 
+//RS     fn handle(&self, index: usize) -> Option<AmbientHandle> {
+//RS         self.state().handles.get(index).copied()
+//RS     }
+//RS 
+//RS     fn extern_call(&self, index: usize) -> Option<AmbientExternCall> {
+//RS         self.state().extern_calls.get(index).copied()
+//RS     }
+//RS 
+//RS     fn mir_extern_call(&self, index: usize) -> Option<AmbientMirExternCall> {
+//RS         self.state().mir_extern_calls.get(index).copied()
+//RS     }
+//RS 
+//RS     fn mir_handle(&self, index: usize) -> Option<AmbientMirHandle> {
+//RS         self.state().mir_handles.get(index).copied()
+//RS     }
+//RS 
+//RS     fn mir_hardware(
+//RS         &self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         let mut host = {
+//RS             let mut state = self.state();
+//RS             state.hardware_host.take()?
+//RS         };
+//RS         let result = host.dispatch(operation, handle, args, span);
+//RS         self.state().hardware_host = Some(host);
+//RS         result
+//RS     }
+//RS     fn mir_lines(
+//RS         &self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         if operation == "loop.lines.next" {
+//RS             let Some(handle) = handle else {
+//RS                 return Some(Err(line_reader_diag(
+//RS                     "line iterator next has no typed reader handle",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             if !args.is_empty() {
+//RS                 return Some(Err(line_reader_diag(
+//RS                     "line iterator next received unexpected arguments",
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let Some(mut reader) = self.state().line_readers.remove(&handle) else {
+//RS                 return Some(Err(line_reader_diag(
+//RS                     "line iterator next used an unknown interpreter handle",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             let result = reader.next();
+//RS             self.state().line_readers.insert(handle, reader);
+//RS             return Some(match result {
+//RS                 Ok(Some(line)) => Ok(AmbientMirHandleResult::Value(
+//RS                     MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(line))),
+//RS                 )),
+//RS                 Ok(None) => Ok(AmbientMirHandleResult::Value(mir_absent_string())),
+//RS                 Err(error) => Err(line_reader_diag(error, span)),
+//RS             });
+//RS         }
+//RS         self.state().mir_lines(operation, handle, args, span)
+//RS     }
+//RS 
+//RS     fn mir_http_router(
+//RS         &self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         if operation == "http_router.openapi" {
+//RS             let Some(handle) = handle else {
+//RS                 return Some(Err(http_router_diag(
+//RS                     "HTTPRouter OpenAPI export has no typed router receiver",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             if !args.is_empty() {
+//RS                 return Some(Err(http_router_diag(
+//RS                     "HTTPRouter OpenAPI export received unexpected arguments",
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let routes = {
+//RS                 let state = self.state();
+//RS                 let Some(router) = state.http_routers.get(&handle) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter OpenAPI export used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 router
+//RS                     .routes
+//RS                     .iter()
+//RS                     .map(|route| {
+//RS                         (
+//RS                             route.method.clone(),
+//RS                             route.pattern.clone(),
+//RS                             route.contract_json.clone(),
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS             };
+//RS             return Some(match crate::Web::web_rt::jet_web_openapi_from_contracts(&routes) {
+//RS                 Ok(document) => Ok(AmbientMirHandleResult::Value(
+//RS                     MirRuntimeValue::String(document),
+//RS                 )),
+//RS                 Err(error) => Err(http_router_diag(error, span)),
+//RS             });
+//RS         }
+//RS         self.state().mir_http_router(operation, handle, args, span)
+//RS     }
+//RS 
+//RS     fn mir_http_serve_once(
+//RS         &self,
+//RS         handle: Option<i64>,
+//RS         args: &[MirRuntimeValue],
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         let Some(listener_id) = handle else {
+//RS             return Some(Err(http_router_diag("HTTP serve has no listener handle", span)));
+//RS         };
+//RS         let [MirRuntimeValue::Int(mux_id)] = args else {
+//RS             return Some(Err(http_router_diag("HTTP serve expects one mux handle", span)));
+//RS         };
+//RS         let listener = {
+//RS             let state = self.state();
+//RS             let Some(listener) = state.http_transport.listeners.get(&listener_id) else {
+//RS                 return Some(Err(http_router_diag("HTTP serve used an unknown listener", span)));
+//RS             };
+//RS             match listener.try_clone() {
+//RS                 Ok(listener) => listener,
+//RS                 Err(error) => {
+//RS                     return Some(Err(http_router_diag(
+//RS                         format!("HTTP listener clone failed: {error}"),
+//RS                         span,
+//RS                     )))
+//RS                 }
+//RS             }
+//RS         };
+//RS         let (mut stream, _) = loop {
+//RS             match listener.accept() {
+//RS                 Ok(connection) => break connection,
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                     std::thread::sleep(std::time::Duration::from_millis(1));
+//RS                 }
+//RS                 Err(error) => {
+//RS                     return Some(Err(http_router_diag(
+//RS                         format!("HTTP accept failed: {error}"),
+//RS                         span,
+//RS                     )))
+//RS                 }
+//RS             }
+//RS         };
+//RS         let raw = match http_read_one(&mut stream) {
+//RS             Ok(raw) => raw,
+//RS             Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS         };
+//RS         let request = http_parse_request_carrier(&raw);
+//RS         let mut state = self.state();
+//RS         let dispatch =
+//RS             state.mir_http_mux("http_mux.dispatch", Some(*mux_id), vec![request], span)?;
+//RS         match dispatch {
+//RS             Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Struct {
+//RS                 mut fields, ..
+//RS             })) => {
+//RS                 let pending = state.http_transport.next_pending.max(1);
+//RS                 state.http_transport.next_pending = pending.saturating_add(1).max(1);
+//RS                 fields.push(("__stream".to_string(), MirRuntimeValue::Int(pending)));
+//RS                 state
+//RS                     .http_transport
+//RS                     .pending
+//RS                     .insert(pending, InterpreterHttpPending { stream });
+//RS                 Some(Ok(AmbientMirHandleResult::Value(
+//RS                     MirRuntimeValue::Struct {
+//RS                         type_name: "HTTPRouteInvocation".to_string(),
+//RS                         fields,
+//RS                     },
+//RS                 )))
+//RS             }
+//RS             Ok(AmbientMirHandleResult::Value(response)) => {
+//RS                 let wire = http_response_wire(&response).unwrap_or_else(|_| {
+//RS                     b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+//RS                         .to_vec()
+//RS                 });
+//RS                 let _ = stream.write_all(&wire);
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS             }
+//RS             Ok(_) => Some(Err(http_router_diag(
+//RS                 "HTTP mux dispatch returned an invalid carrier",
+//RS                 span,
+//RS             ))),
+//RS             Err(error) => Some(Err(error)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn mir_http_mux(
+//RS         &self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         if operation == "http_mux.serve_once" {
+//RS             return self.mir_http_serve_once(handle, &args, span);
+//RS         }
+//RS         if operation == "http_client.send" {
+//RS             if handle.is_some() {
+//RS                 return Some(Err(http_router_diag(
+//RS                     "HTTP client send received an unexpected handle",
+//RS                     span,
+//RS                 )));
+//RS             }
+//RS             let [request] = args.as_slice() else {
+//RS                 return Some(Err(http_router_diag(
+//RS                     "HTTP client send expects one request",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             return Some(
+//RS                 http_client_send(request)
+//RS                     .map(AmbientMirHandleResult::Value)
+//RS                     .map_err(|error| http_router_diag(error, span)),
+//RS             );
+//RS         }
+//RS         self.state().mir_http_mux(operation, handle, args, span)
+//RS     }
+//RS }
+//RS 
+//RS impl InterpreterAmbientState {
+//RS     fn mir_lines(
+//RS         &mut self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         match operation {
+//RS             "loop.lines.init" => {
+//RS                 if handle.is_some() {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "line iterator initializer received an unexpected receiver handle",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let [MirRuntimeValue::String(source)] = args.as_slice() else {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "line iterator initializer arguments do not match the checked ABI",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if source != "lines:stdin" {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "interpreter line iterator only supports the checked stdin source",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let next = if self.next_line_reader == 0 {
+//RS                     1
+//RS                 } else {
+//RS                     self.next_line_reader
+//RS                 };
+//RS                 if self.line_readers.contains_key(&next) {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "interpreter line-reader handle space is exhausted",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 self.next_line_reader = next.saturating_add(1);
+//RS                 self.line_readers.insert(next, InterpreterLineReader::stdin());
+//RS                 Some(Ok(AmbientMirHandleResult::Handle(next)))
+//RS             }
+//RS             "loop.lines.close" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "line iterator close has no typed reader handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if !args.is_empty() {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "line iterator close received unexpected arguments",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 if self.line_readers.remove(&handle).is_none() {
+//RS                     return Some(Err(line_reader_diag(
+//RS                         "line iterator close used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn mir_http_router(
+//RS         &mut self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         match operation {
+//RS             "http_router.new" => {
+//RS                 if handle.is_some() || !args.is_empty() {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter constructor received unexpected handle arguments",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let next = if self.next_http_router == 0 {
+//RS                     1
+//RS                 } else {
+//RS                     self.next_http_router
+//RS                 };
+//RS                 if self.http_routers.contains_key(&next) {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "interpreter HTTPRouter handle space is exhausted",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 self.next_http_router = next.saturating_add(1);
+//RS                 self.http_routers
+//RS                     .insert(next, InterpreterHttpRouter::default());
+//RS                 Some(Ok(AmbientMirHandleResult::Handle(next)))
+//RS             }
+//RS             "http_router.parse" => {
+//RS                 if handle.is_some() {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP request parsing received an unexpected router receiver",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let [MirRuntimeValue::String(raw)] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP request parsing expects one raw request string",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 Some(Ok(AmbientMirHandleResult::Value(
+//RS                     http_parse_request_carrier(raw),
+//RS                 )))
+//RS             }
+//RS             "http_router.register" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration has no typed router receiver",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let [
+//RS                     MirRuntimeValue::String(method),
+//RS                     MirRuntimeValue::String(pattern),
+//RS                     handler,
+//RS                     MirRuntimeValue::String(_source_file),
+//RS                     MirRuntimeValue::Int(_source_line),
+//RS                     MirRuntimeValue::String(contract_json),
+//RS                     MirRuntimeValue::List(handler_param_names),
+//RS                 ] = args.as_slice()
+//RS                 else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration arguments do not match the checked route ABI",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if !matches!(handler, MirRuntimeValue::Closure(_))
+//RS                     && !matches!(
+//RS                         handler,
+//RS                         MirRuntimeValue::Struct { type_name, fields }
+//RS                             if type_name == "__JetHttpHandler"
+//RS                                 && fields.iter().any(|(name, value)| {
+//RS                                     name == "id" && matches!(value, MirRuntimeValue::Int(_))
+//RS                                 })
+//RS                     )
+//RS                 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration handler is not a checked closure",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let names = match handler_param_names
+//RS                     .iter()
+//RS                     .map(|name| match name {
+//RS                         MirRuntimeValue::String(name) if !name.is_empty() => Ok(name.clone()),
+//RS                         _ => Err(http_router_diag(
+//RS                             "HTTPRouter registration handler names are not strings",
+//RS                             span,
+//RS                         )),
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()
+//RS                 {
+//RS                     Ok(names) => names,
+//RS                     Err(error) => return Some(Err(error)),
+//RS                 };
+//RS                 if names.iter().collect::<std::collections::HashSet<_>>().len() != names.len() {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration handler names contain duplicates",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let parsed_pattern = match crate::net_http_rt::jet_http_route_pattern(pattern) {
+//RS                     Ok(pattern) => pattern,
+//RS                     Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS                 };
+//RS                 let Ok((parameters, _request_body)) = http_contract_parts(contract_json) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration contract is not a checked endpoint descriptor",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let Ok(contract) =
+//RS                     crate::net_http_rt::jet_std::parse_json_typed_datatree(contract_json)
+//RS                 else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration contract is not valid JSON",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let Some(contract_object) = http_object(&contract) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration contract is not an object",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if http_text(contract_object, "method") != Some(method.as_str())
+//RS                     || http_text(contract_object, "pattern") != Some(pattern.as_str())
+//RS                 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration contract disagrees with its route",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 if parameters.iter().any(|parameter| {
+//RS                     !matches!(parameter.location.as_str(), "path" | "query")
+//RS                 }) {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration contract has an unsupported parameter location",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 if parameters
+//RS                     .iter()
+//RS                     .filter(|parameter| parameter.location == "path")
+//RS                     .any(|parameter| !names.iter().any(|name| name == &parameter.name))
+//RS                 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration is missing a typed path binding",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 if names
+//RS                     .iter()
+//RS                     .filter(|name| !parameters.iter().any(|parameter| &parameter.name == *name))
+//RS                     .count()
+//RS                     > 1
+//RS                 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration has more than one unbound handler parameter",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let route_shape = crate::net_http_rt::jet_http_route_shape(&parsed_pattern);
+//RS                 let Some(router) = self.http_routers.get_mut(&handle) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if router.routes.iter().any(|route| {
+//RS                     route.method.eq_ignore_ascii_case(method)
+//RS                         && crate::net_http_rt::jet_http_route_shape(&route.parsed_pattern)
+//RS                             == route_shape
+//RS                 }) {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter registration duplicates an existing route",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 router.routes.push(InterpreterHttpRoute {
+//RS                     method: method.clone(),
+//RS                     pattern: pattern.clone(),
+//RS                     parsed_pattern,
+//RS                     handler: handler.clone(),
+//RS                     handler_param_names: names,
+//RS                     contract_json: contract_json.clone(),
+//RS                 });
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS             }
+//RS             "http_router.dispatch" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter dispatch has no typed router receiver",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let [request] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter dispatch expects one HTTPRequest carrier",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let (method, path, _body) = match http_route_request(request) {
+//RS                     Ok(parts) => parts,
+//RS                     Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS                 };
+//RS                 let Some(router) = self.http_routers.get(&handle) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTPRouter dispatch used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if crate::net_http_rt::jet_http_route_validate_path(path).is_err() {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         400,
+//RS                         "400 bad request",
+//RS                     ))));
+//RS                 }
+//RS                 let path_candidates = router
+//RS                     .routes
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .filter_map(|(index, route)| {
+//RS                         crate::net_http_rt::jet_http_route_matches_path(
+//RS                             &route.parsed_pattern,
+//RS                             path,
+//RS                         )
+//RS                         .then_some(index)
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 if path_candidates.is_empty() {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         404,
+//RS                         "404 not found",
+//RS                     ))));
+//RS                 }
+//RS                 let mut selected: Option<usize> = None;
+//RS                 for index in path_candidates {
+//RS                     let route = &router.routes[index];
+//RS                     if !route.method.eq_ignore_ascii_case(method) {
+//RS                         continue;
+//RS                     }
+//RS                     let replace = selected.map_or(true, |current| {
+//RS                         crate::net_http_rt::jet_http_route_selection_cmp(
+//RS                             &route.parsed_pattern,
+//RS                             index,
+//RS                             &router.routes[current].parsed_pattern,
+//RS                             current,
+//RS                         ) == std::cmp::Ordering::Greater
+//RS                     });
+//RS                     if replace {
+//RS                         selected = Some(index);
+//RS                     }
+//RS                 }
+//RS                 let Some(index) = selected else {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         405,
+//RS                         "405 method not allowed",
+//RS                     ))));
+//RS                 };
+//RS                 let route = &router.routes[index];
+//RS                 Some(Ok(match http_route_invocation(route, request) {
+//RS                     Ok(invocation) => AmbientMirHandleResult::Value(invocation),
+//RS                     Err(error) => AmbientMirHandleResult::Value(http_route_error_response(&error)),
+//RS                 }))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS     fn mir_http_mux(
+//RS         &mut self,
+//RS         operation: &str,
+//RS         handle: Option<i64>,
+//RS         args: Vec<MirRuntimeValue>,
+//RS         span: Span,
+//RS     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS         match operation {
+//RS             "tcp_listener.new" => {
+//RS                 let [MirRuntimeValue::String(address)] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "TCP listener expects one address string",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let listener = match TcpListener::bind(address) {
+//RS                     Ok(listener) => listener,
+//RS                     Err(error) => return Some(Err(http_router_diag(format!("TCP listen failed: {error}"), span))),
+//RS                 };
+//RS                 let _ = listener.set_nonblocking(true);
+//RS                 let next = if self.http_transport.next_listener == 0 {
+//RS                     1
+//RS                 } else {
+//RS                     self.http_transport.next_listener
+//RS                 };
+//RS                 self.http_transport.next_listener = next.saturating_add(1).max(1);
+//RS                 self.http_transport.listeners.insert(next, listener);
+//RS                 Some(Ok(AmbientMirHandleResult::Handle(next)))
+//RS             }
+//RS             "tcp_listener.local_addr" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(http_router_diag("TCP listener address has no receiver", span)));
+//RS                 };
+//RS                 let Some(listener) = self.http_transport.listeners.get(&handle) else {
+//RS                     return Some(Err(http_router_diag("TCP listener address used an unknown handle", span)));
+//RS                 };
+//RS                 let address = match listener.local_addr() {
+//RS                     Ok(address) => MirRuntimeValue::String(address.to_string()),
+//RS                     Err(error) => MirRuntimeValue::FailedTold(Box::new(
+//RS                         crate::net_http_rt::jet_net_io_error_mir_value(
+//RS                             "tcp listener local address",
+//RS                             None,
+//RS                             error,
+//RS                         ),
+//RS                     )),
+//RS                 };
+//RS                 Some(Ok(AmbientMirHandleResult::Value(address)))
+//RS             }
+//RS             "http_mux.serve_once" => {
+//RS                 let Some(listener_id) = handle else {
+//RS                     return Some(Err(http_router_diag("HTTP serve has no listener handle", span)));
+//RS                 };
+//RS                 let [MirRuntimeValue::Int(mux_id)] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag("HTTP serve expects one mux handle", span)));
+//RS                 };
+//RS                 let listener = match self.http_transport.listeners.get(&listener_id) {
+//RS                     Some(listener) => match listener.try_clone() {
+//RS                         Ok(listener) => listener,
+//RS                         Err(error) => {
+//RS                             return Some(Err(http_router_diag(
+//RS                                 format!("HTTP listener clone failed: {error}"),
+//RS                                 span,
+//RS                             )))
+//RS                         }
+//RS                     },
+//RS                     None => return Some(Err(http_router_diag("HTTP serve used an unknown listener", span))),
+//RS                 };
+//RS                 let (mut stream, _) = loop {
+//RS                     match listener.accept() {
+//RS                         Ok(connection) => break connection,
+//RS                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                             std::thread::sleep(std::time::Duration::from_millis(1));
+//RS                         }
+//RS                         Err(error) => return Some(Err(http_router_diag(format!("HTTP accept failed: {error}"), span))),
+//RS                     }
+//RS                 };
+//RS                 let raw = match http_read_one(&mut stream) {
+//RS                     Ok(raw) => raw,
+//RS                     Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS                 };
+//RS                 let request = http_parse_request_carrier(&raw);
+//RS                 let dispatch = self.mir_http_mux(
+//RS                     "http_mux.dispatch",
+//RS                     Some(*mux_id),
+//RS                     vec![request],
+//RS                     span,
+//RS                 )?;
+//RS                 match dispatch {
+//RS                     Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Struct { mut fields, .. })) => {
+//RS                         let pending = if self.http_transport.next_pending == 0 {
+//RS                             1
+//RS                         } else {
+//RS                             self.http_transport.next_pending
+//RS                         };
+//RS                         self.http_transport.next_pending = pending.saturating_add(1).max(1);
+//RS                         fields.push(("__stream".to_string(), MirRuntimeValue::Int(pending)));
+//RS                         self.http_transport.pending.insert(pending, InterpreterHttpPending { stream });
+//RS                         Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Struct {
+//RS                             type_name: "HTTPRouteInvocation".to_string(),
+//RS                             fields,
+//RS                         })))
+//RS                     }
+//RS                     Ok(AmbientMirHandleResult::Value(response)) => {
+//RS                         let wire = http_response_wire(&response).unwrap_or_else(|_| {
+//RS                             http_response(500, "500 internal server error");
+//RS                             b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+//RS                         });
+//RS                         let _ = stream.write_all(&wire);
+//RS                         Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS                     }
+//RS                     Ok(_) => Some(Err(http_router_diag("HTTP mux dispatch returned an invalid carrier", span))),
+//RS                     Err(error) => Some(Err(error)),
+//RS                 }
+//RS             }
+//RS             "http_mux.respond" => {
+//RS                 let Some(stream_id) = handle else {
+//RS                     return Some(Err(http_router_diag("HTTP response has no pending stream", span)));
+//RS                 };
+//RS                 let [response] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag("HTTP response expects one response carrier", span)));
+//RS                 };
+//RS                 let Some(mut pending) = self.http_transport.pending.remove(&stream_id) else {
+//RS                     return Some(Err(http_router_diag("HTTP response used an unknown stream", span)));
+//RS                 };
+//RS                 let wire = http_response_wire(response)
+//RS                     .map_err(|error| http_router_diag(error, span));
+//RS                 match wire {
+//RS                     Ok(wire) => {
+//RS                         pending.stream.write_all(&wire).map_err(|error| http_router_diag(format!("HTTP write failed: {error}"), span)).ok();
+//RS                         Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS                     }
+//RS                     Err(error) => Some(Err(error)),
+//RS                 }
+//RS             }
+//RS             "http_mux.new" => {
+//RS                 if handle.is_some() || !args.is_empty() {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux constructor received unexpected arguments",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let next = if self.next_http_mux == 0 {
+//RS                     1
+//RS                 } else {
+//RS                     self.next_http_mux
+//RS                 };
+//RS                 if self.http_muxes.contains_key(&next) {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "interpreter HTTP mux handle space is exhausted",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 self.next_http_mux = next.saturating_add(1);
+//RS                 self.http_muxes.insert(next, InterpreterHttpMux::default());
+//RS                 Some(Ok(AmbientMirHandleResult::Handle(next)))
+//RS             }
+//RS             "http_mux.register" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux registration has no mux receiver",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let (method, pattern, handler, names) = match args.as_slice() {
+//RS                     [
+//RS                         MirRuntimeValue::String(method),
+//RS                         MirRuntimeValue::String(pattern),
+//RS                         handler,
+//RS                     ] => (method, pattern, handler, Vec::new()),
+//RS                     [
+//RS                         MirRuntimeValue::String(method),
+//RS                         MirRuntimeValue::String(pattern),
+//RS                         handler,
+//RS                         MirRuntimeValue::String(_source_file),
+//RS                         MirRuntimeValue::Int(_source_line),
+//RS                         MirRuntimeValue::String(_contract_json),
+//RS                         MirRuntimeValue::List(names),
+//RS                     ] => {
+//RS                         let names = match names
+//RS                             .iter()
+//RS                             .map(|name| match name {
+//RS                                 MirRuntimeValue::String(name) if !name.is_empty() => {
+//RS                                     Ok(name.clone())
+//RS                                 }
+//RS                                 _ => Err(http_router_diag(
+//RS                                     "HTTP mux handler names are not strings",
+//RS                                     span,
+//RS                                 )),
+//RS                             })
+//RS                             .collect::<Result<Vec<_>, _>>()
+//RS                         {
+//RS                             Ok(names) => names,
+//RS                             Err(error) => return Some(Err(error)),
+//RS                         };
+//RS                         (method, pattern, handler, names)
+//RS                     }
+//RS                     _ => {
+//RS                         return Some(Err(http_router_diag(
+//RS                             "HTTP mux registration arguments do not match the checked route ABI",
+//RS                             span,
+//RS                         )))
+//RS                     }
+//RS                 };
+//RS                 if !matches!(handler, MirRuntimeValue::Closure(_))
+//RS                     && !matches!(
+//RS                         handler,
+//RS                         MirRuntimeValue::Struct { type_name, fields }
+//RS                             if type_name == "__JetHttpHandler"
+//RS                                 && fields.iter().any(|(name, value)| {
+//RS                                     name == "id" && matches!(value, MirRuntimeValue::Int(_))
+//RS                                 })
+//RS                     )
+//RS                 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux registration handler is not a checked closure",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 if names.len() > 1 {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux handler accepts at most one request parameter",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 let parsed_pattern = match crate::net_http_rt::jet_http_route_pattern(pattern) {
+//RS                     Ok(pattern) => pattern,
+//RS                     Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS                 };
+//RS                 let route_shape = crate::net_http_rt::jet_http_route_shape(&parsed_pattern);
+//RS                 let Some(mux) = self.http_muxes.get_mut(&handle) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux registration used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if mux.routes.iter().any(|route| {
+//RS                     route.method.eq_ignore_ascii_case(method)
+//RS                         && crate::net_http_rt::jet_http_route_shape(&route.parsed_pattern)
+//RS                             == route_shape
+//RS                 }) {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux registration duplicates an existing route",
+//RS                         span,
+//RS                     )));
+//RS                 }
+//RS                 mux.routes.push(InterpreterHttpRoute {
+//RS                     method: method.clone(),
+//RS                     pattern: pattern.clone(),
+//RS                     parsed_pattern,
+//RS                     handler: handler.clone(),
+//RS                     handler_param_names: names,
+//RS                     contract_json: String::new(),
+//RS                 });
+//RS                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
+//RS             }
+//RS             "http_mux.dispatch" => {
+//RS                 let Some(handle) = handle else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux dispatch has no mux receiver",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let [request] = args.as_slice() else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux dispatch expects one HTTPRequest carrier",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 let (method, path, _body) = match http_route_request(request) {
+//RS                     Ok(parts) => parts,
+//RS                     Err(error) => return Some(Err(http_router_diag(error, span))),
+//RS                 };
+//RS                 let Some(mux) = self.http_muxes.get(&handle) else {
+//RS                     return Some(Err(http_router_diag(
+//RS                         "HTTP mux dispatch used an unknown interpreter handle",
+//RS                         span,
+//RS                     )));
+//RS                 };
+//RS                 if crate::net_http_rt::jet_http_route_validate_path(path).is_err() {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         400,
+//RS                         "400 bad request",
+//RS                     ))));
+//RS                 }
+//RS                 let path_candidates = mux
+//RS                     .routes
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .filter_map(|(index, route)| {
+//RS                         crate::net_http_rt::jet_http_route_matches_path(
+//RS                             &route.parsed_pattern,
+//RS                             path,
+//RS                         )
+//RS                         .then_some(index)
+//RS                     })
+//RS                     .collect::<Vec<_>>();
+//RS                 if path_candidates.is_empty() {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         404,
+//RS                         "404 not found",
+//RS                     ))));
+//RS                 }
+//RS                 let mut selected: Option<usize> = None;
+//RS                 for index in path_candidates {
+//RS                     let route = &mux.routes[index];
+//RS                     if !route.method.eq_ignore_ascii_case(method) {
+//RS                         continue;
+//RS                     }
+//RS                     let replace = selected.map_or(true, |current| {
+//RS                         crate::net_http_rt::jet_http_route_selection_cmp(
+//RS                             &route.parsed_pattern,
+//RS                             index,
+//RS                             &mux.routes[current].parsed_pattern,
+//RS                             current,
+//RS                         ) == std::cmp::Ordering::Greater
+//RS                     });
+//RS                     if replace {
+//RS                         selected = Some(index);
+//RS                     }
+//RS                 }
+//RS                 let Some(index) = selected else {
+//RS                     return Some(Ok(AmbientMirHandleResult::Value(http_response(
+//RS                         405,
+//RS                         "405 method not allowed",
+//RS                     ))));
+//RS                 };
+//RS                 let route = &mux.routes[index];
+//RS                 Some(Ok(match http_mux_invocation(route, request) {
+//RS                     Ok(invocation) => AmbientMirHandleResult::Value(invocation),
+//RS                     Err(error) => AmbientMirHandleResult::Value(http_route_error_response(&error)),
+//RS                 }))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn testing_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter testing adapter rejected the checked operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn testing_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if module != "core.testing" {
+//RS         return None;
+//RS     }
+//RS     match method {
+//RS         "golden" => {
+//RS             let [CtValue::Str(path), CtValue::Str(actual)] = args.as_slice() else {
+//RS                 return Some(Err(testing_diag(
+//RS                     "core.testing.golden received malformed arguments",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             Some(Ok(CtValue::Bool(
+//RS                 crate::testing_shared::jet_testing_golden_result(path, actual).is_ok_and(|value| value),
+//RS             )))
+//RS         }
+//RS         "fixture" => {
+//RS             let [CtValue::Str(path)] = args.as_slice() else {
+//RS                 return Some(Err(testing_diag(
+//RS                     "core.testing.fixture received malformed arguments",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             Some(Ok(CtValue::Str(
+//RS                 crate::testing_shared::jet_testing_fixture_result(path).unwrap_or_default(),
+//RS             )))
+//RS         }
+//RS         "temp_dir" => {
+//RS             let [CtValue::Str(prefix)] = args.as_slice() else {
+//RS                 return Some(Err(testing_diag(
+//RS                     "core.testing.temp_dir received malformed arguments",
+//RS                     span,
+//RS                 )));
+//RS             };
+//RS             Some(
+//RS                 crate::testing_shared::jet_testing_temp_dir_path(prefix)
+//RS                     .map(CtValue::Str)
+//RS                     .map_err(|error| testing_diag(error.to_string(), span)),
+//RS             )
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn sys_getpid_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     _span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if module == "core.sys" && method == "getpid" && args.is_empty() {
+//RS         Some(Ok(CtValue::Int(crate::CoreHost::jet_jit_os_pid())))
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS /// `core.sys` environment and executable rows for the interpreter. They read
+//RS /// and write the same logical environment table the resident JIT tier owns
+//RS /// (`CoreHost::jit_env_*`, the host copy of the Prelude `EnvInit` overlay), so
+//RS /// `set`/`unset`/`vars`/`get` agree with each other and with spawned children,
+//RS /// and `executable` is the Prelude `jet_std_os_executable` kernel.
+//RS fn sys_env_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if module != "core.sys" {
+//RS         return None;
+//RS     }
+//RS     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
+//RS     match (method, args.as_slice()) {
+//RS         ("get", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_value(name) {
+//RS             Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+//RS             None => CtValue::absent(Type::String),
+//RS         })),
+//RS         ("set", [CtValue::Str(name), CtValue::Str(value)]) => {
+//RS             Some(match crate::CoreHost::jit_env_set(name, value) {
+//RS                 Ok(()) => Ok(CtValue::Unit),
+//RS                 Err(error) => Err(hardware_diag(format!("core.sys.set: {error}"), span)),
+//RS             })
+//RS         }
+//RS         ("unset", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_unset(name) {
+//RS             Ok(existed) => CtValue::Present(Box::new(CtValue::Bool(existed))),
+//RS             Err(error) => failed(error),
+//RS         })),
+//RS         ("vars", []) => Some(Ok(match crate::CoreHost::jit_env_vars() {
+//RS             Ok(names) => CtValue::Present(Box::new(CtValue::List(
+//RS                 names.into_iter().map(CtValue::Str).collect(),
+//RS             ))),
+//RS             Err(error) => failed(error),
+//RS         })),
+//RS         ("executable", []) => Some(Ok(CtValue::Str(
+//RS             crate::CoreHost::os_executable_text(),
+//RS         ))),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// Register the selected checked hardware profile for interpreter execution.
+//RS ///
+//RS /// The profile is supplied by bundle facts, not inferred from a target name;
+//RS /// the host is dropped with the surrounding `with_interpreter_ambient` scope.
+//RS pub fn register_hardware_interpreter_ambient(
+//RS     context: &mut InterpreterAmbientContext,
+//RS     profile_id: impl Into<String>,
+//RS     facts: TargetHardwareFacts,
+//RS ) {
+//RS     context.register_hardware_host(profile_id, facts);
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static ACTIVE_CONTEXT: RefCell<Option<InterpreterAmbientContext>> = const { RefCell::new(None) };
+//RS }
+//RS 
+//RS struct ContextGuard {
+//RS     previous: Option<InterpreterAmbientContext>,
+//RS }
+//RS 
+//RS impl Drop for ContextGuard {
+//RS     fn drop(&mut self) {
+//RS         ACTIVE_CONTEXT.with(|slot| {
+//RS             slot.replace(self.previous.take());
+//RS         });
+//RS     }
+//RS }
+//RS fn active_context() -> Option<InterpreterAmbientContext> {
+//RS     ACTIVE_CONTEXT
+//RS         .with(|slot| slot.borrow().as_ref().cloned())
+//RS         .or_else(|| {
+//RS             jet_codegen::Comptime::ambient_worker_context::<InterpreterAmbientContext>()
+//RS                 .map(|context| (*context).clone())
+//RS         })
+//RS }
+//RS 
+//RS 
+//RS /// Run `body` with one canonical typed ambient context installed.
+//RS ///
+//RS /// The callback functions handed to `Comptime` are stable dispatch shims. They
+//RS /// borrow only this scope's context, preserving nested-run restoration and
+//RS /// keeping feature state out of global/per-feature ambient slots.
+//RS pub fn with_interpreter_ambient<R>(
+//RS     body: impl FnOnce(&mut InterpreterAmbientContext) -> R,
+//RS ) -> R {
+//RS     crate::Process::with_interpreter_process_state(|| {
+//RS         let mut context = InterpreterAmbientContext::default();
+//RS         context.register_core_call(crate::Process::ambient_core_call);
+//RS         context.register_core_call(sys_getpid_ambient_core_call);
+//RS         context.register_core_call(sys_env_ambient_core_call);
+//RS         context.register_core_call(testing_ambient_core_call);
+//RS         context.register_mir_extern(crate::Ffi::ambient_mir_extern_call);
+//RS         context.register_mir_handle(crate::Process::ambient_mir_handle);
+//RS         let previous = ACTIVE_CONTEXT.with(|slot| slot.replace(Some(context.clone())));
+//RS         let _context_guard = ContextGuard { previous };
+//RS         let worker_context: jet_codegen::Comptime::AmbientWorkerContext =
+//RS             Arc::new(context.clone());
+//RS         jet_codegen::Comptime::with_ambient_worker_context(Some(worker_context), || {
+//RS             jet_codegen::Comptime::with_ambient(
+//RS                 Some(dispatch_core_call),
+//RS                 Some(dispatch_handle),
+//RS                 Some(dispatch_extern),
+//RS                 || {
+//RS                     jet_codegen::Comptime::with_ambient_core_closure(
+//RS                         Some(dispatch_core_closure),
+//RS                         || {
+//RS                             jet_codegen::Comptime::with_ambient_mir_handle(
+//RS                                 Some(dispatch_mir_handle),
+//RS                                 || {
+//RS                                     jet_codegen::Comptime::with_ambient_mir_extern(
+//RS                                         Some(dispatch_mir_extern),
+//RS                                         || body(&mut context),
+//RS                                     )
+//RS                                 },
+//RS                             )
+//RS                         },
+//RS                     )
+//RS                 },
+//RS             )
+//RS         })
+//RS     })
+//RS }
+//RS fn dispatch_core_closure(
+//RS     module: &str,
+//RS     method: &str,
+//RS     call: MirPreludeCallId,
+//RS     kind: MirCoreClosureKind,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     closure: Option<MirRuntimeValue>,
+//RS     site: MirSiteId,
+//RS     label: &str,
+//RS     span: Span,
+//RS ) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.core_closure_call(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(
+//RS             module,
+//RS             method,
+//RS             call,
+//RS             kind.clone(),
+//RS             args.clone(),
+//RS             closure.clone(),
+//RS             site,
+//RS             label,
+//RS             span,
+//RS         ) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS fn dispatch_mir_handle(
+//RS     operation: &str,
+//RS     handle: Option<i64>,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+//RS     let hardware =
+//RS         active_context().and_then(|context| context.mir_hardware(operation, handle, args.clone(), span));
+//RS     if hardware.is_some() {
+//RS         return hardware;
+//RS     }
+//RS     let lines =
+//RS         active_context().and_then(|context| context.mir_lines(operation, handle, args.clone(), span));
+//RS     if lines.is_some() {
+//RS         return lines;
+//RS     }
+//RS     if matches!(
+//RS         operation,
+//RS         "http_router.new"
+//RS             | "http_router.register"
+//RS             | "http_router.openapi"
+//RS             | "http_router.dispatch"
+//RS             | "http_router.parse"
+//RS     ) {
+//RS         return active_context()
+//RS             .and_then(|context| context.mir_http_router(operation, handle, args, span));
+//RS     }
+//RS     if matches!(
+//RS         operation,
+//RS         "http_mux.new"
+//RS             | "http_mux.register"
+//RS             | "http_mux.dispatch"
+//RS             | "http_mux.serve_once"
+//RS             | "http_mux.respond"
+//RS             | "http_client.send"
+//RS             | "tcp_listener.new"
+//RS             | "tcp_listener.local_addr"
+//RS     ) {
+//RS         return active_context()
+//RS             .and_then(|context| context.mir_http_mux(operation, handle, args, span));
+//RS     }
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.mir_handle(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(operation, handle, args.clone(), span) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS 
+//RS fn dispatch_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     resolved_ret: Option<Type>,
+//RS     mut sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.core_call(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(
+//RS             module,
+//RS             method,
+//RS             args.clone(),
+//RS             span,
+//RS             resolved_ret.clone(),
+//RS             sink.as_deref_mut(),
+//RS         ) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn dispatch_handle(
+//RS     operation: &str,
+//RS     receiver: &mut CtValue,
+//RS     args: &mut [CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.handle(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(operation, receiver, args, span) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn dispatch_extern(
+//RS     symbol: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     resolved_ret: Option<Type>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.extern_call(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(symbol, args.clone(), span, resolved_ret.clone()) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn dispatch_mir_extern(
+//RS     foreign: &MirForeign,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     span: Span,
+//RS ) -> Option<Result<AmbientMirExternResult, Diagnostic>> {
+//RS     let mut index = 0;
+//RS     loop {
+//RS         let callback = active_context().and_then(|context| context.mir_extern_call(index));
+//RS         let Some(callback) = callback else {
+//RS             break;
+//RS         };
+//RS         if let Some(result) = callback(foreign, args.clone(), span) {
+//RS             return Some(result);
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     None
+//RS }
+// END-PORT-PENDING 0240 crates/jet-jit/src/ambient_interp.rs:1-2300
+

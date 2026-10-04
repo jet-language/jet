@@ -1,0 +1,1527 @@
+// PORT-PENDING 0228 crates-jet-jit-src-net: crates/jet-jit/src/Net.rs:1-1523
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Native JIT adapters for `core.net.url` / `core.net.mime` / `core.web.browser` (and later
+//RS //! net/http/email/ws). Algorithms come from the same prelude sources AOT emits.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::JetShow;
+//RS use crate::Marshal::{alloc_byte_list, alloc_string, clone_string, result_err_msg, result_ok};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS 
+//RS pub(crate) mod runtime {
+//RS     use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
+//RS     use crate::{JetDebug, JetDisplay, JetShow};
+//RS 
+//RS     pub mod jet_std {
+//RS         #[derive(Clone, Debug)]
+//RS         pub struct JetURLParts {
+//RS             pub scheme: String,
+//RS             pub username: Option<String>,
+//RS             pub password: Option<String>,
+//RS             pub host: Option<String>,
+//RS             pub port: Option<i64>,
+//RS             pub path: String,
+//RS             pub query: Vec<(String, String)>,
+//RS             pub fragment: Option<String>,
+//RS             pub typed_host: Option<Vec<(String, bool)>>,
+//RS             pub typed_path: Option<Vec<(String, bool)>>,
+//RS         }
+//RS 
+//RS         #[derive(Clone, Debug, PartialEq)]
+//RS         pub struct JetMIME {
+//RS             pub top: String,
+//RS             pub sub: String,
+//RS             pub parameters: Vec<Vec<String>>,
+//RS         }
+//RS 
+//RS         pub(crate) use crate::Encoding::json_rt::{
+//RS             parse_json_strict, render_json, DataTree,
+//RS         };
+//RS         #[allow(unused_imports)]
+//RS         pub use jet_foundation::Outcome::*;
+//RS         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+//RS     }
+//RS     fn jet_deadline_remaining_ms() -> Option<i64> {
+//RS         None
+//RS     }
+//RS 
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Browser.rs");
+//RS     include!("../../jet-codegen/src/Prelude/BrowserTest.rs");
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
+//RS 
+//RS     #[allow(dead_code)]
+//RS     pub(crate) mod tls {
+//RS         include!("../../jet-pkg-model/src/Prelude/NetTls.rs");
+//RS     }
+//RS 
+//RS     pub use jet_std::{JetMIME, JetURLParts};
+//RS 
+//RS     pub(crate) fn email_cancelled() -> bool {
+//RS         jet_codegen::scheduler::jet_scheduler_task_cancelled()
+//RS     }
+//RS     pub(crate) fn email_remaining_ms() -> Option<i64> {
+//RS         jet_codegen::scheduler::jet_ctx_deadline_ms()
+//RS             .map(|deadline| deadline.saturating_sub(jet_codegen::scheduler::jet_std_time_now()))
+//RS     }
+//RS 
+//RS     pub fn email_runtime() -> jet_email::RuntimeFns {
+//RS         jet_email::RuntimeFns {
+//RS             tls_begin: tls::jet_net_tls_begin_impl,
+//RS             tls_begin_ca: tls::jet_net_tls_begin_with_ca_impl,
+//RS             tls_handshake_step: tls::jet_net_tls_handshake_step_impl,
+//RS             tls_set_poll_timeout: tls::jet_net_tls_set_poll_timeout_impl,
+//RS             tls_read: tls::jet_net_tls_read_bytes_impl,
+//RS             tls_write_all: tls::jet_net_tls_write_all_bytes_impl,
+//RS             tls_close: tls::jet_net_tls_close_impl,
+//RS             wipe: crate::Crypto::runtime::jet_crypto_zeroize_email_impl,
+//RS             sha256: crate::Crypto::runtime::jet_crypto_email_sha256_impl,
+//RS             ed25519_sign: crate::Crypto::runtime::jet_crypto_email_ed25519_sign_impl,
+//RS             cancelled: email_cancelled,
+//RS             remaining_ms: email_remaining_ms,
+//RS             accepted_at: jet_email::runtime_now,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURLParts {
+//RS         let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS         jet_std::jet_typed_url_parts_literal(&literal_refs, holes.clone())
+//RS     }
+//RS     pub fn url_query(pairs: &Vec<Vec<String>>) -> String {
+//RS         let rows: Vec<(String, String)> = pairs
+//RS             .iter()
+//RS             .filter(|r| !r.is_empty())
+//RS             .map(|r| {
+//RS                 (
+//RS                     r.first().cloned().unwrap_or_default(),
+//RS                     r.get(1).cloned().unwrap_or_default(),
+//RS                 )
+//RS             })
+//RS             .collect();
+//RS         rows.iter()
+//RS             .map(|(k, v)| {
+//RS                 format!(
+//RS                     "{}={}",
+//RS                     jet_std::jet_url_percent_encode(k, false),
+//RS                     jet_std::jet_url_percent_encode(v, false)
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join("&")
+//RS     }
+//RS     pub fn url_percent_encode(s: &String) -> String {
+//RS         jet_std::jet_url_percent_encode(s, false)
+//RS     }
+//RS     pub fn url_percent_decode(s: &String) -> Result<String, String> {
+//RS         jet_std::jet_url_percent_decode_str(s)
+//RS     }
+//RS     pub fn url_join(base: &String, rel: &String) -> String {
+//RS         jet_std::jet_url_join_text(base, rel)
+//RS     }
+//RS     pub fn url_parse_qsl(query: &String) -> Vec<Vec<String>> {
+//RS         jet_std::jet_url_parse_qsl_rows(query)
+//RS     }
+//RS     pub fn url_quote(text: &String) -> String {
+//RS         jet_std::jet_url_quote(text)
+//RS     }
+//RS     pub fn url_quote_from_bytes(data: &[u8]) -> String {
+//RS         jet_std::jet_url_quote_from_bytes(data)
+//RS     }
+//RS     pub fn url_quote_plus(text: &String) -> String {
+//RS         jet_std::jet_url_quote_plus(text)
+//RS     }
+//RS     pub fn url_unquote(text: &String) -> Result<String, String> {
+//RS         jet_std::jet_url_unquote(text)
+//RS     }
+//RS     pub fn url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
+//RS         jet_std::jet_url_unquote_to_bytes(text)
+//RS     }
+//RS     pub fn url_unquote_plus(text: &String) -> Result<String, String> {
+//RS         jet_std::jet_url_unquote_plus(text)
+//RS     }
+//RS     pub fn url_split_fragment(text: &String) -> (String, String) {
+//RS         jet_std::jet_url_split_fragment(text)
+//RS     }
+//RS     pub fn mime_from_extension(ext: &String) -> Option<String> {
+//RS         jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
+//RS     }
+//RS     pub fn mime_extension(mime: &String) -> Option<String> {
+//RS         jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
+//RS     }
+//RS 
+//RS     pub fn browser_profile(name: &String) -> Result<(String, String), String> {
+//RS         match jet_browser_profile(name) {
+//RS             Ok(profile) => Ok((profile.name.clone(), profile.version.clone())),
+//RS             Err(err) => Err(err.jet_show()),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn browser_timeout(ms: i64) -> Result<i64, String> {
+//RS         match jet_browser_timeout(ms) {
+//RS             Ok(timeout) => Ok(timeout.milliseconds),
+//RS             Err(err) => Err(err.jet_show()),
+//RS         }
+//RS     }
+//RS 
+//RS     thread_local! {
+//RS         static BROWSERS: std::cell::RefCell<Vec<JetBrowser>> =
+//RS             const { std::cell::RefCell::new(Vec::new()) };
+//RS     }
+//RS 
+//RS     fn store_browser(browser: JetBrowser) -> i64 {
+//RS         BROWSERS.with(|browsers| {
+//RS             let mut browsers = browsers.borrow_mut();
+//RS             browsers.push(browser);
+//RS             browsers.len() as i64
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn browser_connect(endpoint: &String) -> Result<i64, String> {
+//RS         jet_browser_connect(endpoint)
+//RS             .map(store_browser)
+//RS             .map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub fn browser_connect_profile(
+//RS         endpoint: &String,
+//RS         profile: &String,
+//RS         timeout: i64,
+//RS     ) -> Result<i64, String> {
+//RS         let profile = jet_browser_profile(profile).map_err(|error| error.jet_show())?;
+//RS         let timeout = JetBrowserTimeout {
+//RS             milliseconds: timeout,
+//RS         };
+//RS         jet_browser_connect_profile(endpoint, &profile, timeout)
+//RS             .map(store_browser)
+//RS             .map_err(|error| error.jet_show())
+//RS     }
+//RS 
+//RS     pub fn browser_locked(
+//RS         engine: &String,
+//RS     ) -> Result<(String, String, String, String, i64, String), String> {
+//RS         jet_browser_locked(engine)
+//RS             .map(|locked| {
+//RS                 (
+//RS                     locked.engine,
+//RS                     locked.version,
+//RS                     locked.binary,
+//RS                     locked.protocol,
+//RS                     locked.size,
+//RS                     locked.output_hash,
+//RS                 )
+//RS             })
+//RS             .map_err(|error| error.jet_show())
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) enum NetValue {
+//RS     EmailAddress(runtime::jet_email::Address),
+//RS     EmailAttachment(runtime::jet_email::Attachment),
+//RS     EmailMessage(runtime::jet_email::Message),
+//RS     EmailMailer(runtime::jet_email::Mailer),
+//RS     BrowserTestConfig(runtime::JetBrowserTestConfig),
+//RS     BrowserTestFixture(runtime::JetBrowserTestFixture),
+//RS     BrowserTestReport(runtime::JetBrowserTestReport),
+//RS     BrowserTestCase(runtime::JetBrowserTestCase),
+//RS     BrowserTestServer(runtime::JetBrowserTestServer),
+//RS }
+//RS 
+//RS fn push(value: NetValue) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.net_values.push(Some(value));
+//RS         rt.net_values.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R> {
+//RS     if handle <= 0 {
+//RS         return None;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         rt.net_values
+//RS             .get(index)
+//RS             .and_then(|slot| slot.as_ref())
+//RS             .and_then(f)
+//RS     })
+//RS }
+//RS 
+//RS fn take_net(handle: i64) -> Option<NetValue> {
+//RS     if handle <= 0 {
+//RS         return None;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         rt.net_values.get_mut(index).and_then(Option::take)
+//RS     })
+//RS }
+//RS 
+//RS fn put_net(handle: i64, value: NetValue) {
+//RS     if handle <= 0 {
+//RS         return;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         if let Some(slot) = rt.net_values.get_mut(index) {
+//RS             *slot = Some(value);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn result_err(msg: String) -> i64 {
+//RS     result_err_msg(&msg)
+//RS }
+//RS 
+//RS fn option_string(s: Option<String>) -> i64 {
+//RS     match s {
+//RS         None => 0,
+//RS         Some(v) => alloc_string(v).wrapping_add(1),
+//RS     }
+//RS }
+//RS 
+//RS fn list_of_strings(rows: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for row in rows {
+//RS             let sid = rt.heap.alloc_string(row);
+//RS             let _ = rt.heap.list_push_int(list, sid);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn list_of_string_pairs(rows: Vec<Vec<String>>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let outer = rt.heap.alloc_empty_list();
+//RS         for row in rows {
+//RS             let inner = rt.heap.alloc_empty_list();
+//RS             for cell in row {
+//RS                 let sid = rt.heap.alloc_string(cell);
+//RS                 let _ = rt.heap.list_push_int(inner, sid);
+//RS             }
+//RS             let _ = rt.heap.list_push_int(outer, inner);
+//RS         }
+//RS         outer
+//RS     })
+//RS }
+//RS 
+//RS fn string_pair(first: String, second: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let first = rt.heap.alloc_string(first);
+//RS         let second = rt.heap.alloc_string(second);
+//RS         let _ = rt.heap.record_set_string(record, 0, first);
+//RS         let _ = rt.heap.record_set_string(record, 1, second);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_url_join_text(base: i64, rel: i64) -> i64 {
+//RS     alloc_string(runtime::url_join(&clone_string(base), &clone_string(rel)))
+//RS }
+//RS 
+//RS fn jet_jit_url_parse_qsl(query: i64) -> i64 {
+//RS     list_of_string_pairs(runtime::url_parse_qsl(&clone_string(query)))
+//RS }
+//RS 
+//RS fn jet_jit_url_urlencode(pairs: i64) -> i64 {
+//RS     alloc_string(runtime::url_query(&read_string_pair_list(pairs)))
+//RS }
+//RS 
+//RS fn jet_jit_url_split_fragment(text: i64) -> i64 {
+//RS     let (url, fragment) = runtime::url_split_fragment(&clone_string(text));
+//RS     string_pair(fragment, url)
+//RS }
+//RS 
+//RS fn jet_jit_url_quote(text: i64) -> i64 {
+//RS     alloc_string(runtime::url_quote(&clone_string(text)))
+//RS }
+//RS 
+//RS fn jet_jit_url_quote_from_bytes(data: i64) -> i64 {
+//RS     let Some(data) = list_bytes(data) else {
+//RS         return 0;
+//RS     };
+//RS     alloc_string(runtime::url_quote_from_bytes(&data))
+//RS }
+//RS 
+//RS fn jet_jit_url_quote_plus(text: i64) -> i64 {
+//RS     alloc_string(runtime::url_quote_plus(&clone_string(text)))
+//RS }
+//RS 
+//RS fn jet_jit_url_unquote(text: i64) -> i64 {
+//RS     match runtime::url_unquote(&clone_string(text)) {
+//RS         Ok(text) => result_ok(alloc_string(text) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_url_unquote_to_bytes(text: i64) -> i64 {
+//RS     match runtime::url_unquote_to_bytes(&clone_string(text)) {
+//RS         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_url_unquote_plus(text: i64) -> i64 {
+//RS     match runtime::url_unquote_plus(&clone_string(text)) {
+//RS         Ok(text) => result_ok(alloc_string(text) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_url_urldefrag(text: i64) -> i64 {
+//RS     let (url, fragment) = runtime::url_split_fragment(&clone_string(text));
+//RS     string_pair(url, fragment)
+//RS }
+//RS 
+//RS 
+//RS fn read_string_pair_list(list: i64) -> Vec<Vec<String>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let inner = rt.heap.list_get_int(list, i).unwrap_or(0);
+//RS             let inner_len = rt.heap.list_len(inner).unwrap_or(0);
+//RS             let mut row = Vec::with_capacity(inner_len as usize);
+//RS             for j in 0..inner_len {
+//RS                 let sid = rt.heap.list_get_int(inner, j).unwrap_or(0);
+//RS                 row.push(rt.heap.clone_string(sid).unwrap_or_default());
+//RS             }
+//RS             out.push(row);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn profile_record(name: String, version: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let name = rt.heap.alloc_string(name);
+//RS         let version = rt.heap.alloc_string(version);
+//RS         let _ = rt.heap.record_set_string(record, 0, name);
+//RS         let _ = rt.heap.record_set_string(record, 1, version);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn timeout_record(milliseconds: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(1);
+//RS         let _ = rt.heap.record_set_int(record, 0, milliseconds);
+//RS         record
+//RS     })
+//RS }
+//RS fn locked_record(
+//RS     engine: String,
+//RS     version: String,
+//RS     binary: String,
+//RS     protocol: String,
+//RS     size: i64,
+//RS     output_hash: String,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(6);
+//RS         let engine = rt.heap.alloc_string(engine);
+//RS         let version = rt.heap.alloc_string(version);
+//RS         let binary = rt.heap.alloc_string(binary);
+//RS         let protocol = rt.heap.alloc_string(protocol);
+//RS         let output_hash = rt.heap.alloc_string(output_hash);
+//RS         let _ = rt.heap.record_set_string(record, 0, engine);
+//RS         let _ = rt.heap.record_set_string(record, 1, version);
+//RS         let _ = rt.heap.record_set_string(record, 2, binary);
+//RS         let _ = rt.heap.record_set_string(record, 3, protocol);
+//RS         let _ = rt.heap.record_set_int(record, 4, size);
+//RS         let _ = rt.heap.record_set_string(record, 5, output_hash);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1=A: a typed `URL{"…"}` head is the `core.net.url.URL` record
+//RS /// in `Core/net/url.jet` field order, projected by the kernel's
+//RS /// `JetURLParts::core_port`/`query` exactly as AOT's `JetURL::from_url_parts`.
+//RS fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
+//RS     // Defaulting a failed marshal to an empty list used to hand the Prelude
+//RS     // constructor mismatched literal/hole counts, and `jet_typed_url_literal`
+//RS     // answers that violated invariant with `std::process::abort()` — a bare
+//RS     // engine abort with no report. Trap at the adapter that owns the marshal.
+//RS     let Some(literals) = require_string_list(literals) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(holes) = require_string_list(holes) else {
+//RS         return 0;
+//RS     };
+//RS     let parts = runtime::url_typed_literal(&literals, &holes);
+//RS     let raw = parts.to_string_value();
+//RS     let (port, port_explicit) = parts.core_port();
+//RS     let query = parts.query();
+//RS     let strings = [
+//RS         (0_i64, parts.scheme),
+//RS         (1, parts.username.unwrap_or_default()),
+//RS         (2, parts.password.unwrap_or_default()),
+//RS         (3, parts.host.unwrap_or_default()),
+//RS         (6, parts.path),
+//RS         (7, query),
+//RS         (8, parts.fragment.unwrap_or_default()),
+//RS         (9, raw),
+//RS     ];
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(10);
+//RS         for (index, text) in strings {
+//RS             let text = rt.heap.alloc_string(text);
+//RS             let _ = rt.heap.record_set_string(record, index, text);
+//RS         }
+//RS         let _ = rt.heap.record_set_int(record, 4, port);
+//RS         let _ = rt.heap.record_set_bool(record, 5, port_explicit);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_url_query(pairs: i64) -> i64 {
+//RS     let pairs = read_string_pair_list(pairs);
+//RS     alloc_string(runtime::url_query(&pairs))
+//RS }
+//RS 
+//RS fn jet_jit_url_percent_encode(s: i64) -> i64 {
+//RS     let s = clone_string(s);
+//RS     alloc_string(runtime::url_percent_encode(&s))
+//RS }
+//RS 
+//RS fn jet_jit_url_percent_decode(s: i64) -> i64 {
+//RS     let s = clone_string(s);
+//RS     match runtime::url_percent_decode(&s) {
+//RS         Ok(text) => result_ok(alloc_string(text) as u64),
+//RS         Err(e) => result_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_mime_from_extension(ext: i64) -> i64 {
+//RS     let ext = clone_string(ext);
+//RS     option_string(runtime::mime_from_extension(&ext))
+//RS }
+//RS 
+//RS fn jet_jit_mime_extension(mime: i64) -> i64 {
+//RS     let mime = clone_string(mime);
+//RS     option_string(runtime::mime_extension(&mime))
+//RS }
+//RS 
+//RS /// The `core.net.mime.MIME` record (`Core/net/mime.jet` field order: `top`,
+//RS /// `sub`, `parameters`) read back into the one Prelude MIME kernel value.
+//RS fn mime_record(record: i64) -> Option<runtime::JetMIME> {
+//RS     let top = record_get_heap_string(record, 0)?;
+//RS     let sub = record_get_heap_string(record, 1)?;
+//RS     let parameters = read_string_pair_list(record_get_i64(record, 2)?);
+//RS     Some(runtime::JetMIME {
+//RS         top,
+//RS         sub,
+//RS         parameters,
+//RS     })
+//RS }
+//RS 
+//RS /// A receiver that is not a MIME record is an engine fault, never an empty
+//RS /// component: trap instead of answering a wrong value no output check sees.
+//RS fn require_mime(record: i64) -> Option<runtime::JetMIME> {
+//RS     let mime = mime_record(record);
+//RS     if mime.is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| rt.set_trap("MIME receiver is not a MIME record"));
+//RS     }
+//RS     mime
+//RS }
+//RS 
+//RS pub(crate) fn mime_parts(record: i64) -> Option<(String, String, Vec<Vec<String>>)> {
+//RS     mime_record(record).map(|mime| (mime.top, mime.sub, mime.parameters))
+//RS }
+//RS 
+//RS fn jet_jit_mime_essence(recv: i64) -> i64 {
+//RS     require_mime(recv).map_or(0, |mime| alloc_string(mime.essence()))
+//RS }
+//RS 
+//RS fn jet_jit_mime_media_type(recv: i64) -> i64 {
+//RS     require_mime(recv).map_or(0, |mime| alloc_string(mime.media_type()))
+//RS }
+//RS 
+//RS fn jet_jit_mime_subtype(recv: i64) -> i64 {
+//RS     require_mime(recv).map_or(0, |mime| alloc_string(mime.subtype()))
+//RS }
+//RS 
+//RS fn jet_jit_mime_params(recv: i64) -> i64 {
+//RS     require_mime(recv).map_or(0, |mime| list_of_string_pairs(mime.params()))
+//RS }
+//RS 
+//RS fn jet_jit_mime_to_string(recv: i64) -> i64 {
+//RS     require_mime(recv).map_or(0, |mime| alloc_string(mime.to_string_value()))
+//RS }
+//RS 
+//RS fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     option_string(require_mime(recv).and_then(|mime| mime.param(&name).ok()))
+//RS }
+//RS 
+//RS fn jet_jit_browser_connect(endpoint: i64) -> i64 {
+//RS     match runtime::browser_connect(&clone_string(endpoint)) {
+//RS         Ok(handle) => result_ok(handle as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_connect_profile(endpoint: i64, profile: i64, timeout: i64) -> i64 {
+//RS     let endpoint = clone_string(endpoint);
+//RS     let profile = record_get_heap_string(profile, 0).unwrap_or_default();
+//RS     let timeout = record_get_i64(timeout, 0).unwrap_or_default();
+//RS     match runtime::browser_connect_profile(&endpoint, &profile, timeout) {
+//RS         Ok(handle) => result_ok(handle as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_locked(engine: i64) -> i64 {
+//RS     match runtime::browser_locked(&clone_string(engine)) {
+//RS         Ok((engine, version, binary, protocol, size, output_hash)) => {
+//RS             result_ok(locked_record(engine, version, binary, protocol, size, output_hash) as u64)
+//RS         }
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_profile(name: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match runtime::browser_profile(&name) {
+//RS         Ok((name, version)) => result_ok(profile_record(name, version) as u64),
+//RS         Err(err) => result_err(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_timeout(ms: i64) -> i64 {
+//RS     match runtime::browser_timeout(ms) {
+//RS         Ok(milliseconds) => result_ok(timeout_record(milliseconds) as u64),
+//RS         Err(err) => result_err(err),
+//RS     }
+//RS }
+//RS fn browser_test_config(handle: i64) -> Option<runtime::JetBrowserTestConfig> {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => Some(config.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config() -> i64 {
+//RS     match runtime::jet_browser_test_config() {
+//RS         Ok(config) => result_ok(push(NetValue::BrowserTestConfig(config)) as u64),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_from_env() -> i64 {
+//RS     match runtime::jet_browser_test_config_from_env() {
+//RS         Ok(config) => result_ok(push(NetValue::BrowserTestConfig(config)) as u64),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_engines(handle: i64) -> i64 {
+//RS     let Some(engines) = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_engines(config))
+//RS         }
+//RS         _ => None,
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     list_of_strings(engines)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_retries(handle: i64) -> i64 {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_retries(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_filter(handle: i64) -> i64 {
+//RS     let filter = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_filter(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(filter)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_reporter(handle: i64) -> i64 {
+//RS     let reporter = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_reporter(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(reporter)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_server_url(handle: i64) -> i64 {
+//RS     let url = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_server_url(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(url)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_artifact_dir(handle: i64) -> i64 {
+//RS     let path = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_artifact_dir(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(path)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_report_path(handle: i64) -> i64 {
+//RS     let path = with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(runtime::jet_browser_test_config_report_path(config))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(path)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_ui(handle: i64) -> i64 {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(i64::from(runtime::jet_browser_test_config_ui(config)))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_visual(handle: i64) -> i64 {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(i64::from(runtime::jet_browser_test_config_visual(config)))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_config_watch(handle: i64) -> i64 {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::BrowserTestConfig(config) => {
+//RS             Some(i64::from(runtime::jet_browser_test_config_watch(config)))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_begin_named(
+//RS     config_handle: i64,
+//RS     test: i64,
+//RS     engine: i64,
+//RS     attempt: i64,
+//RS     source: i64,
+//RS     line: i64,
+//RS     column: i64,
+//RS ) -> i64 {
+//RS     let Some(config) = browser_test_config(config_handle) else {
+//RS         return result_err_msg("invalid BrowserTestConfig handle");
+//RS     };
+//RS     let test = clone_string(test);
+//RS     let engine = clone_string(engine);
+//RS     let source = clone_string(source);
+//RS     match runtime::jet_browser_test_begin_named(
+//RS         &config, &test, &engine, attempt, &source, line, column,
+//RS     ) {
+//RS         Ok(fixture) => result_ok(push(NetValue::BrowserTestFixture(fixture)) as u64),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_selected(config_handle: i64, test: i64) -> i64 {
+//RS     let Some(config) = browser_test_config(config_handle) else {
+//RS         return 0;
+//RS     };
+//RS     i64::from(runtime::jet_browser_test_selected(&config, &clone_string(test)))
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_new(config_handle: i64) -> i64 {
+//RS     let Some(config) = browser_test_config(config_handle) else {
+//RS         return 0;
+//RS     };
+//RS     push(NetValue::BrowserTestReport(
+//RS         runtime::jet_browser_test_report_new(&config),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_add_case(report_handle: i64, case_handle: i64) -> i64 {
+//RS     let Some(NetValue::BrowserTestReport(report)) = take_net(report_handle) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(NetValue::BrowserTestCase(case)) = take_net(case_handle) else {
+//RS         return push(NetValue::BrowserTestReport(report));
+//RS     };
+//RS     push(NetValue::BrowserTestReport(
+//RS         runtime::jet_browser_test_report_add_case(report, case),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_json(report_handle: i64) -> i64 {
+//RS     let text = with_net(report_handle, |value| match value {
+//RS         NetValue::BrowserTestReport(report) => {
+//RS             Some(runtime::jet_browser_test_report_json(report))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(text)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_text(report_handle: i64) -> i64 {
+//RS     let text = with_net(report_handle, |value| match value {
+//RS         NetValue::BrowserTestReport(report) => {
+//RS             Some(runtime::jet_browser_test_report_text(report))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(text)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_html(report_handle: i64) -> i64 {
+//RS     let text = with_net(report_handle, |value| match value {
+//RS         NetValue::BrowserTestReport(report) => {
+//RS             Some(runtime::jet_browser_test_report_html(report))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(text)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_report_exit_code(report_handle: i64) -> i64 {
+//RS     with_net(report_handle, |value| match value {
+//RS         NetValue::BrowserTestReport(report) => {
+//RS             Some(runtime::jet_browser_test_report_exit_code(report))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_write_report(report_handle: i64, path: i64) -> i64 {
+//RS     let Some(report) = with_net(report_handle, |value| match value {
+//RS         NetValue::BrowserTestReport(report) => Some(report.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return result_err_msg("invalid BrowserTestReport handle");
+//RS     };
+//RS     match runtime::jet_browser_test_write_report(&report, &clone_string(path)) {
+//RS         Ok(()) => result_ok(0),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_generate_source(name: i64, route: i64, output: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     let route = clone_string(route);
+//RS     let output = clone_string(output);
+//RS     match runtime::jet_browser_test_generate_source(&name, &route, &output) {
+//RS         Ok(source) => result_ok(alloc_string(source) as u64),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_server_start(config_handle: i64) -> i64 {
+//RS     let Some(config) = browser_test_config(config_handle) else {
+//RS         return result_err_msg("invalid BrowserTestConfig handle");
+//RS     };
+//RS     match runtime::jet_browser_test_server_start(&config) {
+//RS         Ok(server) => result_ok(push(NetValue::BrowserTestServer(server)) as u64),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_server_stop(server_handle: i64) -> i64 {
+//RS     let Some(NetValue::BrowserTestServer(mut server)) = take_net(server_handle) else {
+//RS         return 0;
+//RS     };
+//RS     runtime::jet_browser_test_server_stop(&mut server);
+//RS     let _ = push(NetValue::BrowserTestServer(server));
+//RS     0
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_server_url(server_handle: i64) -> i64 {
+//RS     let url = with_net(server_handle, |value| match value {
+//RS         NetValue::BrowserTestServer(server) => {
+//RS             Some(runtime::jet_browser_test_server_url(server))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(url)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_server_logs(server_handle: i64) -> i64 {
+//RS     let logs = with_net(server_handle, |value| match value {
+//RS         NetValue::BrowserTestServer(server) => {
+//RS             Some(runtime::jet_browser_test_server_logs(server))
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(logs)
+//RS }
+//RS 
+//RS fn jet_jit_browser_test_watch_changed(path: i64, last_modified_ms: i64) -> i64 {
+//RS     match runtime::jet_browser_test_watch_changed(&clone_string(path), last_modified_ms) {
+//RS         Ok(changed) => result_ok(if changed { 1 } else { 0 }),
+//RS         Err(error) => result_err(error.jet_show()),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn record_get_i64(record: i64, idx: i64) -> Option<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(record, idx))
+//RS }
+//RS 
+//RS fn record_get_heap_string(record: i64, idx: i64) -> Option<String> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let sid = rt.heap.record_get_string(record, idx)?;
+//RS         rt.heap.clone_string(sid)
+//RS     })
+//RS }
+//RS 
+//RS fn record_get_packed_string(record: i64, idx: i64) -> Option<String> {
+//RS     let sid = record_get_i64(record, idx)?;
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(sid))
+//RS }
+//RS 
+//RS fn list_strings(list: i64) -> Option<Vec<String>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let sid = rt.heap.list_get_int(list, i)?;
+//RS             out.push(rt.heap.clone_string(sid)?);
+//RS         }
+//RS         Some(out)
+//RS     })
+//RS }
+//RS 
+//RS /// The typed-URL literal head's list marshal. Mirrors `Math::require_string_list`
+//RS /// so both boundary heads report a broken `[String]` carrier the same way (I8).
+//RS fn require_string_list(list: i64) -> Option<Vec<String>> {
+//RS     let values = list_strings(list);
+//RS     if values.is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("typed URL list contains a non-string value")
+//RS         });
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn list_bytes(list: i64) -> Option<Vec<u8>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let value = rt.heap.list_get_int(list, i)?;
+//RS             if !(0..=255).contains(&value) {
+//RS                 return None;
+//RS             }
+//RS             out.push(value as u8);
+//RS         }
+//RS         Some(out)
+//RS     })
+//RS }
+//RS 
+//RS fn email_err(err: runtime::jet_email::Error) -> i64 {
+//RS     let (_variant, disc, operation, server, code, reason) = runtime::jet_email::error_parts(err);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let payload = rt.heap.alloc_record(5);
+//RS         let _ = rt.heap.record_set_int(payload, 0, disc);
+//RS         let operation = rt.heap.alloc_string(operation);
+//RS         let _ = rt.heap.record_set_int(payload, 1, operation);
+//RS         let server = server.map_or(0, |server| rt.heap.alloc_string(server) + 1);
+//RS         let _ = rt.heap.record_set_int(payload, 2, server);
+//RS         let code = code.map_or(0, |code| code + 1);
+//RS         let _ = rt.heap.record_set_int(payload, 3, code);
+//RS         let reason = rt.heap.alloc_string(reason);
+//RS         let _ = rt.heap.record_set_int(payload, 4, reason);
+//RS         crate::runtime_host::alloc_jit_result(rt, false, payload as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn email_config_error(operation: &str, reason: &str) -> i64 {
+//RS     email_err(runtime::jet_email::configuration_error(operation, reason))
+//RS }
+//RS 
+//RS fn unpack_limits(handle: i64) -> Option<runtime::jet_email::Limits> {
+//RS     Some(runtime::jet_email::Limits {
+//RS         max_reply_line_bytes: record_get_i64(handle, 0)?,
+//RS         max_reply_lines: record_get_i64(handle, 1)?,
+//RS         max_capabilities: record_get_i64(handle, 2)?,
+//RS         max_recipients: record_get_i64(handle, 3)?,
+//RS         max_message_bytes: record_get_i64(handle, 4)?,
+//RS         max_auth_challenge_bytes: record_get_i64(handle, 5)?,
+//RS     })
+//RS }
+//RS 
+//RS fn unpack_dkim(handle: i64) -> Option<runtime::jet_email::DkimConfig<Vec<u8>>> {
+//RS     let domain = record_get_heap_string(handle, 0)?;
+//RS     let selector = record_get_heap_string(handle, 1)?;
+//RS     let key_handle = record_get_i64(handle, 2)?;
+//RS     let private_key = crate::Crypto::secret_copy_for_smtp(key_handle)?;
+//RS     let headers = list_strings(record_get_i64(handle, 3)?)?;
+//RS     Some(runtime::jet_email::DkimConfig {
+//RS         domain,
+//RS         selector,
+//RS         private_key,
+//RS         signed_headers: headers,
+//RS     })
+//RS }
+//RS 
+//RS fn unpack_auth(handle: i64) -> Option<runtime::jet_email::SMTPAuth<Vec<u8>>> {
+//RS     let disc = record_get_i64(handle, 0)?;
+//RS     if disc == 0 {
+//RS         return Some(runtime::jet_email::SMTPAuth::None);
+//RS     }
+//RS     if disc == 1 {
+//RS         let username = record_get_packed_string(handle, 1)?;
+//RS         let password_handle = record_get_i64(handle, 2)?;
+//RS         let password = crate::Crypto::secret_copy_for_smtp(password_handle)?;
+//RS         return Some(runtime::jet_email::SMTPAuth::Password { username, password });
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SMTPConfig<Vec<u8>>> {
+//RS     let host = record_get_heap_string(config, 0)?;
+//RS     let port = record_get_i64(config, 1)?;
+//RS     let security = match record_get_i64(config, 2)? {
+//RS         0 => runtime::jet_email::SMTPSecurity::StartTLS,
+//RS         1 => runtime::jet_email::SMTPSecurity::TLS,
+//RS         _ => return None,
+//RS     };
+//RS     let auth_raw = record_get_i64(config, 3)?;
+//RS     let auth = if auth_raw == 0 {
+//RS         runtime::jet_email::SMTPAuth::None
+//RS     } else {
+//RS         unpack_auth(auth_raw)?
+//RS     };
+//RS     let recipient_policy = match record_get_i64(config, 4)? {
+//RS         0 => runtime::jet_email::RecipientPolicy::RequireAll,
+//RS         1 => runtime::jet_email::RecipientPolicy::DeliverAccepted,
+//RS         _ => return None,
+//RS     };
+//RS     let trust_raw = record_get_i64(config, 5)?;
+//RS     let trust = if trust_raw == 0 {
+//RS         runtime::jet_email::TLSTrust::System
+//RS     } else {
+//RS         if record_get_i64(trust_raw, 0)? != 1 {
+//RS             return None;
+//RS         }
+//RS         runtime::jet_email::TLSTrust::SystemPlusCa {
+//RS             pem: list_bytes(record_get_i64(trust_raw, 1)?)?,
+//RS         }
+//RS     };
+//RS     let limits = unpack_limits(record_get_i64(config, 6)?)?;
+//RS     let dkim_opt = record_get_i64(config, 7)?;
+//RS     let dkim = if dkim_opt == 0 {
+//RS         Err(JetAbsent)
+//RS     } else {
+//RS         jet_outcome_of(unpack_dkim(dkim_opt - 1))
+//RS     };
+//RS     Some(runtime::jet_email::SMTPConfig {
+//RS         host,
+//RS         port,
+//RS         security,
+//RS         auth,
+//RS         recipient_policy,
+//RS         trust,
+//RS         limits,
+//RS         dkim,
+//RS     })
+//RS }
+//RS 
+//RS fn email_address_list_handle(addresses: &[runtime::jet_email::Address]) -> i64 {
+//RS     let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+//RS     for address in addresses {
+//RS         let handle = push(NetValue::EmailAddress(address.clone()));
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let _ = rt.heap.list_push_int(list, handle);
+//RS         });
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn email_envelope_handle(envelope: &runtime::jet_email::Envelope) -> i64 {
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(2));
+//RS     let from = push(NetValue::EmailAddress(envelope.from.clone()));
+//RS     let recipients = email_address_list_handle(&envelope.recipients);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let _ = rt.heap.record_set_int(handle, 0, from);
+//RS         let _ = rt.heap.record_set_int(handle, 1, recipients);
+//RS     });
+//RS     handle
+//RS }
+//RS 
+//RS fn email_address_from_handle(handle: i64) -> Option<runtime::jet_email::Address> {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::EmailAddress(address) => Some(address.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn email_address_list_from_handle(list: i64) -> Option<Vec<runtime::jet_email::Address>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         let mut addresses = Vec::with_capacity(len as usize);
+//RS         for index in 0..len {
+//RS             let handle = rt.heap.list_get_int(list, index)?;
+//RS             if handle <= 0 {
+//RS                 return None;
+//RS             }
+//RS             let value = rt
+//RS                 .net_values
+//RS                 .get(handle.saturating_sub(1) as usize)
+//RS                 .and_then(|slot| slot.as_ref())?;
+//RS             let NetValue::EmailAddress(address) = value else {
+//RS                 return None;
+//RS             };
+//RS             addresses.push(address.clone());
+//RS         }
+//RS         Some(addresses)
+//RS     })
+//RS }
+//RS 
+//RS fn email_envelope_from_handle(handle: i64) -> Option<runtime::jet_email::Envelope> {
+//RS     let from = record_get_i64(handle, 0).and_then(email_address_from_handle)?;
+//RS     let recipients = record_get_i64(handle, 1).and_then(email_address_list_from_handle)?;
+//RS     Some(runtime::jet_email::Envelope { from, recipients })
+//RS }
+//RS 
+//RS fn email_attachment_list_from_handle(list: i64) -> Option<Vec<runtime::jet_email::Attachment>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         let mut attachments = Vec::with_capacity(len as usize);
+//RS         for index in 0..len {
+//RS             let handle = rt.heap.list_get_int(list, index)?;
+//RS             if handle <= 0 {
+//RS                 return None;
+//RS             }
+//RS             let value = rt
+//RS                 .net_values
+//RS                 .get(handle.saturating_sub(1) as usize)
+//RS                 .and_then(|slot| slot.as_ref())?;
+//RS             let NetValue::EmailAttachment(attachment) = value else {
+//RS                 return None;
+//RS             };
+//RS             attachments.push(attachment.clone());
+//RS         }
+//RS         Some(attachments)
+//RS     })
+//RS }
+//RS 
+//RS fn email_string(handle: i64) -> Option<String> {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle))
+//RS }
+//RS 
+//RS fn email_message_from_handle(handle: i64) -> Option<runtime::jet_email::Message> {
+//RS     with_net(handle, |value| match value {
+//RS         NetValue::EmailMessage(message) => Some(message.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn email_recipient_report_handle(report: runtime::jet_email::RecipientReport) -> i64 {
+//RS     let runtime::jet_email::RecipientReport {
+//RS         address,
+//RS         accepted,
+//RS         code,
+//RS         message,
+//RS     } = report;
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(4));
+//RS     let address = push(NetValue::EmailAddress(address));
+//RS     let message = alloc_string(message);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let _ = rt.heap.record_set_int(handle, 0, address);
+//RS         let _ = rt.heap.record_set_bool(handle, 1, accepted);
+//RS         let _ = rt.heap.record_set_int(handle, 2, code);
+//RS         let _ = rt.heap.record_set_string(handle, 3, message);
+//RS     });
+//RS     handle
+//RS }
+//RS 
+//RS fn email_recipient_reports_handle(reports: Vec<runtime::jet_email::RecipientReport>) -> i64 {
+//RS     let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+//RS     for report in reports {
+//RS         let handle = email_recipient_report_handle(report);
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let _ = rt.heap.list_push_int(list, handle);
+//RS         });
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn email_send_report_handle(report: runtime::jet_email::SendReport) -> i64 {
+//RS     let runtime::jet_email::SendReport {
+//RS         server,
+//RS         accepted,
+//RS         rejected,
+//RS         response_code,
+//RS         response,
+//RS         accepted_at,
+//RS     } = report;
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(6));
+//RS     let server = alloc_string(server);
+//RS     let accepted = email_recipient_reports_handle(accepted);
+//RS     let rejected = email_recipient_reports_handle(rejected);
+//RS     let response = alloc_string(response);
+//RS     let accepted_at = alloc_string(accepted_at);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let _ = rt.heap.record_set_string(handle, 0, server);
+//RS         let _ = rt.heap.record_set_int(handle, 1, accepted);
+//RS         let _ = rt.heap.record_set_int(handle, 2, rejected);
+//RS         let _ = rt.heap.record_set_int(handle, 3, response_code);
+//RS         let _ = rt.heap.record_set_string(handle, 4, response);
+//RS         let _ = rt.heap.record_set_string(handle, 5, accepted_at);
+//RS     });
+//RS     handle
+//RS }
+//RS 
+//RS fn jet_jit_email_address(text: i64) -> i64 {
+//RS     let Some(text) = email_string(text) else {
+//RS         return email_config_error("address", "invalid address text");
+//RS     };
+//RS     match runtime::jet_email::address(&text) {
+//RS         Ok(addr) => result_ok(push(NetValue::EmailAddress(addr)) as u64),
+//RS         Err(err) => email_err(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_attachment(filename: i64, mime: i64, bytes: i64) -> i64 {
+//RS     let Some(filename) = email_string(filename) else {
+//RS         return email_config_error("attachment", "invalid attachment filename");
+//RS     };
+//RS     let Some(mime) = email_string(mime) else {
+//RS         return email_config_error("attachment", "invalid attachment content type");
+//RS     };
+//RS     let Some(bytes) = list_bytes(bytes) else {
+//RS         return email_config_error("attachment", "invalid attachment bytes");
+//RS     };
+//RS     match runtime::jet_email::attachment(&filename, &mime, &bytes) {
+//RS         Ok(att) => {
+//RS             let h = push(NetValue::EmailAttachment(att));
+//RS             result_ok(h as u64)
+//RS         }
+//RS         Err(err) => email_err(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_message(
+//RS     from: i64,
+//RS     to: i64,
+//RS     bcc: i64,
+//RS     subject: i64,
+//RS     text: i64,
+//RS     html: i64,
+//RS     attachments: i64,
+//RS ) -> i64 {
+//RS     let from = match email_address_from_handle(from) {
+//RS         Some(a) => a,
+//RS         None => {
+//RS             return email_config_error("message", "invalid sender address");
+//RS         }
+//RS     };
+//RS     let to = email_address_list_from_handle(to);
+//RS     let Some(to) = to else {
+//RS         return email_config_error("message", "invalid visible recipient list");
+//RS     };
+//RS     let bcc = email_address_list_from_handle(bcc);
+//RS     let Some(bcc) = bcc else {
+//RS         return email_config_error("message", "invalid blind-copy recipient list");
+//RS     };
+//RS     let Some(subject) = email_string(subject) else {
+//RS         return email_config_error("message", "invalid subject text");
+//RS     };
+//RS     let Some(text) = email_string(text) else {
+//RS         return email_config_error("message", "invalid plain-text body");
+//RS     };
+//RS     let Some(html) = email_string(html) else {
+//RS         return email_config_error("message", "invalid HTML body");
+//RS     };
+//RS     let attachments = email_attachment_list_from_handle(attachments);
+//RS     let Some(attachments) = attachments else {
+//RS         return email_config_error("message", "invalid attachment list");
+//RS     };
+//RS     match runtime::jet_email::message(&from, &to, &bcc, &subject, &text, &html, &attachments) {
+//RS         Ok(msg) => result_ok(push(NetValue::EmailMessage(msg)) as u64),
+//RS         Err(err) => email_err(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_envelope(from: i64, recipients: i64) -> i64 {
+//RS     let Some(from) = email_address_from_handle(from) else {
+//RS         return email_config_error("envelope", "invalid sender address");
+//RS     };
+//RS     let Some(recipients) = email_address_list_from_handle(recipients) else {
+//RS         return email_config_error("envelope", "invalid recipient list");
+//RS     };
+//RS     match runtime::jet_email::envelope(&from, &recipients) {
+//RS         Ok(envelope) => result_ok(email_envelope_handle(&envelope) as u64),
+//RS         Err(error) => email_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_serialize(message: i64) -> i64 {
+//RS     let msg = match email_message_from_handle(message) {
+//RS         Some(m) => m,
+//RS         None => {
+//RS             return email_config_error("serialize", "invalid message");
+//RS         }
+//RS     };
+//RS     match runtime::jet_email::serialize(&msg) {
+//RS         Ok(bytes) => {
+//RS             let list = Concurrency::with_runtime_mut(|rt| {
+//RS                 let list = rt.heap.alloc_empty_list();
+//RS                 for b in bytes {
+//RS                     let _ = rt.heap.list_push_int(list, i64::from(b));
+//RS                 }
+//RS                 list
+//RS             });
+//RS             result_ok(list as u64)
+//RS         }
+//RS         Err(err) => email_err(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_limits_safe() -> i64 {
+//RS     let limits = runtime::jet_email::Limits::safe();
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(6));
+//RS     let fields = [
+//RS         limits.max_reply_line_bytes,
+//RS         limits.max_reply_lines,
+//RS         limits.max_capabilities,
+//RS         limits.max_recipients,
+//RS         limits.max_message_bytes,
+//RS         limits.max_auth_challenge_bytes,
+//RS     ];
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         for (index, value) in fields.into_iter().enumerate() {
+//RS             let _ = rt.heap.record_set_int(handle, index as i64, value);
+//RS         }
+//RS     });
+//RS     handle
+//RS }
+//RS 
+//RS fn jet_jit_email_smtp_from_env() -> i64 {
+//RS     match runtime::jet_email::smtp_from_env(runtime::email_runtime()) {
+//RS         Ok(mailer) => result_ok(push(NetValue::EmailMailer(mailer)) as u64),
+//RS         Err(error) => email_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_message_envelope(message: i64) -> i64 {
+//RS     let Some(message) = email_message_from_handle(message) else {
+//RS         return email_config_error("envelope", "invalid message");
+//RS     };
+//RS     email_envelope_handle(message.envelope())
+//RS }
+//RS 
+//RS fn jet_jit_email_message_with_envelope(message: i64, envelope: i64) -> i64 {
+//RS     let Some(message) = email_message_from_handle(message) else {
+//RS         return email_config_error("with_envelope", "invalid message");
+//RS     };
+//RS     let Some(envelope) = email_envelope_from_handle(envelope) else {
+//RS         return email_config_error("with_envelope", "invalid envelope");
+//RS     };
+//RS     match message.with_envelope(&envelope) {
+//RS         Ok(message) => result_ok(push(NetValue::EmailMessage(message)) as u64),
+//RS         Err(error) => email_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_mailer_send(mailer: i64, message: i64) -> i64 {
+//RS     let Some(message) = email_message_from_handle(message) else {
+//RS         return email_config_error("send", "invalid message");
+//RS     };
+//RS     let Some(NetValue::EmailMailer(mut mailer_value)) = take_net(mailer) else {
+//RS         return email_config_error("send", "invalid mailer");
+//RS     };
+//RS     let result = mailer_value.send(message);
+//RS     put_net(mailer, NetValue::EmailMailer(mailer_value));
+//RS     match result {
+//RS         Ok(report) => result_ok(email_send_report_handle(report) as u64),
+//RS         Err(error) => email_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_email_smtp(config: i64) -> i64 {
+//RS     let Some(mut config) = unpack_smtp_config(config) else {
+//RS         return email_config_error("smtp", "invalid SMTP configuration value");
+//RS     };
+//RS     let extract = |s: &Vec<u8>| s.clone();
+//RS     let email_runtime = runtime::email_runtime();
+//RS     let smtp_result = runtime::jet_email::smtp(&config, extract, email_runtime);
+//RS     runtime::jet_email::wipe_config_secrets(&mut config, email_runtime);
+//RS     match smtp_result {
+//RS         Ok(mailer) => result_ok(push(NetValue::EmailMailer(mailer)) as u64),
+//RS         Err(err) => email_err(err),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn clear_net_state() {}
+//RS 
+//RS host_fns! {
+//RS     struct NetHostFns;
+//RS     register: register_net_symbols;
+//RS     declare: declare_net_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig0 = Signature::new(cc);
+//RS         sig0.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig1 = Signature::new(cc);
+//RS         sig1.params.push(AbiParam::new(types::I64));
+//RS         sig1.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig2 = Signature::new(cc);
+//RS         sig2.params.push(AbiParam::new(types::I64));
+//RS         sig2.params.push(AbiParam::new(types::I64));
+//RS         sig2.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig3 = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             sig3.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         sig3.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig7 = Signature::new(cc);
+//RS         for _ in 0..7 {
+//RS             sig7.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         sig7.returns.push(AbiParam::new(types::I64));
+//RS 
+//RS 
+//RS     }
+//RS     url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;
+//RS     url_typed_literal_canonical: "jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
+//RS     url_typed_literal_std: "jet_std::jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
+//RS     url_percent_encode: "jet_jit_url_percent_encode" => jet_jit_url_percent_encode: sig1;
+//RS     url_percent_decode: "jet_jit_url_percent_decode" => jet_jit_url_percent_decode: sig1;
+//RS     url_join_text: "jet_jit_url_join_text" => jet_jit_url_join_text: sig2;
+//RS     url_parse_qsl: "jet_jit_url_parse_qsl" => jet_jit_url_parse_qsl: sig1;
+//RS     url_urlencode: "jet_jit_url_urlencode" => jet_jit_url_urlencode: sig1;
+//RS     url_split_fragment: "jet_jit_url_split_fragment" => jet_jit_url_split_fragment: sig1;
+//RS     url_quote: "jet_jit_url_quote" => jet_jit_url_quote: sig1;
+//RS     url_quote_from_bytes: "jet_jit_url_quote_from_bytes" => jet_jit_url_quote_from_bytes: sig1;
+//RS     url_quote_plus: "jet_jit_url_quote_plus" => jet_jit_url_quote_plus: sig1;
+//RS     url_unquote: "jet_jit_url_unquote" => jet_jit_url_unquote: sig1;
+//RS     url_unquote_to_bytes: "jet_jit_url_unquote_to_bytes" => jet_jit_url_unquote_to_bytes: sig1;
+//RS     url_unquote_plus: "jet_jit_url_unquote_plus" => jet_jit_url_unquote_plus: sig1;
+//RS     url_urldefrag: "jet_jit_url_urldefrag" => jet_jit_url_urldefrag: sig1;
+//RS     mime_from_extension: "jet_jit_mime_from_extension" => jet_jit_mime_from_extension: sig1;
+//RS     mime_extension: "jet_jit_mime_extension" => jet_jit_mime_extension: sig1;
+//RS     url_query: "jet_jit_url_query" => jet_jit_url_query: sig1;
+//RS     mime_essence: "jet_jit_mime_essence" => jet_jit_mime_essence: sig1;
+//RS     mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
+//RS     checked_mime_media_type: "jet_std::JetMIME::media_type" => jet_jit_mime_media_type: sig1;
+//RS     checked_mime_subtype: "jet_std::JetMIME::subtype" => jet_jit_mime_subtype: sig1;
+//RS     checked_mime_essence: "jet_std::JetMIME::essence" => jet_jit_mime_essence: sig1;
+//RS     checked_mime_param: "jet_std::JetMIME::param" => jet_jit_mime_param: sig2;
+//RS     checked_mime_params: "jet_std::JetMIME::params" => jet_jit_mime_params: sig1;
+//RS     checked_mime_to_string: "jet_std::JetMIME::to_string_value" => jet_jit_mime_to_string: sig1;
+//RS     browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
+//RS     browser_timeout: "jet_jit_browser_timeout" => jet_jit_browser_timeout: sig1;
+//RS     browser_connect: "jet_jit_browser_connect" => jet_jit_browser_connect: sig1;
+//RS     browser_connect_profile: "jet_jit_browser_connect_profile" => jet_jit_browser_connect_profile: sig3;
+//RS     browser_locked: "jet_jit_browser_locked" => jet_jit_browser_locked: sig1;
+//RS     browser_test_config: "jet_jit_browser_test_config" => jet_jit_browser_test_config: sig0;
+//RS     browser_test_config_from_env: "jet_jit_browser_test_config_from_env" => jet_jit_browser_test_config_from_env: sig0;
+//RS     browser_test_config_engines: "jet_jit_browser_test_config_engines" => jet_jit_browser_test_config_engines: sig1;
+//RS     browser_test_config_retries: "jet_jit_browser_test_config_retries" => jet_jit_browser_test_config_retries: sig1;
+//RS     browser_test_config_filter: "jet_jit_browser_test_config_filter" => jet_jit_browser_test_config_filter: sig1;
+//RS     browser_test_config_reporter: "jet_jit_browser_test_config_reporter" => jet_jit_browser_test_config_reporter: sig1;
+//RS     browser_test_config_server_url: "jet_jit_browser_test_config_server_url" => jet_jit_browser_test_config_server_url: sig1;
+//RS     browser_test_config_artifact_dir: "jet_jit_browser_test_config_artifact_dir" => jet_jit_browser_test_config_artifact_dir: sig1;
+//RS     browser_test_config_report_path: "jet_jit_browser_test_config_report_path" => jet_jit_browser_test_config_report_path: sig1;
+//RS     browser_test_config_ui: "jet_jit_browser_test_config_ui" => jet_jit_browser_test_config_ui: sig1;
+//RS     browser_test_config_visual: "jet_jit_browser_test_config_visual" => jet_jit_browser_test_config_visual: sig1;
+//RS     browser_test_config_watch: "jet_jit_browser_test_config_watch" => jet_jit_browser_test_config_watch: sig1;
+//RS     browser_test_begin_named: "jet_jit_browser_test_begin_named" => jet_jit_browser_test_begin_named: sig7;
+//RS     browser_test_selected: "jet_jit_browser_test_selected" => jet_jit_browser_test_selected: sig2;
+//RS     browser_test_report_new: "jet_jit_browser_test_report_new" => jet_jit_browser_test_report_new: sig1;
+//RS     browser_test_report_add_case: "jet_jit_browser_test_report_add_case" => jet_jit_browser_test_report_add_case: sig2;
+//RS     browser_test_report_json: "jet_jit_browser_test_report_json" => jet_jit_browser_test_report_json: sig1;
+//RS     browser_test_report_text: "jet_jit_browser_test_report_text" => jet_jit_browser_test_report_text: sig1;
+//RS     browser_test_report_html: "jet_jit_browser_test_report_html" => jet_jit_browser_test_report_html: sig1;
+//RS     browser_test_report_exit_code: "jet_jit_browser_test_report_exit_code" => jet_jit_browser_test_report_exit_code: sig1;
+//RS     browser_test_write_report: "jet_jit_browser_test_write_report" => jet_jit_browser_test_write_report: sig2;
+//RS     browser_test_generate_source: "jet_jit_browser_test_generate_source" => jet_jit_browser_test_generate_source: sig3;
+//RS     browser_test_server_start: "jet_jit_browser_test_server_start" => jet_jit_browser_test_server_start: sig1;
+//RS     browser_test_server_stop: "jet_jit_browser_test_server_stop" => jet_jit_browser_test_server_stop: sig1;
+//RS     browser_test_server_url: "jet_jit_browser_test_server_url" => jet_jit_browser_test_server_url: sig1;
+//RS     browser_test_server_logs: "jet_jit_browser_test_server_logs" => jet_jit_browser_test_server_logs: sig1;
+//RS     browser_test_watch_changed: "jet_jit_browser_test_watch_changed" => jet_jit_browser_test_watch_changed: sig2;
+//RS     // Canonical `core.web.browser` / `core.web.browser.test` rows resolve by
+//RS     // the exact symbol the row declares; the `jet_jit_*` spellings above stay
+//RS     // for Core rows projected through `CoreCallRecord::jit_symbol_candidates`.
+//RS     row_browser_profile: "jet_browser_profile" => jet_jit_browser_profile: sig1;
+//RS     row_browser_timeout: "jet_browser_timeout" => jet_jit_browser_timeout: sig1;
+//RS     row_browser_connect: "jet_browser_connect" => jet_jit_browser_connect: sig1;
+//RS     row_browser_connect_profile: "jet_browser_connect_profile" => jet_jit_browser_connect_profile: sig3;
+//RS     row_browser_locked: "jet_browser_locked" => jet_jit_browser_locked: sig1;
+//RS     row_browser_test_config: "jet_browser_test_config" => jet_jit_browser_test_config: sig0;
+//RS     row_browser_test_config_from_env: "jet_browser_test_config_from_env" => jet_jit_browser_test_config_from_env: sig0;
+//RS     row_browser_test_begin_named: "jet_browser_test_begin_named" => jet_jit_browser_test_begin_named: sig7;
+//RS     row_browser_test_selected: "jet_browser_test_selected" => jet_jit_browser_test_selected: sig2;
+//RS     row_browser_test_report_new: "jet_browser_test_report_new" => jet_jit_browser_test_report_new: sig1;
+//RS     row_browser_test_report_add_case: "jet_browser_test_report_add_case" => jet_jit_browser_test_report_add_case: sig2;
+//RS     row_browser_test_report_json: "jet_browser_test_report_json" => jet_jit_browser_test_report_json: sig1;
+//RS     row_browser_test_report_text: "jet_browser_test_report_text" => jet_jit_browser_test_report_text: sig1;
+//RS     row_browser_test_report_html: "jet_browser_test_report_html" => jet_jit_browser_test_report_html: sig1;
+//RS     row_browser_test_report_exit_code: "jet_browser_test_report_exit_code" => jet_jit_browser_test_report_exit_code: sig1;
+//RS     row_browser_test_write_report: "jet_browser_test_write_report" => jet_jit_browser_test_write_report: sig2;
+//RS     row_browser_test_generate_source: "jet_browser_test_generate_source" => jet_jit_browser_test_generate_source: sig3;
+//RS     row_browser_test_server_start: "jet_browser_test_server_start" => jet_jit_browser_test_server_start: sig1;
+//RS     row_browser_test_server_stop: "jet_browser_test_server_stop" => jet_jit_browser_test_server_stop: sig1;
+//RS     row_browser_test_server_url: "jet_browser_test_server_url" => jet_jit_browser_test_server_url: sig1;
+//RS     row_browser_test_server_logs: "jet_browser_test_server_logs" => jet_jit_browser_test_server_logs: sig1;
+//RS     row_browser_test_watch_changed: "jet_browser_test_watch_changed" => jet_jit_browser_test_watch_changed: sig2;
+//RS     email_address: "jet_jit_email_address" => jet_jit_email_address: sig1;
+//RS     email_attachment: "jet_jit_email_attachment" => jet_jit_email_attachment: sig3;
+//RS     email_message: "jet_jit_email_message" => jet_jit_email_message: sig7;
+//RS     email_envelope: "jet_jit_email_envelope" => jet_jit_email_envelope: sig2;
+//RS     email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
+//RS     email_limits_safe: "jet_jit_email_limits_safe" => jet_jit_email_limits_safe: sig0;
+//RS     email_limits_safe_prelude: "jet_email::Limits::safe" => jet_jit_email_limits_safe: sig0;
+//RS     email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
+//RS     email_smtp_from_env: "jet_jit_email_smtp_from_env" => jet_jit_email_smtp_from_env: sig0;
+//RS     email_message_envelope: "jet_jit_email_message_envelope" => jet_jit_email_message_envelope: sig1;
+//RS     email_message_with_envelope: "jet_jit_email_message_with_envelope" => jet_jit_email_message_with_envelope: sig2;
+//RS     email_mailer_send: "jet_jit_email_mailer_send" => jet_jit_email_mailer_send: sig2;
+//RS }
+// END-PORT-PENDING 0228 crates/jet-jit/src/Net.rs:1-1523
+

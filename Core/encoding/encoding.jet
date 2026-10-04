@@ -8,6 +8,8 @@ package {
         encoding: .Library{ entry: encoding }
     }
 }
+use core.encoding.runtime.kernel_hex_decode as encoding_hex_decode
+
 // core.encoding — interchange codecs and the one dynamic value tree.
 //
 // Every format in this package speaks the same two verbs: `parse` (text or
@@ -29,6 +31,8 @@ package {
 // - No codec fabricates a value for malformed input. Syntax problems are
 //   `EncodingError`; alphabet helpers use their local typed errors.
 // - Whole-value codecs are pure (`->`) and callers pass text or bytes directly.
+module runtime
+
 module hex
 
 module base32
@@ -71,7 +75,9 @@ pub fn hex_value(b: U8) -> Int? Never! {
 }
 
 /// Lowercase hex of `bytes`. Allocates `2 * bytes.len()` ASCII bytes.
-pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
+// One hexadecimal law for owning lists and borrowed fixed digests. The view
+// retains the original owner/extent; callers do not widen fixed arrays to lists.
+pub fn bytes_to_hex(bytes: View<U8>) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n :: Int.from_u8(b)
@@ -82,20 +88,13 @@ pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
 }
 
 /// Decode a hex string into bytes. Whitespace is rejected; length must be even.
+// String.bytes still materializes the canonical UTF-8 bytes (#4318/#4392).
+// Borrow that one representation; the private decoder never copies encoded
+// bytes or recovers an intermediate String.
 pub fn hex_to_bytes(text: String) -> [U8] HexError! {
     raw :: text.bytes()
-    if raw.len() %% 2 != 0 {
-        return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
-    }
-    out := [U8]{}
-    i := 0
-    loop i < raw.len() {
-        hi :: hex_value(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
-        lo :: hex_value(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
-        &out.push(U8{hi * 16 + lo})
-        i = i + 2
-    }
-    Ok(out)
+    view :: raw[0..<raw.len()]
+    encoding_hex_decode.decode(view)
 }
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask

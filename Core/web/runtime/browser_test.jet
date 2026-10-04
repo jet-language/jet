@@ -1,0 +1,1411 @@
+// PORT-PENDING 0020 crates-jet-codegen-src-prelude-browsertest: crates/jet-codegen/src/Prelude/BrowserTest.rs:1-1407
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-BROWSERTEST1=A (#2498): typed browser-test lifecycle and report support.
+//RS //
+//RS // This fragment is emitted only for the browser test harness. It consumes the
+//RS // native BiDi handles from Browser.rs, owns one fresh context per attempt, and
+//RS // records source-bound facts without putting page payloads in traces. The CLI
+//RS // selects engines and starts/reuses the local web server; this source keeps the
+//RS // runner deterministic across AOT, resident JIT, and the TIR host.
+//RS 
+//RS const JET_BROWSER_TEST_MAX_RETRIES: i64 = 5;
+//RS const JET_BROWSER_TEST_MAX_ENGINES: usize = 3;
+//RS const JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
+//RS const JET_BROWSER_TEST_MAX_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
+//RS const JET_BROWSER_TEST_MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
+//RS const JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES: usize = 64 * 1024;
+//RS const JET_BROWSER_TEST_DEFAULT_TIMEOUT_MS: i64 = 30_000;
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestSource {
+//RS     path: String,
+//RS     line: u32,
+//RS     column: u32,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestConfig {
+//RS     engines: Vec<String>,
+//RS     retries: i64,
+//RS     timeout: JetBrowserTimeout,
+//RS     filter: String,
+//RS     reporter: String,
+//RS     ui: bool,
+//RS     visual: bool,
+//RS     watch: bool,
+//RS     trace_on_retry: bool,
+//RS     trace_all: bool,
+//RS     server_url: String,
+//RS     server_command: Vec<String>,
+//RS     server_reuse: bool,
+//RS     server_cwd: String,
+//RS     artifact_dir: String,
+//RS     report_path: String,
+//RS     source_root: String,
+//RS }
+//RS 
+//RS fn jet_browser_test_config_value(root: &str, key: &str) -> Option<String> {
+//RS     let path = std::path::Path::new(root).join("browser-tests.conf");
+//RS     let contents = std::fs::read_to_string(path).ok()?;
+//RS     contents.lines().find_map(|line| {
+//RS         let line = line.trim();
+//RS         let (name, value) = line.split_once('=')?;
+//RS         if name.trim().eq_ignore_ascii_case(key) {
+//RS             Some(value.trim().to_string())
+//RS         } else {
+//RS             None
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS impl JetBrowserTestConfig {
+//RS     fn from_environment() -> Result<Self, JetBrowserError> {
+//RS         let project_root = jet_browser_project_root();
+//RS         let browser_text = std::env::var("JET_TEST_BROWSERS")
+//RS             .ok()
+//RS             .or_else(|| std::env::var("JET_TEST_BROWSER").ok())
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "browsers"))
+//RS             .unwrap_or_else(|| "chromium".to_string());
+//RS         let engines = jet_browser_test_engines(&browser_text)?;
+//RS         let retries = std::env::var("JET_TEST_RETRIES")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "retries"))
+//RS             .and_then(|value| value.parse::<i64>().ok())
+//RS             .unwrap_or(0);
+//RS         if !(0..=JET_BROWSER_TEST_MAX_RETRIES).contains(&retries) {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         let timeout_ms = std::env::var("JET_TEST_TIMEOUT_MS")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "timeout-ms"))
+//RS             .and_then(|value| value.parse::<i64>().ok())
+//RS             .unwrap_or(JET_BROWSER_TEST_DEFAULT_TIMEOUT_MS);
+//RS         let timeout = jet_browser_timeout(timeout_ms)?;
+//RS         let reporter = std::env::var("JET_TEST_REPORTER")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "reporter"))
+//RS             .unwrap_or_else(|| "text".to_string())
+//RS             .to_ascii_lowercase();
+//RS         if !matches!(reporter.as_str(), "text" | "json" | "html") {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         let artifact_dir = std::env::var("JET_TEST_ARTIFACTS")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "artifacts"))
+//RS             .unwrap_or_else(|| {
+//RS                 std::path::Path::new(&project_root)
+//RS                     .join(".jet/browser-tests/artifacts")
+//RS                     .to_string_lossy()
+//RS                     .into_owned()
+//RS             });
+//RS         let report_path = std::env::var("JET_TEST_REPORT")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "report"))
+//RS             .unwrap_or_else(|| {
+//RS                 std::path::Path::new(&project_root)
+//RS                     .join(".jet/browser-tests/report.json")
+//RS                     .to_string_lossy()
+//RS                     .into_owned()
+//RS             });
+//RS         let server_url = std::env::var("JET_TEST_WEB_SERVER_URL")
+//RS             .ok()
+//RS             .or_else(|| std::env::var("JET_BROWSER_TEST_SERVER_URL").ok())
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "server-url"))
+//RS             .unwrap_or_default();
+//RS         let server_command = std::env::var("JET_TEST_WEB_SERVER_CMD")
+//RS             .ok()
+//RS             .or_else(|| std::env::var("JET_BROWSER_TEST_SERVER_CMD").ok())
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "webServer"))
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "web_server"))
+//RS             .map(|command| jet_browser_test_split_command(&command))
+//RS             .unwrap_or_default();
+//RS         let server_reuse = std::env::var("JET_TEST_WEB_SERVER_REUSE")
+//RS             .ok()
+//RS             .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+//RS             .or_else(|| {
+//RS                 jet_browser_test_config_value(&project_root, "server")
+//RS                     .map(|value| value.eq_ignore_ascii_case("reuse"))
+//RS             })
+//RS             .unwrap_or(false);
+//RS         let server_cwd = std::env::var("JET_TEST_WEB_SERVER_CWD")
+//RS             .ok()
+//RS             .or_else(|| jet_browser_test_config_value(&project_root, "server-cwd"))
+//RS             .unwrap_or_else(|| project_root.clone());
+//RS         Ok(Self {
+//RS             engines,
+//RS             retries,
+//RS             timeout,
+//RS             filter: std::env::var("JET_TEST_FILTER")
+//RS                 .ok()
+//RS                 .or_else(|| jet_browser_test_config_value(&project_root, "filter"))
+//RS                 .unwrap_or_default(),
+//RS             reporter,
+//RS             server_reuse,
+//RS             ui: jet_browser_test_env_bool("JET_TEST_BROWSER_UI", false),
+//RS             visual: jet_browser_test_env_bool("JET_TEST_BROWSER_VISUAL", false),
+//RS             watch: jet_browser_test_env_bool("JET_TEST_WATCH", false),
+//RS             trace_on_retry: jet_browser_test_env_bool("JET_TEST_TRACE_ON_RETRY", true),
+//RS             trace_all: jet_browser_test_env_bool("JET_TEST_TRACE", false),
+//RS             server_url,
+//RS             server_command,
+//RS             server_cwd,
+//RS             artifact_dir,
+//RS             report_path,
+//RS             source_root: project_root,
+//RS         })
+//RS     }
+//RS }
+//RS pub(crate) fn jet_browser_test_config_from_env() -> Result<JetBrowserTestConfig, JetBrowserError> {
+//RS     JetBrowserTestConfig::from_environment()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config() -> Result<JetBrowserTestConfig, JetBrowserError> {
+//RS     jet_browser_test_config_from_env()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_engines(config: &JetBrowserTestConfig) -> Vec<String> {
+//RS     config.engines.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_retries(config: &JetBrowserTestConfig) -> i64 {
+//RS     config.retries
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_filter(config: &JetBrowserTestConfig) -> String {
+//RS     config.filter.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_reporter(config: &JetBrowserTestConfig) -> String {
+//RS     config.reporter.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_ui(config: &JetBrowserTestConfig) -> bool {
+//RS     config.ui
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_visual(config: &JetBrowserTestConfig) -> bool {
+//RS     config.visual
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_watch(config: &JetBrowserTestConfig) -> bool {
+//RS     config.watch
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_server_url(config: &JetBrowserTestConfig) -> String {
+//RS     config.server_url.clone()
+//RS }
+//RS pub(crate) fn jet_browser_test_config_artifact_dir(config: &JetBrowserTestConfig) -> String {
+//RS     config.artifact_dir.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_config_report_path(config: &JetBrowserTestConfig) -> String {
+//RS     config.report_path.clone()
+//RS }
+//RS fn jet_browser_test_env_bool(name: &str, default: bool) -> bool {
+//RS     match std::env::var(name) {
+//RS         Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+//RS             "1" | "true" | "yes" | "on" => true,
+//RS             "0" | "false" | "no" | "off" => false,
+//RS             _ => default,
+//RS         },
+//RS         Err(_) => default,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_test_engines(raw: &str) -> Result<Vec<String>, JetBrowserError> {
+//RS     let mut requested = Vec::new();
+//RS     for value in raw.split(|ch: char| ch == ',' || ch.is_ascii_whitespace()) {
+//RS         let value = value.trim().to_ascii_lowercase();
+//RS         if value.is_empty() {
+//RS             continue;
+//RS         }
+//RS         if !matches!(value.as_str(), "chromium" | "firefox" | "webkit") {
+//RS             return Err(JetBrowserError::new("unknown engine"));
+//RS         }
+//RS         if !requested.contains(&value) {
+//RS             requested.push(value);
+//RS         }
+//RS     }
+//RS     if requested.is_empty() || requested.len() > JET_BROWSER_TEST_MAX_ENGINES {
+//RS         return Err(JetBrowserError::new("unknown engine"));
+//RS     }
+//RS     let mut engines = Vec::new();
+//RS     for value in ["chromium", "firefox", "webkit"] {
+//RS         if requested.iter().any(|entry| entry == value) {
+//RS             engines.push(value.to_string());
+//RS         }
+//RS     }
+//RS     Ok(engines)
+//RS }
+//RS 
+//RS fn jet_browser_test_split_command(raw: &str) -> Vec<String> {
+//RS     let mut command = Vec::new();
+//RS     let mut value = String::new();
+//RS     let mut quote = None;
+//RS     for ch in raw.chars() {
+//RS         match (quote, ch) {
+//RS             (Some(delimiter), ch) if ch == delimiter => quote = None,
+//RS             (Some(_), ch) => value.push(ch),
+//RS             (None, '\'' | '"') => quote = Some(ch),
+//RS             (None, ch) if ch.is_ascii_whitespace() => {
+//RS                 if !value.is_empty() {
+//RS                     command.push(std::mem::take(&mut value));
+//RS                 }
+//RS             }
+//RS             (None, ch) => value.push(ch),
+//RS         }
+//RS     }
+//RS     if !value.is_empty() {
+//RS         command.push(value);
+//RS     }
+//RS     command
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &String) -> bool {
+//RS     if config.filter.trim().is_empty() {
+//RS         return true;
+//RS     }
+//RS     config
+//RS         .filter
+//RS         .split(|ch: char| ch == ',' || ch.is_ascii_whitespace())
+//RS         .filter(|value| !value.is_empty())
+//RS         .any(|pattern| jet_browser_test_glob_match(pattern, name))
+//RS }
+//RS 
+//RS fn jet_browser_test_glob_match(pattern: &str, value: &str) -> bool {
+//RS     let pattern = pattern.as_bytes();
+//RS     let value = value.as_bytes();
+//RS     let mut p = 0;
+//RS     let mut v = 0;
+//RS     let mut star = None;
+//RS     let mut star_value = 0;
+//RS     while v < value.len() {
+//RS         if p < pattern.len() && (pattern[p] == value[v] || pattern[p] == b'?') {
+//RS             p += 1;
+//RS             v += 1;
+//RS         } else if p < pattern.len() && pattern[p] == b'*' {
+//RS             star = Some(p);
+//RS             p += 1;
+//RS             star_value = v;
+//RS         } else if let Some(star_position) = star {
+//RS             p = star_position + 1;
+//RS             star_value += 1;
+//RS             v = star_value;
+//RS         } else {
+//RS             return false;
+//RS         }
+//RS     }
+//RS     while p < pattern.len() && pattern[p] == b'*' {
+//RS         p += 1;
+//RS     }
+//RS     p == pattern.len()
+//RS }
+//RS 
+//RS fn jet_browser_test_source(path: &String, line: i64, column: i64) -> JetBrowserTestSource {
+//RS     JetBrowserTestSource {
+//RS         path: path.clone(),
+//RS         line: u32::try_from(line.max(0)).unwrap_or(u32::MAX),
+//RS         column: u32::try_from(column.max(0)).unwrap_or(u32::MAX),
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestAction {
+//RS     sequence: usize,
+//RS     kind: String,
+//RS     fact: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestSnapshot {
+//RS     kind: String,
+//RS     hash: String,
+//RS     bytes: usize,
+//RS     path: String,
+//RS     source: JetBrowserTestSource,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestEventFact {
+//RS     kind: String,
+//RS     request_id_hash: String,
+//RS     request_method: String,
+//RS     url_hash: String,
+//RS     status_code: i64,
+//RS     is_blocked: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestArtifact {
+//RS     name: String,
+//RS     path: String,
+//RS     mime: String,
+//RS     bytes: usize,
+//RS     hash: String,
+//RS     source: JetBrowserTestSource,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestAttempt {
+//RS     test: String,
+//RS     engine: String,
+//RS     attempt: i64,
+//RS     passed: bool,
+//RS     expected_failure: bool,
+//RS     duration_ms: i64,
+//RS     source: JetBrowserTestSource,
+//RS     actions: Vec<JetBrowserTestAction>,
+//RS     snapshots: Vec<JetBrowserTestSnapshot>,
+//RS     events: Vec<JetBrowserTestEventFact>,
+//RS     artifacts: Vec<JetBrowserTestArtifact>,
+//RS     trace: Vec<String>,
+//RS     error: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestCase {
+//RS     name: String,
+//RS     selected: bool,
+//RS     attempts: Vec<JetBrowserTestAttempt>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserTestReport {
+//RS     source_root: String,
+//RS     reporter: String,
+//RS     ui: bool,
+//RS     watch: bool,
+//RS     cases: Vec<JetBrowserTestCase>,
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_report_new(config: &JetBrowserTestConfig) -> JetBrowserTestReport {
+//RS     JetBrowserTestReport {
+//RS         source_root: config.source_root.clone(),
+//RS         reporter: config.reporter.clone(),
+//RS         ui: config.ui,
+//RS         watch: config.watch,
+//RS         cases: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_test_parse_actions(raw: &[String]) -> Vec<JetBrowserTestAction> {
+//RS     raw.iter()
+//RS         .enumerate()
+//RS         .map(|(sequence, entry)| {
+//RS             let (kind, fact) = entry
+//RS                 .split_once(':')
+//RS                 .map_or((entry.as_str(), ""), |(kind, fact)| (kind, fact));
+//RS             JetBrowserTestAction {
+//RS                 sequence,
+//RS                 kind: kind.to_string(),
+//RS                 fact: fact.to_string(),
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_browser_test_endpoint(engine: &str) -> Result<String, JetBrowserError> {
+//RS     let key = format!("JET_BROWSER_{}_ENDPOINT", engine.to_ascii_uppercase());
+//RS     let endpoint = std::env::var(&key)
+//RS         .or_else(|_| std::env::var("JET_BROWSER_ENDPOINT"))
+//RS         .unwrap_or_default();
+//RS     if endpoint.starts_with("ws://") || endpoint.starts_with("wss://") {
+//RS         Ok(endpoint)
+//RS     } else {
+//RS         Err(JetBrowserError::new("transport"))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_test_profile(locked: &JetBrowserLocked) -> Result<JetBrowserProfile, JetBrowserError> {
+//RS     let name = if locked.protocol.starts_with("bidi-") {
+//RS         locked.protocol.clone()
+//RS     } else {
+//RS         "bidi-2025.5".to_string()
+//RS     };
+//RS     jet_browser_profile(&name)
+//RS }
+//RS 
+//RS pub(crate) struct JetBrowserTestSession {
+//RS     browser: JetBrowser,
+//RS     context: JetBrowserContext,
+//RS     page: JetBrowserPage,
+//RS     actions: JetBrowserTestActionSink,
+//RS     config: JetBrowserTestConfig,
+//RS     test: String,
+//RS     engine: String,
+//RS     attempt: i64,
+//RS     source: JetBrowserTestSource,
+//RS     started: std::time::Instant,
+//RS }
+//RS 
+//RS fn jet_browser_test_begin(
+//RS     config: &JetBrowserTestConfig,
+//RS     test: &String,
+//RS     engine: &String,
+//RS     attempt: i64,
+//RS     source: JetBrowserTestSource,
+//RS ) -> Result<JetBrowserTestSession, JetBrowserError> {
+//RS     let locked = jet_browser_locked(engine)?;
+//RS     let endpoint = jet_browser_test_endpoint(engine)?;
+//RS     let profile = jet_browser_test_profile(&locked)?;
+//RS     let browser = jet_browser_connect_profile(&endpoint, &profile, config.timeout)?;
+//RS     let actions: JetBrowserTestActionSink =
+//RS         std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+//RS     jet_browser_test_attach_actions(&browser, Some(actions.clone()));
+//RS     let context = jet_browser_context(&browser)?;
+//RS     let page = match jet_browser_context_page(&context) {
+//RS         Ok(page) => page,
+//RS         Err(error) => {
+//RS             let _ = jet_browser_context_close(&context);
+//RS             let _ = jet_browser_close(&browser);
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     // A browser may not implement every optional event in an older profile.
+//RS     // The native event queue remains authoritative for the events it accepts.
+//RS     for event in [
+//RS         "log.entryAdded",
+//RS         "network.beforeRequestSent",
+//RS         "network.responseStarted",
+//RS         "network.fetchError",
+//RS         "browsingContext.consoleMessage",
+//RS     ] {
+//RS         let _ = jet_browser_subscribe(&browser, &event.to_string());
+//RS     }
+//RS     Ok(JetBrowserTestSession {
+//RS         browser,
+//RS         context,
+//RS         page,
+//RS         actions,
+//RS         config: config.clone(),
+//RS         test: test.clone(),
+//RS         engine: engine.clone(),
+//RS         attempt,
+//RS         source,
+//RS         started: std::time::Instant::now(),
+//RS     })
+//RS }
+//RS pub(crate) fn jet_browser_test_begin_named(
+//RS     config: &JetBrowserTestConfig,
+//RS     test: &String,
+//RS     engine: &String,
+//RS     attempt: i64,
+//RS     source_path: &String,
+//RS     line: i64,
+//RS     column: i64,
+//RS ) -> Result<JetBrowserTestFixture, JetBrowserError> {
+//RS     jet_browser_test_begin(
+//RS         config,
+//RS         test,
+//RS         engine,
+//RS         attempt,
+//RS         jet_browser_test_source(source_path, line, column),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_test_fixture_source(
+//RS     fixture: &JetBrowserTestFixture,
+//RS ) -> String {
+//RS     format!(
+//RS         "{}:{}:{}",
+//RS         fixture.source.path, fixture.source.line, fixture.source.column
+//RS     )
+//RS }
+//RS pub(crate) type JetBrowserTestFixture = JetBrowserTestSession;
+//RS 
+//RS fn jet_browser_test_fixture_page(fixture: &JetBrowserTestFixture) -> JetBrowserPage {
+//RS     fixture.page.clone()
+//RS }
+//RS 
+//RS fn jet_browser_test_fixture_context(
+//RS     fixture: &JetBrowserTestFixture,
+//RS ) -> JetBrowserContext {
+//RS     fixture.context.clone()
+//RS }
+//RS 
+//RS fn jet_browser_test_fixture_finish(
+//RS     fixture: JetBrowserTestFixture,
+//RS     result: Result<(), JetBrowserError>,
+//RS     expected_failure: bool,
+//RS ) -> JetBrowserTestAttempt {
+//RS     jet_browser_test_finish(fixture, result, expected_failure)
+//RS }
+//RS 
+//RS fn jet_browser_test_drain_events(browser: &JetBrowser) -> Vec<JetBrowserTestEventFact> {
+//RS     let mut events = Vec::new();
+//RS     loop {
+//RS         let timeout = JetBrowserTimeout { milliseconds: 1 };
+//RS         let Ok(event) = jet_browser_next_event(browser, timeout) else {
+//RS             break;
+//RS         };
+//RS         let method = jet_browser_event_kind(&event);
+//RS         let kind = if method.starts_with("log.") || method.contains("console") {
+//RS             "console"
+//RS         } else if method.starts_with("network.") {
+//RS             "network"
+//RS         } else {
+//RS             "event"
+//RS         };
+//RS         events.push(JetBrowserTestEventFact {
+//RS             kind: kind.to_string(),
+//RS             request_id_hash: jet_browser_fact_hash(&jet_browser_event_request_id(&event)),
+//RS             request_method: jet_browser_event_request_method(&event),
+//RS             url_hash: jet_browser_event_url_hash(&event),
+//RS             status_code: jet_browser_event_status_code(&event),
+//RS             is_blocked: jet_browser_event_is_blocked(&event),
+//RS         });
+//RS         if events.len() == JET_BROWSER_EVENT_LIMIT {
+//RS             break;
+//RS         }
+//RS     }
+//RS     events
+//RS }
+//RS 
+//RS fn jet_browser_test_safe_component(value: &str, fallback: &str) -> String {
+//RS     let safe: String = value
+//RS         .chars()
+//RS         .map(|ch| {
+//RS             if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+//RS                 ch
+//RS             } else {
+//RS                 '_'
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     if safe.is_empty() || safe == "." || safe == ".." {
+//RS         fallback.to_string()
+//RS     } else {
+//RS         safe
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_test_attempt_dir(session: &JetBrowserTestSession) -> std::path::PathBuf {
+//RS     std::path::Path::new(&session.config.artifact_dir)
+//RS         .join(jet_browser_test_safe_component(&session.test, "test"))
+//RS         .join(jet_browser_test_safe_component(&session.engine, "engine"))
+//RS         .join(format!("attempt-{}", session.attempt))
+//RS }
+//RS 
+//RS fn jet_browser_test_write_bytes(path: &std::path::Path, bytes: &[u8]) -> Result<(), JetBrowserError> {
+//RS     if bytes.len() > JET_BROWSER_TEST_MAX_ARTIFACT_BYTES {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     if let Some(parent) = path.parent() {
+//RS         std::fs::create_dir_all(parent).map_err(|_| JetBrowserError::new("transport"))?;
+//RS     }
+//RS     std::fs::write(path, bytes).map_err(|_| JetBrowserError::new("transport"))
+//RS }
+//RS 
+//RS fn jet_browser_test_capture_text_snapshot(
+//RS     session: &JetBrowserTestSession,
+//RS     kind: &str,
+//RS     value: Result<String, JetBrowserError>,
+//RS     snapshots: &mut Vec<JetBrowserTestSnapshot>,
+//RS     path: Option<&std::path::Path>,
+//RS ) {
+//RS     let Ok(value) = value else {
+//RS         return;
+//RS     };
+//RS     let full_hash = jet_browser_fact_hash(&value);
+//RS     let bytes = value.len();
+//RS     let retained = if bytes > JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES {
+//RS         String::from_utf8_lossy(&value.as_bytes()[..JET_BROWSER_TEST_MAX_SNAPSHOT_BYTES]).into_owned()
+//RS     } else {
+//RS         value
+//RS     };
+//RS     let mut artifact_path = String::new();
+//RS     if let Some(path) = path {
+//RS         if jet_browser_test_write_bytes(path, retained.as_bytes()).is_ok() {
+//RS             artifact_path = path.to_string_lossy().into_owned();
+//RS         }
+//RS     }
+//RS     snapshots.push(JetBrowserTestSnapshot {
+//RS         kind: kind.to_string(),
+//RS         hash: full_hash,
+//RS         bytes,
+//RS         path: artifact_path,
+//RS         source: session.source.clone(),
+//RS     });
+//RS }
+//RS 
+//RS fn jet_browser_test_capture_binary_artifact(
+//RS     session: &JetBrowserTestSession,
+//RS     name: &str,
+//RS     mime: &str,
+//RS     encoded: Result<String, JetBrowserError>,
+//RS     artifacts: &mut Vec<JetBrowserTestArtifact>,
+//RS ) {
+//RS     let Ok(encoded) = encoded else {
+//RS         return;
+//RS     };
+//RS     let Ok(bytes) = jet_browser_test_base64_decode(&encoded) else {
+//RS         return;
+//RS     };
+//RS     if bytes.len() > JET_BROWSER_TEST_MAX_ARTIFACT_BYTES {
+//RS         return;
+//RS     }
+//RS     let dir = jet_browser_test_attempt_dir(session);
+//RS     let path = dir.join(jet_browser_test_safe_component(name, "artifact"));
+//RS     if jet_browser_test_write_bytes(&path, &bytes).is_err() {
+//RS         return;
+//RS     }
+//RS     artifacts.push(JetBrowserTestArtifact {
+//RS         name: name.to_string(),
+//RS         path: path.to_string_lossy().into_owned(),
+//RS         mime: mime.to_string(),
+//RS         bytes: bytes.len(),
+//RS         hash: jet_browser_fact_hash(&String::from_utf8_lossy(&bytes)),
+//RS         source: session.source.clone(),
+//RS     });
+//RS }
+//RS 
+//RS fn jet_browser_test_capture_facts(
+//RS     session: &JetBrowserTestSession,
+//RS     include_payloads: bool,
+//RS ) -> (
+//RS     Vec<JetBrowserTestSnapshot>,
+//RS     Vec<JetBrowserTestArtifact>,
+//RS     Vec<JetBrowserTestEventFact>,
+//RS ) {
+//RS     let mut snapshots = Vec::new();
+//RS     let mut artifacts = Vec::new();
+//RS     let dir = jet_browser_test_attempt_dir(session);
+//RS     let dom_path = include_payloads.then(|| dir.join("dom.html"));
+//RS     jet_browser_test_capture_text_snapshot(
+//RS         session,
+//RS         "url",
+//RS         jet_browser_page_url(&session.page),
+//RS         &mut snapshots,
+//RS         None,
+//RS     );
+//RS     jet_browser_test_capture_text_snapshot(
+//RS         session,
+//RS         "title",
+//RS         jet_browser_page_title(&session.page),
+//RS         &mut snapshots,
+//RS         None,
+//RS     );
+//RS     jet_browser_test_capture_text_snapshot(
+//RS         session,
+//RS         "text",
+//RS         jet_browser_page_text(&session.page),
+//RS         &mut snapshots,
+//RS         None,
+//RS     );
+//RS     jet_browser_test_capture_text_snapshot(
+//RS         session,
+//RS         "dom",
+//RS         jet_browser_page_dom(&session.page),
+//RS         &mut snapshots,
+//RS         dom_path.as_deref(),
+//RS     );
+//RS     if include_payloads || session.config.visual {
+//RS         jet_browser_test_capture_binary_artifact(
+//RS             session,
+//RS             "screenshot.png",
+//RS             "image/png",
+//RS             jet_browser_page_screenshot(&session.page),
+//RS             &mut artifacts,
+//RS         );
+//RS     }
+//RS     let events = jet_browser_test_drain_events(&session.browser);
+//RS     (snapshots, artifacts, events)
+//RS }
+//RS 
+//RS fn jet_browser_test_finish(
+//RS     session: JetBrowserTestSession,
+//RS     result: Result<(), JetBrowserError>,
+//RS     expected_failure: bool,
+//RS ) -> JetBrowserTestAttempt {
+//RS     let raw_passed = result.is_ok();
+//RS     let error = result
+//RS         .err()
+//RS         .map_or_else(String::new, |error| error.jet_show());
+//RS     let passed = if expected_failure {
+//RS         !raw_passed
+//RS     } else {
+//RS         raw_passed
+//RS     };
+//RS     let retry_requested = session.attempt > 0 && session.config.trace_on_retry;
+//RS     let trace_requested = session.config.trace_all || retry_requested;
+//RS     let include_payloads = !raw_passed || trace_requested || session.config.ui;
+//RS     let (snapshots, artifacts, events) = jet_browser_test_capture_facts(&session, include_payloads);
+//RS     let trace = if !raw_passed || trace_requested || session.config.ui {
+//RS         jet_browser_trace(&session.browser).entries
+//RS     } else {
+//RS         Vec::new()
+//RS     };
+//RS     let actions = jet_browser_test_parse_actions(&session.actions.borrow());
+//RS     let duration_ms = i64::try_from(session.started.elapsed().as_millis()).unwrap_or(i64::MAX);
+//RS     let _ = jet_browser_page_close(&session.page);
+//RS     let _ = jet_browser_context_close(&session.context);
+//RS     let _ = jet_browser_close(&session.browser);
+//RS     JetBrowserTestAttempt {
+//RS         test: session.test,
+//RS         engine: session.engine,
+//RS         attempt: session.attempt,
+//RS         passed,
+//RS         expected_failure,
+//RS         duration_ms,
+//RS         source: session.source,
+//RS         actions,
+//RS         snapshots,
+//RS         events,
+//RS         artifacts,
+//RS         trace,
+//RS         error,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_test_setup_failure(
+//RS     test: &String,
+//RS     engine: &String,
+//RS     attempt: i64,
+//RS     expected_failure: bool,
+//RS     source: JetBrowserTestSource,
+//RS     error: JetBrowserError,
+//RS ) -> JetBrowserTestAttempt {
+//RS     JetBrowserTestAttempt {
+//RS         test: test.clone(),
+//RS         engine: engine.clone(),
+//RS         attempt,
+//RS         passed: false,
+//RS         expected_failure,
+//RS         duration_ms: 0,
+//RS         source,
+//RS         actions: Vec::new(),
+//RS         snapshots: Vec::new(),
+//RS         events: Vec::new(),
+//RS         artifacts: Vec::new(),
+//RS         trace: Vec::new(),
+//RS         error: error.jet_show(),
+//RS     }
+//RS }
+//RS 
+//RS type JetBrowserTestBody = fn(&JetBrowserPage) -> Result<(), JetBrowserError>;
+//RS 
+//RS fn jet_browser_test_run_case(
+//RS     config: &JetBrowserTestConfig,
+//RS     name: &String,
+//RS     source: JetBrowserTestSource,
+//RS     expected_failure: bool,
+//RS     body: JetBrowserTestBody,
+//RS ) -> JetBrowserTestCase {
+//RS     if !jet_browser_test_selected(config, name) {
+//RS         return JetBrowserTestCase {
+//RS             name: name.clone(),
+//RS             selected: false,
+//RS             attempts: Vec::new(),
+//RS         };
+//RS     }
+//RS     let mut attempts = Vec::new();
+//RS     for engine in &config.engines {
+//RS         for attempt in 0..=config.retries {
+//RS             let session = jet_browser_test_begin(config, name, engine, attempt, source.clone());
+//RS             let attempt_result = match session {
+//RS                 Ok(session) => {
+//RS                     let result = body(&session.page);
+//RS                     jet_browser_test_finish(session, result, expected_failure)
+//RS                 }
+//RS                 Err(error) => jet_browser_test_setup_failure(
+//RS                     name,
+//RS                     engine,
+//RS                     attempt,
+//RS                     expected_failure,
+//RS                     source.clone(),
+//RS                     error,
+//RS                 ),
+//RS             };
+//RS             let passed = attempt_result.passed;
+//RS             attempts.push(attempt_result);
+//RS             if passed {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     JetBrowserTestCase {
+//RS         name: name.clone(),
+//RS         selected: true,
+//RS         attempts,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_report_add_case(
+//RS     mut report: JetBrowserTestReport,
+//RS     case: JetBrowserTestCase,
+//RS ) -> JetBrowserTestReport {
+//RS     report.cases.push(case);
+//RS     report.cases.sort_by(|left, right| left.name.cmp(&right.name));
+//RS     report
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_report_exit_code(report: &JetBrowserTestReport) -> i64 {
+//RS     report
+//RS         .cases
+//RS         .iter()
+//RS         .any(|case| {
+//RS             case.selected
+//RS                 && case
+//RS                     .attempts
+//RS                     .last()
+//RS                     .map_or(true, |attempt| !attempt.passed)
+//RS         }) as i64
+//RS }
+//RS 
+//RS fn jet_browser_test_report_summary(report: &JetBrowserTestReport) -> String {
+//RS     let mut passed = 0;
+//RS     let mut failed = 0;
+//RS     let mut skipped = 0;
+//RS     for case in &report.cases {
+//RS         if !case.selected {
+//RS             skipped += 1;
+//RS         } else if case.attempts.last().is_some_and(|attempt| attempt.passed)
+//RS             && !case.attempts.is_empty()
+//RS         {
+//RS             passed += 1;
+//RS         } else {
+//RS             failed += 1;
+//RS         }
+//RS     }
+//RS     format!("{passed} passed, {failed} failed, {skipped} skipped")
+//RS }
+//RS 
+//RS fn jet_browser_test_json_source(source: &JetBrowserTestSource) -> jet_std::DataTree {
+//RS     jet_browser_object(vec![
+//RS         ("path", jet_browser_text(&source.path)),
+//RS         ("line", jet_std::DataTree::Float(f64::from(source.line))),
+//RS         ("column", jet_std::DataTree::Float(f64::from(source.column))),
+//RS     ])
+//RS }
+//RS 
+//RS fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::DataTree {
+//RS     let actions = jet_std::DataTree::Array(
+//RS         attempt
+//RS             .actions
+//RS             .iter()
+//RS             .map(|action| {
+//RS                 jet_browser_object(vec![
+//RS                     ("sequence", jet_std::DataTree::Float(action.sequence as f64)),
+//RS                     ("kind", jet_browser_text(&action.kind)),
+//RS                     ("fact", jet_browser_text(&action.fact)),
+//RS                     ("source", jet_browser_test_json_source(&attempt.source)),
+//RS                 ])
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     let snapshots = jet_std::DataTree::Array(
+//RS         attempt
+//RS             .snapshots
+//RS             .iter()
+//RS             .map(|snapshot| {
+//RS                 jet_browser_object(vec![
+//RS                     ("kind", jet_browser_text(&snapshot.kind)),
+//RS                     ("hash", jet_browser_text(&snapshot.hash)),
+//RS                     ("bytes", jet_std::DataTree::Float(snapshot.bytes as f64)),
+//RS                     ("path", jet_browser_text(&snapshot.path)),
+//RS                     ("source", jet_browser_test_json_source(&snapshot.source)),
+//RS                 ])
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     let events = jet_std::DataTree::Array(
+//RS         attempt
+//RS             .events
+//RS             .iter()
+//RS             .map(|event| {
+//RS                 jet_browser_object(vec![
+//RS                     ("kind", jet_browser_text(&event.kind)),
+//RS                     ("requestIdHash", jet_browser_text(&event.request_id_hash)),
+//RS                     ("requestMethod", jet_browser_text(&event.request_method)),
+//RS                     ("urlHash", jet_browser_text(&event.url_hash)),
+//RS                     (
+//RS                         "statusCode",
+//RS                         jet_std::DataTree::Float(event.status_code as f64),
+//RS                     ),
+//RS                     ("isBlocked", jet_std::DataTree::Bool(event.is_blocked)),
+//RS                 ])
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     let artifacts = jet_std::DataTree::Array(
+//RS         attempt
+//RS             .artifacts
+//RS             .iter()
+//RS             .map(|artifact| {
+//RS                 jet_browser_object(vec![
+//RS                     ("name", jet_browser_text(&artifact.name)),
+//RS                     ("path", jet_browser_text(&artifact.path)),
+//RS                     ("mime", jet_browser_text(&artifact.mime)),
+//RS                     ("bytes", jet_std::DataTree::Float(artifact.bytes as f64)),
+//RS                     ("hash", jet_browser_text(&artifact.hash)),
+//RS                     ("source", jet_browser_test_json_source(&artifact.source)),
+//RS                 ])
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     let trace = jet_std::DataTree::Array(
+//RS         attempt
+//RS             .trace
+//RS             .iter()
+//RS             .map(|entry| jet_browser_text(entry))
+//RS             .collect(),
+//RS     );
+//RS     jet_browser_object(vec![
+//RS         ("test", jet_browser_text(&attempt.test)),
+//RS         ("engine", jet_browser_text(&attempt.engine)),
+//RS         (
+//RS             "attempt",
+//RS             jet_std::DataTree::Float(attempt.attempt as f64),
+//RS         ),
+//RS         ("passed", jet_std::DataTree::Bool(attempt.passed)),
+//RS         (
+//RS             "expectedFailure",
+//RS             jet_std::DataTree::Bool(attempt.expected_failure),
+//RS         ),
+//RS         (
+//RS             "durationMs",
+//RS             jet_std::DataTree::Float(attempt.duration_ms as f64),
+//RS         ),
+//RS         ("source", jet_browser_test_json_source(&attempt.source)),
+//RS         ("actions", actions),
+//RS         ("snapshots", snapshots),
+//RS         ("events", events),
+//RS         ("artifacts", artifacts),
+//RS         ("trace", trace),
+//RS         (
+//RS             "error",
+//RS             if attempt.error.is_empty() {
+//RS                 jet_std::DataTree::Null
+//RS             } else {
+//RS                 jet_browser_text(&attempt.error)
+//RS             },
+//RS         ),
+//RS     ])
+//RS }
+//RS 
+//RS fn jet_browser_test_json(report: &JetBrowserTestReport) -> String {
+//RS     let cases = jet_std::DataTree::Array(
+//RS         report
+//RS             .cases
+//RS             .iter()
+//RS             .map(|case| {
+//RS                 jet_browser_object(vec![
+//RS                     ("name", jet_browser_text(&case.name)),
+//RS                     ("selected", jet_std::DataTree::Bool(case.selected)),
+//RS                     (
+//RS                         "attempts",
+//RS                         jet_std::DataTree::Array(
+//RS                             case
+//RS                                 .attempts
+//RS                                 .iter()
+//RS                                 .map(jet_browser_test_json_attempt)
+//RS                                 .collect(),
+//RS                         ),
+//RS                     ),
+//RS                 ])
+//RS             })
+//RS             .collect(),
+//RS     );
+//RS     jet_std::render_json(
+//RS         &jet_browser_object(vec![
+//RS             ("schema", jet_browser_text("jet.browser.test/v1")),
+//RS             ("sourceRoot", jet_browser_text(&report.source_root)),
+//RS             ("reporter", jet_browser_text(&report.reporter)),
+//RS             ("ui", jet_std::DataTree::Bool(report.ui)),
+//RS             ("watch", jet_std::DataTree::Bool(report.watch)),
+//RS             ("summary", jet_browser_text(&jet_browser_test_report_summary(report))),
+//RS             (
+//RS                 "exitCode",
+//RS                 jet_std::DataTree::Float(jet_browser_test_report_exit_code(report) as f64),
+//RS             ),
+//RS             ("cases", cases),
+//RS         ]),
+//RS         true,
+//RS         0,
+//RS     )
+//RS }
+//RS pub(crate) fn jet_browser_test_report_json(report: &JetBrowserTestReport) -> String {
+//RS     jet_browser_test_json(report)
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_report_text(report: &JetBrowserTestReport) -> String {
+//RS     jet_browser_test_text(report)
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_report_html(report: &JetBrowserTestReport) -> String {
+//RS     jet_browser_test_html(report)
+//RS }
+//RS 
+//RS fn jet_browser_test_text(report: &JetBrowserTestReport) -> String {
+//RS     let mut out = format!("Browser tests: {}\n", jet_browser_test_report_summary(report));
+//RS     for case in &report.cases {
+//RS         if !case.selected {
+//RS             out.push_str(&format!("SKIP {}\n", case.name));
+//RS             continue;
+//RS         }
+//RS         for attempt in &case.attempts {
+//RS             out.push_str(&format!(
+//RS                 "{} {} [{}] attempt={} duration={}ms\n",
+//RS                 if attempt.passed { "PASS" } else { "FAIL" },
+//RS                 attempt.test,
+//RS                 attempt.engine,
+//RS                 attempt.attempt,
+//RS                 attempt.duration_ms
+//RS             ));
+//RS             if !attempt.error.is_empty() {
+//RS                 out.push_str(&format!("  error: {}\n", attempt.error));
+//RS             }
+//RS             for action in &attempt.actions {
+//RS                 out.push_str(&format!("  action {}: {} {}\n", action.sequence, action.kind, action.fact));
+//RS             }
+//RS             for snapshot in &attempt.snapshots {
+//RS                 out.push_str(&format!(
+//RS                     "  snapshot {}: {} bytes={} hash={}{}\n",
+//RS                     snapshot.kind,
+//RS                     snapshot.path,
+//RS                     snapshot.bytes,
+//RS                     snapshot.hash,
+//RS                     if snapshot.source.path.is_empty() {
+//RS                         String::new()
+//RS                     } else {
+//RS                         format!(" source={}:{}", snapshot.source.path, snapshot.source.line)
+//RS                     }
+//RS                 ));
+//RS             }
+//RS             for event in &attempt.events {
+//RS                 out.push_str(&format!(
+//RS                     "  {} request={} method={} url={} status={} blocked={}\n",
+//RS                     event.kind,
+//RS                     event.request_id_hash,
+//RS                     event.request_method,
+//RS                     event.url_hash,
+//RS                     event.status_code,
+//RS                     event.is_blocked
+//RS                 ));
+//RS             }
+//RS             for artifact in &attempt.artifacts {
+//RS                 out.push_str(&format!("  attachment {}: {}\n", artifact.name, artifact.path));
+//RS             }
+//RS             if !attempt.trace.is_empty() {
+//RS                 out.push_str(&format!("  trace: {}\n", attempt.trace.join(",")));
+//RS             }
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_browser_test_html_json(value: &str) -> String {
+//RS     value
+//RS         .replace('&', "\\u0026")
+//RS         .replace('<', "\\u003c")
+//RS         .replace('>', "\\u003e")
+//RS         .replace('\u{2028}', "\\u2028")
+//RS         .replace('\u{2029}', "\\u2029")
+//RS }
+//RS 
+//RS fn jet_browser_test_html(report: &JetBrowserTestReport) -> String {
+//RS     let json = jet_browser_test_html_json(&jet_browser_test_json(report));
+//RS     let mut out = String::from(
+//RS         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet browser tests</title><style>\
+//RS          :root{color-scheme:dark;font:14px system-ui,sans-serif;background:#10151d;color:#e7edf5}\
+//RS          body{margin:0;padding:24px;max-width:1400px;margin-inline:auto}\
+//RS          header{display:flex;gap:16px;align-items:end;justify-content:space-between;border-bottom:1px solid #344052;padding-bottom:16px}\
+//RS          input{background:#171f2b;border:1px solid #40506a;color:inherit;padding:8px;border-radius:5px;min-width:260px}\
+//RS          main{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(0,2fr);gap:18px;margin-top:18px}\
+//RS          section{border:1px solid #344052;border-radius:8px;background:#151c27;padding:14px;margin-bottom:12px}\
+//RS          .tree button{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;padding:8px;border-radius:4px;cursor:pointer}\
+//RS          .tree button:hover,.tree button.active{background:#26364b}.pass{color:#6ee7a8}.fail{color:#ff8e8e}.muted{color:#9aabc0}\
+//RS          pre{white-space:pre-wrap;overflow:auto;background:#0d1118;border-radius:5px;padding:10px;font-size:12px}\
+//RS          .chip{display:inline-block;border:1px solid #40506a;border-radius:999px;padding:2px 7px;margin:2px;font-size:12px}\
+//RS          @media(max-width:760px){main{display:block}body{padding:14px}input{min-width:0;width:100%}}\
+//RS          </style></head><body><header><div><div class=\"muted\">Jet browser test viewer</div><h1 id=\"summary\">Loading</h1></div><label>Filter <input id=\"filter\" placeholder=\"test or engine\"></label></header><main><section class=\"tree\"><h2>Test tree</h2><div id=\"tree\"></div></section><section><div id=\"details\"><p class=\"muted\">Select a test.</p></div></section></main><script id=\"jet-browser-data\" type=\"application/json\">",
+//RS     );
+//RS     out.push_str(&json);
+//RS     out.push_str(
+//RS         r#"</script><script>
+//RS const data=JSON.parse(document.getElementById('jet-browser-data').textContent);
+//RS const tree=document.getElementById('tree'), details=document.getElementById('details'), filter=document.getElementById('filter');
+//RS const text=(tag,value,cls='')=>{const e=document.createElement(tag);e.textContent=value??'';if(cls)e.className=cls;return e;};
+//RS const allAttempts=c=>c.attempts||[];
+//RS function renderTree(){tree.replaceChildren();const q=filter.value.toLowerCase();for(const c of data.cases){if(q&&!(`${c.name} ${allAttempts(c).map(a=>a.engine).join(' ')}`.toLowerCase().includes(q)))continue;const b=document.createElement('button');const last=allAttempts(c).at(-1);b.append(text('span',c.selected?(last&&last.passed?'PASS ':'FAIL '):'SKIP ','',c.selected?(last&&last.passed?'pass':'fail'):'muted'),text('span',c.name));b.onclick=()=>renderDetails(c);tree.append(b);}}
+//RS function renderDetails(c){details.replaceChildren();details.append(text('h2',c.name));for(const a of allAttempts(c)){const s=document.createElement('section');s.append(text('h3',`${a.passed?'PASS':'FAIL'} · ${a.engine} · attempt ${a.attempt}`,a.passed?'pass':'fail'));s.append(text('p',`Duration ${a.durationMs} ms · source ${a.source.path}:${a.source.line}:${a.source.column}`,'muted'));if(a.error)s.append(text('p',`Error: ${a.error}`,'fail'));const timeline=document.createElement('div');timeline.append(text('h4','Timeline'));for(const x of a.actions||[])timeline.append(text('span',`${x.sequence} ${x.kind} ${x.fact}`,'chip'));for(const x of a.trace||[])timeline.append(text('span',x,'chip'));s.append(timeline);const dom=document.createElement('div');dom.append(text('h4','DOM snapshots'));for(const x of a.snapshots||[])dom.append(text('p',`${x.kind}: ${x.hash} · ${x.bytes} bytes${x.path?' · '+x.path:''}`));s.append(dom);const source=document.createElement('div');source.append(text('h4','Source'));source.append(text('p',`${a.source.path}:${a.source.line}:${a.source.column}`));s.append(source);const logs=document.createElement('div');logs.append(text('h4','Logs / console'));for(const x of (a.events||[]).filter(x=>x.kind==='console'))logs.append(text('p',`${x.requestMethod||'console'} · ${x.urlHash||''}`));s.append(logs);const network=document.createElement('div');network.append(text('h4','Network'));for(const x of (a.events||[]).filter(x=>x.kind==='network'))network.append(text('p',`${x.requestMethod||''} · ${x.urlHash||''} · ${x.statusCode} · blocked=${x.isBlocked}`));s.append(network);const attachments=document.createElement('div');attachments.append(text('h4','Attachments'));for(const x of a.artifacts||[])attachments.append(text('p',`${x.name} · ${x.path} · ${x.mime} · ${x.bytes} bytes`));s.append(attachments);details.append(s);}}
+//RS summary.textContent=`${data.summary} · exit ${data.exitCode}`;filter.addEventListener('input',renderTree);renderTree();if(data.watch)setInterval(()=>location.reload(),1000);
+//RS </script></body></html>"#,
+//RS     );
+//RS     out
+//RS }
+//RS 
+//RS fn jet_browser_test_render(report: &JetBrowserTestReport) -> String {
+//RS     match report.reporter.as_str() {
+//RS         "json" => jet_browser_test_json(report),
+//RS         "html" => jet_browser_test_html(report),
+//RS         _ => jet_browser_test_text(report),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_write_report(
+//RS     report: &JetBrowserTestReport,
+//RS     path: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     let rendered = jet_browser_test_render(report);
+//RS     let target = std::path::Path::new(path);
+//RS     jet_browser_test_write_bytes(target, rendered.as_bytes())?;
+//RS     if report.ui || report.reporter == "html" {
+//RS         let viewer = target.with_extension("html");
+//RS         jet_browser_test_write_bytes(&viewer, jet_browser_test_html(report).as_bytes())?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS pub(crate) fn jet_browser_test_watch_changed(
+//RS     path: &String,
+//RS     last_modified_ms: i64,
+//RS ) -> Result<bool, JetBrowserError> {
+//RS     let metadata = match std::fs::metadata(path) {
+//RS         Ok(metadata) => metadata,
+//RS         Err(_) => return Ok(last_modified_ms >= 0),
+//RS     };
+//RS     let modified_ms = metadata
+//RS         .modified()
+//RS         .ok()
+//RS         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+//RS         .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
+//RS         .unwrap_or(0);
+//RS     Ok(modified_ms > last_modified_ms)
+//RS }
+//RS 
+//RS 
+//RS fn jet_browser_test_escape_source(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '\\' => escaped.push_str("\\\\"),
+//RS             '"' => escaped.push_str("\\\""),
+//RS             '\n' => escaped.push_str("\\n"),
+//RS             '\r' => escaped.push_str("\\r"),
+//RS             '\t' => escaped.push_str("\\t"),
+//RS             ch => escaped.push(ch),
+//RS         }
+//RS     }
+//RS     escaped
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_generate_source(
+//RS     name: &String,
+//RS     route: &String,
+//RS     output: &String,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     if name.is_empty()
+//RS         || !name
+//RS             .chars()
+//RS             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+//RS         || route.is_empty()
+//RS     {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let route = jet_browser_test_escape_source(route);
+//RS     let source = format!(
+//RS         "use core.web.browser\n\n#Test fn {name}(page: BrowserPage) {{\n  page.goto(\"{route}\")\n}}\n"
+//RS     );
+//RS     jet_browser_test_write_bytes(std::path::Path::new(output), source.as_bytes())?;
+//RS     Ok(source)
+//RS }
+//RS 
+//RS pub(crate) struct JetBrowserTestServer {
+//RS     child: Option<std::process::Child>,
+//RS     url: String,
+//RS     logs: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+//RS }
+//RS 
+//RS impl JetBrowserTestServer {
+//RS     fn start(config: &JetBrowserTestConfig) -> Result<Self, JetBrowserError> {
+//RS         if config.server_url.is_empty() {
+//RS             return Err(JetBrowserError::new("transport"));
+//RS         }
+//RS         let logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+//RS         let reusable = if config.server_reuse {
+//RS             let probe = Self {
+//RS                 child: None,
+//RS                 url: config.server_url.clone(),
+//RS                 logs: logs.clone(),
+//RS             };
+//RS             probe
+//RS                 .wait_ready(JetBrowserTimeout { milliseconds: 100 })
+//RS                 .is_ok()
+//RS         } else {
+//RS             false
+//RS         };
+//RS         let mut child = None;
+//RS         if !reusable && !config.server_command.is_empty() {
+//RS             let mut command = std::process::Command::new(&config.server_command[0]);
+//RS             command.args(&config.server_command[1..]);
+//RS             if !config.server_cwd.is_empty() {
+//RS                 command.current_dir(&config.server_cwd);
+//RS             }
+//RS             command.stdout(std::process::Stdio::piped());
+//RS             command.stderr(std::process::Stdio::piped());
+//RS             let mut process = command
+//RS                 .spawn()
+//RS                 .map_err(|_| JetBrowserError::new("transport"))?;
+//RS             if let Some(stdout) = process.stdout.take() {
+//RS                 jet_browser_test_server_capture(stdout, logs.clone());
+//RS             }
+//RS             if let Some(stderr) = process.stderr.take() {
+//RS                 jet_browser_test_server_capture(stderr, logs.clone());
+//RS             }
+//RS             child = Some(process);
+//RS         }
+//RS         let server = Self {
+//RS             child,
+//RS             url: config.server_url.clone(),
+//RS             logs,
+//RS         };
+//RS         if !reusable {
+//RS             server.wait_ready(config.timeout)?;
+//RS         }
+//RS         Ok(server)
+//RS     }
+//RS 
+//RS     fn wait_ready(&self, timeout: JetBrowserTimeout) -> Result<(), JetBrowserError> {
+//RS         let Some((host, port)) = jet_browser_test_host_port(&self.url) else {
+//RS             return Err(JetBrowserError::new("transport"));
+//RS         };
+//RS         let addresses = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
+//RS             .map_err(|_| JetBrowserError::new("transport"))?
+//RS             .collect::<Vec<_>>();
+//RS         if addresses.is_empty() {
+//RS             return Err(JetBrowserError::new("transport"));
+//RS         }
+//RS         let deadline = std::time::Instant::now()
+//RS             + std::time::Duration::from_millis(timeout.milliseconds as u64);
+//RS         loop {
+//RS             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS             if remaining.is_zero() {
+//RS                 return Err(JetBrowserError::new("timeout"));
+//RS             }
+//RS             if addresses.iter().any(|address| {
+//RS                 std::net::TcpStream::connect_timeout(
+//RS                     address,
+//RS                     remaining.min(std::time::Duration::from_millis(100)),
+//RS                 )
+//RS                 .is_ok()
+//RS             }) {
+//RS                 return Ok(());
+//RS             }
+//RS             std::thread::sleep(std::time::Duration::from_millis(10));
+//RS         }
+//RS     }
+//RS 
+//RS     fn logs(&self) -> String {
+//RS         self.logs
+//RS             .lock()
+//RS             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+//RS             .unwrap_or_default()
+//RS     }
+//RS 
+//RS     fn stop(&mut self) {
+//RS         if let Some(child) = self.child.as_mut() {
+//RS             let _ = child.kill();
+//RS             let _ = child.wait();
+//RS         }
+//RS         self.child = None;
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetBrowserTestServer {
+//RS     fn drop(&mut self) {
+//RS         self.stop();
+//RS     }
+//RS }
+//RS pub(crate) fn jet_browser_test_server_start(
+//RS     config: &JetBrowserTestConfig,
+//RS ) -> Result<JetBrowserTestServer, JetBrowserError> {
+//RS     JetBrowserTestServer::start(config)
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_server_stop(server: &mut JetBrowserTestServer) {
+//RS     server.stop();
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_server_url(server: &JetBrowserTestServer) -> String {
+//RS     server.url.clone()
+//RS }
+//RS 
+//RS pub(crate) fn jet_browser_test_server_logs(server: &JetBrowserTestServer) -> String {
+//RS     server.logs()
+//RS }
+//RS 
+//RS fn jet_browser_test_server_capture<R>(mut reader: R, logs: std::sync::Arc<std::sync::Mutex<Vec<u8>>>)
+//RS where
+//RS     R: std::io::Read + Send + 'static,
+//RS {
+//RS     std::thread::spawn(move || {
+//RS         let mut bytes = Vec::new();
+//RS         let _ = reader.read_to_end(&mut bytes);
+//RS         bytes.truncate(JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES);
+//RS         if let Ok(mut output) = logs.lock() {
+//RS             let available = JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES.saturating_sub(output.len());
+//RS             output.extend_from_slice(&bytes[..bytes.len().min(available)]);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_browser_test_host_port(url: &str) -> Option<(String, u16)> {
+//RS     let authority = url
+//RS         .strip_prefix("http://")
+//RS         .or_else(|| url.strip_prefix("https://"))?;
+//RS     let authority = authority.split('/').next()?;
+//RS     if authority.is_empty() || authority.contains('@') {
+//RS         return None;
+//RS     }
+//RS     if let Some((host, port)) = authority.rsplit_once(':') {
+//RS         if host.is_empty() {
+//RS             return None;
+//RS         }
+//RS         return Some((host.to_string(), port.parse().ok()?));
+//RS     }
+//RS     Some((authority.to_string(), 80))
+//RS }
+//RS 
+//RS fn jet_browser_test_base64_decode(value: &str) -> Result<Vec<u8>, JetBrowserError> {
+//RS     let mut output = Vec::with_capacity(value.len() * 3 / 4);
+//RS     let mut quartet = [0u8; 4];
+//RS     let mut count = 0;
+//RS     for byte in value.bytes() {
+//RS         if byte.is_ascii_whitespace() {
+//RS             continue;
+//RS         }
+//RS         if byte == b'=' {
+//RS             quartet[count] = 64;
+//RS         } else {
+//RS             quartet[count] = match byte {
+//RS                 b'A'..=b'Z' => byte - b'A',
+//RS                 b'a'..=b'z' => byte - b'a' + 26,
+//RS                 b'0'..=b'9' => byte - b'0' + 52,
+//RS                 b'+' => 62,
+//RS                 b'/' => 63,
+//RS                 _ => return Err(JetBrowserError::new("protocol")),
+//RS             };
+//RS         }
+//RS         count += 1;
+//RS         if count != 4 {
+//RS             continue;
+//RS         }
+//RS         output.push((quartet[0] << 2) | (quartet[1] >> 4));
+//RS         if quartet[2] != 64 {
+//RS             output.push((quartet[1] << 4) | (quartet[2] >> 2));
+//RS         }
+//RS         if quartet[3] != 64 {
+//RS             output.push((quartet[2] << 6) | quartet[3]);
+//RS         }
+//RS         if output.len() > JET_BROWSER_TEST_MAX_SCREENSHOT_BYTES {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         count = 0;
+//RS     }
+//RS     if count != 0 {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     Ok(output)
+//RS }
+// END-PORT-PENDING 0020 crates/jet-codegen/src/Prelude/BrowserTest.rs:1-1407
+

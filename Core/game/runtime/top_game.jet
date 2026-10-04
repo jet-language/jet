@@ -1,0 +1,834 @@
+// PORT-PENDING 0272 crates-jet-codegen-src-prelude-corelib-top-game: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:1-830
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // -- core.game headless substrate (D-GAME1/2/3, D-WD10, D-GAME-*) -------------
+//RS fn jet_game_identity_from_env(key: &str, fallback: &str) -> String {
+//RS     std::env::var(key)
+//RS         .ok()
+//RS         .filter(|value| !value.trim().is_empty())
+//RS         .unwrap_or_else(|| fallback.to_string())
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct GameState {
+//RS     assets: Vec<(String, String)>,
+//RS     bindings: Vec<(String, String)>,
+//RS     components: Vec<String>,
+//RS     /// Asset bytes and handles are host-supplied checked facts.  The headless
+//RS     /// Core adapter does not inspect paths or read files.
+//RS     asset_bytes: u64,
+//RS     asset_roots: JetGameAssetRootSet,
+//RS     asset_handles: std::collections::BTreeMap<String, GameAssetRuntimeHandle>,
+//RS     dev_session: Option<GameDevSession>,
+//RS }
+//RS 
+//RS impl GameState {
+//RS     fn new(scene_name: &str) -> Self {
+//RS         let root = JetGameAssetRootIdentity::new("game", ".")
+//RS             .expect("the built-in game asset root is valid");
+//RS         let asset_roots =
+//RS             JetGameAssetRootSet::new(vec![root]).expect("the built-in game asset root is unique");
+//RS         let dev_session = if JET_GAME_DEBUG_DATA_ENABLED {
+//RS             let fallback_source = if scene_name.is_empty() {
+//RS                 "game"
+//RS             } else {
+//RS                 scene_name
+//RS             };
+//RS             let session = jet_game_identity_from_env(
+//RS                 "JET_DEVTOOLS_RELAY_SESSION_ID",
+//RS                 &format!("game:{scene_name}"),
+//RS             );
+//RS             let source = jet_game_identity_from_env("JET_DEVTOOLS_RELAY_SOURCE_ID", fallback_source);
+//RS             let build = jet_game_identity_from_env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime");
+//RS             let revision = jet_game_identity_from_env("JET_DEVTOOLS_RELAY_REVISION", "runtime");
+//RS             let identity = GameDevRunIdentity::new(session, source, build, revision);
+//RS             let mut dev_session = GameDevSession::new_with_policy(
+//RS                 identity,
+//RS                 0,
+//RS                 GameDevPolicy::new(JET_GAME_DEBUG_DATA_ENABLED),
+//RS             )
+//RS             .expect("the built-in game dev session is valid");
+//RS             jet_game_install_devtools_callback();
+//RS             dev_session
+//RS                 .register_gameplay_debugger(0, "dev")
+//RS                 .expect("the built-in gameplay debugger extension is valid");
+//RS             dev_session
+//RS                 .configure_asset_roots(asset_roots.clone())
+//RS                 .expect("the built-in game asset roots are valid");
+//RS             Some(dev_session)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         Self {
+//RS             assets: Vec::new(),
+//RS             bindings: Vec::new(),
+//RS             components: Vec::new(),
+//RS             asset_bytes: 0,
+//RS             asset_roots,
+//RS             asset_handles: std::collections::BTreeMap::new(),
+//RS             dev_session,
+//RS         }
+//RS     }
+//RS }
+//RS impl Drop for GameState {
+//RS     fn drop(&mut self) {
+//RS         let timestamp_ms = std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .map(|duration| duration.as_millis() as u64)
+//RS             .unwrap_or(0);
+//RS         if let Some(dev_session) = self.dev_session.as_mut() {
+//RS             let _ = dev_session.stop(timestamp_ms, "game state dropped");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for GameState {
+//RS     fn default() -> Self {
+//RS         Self::new("game")
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct GameAssets {
+//RS     state: std::rc::Rc<std::cell::RefCell<GameState>>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct GameInputMap {
+//RS     state: std::rc::Rc<std::cell::RefCell<GameState>>,
+//RS }
+//RS 
+//RS struct GameScene {
+//RS     name: String,
+//RS     assets: GameAssets,
+//RS     user_assets: GameAssets,
+//RS     input: GameInputMap,
+//RS     user_input: GameInputMap,
+//RS     callbacks: std::rc::Rc<std::cell::RefCell<Vec<GameFrameCallback>>>,
+//RS }
+//RS const MAX_GAME_SCENE_CALLBACKS: usize = 256;
+//RS 
+//RS struct GameFrameCallback {
+//RS     callback: Box<dyn FnMut(GameFrame)>,
+//RS     schedule: Option<jet_foundation::ResourceSchedule::JetFrameSchedule>,
+//RS     derivation: Option<String>,
+//RS     completion: Option<
+//RS         std::sync::Arc<
+//RS             std::sync::Mutex<jet_foundation::ResourceSchedule::JetFrameCompletionState>,
+//RS         >,
+//RS     >,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameImage {
+//RS     path: String,
+//RS     runtime: Option<GameAssetRuntimeHandle>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameSound {
+//RS     path: String,
+//RS     runtime: Option<GameAssetRuntimeHandle>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameAssetRuntimePayload {
+//RS     artifact: JetGameAssetArtifactIdentity,
+//RS     bytes: std::sync::Arc<[u8]>,
+//RS     metadata: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameAssetRuntimeHandle {
+//RS     payload: std::sync::Arc<std::sync::RwLock<GameAssetRuntimePayload>>,
+//RS }
+//RS 
+//RS impl GameAssetRuntimeHandle {
+//RS     fn new(payload: GameAssetRuntimePayload) -> Self {
+//RS         Self {
+//RS             payload: std::sync::Arc::new(std::sync::RwLock::new(payload)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn byte_len(&self) -> u64 {
+//RS         self.payload
+//RS             .read()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS             .bytes
+//RS             .len() as u64
+//RS     }
+//RS 
+//RS     fn replace(&self, payload: GameAssetRuntimePayload) -> u64 {
+//RS         let mut current = self
+//RS             .payload
+//RS             .write()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner);
+//RS         let previous = current.bytes.len() as u64;
+//RS         *current = payload;
+//RS         previous
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug)]
+//RS struct GameReplay {
+//RS     path: String,
+//RS     tape: JetGameReplay,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameBackend {
+//RS     renderer: String,
+//RS     audio: String,
+//RS     editor: String,
+//RS     /// The shared plan is the only owner of default, validation, and
+//RS     /// countdown state. `None` inside the plan means a live/unbounded backend.
+//RS     frame_budget: JetGameFrameBudget,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameInputSnapshot {
+//RS     pressed: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct GameFrame {
+//RS     index: i64,
+//RS     user_index: i64,
+//RS     input: GameInputSnapshot,
+//RS     user_input: GameInputSnapshot,
+//RS }
+//RS 
+//RS impl JetShow for GameScene {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameScene({})", self.name)
+//RS     }
+//RS }
+//RS impl JetShow for GameAssets {
+//RS     fn jet_show(&self) -> String {
+//RS         "GameAssets".to_string()
+//RS     }
+//RS }
+//RS impl JetShow for GameInputMap {
+//RS     fn jet_show(&self) -> String {
+//RS         "GameInputMap".to_string()
+//RS     }
+//RS }
+//RS impl JetShow for GameImage {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameImage({})", self.path)
+//RS     }
+//RS }
+//RS impl JetDebug for GameImage {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS impl JetShow for GameSound {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameSound({})", self.path)
+//RS     }
+//RS }
+//RS impl JetDebug for GameSound {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS impl JetShow for GameReplay {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameReplay({})", self.path)
+//RS     }
+//RS }
+//RS impl JetShow for GameBackend {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "GameBackend(renderer: {}, audio: {}, editor: {})",
+//RS             self.renderer, self.audio, self.editor
+//RS         )
+//RS     }
+//RS }
+//RS impl JetShow for GameInputSnapshot {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameInputSnapshot({})", self.pressed.join(","))
+//RS     }
+//RS }
+//RS impl JetShow for GameFrame {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("GameFrame({})", self.index)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_game_scene_new(name: &String) -> GameScene {
+//RS     let state = std::rc::Rc::new(std::cell::RefCell::new(GameState::new(name)));
+//RS     let assets = GameAssets {
+//RS         state: state.clone(),
+//RS     };
+//RS     let input = GameInputMap {
+//RS         state: state.clone(),
+//RS     };
+//RS     GameScene {
+//RS         name: name.clone(),
+//RS         assets: assets.clone(),
+//RS         user_assets: assets,
+//RS         input: input.clone(),
+//RS         user_input: input,
+//RS         callbacks: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_game_replay_record(path: &String) -> GameReplay {
+//RS     let tape = JetGameReplay::from_path(path)
+//RS         .unwrap_or_else(|error| panic!("invalid game replay `{path}`: {error}"));
+//RS     GameReplay {
+//RS         path: path.clone(),
+//RS         tape,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_game_backend_headless() -> GameBackend {
+//RS     GameBackend {
+//RS         renderer: "headless".to_string(),
+//RS         audio: "none".to_string(),
+//RS         editor: "none".to_string(),
+//RS         frame_budget: JetGameFrameBudget::default(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-GAME-LOOP1=A: delegate frame availability and presentation to the
+//RS /// canonical Foundation plan.
+//RS fn jet_game_backend_should_continue(backend: &GameBackend) -> bool {
+//RS     backend.frame_budget.should_continue()
+//RS }
+//RS 
+//RS fn jet_game_backend_present(backend: &mut GameBackend) {
+//RS     backend.frame_budget.present();
+//RS }
+//RS 
+//RS 
+//RS fn jet_game_scene_on_frame(
+//RS     scene: &mut GameScene,
+//RS     f: Box<dyn FnMut(GameFrame)>,
+//RS     schedule_json: Option<&str>,
+//RS     derivation_id: Option<&str>,
+//RS ) {
+//RS     let schedule = schedule_json.map(|payload| {
+//RS         jet_foundation::ResourceSchedule::JetFrameSchedule::from_canonical_json(payload)
+//RS             .unwrap_or_else(|error| panic!("invalid checked game frame schedule: {error}"))
+//RS     });
+//RS     if schedule.is_some() && derivation_id.is_none() {
+//RS         panic!("checked game frame schedule has no canonical derivation");
+//RS     }
+//RS     let mut callbacks = scene.callbacks.borrow_mut();
+//RS     if callbacks.len() >= MAX_GAME_SCENE_CALLBACKS {
+//RS         panic!("game scene callback limit exceeded");
+//RS     }
+//RS     callbacks.push(GameFrameCallback {
+//RS         completion: schedule.as_ref().map(|schedule| {
+//RS             std::sync::Arc::new(std::sync::Mutex::new(
+//RS                 jet_foundation::ResourceSchedule::JetFrameCompletionState::new(schedule),
+//RS             ))
+//RS         }),
+//RS         callback: f,
+//RS         schedule,
+//RS         derivation: derivation_id.map(str::to_string),
+//RS     });
+//RS }
+//RS 
+//RS fn jet_game_execute_frame_callback(callback: &mut GameFrameCallback, frame: GameFrame) {
+//RS     if let Some(schedule) = &callback.schedule {
+//RS         if schedule
+//RS             .operations
+//RS             .windows(2)
+//RS             .any(|window| window[0].source_index > window[1].source_index)
+//RS         {
+//RS             panic!("checked game frame schedule is not in source order");
+//RS         }
+//RS         if callback.derivation.is_none() {
+//RS             panic!("checked game frame schedule has no canonical derivation");
+//RS         }
+//RS     }
+//RS     let completion = callback.completion.clone();
+//RS     if let Some(completion) = completion {
+//RS         jet_foundation::ResourceSchedule::with_frame_completion_scope(completion, || {
+//RS             (callback.callback)(frame)
+//RS         });
+//RS     } else {
+//RS         (callback.callback)(frame);
+//RS     }
+//RS     if let Some(schedule) = &callback.schedule {
+//RS         let completion = callback
+//RS             .completion
+//RS             .as_ref()
+//RS             .expect("checked game frame schedule has no completion state")
+//RS             .lock()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner);
+//RS         completion
+//RS             .assert_reuse_ready(schedule)
+//RS             .unwrap_or_else(|error| panic!("checked game frame reuse before completion: {error}"));
+//RS     }
+//RS }
+//RS pub(crate) fn jet_game_frame_schedule_explain(
+//RS     schedule: &jet_foundation::ResourceSchedule::JetFrameSchedule,
+//RS ) -> String {
+//RS     schedule.explain()
+//RS }
+//RS 
+//RS fn jet_game_scene_component(scene: &mut GameScene, name: &String) {
+//RS     let mut state = scene.assets.state.borrow_mut();
+//RS     if !state.components.iter().any(|existing| existing == name) {
+//RS         state.components.push(name.clone());
+//RS     }
+//RS }
+//RS 
+//RS /// D-GAME-LOOP1=A: return one synthetic entity row of component *data*
+//RS /// (default-initialized Int fields), not bare type-name markers.
+//RS fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
+//RS     let state = scene.assets.state.borrow();
+//RS     let wanted: Vec<&str> = names.split(',').filter(|s| !s.is_empty()).collect();
+//RS     if wanted
+//RS         .iter()
+//RS         .all(|name| state.components.iter().any(|c| c == name))
+//RS     {
+//RS         let row = wanted
+//RS             .iter()
+//RS             .map(|name| match *name {
+//RS                 "Position" => "Position{x:0}".to_string(),
+//RS                 "Velocity" => "Velocity{dx:0}".to_string(),
+//RS                 other => format!("{other}{{}}"),
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         vec![row]
+//RS     } else {
+//RS         Vec::new()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage, String> {
+//RS     let resolved = assets
+//RS         .state
+//RS         .borrow()
+//RS         .asset_roots
+//RS         .resolve(path.clone())
+//RS         .map_err(|error| error.to_string())?;
+//RS     let asset_key = resolved.node().key();
+//RS     let logical_path = resolved.logical_path;
+//RS     let mut state = assets.state.borrow_mut();
+//RS     let runtime = state.asset_handles.get(&asset_key).cloned();
+//RS     state
+//RS         .assets
+//RS         .push(("image".to_string(), logical_path.clone()));
+//RS     Ok(GameImage {
+//RS         path: logical_path,
+//RS         runtime,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> Result<GameSound, String> {
+//RS     let resolved = assets
+//RS         .state
+//RS         .borrow()
+//RS         .asset_roots
+//RS         .resolve(path.clone())
+//RS         .map_err(|error| error.to_string())?;
+//RS     let asset_key = resolved.node().key();
+//RS     let logical_path = resolved.logical_path;
+//RS     let mut state = assets.state.borrow_mut();
+//RS     let runtime = state.asset_handles.get(&asset_key).cloned();
+//RS     state
+//RS         .assets
+//RS         .push(("sound".to_string(), logical_path.clone()));
+//RS     Ok(GameSound {
+//RS         path: logical_path,
+//RS         runtime,
+//RS     })
+//RS }
+//RS /// Apply one importer-checked runtime fact.  The core game layer never reads
+//RS /// paths or chooses an importer: the canonical plan/outcome/fact are validated
+//RS /// by the dev session before this handle becomes visible to image or sound.
+//RS fn jet_game_assets_reload(
+//RS     assets: &GameAssets,
+//RS     timestamp_ms: u64,
+//RS     plan: JetGameAssetImportPlan,
+//RS     outcome: JetGameAssetImportOutcome,
+//RS     fact: JetGameAssetRuntimeFact,
+//RS ) -> Result<JetGameAssetTransactionReceipt, String> {
+//RS     if !JET_GAME_DEBUG_DATA_ENABLED {
+//RS         return Err("game asset reload is unavailable outside a development profile".to_string());
+//RS     }
+//RS     let asset_key = fact.artifact.source.node().key();
+//RS     let byte_len = fact.byte_len();
+//RS     let receipt = {
+//RS         let mut state = assets.state.borrow_mut();
+//RS         let dev_session = state
+//RS             .dev_session
+//RS             .as_mut()
+//RS             .ok_or_else(|| "game development data is disabled for this profile".to_string())?;
+//RS         dev_session.reload_asset_with_fact(timestamp_ms, plan, outcome, &fact)?
+//RS     };
+//RS     if !receipt.is_committed()
+//RS         || !receipt.entries.iter().any(|entry| {
+//RS             matches!(
+//RS                 entry.status,
+//RS                 JetGameAssetReloadStatus::Applied | JetGameAssetReloadStatus::Unchanged
+//RS             )
+//RS         })
+//RS     {
+//RS         return Ok(receipt);
+//RS     }
+//RS 
+//RS     let payload = GameAssetRuntimePayload {
+//RS         artifact: fact.artifact,
+//RS         bytes: std::sync::Arc::from(fact.bytes),
+//RS         metadata: fact.metadata,
+//RS     };
+//RS     let mut state = assets.state.borrow_mut();
+//RS     let previous_len = if let Some(existing) = state.asset_handles.get(&asset_key) {
+//RS         existing.replace(payload)
+//RS     } else {
+//RS         state
+//RS             .asset_handles
+//RS             .insert(asset_key, GameAssetRuntimeHandle::new(payload));
+//RS         0
+//RS     };
+//RS     state.asset_bytes = state
+//RS         .asset_bytes
+//RS         .saturating_sub(previous_len)
+//RS         .saturating_add(byte_len);
+//RS     Ok(receipt)
+//RS }
+//RS 
+//RS 
+//RS fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) {
+//RS     let mut state = input.state.borrow_mut();
+//RS     if !state.bindings.iter().any(|(a, k)| a == action && k == key) {
+//RS         state.bindings.push((action.clone(), key.clone()));
+//RS     }
+//RS }
+//RS 
+//RS fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
+//RS     input.pressed.iter().any(|a| a == action)
+//RS }
+//RS 
+//RS /// Read peak RSS (VmHWM) from /proc/self/status in bytes.
+//RS /// Returns 0 if unavailable (non-Linux or parse failure).
+//RS fn read_vmhwm_bytes() -> u64 {
+//RS     let Ok(text) = std::fs::read_to_string("/proc/self/status") else { return 0 };
+//RS     for line in text.lines() {
+//RS         if let Some(rest) = line.strip_prefix("VmHWM:") {
+//RS             // Value is in kibibytes: "VmHWM:    1234 kB"
+//RS             if let Some(kib) = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) {
+//RS                 return kib.saturating_mul(1024);
+//RS             }
+//RS         }
+//RS     }
+//RS     0
+//RS }
+//RS 
+//RS /// Replay consumption is owned by the shared Foundation tape. A missing frame
+//RS /// means that no action was recorded for that frame; it is not a synthetic
+//RS /// input.
+//RS fn jet_game_replay_input(
+//RS     replay: Option<&GameReplay>,
+//RS     frame_idx: i64,
+//RS     _bindings: &[(String, String)],
+//RS     replay_cursor: &mut i64,
+//RS ) -> Vec<String> {
+//RS     *replay_cursor = (*replay_cursor).saturating_add(1);
+//RS     replay
+//RS         .and_then(|replay| replay.tape.actions_at(frame_idx))
+//RS         .map(|actions| actions.to_vec())
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS /// D-FOUND-COREAPI1=A: run a checked, deterministic frame budget through the
+//RS /// shared Prelude kernel. The Foundation plan owns validation and iteration;
+//RS /// this adapter only projects its facts into the game transcript.
+//RS fn jet_game_run(
+//RS     scene: &mut GameScene,
+//RS     replay: Option<&GameReplay>,
+//RS     backend: Option<&GameBackend>,
+//RS     frames: Option<&i64>,
+//RS ) -> String {
+//RS     if let Some(frames) = frames {
+//RS         JetGameFrameBudget::validate(*frames).unwrap_or_else(|error| panic!("{error}"));
+//RS     }
+//RS     let mut backend = backend.cloned().unwrap_or_else(jet_game_backend_headless);
+//RS     backend
+//RS         .frame_budget
+//RS         .set_requested(frames.copied())
+//RS         .unwrap_or_else(|error| panic!("{error}"));
+//RS     let replay_path = replay
+//RS         .map(|r| r.path.clone())
+//RS         .unwrap_or_else(|| "<none>".to_string());
+//RS     // A probe matches this scene, pins identity, then runs 120 warmup plus
+//RS     // 600 measured frames and emits JETSCENE1 wire rows to stdout.
+//RS     let probe_name = std::env::var("JET_SCENE_PROBE").ok();
+//RS     let measuring = probe_name.as_deref() == Some(scene.name.as_str());
+//RS 
+//RS     let asset_bytes = scene.assets.state.borrow().asset_bytes;
+//RS     let warmup_frames: i64 = 120;
+//RS     let measure_frames: i64 = 600;
+//RS     let total_frames = warmup_frames + measure_frames;
+//RS     let mut frame_plan = if measuring {
+//RS         JetGameFrameBudget::with_frame_count(total_frames)
+//RS             .expect("the measured game frame plan must be positive")
+//RS     } else {
+//RS         backend.frame_budget.clone()
+//RS     };
+//RS 
+//RS     let mut out = Vec::new();
+//RS     if !measuring {
+//RS         out.push(format!("scene:{}", scene.name));
+//RS         out.push(format!(
+//RS             "backend:{}/{}/{}",
+//RS             backend.renderer, backend.audio, backend.editor
+//RS         ));
+//RS         out.push(format!("replay:{}", replay_path));
+//RS         {
+//RS             let state = scene.assets.state.borrow();
+//RS             let assets = state
+//RS                 .assets
+//RS                 .iter()
+//RS                 .map(|(kind, path)| format!("{}:{}", kind, path))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             out.push(format!(
+//RS                 "assets:{}",
+//RS                 if assets.is_empty() { "none".to_string() } else { assets }
+//RS             ));
+//RS             let bindings = state
+//RS                 .bindings
+//RS                 .iter()
+//RS                 .map(|(action, key)| format!("{}={}", action, key))
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             out.push(format!(
+//RS                 "input:{}",
+//RS                 if bindings.is_empty() { "none".to_string() } else { bindings }
+//RS             ));
+//RS             let components = state.components.join(",");
+//RS             out.push(format!(
+//RS                 "components:{}",
+//RS                 if components.is_empty() { "none".to_string() } else { components }
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     // Hex-encode scene name for the wire protocol (avoids tab/newline issues).
+//RS     let scene_hex: String = scene.name.bytes().map(|b| format!("{:02x}", b)).collect();
+//RS 
+//RS     if measuring {
+//RS         // D-PERFBUDGET-GAMEMIGRATE1: one SceneProbe pins backend, target,
+//RS         // device, replay/input, scene-ready, 120 warmup, 600 measured,
+//RS         // viewport, and settings before any sample row.
+//RS         println!(
+//RS             "JETSCENEID\t{scene_hex}\tbackend={}/{}/{}\treplay={}\tdevice=headless\tviewport=default\tsettings=default\twarmup={warmup_frames}\tmeasured={measure_frames}\tready=frame0",
+//RS             backend.renderer, backend.audio, backend.editor, replay_path
+//RS         );
+//RS     }
+//RS     if JET_GAME_DEBUG_DATA_ENABLED {
+//RS         let mut state = scene.assets.state.borrow_mut();
+//RS         let dev_session = state
+//RS             .dev_session
+//RS             .as_mut()
+//RS             .expect("development game session must exist when debug data is enabled");
+//RS         let identity = dev_session.profiler.identity().clone();
+//RS         dev_session
+//RS             .set_trace_context(JetGameTraceContext::new(
+//RS                 identity.session,
+//RS                 scene.name.clone(),
+//RS                 "runtime",
+//RS                 format!("{}/{}/{}", backend.renderer, backend.audio, backend.editor),
+//RS                 1,
+//RS                 1,
+//RS                 "default",
+//RS             ))
+//RS             .expect("the game trace context must satisfy the profiler identity");
+//RS         dev_session
+//RS             .dispatch_pending_devtools_controls(0)
+//RS             .expect("game devtools command ingress must be valid");
+//RS         if dev_session.phase == GameDevPhase::Editing {
+//RS             dev_session
+//RS                 .dispatch_control(0, GameDevControl::Play)
+//RS                 .expect("the game devtools session must enter Play");
+//RS         }
+//RS     }
+//RS 
+//RS     // D-GAME-LOOP1=A: the Foundation plan controls both ordinary and probe
+//RS     // iteration. Replay consumption and transcript hashing happen once per
+//RS     // issued frame and cannot shorten the requested count.
+//RS     let mut frame_idx: i64 = 0;
+//RS     let mut replay_cursor: i64 = 0;
+//RS     let mut transcript = JetGameTranscriptHasher::new();
+//RS     while let Some(index) = frame_plan.next_frame() {
+//RS         loop {
+//RS             let admitted = if JET_GAME_DEBUG_DATA_ENABLED {
+//RS                 let mut state = scene.assets.state.borrow_mut();
+//RS                 let dev_session = state
+//RS                     .dev_session
+//RS                     .as_mut()
+//RS                     .expect("development game session must exist when debug data is enabled");
+//RS                 dev_session
+//RS                     .dispatch_pending_devtools_controls(frame_idx as u64)
+//RS                     .expect("game devtools command ingress must be valid");
+//RS                 dev_session.begin_simulation_frame()
+//RS             } else {
+//RS                 true
+//RS             };
+//RS             if admitted {
+//RS                 break;
+//RS             }
+//RS             // A paused session keeps this frame in flight until the host
+//RS             // supplies Resume or the one-shot FrameAdvance command.
+//RS             std::thread::sleep(std::time::Duration::from_millis(1));
+//RS         }
+//RS         let pressed = {
+//RS             let state = scene.assets.state.borrow();
+//RS             jet_game_replay_input(replay, frame_idx, &state.bindings, &mut replay_cursor)
+//RS         };
+//RS         transcript.push_frame(frame_idx, &pressed);
+//RS         let frame = GameFrame {
+//RS             index: frame_idx,
+//RS             user_index: frame_idx,
+//RS             input: GameInputSnapshot {
+//RS                 pressed: pressed.clone(),
+//RS             },
+//RS             user_input: GameInputSnapshot {
+//RS                 pressed: pressed.clone(),
+//RS             },
+//RS         };
+//RS         let callbacks_count = scene.callbacks.borrow().len() as u64;
+//RS         let t0 = std::time::Instant::now();
+//RS         // The headless adapter is the serial reference execution: callback
+//RS         // registration order is source order, and it makes no physical
+//RS         // parallel/reuse decision from model-only facts.
+//RS         if measuring {
+//RS             for callback in scene.callbacks.borrow_mut().iter_mut() {
+//RS                 jet_game_execute_frame_callback(callback, frame.clone());
+//RS             }
+//RS         } else {
+//RS             for callback in scene.callbacks.borrow_mut().iter_mut() {
+//RS                 jet_game_execute_frame_callback(callback, frame.clone());
+//RS             }
+//RS             let input = if pressed.is_empty() {
+//RS                 "none".to_string()
+//RS             } else {
+//RS                 pressed.join("+")
+//RS             };
+//RS             out.push(format!("frame:{} input:{}", frame_idx, input));
+//RS         }
+//RS         let elapsed_ns = t0.elapsed().as_nanos() as u64;
+//RS         let rss = read_vmhwm_bytes();
+//RS         if measuring && frame_idx >= warmup_frames {
+//RS             println!("JETSCENE1\t{scene_hex}\tFrameTime\t{elapsed_ns}");
+//RS             println!("JETSCENE1\t{scene_hex}\tDrawCalls\t{callbacks_count}");
+//RS             println!("JETSCENE1\t{scene_hex}\tSceneAssetBytes\t{asset_bytes}");
+//RS             println!("JETSCENE1\t{scene_hex}\tMemoryHighWater\t{rss}");
+//RS         }
+//RS 
+//RS         if JET_GAME_DEBUG_DATA_ENABLED {
+//RS             let identity = {
+//RS                 let state = scene.assets.state.borrow();
+//RS                 state
+//RS                     .dev_session
+//RS                     .as_ref()
+//RS                     .expect("development game session must exist when debug data is enabled")
+//RS                     .profiler
+//RS                     .identity()
+//RS                     .clone()
+//RS             };
+//RS             let frame_identity = JetGameFrameIdentity::new(
+//RS                 &scene.name,
+//RS                 frame_idx as u64,
+//RS                 identity.build,
+//RS                 identity.revision,
+//RS                 identity.source,
+//RS             );
+//RS             let sample = JetGameFrameSample::new(
+//RS                 frame_identity,
+//RS                 frame_idx as u64,
+//RS                 elapsed_ns,
+//RS                 None,
+//RS             );
+//RS             let mut state = scene.assets.state.borrow_mut();
+//RS             let dev_session = state
+//RS                 .dev_session
+//RS                 .as_mut()
+//RS                 .expect("development game session must exist when debug data is enabled");
+//RS             if dev_session.profiler.profiler().state() == JetGameFrameProfilerState::Running {
+//RS                 dev_session
+//RS                     .record_and_publish(sample.into())
+//RS                     .expect("the game frame producer must satisfy the profiler identity");
+//RS                 let sample_time_ns = frame_idx as u64;
+//RS                 let event_time_ms = frame_idx as u64;
+//RS                 dev_session
+//RS                     .publish_overlay_metric(
+//RS                         event_time_ms,
+//RS                         JetGameOverlayMetricValue::new(
+//RS                             JetGameOverlayMetric::FrameTime,
+//RS                             elapsed_ns.min(i64::MAX as u64) as i64,
+//RS                             sample_time_ns,
+//RS                         ),
+//RS                     )
+//RS                     .expect("the game frame metric must publish");
+//RS                 dev_session
+//RS                     .publish_overlay_metric(
+//RS                         event_time_ms,
+//RS                         JetGameOverlayMetricValue::new(
+//RS                             JetGameOverlayMetric::DrawCalls,
+//RS                             callbacks_count.min(i64::MAX as u64) as i64,
+//RS                             sample_time_ns,
+//RS                         ),
+//RS                     )
+//RS                     .expect("the draw-call metric must publish");
+//RS                 if asset_bytes != 0 {
+//RS                     dev_session
+//RS                         .publish_overlay_metric(
+//RS                             event_time_ms,
+//RS                             JetGameOverlayMetricValue::new(
+//RS                                 JetGameOverlayMetric::SceneAssetBytes,
+//RS                                 asset_bytes.min(i64::MAX as u64) as i64,
+//RS                                 sample_time_ns,
+//RS                             ),
+//RS                         )
+//RS                         .expect("the scene asset metric must publish");
+//RS                 }
+//RS                 if rss != 0 {
+//RS                     dev_session
+//RS                         .publish_overlay_metric(
+//RS                             event_time_ms,
+//RS                             JetGameOverlayMetricValue::new(
+//RS                                 JetGameOverlayMetric::MemoryHighWater,
+//RS                                 rss.min(i64::MAX as u64) as i64,
+//RS                                 sample_time_ns,
+//RS                             ),
+//RS                         )
+//RS                         .expect("the memory metric must publish");
+//RS                 }
+//RS             }
+//RS         }
+//RS         if JET_GAME_DEBUG_DATA_ENABLED {
+//RS             let mut state = scene.assets.state.borrow_mut();
+//RS             state
+//RS                 .dev_session
+//RS                 .as_mut()
+//RS                 .expect("development game session must exist when debug data is enabled")
+//RS                 .finish_simulation_frame(frame_idx as u64, frame_idx as u64)
+//RS                 .expect("the game frame must satisfy the devtools phase");
+//RS         }
+//RS         frame_plan.present();
+//RS     }
+//RS     if JET_GAME_DEBUG_DATA_ENABLED {
+//RS         let mut state = scene.assets.state.borrow_mut();
+//RS         state
+//RS             .dev_session
+//RS             .as_mut()
+//RS             .expect("development game session must exist when debug data is enabled")
+//RS             .stop(frame_idx as u64, "game run completed")
+//RS             .expect("the game run must publish its stopped lifecycle");
+//RS     }
+//RS     if !measuring && frames.is_some() {
+//RS         out.push(format!("transcript_hash:{}", transcript.finish()));
+//RS     }
+//RS     out.join("\n")
+//RS }
+// END-PORT-PENDING 0272 crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:1-830
+

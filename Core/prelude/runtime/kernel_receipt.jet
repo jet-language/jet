@@ -1,0 +1,845 @@
+// PORT-PENDING 0232 crates-jet-jit-src-receipt: crates/jet-jit/src/Receipt.rs:1-841
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Interpreter and resident-host adapters for the shared receipt section kernel.
+//RS //!
+//RS //! The kernel owns canonicalization, limits, identity, and publication. This
+//RS //! module only turns a tier value into the kernel's encoded boundary and wires
+//RS //! the interpreter ambient callback.
+//RS 
+//RS use jet_foundation::AST::{CtValue, Type};
+//RS use jet_foundation::Shape::ShapeProjectionKind;
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS 
+//RS pub(crate) mod kernel {
+//RS     pub(crate) use crate::Encoding::json_rt as jet_std;
+//RS     use jet_codegen::development_receipt::ensure_receipt_directory;
+//RS 
+//RS     #[allow(non_camel_case_types)]
+//RS     pub(crate) trait __jet_Encode {
+//RS         fn jet_encode(&self) -> jet_std::DataTree;
+//RS     }
+//RS 
+//RS     fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
+//RS         crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/Core/Receipt.rs");
+//RS }
+//RS 
+//RS use crate::Encoding::json_rt::DataTree;
+//RS use crate::runtime_host::{
+//RS     JitRuntime, RuntimeTypeDescriptor, RuntimeValueAbi, RuntimeValueKind,
+//RS };
+//RS use std::collections::HashSet;
+//RS use jet_rt::JetVal;
+//RS 
+//RS const RECEIPT_VALUE_MAX_DEPTH: usize = 128;
+//RS const RECEIPT_VALUE_MAX_NODES: usize = 1_000_000;
+//RS const RECEIPT_VALUE_MAX_BYTES: usize = 64 * 1024 * 1024;
+//RS 
+//RS pub(crate) struct EncodeState {
+//RS     nodes: usize,
+//RS     bytes: usize,
+//RS     active: HashSet<(u64, i64)>,
+//RS     callback: Option<HistoryCallableEncoder>,
+//RS }
+//RS 
+//RS pub(crate) type HistoryCallableEncoder = fn(
+//RS     &mut JitRuntime,
+//RS     i64,
+//RS     &RuntimeTypeDescriptor,
+//RS     &mut EncodeState,
+//RS     usize,
+//RS ) -> Result<DataTree, String>;
+//RS 
+//RS impl EncodeState {
+//RS     pub(crate) fn visit(&mut self, depth: usize) -> Result<(), String> {
+//RS         if depth > RECEIPT_VALUE_MAX_DEPTH {
+//RS             return Err(format!(
+//RS                 "receipt value exceeds maximum depth {}",
+//RS                 RECEIPT_VALUE_MAX_DEPTH
+//RS             ));
+//RS         }
+//RS         self.nodes = self
+//RS             .nodes
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "receipt value node count overflowed".to_string())?;
+//RS         if self.nodes > RECEIPT_VALUE_MAX_NODES {
+//RS             return Err(format!(
+//RS                 "receipt value exceeds maximum node count {}",
+//RS                 RECEIPT_VALUE_MAX_NODES
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     pub(crate) fn bytes(&mut self, amount: usize) -> Result<(), String> {
+//RS         self.bytes = self
+//RS             .bytes
+//RS             .checked_add(amount)
+//RS             .ok_or_else(|| "receipt value byte count overflowed".to_string())?;
+//RS         if self.bytes > RECEIPT_VALUE_MAX_BYTES {
+//RS             return Err(format!(
+//RS                 "receipt value exceeds maximum byte count {}",
+//RS                 RECEIPT_VALUE_MAX_BYTES
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(crate) fn enter(&mut self, descriptor: &RuntimeTypeDescriptor, raw: i64) -> Result<(), String> {
+//RS         if !self.active.insert((descriptor.id, raw)) {
+//RS             return Err(format!(
+//RS                 "receipt value contains a cycle through type `{}`",
+//RS                 descriptor.name
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(crate) fn leave(&mut self, descriptor: &RuntimeTypeDescriptor, raw: i64) {
+//RS         self.active.remove(&(descriptor.id, raw));
+//RS     }
+//RS }
+//RS 
+//RS enum RuntimeWord {
+//RS     Bits(i64),
+//RS     Float(f64),
+//RS     Bool(bool),
+//RS     Char(char),
+//RS     String(String),
+//RS }
+//RS 
+//RS fn lookup_descriptor(
+//RS     rt: &JitRuntime,
+//RS     type_id: Option<u64>,
+//RS     owner: &str,
+//RS ) -> Result<RuntimeTypeDescriptor, String> {
+//RS     let type_id =
+//RS         type_id.ok_or_else(|| format!("receipt value `{owner}` has no type descriptor"))?;
+//RS     rt.runtime_type_descriptor(type_id)
+//RS         .cloned()
+//RS         .ok_or_else(|| format!("receipt value `{owner}` has unknown type descriptor {type_id}"))
+//RS }
+//RS 
+//RS fn bits(word: RuntimeWord, owner: &str) -> Result<i64, String> {
+//RS     match word {
+//RS         RuntimeWord::Bits(value) => Ok(value),
+//RS         RuntimeWord::Float(_)
+//RS         | RuntimeWord::Bool(_)
+//RS         | RuntimeWord::Char(_)
+//RS         | RuntimeWord::String(_) => {
+//RS             Err(format!("receipt value `{owner}` has an incompatible runtime carrier"))
+//RS         }
+//RS     }
+//RS }
+//RS fn word_from_raw(
+//RS     rt: &JitRuntime,
+//RS     raw: i64,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<RuntimeWord, String> {
+//RS     if descriptor.kind == RuntimeValueKind::String {
+//RS         return rt
+//RS             .heap
+//RS             .clone_string(raw)
+//RS             .map(RuntimeWord::String)
+//RS             .ok_or_else(|| {
+//RS                 format!(
+//RS                     "receipt value `{}` has an invalid String handle {}",
+//RS                     descriptor.name, raw
+//RS                 )
+//RS             });
+//RS     }
+//RS     Ok(RuntimeWord::Bits(raw))
+//RS }
+//RS 
+//RS fn word_from_slot(
+//RS     rt: &mut JitRuntime,
+//RS     value: JetVal,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<RuntimeWord, String> {
+//RS     match value {
+//RS         JetVal::Int(raw) | JetVal::Word { value: raw, .. } | JetVal::RecordRef(raw) => word_from_raw(rt, raw, descriptor),
+//RS         JetVal::Float(value) if descriptor.kind == RuntimeValueKind::Float => {
+//RS             Ok(RuntimeWord::Float(value))
+//RS         }
+//RS         JetVal::Bool(value) if descriptor.kind == RuntimeValueKind::Bool => {
+//RS             Ok(RuntimeWord::Bool(value))
+//RS         }
+//RS         JetVal::Char(value) if descriptor.kind == RuntimeValueKind::Char => {
+//RS             Ok(RuntimeWord::Char(value))
+//RS         }
+//RS         JetVal::String(value) if descriptor.kind == RuntimeValueKind::String => {
+//RS             Ok(RuntimeWord::String(value))
+//RS         }
+//RS         JetVal::StringView { owner, start, end }
+//RS             if descriptor.kind == RuntimeValueKind::String =>
+//RS         {
+//RS             let value = rt
+//RS                 .heap
+//RS                 .get_string(owner)
+//RS                 .and_then(|text| text.get(start..end))
+//RS                 .ok_or_else(|| {
+//RS                     format!(
+//RS                         "receipt value `{}` has an invalid StringView",
+//RS                         descriptor.name
+//RS                     )
+//RS                 })?
+//RS                 .to_string();
+//RS             Ok(RuntimeWord::String(value))
+//RS         }
+//RS         JetVal::ExactInt(value) if descriptor.kind == RuntimeValueKind::Int => {
+//RS             let raw = rt
+//RS                 .heap
+//RS                 .int_from_str(&value.to_string_rep())
+//RS                 .map_err(|error| {
+//RS                     format!("receipt value `{}` has an invalid Int: {error}", descriptor.name)
+//RS                 })?;
+//RS             Ok(RuntimeWord::Bits(raw))
+//RS         }
+//RS         JetVal::Record(values)
+//RS             if matches!(
+//RS                 descriptor.kind,
+//RS                 RuntimeValueKind::Record | RuntimeValueKind::Enum
+//RS             ) =>
+//RS         {
+//RS             Ok(RuntimeWord::Bits(rt.heap.alloc_record_values(values)))
+//RS         }
+//RS         value => Err(format!(
+//RS             "receipt value `{}` has an incompatible runtime slot {:?}",
+//RS             descriptor.name, value
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn encode_int(
+//RS     rt: &JitRuntime,
+//RS     raw: i64,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<DataTree, String> {
+//RS     if let Some(width) = descriptor.integer_width {
+//RS         return Ok(if width.signed {
+//RS             crate::Encoding::json_rt::jet_datatree_encode_i64(raw)
+//RS         } else {
+//RS             crate::Encoding::json_rt::jet_datatree_encode_u64(raw as u64)
+//RS         });
+//RS     }
+//RS     match rt.heap.int_to_i64(raw) {
+//RS         Some(value) => Ok(crate::Encoding::json_rt::jet_datatree_encode_i64(value)),
+//RS         None => Ok(DataTree::Number(rt.heap.int_to_string(raw))),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_float(word: RuntimeWord, descriptor: &RuntimeTypeDescriptor) -> Result<DataTree, String> {
+//RS     let value = match word {
+//RS         RuntimeWord::Float(value) => value,
+//RS         RuntimeWord::Bits(value) => match descriptor.abi {
+//RS             RuntimeValueAbi::Float => f64::from_bits(value as u64),
+//RS             RuntimeValueAbi::Float32 => f32::from_bits(value as u32) as f64,
+//RS             _ => {
+//RS                 return Err(format!(
+//RS                     "receipt value `{}` has an incompatible Float carrier",
+//RS                     descriptor.name
+//RS                 ))
+//RS             }
+//RS         },
+//RS         RuntimeWord::Bool(_) | RuntimeWord::Char(_) | RuntimeWord::String(_) => {
+//RS             return Err(format!(
+//RS                 "receipt value `{}` has an incompatible Float carrier",
+//RS                 descriptor.name
+//RS             ))
+//RS         }
+//RS     };
+//RS     if !value.is_finite() {
+//RS         return Err(format!(
+//RS             "receipt value `{}` contains a non-finite Float",
+//RS             descriptor.name
+//RS         ));
+//RS     }
+//RS     Ok(DataTree::Float(value))
+//RS }
+//RS 
+//RS fn encode_string(
+//RS     state: &mut EncodeState,
+//RS     word: RuntimeWord,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<DataTree, String> {
+//RS     let value = match word {
+//RS         RuntimeWord::String(value) => value,
+//RS         RuntimeWord::Bits(value) => {
+//RS             return Err(format!(
+//RS                 "receipt value `{}` has an invalid String handle {}",
+//RS                 descriptor.name, value
+//RS             ))
+//RS         }
+//RS         RuntimeWord::Float(_)
+//RS         | RuntimeWord::Bool(_)
+//RS         | RuntimeWord::Char(_) => {
+//RS             return Err(format!(
+//RS                 "receipt value `{}` has an incompatible String carrier",
+//RS                 descriptor.name
+//RS             ))
+//RS         }
+//RS     };
+//RS     state.bytes(value.len())?;
+//RS     Ok(DataTree::Text(value))
+//RS }
+//RS 
+//RS fn encode_value(
+//RS     rt: &mut JitRuntime,
+//RS     word: RuntimeWord,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     state.visit(depth)?;
+//RS     match descriptor.kind {
+//RS         RuntimeValueKind::Unit => Ok(DataTree::Null),
+//RS         RuntimeValueKind::Int => encode_int(rt, bits(word, &descriptor.name)?, descriptor),
+//RS         RuntimeValueKind::Float => encode_float(word, descriptor),
+//RS         RuntimeValueKind::Bool => match word {
+//RS             RuntimeWord::Bool(value) => Ok(DataTree::Bool(value)),
+//RS             RuntimeWord::Bits(value) => Ok(DataTree::Bool(value != 0)),
+//RS             RuntimeWord::Float(_)
+//RS             | RuntimeWord::Char(_)
+//RS             | RuntimeWord::String(_) => Err(format!(
+//RS                 "receipt value `{}` has an incompatible Bool carrier",
+//RS                 descriptor.name
+//RS             )),
+//RS         },
+//RS         RuntimeValueKind::Char => {
+//RS             let value = match word {
+//RS                 RuntimeWord::Char(value) => value,
+//RS                 RuntimeWord::Bits(value) => char::from_u32(value as u32).ok_or_else(|| {
+//RS                     format!("receipt value `{}` contains an invalid Char", descriptor.name)
+//RS                 })?,
+//RS                 RuntimeWord::Float(_)
+//RS                 | RuntimeWord::Bool(_)
+//RS                 | RuntimeWord::String(_) => {
+//RS                     return Err(format!(
+//RS                         "receipt value `{}` has an incompatible Char carrier",
+//RS                         descriptor.name
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let value = value.to_string();
+//RS             state.bytes(value.len())?;
+//RS             Ok(DataTree::Text(value))
+//RS         }
+//RS         RuntimeValueKind::String => encode_string(state, word, descriptor),
+//RS         RuntimeValueKind::List => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             encode_list(rt, raw, descriptor, state, depth)
+//RS         }
+//RS         RuntimeValueKind::Map => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             encode_map(rt, raw, descriptor, state, depth)
+//RS         }
+//RS         RuntimeValueKind::Shared => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             state.enter(descriptor, raw)?;
+//RS             let result = (|| {
+//RS                 let value = crate::Memory::shared_value(rt, raw).ok_or_else(|| {
+//RS                     format!(
+//RS                         "receipt value `{}` has an invalid Shared handle",
+//RS                         descriptor.name
+//RS                     )
+//RS                 })?;
+//RS                 let child = lookup_descriptor(rt, descriptor.element, "Shared value")?;
+//RS                 encode_value(rt, RuntimeWord::Bits(value), &child, state, depth + 1)
+//RS             })();
+//RS             state.leave(descriptor, raw);
+//RS             result
+//RS         }
+//RS         RuntimeValueKind::Option => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             state.enter(descriptor, raw)?;
+//RS             let result = encode_result_like(rt, raw, descriptor, descriptor.ok, state, depth);
+//RS             state.leave(descriptor, raw);
+//RS             result
+//RS         }
+//RS         RuntimeValueKind::Result => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             state.enter(descriptor, raw)?;
+//RS             let result = encode_result_like(rt, raw, descriptor, descriptor.ok, state, depth);
+//RS             state.leave(descriptor, raw);
+//RS             result
+//RS         }
+//RS         RuntimeValueKind::Record => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             encode_record(rt, raw, descriptor, state, depth)
+//RS         }
+//RS         RuntimeValueKind::Enum => {
+//RS             let raw = bits(word, &descriptor.name)?;
+//RS             encode_enum(rt, raw, descriptor, state, depth)
+//RS         }
+//RS         RuntimeValueKind::Closure => {
+//RS             if let Some(callback) = state.callback {
+//RS                 callback(rt, bits(word, &descriptor.name)?, descriptor, state, depth)
+//RS             } else {
+//RS                 Err(format!(
+//RS                     "receipt value `{}` has unsupported runtime kind {:?}",
+//RS                     descriptor.name, descriptor.kind
+//RS                 ))
+//RS             }
+//RS         }
+//RS         RuntimeValueKind::Named
+//RS         | RuntimeValueKind::View
+//RS         | RuntimeValueKind::Iterator
+//RS         | RuntimeValueKind::Handle => Err(format!(
+//RS             "receipt value `{}` has unsupported runtime kind {:?}",
+//RS             descriptor.name, descriptor.kind
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_result_like(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     ok_id: Option<u64>,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     let (is_ok, payload) = crate::runtime_host::jit_result_parts(rt, raw)
+//RS         .ok_or_else(|| format!("receipt value `{}` has an invalid result handle", owner.name))?;
+//RS     if !is_ok {
+//RS         return Ok(DataTree::Null);
+//RS     }
+//RS     let child = lookup_descriptor(rt, ok_id, "result payload")?;
+//RS     let word = word_from_raw(rt, payload as i64, &child)?;
+//RS     encode_value(rt, word, &child, state, depth + 1)
+//RS }
+//RS 
+//RS fn encode_byte_list(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     let length = rt
+//RS         .heap
+//RS         .list_len(raw)
+//RS         .ok_or_else(|| format!("receipt value `{}` has an invalid byte list", owner.name))?;
+//RS     let length = usize::try_from(length)
+//RS         .map_err(|_| format!("receipt value `{}` has a negative list length", owner.name))?;
+//RS     if length > RECEIPT_VALUE_MAX_NODES.saturating_sub(state.nodes) {
+//RS         return Err(format!(
+//RS             "receipt value exceeds maximum node count {}",
+//RS             RECEIPT_VALUE_MAX_NODES
+//RS         ));
+//RS     }
+//RS     let mut bytes = Vec::with_capacity(length);
+//RS     for index in 0..length {
+//RS         state.visit(depth + 1)?;
+//RS         let index = i64::try_from(index).map_err(|_| "receipt byte index overflowed".to_string())?;
+//RS         let value = rt
+//RS             .heap
+//RS             .list_get_int(raw, index)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid byte slot", owner.name))?;
+//RS         let value = rt
+//RS             .heap
+//RS             .int_to_i64(value)
+//RS             .ok_or_else(|| format!("receipt value `{}` contains an out-of-range byte", owner.name))?;
+//RS         bytes.push(
+//RS             u8::try_from(value)
+//RS                 .map_err(|_| format!("receipt value `{}` contains an out-of-range byte", owner.name))?,
+//RS         );
+//RS     }
+//RS     state.bytes(bytes.len())?;
+//RS     Ok(DataTree::Bytes(bytes))
+//RS }
+//RS 
+//RS fn is_byte_descriptor(descriptor: &RuntimeTypeDescriptor) -> bool {
+//RS     descriptor.kind == RuntimeValueKind::Int
+//RS         && (descriptor.name == "U8" || descriptor.canonical == "U8")
+//RS }
+//RS 
+//RS fn encode_list(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     let length = rt
+//RS         .heap
+//RS         .list_len(raw)
+//RS         .ok_or_else(|| format!("receipt value `{}` has an invalid list handle", owner.name))?;
+//RS     let length = usize::try_from(length)
+//RS         .map_err(|_| format!("receipt value `{}` has a negative list length", owner.name))?;
+//RS     let element = lookup_descriptor(rt, owner.element, "list element")?;
+//RS     state.enter(owner, raw)?;
+//RS     let result = if is_byte_descriptor(&element) {
+//RS         encode_byte_list(rt, raw, owner, state, depth)
+//RS     } else {
+//RS         if length > RECEIPT_VALUE_MAX_NODES.saturating_sub(state.nodes) {
+//RS             Err(format!(
+//RS                 "receipt value exceeds maximum node count {}",
+//RS                 RECEIPT_VALUE_MAX_NODES
+//RS             ))
+//RS         } else {
+//RS             let slots = rt
+//RS                 .heap
+//RS                 .clone_list_values(raw)
+//RS                 .ok_or_else(|| format!("receipt value `{}` has an invalid list handle", owner.name))?;
+//RS             let mut values = Vec::with_capacity(length);
+//RS             for slot in slots {
+//RS                 let word = word_from_slot(rt, slot, &element)?;
+//RS                 values.push(encode_value(rt, word, &element, state, depth + 1)?);
+//RS             }
+//RS             Ok(DataTree::Array(values))
+//RS         }
+//RS     };
+//RS     state.leave(owner, raw);
+//RS     result
+//RS }
+//RS 
+//RS fn encode_map(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     let length = rt
+//RS         .heap
+//RS         .map_len(raw)
+//RS         .ok_or_else(|| format!("receipt value `{}` has an invalid map handle", owner.name))?;
+//RS     let length = usize::try_from(length)
+//RS         .map_err(|_| format!("receipt value `{}` has a negative map length", owner.name))?;
+//RS     let key = lookup_descriptor(rt, owner.key, "map key")?;
+//RS     if key.kind != RuntimeValueKind::String {
+//RS         return Err(format!(
+//RS             "receipt value `{}` has a non-String map key",
+//RS             owner.name
+//RS         ));
+//RS     }
+//RS     let value = lookup_descriptor(rt, owner.value, "map value")?;
+//RS     state.enter(owner, raw)?;
+//RS     let result = if length > RECEIPT_VALUE_MAX_NODES.saturating_sub(state.nodes) {
+//RS         Err(format!(
+//RS             "receipt value exceeds maximum node count {}",
+//RS             RECEIPT_VALUE_MAX_NODES
+//RS         ))
+//RS     } else {
+//RS         let mut entries = Vec::with_capacity(length);
+//RS         for index in 0..length {
+//RS             let index =
+//RS                 i64::try_from(index).map_err(|_| "receipt map index overflowed".to_string())?;
+//RS             let key_raw = rt
+//RS                 .heap
+//RS                 .map_key_at(raw, index)
+//RS                 .ok_or_else(|| format!("receipt value `{}` has an invalid map key", owner.name))?;
+//RS             let key_text = rt
+//RS                 .heap
+//RS                 .clone_string(key_raw)
+//RS                 .ok_or_else(|| format!("receipt value `{}` has an invalid map key string", owner.name))?;
+//RS             state.bytes(key_text.len())?;
+//RS             let value_raw = rt
+//RS                 .heap
+//RS                 .map_value_at(raw, index)
+//RS                 .ok_or_else(|| format!("receipt value `{}` has an invalid map value", owner.name))?;
+//RS             let word = word_from_raw(rt, value_raw, &value)?;
+//RS             let value = encode_value(rt, word, &value, state, depth + 1)?;
+//RS             entries.push((key_text, value));
+//RS         }
+//RS         Ok(DataTree::Object(entries))
+//RS     };
+//RS     state.leave(owner, raw);
+//RS     result
+//RS }
+//RS 
+//RS fn record_word(
+//RS     rt: &JitRuntime,
+//RS     record: i64,
+//RS     index: usize,
+//RS     field: &RuntimeTypeDescriptor,
+//RS ) -> Result<RuntimeWord, String> {
+//RS     let index =
+//RS         i64::try_from(index).map_err(|_| "receipt record field index overflowed".to_string())?;
+//RS     match field.kind {
+//RS         RuntimeValueKind::Float => rt
+//RS             .heap
+//RS             .record_get_float(record, index)
+//RS             .map(RuntimeWord::Float)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid Float field", field.name)),
+//RS         RuntimeValueKind::Bool => rt
+//RS             .heap
+//RS             .record_get_bool(record, index)
+//RS             .map(RuntimeWord::Bool)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid Bool field", field.name)),
+//RS         RuntimeValueKind::Char => rt
+//RS             .heap
+//RS             .record_get_char(record, index)
+//RS             .map(RuntimeWord::Char)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid Char field", field.name)),
+//RS         RuntimeValueKind::String => rt
+//RS             .heap
+//RS             .record_clone_string(record, index)
+//RS             .map(RuntimeWord::String)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid String field", field.name)),
+//RS         _ => rt
+//RS             .heap
+//RS             .record_get_int(record, index)
+//RS             .map(RuntimeWord::Bits)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid field carrier", field.name)),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_record(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     state.enter(owner, raw)?;
+//RS     let result = (|| {
+//RS         let mut fields = Vec::with_capacity(owner.fields.len());
+//RS         for field in &owner.fields {
+//RS             if field.skip {
+//RS                 continue;
+//RS             }
+//RS             let child = lookup_descriptor(rt, Some(field.type_id), &field.source_name)?;
+//RS             let word = record_word(rt, raw, field.index, &child)?;
+//RS             if child.kind == RuntimeValueKind::Option {
+//RS                 let option_raw = match &word {
+//RS                     RuntimeWord::Bits(value) => *value,
+//RS                     _ => {
+//RS                         return Err(format!(
+//RS                             "receipt value `{}` has an invalid Option field carrier",
+//RS                             field.source_name
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 let (present, _) = crate::runtime_host::jit_result_parts(rt, option_raw)
+//RS                     .ok_or_else(|| {
+//RS                         format!(
+//RS                             "receipt value `{}` has an invalid Option field",
+//RS                             field.source_name
+//RS                         )
+//RS                     })?;
+//RS                 if !present {
+//RS                     continue;
+//RS                 }
+//RS             }
+//RS             let field_json_name = field
+//RS                 .shape_names
+//RS                 .name_for(ShapeProjectionKind::Json)
+//RS                 .expect("runtime receipt fields always have a JSON projection name");
+//RS             state.bytes(field_json_name.len())?;
+//RS             let value = encode_value(rt, word, &child, state, depth + 1)?;
+//RS             fields.push((field_json_name.to_string(), value));
+//RS         }
+//RS         Ok(DataTree::Object(fields))
+//RS     })();
+//RS     state.leave(owner, raw);
+//RS     result
+//RS }
+//RS 
+//RS fn encode_enum(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     owner: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     state.enter(owner, raw)?;
+//RS     let result = (|| {
+//RS         let discriminant = rt
+//RS             .heap
+//RS             .record_get_int(raw, 0)
+//RS             .ok_or_else(|| format!("receipt value `{}` has an invalid enum record", owner.name))?;
+//RS         let variant = owner
+//RS             .variants
+//RS             .iter()
+//RS             .find(|variant| variant.discriminant == discriminant)
+//RS             .cloned()
+//RS             .ok_or_else(|| format!("receipt value `{}` has an unknown enum discriminant", owner.name))?;
+//RS         let variant_wire = variant.wire_name.clone();
+//RS         let mut named_payload = Vec::with_capacity(variant.fields.len());
+//RS         let mut single_payload = None;
+//RS         for field in &variant.fields {
+//RS             if field.skip {
+//RS                 continue;
+//RS             }
+//RS             let child = lookup_descriptor(rt, Some(field.type_id), &field.source_name)?;
+//RS             let word = record_word(rt, raw, field.index.saturating_add(1), &child)?;
+//RS             let value = encode_value(rt, word, &child, state, depth + 1)?;
+//RS             if variant.fields.len() == 1 {
+//RS                 single_payload = Some(value);
+//RS             } else {
+//RS                 let field_json_name = field
+//RS                     .shape_names
+//RS                     .name_for(ShapeProjectionKind::Json)
+//RS                     .expect("runtime receipt fields always have a JSON projection name");
+//RS                 state.bytes(field_json_name.len())?;
+//RS                 named_payload.push((field_json_name.to_string(), value));
+//RS             }
+//RS         }
+//RS         let payload = if variant.fields.is_empty() {
+//RS             None
+//RS         } else if variant.fields.len() == 1 {
+//RS             Some(single_payload.ok_or_else(|| {
+//RS                 format!(
+//RS                     "receipt enum variant `{}` has no encoded payload",
+//RS                     variant.name
+//RS                 )
+//RS             })?)
+//RS         } else {
+//RS             Some(DataTree::Object(named_payload))
+//RS         };
+//RS         if owner.serde_untagged {
+//RS             return Ok(payload.unwrap_or(DataTree::Null));
+//RS         }
+//RS         if let Some(tag) = owner.serde_tag.as_deref() {
+//RS             state.bytes(tag.len())?;
+//RS             state.bytes(variant_wire.len())?;
+//RS             let mut entries = vec![(tag.to_string(), DataTree::Text(variant_wire))];
+//RS             match payload {
+//RS                 None => {}
+//RS                 Some(value) if variant.fields.len() == 1 => {
+//RS                     state.bytes("value".len())?;
+//RS                     entries.push(("value".to_string(), value));
+//RS                 }
+//RS                 Some(DataTree::Object(fields)) => entries.extend(fields),
+//RS                 Some(_) => {
+//RS                     return Err(format!(
+//RS                         "receipt enum variant `{}` has an invalid named payload",
+//RS                         variant.name
+//RS                     ))
+//RS                 }
+//RS             }
+//RS             return Ok(DataTree::Object(entries));
+//RS         }
+//RS         match payload {
+//RS             None => {
+//RS                 state.bytes(variant_wire.len())?;
+//RS                 Ok(DataTree::Text(variant_wire))
+//RS             }
+//RS             Some(payload) => {
+//RS                 state.bytes(variant_wire.len())?;
+//RS                 Ok(DataTree::Object(vec![(variant_wire, payload)]))
+//RS             }
+//RS         }
+//RS     })();
+//RS     state.leave(owner, raw);
+//RS     result
+//RS }
+//RS 
+//RS /// Encode one erased value using an existing recursive state. History's
+//RS /// resident callable hook uses this to preserve cycle detection while it
+//RS /// descends into a callback's live captures.
+//RS pub(crate) fn encode_jit_value_nested(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS     state: &mut EncodeState,
+//RS     depth: usize,
+//RS ) -> Result<DataTree, String> {
+//RS     let word = word_from_raw(rt, raw, descriptor)?;
+//RS     encode_value(rt, word, descriptor, state, depth)
+//RS }
+//RS 
+//RS /// Encode one erased resident slot while preserving its concrete carrier.
+//RS pub(crate) fn encode_jit_value_slot(
+//RS     rt: &mut JitRuntime,
+//RS     value: JetVal,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<DataTree, String> {
+//RS     let mut state = EncodeState {
+//RS         nodes: 0,
+//RS         bytes: 0,
+//RS         active: HashSet::new(),
+//RS         callback: None,
+//RS     };
+//RS     let word = word_from_slot(rt, value, descriptor)?;
+//RS     encode_value(rt, word, descriptor, &mut state, 0)
+//RS }
+//RS 
+//RS /// Encode one erased resident value with an optional checked callable hook.
+//RS /// Ordinary receipt callers use `encode_jit_value`, which leaves callable
+//RS /// values unsupported; history alone supplies the hook for known JIT slots.
+//RS pub(crate) fn encode_jit_value_with_history_callback(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS     callback: HistoryCallableEncoder,
+//RS ) -> Result<DataTree, String> {
+//RS     let mut state = EncodeState {
+//RS         nodes: 0,
+//RS         bytes: 0,
+//RS         active: HashSet::new(),
+//RS         callback: Some(callback),
+//RS     };
+//RS     encode_jit_value_nested(rt, raw, descriptor, &mut state, 0)
+//RS }
+//RS 
+//RS /// Encode one erased resident value through the checked descriptor registry.
+//RS ///
+//RS /// The returned tree is rendered only after the runtime lock is released. This
+//RS /// keeps the shared JSON renderer's own exact-Int adapter from re-entering the
+//RS /// resident lock while it formats the value.
+//RS pub(crate) fn encode_jit_value(
+//RS     rt: &mut JitRuntime,
+//RS     raw: i64,
+//RS     descriptor: &RuntimeTypeDescriptor,
+//RS ) -> Result<DataTree, String> {
+//RS     let mut state = EncodeState {
+//RS         nodes: 0,
+//RS         bytes: 0,
+//RS         active: HashSet::new(),
+//RS         callback: None,
+//RS     };
+//RS     encode_jit_value_nested(rt, raw, descriptor, &mut state, 0)
+//RS }
+//RS 
+//RS fn receipt_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter ambient receipt adapter rejected the attachment".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     // Receiver rows are represented by an empty Core module in the canonical
+//RS     // registry. The route identity remains `core.handle.attach`; only this
+//RS     // ambient callback sees the receiver projection's empty module.
+//RS     if !module.is_empty() || method != "attach" {
+//RS         return None;
+//RS     }
+//RS     let [value, CtValue::Str(section_name), CtValue::Str(type_name), CtValue::Str(schema_digest)] =
+//RS         args.as_slice()
+//RS     else {
+//RS         return Some(Err(receipt_diag(
+//RS             "receipt.attach received malformed payload or metadata",
+//RS             span,
+//RS         )));
+//RS     };
+//RS     let payload = jet_codegen::Comptime::render_datatree_for_tir(value);
+//RS     kernel::jet_receipt_attach_encoded(
+//RS         &payload,
+//RS         section_name,
+//RS         type_name,
+//RS         schema_digest,
+//RS     );
+//RS     Some(Ok(CtValue::Unit))
+//RS }
+//RS 
+//RS pub(crate) fn register_interpreter_ambient(context: &mut crate::InterpreterAmbientContext) {
+//RS     context.register_core_call(ambient_core_call);
+//RS }
+//RS 
+// END-PORT-PENDING 0232 crates/jet-jit/src/Receipt.rs:1-841
+

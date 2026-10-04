@@ -1,0 +1,54 @@
+// Frozen Core/NetError.rs:7-22, Top/NetHTTP.rs:530-558,778-875.
+// The existing typed NetError/NetErrorDetail/DNSError carrier is a prerequisite.
+// Adapters project borrowed fields and surface ordinals, NOT Rust enum positions.
+// 0 InvalidInput,1 PermissionDenied,2 AddressInUse,3 AddressUnavailable,
+// 4 ConnectionRefused,5 ConnectionReset,6 NotConnected,7 Closed,8 Timeout,
+// 9 Cancelled,10 Unsupported,11 TLS,12 Protocol,13 Other,14 DNS.
+// DNS subordinal: 0 NotFound(name), 1 Failure(message). Invalid/missing display
+// parts intentionally produce empty text, as the frozen Rust kernel does.
+
+// Rust jet_net_error_kernel_show:7-22.
+pub fn jet_net_error_kernel_show(variant: I64, detail_message: String?, dns_variant: I64?, dns_value: String?) -> String Never! {
+    if variant >= 0 && variant <= 13 -> return detail_message ?? ""
+    if variant == 14 {
+        sub :: dns_variant ?? return ""
+        value :: dns_value ?? return ""
+        if sub == 0 -> return "DNS name not found: `{value}`"
+        if sub == 1 -> return value
+    }
+    ""
+}
+
+// Rust jet_net_error_operation:798-802; DNS has no detail, operation is "dns".
+pub fn jet_net_error_operation(variant: I64, detail_operation: String?) -> String Never! {
+    if variant == 14 -> return "dns"
+    detail_operation ?? ""
+}
+
+// Rust jet_net_error_address:803-805: absence is NOT an empty present String.
+pub fn jet_net_error_address(variant: I64, detail_address: String?) -> String? Never! {
+    if variant == 14 -> return None
+    ~detail_address
+}
+
+// Rust jet_net_error_name:806-811: only DNS NotFound projects its payload name.
+pub fn jet_net_error_name(variant: I64, detail_name: String?, dns_variant: I64?, dns_value: String?) -> String? Never! {
+    if variant == 14 {
+        if dns_variant == .Val(sub) {
+            if sub == 0 -> return ~dns_value
+        }
+        return None
+    }
+    ~detail_name
+}
+
+// Rust jet_net_error_message:812-814: show and message have exactly one meaning.
+pub fn jet_net_error_message(variant: I64, detail_message: String?, dns_variant: I64?, dns_value: String?) -> String Never! {
+    jet_net_error_kernel_show(variant, detail_message, dns_variant, dns_value)
+}
+
+// Rust jet_net_error_os_code:815-817: preserve full signed64 native OS code.
+pub fn jet_net_error_os_code(variant: I64, detail_os_code: I64?) -> I64? Never! {
+    if variant == 14 -> return None
+    ~detail_os_code
+}

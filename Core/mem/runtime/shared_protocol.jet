@@ -1,0 +1,2258 @@
+// PORT-PENDING 0188 crates-jet-codegen-src-prelude-sharedprotocol: crates/jet-codegen/src/Prelude/SharedProtocol.rs:1-2254
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SHAREDGUARD1=A: the one lock and condition protocol shared by native
+//RS // Prelude values and evaluator adapters. Payload storage is deliberately
+//RS // outside this module; engines may marshal values, but not redefine policy.
+//RS 
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_GUARD_EDIT_REQUIRED: &str = "a condition wait needs an edit guard";
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_GUARD_WAIT_CANCELLED: &str = "condition wait cancelled";
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_GUARD_INVALID: &str = "SharedGuard is invalid or released";
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_GUARD_VALUE_STORAGE_FAILED: &str = "SharedGuard value storage failed";
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED: &str =
+//RS     "SharedGuard character storage failed";
+//RS #[allow(dead_code)]
+//RS pub const JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED: &str =
+//RS     "Shared transaction record payload became invalid";
+//RS 
+//RS pub fn jet_shared_guard_validate_char(value: i32) -> Result<char, &'static str> {
+//RS     char::from_u32(value as u32).ok_or(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED)
+//RS }
+//RS /// Runtime scalar kinds with a lossless representation in one atomic word.
+//RS ///
+//RS /// This metadata is shared by generated Prelude code and execution adapters;
+//RS /// it deliberately contains only scalar representations that can be read or
+//RS /// written without entering the blocking Shared protocol.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetSharedScalarKind {
+//RS     I8,
+//RS     U8,
+//RS     I16,
+//RS     U16,
+//RS     I32,
+//RS     U32,
+//RS     I64,
+//RS     U64,
+//RS     F32,
+//RS     F64,
+//RS     Bool,
+//RS     Char,
+//RS }
+//RS 
+//RS /// The canonical wait-free carrier for a scalar Shared payload.
+//RS ///
+//RS /// The payload bits use Acquire loads and Release stores.  The carrier has no
+//RS /// mutex, condition variable, allocation, or retry loop; structured Shared
+//RS /// values continue to use `JetSharedProtocol` separately.
+//RS pub struct JetSharedAtomic {
+//RS     kind: JetSharedScalarKind,
+//RS     bits: std::sync::atomic::AtomicU64,
+//RS }
+//RS 
+//RS impl JetSharedAtomic {
+//RS     pub fn new(kind: JetSharedScalarKind, bits: u64) -> Self {
+//RS         Self {
+//RS             kind,
+//RS             bits: std::sync::atomic::AtomicU64::new(bits),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn kind(&self) -> JetSharedScalarKind {
+//RS         self.kind
+//RS     }
+//RS 
+//RS     #[inline(always)]
+//RS     pub fn load(&self) -> u64 {
+//RS         self.bits
+//RS             .load(std::sync::atomic::Ordering::Acquire)
+//RS     }
+//RS 
+//RS     #[inline(always)]
+//RS     pub fn store(&self, bits: u64) {
+//RS         self.bits
+//RS             .store(bits, std::sync::atomic::Ordering::Release);
+//RS     }
+//RS 
+//RS     #[inline(always)]
+//RS     pub fn swap(&self, bits: u64) -> u64 {
+//RS         self.bits
+//RS             .swap(bits, std::sync::atomic::Ordering::AcqRel)
+//RS     }
+//RS }
+//RS 
+//RS /// Return the scalar carrier kind for a native Prelude payload.
+//RS ///
+//RS /// Type identity is resolved once when the Shared cell is constructed.  A
+//RS /// non-scalar payload returns `None` and keeps the protocol-backed path.
+//RS pub fn jet_shared_scalar_kind<T: 'static>() -> Option<JetSharedScalarKind> {
+//RS     let ty = std::any::TypeId::of::<T>();
+//RS     Some(if ty == std::any::TypeId::of::<i8>() {
+//RS         JetSharedScalarKind::I8
+//RS     } else if ty == std::any::TypeId::of::<u8>() {
+//RS         JetSharedScalarKind::U8
+//RS     } else if ty == std::any::TypeId::of::<i16>() {
+//RS         JetSharedScalarKind::I16
+//RS     } else if ty == std::any::TypeId::of::<u16>() {
+//RS         JetSharedScalarKind::U16
+//RS     } else if ty == std::any::TypeId::of::<i32>() {
+//RS         JetSharedScalarKind::I32
+//RS     } else if ty == std::any::TypeId::of::<u32>() {
+//RS         JetSharedScalarKind::U32
+//RS     } else if ty == std::any::TypeId::of::<i64>() {
+//RS         JetSharedScalarKind::I64
+//RS     } else if ty == std::any::TypeId::of::<u64>() {
+//RS         JetSharedScalarKind::U64
+//RS     } else if ty == std::any::TypeId::of::<f32>() {
+//RS         JetSharedScalarKind::F32
+//RS     } else if ty == std::any::TypeId::of::<f64>() {
+//RS         JetSharedScalarKind::F64
+//RS     } else if ty == std::any::TypeId::of::<bool>() {
+//RS         JetSharedScalarKind::Bool
+//RS     } else if ty == std::any::TypeId::of::<char>() {
+//RS         JetSharedScalarKind::Char
+//RS     } else {
+//RS         return None;
+//RS     })
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct JetSharedLockState {
+//RS     readers: usize,
+//RS     writer: bool,
+//RS     writers_waiting: usize,
+//RS }
+//RS 
+//RS pub struct JetSharedProtocol {
+//RS     state: std::sync::Mutex<JetSharedLockState>,
+//RS     wake: std::sync::Condvar,
+//RS }
+//RS 
+//RS /// One physical Shared owner that can participate in the canonical ordered
+//RS /// lock protocol. `owner_identity` deduplicates aliases; `protocol_order_key`
+//RS /// orders distinct owner permits.
+//RS pub trait JetSharedCanonicalOwner: Send + Sync + 'static {
+//RS     fn owner_identity(&self) -> usize;
+//RS     fn protocol_order_key(&self) -> usize;
+//RS     fn acquire_permit(
+//RS         self: std::sync::Arc<Self>,
+//RS         editable: bool,
+//RS     ) -> Result<std::sync::Arc<dyn JetSharedCanonicalPermit>, String>;
+//RS }
+//RS /// The one-shot, owner-neutral completion of a managed payload finalizer.
+//RS pub type JetSharedPhysicalCompletion = Box<dyn std::any::Any + Send + 'static>;
+//RS 
+//RS /// Result of a physical Shared operation. Body status and a ready linear
+//RS /// finalizer completion are independent, so an operation error cannot lose a
+//RS /// completion already produced while releasing its last borrow.
+//RS #[must_use = "consume both the operation result and any linear finalizer completion"]
+//RS pub struct JetSharedPhysicalOperationOutcome<T> {
+//RS     pub result: Result<T, String>,
+//RS     pub completion: Option<JetSharedPhysicalCompletion>,
+//RS }
+//RS 
+//RS impl<T> JetSharedPhysicalOperationOutcome<T> {
+//RS     pub fn new(
+//RS         result: Result<T, String>,
+//RS         completion: Option<JetSharedPhysicalCompletion>,
+//RS     ) -> Self {
+//RS         Self { result, completion }
+//RS     }
+//RS }
+//RS 
+//RS pub type JetSharedPhysicalPayloadFinalizer<T> =
+//RS     Box<dyn FnOnce(T) -> JetSharedPhysicalCompletion + Send + 'static>;
+//RS pub type JetSharedPhysicalCompletionDelivery = std::sync::Arc<
+//RS     dyn Fn(JetSharedPhysicalCompletion) + Send + Sync + 'static,
+//RS >;
+//RS 
+//RS /// One managed physical-payload finalizer and its real receiver for implicit
+//RS /// Rust Drop paths. Explicit physical releases return the completion; callers
+//RS /// forward it through this same receiver when it is not returned farther.
+//RS #[must_use = "install or invoke the finalizer binding with its completion receiver"]
+//RS pub struct JetSharedPhysicalFinalizerBinding<T> {
+//RS     finalize: JetSharedPhysicalPayloadFinalizer<T>,
+//RS     deliver: JetSharedPhysicalCompletionDelivery,
+//RS }
+//RS 
+//RS impl<T> JetSharedPhysicalFinalizerBinding<T> {
+//RS     pub fn new(
+//RS         finalize: JetSharedPhysicalPayloadFinalizer<T>,
+//RS         deliver: JetSharedPhysicalCompletionDelivery,
+//RS     ) -> Self {
+//RS         Self { finalize, deliver }
+//RS     }
+//RS 
+//RS     pub fn completion_delivery(&self) -> JetSharedPhysicalCompletionDelivery {
+//RS         self.deliver.clone()
+//RS     }
+//RS 
+//RS     pub fn deliver(&self, completion: JetSharedPhysicalCompletion) {
+//RS         (self.deliver)(completion);
+//RS     }
+//RS 
+//RS     pub fn finish(self, value: T) -> JetSharedPhysicalCompletion {
+//RS         (self.finalize)(value)
+//RS     }
+//RS 
+//RS     pub fn finish_and_deliver(self, value: T) {
+//RS         (self.deliver)((self.finalize)(value));
+//RS     }
+//RS }
+//RS 
+//RS /// Backend-neutral physical Shared ownership hooks. Pins preserve the cell
+//RS /// allocation but do not count as owners; alias reservations atomically
+//RS /// increment the canonical logical-owner count and release exactly once.
+//RS pub(crate) trait JetSharedPhysicalOwnerApi: Clone + Send + Sync + 'static {
+//RS     type Root: Send + Sync + 'static;
+//RS     type Pin: std::any::Any + Send + Sync + 'static;
+//RS     type Borrow: std::any::Any + Send + Sync + 'static;
+//RS     type Alias: std::any::Any + Send + Sync + 'static;
+//RS     type PhysicalGuard: 'static;
+//RS 
+//RS     fn owner_identity(&self) -> usize;
+//RS     fn protocol_order_key(&self) -> usize;
+//RS     fn logical_owner_count(&self) -> Result<usize, String>;
+//RS     fn pin_live_owner(&self) -> Result<Option<Self::Pin>, String>;
+//RS     fn reserve_logical_alias(&self) -> Result<Option<Self::Alias>, String>;
+//RS     fn alias_token_id(&self, alias: &Self::Alias) -> i64;
+//RS     fn install_payload_finalizer(
+//RS         &self,
+//RS         finalizer: &mut Option<JetSharedPhysicalFinalizerBinding<Self::Root>>,
+//RS     ) -> Result<(), String>;
+//RS     fn release_owner_alias(
+//RS         &self,
+//RS         alias: Self::Alias,
+//RS     ) -> JetSharedPhysicalOperationOutcome<()>;
+//RS     fn release_physical_borrow(
+//RS         &self,
+//RS         borrow: Self::Borrow,
+//RS     ) -> JetSharedPhysicalOperationOutcome<()>;
+//RS     fn release_physical_guard(
+//RS         &self,
+//RS         guard: Self::PhysicalGuard,
+//RS     ) -> JetSharedPhysicalOperationOutcome<()>;
+//RS     fn with_live_root<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&Self::Root, u64) -> R,
+//RS     ) -> JetSharedPhysicalOperationOutcome<Option<R>>;
+//RS     fn with_live_edit<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&mut Self::Root) -> R,
+//RS     ) -> JetSharedPhysicalOperationOutcome<Option<R>>;
+//RS     fn replace_if_revision(
+//RS         &self,
+//RS         expected_revision: u64,
+//RS         replacement: Self::Root,
+//RS     ) -> JetSharedPhysicalOperationOutcome<Option<(bool, u64)>>
+//RS     where
+//RS         Self::Root: Clone;
+//RS     fn acquire_physical_guard(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> JetSharedPhysicalOperationOutcome<Option<Self::PhysicalGuard>>;
+//RS }
+//RS 
+//RS 
+//RS /// Invocation-local lease on one canonical physical owner permit.
+//RS ///
+//RS /// Implementations may hold non-Send runtime guards; the lease is never
+//RS /// retained in a shared owner carrier. External participants use `stage_value`
+//RS /// to prepare publication through this already-held permit. If any participant
+//RS /// fails to stage, `discard_staged` must leave the owner unchanged before any
+//RS /// permit is released.
+//RS pub trait JetSharedCanonicalPermit: std::any::Any {
+//RS     fn editable(&self) -> bool;
+//RS     fn held(&self) -> bool;
+//RS     fn release(&self) -> JetSharedPhysicalOperationOutcome<()>;
+//RS     fn release_during_drop(&self);
+//RS     fn reacquire(&self, cancelled: &mut dyn FnMut() -> bool) -> bool;
+//RS     fn stage_value(&self, _value: Box<dyn std::any::Any>) -> Result<(), String> {
+//RS         Err("canonical Shared owner does not support typed transaction staging".to_string())
+//RS     }
+//RS     fn discard_staged(&self) -> Result<(), String> {
+//RS         Ok(())
+//RS     }
+//RS     fn into_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any>;
+//RS }
+//RS 
+//RS impl JetSharedProtocol {
+//RS     pub fn new() -> std::sync::Arc<Self> {
+//RS         std::sync::Arc::new(Self {
+//RS             state: std::sync::Mutex::new(JetSharedLockState::default()),
+//RS             wake: std::sync::Condvar::new(),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn acquire(
+//RS         self: &std::sync::Arc<Self>,
+//RS         editable: bool,
+//RS         mut cancelled: impl FnMut() -> bool,
+//RS     ) -> Option<std::sync::Arc<JetSharedPermit>> {
+//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS         if editable {
+//RS             state.writers_waiting += 1;
+//RS         }
+//RS         loop {
+//RS             if cancelled() {
+//RS                 if editable {
+//RS                     state.writers_waiting -= 1;
+//RS                     self.wake.notify_all();
+//RS                 }
+//RS                 return None;
+//RS             }
+//RS             let available = if editable {
+//RS                 !state.writer && state.readers == 0
+//RS             } else {
+//RS                 !state.writer && state.writers_waiting == 0
+//RS             };
+//RS             if available {
+//RS                 if editable {
+//RS                     state.writers_waiting -= 1;
+//RS                     state.writer = true;
+//RS                 } else {
+//RS                     state.readers += 1;
+//RS                 }
+//RS                 return Some(std::sync::Arc::new(JetSharedPermit {
+//RS                     protocol: self.clone(),
+//RS                     editable,
+//RS                     held: std::sync::atomic::AtomicBool::new(true),
+//RS                 }));
+//RS             }
+//RS             let (next, _) = self
+//RS                 .wake
+//RS                 .wait_timeout(state, std::time::Duration::from_millis(10))
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             state = next;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetSharedCanonicalOwner for JetSharedProtocol {
+//RS     fn owner_identity(&self) -> usize {
+//RS         self as *const Self as usize
+//RS     }
+//RS 
+//RS     fn protocol_order_key(&self) -> usize {
+//RS         self as *const Self as usize
+//RS     }
+//RS 
+//RS     fn acquire_permit(
+//RS         self: std::sync::Arc<Self>,
+//RS         editable: bool,
+//RS     ) -> Result<std::sync::Arc<dyn JetSharedCanonicalPermit>, String> {
+//RS         self.acquire(editable, || false)
+//RS             .map(|permit| permit as std::sync::Arc<dyn JetSharedCanonicalPermit>)
+//RS             .ok_or_else(|| "canonical Shared permit acquisition was cancelled".to_string())
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_shared_acquire(
+//RS     protocol: &std::sync::Arc<JetSharedProtocol>,
+//RS     editable: bool,
+//RS     cancelled: impl FnMut() -> bool,
+//RS ) -> Option<std::sync::Arc<JetSharedPermit>> {
+//RS     protocol.acquire(editable, cancelled)
+//RS }
+//RS 
+//RS /// Acquire one physical owner permit per root in canonical protocol order.
+//RS /// Duplicate aliases share the same lease while each row preserves its
+//RS /// original participant index and requested editable capability.
+//RS pub fn jet_shared_acquire_ordered_owners(
+//RS     participants: Vec<(
+//RS         usize,
+//RS         std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         bool,
+//RS     )>,
+//RS ) -> Result<
+//RS     Vec<(
+//RS         usize,
+//RS         bool,
+//RS         std::sync::Arc<dyn JetSharedCanonicalPermit>,
+//RS     )>,
+//RS     String,
+//RS > {
+//RS     jet_shared_acquire_ordered_by(participants, |owner, editable| owner.acquire_permit(editable))
+//RS }
+//RS 
+//RS fn jet_shared_acquire_ordered_by<O, P>(
+//RS     mut participants: Vec<(usize, std::sync::Arc<O>, bool)>,
+//RS     mut acquire: impl FnMut(std::sync::Arc<O>, bool) -> Result<std::sync::Arc<P>, String>,
+//RS ) -> Result<Vec<(usize, bool, std::sync::Arc<P>)>, String>
+//RS where
+//RS     O: JetSharedCanonicalOwner + ?Sized,
+//RS     P: JetSharedCanonicalPermit + ?Sized,
+//RS {
+//RS     let mut ordered = participants
+//RS         .drain(..)
+//RS         .map(|(index, owner, editable)| {
+//RS             (
+//RS                 index,
+//RS                 owner.owner_identity(),
+//RS                 owner.protocol_order_key(),
+//RS                 editable,
+//RS                 owner,
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     ordered.sort_unstable_by_key(|(index, identity, order_key, _, _)| {
+//RS         (*order_key, *identity, *index)
+//RS     });
+//RS 
+//RS     let mut acquired = Vec::with_capacity(ordered.len());
+//RS     let mut start = 0;
+//RS     while start < ordered.len() {
+//RS         let (_, owner_identity, order_key, first_editable, owner) = &ordered[start];
+//RS         let mut end = start + 1;
+//RS         let mut editable = *first_editable;
+//RS         while end < ordered.len() && ordered[end].1 == *owner_identity {
+//RS             if ordered[end].2 != *order_key {
+//RS                 return Err(
+//RS                     "one physical Shared owner reported inconsistent protocol ordering keys"
+//RS                         .to_string(),
+//RS                 );
+//RS             }
+//RS             editable |= ordered[end].3;
+//RS             end += 1;
+//RS         }
+//RS         let permit = acquire(owner.clone(), editable)?;
+//RS         for (index, _, _, requested_editable, _) in &ordered[start..end] {
+//RS             acquired.push((*index, *requested_editable, std::sync::Arc::clone(&permit)));
+//RS         }
+//RS         start = end;
+//RS     }
+//RS     Ok(acquired)
+//RS }
+//RS 
+//RS pub fn jet_shared_acquire_ordered(
+//RS     protocols: Vec<std::sync::Arc<JetSharedProtocol>>,
+//RS ) -> Vec<std::sync::Arc<JetSharedPermit>> {
+//RS     let participants = protocols
+//RS         .into_iter()
+//RS         .enumerate()
+//RS         .map(|(index, protocol)| {
+//RS             (
+//RS                 index,
+//RS                 protocol,
+//RS                 true,
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     let rows = jet_shared_acquire_ordered_by(participants, |owner, editable| {
+//RS         owner.acquire(editable, || false)
+//RS             .ok_or_else(|| "canonical Shared permit acquisition was cancelled".to_string())
+//RS     })
+//RS     .expect("uncancelled transaction lock acquisition succeeds");
+//RS     let mut acquired: Vec<std::sync::Arc<JetSharedPermit>> = Vec::with_capacity(rows.len());
+//RS     let mut permits = Vec::new();
+//RS     for (_, _, permit) in rows {
+//RS         if acquired
+//RS             .last()
+//RS             .is_some_and(|previous| std::sync::Arc::ptr_eq(previous, &permit))
+//RS         {
+//RS             continue;
+//RS         }
+//RS         acquired.push(permit.clone());
+//RS         permits.push(permit);
+//RS     }
+//RS     permits
+//RS }
+//RS 
+//RS /// The Shared side of a `#Transact` block.
+//RS ///
+//RS /// Engines and generated adapters only supply type-erased payload closures.
+//RS /// Participant identity, canonical lock ordering, commit, rollback, and the
+//RS /// transaction-local view live here so every execution tier uses one protocol.
+//RS ///
+//RS /// A transaction stages each edited payload in a private working value.  The
+//RS /// edit callback runs once while the transaction body is executing; commit
+//RS /// only publishes that working value.  Nested transactions clone the parent's
+//RS /// working value, merge a committed child back into the parent, and never
+//RS /// publish to a Shared cell until the outermost transaction commits.
+//RS trait JetSharedTxnValue {
+//RS     fn as_any(&self) -> &dyn std::any::Any;
+//RS 
+//RS     fn merge_into(&self, parent: &dyn JetSharedTxnValue);
+//RS }
+//RS 
+//RS struct JetSharedTxnValueImpl<T: 'static> {
+//RS     value: std::rc::Rc<std::cell::RefCell<T>>,
+//RS }
+//RS 
+//RS impl<T: Clone + 'static> JetSharedTxnValue for JetSharedTxnValueImpl<T> {
+//RS     fn as_any(&self) -> &dyn std::any::Any {
+//RS         self
+//RS     }
+//RS 
+//RS     fn merge_into(&self, parent: &dyn JetSharedTxnValue) {
+//RS         let parent = parent
+//RS             .as_any()
+//RS             .downcast_ref::<Self>()
+//RS             .expect("Shared transaction participant type changed");
+//RS         let value = self.value.borrow().clone();
+//RS         *parent.value.borrow_mut() = value;
+//RS     }
+//RS }
+//RS 
+//RS struct JetSharedTransactionPart {
+//RS     protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS     staged: Option<Box<dyn JetSharedTxnValue>>,
+//RS     writes: bool,
+//RS     snapshots: Vec<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+//RS     deltas: Vec<Box<dyn FnOnce()>>,
+//RS     stage_hooks: Vec<
+//RS         Box<dyn FnOnce(&dyn JetSharedCanonicalPermit) -> Result<(), String>>,
+//RS     >,
+//RS     commit_hooks: Vec<Box<dyn FnOnce(&dyn JetSharedCanonicalPermit)>>,
+//RS     has_commit_hook: bool,
+//RS }
+//RS impl JetSharedTransactionPart {
+//RS     fn new(protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>) -> Self {
+//RS         Self {
+//RS             protocol,
+//RS             staged: None,
+//RS             writes: false,
+//RS             snapshots: Vec::new(),
+//RS             deltas: Vec::new(),
+//RS             stage_hooks: Vec::new(),
+//RS             commit_hooks: Vec::new(),
+//RS             has_commit_hook: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct JetSharedTransactionState {
+//RS     parts: Option<Vec<JetSharedTransactionPart>>,
+//RS     rollback_hooks: Option<Vec<Box<dyn FnOnce()>>>,
+//RS     parent: Option<std::rc::Weak<std::cell::RefCell<JetSharedTransactionState>>>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_SHARED_TRANSACTION_STACK:
+//RS         std::cell::RefCell<Vec<std::rc::Weak<std::cell::RefCell<JetSharedTransactionState>>>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS pub struct JetSharedTransaction {
+//RS     state: std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+//RS     // Declared after `state` so the gate opens only once `Drop` has run the
+//RS     // rollback hooks or the commit has published.
+//RS     _gate: Option<JetSharedTransactionGate>,
+//RS }
+//RS 
+//RS /// Outermost Shared transactions run one at a time, process-wide. A body
+//RS /// works on transaction-local copies taken at first touch and commit publishes
+//RS /// them, so two transactions whose bodies overlapped would each publish a copy
+//RS /// that misses the other's write. Holding the gate from begin to commit or
+//RS /// rollback makes every transaction's copies current; contention waits and
+//RS /// the body still runs once. Nested transactions join their parent and never
+//RS /// take the gate again; the per-thread depth keeps an orphaned inner begin
+//RS /// from waiting on its own thread.
+//RS struct JetSharedTransactionGate;
+//RS 
+//RS static JET_SHARED_TRANSACTION_GATE_OWNER: std::sync::Mutex<Option<(std::thread::ThreadId, usize)>> =
+//RS     std::sync::Mutex::new(None);
+//RS static JET_SHARED_TRANSACTION_GATE_RELEASED: std::sync::Condvar = std::sync::Condvar::new();
+//RS 
+//RS impl JetSharedTransactionGate {
+//RS     fn enter() -> Self {
+//RS         let me = std::thread::current().id();
+//RS         let mut owner = JET_SHARED_TRANSACTION_GATE_OWNER
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         loop {
+//RS             match owner.as_mut() {
+//RS                 None => {
+//RS                     *owner = Some((me, 1));
+//RS                     return Self;
+//RS                 }
+//RS                 Some((holder, depth)) if *holder == me => {
+//RS                     *depth += 1;
+//RS                     return Self;
+//RS                 }
+//RS                 Some(_) => {
+//RS                     owner = JET_SHARED_TRANSACTION_GATE_RELEASED
+//RS                         .wait(owner)
+//RS                         .unwrap_or_else(|error| error.into_inner());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetSharedTransactionGate {
+//RS     fn drop(&mut self) {
+//RS         let mut owner = JET_SHARED_TRANSACTION_GATE_OWNER
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         if let Some((_, depth)) = owner.as_mut() {
+//RS             *depth -= 1;
+//RS             if *depth == 0 {
+//RS                 *owner = None;
+//RS                 JET_SHARED_TRANSACTION_GATE_RELEASED.notify_all();
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_shared_transaction_part_mut<'a>(
+//RS     parts: &'a mut Vec<JetSharedTransactionPart>,
+//RS     protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS ) -> &'a mut JetSharedTransactionPart {
+//RS     if let Some(index) = parts
+//RS         .iter()
+//RS         .position(|part| part.protocol.owner_identity() == protocol.owner_identity())
+//RS     {
+//RS         assert_eq!(
+//RS             parts[index].protocol.protocol_order_key(),
+//RS             protocol.protocol_order_key(),
+//RS             "one physical Shared owner reported inconsistent protocol ordering keys",
+//RS         );
+//RS         return &mut parts[index];
+//RS     }
+//RS     parts.push(JetSharedTransactionPart::new(protocol.clone()));
+//RS     parts.last_mut().expect("new Shared transaction participant")
+//RS }
+//RS 
+//RS fn jet_shared_transaction_part<'a>(
+//RS     parts: &'a [JetSharedTransactionPart],
+//RS     protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS ) -> Option<&'a JetSharedTransactionPart> {
+//RS     parts
+//RS         .iter()
+//RS         .find(|part| part.protocol.owner_identity() == protocol.owner_identity())
+//RS }
+//RS 
+//RS fn jet_shared_transaction_staged_from<T: 'static>(
+//RS     state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+//RS     protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS ) -> Option<std::rc::Rc<std::cell::RefCell<T>>> {
+//RS     let (staged, parent) = {
+//RS         let state = state.borrow();
+//RS         let staged = state
+//RS             .parts
+//RS             .as_deref()
+//RS             .and_then(|parts| jet_shared_transaction_part(parts, protocol))
+//RS             .and_then(|part| part.staged.as_ref())
+//RS             .and_then(|staged| {
+//RS                 staged
+//RS                     .as_any()
+//RS                     .downcast_ref::<JetSharedTxnValueImpl<T>>()
+//RS                     .map(|staged| staged.value.clone())
+//RS             });
+//RS         (staged, state.parent.clone())
+//RS     };
+//RS     staged.or_else(|| {
+//RS         parent
+//RS             .and_then(|parent| parent.upgrade())
+//RS             .and_then(|parent| jet_shared_transaction_staged_from(&parent, protocol))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_shared_transaction_has_writes(
+//RS     state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+//RS     protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS ) -> bool {
+//RS     let (writes, parent) = {
+//RS         let state = state.borrow();
+//RS         let writes = state
+//RS             .parts
+//RS             .as_deref()
+//RS             .and_then(|parts| jet_shared_transaction_part(parts, protocol))
+//RS             .is_some_and(|part| part.writes);
+//RS         (writes, state.parent.clone())
+//RS     };
+//RS     writes
+//RS         || parent.is_some_and(|parent| {
+//RS             parent
+//RS                 .upgrade()
+//RS                 .is_some_and(|parent| jet_shared_transaction_has_writes(&parent, protocol))
+//RS         })
+//RS }
+//RS 
+//RS fn jet_shared_transaction_pop(
+//RS     state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+//RS ) {
+//RS     JET_SHARED_TRANSACTION_STACK.with(|stack| {
+//RS         let mut stack = stack.borrow_mut();
+//RS         if let Some(index) = stack.iter().rposition(|entry| {
+//RS             entry
+//RS                 .upgrade()
+//RS                 .is_some_and(|candidate| std::rc::Rc::ptr_eq(&candidate, state))
+//RS         }) {
+//RS             stack.remove(index);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_shared_transaction_merge_nested(
+//RS     parent: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+//RS     mut child_parts: Vec<JetSharedTransactionPart>,
+//RS     mut child_rollbacks: Vec<Box<dyn FnOnce()>>,
+//RS ) {
+//RS     let mut parent = parent.borrow_mut();
+//RS     let parts = parent
+//RS         .parts
+//RS         .as_mut()
+//RS         .expect("nested Shared transaction parent already committed");
+//RS     for mut child in child_parts.drain(..) {
+//RS         let parent_part = jet_shared_transaction_part_mut(parts, &child.protocol);
+//RS         if child.writes {
+//RS             for snapshot in &parent_part.snapshots {
+//RS                 snapshot.store(false, std::sync::atomic::Ordering::Release);
+//RS             }
+//RS         }
+//RS         if let Some(staged) = child.staged.take() {
+//RS             if let Some(parent_staged) = parent_part.staged.as_ref() {
+//RS                 staged.merge_into(parent_staged.as_ref());
+//RS             } else {
+//RS                 parent_part.staged = Some(staged);
+//RS             }
+//RS         }
+//RS         parent_part.writes |= child.writes;
+//RS         parent_part.deltas.append(&mut child.deltas);
+//RS         if !parent_part.has_commit_hook {
+//RS             parent_part.stage_hooks.append(&mut child.stage_hooks);
+//RS             parent_part.commit_hooks.append(&mut child.commit_hooks);
+//RS             parent_part.has_commit_hook = child.has_commit_hook;
+//RS         }
+//RS         parent_part.snapshots.append(&mut child.snapshots);
+//RS     }
+//RS     parent
+//RS         .rollback_hooks
+//RS         .as_mut()
+//RS         .expect("nested Shared transaction parent has no rollback hooks")
+//RS         .append(&mut child_rollbacks);
+//RS }
+//RS 
+//RS pub fn jet_shared_transaction_begin() -> JetSharedTransaction {
+//RS     let parent = JET_SHARED_TRANSACTION_STACK.with(|stack| {
+//RS         stack
+//RS             .borrow()
+//RS             .last()
+//RS             .and_then(|parent| parent.upgrade())
+//RS             .map(|parent| std::rc::Rc::downgrade(&parent))
+//RS     });
+//RS     // Only an outermost transaction takes the gate; a nested one joins the
+//RS     // parent that already holds it.
+//RS     let gate = parent.is_none().then(JetSharedTransactionGate::enter);
+//RS     let state = std::rc::Rc::new(std::cell::RefCell::new(JetSharedTransactionState {
+//RS         parts: Some(Vec::new()),
+//RS         rollback_hooks: Some(Vec::new()),
+//RS         parent,
+//RS     }));
+//RS     JET_SHARED_TRANSACTION_STACK.with(|stack| {
+//RS         stack.borrow_mut().push(std::rc::Rc::downgrade(&state));
+//RS     });
+//RS     JetSharedTransaction { state, _gate: gate }
+//RS }
+//RS 
+//RS impl JetSharedTransaction {
+//RS     pub fn touch(&mut self, protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>) {
+//RS         let mut state = self.state.borrow_mut();
+//RS         let parts = state
+//RS             .parts
+//RS             .as_mut()
+//RS             .expect("Shared transaction touch after commit");
+//RS         let _ = jet_shared_transaction_part_mut(parts, &protocol);
+//RS     }
+//RS 
+//RS     /// Return a transaction-local working value, creating it from `initial`
+//RS     /// only when neither this transaction nor its parent has staged a value.
+//RS     pub fn stage_value<T: Clone + 'static>(
+//RS         &mut self,
+//RS         protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         initial: impl FnOnce() -> T,
+//RS     ) -> std::rc::Rc<std::cell::RefCell<T>> {
+//RS         {
+//RS             let state = self.state.borrow();
+//RS             if let Some(staged) = state
+//RS                 .parts
+//RS                 .as_deref()
+//RS                 .and_then(|parts| jet_shared_transaction_part(parts, &protocol))
+//RS                 .and_then(|part| part.staged.as_ref())
+//RS                 .and_then(|staged| {
+//RS                     staged
+//RS                         .as_any()
+//RS                         .downcast_ref::<JetSharedTxnValueImpl<T>>()
+//RS                         .map(|staged| staged.value.clone())
+//RS                 })
+//RS             {
+//RS                 return staged;
+//RS             }
+//RS         }
+//RS         let value = self
+//RS             .staged_value::<T>(&protocol)
+//RS             .map(|staged| staged.borrow().clone())
+//RS             .unwrap_or_else(initial);
+//RS         let staged = std::rc::Rc::new(std::cell::RefCell::new(value));
+//RS         let mut state = self.state.borrow_mut();
+//RS         let parts = state
+//RS             .parts
+//RS             .as_mut()
+//RS             .expect("Shared transaction stage after commit");
+//RS         let part = jet_shared_transaction_part_mut(parts, &protocol);
+//RS         part.staged = Some(Box::new(JetSharedTxnValueImpl {
+//RS             value: staged.clone(),
+//RS         }));
+//RS         staged
+//RS     }
+//RS 
+//RS     pub fn staged_value<T: 'static>(
+//RS         &self,
+//RS         protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS     ) -> Option<std::rc::Rc<std::cell::RefCell<T>>> {
+//RS         jet_shared_transaction_staged_from::<T>(&self.state, protocol)
+//RS     }
+//RS 
+//RS     /// Mark a participant as written and invalidate tickets captured before
+//RS     /// this local write. The outermost commit still advances one revision.
+//RS     pub fn mark_write(&mut self, protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>) {
+//RS         let mut state = self.state.borrow_mut();
+//RS         let parts = state
+//RS             .parts
+//RS             .as_mut()
+//RS             .expect("Shared transaction write after commit");
+//RS         let part = jet_shared_transaction_part_mut(parts, &protocol);
+//RS         part.writes = true;
+//RS         for snapshot in &part.snapshots {
+//RS             snapshot.store(false, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn snapshot_revision(
+//RS         &self,
+//RS         protocol: &std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         committed: u64,
+//RS     ) -> Option<u64> {
+//RS         if jet_shared_transaction_has_writes(&self.state, protocol) {
+//RS             committed.checked_add(1)
+//RS         } else {
+//RS             Some(committed)
+//RS         }
+//RS     }
+//RS 
+//RS     /// Register a snapshot with the participant so abort invalidates it and
+//RS     /// nested commit can carry its lifecycle into the parent transaction.
+//RS     pub fn record_snapshot(
+//RS         &mut self,
+//RS         protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+//RS     ) {
+//RS         self.touch(protocol.clone());
+//RS         {
+//RS             let mut state = self.state.borrow_mut();
+//RS             let parts = state
+//RS                 .parts
+//RS                 .as_mut()
+//RS                 .expect("Shared transaction snapshot after commit");
+//RS             jet_shared_transaction_part_mut(parts, &protocol)
+//RS                 .snapshots
+//RS                 .push(valid.clone());
+//RS         }
+//RS         self.record_rollback(Box::new(move || {
+//RS             valid.store(false, std::sync::atomic::Ordering::Release);
+//RS         }));
+//RS     }
+//RS 
+//RS     pub fn record_edit(
+//RS         &mut self,
+//RS         protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         delta: Box<dyn FnOnce()>,
+//RS     ) {
+//RS         let mut state = self.state.borrow_mut();
+//RS         let parts = state
+//RS             .parts
+//RS             .as_mut()
+//RS             .expect("Shared transaction edit after commit");
+//RS         jet_shared_transaction_part_mut(parts, &protocol)
+//RS             .deltas
+//RS             .push(delta);
+//RS     }
+//RS 
+//RS     /// Register the prepare and publish hooks for a participant. Preparation
+//RS     /// runs for every owner under its canonical permit before any commit hook
+//RS     /// publishes. The first pair wins because a participant publishes once,
+//RS     /// while its transaction-local deltas may accumulate.
+//RS     pub fn record_edit_with_commit(
+//RS         &mut self,
+//RS         protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         delta: Box<dyn FnOnce()>,
+//RS         commit: Box<dyn FnOnce(&dyn JetSharedCanonicalPermit)>,
+//RS     ) {
+//RS         self.record_edit_with_staged_commit(protocol, delta, Box::new(|_| Ok(())), commit);
+//RS     }
+//RS 
+//RS     /// Register one fallible staging hook and one infallible publication hook.
+//RS     /// If staging fails, every acquired permit is asked to discard its staged
+//RS     /// value before any owner is allowed to publish.
+//RS     pub fn record_edit_with_staged_commit(
+//RS         &mut self,
+//RS         protocol: std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS         delta: Box<dyn FnOnce()>,
+//RS         stage: Box<
+//RS             dyn FnOnce(&dyn JetSharedCanonicalPermit) -> Result<(), String>,
+//RS         >,
+//RS         commit: Box<dyn FnOnce(&dyn JetSharedCanonicalPermit)>,
+//RS     ) {
+//RS         let mut state = self.state.borrow_mut();
+//RS         let parts = state
+//RS             .parts
+//RS             .as_mut()
+//RS             .expect("Shared transaction edit after commit");
+//RS         let part = jet_shared_transaction_part_mut(parts, &protocol);
+//RS         part.deltas.push(delta);
+//RS         if !part.has_commit_hook {
+//RS             part.stage_hooks.push(stage);
+//RS             part.commit_hooks.push(commit);
+//RS             part.has_commit_hook = true;
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn record_rollback(&mut self, hook: Box<dyn FnOnce()>) {
+//RS         self.state
+//RS             .borrow_mut()
+//RS             .rollback_hooks
+//RS             .as_mut()
+//RS             .expect("Shared transaction rollback after commit")
+//RS             .push(hook);
+//RS     }
+//RS 
+//RS     pub fn commit(self) {
+//RS         self.commit_with(|| ());
+//RS     }
+//RS 
+//RS     pub fn commit_with<R>(self, apply: impl FnOnce() -> R) -> R {
+//RS         self.try_commit_with(apply)
+//RS             .unwrap_or_else(|error| panic!("Shared transaction commit failed: {error}"))
+//RS     }
+//RS 
+//RS     /// Fallible counterpart to `commit_with`, used by adapters whose physical
+//RS     /// owner can reject a prepared value. No participant publishes unless all
+//RS     /// staging hooks succeed under the complete canonical permit set.
+//RS     pub fn try_commit_with<R>(
+//RS         self,
+//RS         apply: impl FnOnce() -> R,
+//RS     ) -> Result<R, String> {
+//RS         let state = self.state.clone();
+//RS         let (parts, rollback_hooks, parent) = {
+//RS             let mut state = state.borrow_mut();
+//RS             (
+//RS                 state.parts.take(),
+//RS                 state.rollback_hooks.take(),
+//RS                 state.parent.clone(),
+//RS             )
+//RS         };
+//RS         jet_shared_transaction_pop(&state);
+//RS         let Some(mut parts) = parts else {
+//RS             return Ok(apply());
+//RS         };
+//RS         let mut rollback_hooks = rollback_hooks.unwrap_or_default();
+//RS         if let Some(parent) = parent.and_then(|parent| parent.upgrade()) {
+//RS             jet_shared_transaction_merge_nested(&parent, parts, rollback_hooks);
+//RS             return Ok(apply());
+//RS         }
+//RS         let owners = parts
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(index, part)| (index, part.protocol.clone(), true))
+//RS             .collect();
+//RS         let leases = match jet_shared_acquire_ordered_owners(owners) {
+//RS             Ok(leases) => leases,
+//RS             Err(error) => {
+//RS                 for hook in rollback_hooks.drain(..) {
+//RS                     hook();
+//RS                 }
+//RS                 return Err(format!(
+//RS                     "canonical Shared transaction owner acquisition failed: {error}"
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let mut permits = vec![None; parts.len()];
+//RS         for (index, _, permit) in leases {
+//RS             permits[index] = Some(permit);
+//RS         }
+//RS         for part in &mut parts {
+//RS             for delta in part.deltas.drain(..) {
+//RS                 delta();
+//RS             }
+//RS         }
+//RS         let stage_result = (|| {
+//RS             for (index, part) in parts.iter_mut().enumerate() {
+//RS                 let permit = permits[index]
+//RS                     .as_ref()
+//RS                     .expect("ordered Shared acquisition omitted a participant");
+//RS                 for stage in part.stage_hooks.drain(..) {
+//RS                     stage(permit.as_ref())?;
+//RS                 }
+//RS             }
+//RS             Ok::<(), String>(())
+//RS         })();
+//RS         if let Err(error) = stage_result {
+//RS             let mut discard_errors = Vec::new();
+//RS             for permit in permits.iter().flatten() {
+//RS                 if let Err(discard_error) = permit.discard_staged() {
+//RS                     discard_errors.push(discard_error);
+//RS                 }
+//RS             }
+//RS             drop(permits);
+//RS             for hook in rollback_hooks.drain(..) {
+//RS                 hook();
+//RS             }
+//RS             if !discard_errors.is_empty() {
+//RS                 return Err(format!(
+//RS                     "{error}; failed to discard staged Shared values: {}",
+//RS                     discard_errors.join("; ")
+//RS                 ));
+//RS             }
+//RS             return Err(error);
+//RS         }
+//RS         for (index, part) in parts.iter_mut().enumerate() {
+//RS             let permit = permits[index]
+//RS                 .as_ref()
+//RS                 .expect("ordered Shared acquisition omitted a participant");
+//RS             for commit in part.commit_hooks.drain(..) {
+//RS                 commit(permit.as_ref());
+//RS             }
+//RS         }
+//RS         drop(permits);
+//RS         Ok(apply())
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl Drop for JetSharedTransaction {
+//RS     fn drop(&mut self) {
+//RS         let state = self.state.clone();
+//RS         let rollback_hooks = {
+//RS             let mut state = state.borrow_mut();
+//RS             if state.parts.take().is_some() {
+//RS                 state.rollback_hooks.take()
+//RS             } else {
+//RS                 None
+//RS             }
+//RS         };
+//RS         if let Some(mut hooks) = rollback_hooks {
+//RS             jet_shared_transaction_pop(&state);
+//RS             for hook in hooks.drain(..) {
+//RS                 hook();
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetSharedPermit {
+//RS     protocol: std::sync::Arc<JetSharedProtocol>,
+//RS     editable: bool,
+//RS     held: std::sync::atomic::AtomicBool,
+//RS }
+//RS 
+//RS impl JetSharedPermit {
+//RS     pub fn editable(&self) -> bool {
+//RS         self.editable
+//RS     }
+//RS 
+//RS     pub fn held(&self) -> bool {
+//RS         self.held.load(std::sync::atomic::Ordering::Acquire)
+//RS     }
+//RS 
+//RS     pub fn release(&self) {
+//RS         if !self
+//RS             .held
+//RS             .swap(false, std::sync::atomic::Ordering::AcqRel)
+//RS         {
+//RS             return;
+//RS         }
+//RS         let mut state = self
+//RS             .protocol
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         if self.editable {
+//RS             state.writer = false;
+//RS         } else {
+//RS             state.readers = state.readers.saturating_sub(1);
+//RS         }
+//RS         self.protocol.wake.notify_all();
+//RS     }
+//RS 
+//RS     pub fn reacquire(&self, mut cancelled: impl FnMut() -> bool) -> bool {
+//RS         if self.held() {
+//RS             return true;
+//RS         }
+//RS         let mut state = self
+//RS             .protocol
+//RS             .state
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         if self.editable {
+//RS             state.writers_waiting += 1;
+//RS         }
+//RS         loop {
+//RS             if cancelled() {
+//RS                 if self.editable {
+//RS                     state.writers_waiting -= 1;
+//RS                     self.protocol.wake.notify_all();
+//RS                 }
+//RS                 return false;
+//RS             }
+//RS             let available = if self.editable {
+//RS                 !state.writer && state.readers == 0
+//RS             } else {
+//RS                 !state.writer && state.writers_waiting == 0
+//RS             };
+//RS             if available {
+//RS                 if self.editable {
+//RS                     state.writers_waiting -= 1;
+//RS                     state.writer = true;
+//RS                 } else {
+//RS                     state.readers += 1;
+//RS                 }
+//RS                 self.held
+//RS                     .store(true, std::sync::atomic::Ordering::Release);
+//RS                 return true;
+//RS             }
+//RS             let (next, _) = self
+//RS                 .protocol
+//RS                 .wake
+//RS                 .wait_timeout(state, std::time::Duration::from_millis(10))
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             state = next;
+//RS         }
+//RS     }
+//RS }
+//RS impl JetSharedCanonicalPermit for JetSharedPermit {
+//RS     fn editable(&self) -> bool {
+//RS         JetSharedPermit::editable(self)
+//RS     }
+//RS 
+//RS     fn held(&self) -> bool {
+//RS         JetSharedPermit::held(self)
+//RS     }
+//RS 
+//RS     fn release(&self) -> JetSharedPhysicalOperationOutcome<()> {
+//RS         JetSharedPermit::release(self);
+//RS         JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+//RS     }
+//RS 
+//RS     fn release_during_drop(&self) {
+//RS         JetSharedPermit::release(self);
+//RS     }
+//RS 
+//RS     fn reacquire(&self, cancelled: &mut dyn FnMut() -> bool) -> bool {
+//RS         JetSharedPermit::reacquire(self, || cancelled())
+//RS     }
+//RS 
+//RS     fn into_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any> {
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetSharedGuardState {
+//RS     permit: std::sync::Arc<dyn JetSharedCanonicalPermit>,
+//RS     path: Vec<i64>,
+//RS     editable: bool,
+//RS     active: std::sync::atomic::AtomicBool,
+//RS }
+//RS 
+//RS impl JetSharedGuardState {
+//RS     pub fn permit_arc(&self) -> std::sync::Arc<dyn JetSharedCanonicalPermit> {
+//RS         self.permit.clone()
+//RS     }
+//RS 
+//RS     pub fn permit(&self) -> &dyn JetSharedCanonicalPermit {
+//RS         self.permit.as_ref()
+//RS     }
+//RS 
+//RS     pub fn editable(&self) -> bool {
+//RS         self.editable
+//RS     }
+//RS 
+//RS     pub fn held(&self) -> bool {
+//RS         self.active.load(std::sync::atomic::Ordering::Acquire) && self.permit.held()
+//RS     }
+//RS 
+//RS     pub fn path(&self) -> &[i64] {
+//RS         &self.path
+//RS     }
+//RS }
+//RS 
+//RS /// Build the checked path-tracking guard state around an already-acquired
+//RS /// canonical physical owner permit. This does not acquire a shell protocol.
+//RS pub fn jet_shared_guard_state_from_permit(
+//RS     permit: std::sync::Arc<dyn JetSharedCanonicalPermit>,
+//RS     editable: bool,
+//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+//RS     if !permit.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     if editable && !permit.editable() {
+//RS         return Err(JET_SHARED_GUARD_EDIT_REQUIRED);
+//RS     }
+//RS     Ok(std::sync::Arc::new(JetSharedGuardState {
+//RS         permit,
+//RS         path: Vec::new(),
+//RS         editable,
+//RS         active: std::sync::atomic::AtomicBool::new(true),
+//RS     }))
+//RS }
+//RS 
+//RS impl Drop for JetSharedPermit {
+//RS     fn drop(&mut self) {
+//RS         self.release();
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub fn jet_shared_guard_acquire(
+//RS     protocol: &std::sync::Arc<JetSharedProtocol>,
+//RS     editable: bool,
+//RS     cancelled: impl FnMut() -> bool,
+//RS ) -> Option<std::sync::Arc<JetSharedGuardState>> {
+//RS     jet_shared_acquire(protocol, editable, cancelled).map(|permit| {
+//RS         let permit: std::sync::Arc<dyn JetSharedCanonicalPermit> = permit;
+//RS         jet_shared_guard_state_from_permit(permit, editable)
+//RS             .expect("new Shared guard permit is held with matching capability")
+//RS     })
+//RS }
+//RS 
+//RS /// Acquire owner permits through the same canonical owner ordering used by
+//RS /// transactions, then return one checked path state per original participant.
+//RS pub fn jet_shared_guard_acquire_ordered(
+//RS     participants: Vec<(usize, std::sync::Arc<JetSharedProtocol>, bool)>,
+//RS ) -> Vec<(usize, std::sync::Arc<JetSharedGuardState>)> {
+//RS     let owners = participants
+//RS         .into_iter()
+//RS         .map(|(index, protocol, editable)| {
+//RS             (
+//RS                 index,
+//RS                 protocol as std::sync::Arc<dyn JetSharedCanonicalOwner>,
+//RS                 editable,
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     jet_shared_acquire_ordered_owners(owners)
+//RS         .expect("uncancelled ordered Shared owner acquisition succeeds")
+//RS         .into_iter()
+//RS         .map(|(index, editable, permit)| {
+//RS             (
+//RS                 index,
+//RS                 jet_shared_guard_state_from_permit(permit, editable)
+//RS                     .expect("ordered Shared permit is held with matching capability"),
+//RS             )
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_map(
+//RS     guard: &JetSharedGuardState,
+//RS     field: i64,
+//RS     editable: bool,
+//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+//RS     jet_shared_guard_map_path(guard, &[field], editable)
+//RS }
+//RS 
+//RS /// Map a checked guard through a complete stored-field suffix while retaining
+//RS /// its canonical permit and consuming the parent only after child creation.
+//RS pub fn jet_shared_guard_map_path(
+//RS     guard: &JetSharedGuardState,
+//RS     fields: &[i64],
+//RS     editable: bool,
+//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+//RS     if !guard.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     if editable {
+//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+//RS     }
+//RS 
+//RS     let mapped = std::sync::Arc::new(JetSharedGuardState {
+//RS         permit: std::sync::Arc::clone(&guard.permit),
+//RS         path: jet_shared_guard_path_with_suffix(guard, fields),
+//RS         editable,
+//RS         active: std::sync::atomic::AtomicBool::new(true),
+//RS     });
+//RS     guard
+//RS         .active
+//RS         .store(false, std::sync::atomic::Ordering::Release);
+//RS     Ok(mapped)
+//RS }
+//RS 
+//RS /// Split one checked guard into two disjoint projections while retaining the
+//RS /// original permit. Sema proves both field identities are stored and disjoint;
+//RS /// this protocol helper only records paths and consumes the parent after both
+//RS /// child states have been created.
+//RS pub fn jet_shared_guard_split(
+//RS     guard: &JetSharedGuardState,
+//RS     first: i64,
+//RS     second: i64,
+//RS     editable: bool,
+//RS ) -> Result<
+//RS     (
+//RS         std::sync::Arc<JetSharedGuardState>,
+//RS         std::sync::Arc<JetSharedGuardState>,
+//RS     ),
+//RS     &'static str,
+//RS > {
+//RS     jet_shared_guard_split_path(guard, &[first], &[second], editable)
+//RS }
+//RS 
+//RS /// Split a checked guard through two complete stored-field suffixes. Both
+//RS /// children retain the same permit and inherit the source path.
+//RS pub fn jet_shared_guard_split_path(
+//RS     guard: &JetSharedGuardState,
+//RS     first_fields: &[i64],
+//RS     second_fields: &[i64],
+//RS     editable: bool,
+//RS ) -> Result<
+//RS     (
+//RS         std::sync::Arc<JetSharedGuardState>,
+//RS         std::sync::Arc<JetSharedGuardState>,
+//RS     ),
+//RS     &'static str,
+//RS > {
+//RS     if !guard.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     if editable {
+//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+//RS     }
+//RS 
+//RS     let first = std::sync::Arc::new(JetSharedGuardState {
+//RS         permit: std::sync::Arc::clone(&guard.permit),
+//RS         path: jet_shared_guard_path_with_suffix(guard, first_fields),
+//RS         editable,
+//RS         active: std::sync::atomic::AtomicBool::new(true),
+//RS     });
+//RS     let second = std::sync::Arc::new(JetSharedGuardState {
+//RS         permit: std::sync::Arc::clone(&guard.permit),
+//RS         path: jet_shared_guard_path_with_suffix(guard, second_fields),
+//RS         editable,
+//RS         active: std::sync::atomic::AtomicBool::new(true),
+//RS     });
+//RS     guard
+//RS         .active
+//RS         .store(false, std::sync::atomic::Ordering::Release);
+//RS     Ok((first, second))
+//RS }
+//RS 
+//RS fn jet_shared_guard_path_with_suffix(
+//RS     guard: &JetSharedGuardState,
+//RS     suffix: &[i64],
+//RS ) -> Vec<i64> {
+//RS     let mut path = Vec::with_capacity(guard.path.len() + suffix.len());
+//RS     path.extend_from_slice(&guard.path);
+//RS     path.extend_from_slice(suffix);
+//RS     path
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_clone(
+//RS     guard: &JetSharedGuardState,
+//RS     editable: bool,
+//RS ) -> Result<std::sync::Arc<JetSharedGuardState>, &'static str> {
+//RS     if !guard.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     if editable {
+//RS         jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+//RS     }
+//RS 
+//RS     Ok(std::sync::Arc::new(JetSharedGuardState {
+//RS         permit: std::sync::Arc::clone(&guard.permit),
+//RS         path: guard.path.clone(),
+//RS         editable,
+//RS         active: std::sync::atomic::AtomicBool::new(true),
+//RS     }))
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_require_edit(
+//RS     guard: &JetSharedGuardState,
+//RS ) -> Result<(), &'static str> {
+//RS     if !guard.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_require_edit_capability(
+//RS     editable: bool,
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS ) -> Result<(), &'static str> {
+//RS     if !permit.held() {
+//RS         return Err(JET_SHARED_GUARD_INVALID);
+//RS     }
+//RS     if !editable || !permit.editable() {
+//RS         return Err(JET_SHARED_GUARD_EDIT_REQUIRED);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub trait JetConditionWaiter: Send + Sync {
+//RS     fn park(&self) -> Result<(), ()>;
+//RS     fn wake(&self);
+//RS     fn interrupted(&self) -> bool {
+//RS         false
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetConditionProtocol {
+//RS     waiters: std::sync::Mutex<
+//RS         std::collections::VecDeque<(u64, std::sync::Arc<dyn JetConditionWaiter>)>,
+//RS     >,
+//RS     next_id: std::sync::atomic::AtomicU64,
+//RS     epoch: std::sync::atomic::AtomicU64,
+//RS     pending: std::sync::atomic::AtomicU64,
+//RS }
+//RS 
+//RS impl JetConditionProtocol {
+//RS     pub fn new() -> std::sync::Arc<Self> {
+//RS         std::sync::Arc::new(Self {
+//RS             waiters: std::sync::Mutex::new(std::collections::VecDeque::new()),
+//RS             next_id: std::sync::atomic::AtomicU64::new(1),
+//RS             epoch: std::sync::atomic::AtomicU64::new(0),
+//RS             pending: std::sync::atomic::AtomicU64::new(0),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn register(
+//RS         self: &std::sync::Arc<Self>,
+//RS         waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS     ) -> JetConditionRegistration {
+//RS         let id = self
+//RS             .next_id
+//RS             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS         let mut waiters = self
+//RS             .waiters
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         let epoch = self
+//RS             .epoch
+//RS             .load(std::sync::atomic::Ordering::Relaxed);
+//RS         let stale = self
+//RS             .pending
+//RS             .fetch_update(
+//RS                 std::sync::atomic::Ordering::Relaxed,
+//RS                 std::sync::atomic::Ordering::Relaxed,
+//RS                 |pending| {
+//RS                     if pending > 0 {
+//RS                         Some(pending - 1)
+//RS                     } else {
+//RS                         None
+//RS                     }
+//RS                 },
+//RS             )
+//RS             .is_ok();
+//RS         waiters.push_back((id, waiter));
+//RS         JetConditionRegistration {
+//RS             condition: self.clone(),
+//RS             id,
+//RS             epoch,
+//RS             stale,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn notify_one(&self) {
+//RS         let waiter = {
+//RS             let mut waiters = self
+//RS                 .waiters
+//RS                 .lock()
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             self.epoch
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::Release);
+//RS             let waiter = waiters.pop_front().map(|(_, waiter)| waiter);
+//RS             if waiter.is_none() {
+//RS                 self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS             }
+//RS             waiter
+//RS         };
+//RS         if let Some(waiter) = waiter {
+//RS             waiter.wake();
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn notify_all(&self) {
+//RS         let waiters = {
+//RS             let mut registered = self
+//RS                 .waiters
+//RS                 .lock()
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             self.epoch
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::Release);
+//RS             let waiters = registered
+//RS                 .drain(..)
+//RS                 .map(|(_, waiter)| waiter)
+//RS                 .collect::<Vec<_>>();
+//RS             if waiters.is_empty() {
+//RS                 self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS             }
+//RS             waiters
+//RS         };
+//RS         for waiter in waiters {
+//RS             waiter.wake();
+//RS         }
+//RS     }
+//RS 
+//RS     fn unregister(&self, id: u64) {
+//RS         self.waiters
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner())
+//RS             .retain(|(candidate, _)| *candidate != id);
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_shared_condition_notify_one(
+//RS     condition: &std::sync::Arc<JetConditionProtocol>,
+//RS ) {
+//RS     condition.notify_one();
+//RS }
+//RS 
+//RS pub fn jet_shared_condition_notify_all(
+//RS     condition: &std::sync::Arc<JetConditionProtocol>,
+//RS ) {
+//RS     condition.notify_all();
+//RS }
+//RS 
+//RS pub struct JetConditionRegistration {
+//RS     condition: std::sync::Arc<JetConditionProtocol>,
+//RS     id: u64,
+//RS     epoch: u64,
+//RS     stale: bool,
+//RS }
+//RS 
+//RS impl JetConditionRegistration {
+//RS     fn saw_notification(&self) -> bool {
+//RS         self.stale
+//RS             || self
+//RS                 .condition
+//RS                 .epoch
+//RS                 .load(std::sync::atomic::Ordering::Acquire)
+//RS                 != self.epoch
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetConditionRegistration {
+//RS     fn drop(&mut self) {
+//RS         self.condition.unregister(self.id);
+//RS     }
+//RS }
+//RS 
+//RS pub enum JetConditionWaitError<E> {
+//RS     Predicate(E),
+//RS     Cancelled,
+//RS }
+//RS 
+//RS /// Handoff coordinated with a condition wait while its notification is
+//RS /// registered. The physical owner publishes/releases before the local permit
+//RS /// is released, and reacquires before local permit restoration.
+//RS pub trait JetSharedWaitHandoff {
+//RS     fn suspend(&mut self) -> Result<(), ()>;
+//RS     fn resume(&mut self, cancelled: bool) -> Result<bool, ()>;
+//RS     fn abort(&mut self) -> Result<(), ()>;
+//RS }
+//RS 
+//RS struct JetConditionWaitCleanup<'a> {
+//RS     registration: Option<JetConditionRegistration>,
+//RS     permit: &'a dyn JetSharedCanonicalPermit,
+//RS     waiter: &'a dyn JetConditionWaiter,
+//RS     released: bool,
+//RS }
+//RS 
+//RS impl JetConditionWaitCleanup<'_> {
+//RS     fn release(&mut self) {
+//RS         self.permit.release_during_drop();
+//RS         self.released = true;
+//RS     }
+//RS 
+//RS     fn abandon(&mut self) {
+//RS         self.registration.take();
+//RS         self.released = false;
+//RS     }
+//RS 
+//RS     fn finish(&mut self) -> Result<(), ()> {
+//RS         self.registration.take();
+//RS         if self.released {
+//RS             self.released = false;
+//RS             let mut cancelled = || self.waiter.interrupted();
+//RS             if !self.permit.reacquire(&mut cancelled) {
+//RS                 return Err(());
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetConditionWaitCleanup<'_> {
+//RS     fn drop(&mut self) {
+//RS         self.registration.take();
+//RS         if self.released {
+//RS             let mut cancelled = || self.waiter.interrupted();
+//RS             let _ = self.permit.reacquire(&mut cancelled);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_shared_condition_wait_registered(
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS     registration: JetConditionRegistration,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS ) -> Result<(), ()> {
+//RS     jet_shared_condition_wait_registered_with_handoff(permit, registration, waiter, None)
+//RS }
+//RS 
+//RS fn jet_shared_condition_wait_registered_with_handoff(
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS     registration: JetConditionRegistration,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
+//RS ) -> Result<(), ()> {
+//RS     let mut cleanup = JetConditionWaitCleanup {
+//RS         registration: Some(registration),
+//RS         permit,
+//RS         waiter: waiter.as_ref(),
+//RS         released: false,
+//RS     };
+//RS     let mut handoff = handoff;
+//RS     if let Some(owner) = handoff.as_deref_mut() {
+//RS         if owner.suspend().is_err() {
+//RS             let _ = owner.abort();
+//RS             return Err(());
+//RS         }
+//RS     }
+//RS     let saw_notification = cleanup
+//RS         .registration
+//RS         .as_ref()
+//RS         .is_some_and(JetConditionRegistration::saw_notification);
+//RS     cleanup.release();
+//RS     let parked = if saw_notification {
+//RS         Ok(())
+//RS     } else {
+//RS         waiter.park()
+//RS     };
+//RS     let resumed = match handoff.as_deref_mut() {
+//RS         Some(owner) => owner.resume(parked.is_err()),
+//RS         None => Ok(true),
+//RS     };
+//RS     if !matches!(resumed, Ok(true)) {
+//RS         if let Some(owner) = handoff.as_deref_mut() {
+//RS             let _ = owner.abort();
+//RS         }
+//RS         cleanup.abandon();
+//RS         return Err(());
+//RS     }
+//RS     let reacquired = cleanup.finish();
+//RS     if reacquired.is_err() {
+//RS         if let Some(owner) = handoff.as_deref_mut() {
+//RS             let _ = owner.abort();
+//RS         }
+//RS         cleanup.abandon();
+//RS         return Err(());
+//RS     }
+//RS     drop(cleanup);
+//RS     parked.and(reacquired)
+//RS }
+//RS 
+//RS /// Park one condition-wait iteration after the caller checked its predicate.
+//RS /// Registration precedes physical handoff; notification is rechecked after
+//RS /// publication and before the local permit is released.
+//RS pub fn jet_shared_condition_wait_once(
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS     condition: &std::sync::Arc<JetConditionProtocol>,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS ) -> Result<(), ()> {
+//RS     jet_shared_condition_wait_once_with_handoff(permit, condition, waiter, None)
+//RS }
+//RS 
+//RS pub fn jet_shared_condition_wait_once_with_handoff(
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS     condition: &std::sync::Arc<JetConditionProtocol>,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
+//RS ) -> Result<(), ()> {
+//RS     let registration = condition.register(waiter.clone());
+//RS     jet_shared_condition_wait_registered_with_handoff(permit, registration, waiter, handoff)
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetSharedGuardWaitError {
+//RS     Invalid,
+//RS     EditRequired,
+//RS     Cancelled,
+//RS }
+//RS 
+//RS impl JetSharedGuardWaitError {
+//RS     pub fn message(self) -> &'static str {
+//RS         match self {
+//RS             Self::Invalid => JET_SHARED_GUARD_INVALID,
+//RS             Self::EditRequired => JET_SHARED_GUARD_EDIT_REQUIRED,
+//RS             Self::Cancelled => JET_SHARED_GUARD_WAIT_CANCELLED,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn traps(self) -> bool {
+//RS         matches!(self, Self::Invalid)
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_wait_once(
+//RS     guard: Option<&JetSharedGuardState>,
+//RS     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS ) -> Result<(), JetSharedGuardWaitError> {
+//RS     jet_shared_guard_wait_once_with_handoff(guard, condition, waiter, None)
+//RS }
+//RS 
+//RS pub fn jet_shared_guard_wait_once_with_handoff(
+//RS     guard: Option<&JetSharedGuardState>,
+//RS     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
+//RS     waiter: std::sync::Arc<dyn JetConditionWaiter>,
+//RS     handoff: Option<&mut dyn JetSharedWaitHandoff>,
+//RS ) -> Result<(), JetSharedGuardWaitError> {
+//RS     let guard = guard.ok_or(JetSharedGuardWaitError::Invalid)?;
+//RS     let condition = condition.ok_or(JetSharedGuardWaitError::Invalid)?;
+//RS     jet_shared_guard_require_edit(guard).map_err(|message| {
+//RS         if message == JET_SHARED_GUARD_INVALID {
+//RS             JetSharedGuardWaitError::Invalid
+//RS         } else {
+//RS             JetSharedGuardWaitError::EditRequired
+//RS         }
+//RS     })?;
+//RS     jet_shared_condition_wait_once_with_handoff(guard.permit(), condition, waiter, handoff)
+//RS         .map_err(|_| JetSharedGuardWaitError::Cancelled)
+//RS }
+//RS 
+//RS pub fn jet_shared_condition_wait<E>(
+//RS     permit: &dyn JetSharedCanonicalPermit,
+//RS     condition: &std::sync::Arc<JetConditionProtocol>,
+//RS     mut ready: impl FnMut() -> Result<bool, E>,
+//RS     mut waiter: impl FnMut() -> std::sync::Arc<dyn JetConditionWaiter>,
+//RS ) -> Result<(), JetConditionWaitError<E>> {
+//RS     loop {
+//RS         if ready().map_err(JetConditionWaitError::Predicate)? {
+//RS             return Ok(());
+//RS         }
+//RS         let waiter = waiter();
+//RS         let registration = condition.register(waiter.clone());
+//RS         if ready().map_err(JetConditionWaitError::Predicate)? {
+//RS             drop(registration);
+//RS             return Ok(());
+//RS         }
+//RS         let parked = jet_shared_condition_wait_registered(permit, registration, waiter);
+//RS         if parked.is_err() {
+//RS             return Err(JetConditionWaitError::Cancelled);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod shared_protocol_tests {
+//RS     use super::*;
+//RS 
+//RS     struct CountingWaiter(std::sync::atomic::AtomicUsize);
+//RS     struct PanicWaiter;
+//RS     struct BlockingWaiter {
+//RS         notified: std::sync::atomic::AtomicBool,
+//RS         lock: std::sync::Mutex<()>,
+//RS         wake: std::sync::Condvar,
+//RS     }
+//RS 
+//RS     impl CountingWaiter {
+//RS         fn new() -> Self {
+//RS             Self(std::sync::atomic::AtomicUsize::new(0))
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetConditionWaiter for CountingWaiter {
+//RS         fn park(&self) -> Result<(), ()> {
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn wake(&self) {
+//RS             self.0
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetConditionWaiter for PanicWaiter {
+//RS         fn park(&self) -> Result<(), ()> {
+//RS             panic!("waiter panic")
+//RS         }
+//RS 
+//RS         fn wake(&self) {}
+//RS     }
+//RS 
+//RS     impl BlockingWaiter {
+//RS         fn new() -> Self {
+//RS             Self {
+//RS                 notified: std::sync::atomic::AtomicBool::new(false),
+//RS                 lock: std::sync::Mutex::new(()),
+//RS                 wake: std::sync::Condvar::new(),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetConditionWaiter for BlockingWaiter {
+//RS         fn park(&self) -> Result<(), ()> {
+//RS             if self
+//RS                 .notified
+//RS                 .swap(false, std::sync::atomic::Ordering::Acquire)
+//RS             {
+//RS                 return Ok(());
+//RS             }
+//RS             let mut lock = self.lock.lock().unwrap();
+//RS             while !self
+//RS                 .notified
+//RS                 .swap(false, std::sync::atomic::Ordering::Acquire)
+//RS             {
+//RS                 lock = self.wake.wait(lock).unwrap();
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn wake(&self) {
+//RS             let _lock = self.lock.lock().unwrap();
+//RS             self.notified
+//RS                 .store(true, std::sync::atomic::Ordering::Release);
+//RS             self.wake.notify_one();
+//RS         }
+//RS     }
+//RS     #[derive(Default)]
+//RS     struct TransactionTestOwnerState {
+//RS         staged: bool,
+//RS         published: bool,
+//RS         discards: usize,
+//RS     }
+//RS 
+//RS     struct TransactionTestOwner {
+//RS         order: usize,
+//RS         state: std::sync::Arc<std::sync::Mutex<TransactionTestOwnerState>>,
+//RS     }
+//RS 
+//RS     struct TransactionTestPermit {
+//RS         state: std::sync::Arc<std::sync::Mutex<TransactionTestOwnerState>>,
+//RS         held: std::sync::atomic::AtomicBool,
+//RS     }
+//RS 
+//RS     impl JetSharedCanonicalOwner for TransactionTestOwner {
+//RS         fn owner_identity(&self) -> usize {
+//RS             self as *const Self as usize
+//RS         }
+//RS 
+//RS         fn protocol_order_key(&self) -> usize {
+//RS             self.order
+//RS         }
+//RS 
+//RS         fn acquire_permit(
+//RS             self: std::sync::Arc<Self>,
+//RS             _editable: bool,
+//RS         ) -> Result<std::sync::Arc<dyn JetSharedCanonicalPermit>, String> {
+//RS             Ok(std::sync::Arc::new(TransactionTestPermit {
+//RS                 state: self.state.clone(),
+//RS                 held: std::sync::atomic::AtomicBool::new(true),
+//RS             }))
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetSharedCanonicalPermit for TransactionTestPermit {
+//RS         fn editable(&self) -> bool {
+//RS             true
+//RS         }
+//RS 
+//RS         fn held(&self) -> bool {
+//RS             self.held.load(std::sync::atomic::Ordering::Acquire)
+//RS         }
+//RS 
+//RS         fn release(&self) -> JetSharedPhysicalOperationOutcome<()> {
+//RS             self.held.store(false, std::sync::atomic::Ordering::Release);
+//RS             JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+//RS         }
+//RS 
+//RS         fn release_during_drop(&self) {
+//RS             self.held.store(false, std::sync::atomic::Ordering::Release);
+//RS         }
+//RS 
+//RS         fn reacquire(&self, cancelled: &mut dyn FnMut() -> bool) -> bool {
+//RS             if cancelled() {
+//RS                 return false;
+//RS             }
+//RS             self.held.store(true, std::sync::atomic::Ordering::Release);
+//RS             true
+//RS         }
+//RS 
+//RS         fn discard_staged(&self) -> Result<(), String> {
+//RS             let mut state = self.state.lock().unwrap();
+//RS             state.staged = false;
+//RS             state.discards += 1;
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn into_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any> {
+//RS             self
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn transaction_stage_failure_discards_all_participants_before_rollback() {
+//RS         let first = std::sync::Arc::new(TransactionTestOwner {
+//RS             order: 1,
+//RS             state: std::sync::Arc::new(std::sync::Mutex::new(
+//RS                 TransactionTestOwnerState::default(),
+//RS             )),
+//RS         });
+//RS         let second = std::sync::Arc::new(TransactionTestOwner {
+//RS             order: 2,
+//RS             state: std::sync::Arc::new(std::sync::Mutex::new(
+//RS                 TransactionTestOwnerState::default(),
+//RS             )),
+//RS         });
+//RS         let first_owner: std::sync::Arc<dyn JetSharedCanonicalOwner> = first.clone();
+//RS         let second_owner: std::sync::Arc<dyn JetSharedCanonicalOwner> = second.clone();
+//RS         let applied = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let rolled_back = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let mut transaction = jet_shared_transaction_begin();
+//RS         for (owner, state, fail) in [
+//RS             (first_owner, first.state.clone(), false),
+//RS             (second_owner, second.state.clone(), true),
+//RS         ] {
+//RS             let staged_state = state.clone();
+//RS             transaction.record_edit_with_staged_commit(
+//RS                 owner,
+//RS                 Box::new(|| {}),
+//RS                 Box::new(move |_| {
+//RS                     staged_state.lock().unwrap().staged = true;
+//RS                     if fail {
+//RS                         Err("participant staging rejected".to_string())
+//RS                     } else {
+//RS                         Ok(())
+//RS                     }
+//RS                 }),
+//RS                 Box::new(move |_| {
+//RS                     state.lock().unwrap().published = true;
+//RS                 }),
+//RS             );
+//RS         }
+//RS         let rollback_flag = rolled_back.clone();
+//RS         transaction.record_rollback(Box::new(move || {
+//RS             rollback_flag.store(true, std::sync::atomic::Ordering::Release);
+//RS         }));
+//RS 
+//RS         let apply_flag = applied.clone();
+//RS         let result = transaction.try_commit_with(move || {
+//RS             apply_flag.store(true, std::sync::atomic::Ordering::Release);
+//RS         });
+//RS 
+//RS         assert_eq!(result, Err("participant staging rejected".to_string()));
+//RS         assert!(!applied.load(std::sync::atomic::Ordering::Acquire));
+//RS         assert!(rolled_back.load(std::sync::atomic::Ordering::Acquire));
+//RS         for owner in [first, second] {
+//RS             let state = owner.state.lock().unwrap();
+//RS             assert!(!state.staged);
+//RS             assert!(!state.published);
+//RS             assert_eq!(state.discards, 1);
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn full_path_map_and_split_preserve_parent_prefix_and_one_permit() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let root = jet_shared_guard_acquire(&protocol, true, || false).unwrap();
+//RS         let mapped = jet_shared_guard_map_path(&root, &[4, 7], true).unwrap();
+//RS         assert!(!root.held());
+//RS         assert_eq!(mapped.path(), &[4, 7]);
+//RS 
+//RS         let (first, second) =
+//RS             jet_shared_guard_split_path(&mapped, &[10, 11], &[20, 21, 22], true).unwrap();
+//RS         assert!(!mapped.held());
+//RS         assert_eq!(first.path(), &[4, 7, 10, 11]);
+//RS         assert_eq!(second.path(), &[4, 7, 20, 21, 22]);
+//RS         assert!(first.held());
+//RS         assert!(second.held());
+//RS         assert!(std::sync::Arc::ptr_eq(&first.permit, &second.permit));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn failed_full_path_projection_keeps_parent_live() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let root = jet_shared_guard_acquire(&protocol, false, || false).unwrap();
+//RS 
+//RS         assert!(matches!(
+//RS             jet_shared_guard_map_path(&root, &[3, 5], true),
+//RS             Err(message) if message == JET_SHARED_GUARD_EDIT_REQUIRED,
+//RS         ));
+//RS         assert!(root.held());
+//RS         assert!(root.path().is_empty());
+//RS     }
+//RS     #[test]
+//RS     fn ordered_acquisition_deduplicates_one_protocol() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let permits =
+//RS             jet_shared_acquire_ordered(vec![protocol.clone(), protocol.clone()]);
+//RS         assert_eq!(permits.len(), 1);
+//RS         assert!(permits[0].editable());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ordered_acquisition_uses_protocol_address_order() {
+//RS         let first = JetSharedProtocol::new();
+//RS         let second = JetSharedProtocol::new();
+//RS         let expected = std::cmp::min(
+//RS             std::sync::Arc::as_ptr(&first) as usize,
+//RS             std::sync::Arc::as_ptr(&second) as usize,
+//RS         );
+//RS         let permits = jet_shared_acquire_ordered(vec![second, first]);
+//RS         assert_eq!(
+//RS             std::sync::Arc::as_ptr(&permits[0].protocol) as usize,
+//RS             expected,
+//RS             "multi-cell commit locks must use stable address order"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn contended_transaction_waits_and_applies_its_body_once() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let held = protocol.acquire(true, || false).unwrap();
+//RS         let log_lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+//RS         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+//RS         let worker_protocol = protocol.clone();
+//RS         let worker_log_lines = log_lines.clone();
+//RS         let worker = std::thread::spawn(move || {
+//RS             let mut transaction = jet_shared_transaction_begin();
+//RS             transaction.record_edit(
+//RS                 worker_protocol,
+//RS                 Box::new(move || {
+//RS                     worker_log_lines.lock().unwrap().push("transaction-body");
+//RS                 }),
+//RS             );
+//RS             ready_tx.send(()).unwrap();
+//RS             transaction.commit();
+//RS         });
+//RS 
+//RS         ready_rx
+//RS             .recv_timeout(std::time::Duration::from_secs(1))
+//RS             .expect("transaction worker reached the lock wait");
+//RS         assert!(
+//RS             log_lines.lock().unwrap().is_empty(),
+//RS             "a blocked commit must not log"
+//RS         );
+//RS         drop(held);
+//RS         worker.join().unwrap();
+//RS         assert_eq!(
+//RS             *log_lines.lock().unwrap(),
+//RS             vec!["transaction-body"],
+//RS             "the committed transaction emits its body log exactly once"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn notify_one_claims_each_waiter_once() {
+//RS         let condition = JetConditionProtocol::new();
+//RS         let first = std::sync::Arc::new(CountingWaiter::new());
+//RS         let second = std::sync::Arc::new(CountingWaiter::new());
+//RS         let _first_registration = condition.register(first.clone());
+//RS         let _second_registration = condition.register(second.clone());
+//RS 
+//RS         condition.notify_one();
+//RS         condition.notify_one();
+//RS 
+//RS         assert_eq!(
+//RS             first.0.load(std::sync::atomic::Ordering::SeqCst),
+//RS             1
+//RS         );
+//RS         assert_eq!(
+//RS             second.0.load(std::sync::atomic::Ordering::SeqCst),
+//RS             1
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn panic_during_park_unregisters_and_reacquires() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let condition = JetConditionProtocol::new();
+//RS         let permit = protocol.acquire(true, || false).unwrap();
+//RS 
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             let _ = jet_shared_condition_wait(
+//RS                 permit.as_ref(),
+//RS                 &condition,
+//RS                 || Ok::<bool, ()>(false),
+//RS                 || std::sync::Arc::new(PanicWaiter),
+//RS             );
+//RS         }));
+//RS 
+//RS         assert!(result.is_err());
+//RS         assert!(permit.held());
+//RS         drop(permit);
+//RS         assert!(protocol.acquire(true, || false).is_some());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn notify_before_registration_becomes_a_spurious_wake() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let condition = JetConditionProtocol::new();
+//RS         let permit = protocol.acquire(true, || false).unwrap();
+//RS         condition.notify_one();
+//RS 
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             jet_shared_condition_wait_once(
+//RS                 permit.as_ref(),
+//RS                 &condition,
+//RS                 std::sync::Arc::new(PanicWaiter),
+//RS             )
+//RS         }));
+//RS 
+//RS         assert!(result.is_ok());
+//RS         assert!(permit.held());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn notify_between_registration_and_park_is_not_lost() {
+//RS         for _ in 0..64 {
+//RS             let protocol = JetSharedProtocol::new();
+//RS             let condition = JetConditionProtocol::new();
+//RS             let waiter = std::sync::Arc::new(BlockingWaiter::new());
+//RS             let rescue = waiter.clone();
+//RS             let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS             let (registered_tx, registered_rx) = std::sync::mpsc::channel();
+//RS             let (park_tx, park_rx) = std::sync::mpsc::channel();
+//RS             let (done_tx, done_rx) = std::sync::mpsc::channel();
+//RS             let worker_condition = condition.clone();
+//RS             let worker_ready = ready.clone();
+//RS             let worker = std::thread::spawn(move || {
+//RS                 let permit = protocol.acquire(true, || false).unwrap();
+//RS                 let mut checks = 0usize;
+//RS                 let result = jet_shared_condition_wait(
+//RS                     permit.as_ref(),
+//RS                     &worker_condition,
+//RS                     || {
+//RS                         checks += 1;
+//RS                         if checks == 2 {
+//RS                             registered_tx.send(()).unwrap();
+//RS                             park_rx.recv().unwrap();
+//RS                             return Ok::<bool, ()>(false);
+//RS                         }
+//RS                         Ok(worker_ready.load(std::sync::atomic::Ordering::Acquire))
+//RS                     },
+//RS                     || waiter.clone(),
+//RS                 );
+//RS                 done_tx.send(result.is_ok()).unwrap();
+//RS             });
+//RS 
+//RS             registered_rx
+//RS                 .recv_timeout(std::time::Duration::from_secs(1))
+//RS                 .expect("waiter registers before the second predicate check");
+//RS             ready.store(true, std::sync::atomic::Ordering::Release);
+//RS             condition.notify_one();
+//RS             park_tx.send(()).unwrap();
+//RS             let done = done_rx.recv_timeout(std::time::Duration::from_secs(1));
+//RS             if done.is_err() {
+//RS                 rescue.wake();
+//RS             }
+//RS             assert_eq!(done.ok(), Some(true));
+//RS             worker.join().unwrap();
+//RS         }
+//RS     }
+//RS     struct OrderedHandoffWaiter(std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>);
+//RS 
+//RS     impl JetConditionWaiter for OrderedHandoffWaiter {
+//RS         fn park(&self) -> Result<(), ()> {
+//RS             self.0.lock().unwrap().push("park");
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn wake(&self) {
+//RS             self.0.lock().unwrap().push("wake");
+//RS         }
+//RS     }
+//RS 
+//RS     struct NotifyDuringHandoff {
+//RS         condition: std::sync::Arc<JetConditionProtocol>,
+//RS         events: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+//RS     }
+//RS 
+//RS     impl JetSharedWaitHandoff for NotifyDuringHandoff {
+//RS         fn suspend(&mut self) -> Result<(), ()> {
+//RS             self.events.lock().unwrap().push("suspend");
+//RS             self.condition.notify_one();
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn resume(&mut self, cancelled: bool) -> Result<bool, ()> {
+//RS             self.events.lock().unwrap().push("resume");
+//RS             assert!(!cancelled);
+//RS             Ok(true)
+//RS         }
+//RS 
+//RS         fn abort(&mut self) -> Result<(), ()> {
+//RS             self.events.lock().unwrap().push("abort");
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn condition_notification_during_physical_handoff_is_not_lost() {
+//RS         let protocol = JetSharedProtocol::new();
+//RS         let permit = protocol.acquire(true, || false).unwrap();
+//RS         let condition = JetConditionProtocol::new();
+//RS         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+//RS         let waiter: std::sync::Arc<dyn JetConditionWaiter> =
+//RS             std::sync::Arc::new(OrderedHandoffWaiter(events.clone()));
+//RS         let mut handoff = NotifyDuringHandoff {
+//RS             condition: condition.clone(),
+//RS             events: events.clone(),
+//RS         };
+//RS 
+//RS         assert_eq!(
+//RS             jet_shared_condition_wait_once_with_handoff(
+//RS                 permit.as_ref(),
+//RS                 &condition,
+//RS                 waiter,
+//RS                 Some(&mut handoff),
+//RS             ),
+//RS             Ok(()),
+//RS         );
+//RS         assert_eq!(*events.lock().unwrap(), vec!["suspend", "wake", "resume"]);
+//RS         assert!(permit.held());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn ordered_guard_acquisition_preserves_indices_and_shares_duplicate_permits() {
+//RS         let first = JetSharedProtocol::new();
+//RS         let second = JetSharedProtocol::new();
+//RS         let guards = jet_shared_guard_acquire_ordered(vec![
+//RS             (11, second.clone(), false),
+//RS             (7, first.clone(), true),
+//RS             (12, first.clone(), false),
+//RS         ]);
+//RS 
+//RS         let mut indices = guards.iter().map(|(index, _)| *index).collect::<Vec<_>>();
+//RS         indices.sort_unstable();
+//RS         assert_eq!(indices, vec![7, 11, 12]);
+//RS         assert!(guards.iter().all(|(_, guard)| guard.held()));
+//RS         let mut editability = guards
+//RS             .iter()
+//RS             .map(|(index, guard)| (*index, guard.editable()))
+//RS             .collect::<Vec<_>>();
+//RS         editability.sort_unstable_by_key(|(index, _)| *index);
+//RS         assert_eq!(editability, vec![(7, true), (11, false), (12, false)]);
+//RS         let mut permit_editability = guards
+//RS             .iter()
+//RS             .map(|(index, guard)| (*index, guard.permit().editable()))
+//RS             .collect::<Vec<_>>();
+//RS         permit_editability.sort_unstable_by_key(|(index, _)| *index);
+//RS         assert_eq!(permit_editability, vec![(7, true), (11, false), (12, true)]);
+//RS         let first_guard = guards.iter().find(|(index, _)| *index == 7).unwrap();
+//RS         let duplicate_guard = guards.iter().find(|(index, _)| *index == 12).unwrap();
+//RS         assert!(std::sync::Arc::ptr_eq(
+//RS             &first_guard.1.permit_arc(),
+//RS             &duplicate_guard.1.permit_arc(),
+//RS         ));
+//RS         drop(guards);
+//RS         assert!(jet_shared_acquire(&first, true, || false).is_some());
+//RS         assert!(jet_shared_acquire(&second, true, || false).is_some());
+//RS     }
+//RS }
+// END-PORT-PENDING 0188 crates/jet-codegen/src/Prelude/SharedProtocol.rs:1-2254
+

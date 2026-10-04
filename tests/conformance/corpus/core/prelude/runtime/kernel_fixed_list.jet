@@ -1,0 +1,11 @@
+use core.prelude.runtime.kernel_fixed_list.[jet_fixed_list_index]
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedList.rs:46
+#Test("checked_index_preserves_native_boundaries") {
+    in_range :: jet_fixed_list_index(USize{3}, I64{2}, fn(index) { index }).expect("last slot is valid")
+    assert_eq(in_range, USize{2})
+    for index in [I64{-1}, I64{3}, I64.MAX] {
+        error :: jet_fixed_list_index(USize{3}, index, fn(value) { value }).expect_err("index must stop")
+        assert_eq(error.index, index)
+        assert_eq(error.len, USize{3})
+    }
+}

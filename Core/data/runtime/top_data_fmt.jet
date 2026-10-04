@@ -1,0 +1,168 @@
+// PORT-PENDING 0264 crates-jet-codegen-src-prelude-corelib-top-datafmt: crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:1-164
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_data_pivot_sum<T, FR, FC, FV>(
+//RS     rows: &Vec<T>,
+//RS     row_key: FR,
+//RS     col_key: FC,
+//RS     value: FV,
+//RS ) -> Vec<jet_std::DataPivotCell>
+//RS where
+//RS     T: Clone,
+//RS     FR: Fn(T) -> String,
+//RS     FC: Fn(T) -> String,
+//RS     FV: Fn(T) -> f64,
+//RS {
+//RS     let mut groups = std::collections::BTreeMap::<(String, String), (i64, f64)>::new();
+//RS     for row in rows.iter().cloned() {
+//RS         let key = (row_key(row.clone()), col_key(row.clone()));
+//RS         let entry = groups.entry(key).or_insert((0, 0.0));
+//RS         entry.0 += 1;
+//RS         entry.1 += value(row);
+//RS     }
+//RS     groups
+//RS         .into_iter()
+//RS         .map(|((row_key, column_key), (count, sum))| jet_std::DataPivotCell {
+//RS             row_key,
+//RS             column_key,
+//RS             count,
+//RS             sum,
+//RS             mean: if count == 0 { 0.0 } else { sum / count as f64 },
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS // CSV typed encode: `[T]` → header row (field names from the first row's Object)
+//RS // + one record per element. Flat object records and explicit row arrays share the
+//RS // same renderer: rows already carry their header as the first row.
+//RS fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
+//RS     let trees: Vec<jet_std::DataTree> = values.iter().map(|v| v.jet_encode()).collect();
+//RS     let mut rows: Vec<Vec<String>> = Vec::new();
+//RS     if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
+//RS         let header: Vec<String> = entries.iter().map(|(k, _)| k.clone()).collect();
+//RS         rows.push(header.clone());
+//RS         for tree in &trees {
+//RS             if !matches!(tree, jet_std::DataTree::Object(_)) {
+//RS                 jet_panic(
+//RS                     "<core.encoding.csv>",
+//RS                     0,
+//RS                     "csv.to_string needs rows or records",
+//RS                 );
+//RS             }
+//RS             let mut record = Vec::with_capacity(header.len());
+//RS             for key in &header {
+//RS                 let cell = match jet_std::datatree_get(tree, key) {
+//RS                     Some(jet_std::DataTree::Text(s)) => s.clone(),
+//RS                     Some(jet_std::DataTree::Int(n)) => jet_std::jet_int_to_string(*n),
+//RS                     Some(jet_std::DataTree::Float(f)) => format!("{:?}", f),
+//RS                     Some(jet_std::DataTree::Bool(b)) => b.to_string(),
+//RS                     Some(jet_std::DataTree::Null) | None => String::new(),
+//RS                     Some(other) => jet_std::render_datatree_json(other, false, 0),
+//RS                 };
+//RS                 record.push(cell);
+//RS             }
+//RS             rows.push(record);
+//RS         }
+//RS     } else {
+//RS         for tree in trees {
+//RS             let jet_std::DataTree::Array(cells) = tree else {
+//RS                 jet_panic(
+//RS                     "<core.encoding.csv>",
+//RS                     0,
+//RS                     "csv.to_string needs rows or records",
+//RS                 );
+//RS             };
+//RS             rows.push(
+//RS                 cells
+//RS                     .iter()
+//RS                     .map(|cell| match cell {
+//RS                         jet_std::DataTree::Text(s) => s.clone(),
+//RS                         jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
+//RS                         jet_std::DataTree::Float(f) => format!("{:?}", f),
+//RS                         jet_std::DataTree::Bool(b) => b.to_string(),
+//RS                         jet_std::DataTree::Null => String::new(),
+//RS                         other => jet_std::render_datatree_json(other, false, 0),
+//RS                     })
+//RS                     .collect(),
+//RS             );
+//RS         }
+//RS     }
+//RS     jet_ring_csv_render(&rows)
+//RS }
+//RS 
+//RS // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
+//RS // `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
+//RS // The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
+//RS // `to_string` renders a `DataTree` back to a nested document.
+//RS fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     jet_std::toml::parse_to_tree(text).map_err(|e| {
+//RS         jet_std::EncodingError::new(
+//RS             jet_std::EncodingFormat::TOML,
+//RS             jet_std::EncodingErrorKind::Syntax,
+//RS             0,
+//RS             Ok(e.line as i64),
+//RS             Err(JetAbsent),
+//RS             "",
+//RS             e.message,
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_std_toml_render(d: &jet_std::DataTree) -> String {
+//RS     jet_std::toml::render(d)
+//RS }
+//RS 
+//RS fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let tree = jet_std::toml::parse_to_tree(text).map_err(|e| {
+//RS         jet_std::FieldError::one(format!("invalid TOML (line {}): {}", e.line, e.message))
+//RS     })?;
+//RS     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
+//RS     T::jet_decode(&tree)
+//RS }
+//RS 
+//RS // YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
+//RS // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
+//RS // rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
+//RS // comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
+//RS fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     jet_std::yaml::parse_to_tree(text).map_err(|e| {
+//RS         jet_std::EncodingError::new(
+//RS             jet_std::EncodingFormat::YAML,
+//RS             jet_std::EncodingErrorKind::Syntax,
+//RS             0,
+//RS             Ok(e.line as i64),
+//RS             Err(JetAbsent),
+//RS             "",
+//RS             e.message,
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_std_yaml_render(d: &jet_std::DataTree) -> String {
+//RS     jet_std::yaml::render(d)
+//RS }
+//RS 
+//RS fn jet_enc_yaml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let tree = jet_std::yaml::parse_to_tree(text).map_err(|e| {
+//RS         jet_std::FieldError::one(format!("invalid YAML (line {}): {}", e.line, e.message))
+//RS     })?;
+//RS     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
+//RS     T::jet_decode(&tree)
+//RS }
+//RS fn jet_enc_toml_to_string<T: __jet_Encode>(v: &T) -> String {
+//RS     jet_std::toml::render(&v.jet_encode())
+//RS }
+//RS fn jet_enc_yaml_to_string<T: __jet_Encode>(v: &T) -> String {
+//RS     jet_std::yaml::render(&v.jet_encode())
+//RS }
+//RS 
+//RS // D-SQL-SURFACE1=C: the query plan and field comparison live in the shared
+//RS // non-generic Prelude entry. This typed wrapper only encodes rows and maps
+//RS // selected positions back to `T`, preserving one query implementation across
+//RS // AOT, TIR, and resident adapters.
+//RS fn jet_data_query_rows<T: __jet_Encode + Clone>(rows: &Vec<T>, sql: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+//RS     let trees = rows.iter().map(|row| row.jet_encode()).collect::<Vec<_>>();
+//RS     let selected = jet_data_query_indices(&trees, sql)?;
+//RS     Ok(selected.into_iter().map(|index| rows[index].clone()).collect())
+//RS }
+//RS 
+// END-PORT-PENDING 0264 crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs:1-164
+

@@ -1,0 +1,1818 @@
+// PORT-PENDING 0236 crates-jet-jit-src-ui-slice-1795: crates/jet-jit/src/Ui.rs:1795-3608
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn ambient_ui_host_error_value(error: ui_rt::JetUiHostError) -> CtValue {
+//RS     match error {
+//RS         ui_rt::JetUiHostError::Cancelled(reason) => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "Cancelled",
+//RS             vec![(None, ambient_ui_cancellation_value(reason))],
+//RS         ),
+//RS         ui_rt::JetUiHostError::CapabilityUnavailable { capability } => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "CapabilityUnavailable",
+//RS             vec![(None, CtValue::Str(capability.to_string()))],
+//RS         ),
+//RS         ui_rt::JetUiHostError::CapabilityDenied { capability } => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "CapabilityDenied",
+//RS             vec![(None, ambient_capability_value(capability))],
+//RS         ),
+//RS         ui_rt::JetUiHostError::InvalidRequest(message) => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "InvalidRequest",
+//RS             vec![(None, CtValue::Str(message))],
+//RS         ),
+//RS         ui_rt::JetUiHostError::HostFailure { service, message } => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "HostFailure",
+//RS             vec![
+//RS                 (None, CtValue::Str(service.to_string())),
+//RS                 (None, CtValue::Str(message)),
+//RS             ],
+//RS         ),
+//RS         ui_rt::JetUiHostError::ResourceDenied(message) => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "ResourceDenied",
+//RS             vec![(None, CtValue::Str(message))],
+//RS         ),
+//RS         ui_rt::JetUiHostError::ShortcutConflict {
+//RS             shortcut,
+//RS             existing_action,
+//RS         } => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "ShortcutConflict",
+//RS             vec![
+//RS                 (None, ambient_shortcut_value(shortcut)),
+//RS                 (None, CtValue::Str(existing_action)),
+//RS             ],
+//RS         ),
+//RS         ui_rt::JetUiHostError::QueueFull { service } => ambient_enum_value(
+//RS             "UIHostError",
+//RS             "QueueFull",
+//RS             vec![(None, CtValue::Str(service.to_string()))],
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_service_result<T>(
+//RS     result: ui_rt::JetUiServiceResult<T>,
+//RS     encode: impl FnOnce(T) -> CtValue,
+//RS ) -> CtValue {
+//RS     match result {
+//RS         Ok(value) => CtValue::Present(Box::new(encode(value))),
+//RS         Err(error) => CtValue::failed(Box::new(ambient_ui_host_error_value(error))),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_option_result<T>(
+//RS     result: ui_rt::JetUiServiceResult<Option<T>>,
+//RS     type_name: &str,
+//RS     encode: impl FnOnce(T) -> CtValue,
+//RS ) -> CtValue {
+//RS     ambient_service_result(result, |value| {
+//RS         value.map_or_else(
+//RS             || ambient_absent(type_name),
+//RS             |value| CtValue::Present(Box::new(encode(value))),
+//RS         )
+//RS     })
+//RS }
+//RS fn ui_mir_named(name: &str) -> MirType {
+//RS     MirType::from_kind(MirTypeKind::Apply { name: MirNominalRef::from_name(name), args: Vec::new() })
+//RS }
+//RS 
+//RS fn ui_mir_absent(name: &str) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Absent {
+//RS         element: ui_mir_named(name),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_enum(type_name: &str, variant: &str) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_role(role: Option<ui_rt::JetUiAriaRole>) -> MirRuntimeValue {
+//RS     role.map_or_else(
+//RS         || ui_mir_absent("UIAriaRole"),
+//RS         |role| {
+//RS             let variant = match role {
+//RS                 ui_rt::JetUiAriaRole::Button => "Button",
+//RS                 ui_rt::JetUiAriaRole::TextInput => "TextInput",
+//RS                 ui_rt::JetUiAriaRole::Label => "Label",
+//RS                 ui_rt::JetUiAriaRole::Container => "Container",
+//RS             };
+//RS             MirRuntimeValue::Present(Box::new(ui_mir_enum("UIAriaRole", variant)))
+//RS         },
+//RS     )
+//RS }
+//RS fn ui_mir_ime(ime: Option<ui_rt::JetUiImeMode>) -> MirRuntimeValue {
+//RS     ime.map_or_else(
+//RS         || ui_mir_absent("UIIMEMode"),
+//RS         |ime| {
+//RS             let variant = match ime {
+//RS                 ui_rt::JetUiImeMode::Native => "Native",
+//RS                 ui_rt::JetUiImeMode::Disabled => "Disabled",
+//RS             };
+//RS             MirRuntimeValue::Present(Box::new(ui_mir_enum("UIIMEMode", variant)))
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn ui_mir_kind(kind: &ui_rt::JetUiNodeKind) -> MirRuntimeValue {
+//RS     let variant = match kind {
+//RS         ui_rt::JetUiNodeKind::Custom => "Custom",
+//RS         ui_rt::JetUiNodeKind::Text => "Text",
+//RS         ui_rt::JetUiNodeKind::Box => "Box",
+//RS         ui_rt::JetUiNodeKind::Button => "Button",
+//RS         ui_rt::JetUiNodeKind::TextInput => "TextInput",
+//RS     };
+//RS     ui_mir_enum("UINodeKind", variant)
+//RS }
+//RS 
+//RS fn ui_mir_accessibility(
+//RS     accessibility: Option<ui_rt::JetUiAccessibility>,
+//RS ) -> MirRuntimeValue {
+//RS     let Some(accessibility) = accessibility else {
+//RS         return ui_mir_absent("UIAccessibility");
+//RS     };
+//RS     let optional_string = |value: Option<String>| {
+//RS         value.map_or_else(
+//RS             || ui_mir_absent("String"),
+//RS             |value| MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(value))),
+//RS         )
+//RS     };
+//RS     let states = accessibility
+//RS         .states
+//RS         .into_iter()
+//RS         .map(|state| {
+//RS             let (variant, args) = match state {
+//RS                 ui_rt::JetUiAccessibilityState::Disabled => ("Disabled", Vec::new()),
+//RS                 ui_rt::JetUiAccessibilityState::Busy => ("Busy", Vec::new()),
+//RS                 ui_rt::JetUiAccessibilityState::Expanded(value) => (
+//RS                     "Expanded",
+//RS                     vec![(None, MirRuntimeValue::Bool(value))],
+//RS                 ),
+//RS                 ui_rt::JetUiAccessibilityState::Checked(value) => {
+//RS                     ("Checked", vec![(None, MirRuntimeValue::Bool(value))])
+//RS                 }
+//RS                 ui_rt::JetUiAccessibilityState::Selected(value) => {
+//RS                     ("Selected", vec![(None, MirRuntimeValue::Bool(value))])
+//RS                 }
+//RS                 ui_rt::JetUiAccessibilityState::Required => ("Required", Vec::new()),
+//RS                 ui_rt::JetUiAccessibilityState::Value(value) => {
+//RS                     ("Value", vec![(None, MirRuntimeValue::String(value))])
+//RS                 }
+//RS             };
+//RS             MirRuntimeValue::Enum {
+//RS                 type_name: "UIAccessibilityState".to_string(),
+//RS                 variant: variant.to_string(),
+//RS                 args,
+//RS             }
+//RS         })
+//RS         .collect();
+//RS     MirRuntimeValue::Present(Box::new(MirRuntimeValue::Struct {
+//RS         type_name: "UIAccessibility".to_string(),
+//RS         fields: vec![
+//RS             ("name".to_string(), optional_string(accessibility.name)),
+//RS             (
+//RS                 "description".to_string(),
+//RS                 optional_string(accessibility.description),
+//RS             ),
+//RS             ("states".to_string(), MirRuntimeValue::List(states)),
+//RS         ],
+//RS     }))
+//RS }
+//RS 
+//RS fn ui_mir_node_value(
+//RS     node: ui_rt::JetUiNode,
+//RS     shortcut: MirRuntimeValue,
+//RS     callback: Option<(&str, MirRuntimeValue)>,
+//RS ) -> MirRuntimeValue {
+//RS     let children = node
+//RS         .children
+//RS         .into_iter()
+//RS         .map(|child| ui_mir_node_value(child, ui_mir_absent("UIShortcut"), None))
+//RS         .collect();
+//RS     let mut fields = vec![
+//RS         ("label".to_string(), MirRuntimeValue::String(node.label)),
+//RS         (
+//RS             "width".to_string(),
+//RS             MirRuntimeValue::Float {
+//RS                 value: node.width,
+//RS                 f32: false,
+//RS             },
+//RS         ),
+//RS         (
+//RS             "height".to_string(),
+//RS             MirRuntimeValue::Float {
+//RS                 value: node.height,
+//RS                 f32: false,
+//RS             },
+//RS         ),
+//RS         ("role".to_string(), ui_mir_role(node.role)),
+//RS         (
+//RS             "accessibility".to_string(),
+//RS             ui_mir_accessibility(node.accessibility),
+//RS         ),
+//RS         ("ime".to_string(), ui_mir_ime(node.ime)),
+//RS         (
+//RS             "color".to_string(),
+//RS             node.color.map_or_else(
+//RS                 || ui_mir_absent("String"),
+//RS                 |value| MirRuntimeValue::Present(Box::new(MirRuntimeValue::String(value))),
+//RS             ),
+//RS         ),
+//RS         ("kind".to_string(), ui_mir_kind(&node.kind)),
+//RS         ("children".to_string(), MirRuntimeValue::List(children)),
+//RS         ("shortcut".to_string(), shortcut),
+//RS     ];
+//RS     if let Some((name, callback)) = callback {
+//RS         fields.push((name.to_string(), callback));
+//RS     }
+//RS     MirRuntimeValue::Struct {
+//RS         type_name: "UINode".to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_optional_shortcut(
+//RS     value: &MirRuntimeValue,
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::Absent { .. } => Ok(value.clone()),
+//RS         MirRuntimeValue::Present(inner)
+//RS             if matches!(
+//RS                 inner.as_ref(),
+//RS                 MirRuntimeValue::Struct { type_name, .. } if type_name == "UIShortcut"
+//RS             ) =>
+//RS         {
+//RS             Ok(MirRuntimeValue::Present(inner.clone()))
+//RS         }
+//RS         _ => Err(unsupported(
+//RS             "core.ui.button() expects an optional UIShortcut",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_optional_label(
+//RS     value: &MirRuntimeValue,
+//RS     span: Span,
+//RS ) -> Result<Option<String>, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::Absent { .. } => Ok(None),
+//RS         MirRuntimeValue::Present(value) => match value.as_ref() {
+//RS             MirRuntimeValue::String(value) => Ok(Some(value.clone())),
+//RS             _ => Err(unsupported(
+//RS                 "core.ui.button() expects an optional accessible String label",
+//RS                 span,
+//RS             )),
+//RS         },
+//RS         _ => Err(unsupported(
+//RS             "core.ui.button() expects an optional accessible String label",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_ime_mode(
+//RS     value: &MirRuntimeValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiImeMode, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } if type_name == "UIIMEMode" && args.is_empty() => match variant.as_str() {
+//RS             "Native" => Ok(ui_rt::JetUiImeMode::Native),
+//RS             "Disabled" => Ok(ui_rt::JetUiImeMode::Disabled),
+//RS             _ => Err(unsupported("unknown UIIMEMode variant", span)),
+//RS         },
+//RS         _ => Err(unsupported("core.ui.text_input() expects UIIMEMode", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ui_mir_preview_source(kind: &MirCoreClosureKind) -> Option<MirRuntimeValue> {
+//RS     let MirCoreClosureKind::UiPreview {
+//RS         source_file,
+//RS         source_start_line,
+//RS         source_start_column,
+//RS         source_end_line,
+//RS         source_end_column,
+//RS         build_id,
+//RS         revision,
+//RS         ..
+//RS     } = kind
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     let source_id = source_file.clone();
+//RS     Some(MirRuntimeValue::Struct {
+//RS         type_name: "UIPreviewSource".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "source_id".to_string(),
+//RS                 MirRuntimeValue::String(source_id.clone()),
+//RS             ),
+//RS             (
+//RS                 "build_id".to_string(),
+//RS                 MirRuntimeValue::String(build_id.clone()),
+//RS             ),
+//RS             (
+//RS                 "revision".to_string(),
+//RS                 MirRuntimeValue::String(revision.clone()),
+//RS             ),
+//RS             (
+//RS                 "span".to_string(),
+//RS                 MirRuntimeValue::Struct {
+//RS                     type_name: "JetDevtoolsSourceSpan".to_string(),
+//RS                     fields: vec![
+//RS                         (
+//RS                             "source_id".to_string(),
+//RS                             MirRuntimeValue::String(source_id),
+//RS                         ),
+//RS                         (
+//RS                             "file".to_string(),
+//RS                             MirRuntimeValue::String(source_file.clone()),
+//RS                         ),
+//RS                         (
+//RS                             "start_line".to_string(),
+//RS                             MirRuntimeValue::Int(i64::from(*source_start_line)),
+//RS                         ),
+//RS                         (
+//RS                             "start_column".to_string(),
+//RS                             MirRuntimeValue::Int(i64::from(*source_start_column)),
+//RS                         ),
+//RS                         (
+//RS                             "end_line".to_string(),
+//RS                             MirRuntimeValue::Int(i64::from(*source_end_line)),
+//RS                         ),
+//RS                         (
+//RS                             "end_column".to_string(),
+//RS                             MirRuntimeValue::Int(i64::from(*source_end_column)),
+//RS                         ),
+//RS                     ],
+//RS                 },
+//RS             ),
+//RS         ],
+//RS     })
+//RS }
+//RS 
+//RS fn jet_ui_core_closure_ambient_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     _call: MirPreludeCallId,
+//RS     kind: MirCoreClosureKind,
+//RS     args: Vec<MirRuntimeValue>,
+//RS     closure: Option<MirRuntimeValue>,
+//RS     _site: MirSiteId,
+//RS     _label: &str,
+//RS     span: Span,
+//RS ) -> Option<Result<MirRuntimeValue, Diagnostic>> {
+//RS     let preview_source = ui_mir_preview_source(&kind);
+//RS     match (module, method, kind) {
+//RS         (
+//RS             "core.ui",
+//RS             "preview",
+//RS             MirCoreClosureKind::UiPreview {
+//RS                 playground: false,
+//RS                 ..
+//RS             },
+//RS         ) => Some((|| {
+//RS             let [name, viewport] = args.as_slice() else {
+//RS                 return Err(unsupported(
+//RS                     "core.ui.preview() callback route has the wrong argument shape",
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             let name = match name {
+//RS                 MirRuntimeValue::String(value) if !value.trim().is_empty() => value.clone(),
+//RS                 _ => {
+//RS                     return Err(unsupported(
+//RS                         "core.ui.preview() expects a non-empty String name",
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let callback = closure.ok_or_else(|| {
+//RS                 unsupported(
+//RS                     "core.ui.preview() callback route has no callback value",
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             if !matches!(callback, MirRuntimeValue::Closure(_)) {
+//RS                 return Err(unsupported(
+//RS                     "core.ui.preview() callback is not callable",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             Ok(MirRuntimeValue::Struct {
+//RS                 type_name: "UIPreview".to_string(),
+//RS                 fields: vec![
+//RS                     ("kind".to_string(), ui_mir_enum("UIPreviewKind", "Preview")),
+//RS                     ("name".to_string(), MirRuntimeValue::String(name)),
+//RS                     ("viewport".to_string(), viewport.clone()),
+//RS                     ("callback".to_string(), callback),
+//RS                     (
+//RS                         "source".to_string(),
+//RS                         preview_source
+//RS                             .clone()
+//RS                             .expect("UIPreview kind carries compiler source"),
+//RS                     ),
+//RS                 ],
+//RS             })
+//RS         })()),
+//RS         (
+//RS             "core.ui",
+//RS             "playground",
+//RS             MirCoreClosureKind::UiPreview {
+//RS                 playground: true,
+//RS                 ..
+//RS             },
+//RS         ) => Some((|| {
+//RS             let [name, viewport] = args.as_slice() else {
+//RS                 return Err(unsupported(
+//RS                     "core.ui.playground() callback route has the wrong argument shape",
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             let name = match name {
+//RS                 MirRuntimeValue::String(value) if !value.trim().is_empty() => value.clone(),
+//RS                 _ => {
+//RS                     return Err(unsupported(
+//RS                         "core.ui.playground() expects a non-empty String name",
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let callback = closure.ok_or_else(|| {
+//RS                 unsupported(
+//RS                     "core.ui.playground() callback route has no callback value",
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             if !matches!(callback, MirRuntimeValue::Closure(_)) {
+//RS                 return Err(unsupported(
+//RS                     "core.ui.playground() callback is not callable",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             Ok(MirRuntimeValue::Struct {
+//RS                 type_name: "UIPreview".to_string(),
+//RS                 fields: vec![
+//RS                     (
+//RS                         "kind".to_string(),
+//RS                         ui_mir_enum("UIPreviewKind", "Playground"),
+//RS                     ),
+//RS                     ("name".to_string(), MirRuntimeValue::String(name)),
+//RS                     ("viewport".to_string(), viewport.clone()),
+//RS                     ("callback".to_string(), callback),
+//RS                     (
+//RS                         "source".to_string(),
+//RS                         preview_source
+//RS                             .expect("UIPreview kind carries compiler source"),
+//RS                     ),
+//RS                 ],
+//RS             })
+//RS         })()),
+//RS         ("core.ui", "button", MirCoreClosureKind::UiAction) => Some((|| {
+//RS             let [display, shortcut, accessible_label] = args.as_slice() else {
+//RS                 return Err(unsupported(
+//RS                     "core.ui.button() callback route has the wrong argument shape",
+//RS                     span,
+//RS                 ));
+//RS             };
+//RS             let display = match display {
+//RS                 MirRuntimeValue::String(value) => value,
+//RS                 _ => {
+//RS                     return Err(unsupported(
+//RS                         "core.ui.button() expects a String display label",
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             let shortcut = ui_mir_optional_shortcut(shortcut, span)?;
+//RS             let accessible_label = ui_mir_optional_label(accessible_label, span)?;
+//RS             let callback = closure.ok_or_else(|| {
+//RS                 unsupported(
+//RS                     "core.ui.button() callback route has no callback value",
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             let accessible_label = accessible_label.map_or_else(
+//RS                 || Err(ui_rt::JetAbsent),
+//RS                 Ok,
+//RS             );
+//RS             let node = ui_rt::jet_ui_button_with_metadata(
+//RS                 display,
+//RS                 Err(ui_rt::JetAbsent),
+//RS                 accessible_label,
+//RS             );
+//RS             Ok(ui_mir_node_value(
+//RS                 node,
+//RS                 shortcut,
+//RS                 Some(("on_click", callback)),
+//RS             ))
+//RS         })()),
+//RS         ("core.ui", "text_input", MirCoreClosureKind::UiTextInputOnDrop) => {
+//RS             Some((|| {
+//RS                 let [state, ime] = args.as_slice() else {
+//RS                     return Err(unsupported(
+//RS                         "core.ui.text_input() drop route has the wrong argument shape",
+//RS                         span,
+//RS                     ));
+//RS                 };
+//RS                 let state = match state {
+//RS                     MirRuntimeValue::String(value) => value,
+//RS                     _ => {
+//RS                         return Err(unsupported(
+//RS                             "core.ui.text_input() expects a String state",
+//RS                             span,
+//RS                         ))
+//RS                     }
+//RS                 };
+//RS                 let node = ui_rt::jet_ui_text_input(state, ui_mir_ime_mode(ime, span)?);
+//RS                 let callback = closure.ok_or_else(|| {
+//RS                     unsupported(
+//RS                         "core.ui.text_input() drop route has no callback value",
+//RS                         span,
+//RS                     )
+//RS                 })?;
+//RS                 Ok(ui_mir_node_value(
+//RS                     node,
+//RS                     ui_mir_absent("UIShortcut"),
+//RS                     Some(("on_drop", callback)),
+//RS                 ))
+//RS             })())
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn ambient_expect_arity(
+//RS     args: &[CtValue],
+//RS     expected: usize,
+//RS     operation: &str,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if args.len() == expected {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(unsupported(
+//RS             &format!("{operation} expects {expected} arguments"),
+//RS             span,
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_host_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if matches!(module, "JetUiShortcut" | "::JetUiShortcut") && method == "cmd" {
+//RS         return Some((|| {
+//RS             ambient_expect_arity(&args, 1, "UIShortcut.cmd", span)?;
+//RS             let key = ambient_string(&args[0], "UIShortcut.cmd", span)?;
+//RS             Ok(ambient_shortcut_value(ui_rt::JetUiShortcut::cmd(&key)))
+//RS         })());
+//RS     }
+//RS     match (module, method) {
+//RS         ("core.ui", "node") => Some((|| {
+//RS             ambient_expect_arity(&args, 3, "core.ui.node", span)?;
+//RS             let label = ambient_string(&args[0], "core.ui.node", span)?;
+//RS             let width = ambient_float(&args[1], "core.ui.node", span)?;
+//RS             let height = ambient_float(&args[2], "core.ui.node", span)?;
+//RS             Ok(ambient_node_value(ui_rt::jet_ui_node(&label, width, height)))
+//RS         })()),
+//RS         ("core.ui", "text") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.text", span)?;
+//RS             let text = ambient_string(&args[0], "core.ui.text", span)?;
+//RS             Ok(ambient_node_value(ui_rt::jet_ui_text(&text)))
+//RS         })()),
+//RS         ("core.ui", "node_accessibility") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.node_accessibility", span)?;
+//RS             let node = ambient_node(&args[0], span)?;
+//RS             let accessibility = ambient_accessibility(&args[1], span)?;
+//RS             Ok(ambient_node_value(ui_rt::jet_ui_node_accessibility(
+//RS                 node,
+//RS                 accessibility,
+//RS             )))
+//RS         })()),
+//RS         ("core.ui", "node_shortcut") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.node_shortcut", span)?;
+//RS             let node = ambient_node(&args[0], span)?;
+//RS             let shortcut = ambient_shortcut(&args[1], span)?;
+//RS             Ok(ambient_node_value(ui_rt::jet_ui_node_shortcut(node, shortcut)))
+//RS         })()),
+//RS         ("core.ui", "text_input") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.text_input", span)?;
+//RS             let state = ambient_string(&args[0], "core.ui.text_input", span)?;
+//RS             let ime = ambient_ime_mode(&args[1], span)?;
+//RS             Ok(ambient_node_value(ui_rt::jet_ui_text_input(&state, ime)))
+//RS         })()),
+//RS         ("core.ui.host", "capabilities") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.capabilities", span)?;
+//RS             let facts = with_ui_host(|| ui_rt::jet_ui_host_capabilities());
+//RS             Ok(ambient_capability_facts_value(facts))
+//RS         })()),
+//RS         ("core.ui.host", "file_filter") => Some((|| {
+//RS             ambient_expect_arity(&args, 3, "core.ui.host.file_filter", span)?;
+//RS             let label = ambient_string(&args[0], "core.ui.host.file_filter", span)?;
+//RS             let extensions = ambient_strings(&args[1], "core.ui.host.file_filter", span)?;
+//RS             let mime_types = ambient_strings(&args[2], "core.ui.host.file_filter", span)?;
+//RS             Ok(ambient_service_result(
+//RS                 ui_rt::jet_ui_host_file_filter(&label, &extensions, &mime_types),
+//RS                 ambient_file_filter_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "file_filter_text") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.file_filter_text", span)?;
+//RS             Ok(ambient_file_filter_value(ui_rt::jet_ui_host_file_filter_text()))
+//RS         })()),
+//RS         ("core.ui.host", "fs_rights_read") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_read", span)?;
+//RS             Ok(ambient_fs_rights_value(ui_rt::jet_ui_host_fs_rights_read()))
+//RS         })()),
+//RS         ("core.ui.host", "fs_rights_write") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_write", span)?;
+//RS             Ok(ambient_fs_rights_value(ui_rt::jet_ui_host_fs_rights_write()))
+//RS         })()),
+//RS         ("core.ui.host", "fs_rights_read_write") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_read_write", span)?;
+//RS             Ok(ambient_fs_rights_value(
+//RS                 ui_rt::jet_ui_host_fs_rights_read_write(),
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "fs_grant") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.fs_grant", span)?;
+//RS             let root = ambient_string(&args[0], "core.ui.host.fs_grant", span)?;
+//RS             let rights = ambient_fs_rights(&args[1], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 ui_rt::jet_ui_host_fs_grant(&root, rights),
+//RS                 ambient_fs_grant_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "open_request") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.open_request", span)?;
+//RS             let grant = ambient_fs_grant(&args[0], span)?;
+//RS             Ok(ambient_file_request_value(ui_rt::jet_ui_host_open_request(
+//RS                 grant,
+//RS             )))
+//RS         })()),
+//RS         ("core.ui.host", "save_request") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.save_request", span)?;
+//RS             let grant = ambient_fs_grant(&args[0], span)?;
+//RS             Ok(ambient_file_request_value(ui_rt::jet_ui_host_save_request(
+//RS                 grant,
+//RS             )))
+//RS         })()),
+//RS         ("core.ui.host", "open_file") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.open_file", span)?;
+//RS             let request = ambient_file_request(&args[0], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_open_file(request)),
+//RS                 ambient_file_selection_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "save_file") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.save_file", span)?;
+//RS             let request = ambient_file_request(&args[0], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_save_file(request)),
+//RS                 ambient_file_selection_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "shortcut") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.shortcut", span)?;
+//RS             let key = ambient_string(&args[0], "core.ui.host.shortcut", span)?;
+//RS             let modifiers = ambient_shortcut_modifiers(&args[1], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 ui_rt::jet_ui_host_shortcut(&key, modifiers),
+//RS                 ambient_shortcut_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host", "accessibility") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.accessibility", span)?;
+//RS             let name = ambient_string(&args[0], "core.ui.host.accessibility", span)?;
+//RS             let description = ambient_string(&args[1], "core.ui.host.accessibility", span)?;
+//RS             Ok(ambient_service_result(
+//RS                 ui_rt::jet_ui_host_accessibility(&name, &description),
+//RS                 ambient_accessibility_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.clipboard", "read_text") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.clipboard.read_text", span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_clipboard_read_text()),
+//RS                 ambient_clipboard_text_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.clipboard", "write_text") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.clipboard.write_text", span)?;
+//RS             let text = ambient_string(&args[0], "core.ui.host.clipboard.write_text", span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_clipboard_write_text(&text)),
+//RS                 ambient_clipboard_write_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.ime", "poll") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.ime.poll", span)?;
+//RS             Ok(ambient_option_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_ime_poll()),
+//RS                 "UIIMEEvent",
+//RS                 ambient_ime_event_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.drag_drop", "poll") => Some((|| {
+//RS             ambient_expect_arity(&args, 0, "core.ui.host.drag_drop.poll", span)?;
+//RS             Ok(ambient_option_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_drag_poll()),
+//RS                 "UIDragEvent",
+//RS                 ambient_drag_event_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.shortcuts", "binding") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.shortcuts.binding", span)?;
+//RS             let shortcut = ambient_shortcut(&args[0], span)?;
+//RS             let action = ambient_string(&args[1], "core.ui.host.shortcuts.binding", span)?;
+//RS             Ok(ambient_service_result(
+//RS                 ui_rt::jet_ui_host_shortcut_binding(shortcut, &action),
+//RS                 ambient_shortcut_binding_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.shortcuts", "register") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.register", span)?;
+//RS             let binding = ambient_shortcut_binding(&args[0], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_shortcuts_register(binding)),
+//RS                 ambient_shortcut_binding_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.shortcuts", "dispatch") => Some((|| {
+//RS             ambient_expect_arity(&args, 1, "core.ui.host.shortcuts.dispatch", span)?;
+//RS             let shortcut = ambient_shortcut(&args[0], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_shortcuts_dispatch(shortcut)),
+//RS                 ambient_shortcut_dispatch_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.accessibility", "attach") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.attach", span)?;
+//RS             let node = ambient_node(&args[0], span)?;
+//RS             let accessibility = ambient_accessibility(&args[1], span)?;
+//RS             Ok(ambient_service_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_attach_accessibility(node, accessibility)),
+//RS                 ambient_node_value,
+//RS             ))
+//RS         })()),
+//RS         ("core.ui.host.accessibility", "project") => Some((|| {
+//RS             ambient_expect_arity(&args, 2, "core.ui.host.accessibility.project", span)?;
+//RS             let node = ambient_node(&args[0], span)?;
+//RS             let node_id = ambient_node_id(&args[1], span)?;
+//RS             Ok(ambient_option_result(
+//RS                 with_ui_host(|| ui_rt::jet_ui_host_project_accessibility(node, node_id)),
+//RS                 "UIAccessibilityProjection",
+//RS                 ambient_projection_value,
+//RS             ))
+//RS         })()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ui_font_ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     match (module, method) {
+//RS         ("core.font", "system") => Some((|| {
+//RS             let style = args
+//RS                 .first()
+//RS                 .ok_or_else(|| unsupported("core.font.system() expects FontStyle", span))?;
+//RS             Ok(ambient_font_face_value(ui_rt::jet_font_system(
+//RS                 ambient_font_style(style, span)?,
+//RS             )))
+//RS         })()),
+//RS         ("core.font", "shape") => Some((|| {
+//RS             let text = match args.first() {
+//RS                 Some(CtValue::Str(value)) => value,
+//RS                 _ => return Err(unsupported("core.font.shape() expects String text", span)),
+//RS             };
+//RS             let face = ambient_font_face(
+//RS                 args.get(1)
+//RS                     .ok_or_else(|| unsupported("core.font.shape() expects FontFace", span))?,
+//RS                 span,
+//RS             )?;
+//RS             let run = with_ui_host(|| {
+//RS                 ui_rt::jet_ui_with_current_host(|host| host.shape_text(text, &face))
+//RS             })
+//RS             .map_err(|error| {
+//RS                 Diagnostic::runtime_host_fault(
+//RS                     String::new(),
+//RS                     format!("font shaping host contract failure: {error:?}"),
+//RS                 )
+//RS             })?;
+//RS             Ok(ambient_glyph_run_value(run))
+//RS         })()),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn register_interpreter_ambient(
+//RS     context: &mut crate::ambient_interp::InterpreterAmbientContext,
+//RS ) {
+//RS     context.register_core_call(jet_ui_font_ambient_core_call);
+//RS     context.register_core_call(jet_ui_host_ambient_core_call);
+//RS     context.register_core_closure_call(jet_ui_core_closure_ambient_call);
+//RS }
+//RS 
+//RS fn ui_result<T>(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     result: ui_rt::JetUiServiceResult<T>,
+//RS     store: impl FnOnce(&mut crate::runtime_host::JitRuntime, T) -> i64,
+//RS ) -> i64 {
+//RS     match result {
+//RS         Ok(value) => {
+//RS             let stored = store(rt, value);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, stored as u64)
+//RS         }
+//RS         Err(error) => {
+//RS             // Keep the typed host error on the canonical Err side. The resident
+//RS             // JIT's opaque error slot is rendered only at the observation edge;
+//RS             // cancellation is never collapsed into a bare integer.
+//RS             let error = rt.heap.alloc_string(format!("{error:?}"));
+//RS             crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn ui_list_strings(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<Vec<String>> {
+//RS     let length = rt.heap.list_len(handle)?;
+//RS     let mut strings = Vec::with_capacity(usize::try_from(length).ok()?);
+//RS     for index in 0..length {
+//RS         strings.push(rt.heap.clone_string(rt.heap.list_get_int(handle, index)?)?);
+//RS     }
+//RS     Some(strings)
+//RS }
+//RS 
+//RS fn ui_push_strings(rt: &mut crate::runtime_host::JitRuntime, values: &[String]) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for value in values {
+//RS         let string = rt.heap.alloc_string(value.clone());
+//RS         let _ = rt.heap.list_push_int(list, string);
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn ui_push_capability_facts(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     facts: ui_rt::JetUiCapabilityFacts,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(0);
+//RS     ui_store_value(rt, record, UiValue::CapabilityFacts(facts))
+//RS }
+//RS 
+//RS fn ui_decode_fs_rights(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetUiFsRights> {
+//RS     match ui_value(rt, handle)? {
+//RS         UiValue::FsRights(rights) => Some(rights),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_fs_rights(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     rights: ui_rt::JetUiFsRights,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(0);
+//RS     ui_store_value(rt, record, UiValue::FsRights(rights))
+//RS }
+//RS 
+//RS fn ui_push_file_filter(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     filter: ui_rt::JetUiFileFilter,
+//RS ) -> i64 {
+//RS     let label = rt.heap.alloc_string(filter.label.clone());
+//RS     let extensions = ui_push_strings(rt, &filter.extensions);
+//RS     let mime_types = ui_push_strings(rt, &filter.mime_types);
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_string(record, 0, label);
+//RS     let _ = rt.heap.record_set_int(record, 1, extensions);
+//RS     let _ = rt.heap.record_set_int(record, 2, mime_types);
+//RS     ui_store_value(rt, record, UiValue::FileFilter(filter))
+//RS }
+//RS 
+//RS fn ui_push_fs_grant(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     grant: ui_rt::JetUiFsGrant,
+//RS ) -> i64 {
+//RS     let root = rt.heap.alloc_string(grant.root().to_string());
+//RS     let rights = ui_push_fs_rights(rt, grant.rights());
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_string(record, 0, root);
+//RS     let _ = rt.heap.record_set_record(record, 1, rights);
+//RS     ui_store_value(rt, record, UiValue::FsGrant(grant))
+//RS }
+//RS 
+//RS fn ui_decode_fs_grant(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetUiFsGrant> {
+//RS     match ui_value(rt, handle)? {
+//RS         UiValue::FsGrant(grant) => Some(grant),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_file_request(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     request: ui_rt::JetUiFileDialogRequest,
+//RS ) -> i64 {
+//RS     let title = rt.heap.alloc_string(request.title.clone());
+//RS     let kind = rt.heap.alloc_record(1);
+//RS     let kind_discriminant = match request.kind {
+//RS         ui_rt::JetUiFileDialogKind::Open => 0,
+//RS         ui_rt::JetUiFileDialogKind::Save => 1,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(kind, 0, kind_discriminant);
+//RS     let grant = ui_push_fs_grant(rt, request.grant.clone());
+//RS     let initial_directory = request
+//RS         .initial_directory
+//RS         .as_ref()
+//RS         .map(|directory| ui_push_granted_path(rt, directory.clone()).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let filters = rt.heap.alloc_empty_list();
+//RS     for filter in &request.filters {
+//RS         let handle = ui_push_file_filter(rt, filter.clone());
+//RS         let _ = rt.heap.list_push_int(filters, handle);
+//RS     }
+//RS     let record = rt.heap.alloc_record(6);
+//RS     let _ = rt.heap.record_set_string(record, 0, title);
+//RS     let _ = rt.heap.record_set_record(record, 1, kind);
+//RS     let _ = rt.heap.record_set_record(record, 2, grant);
+//RS     let _ = rt.heap.record_set_int(record, 3, initial_directory);
+//RS     let _ = rt.heap.record_set_int(record, 4, filters);
+//RS     let _ = rt.heap.record_set_bool(record, 5, request.allow_multiple);
+//RS     ui_store_value(rt, record, UiValue::FileDialogRequest(request))
+//RS }
+//RS 
+//RS fn ui_decode_file_request(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetUiFileDialogRequest> {
+//RS     match ui_value(rt, handle)? {
+//RS         UiValue::FileDialogRequest(request) => Some(request),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_granted_path(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     path: ui_rt::JetUiGrantedPath,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_string(path.path().to_string());
+//RS     let grant_root = rt.heap.alloc_string(path.grant_root().to_string());
+//RS     let access = rt.heap.alloc_record(1);
+//RS     let access_discriminant = match path.access() {
+//RS         ui_rt::JetUiFsAccess::Read => 0,
+//RS         ui_rt::JetUiFsAccess::Write => 1,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(access, 0, access_discriminant);
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_string(record, 0, value);
+//RS     let _ = rt.heap.record_set_string(record, 1, grant_root);
+//RS     let _ = rt.heap.record_set_record(record, 2, access);
+//RS     ui_store_value(rt, record, UiValue::GrantedPath(path))
+//RS }
+//RS 
+//RS fn ui_push_file_selection(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     selection: ui_rt::JetUiFileDialogSelection,
+//RS ) -> i64 {
+//RS     let files = rt.heap.alloc_empty_list();
+//RS     for file in &selection.files {
+//RS         let handle = ui_push_granted_path(rt, file.clone());
+//RS         let _ = rt.heap.list_push_int(files, handle);
+//RS     }
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(record, 0, files);
+//RS     ui_store_value(rt, record, UiValue::FileDialogSelection(selection))
+//RS }
+//RS 
+//RS fn ui_push_text_range(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     range: ui_rt::JetUiTextRange,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, i64::try_from(range.start).unwrap_or(i64::MAX));
+//RS     let _ = rt.heap.record_set_int(record, 1, i64::try_from(range.end).unwrap_or(i64::MAX));
+//RS     ui_store_value(rt, record, UiValue::TextRange(range))
+//RS }
+//RS 
+//RS fn ui_push_clipboard_text(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: ui_rt::JetUiClipboardText,
+//RS ) -> i64 {
+//RS     let text = rt.heap.alloc_string(value.text.clone());
+//RS     let selection = value
+//RS         .selection
+//RS         .map(|range| ui_push_text_range(rt, range).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_string(record, 0, text);
+//RS     let _ = rt.heap.record_set_int(record, 1, selection);
+//RS     ui_store_value(rt, record, UiValue::ClipboardText(value))
+//RS }
+//RS 
+//RS /// `UiClipboardWrite { characters }` — the same one-field record the
+//RS /// interpreter's `ambient_clipboard_write_value` projects.
+//RS fn ui_push_clipboard_write(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: ui_rt::JetUiClipboardWrite,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(
+//RS         record,
+//RS         0,
+//RS         i64::try_from(value.characters).unwrap_or(i64::MAX),
+//RS     );
+//RS     ui_store_value(rt, record, UiValue::ClipboardWrite(value))
+//RS }
+//RS 
+//RS fn ui_decode_shortcut_modifiers(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetUiShortcutModifiers> {
+//RS     if let Some(UiValue::ShortcutModifiers(modifiers)) = ui_value(rt, handle) {
+//RS         return Some(modifiers);
+//RS     }
+//RS     Some(ui_rt::JetUiShortcutModifiers::from_bits(
+//RS         u8::try_from(handle & 0x1f).ok()?,
+//RS     ))
+//RS }
+//RS 
+//RS fn ui_push_shortcut(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     shortcut: ui_rt::JetUiShortcut,
+//RS ) -> i64 {
+//RS     let key = rt.heap.alloc_string(shortcut.key.clone());
+//RS     let modifiers = rt.heap.alloc_record(1);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(modifiers, 0, i64::from(shortcut.modifiers.bits()));
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_string(record, 0, key);
+//RS     let _ = rt.heap.record_set_record(record, 1, modifiers);
+//RS     ui_store_value(rt, record, UiValue::Shortcut(shortcut))
+//RS }
+//RS 
+//RS fn ui_decode_shortcut(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetUiShortcut> {
+//RS     match ui_value(rt, handle)? {
+//RS         UiValue::Shortcut(shortcut) => Some(shortcut),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_shortcut_binding(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     binding: ui_rt::JetUiShortcutBinding,
+//RS ) -> i64 {
+//RS     let shortcut = ui_push_shortcut(rt, binding.shortcut.clone());
+//RS     let action = rt.heap.alloc_string(binding.action.clone());
+//RS     let node = i64::from(binding.node.is_some());
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_record(record, 0, shortcut);
+//RS     let _ = rt.heap.record_set_string(record, 1, action);
+//RS     let _ = rt.heap.record_set_int(record, 2, node);
+//RS     ui_store_value(rt, record, UiValue::ShortcutBinding(binding))
+//RS }
+//RS 
+//RS fn ui_push_accessibility(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     accessibility: ui_rt::JetUiAccessibility,
+//RS ) -> i64 {
+//RS     let name = accessibility
+//RS         .name
+//RS         .as_ref()
+//RS         .map(|value| rt.heap.alloc_string(value.clone()).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let description = accessibility
+//RS         .description
+//RS         .as_ref()
+//RS         .map(|value| rt.heap.alloc_string(value.clone()).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let states = rt.heap.alloc_empty_list();
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_int(record, 0, name);
+//RS     let _ = rt.heap.record_set_int(record, 1, description);
+//RS     let _ = rt.heap.record_set_int(record, 2, states);
+//RS     ui_store_value(rt, record, UiValue::Accessibility(accessibility))
+//RS }
+//RS 
+//RS fn jet_jit_ui_node_accessibility(node: i64, accessibility: i64) -> i64 {
+//RS     let Some((node_value, accessibility)) = with_rt(|rt| {
+//RS         let Some(node_value) = rt.ui.nodes.get(node.saturating_sub(1) as usize).cloned() else {
+//RS             rt.set_host_fault("JIT UI node_accessibility received an invalid node handle");
+//RS             return None;
+//RS         };
+//RS         let Some(UiValue::Accessibility(accessibility)) = ui_value(rt, accessibility) else {
+//RS             rt.set_host_fault("JIT UI node_accessibility received an invalid accessibility handle");
+//RS             return None;
+//RS         };
+//RS         Some((node_value, accessibility))
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| {
+//RS         ui_rt::jet_ui_host_attach_accessibility(node_value, accessibility)
+//RS     });
+//RS     with_rt(|rt| {
+//RS         ui_result(rt, result, |rt, node| {
+//RS             rt.ui.nodes.push(node);
+//RS             rt.ui.nodes.len() as i64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_node_shortcut(node: i64, shortcut: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(node_value) = rt.ui.nodes.get(node.saturating_sub(1) as usize).cloned() else {
+//RS             rt.set_host_fault("JIT UI node_shortcut received an invalid node handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(shortcut) = ui_decode_shortcut(rt, shortcut) else {
+//RS             rt.set_host_fault("JIT UI node_shortcut received an invalid shortcut handle");
+//RS             return 0;
+//RS         };
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_node_shortcut(node_value, shortcut));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_text_input(state: i64, ime: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(state) = rt.heap.clone_string(state) else {
+//RS             rt.set_host_fault("JIT UI text_input received a non-string state handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(ime) = ui_decode_ime_mode(rt, ime) else {
+//RS             return 0;
+//RS         };
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_text_input(&state, ime));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_node_label(node: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt
+//RS             .ui
+//RS             .nodes
+//RS             .get(node.saturating_sub(1) as usize)
+//RS             .map(|n| n.label.clone())
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_string(label)
+//RS     })
+//RS }
+//RS fn jet_jit_ui_host_capabilities() -> i64 {
+//RS     let facts = with_ui_host(|| ui_rt::jet_ui_host_capabilities());
+//RS     with_rt(|rt| ui_push_capability_facts(rt, facts))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_file_filter(label: i64, extensions: i64, mime_types: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(label) = rt.heap.clone_string(label) else {
+//RS             rt.set_host_fault("JIT ui.host.file_filter received a non-string label");
+//RS             return 0;
+//RS         };
+//RS         let Some(extensions) = ui_list_strings(rt, extensions) else {
+//RS             rt.set_host_fault("JIT ui.host.file_filter received an invalid extension list");
+//RS             return 0;
+//RS         };
+//RS         let Some(mime_types) = ui_list_strings(rt, mime_types) else {
+//RS             rt.set_host_fault("JIT ui.host.file_filter received an invalid MIME list");
+//RS             return 0;
+//RS         };
+//RS         let result = ui_rt::jet_ui_host_file_filter(&label, &extensions, &mime_types);
+//RS         ui_result(rt, result, ui_push_file_filter)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_file_filter_text() -> i64 {
+//RS     with_rt(|rt| ui_push_file_filter(rt, ui_rt::jet_ui_host_file_filter_text()))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_fs_rights_read() -> i64 {
+//RS     with_rt(|rt| ui_push_fs_rights(rt, ui_rt::jet_ui_host_fs_rights_read()))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_fs_rights_write() -> i64 {
+//RS     with_rt(|rt| ui_push_fs_rights(rt, ui_rt::jet_ui_host_fs_rights_write()))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_fs_rights_read_write() -> i64 {
+//RS     with_rt(|rt| ui_push_fs_rights(rt, ui_rt::jet_ui_host_fs_rights_read_write()))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_fs_grant(root: i64, rights: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(root) = rt.heap.clone_string(root) else {
+//RS             rt.set_host_fault("JIT ui.host.fs_grant received a non-string root");
+//RS             return 0;
+//RS         };
+//RS         let Some(rights) = ui_decode_fs_rights(rt, rights) else {
+//RS             rt.set_host_fault("JIT ui.host.fs_grant received invalid rights");
+//RS             return 0;
+//RS         };
+//RS         ui_result(
+//RS             rt,
+//RS             ui_rt::jet_ui_host_fs_grant(&root, rights),
+//RS             ui_push_fs_grant,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_open_request(grant: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(grant) = ui_decode_fs_grant(rt, grant) else {
+//RS             rt.set_host_fault("JIT ui.host.open_request received invalid grant");
+//RS             return 0;
+//RS         };
+//RS         ui_push_file_request(rt, ui_rt::jet_ui_host_open_request(grant))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_save_request(grant: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(grant) = ui_decode_fs_grant(rt, grant) else {
+//RS             rt.set_host_fault("JIT ui.host.save_request received invalid grant");
+//RS             return 0;
+//RS         };
+//RS         ui_push_file_request(rt, ui_rt::jet_ui_host_save_request(grant))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_open_file(request: i64) -> i64 {
+//RS     let Some(request) = with_rt(|rt| {
+//RS         let Some(request) = ui_decode_file_request(rt, request) else {
+//RS             rt.set_host_fault("JIT ui.host.open_file received invalid request");
+//RS             return None;
+//RS         };
+//RS         Some(request)
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_open_file(request));
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_file_selection))
+//RS }
+//RS fn jet_jit_ui_host_save_file(request: i64) -> i64 {
+//RS     let Some(request) = with_rt(|rt| {
+//RS         let Some(request) = ui_decode_file_request(rt, request) else {
+//RS             rt.set_host_fault("JIT ui.host.save_file received invalid request");
+//RS             return None;
+//RS         };
+//RS         Some(request)
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_save_file(request));
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_file_selection))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_ui_host_shortcut(key: i64, modifiers: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(key) = rt.heap.clone_string(key) else {
+//RS             rt.set_host_fault("JIT ui.host.shortcut received a non-string key");
+//RS             return 0;
+//RS         };
+//RS         let Some(modifiers) = ui_decode_shortcut_modifiers(rt, modifiers) else {
+//RS             rt.set_host_fault("JIT ui.host.shortcut received invalid modifiers");
+//RS             return 0;
+//RS         };
+//RS         ui_result(
+//RS             rt,
+//RS             ui_rt::jet_ui_host_shortcut(&key, modifiers),
+//RS             ui_push_shortcut,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_accessibility(name: i64, description: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(name) = rt.heap.clone_string(name) else {
+//RS             rt.set_host_fault("JIT ui.host.accessibility received a non-string name");
+//RS             return 0;
+//RS         };
+//RS         let Some(description) = rt.heap.clone_string(description) else {
+//RS             rt.set_host_fault("JIT ui.host.accessibility received a non-string description");
+//RS             return 0;
+//RS         };
+//RS         ui_result(
+//RS             rt,
+//RS             ui_rt::jet_ui_host_accessibility(&name, &description),
+//RS             ui_push_accessibility,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn ui_push_ime_phase(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     phase: ui_rt::JetUiImePhase,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let discriminant = match phase {
+//RS         ui_rt::JetUiImePhase::Start => 0,
+//RS         ui_rt::JetUiImePhase::Update => 1,
+//RS         ui_rt::JetUiImePhase::Commit => 2,
+//RS         ui_rt::JetUiImePhase::Cancel => 3,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_ime_event_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: ui_rt::JetUiImeEvent,
+//RS ) -> i64 {
+//RS     let target = rt.heap.alloc_string(event.target.as_str().to_string());
+//RS     let phase = ui_push_ime_phase(rt, event.phase);
+//RS     let composition = event
+//RS         .composition
+//RS         .as_ref()
+//RS         .map(|composition| {
+//RS             let text = rt.heap.alloc_string(composition.text.clone());
+//RS             let selection = ui_push_text_range(rt, composition.selection);
+//RS             let marked = composition
+//RS                 .marked
+//RS                 .map(|range| ui_push_text_range(rt, range).wrapping_add(1))
+//RS                 .unwrap_or(0);
+//RS             let record = rt.heap.alloc_record(3);
+//RS             let _ = rt.heap.record_set_string(record, 0, text);
+//RS             let _ = rt.heap.record_set_record(record, 1, selection);
+//RS             let _ = rt.heap.record_set_int(record, 2, marked);
+//RS             record
+//RS         })
+//RS         .map(|record| record.wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_string(record, 0, target);
+//RS     let _ = rt.heap.record_set_record(record, 1, phase);
+//RS     let _ = rt.heap.record_set_int(record, 2, composition);
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_ime_event(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: Option<ui_rt::JetUiImeEvent>,
+//RS ) -> i64 {
+//RS     let payload = event
+//RS         .as_ref()
+//RS         .map(|event| ui_push_ime_event_value(rt, event.clone()).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(record, 0, payload);
+//RS     ui_store_value(rt, record, UiValue::ImeEvent(event))
+//RS }
+//RS 
+//RS fn ui_push_drag_phase(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     phase: ui_rt::JetUiDragPhase,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let discriminant = match phase {
+//RS         ui_rt::JetUiDragPhase::Enter => 0,
+//RS         ui_rt::JetUiDragPhase::Over => 1,
+//RS         ui_rt::JetUiDragPhase::Drop => 2,
+//RS         ui_rt::JetUiDragPhase::Leave => 3,
+//RS         ui_rt::JetUiDragPhase::Cancel => 4,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_drag_operation(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     operation: ui_rt::JetUiDragOperation,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let discriminant = match operation {
+//RS         ui_rt::JetUiDragOperation::Copy => 0,
+//RS         ui_rt::JetUiDragOperation::Move => 1,
+//RS         ui_rt::JetUiDragOperation::Link => 2,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_drop_item(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     item: &ui_rt::JetUiDropItem,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     match item {
+//RS         ui_rt::JetUiDropItem::Text(text) => {
+//RS             let text = rt.heap.alloc_string(text.clone());
+//RS             let _ = rt.heap.record_set_int(record, 0, 0);
+//RS             let _ = rt.heap.record_set_string(record, 1, text);
+//RS         }
+//RS         ui_rt::JetUiDropItem::URI(uri) => {
+//RS             let uri = rt.heap.alloc_string(uri.clone());
+//RS             let _ = rt.heap.record_set_int(record, 0, 1);
+//RS             let _ = rt.heap.record_set_string(record, 1, uri);
+//RS         }
+//RS         ui_rt::JetUiDropItem::File(file) => {
+//RS             let file = ui_push_granted_path(rt, file.clone());
+//RS             let _ = rt.heap.record_set_int(record, 0, 2);
+//RS             let _ = rt.heap.record_set_record(record, 1, file);
+//RS         }
+//RS     }
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_drag_event_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: ui_rt::JetUiDragEvent,
+//RS ) -> i64 {
+//RS     let target = rt.heap.alloc_string(event.target.as_str().to_string());
+//RS     let phase = ui_push_drag_phase(rt, event.phase);
+//RS     let operation = ui_push_drag_operation(rt, event.operation);
+//RS     let items = rt.heap.alloc_empty_list();
+//RS     for item in &event.items {
+//RS         let item = ui_push_drop_item(rt, item);
+//RS         let _ = rt.heap.list_push_int(items, item);
+//RS     }
+//RS     let record = rt.heap.alloc_record(4);
+//RS     let _ = rt.heap.record_set_string(record, 0, target);
+//RS     let _ = rt.heap.record_set_record(record, 1, phase);
+//RS     let _ = rt.heap.record_set_record(record, 2, operation);
+//RS     let _ = rt.heap.record_set_int(record, 3, items);
+//RS     record
+//RS }
+//RS 
+//RS fn ui_push_drag_event(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: Option<ui_rt::JetUiDragEvent>,
+//RS ) -> i64 {
+//RS     let payload = event
+//RS         .as_ref()
+//RS         .map(|event| ui_push_drag_event_value(rt, event.clone()).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(record, 0, payload);
+//RS     ui_store_value(rt, record, UiValue::DragEvent(event))
+//RS }
+//RS 
+//RS fn jet_jit_ui_shortcut_command(key: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(key) = rt.heap.clone_string(key) else {
+//RS             rt.set_host_fault("JIT UIShortcut.cmd received a non-string key handle");
+//RS             return 0;
+//RS         };
+//RS         ui_push_shortcut(rt, ui_rt::JetUiShortcut::cmd(&key))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_clipboard_read_text() -> i64 {
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_clipboard_read_text());
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_clipboard_text))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_clipboard_write_text(text: i64) -> i64 {
+//RS     let Some(text) = with_rt(|rt| {
+//RS         let Some(text) = rt.heap.clone_string(text) else {
+//RS             rt.set_host_fault("JIT ui.host.clipboard.write_text received a non-string handle");
+//RS             return None;
+//RS         };
+//RS         Some(text)
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_clipboard_write_text(&text));
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_clipboard_write))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_ime_poll() -> i64 {
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_ime_poll());
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_ime_event))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_drag_poll() -> i64 {
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_drag_poll());
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_drag_event))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_ui_host_shortcut_binding(shortcut: i64, action: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(shortcut) = ui_decode_shortcut(rt, shortcut) else {
+//RS             rt.set_host_fault("JIT ui.host.shortcuts.binding received invalid shortcut");
+//RS             return 0;
+//RS         };
+//RS         let Some(action) = rt.heap.clone_string(action) else {
+//RS             rt.set_host_fault("JIT ui.host.shortcuts.binding received invalid action");
+//RS             return 0;
+//RS         };
+//RS         ui_result(
+//RS             rt,
+//RS             ui_rt::jet_ui_host_shortcut_binding(shortcut, &action),
+//RS             ui_push_shortcut_binding,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn ui_push_shortcut_dispatch(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     dispatch: ui_rt::JetUiShortcutDispatch,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     match &dispatch {
+//RS         ui_rt::JetUiShortcutDispatch::Dispatched(binding) => {
+//RS             let binding = ui_push_shortcut_binding(rt, binding.clone());
+//RS             let _ = rt.heap.record_set_int(record, 0, 0);
+//RS             let _ = rt.heap.record_set_record(record, 1, binding);
+//RS         }
+//RS         ui_rt::JetUiShortcutDispatch::Unhandled => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 1);
+//RS             let _ = rt.heap.record_set_int(record, 1, 0);
+//RS         }
+//RS     }
+//RS     ui_store_value(rt, record, UiValue::ShortcutDispatch(dispatch))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_shortcuts_register(binding: i64) -> i64 {
+//RS     let Some(binding) = with_rt(|rt| {
+//RS         let binding = match ui_value(rt, binding) {
+//RS             Some(UiValue::ShortcutBinding(binding)) => binding,
+//RS             _ => {
+//RS                 rt.set_host_fault("JIT ui.host.shortcuts.register received invalid binding");
+//RS                 return None;
+//RS             }
+//RS         };
+//RS         Some(binding)
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_shortcuts_register(binding));
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_shortcut_binding))
+//RS }
+//RS 
+//RS fn jet_jit_ui_host_shortcuts_dispatch(shortcut: i64) -> i64 {
+//RS     let Some(shortcut) = with_rt(|rt| {
+//RS         let Some(shortcut) = ui_decode_shortcut(rt, shortcut) else {
+//RS             rt.set_host_fault("JIT ui.host.shortcuts.dispatch received invalid shortcut");
+//RS             return None;
+//RS         };
+//RS         Some(shortcut)
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let result = with_ui_host(|| ui_rt::jet_ui_host_shortcuts_dispatch(shortcut));
+//RS     with_rt(|rt| ui_result(rt, result, ui_push_shortcut_dispatch))
+//RS }
+//RS 
+//RS fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {
+//RS     with_rt(|rt| {
+//RS         let Some(n) = rt.ui.nodes.get(node.saturating_sub(1) as usize) else {
+//RS             return 0.0;
+//RS         };
+//RS         if which == 0 {
+//RS             n.width
+//RS         } else {
+//RS             n.height
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_null_backend() -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.ui
+//RS             .backends
+//RS             .push(UiBackendSlot::Null(ui_rt::jet_ui_null()));
+//RS         rt.ui.backends.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_tui_backend() -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.ui.backends.push(UiBackendSlot::Tui(ui_rt::jet_ui_tui()));
+//RS         rt.ui.backends.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_gtk_backend() -> i64 {
+//RS     let backend = ui_rt::jet_ui_gtk();
+//RS     with_rt(|rt| {
+//RS         if std::env::var_os("JET_UI_HEADLESS").is_none() {
+//RS             // Keep host services and the selected render backend on the same
+//RS             // native state so callbacks observe one GTK tree.
+//RS             rt.ui.host = UiHostSlot::Gtk(backend.clone());
+//RS         }
+//RS         rt.ui.backends.push(UiBackendSlot::Gtk(backend));
+//RS         rt.ui.backends.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_node(label: i64, w: f64, h: f64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt.heap.clone_string(label).unwrap_or_default();
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_node(&label, w, h));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_text(label: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt.heap.clone_string(label).unwrap_or_default();
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_text(&label));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_button(label: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt.heap.clone_string(label).unwrap_or_default();
+//RS         rt.ui.nodes.push(ui_rt::jet_ui_button(&label));
+//RS         rt.ui.nodes.len() as i64
+//RS     })
+//RS }
+//RS fn jet_jit_ui_phone() -> i64 {
+//RS     jet_jit_ui_preview_viewport(0)
+//RS }
+//RS 
+//RS fn jet_jit_ui_tablet() -> i64 {
+//RS     jet_jit_ui_preview_viewport(1)
+//RS }
+//RS 
+//RS fn jet_jit_ui_desktop() -> i64 {
+//RS     jet_jit_ui_preview_viewport(2)
+//RS }
+//RS 
+//RS fn jet_jit_ui_preview_viewport(kind: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let record = rt.heap.alloc_record(1);
+//RS         let _ = rt.heap.record_set_int(record, 0, kind);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_previews(values: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let record = rt.heap.alloc_record(1);
+//RS         let _ = rt.heap.record_set_int(record, 0, values);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_ui_playgrounds(values: i64) -> i64 {
+//RS     jet_jit_ui_previews(values)
+//RS }
+//RS 
+//RS 
+//RS /// The canonical Core closure route carries a checked callable handle, not
+//RS /// the legacy callback expansion used by older UI rows.
+//RS fn core_ui_callable(callable: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callable)
+//RS     });
+//RS     if slot.is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("MIR UI closure has an invalid callable handle");
+//RS             true
+//RS         });
+//RS     }
+//RS     slot
+//RS }
+//RS 
+//RS fn invoke_core_ui(slot: crate::runtime_host::JitCallableSlot) {
+//RS     unsafe {
+//RS         if slot.has_env {
+//RS             let callback: unsafe extern "C" fn(i64) =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(slot.env);
+//RS         } else {
+//RS             let callback: unsafe extern "C" fn() =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn invoke_core_ui_drop(
+//RS     slot: crate::runtime_host::JitCallableSlot,
+//RS     items: Vec<ui_rt::JetUiDropItem>,
+//RS ) {
+//RS     let items_handle = Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for item in &items {
+//RS             let item = ui_push_drop_item(rt, item);
+//RS             let _ = rt.heap.list_push_int(list, item);
+//RS         }
+//RS         list
+//RS     });
+//RS     unsafe {
+//RS         if slot.has_env {
+//RS             let callback: unsafe extern "C" fn(i64, i64) =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(slot.env, items_handle);
+//RS         } else {
+//RS             let callback: unsafe extern "C" fn(i64) = std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(items_handle);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn ui_decode_ime_mode(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     raw: i64,
+//RS ) -> Option<ui_rt::JetUiImeMode> {
+//RS     match raw {
+//RS         0 => Some(ui_rt::JetUiImeMode::Native),
+//RS         1 => Some(ui_rt::JetUiImeMode::Disabled),
+//RS         _ => {
+//RS             rt.set_host_fault("MIR UI text_input received an invalid IME mode");
+//RS             None
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn ui_decode_optional_shortcut(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     result: i64,
+//RS ) -> Option<Option<ui_rt::JetUiShortcut>> {
+//RS     let (ok, bits) = crate::runtime_host::jit_result_parts(rt, result)?;
+//RS     if !ok {
+//RS         return Some(None);
+//RS     }
+//RS     ui_decode_shortcut(rt, bits as i64).map(Some)
+//RS }
+//RS 
+//RS fn ui_decode_optional_string(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     result: i64,
+//RS ) -> Option<Option<String>> {
+//RS     let (ok, bits) = crate::runtime_host::jit_result_parts(rt, result)?;
+//RS     if !ok {
+//RS         return Some(None);
+//RS     }
+//RS     rt.heap.clone_string(bits as i64).map(Some)
+//RS }
+//RS 
+//RS #[allow(clippy::too_many_arguments)]
+//RS fn jet_jit_core_ui_preview_attach_compiler_source(
+//RS     preview: i64,
+//RS     source_id: i64,
+//RS     source_file: i64,
+//RS     build_id: i64,
+//RS     revision: i64,
+//RS     start_line: i64,
+//RS     start_column: i64,
+//RS     end_line: i64,
+//RS     end_column: i64,
+//RS ) -> i64 {
+//RS     with_rt(|rt| {
+//RS         if rt.heap.record_get_int(preview, 4).is_none() {
+//RS             rt.set_host_fault("JIT UI preview has an invalid preview record");
+//RS             return 0;
+//RS         }
+//RS         let source = rt.heap.alloc_record(8);
+//RS         let _ = rt.heap.record_set_string(source, 0, source_id);
+//RS         let _ = rt.heap.record_set_string(source, 1, source_file);
+//RS         let _ = rt.heap.record_set_string(source, 2, build_id);
+//RS         let _ = rt.heap.record_set_string(source, 3, revision);
+//RS         let _ = rt.heap.record_set_int(source, 4, start_line);
+//RS         let _ = rt.heap.record_set_int(source, 5, start_column);
+//RS         let _ = rt.heap.record_set_int(source, 6, end_line);
+//RS         let _ = rt.heap.record_set_int(source, 7, end_column);
+//RS         if rt.heap.record_set_record(preview, 4, source).is_none() {
+//RS             rt.set_host_fault("JIT UI preview source attachment failed");
+//RS             0
+//RS         } else {
+//RS             preview
+//RS         }
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0236 crates/jet-jit/src/Ui.rs:1795-3608
+

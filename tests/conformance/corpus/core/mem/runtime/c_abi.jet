@@ -1,0 +1,151 @@
+use core.mem.host.kernel_c_abi as c_abi_policy
+use core.text as c_abi_text
+
+// These assertions exercise real independent policy, not C exports/linking,
+// raw-handle ownership, allocation, callback unwinding or tier acceptance.
+// Main assembles this private source closure; no fake provider is admissible.
+
+fn c_abi_test_layout(size: U64, align: U64, target_max: U64, expected_size: U64) Never! {
+    layout :: c_abi_policy.c_abi_box_layout(size, align, target_max) ?? panic("expected valid box layout")
+    assert_eq(layout.size, expected_size)
+    assert_eq(layout.align, align)
+}
+
+fn c_abi_test_bad_layout(size: U64, align: U64, target_max: U64) Never! {
+    if c_abi_policy.c_abi_box_layout(size, align, target_max) == {
+        .Val(_) -> panic("expected invalid box layout")
+        .None -> {}
+    }
+}
+
+#Test("C ABI source line projects only native U32 range") {
+    assert_eq(c_abi_policy.c_abi_line_of(I64{-1}), U32{0})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{-9223372036854775807} - I64{1}), U32{0})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{0}), U32{0})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{1}), U32{1})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{4294967295}), U32{4294967295})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{4294967296}), U32{0})
+    assert_eq(c_abi_policy.c_abi_line_of(I64{9223372036854775807}), U32{0})
+}
+
+#Test("C ABI allocation zero size still validates alignment and charges one byte") {
+    // Rust alloc/free :110,:127; zero size does not permit zero alignment.
+    c_abi_test_layout(U64{0}, U64{1}, U64{9223372036854775807}, U64{1})
+    c_abi_test_layout(U64{0}, U64{8}, U64{9223372036854775807}, U64{1})
+    c_abi_test_bad_layout(U64{0}, U64{0}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{0}, U64{3}, U64{9223372036854775807})
+    c_abi_test_layout(U64{17}, U64{16}, U64{9223372036854775807}, U64{17})
+}
+
+#Test("C ABI allocation rejects nonpowers and complete unsigned words without wrapping") {
+    c_abi_test_bad_layout(U64{1}, U64{0}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{1}, U64{3}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{1}, U64{6}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{1}, U64{18446744073709551615}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{18446744073709551615}, U64{1}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{9223372036854775808}, U64{1}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{0}, U64{9223372036854775808}, U64{9223372036854775807})
+}
+
+#Test("C ABI allocation exact signed address bound includes alignment padding") {
+    // 64-bit target facts are explicit test inputs, not an assumed host layout.
+    c_abi_test_layout(U64{9223372036854775806}, U64{1}, U64{9223372036854775807}, U64{9223372036854775806})
+    c_abi_test_layout(U64{9223372036854775807}, U64{1}, U64{9223372036854775807}, U64{9223372036854775807})
+    c_abi_test_bad_layout(U64{9223372036854775808}, U64{1}, U64{9223372036854775807})
+    c_abi_test_layout(U64{9223372036854775800}, U64{8}, U64{9223372036854775807}, U64{9223372036854775800})
+    c_abi_test_bad_layout(U64{9223372036854775801}, U64{8}, U64{9223372036854775807})
+    c_abi_test_layout(U64{1}, U64{4611686018427387904}, U64{9223372036854775807}, U64{1})
+}
+
+#Test("C ABI layout uses selected target bound rather than build host width") {
+    // Same max(1)+alignment contract for a target with 32-bit pointers.
+    c_abi_test_layout(U64{2147483647}, U64{1}, U64{2147483647}, U64{2147483647})
+    c_abi_test_bad_layout(U64{2147483648}, U64{1}, U64{2147483647})
+    c_abi_test_layout(U64{2147483640}, U64{8}, U64{2147483647}, U64{2147483640})
+    c_abi_test_bad_layout(U64{2147483641}, U64{8}, U64{2147483647})
+    c_abi_test_bad_layout(U64{0}, U64{2147483648}, U64{2147483647})
+}
+
+#Test("C ABI character carrier replaces invalid Unicode without narrowing wrap") {
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{0}), U32{0})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{65}), U32{65})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{233}), U32{233})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{55295}), U32{55295})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{55296}), U32{65533})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{57343}), U32{65533})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{57344}), U32{57344})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{128512}), U32{128512})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{1114111}), U32{1114111})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{1114112}), U32{65533})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{-1}), U32{65533})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{4294967296}), U32{65533})
+    assert_eq(c_abi_policy.c_abi_char_scalar(I64{9223372036854775807}), U32{65533})
+}
+
+#Test("C ABI Bool and flush flags accept every nonzero byte and emit only zero or one") {
+    assert(!c_abi_policy.c_abi_bool_input(U8{0}))
+    assert(c_abi_policy.c_abi_bool_input(U8{1}))
+    assert(c_abi_policy.c_abi_bool_input(U8{2}))
+    assert(c_abi_policy.c_abi_bool_input(U8{128}))
+    assert(c_abi_policy.c_abi_bool_input(U8{255}))
+    assert_eq(c_abi_policy.c_abi_bool_output(false), U8{0})
+    assert_eq(c_abi_policy.c_abi_bool_output(true), U8{1})
+    assert_eq(c_abi_policy.c_abi_bool_output(c_abi_policy.c_abi_bool_input(U8{255})), U8{1})
+}
+
+#Test("C ABI String compare reuses canonical lexical bytes without allocating byte lists") {
+    assert_eq(c_abi_policy.c_abi_string_compare("", ""), I64{0})
+    assert_eq(c_abi_policy.c_abi_string_compare("", "a"), I64{-1})
+    assert_eq(c_abi_policy.c_abi_string_compare("abc", "ab"), I64{1})
+    assert_eq(c_abi_policy.c_abi_string_compare("ab", "abc"), I64{-1})
+    assert_eq(c_abi_policy.c_abi_string_compare("same", "same"), I64{0})
+    assert_eq(c_abi_policy.c_abi_string_compare("z", "é"), I64{-1})
+    assert_eq(c_abi_policy.c_abi_string_compare("é", "é"), I64{1})
+    assert_eq(c_abi_policy.c_abi_string_compare("😀", "é"), I64{1})
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF-8")
+    assert_eq(c_abi_policy.c_abi_string_compare(nul, ""), I64{1})
+    assert_eq(c_abi_policy.c_abi_string_compare(nul, "a"), I64{-1})
+    // Ordinary borrowing must leave both caller-owned Strings usable.
+    left := "héllo"
+    right := "héllp"
+    assert_eq(c_abi_policy.c_abi_string_compare(left, right), I64{-1})
+    assert_eq(left, "héllo")
+    assert_eq(right, "héllp")
+}
+
+#Test("String source ownership scalar length oracle remains canonical with Core text in scope") {
+    // string_source_ownership.rs:57–69, string_len_source_agrees_across_execution_tiers.
+    // This retains the exact value oracle only; a private test is not tier proof
+    // or jet_char_len(handle) proof. The handle/projection/Int word is blocked.
+    assert_eq("héllo".len(), 5)
+}
+
+// Original native acceptance remains OPEN, not replaced by the private tests:
+// * library_outputs.rs:115,164,243,539,616: export/import, native C/C++ hosts,
+//   native/component equality, opaque text lifecycle and re-entry/panic child;
+//   :606 stdout "embedding-ok\n", :608 stderr contains "Stop [E3001]".
+// * failure_tier_parity.rs:167,198,248,281,291: converted/recovered failure
+//   report, no stdout on failure, matching exit1 and reports across tiers.
+// * resource_close.rs:139,161,183,255,319,379,404,427,478: ordinary cleanup,
+//   Stop cleanup+exit70 exactly once, transfer, LIFO/early exit and native parity.
+//   Stop E3010/E3011/E3012 each appear once (:239–250); host faults keep exit101.
+// * string_source_ownership.rs:6,20,32 are compiler source/visibility/route tests,
+//   not raw-handle lifetime proofs; intentionally unchanged. :57 value above.
+// * Compiler/JetBackend/Tests/check-native-fixtures.mjs:28–33 original goldens:
+//   hello="hello, world\n", arithmetic="18\n",
+//   control-flow="0\n1\n2\nsum = 15\ntrue\n",
+//   aggregates="7\n5\n12\ntrue\np.x = 3\n".
+//
+// True native assertions additionally require null free/drop no-op before any
+// layout/projection; zero-size nonnull aligned allocation; fullwidth exact Int
+// spills and narrowing Stop wording; static invalid UTF8 lossily constructed;
+// nonASCII retained handle cloning and borrowed calls; builder finish identical
+// address with no copy; cursor transferred/dropped exactly once; stdout newline,
+// flush, stderr source line and report; NO unwind entering a generated frame.
+// They cannot be expressed as calls to old Rust jet_rt_* symbols, a fake opaque
+// owner, or a return-success callback provider. #4483, #4467, raw typed owner and
+// no-unwind capability requests must land first. Positive/control/restored and
+// the original host/tier/link tests are then required, not implied here.
+// Private control: change the zero-size expected size from 1
+// to 0, or the max+alignment layout from rejection to acceptance; restored real
+// policy must pass. Native control must mutate the true export path itself.

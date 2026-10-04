@@ -1,0 +1,306 @@
+use core.sys.target.[selected_family]
+use std.cell.[Cell, RefCell]
+use std.string as string
+use jet_std.[jet_numeric_float_to_int, jet_numeric_float_narrow, jet_numeric_bit_count,
+    jet_numeric_int_bit_count, jet_numeric_try_from_fixed, jet_numeric_checked_widen_at,
+    jet_int_from_str, jet_int_try_from, jet_int_try_from_checked, jet_int_checked_fixed,
+    jet_int_checked_widen, jet_unit_conversion_exact, jet_unit_conversion_rounded]
+use jet_foundation.UnitConversion.[UnitRoundingMode]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:1
+// Web marshals operands and result carriers only. Conversion policy stays in
+// NumericConversion, CommonTypes and Foundation UnitConversion. Every input
+// pointer must refer to bridge-owned TLS allocation, never arbitrary host bytes.
+// Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:7
+// GATE #4483: immutable selected_arch is needed for the exact wasm32 cfg.
+prep if selected_family() == .Wasm and core.sys.target.selected_arch() == "wasm32" {
+module jet_numeric_web_bridge {
+    // GATE #4494: per-thread Cell/RefCell storage, vector backing addresses and
+    // exact unmangled C exports for every pub jet_numeric_web_* callable below.
+    // GATE #4483: wasm32 pointer narrowing and signed i128 LE result carrier.
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:12
+    const TEXT_SLOT_COUNT: Int = 6
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:13
+    const FILE_SLOT: U32 = U32{0}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:14
+    const SCALE_NUM_SLOT: U32 = U32{1}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:15
+    const SCALE_DEN_SLOT: U32 = U32{2}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:16
+    const OFFSET_NUM_SLOT: U32 = U32{3}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:17
+    const OFFSET_DEN_SLOT: U32 = U32{4}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:18
+    const INT_SLOT: U32 = U32{5}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:19
+    const OK: I32 = I32{1}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:20
+    const ABSENT_OR_NONE: I32 = I32{0}
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:21
+    const BRIDGE_ERROR: I32 = I32{-1}
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:23
+    // Native thread_local names are gated; initialization is once per thread,
+    // not a process-global mutable buffer or a fresh allocation per call.
+    TEXT :: std.thread_local(fn() { RefCell.new(std.array.from_fn<[U8], 6>(fn(_) { [] })) })
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:26
+    ERROR :: std.thread_local(fn() { RefCell.new([U8]{}) })
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:27
+    I128_RESULT :: std.thread_local(fn() { Cell.new(std.array.from_fn<U8, 16>(fn(_) { U8{0} })) })
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:28
+    F64_RESULT :: std.thread_local(fn() { Cell.new(0.0) })
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:29
+    F32_RESULT :: std.thread_local(fn() { Cell.new(F32{0.0}) })
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:32
+    fn set_error(message: String) Never! {
+        ERROR.with(fn(cell) {
+            error := cell.borrow_mut()
+            error.clear()
+            error.extend_from_slice(message.bytes())
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:40
+    fn begin_result() Never! {
+        ERROR.with(fn(cell) { cell.borrow_mut().clear() })
+        I128_RESULT.with(fn(cell) { cell.set(std.array.from_fn<U8, 16>(fn(_) { U8{0} })) })
+        F64_RESULT.with(fn(cell) { cell.set(0.0) })
+        F32_RESULT.with(fn(cell) { cell.set(F32{0.0}) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:47
+    fn finish_result() Never! {
+        ERROR.with(fn(cell) {
+            error := cell.borrow_mut()
+            error.clear()
+            error.shrink_to_fit()
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:55
+    fn store_i128(value: Int) Never! {
+        // GATE #4483: the conversion kernels return exactly an i128-domain value;
+        // serialize all 16 signed LE bytes, not a packed Int handle or an i64.
+        I128_RESULT.with(fn(cell) { cell.set(std.i128.from(value).to_le_bytes()) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:59
+    fn result_ok_i128(value: Int) -> I32 Never! { store_i128(value); OK }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:64
+    fn result_err(error: String) -> I32 Never! { set_error(error); ABSENT_OR_NONE }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:69
+    fn bridge_error(error: String) -> I32 Never! { set_error(error); BRIDGE_ERROR }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:74
+    fn text_slot(slot: U32) -> Int Err! {
+        // Exact selected wasm32 usize conversion.
+        index :: match std.usize.try_from(slot) {
+            Val(index) => Int{index},
+            Err(_) => return Err("invalid numeric Web text slot"),
+        }
+        if index < TEXT_SLOT_COUNT { index } else { return Err("invalid numeric Web text slot") }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:81
+    fn read_text(slot: U32, ptr: U32, len: U32, label: String) -> String Err! {
+        index :: text_slot(slot)?
+        length :: match std.usize.try_from(len) {
+            Val(length) => Int{length},
+            Err(_) => return Err("numeric Web {label} length is invalid"),
+        }
+        TEXT.with(fn(cell) {
+            slots :: cell.borrow()
+            bytes :: slots[index]
+            if bytes.len() != length -> return Err("numeric Web {label} length does not match its allocation")
+            if (length == 0 and ptr != U32{0}) or (length != 0 and bytes.as_ptr().addr() != Int{ptr}) {
+                return Err("numeric Web {label} pointer is not owned by the bridge")
+            }
+            // GATE #4409: strict UTF8 conversion, with bridge-owned error wording.
+            match string.String.from_utf8(bytes.clone()) {
+                Val(text) => text,
+                Err(_) => return Err("numeric Web {label} must be UTF-8"),
+            }
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:99
+    fn read_file(ptr: U32, len: U32) -> String Err! { read_text(FILE_SLOT, ptr, len, "source file") }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:103
+    fn read_int(ptr: U32, len: U32) -> I64 Err! {
+        value :: read_text(INT_SLOT, ptr, len, "Int")?
+        match jet_int_from_str(value) {
+            Val(value) => value,
+            Err(error) => return Err("numeric Web Int is invalid: {error}"),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:109
+    fn rounding_mode(mode: I64) -> UnitRoundingMode Err! {
+        match mode {
+            0 => .TowardZero, 1 => .Floor, 2 => .Ceiling, 3 => .NearestEven,
+            _ => return Err("invalid unit rounding mode"),
+        }
+    }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:120
+    pub fn jet_numeric_web_text_alloc(slot: U32, length: U32) -> U32 Never! {
+        index :: match text_slot(slot) { Val(index) => index, Err(_) => return U32{0} }
+        size :: match std.usize.try_from(length) { Val(size) => Int{size}, Err(_) => return U32{0} }
+        TEXT.with(fn(cell) {
+            slots := cell.borrow_mut()
+            bytes := &slots[index]
+            if not bytes.is_empty() -> return U32{0}
+            if size == 0 -> return U32{0}
+            bytes.resize(size, U8{0})
+            U32{bytes.as_mut_ptr().addr()}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:142
+    pub fn jet_numeric_web_text_free(slot: U32, ptr: U32) -> U32 Never! {
+        index :: match text_slot(slot) { Val(index) => index, Err(_) => return U32{0} }
+        TEXT.with(fn(cell) {
+            slots := cell.borrow_mut()
+            bytes := &slots[index]
+            owned :: if bytes.is_empty() { ptr == U32{0} } else { Int{ptr} == bytes.as_ptr().addr() }
+            if not owned -> return U32{0}
+            bytes.clear()
+            bytes.shrink_to_fit()
+            U32{1}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:164
+    pub fn jet_numeric_web_result_clear() Never! { finish_result() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:169
+    pub fn jet_numeric_web_i128_ptr() -> U32 Never! { I128_RESULT.with(fn(cell) { U32{cell.as_ptr().addr()} }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:174
+    pub fn jet_numeric_web_i128_len() -> U32 Never! { U32{16} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:179
+    pub fn jet_numeric_web_error_ptr() -> U32 Never! { ERROR.with(fn(cell) { U32{cell.borrow().as_ptr().addr()} }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:184
+    pub fn jet_numeric_web_error_len() -> U32 Never! { ERROR.with(fn(cell) { U32{cell.borrow().len()} }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:189
+    pub fn jet_numeric_web_f64_result() -> Float Never! { F64_RESULT.with(fn(cell) { cell.get() }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:194
+    pub fn jet_numeric_web_f32_result() -> F32 Never! { F32_RESULT.with(fn(cell) { cell.get() }) }
+
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:199
+    pub fn jet_numeric_web_float_to_int(value: Float, kind: I64) -> I32 Never! {
+        begin_result()
+        match jet_numeric_float_to_int(value, kind) {
+            Val(value) => result_ok_i128(value), Err(error) => result_err(error),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:208
+    pub fn jet_numeric_web_float_narrow(value: Float) -> I32 Never! {
+        begin_result()
+        match jet_numeric_float_narrow(value) {
+            Val(value) => { F32_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            Err(error) => result_err(error),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:220
+    pub fn jet_numeric_web_bit_count(value: I64, operation: I64, width: I64) -> I64 Never! {
+        jet_numeric_bit_count(value, operation, width)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:225
+    pub fn jet_numeric_web_int_bit_count(value_ptr: U32, value_len: U32, operation: I64, width: I64) -> I32 Never! {
+        begin_result()
+        value :: match read_int(value_ptr, value_len) { Val(value) => value, Err(error) => return bridge_error(error) }
+        result_ok_i128(Int{jet_numeric_int_bit_count(value, operation, width)})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:240
+    pub fn jet_numeric_web_try_from_fixed(raw: U64, signed: U32, kind: I64) -> I32 Never! {
+        begin_result()
+        match jet_numeric_try_from_fixed(raw, signed != U32{0}, kind) {
+            Val(value) => result_ok_i128(value), Err(error) => result_err(error),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:253
+    pub fn jet_numeric_web_int_try_from(value_ptr: U32, value_len: U32, kind: I64) -> I32 Never! {
+        begin_result()
+        value :: match read_int(value_ptr, value_len) { Val(value) => value, Err(error) => return bridge_error(error) }
+        match jet_int_try_from(value, kind) { Val(value) => result_ok_i128(value), None => ABSENT_OR_NONE }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:270
+    pub fn jet_numeric_web_int_try_from_checked(value_ptr: U32, value_len: U32, kind: I64) -> I32 Never! {
+        begin_result()
+        value :: match read_int(value_ptr, value_len) { Val(value) => value, Err(error) => return bridge_error(error) }
+        match jet_int_try_from_checked(value, kind) {
+            Val(value) => result_ok_i128(value), Err(error) => result_err(error),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:287
+    pub fn jet_numeric_web_int_checked_fixed(value_ptr: U32, value_len: U32, kind: I64,
+        file_ptr: U32, file_len: U32, line: U32) -> I32 Never! {
+        begin_result()
+        value :: match read_int(value_ptr, value_len) { Val(value) => value, Err(error) => return bridge_error(error) }
+        file :: match read_file(file_ptr, file_len) { Val(file) => file, Err(error) => return bridge_error(error) }
+        converted :: jet_int_checked_fixed(value, kind, file, line)
+        result_ok_i128(converted)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:309
+    pub fn jet_numeric_web_checked_widen_at(raw: U64, signed: U32, target_f32: U32,
+        file_ptr: U32, file_len: U32, line: U32) -> Float Never! {
+        begin_result()
+        file :: match read_file(file_ptr, file_len) {
+            Val(file) => file,
+            Err(error) => { set_error(error); return 0.0 },
+        }
+        jet_numeric_checked_widen_at(raw, signed != U32{0}, target_f32 != U32{0}, file, line)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:329
+    pub fn jet_numeric_web_int_checked_widen(value_ptr: U32, value_len: U32, target_f32: U32,
+        file_ptr: U32, file_len: U32, line: U32) -> Float Never! {
+        begin_result()
+        value :: match read_int(value_ptr, value_len) {
+            Val(value) => value,
+            Err(error) => { set_error(error); return 0.0 },
+        }
+        file :: match read_file(file_ptr, file_len) {
+            Val(file) => file,
+            Err(error) => { set_error(error); return 0.0 },
+        }
+        jet_int_checked_widen(value, target_f32 != U32{0}, file, line)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:356
+    pub fn jet_numeric_web_unit_conversion_exact(value: Float,
+        scale_num_ptr: U32, scale_num_len: U32, scale_den_ptr: U32, scale_den_len: U32,
+        offset_num_ptr: U32, offset_num_len: U32, offset_den_ptr: U32, offset_den_len: U32) -> I32 Never! {
+        begin_result()
+        scale_num :: match read_text(SCALE_NUM_SLOT, scale_num_ptr, scale_num_len, "scale numerator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        scale_den :: match read_text(SCALE_DEN_SLOT, scale_den_ptr, scale_den_len, "scale denominator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        offset_num :: match read_text(OFFSET_NUM_SLOT, offset_num_ptr, offset_num_len, "offset numerator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        offset_den :: match read_text(OFFSET_DEN_SLOT, offset_den_ptr, offset_den_len, "offset denominator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        match jet_unit_conversion_exact(value, scale_num, scale_den, offset_num, offset_den) {
+            Val(value) => { F64_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            None => ABSENT_OR_NONE,
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/NumericWeb.rs:394
+    pub fn jet_numeric_web_unit_conversion_rounded(value: Float,
+        scale_num_ptr: U32, scale_num_len: U32, scale_den_ptr: U32, scale_den_len: U32,
+        offset_num_ptr: U32, offset_num_len: U32, offset_den_ptr: U32, offset_den_len: U32,
+        mode: I64, digits: I64) -> I32 Never! {
+        begin_result()
+        mode :: match rounding_mode(mode) { Val(mode) => mode, Err(error) => return bridge_error(error) }
+        scale_num :: match read_text(SCALE_NUM_SLOT, scale_num_ptr, scale_num_len, "scale numerator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        scale_den :: match read_text(SCALE_DEN_SLOT, scale_den_ptr, scale_den_len, "scale denominator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        offset_num :: match read_text(OFFSET_NUM_SLOT, offset_num_ptr, offset_num_len, "offset numerator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        offset_den :: match read_text(OFFSET_DEN_SLOT, offset_den_ptr, offset_den_len, "offset denominator") {
+            Val(value) => value, Err(error) => return bridge_error(error),
+        }
+        match jet_unit_conversion_rounded(value, scale_num, scale_den, offset_num, offset_den, mode, digits) {
+            Val(value) => { F64_RESULT.with(fn(cell) { cell.set(value) }); OK },
+            Err(error) => result_err(error),
+        }
+    }
+}
+}

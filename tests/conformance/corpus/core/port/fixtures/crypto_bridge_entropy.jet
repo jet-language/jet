@@ -1,0 +1,1827 @@
+// PORT-PENDING 1055 tests-fixtures-crypto-bridge-entropy: tests/fixtures/crypto_bridge_entropy.rs:1-1823
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // The test that builds this fixture prepends the bridge's own projection:
+//RS // `jet_pkg_model::FFI::crypto_bridge_root_modules()` and
+//RS // `crypto_bridge_entropy_runtime()` (standalone Outcome + entropy provider).
+//RS include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
+//RS 
+//RS #[cfg(test)]
+//RS mod expiring_secret_runtime {
+//RS     use super::{jet_crypto_clear_zeroize_test_observer, jet_crypto_set_zeroize_test_observer};
+//RS     use std::cell::RefCell;
+//RS     use std::rc::Rc;
+//RS     use std::sync::Arc;
+//RS     use std::sync::atomic::{AtomicI64, Ordering};
+//RS 
+//RS     #[derive(Debug, PartialEq)]
+//RS     struct JetExpired;
+//RS 
+//RS     struct ManualClock {
+//RS         now: Arc<AtomicI64>,
+//RS     }
+//RS 
+//RS     impl ManualClock {
+//RS         fn new(now: i64) -> Self {
+//RS             Self {
+//RS                 now: Arc::new(AtomicI64::new(now)),
+//RS             }
+//RS         }
+//RS 
+//RS         fn set(&self, now: i64) {
+//RS             self.now.store(now, Ordering::Relaxed);
+//RS         }
+//RS 
+//RS         fn observer(&self) -> impl Fn() -> i64 + Send + Sync + 'static {
+//RS             let now = Arc::clone(&self.now);
+//RS             move || now.load(Ordering::Relaxed)
+//RS         }
+//RS     }
+//RS 
+//RS     include!("../../crates/jet-codegen/src/Prelude/Core/ExpiringSecret.rs");
+//RS 
+//RS     #[test]
+//RS     fn expiry_and_wrapper_drop_zeroize_owned_values() {
+//RS         struct ObservedSecret(Vec<u8>);
+//RS         impl Drop for ObservedSecret {
+//RS             fn drop(&mut self) {
+//RS                 super::zeroize(&mut self.0);
+//RS             }
+//RS         }
+//RS 
+//RS         let observed = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+//RS         let snapshots = Rc::clone(&observed);
+//RS         jet_crypto_set_zeroize_test_observer(move |bytes| {
+//RS             snapshots.borrow_mut().push(bytes.to_vec());
+//RS         });
+//RS 
+//RS         let clock = ManualClock::new(0);
+//RS         let mut expired =
+//RS             JetExpiringSecret::new(ObservedSecret(vec![1; 17]), 0, clock.observer());
+//RS         clock.set(1);
+//RS         assert_eq!(expired.with(|_| ()), Err(JetExpired));
+//RS         drop(expired);
+//RS         drop(JetExpiringSecret::new(
+//RS             ObservedSecret(vec![2; 18]),
+//RS             0,
+//RS             clock.observer(),
+//RS         ));
+//RS 
+//RS         jet_crypto_clear_zeroize_test_observer();
+//RS         assert_eq!(*observed.borrow(), vec![vec![0; 17], vec![0; 18]]);
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use std::cell::RefCell;
+//RS     use std::rc::Rc;
+//RS 
+//RS     fn fail_entropy() {
+//RS         jet_crypto_entropy_set_test_provider(|_| JetCryptoEntropyStep::Failed);
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     enum PublishRace {
+//RS         SwapParent { at: &'static str, parent: std::path::PathBuf, moved: std::path::PathBuf },
+//RS         CreateDestination { at: &'static str, destination: std::path::PathBuf },
+//RS         ReplaceCandidate { at: &'static str, parent: std::path::PathBuf, prefix: &'static str },
+//RS         AppendFile { at: &'static str, path: std::path::PathBuf },
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     thread_local! {
+//RS         static PUBLISH_RACE: RefCell<Option<PublishRace>> = const { RefCell::new(None) };
+//RS         static CANCEL_BOUNDARY: RefCell<Option<&'static str>> = const { RefCell::new(None) };
+//RS         static CANCEL_NOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS         static OVERSIZE_BOUNDARY_HIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn publication_race(created: &'static str) {
+//RS         PUBLISH_RACE.with(|slot| {
+//RS             let mut slot = slot.borrow_mut();
+//RS             let ready = match slot.as_ref() {
+//RS                 Some(PublishRace::SwapParent { at, .. }
+//RS                     | PublishRace::CreateDestination { at, .. }
+//RS                     | PublishRace::ReplaceCandidate { at, .. }
+//RS                     | PublishRace::AppendFile { at, .. }) => *at == created,
+//RS                 None => false,
+//RS             };
+//RS             if !ready { return; }
+//RS             match slot.take().unwrap() {
+//RS                 PublishRace::SwapParent { parent, moved, .. } => {
+//RS                     std::fs::rename(&parent, &moved).unwrap();
+//RS                     std::fs::create_dir(&parent).unwrap();
+//RS                 }
+//RS                 PublishRace::CreateDestination { destination, .. } => {
+//RS                     std::fs::write(destination, b"racer").unwrap();
+//RS                 }
+//RS                 PublishRace::ReplaceCandidate { parent, prefix, .. } => {
+//RS                     assert!(std::fs::read_dir(&parent).unwrap().all(|entry| {
+//RS                         !entry.unwrap().file_name().to_string_lossy().starts_with(&format!(".{prefix}-"))
+//RS                     }));
+//RS                     let candidate = parent.join(format!(".{prefix}-attacker"));
+//RS                     let moved = parent.join(format!(".{prefix}-attacker-moved"));
+//RS                     std::fs::write(&candidate, b"attacker-original").unwrap();
+//RS                     std::fs::rename(&candidate, &moved).unwrap();
+//RS                     std::fs::write(&candidate, b"attacker-replacement").unwrap();
+//RS                 }
+//RS                 PublishRace::AppendFile { path, .. } => {
+//RS                     use std::io::Write;
+//RS                     std::fs::OpenOptions::new().append(true).open(path).unwrap()
+//RS                         .write_all(b"trailing byte").unwrap();
+//RS                 }
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_publish_race(action: PublishRace) {
+//RS         PUBLISH_RACE.with(|slot| *slot.borrow_mut() = Some(action));
+//RS         jet_crypto_set_file_boundary_test_observer(publication_race);
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn cancellation_boundary(observed: &'static str) {
+//RS         CANCEL_BOUNDARY.with(|slot| {
+//RS             if slot.borrow().is_some_and(|boundary| boundary == observed) {
+//RS                 slot.borrow_mut().take();
+//RS                 CANCEL_NOW.with(|cancel| cancel.set(true));
+//RS             }
+//RS         });
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_cancellation(boundary: &'static str) {
+//RS         CANCEL_BOUNDARY.with(|slot| *slot.borrow_mut() = Some(boundary));
+//RS         CANCEL_NOW.with(|cancel| cancel.set(false));
+//RS         jet_crypto_set_file_boundary_test_observer(cancellation_boundary);
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn cancel_at_boundary() -> bool {
+//RS         CANCEL_NOW.with(|cancel| cancel.get())
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn assert_cancellation_fired() {
+//RS         CANCEL_BOUNDARY.with(|slot| assert!(slot.borrow().is_none()));
+//RS         CANCEL_NOW.with(|cancel| assert!(cancel.get()));
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn record_oversize_boundary(observed: &'static str) {
+//RS         if matches!(observed, "seal-stage" | "seal-output") {
+//RS             OVERSIZE_BOUNDARY_HIT.with(|hit| hit.set(true));
+//RS             CANCEL_NOW.with(|cancel| cancel.set(true));
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_oversize_boundary_trap() {
+//RS         OVERSIZE_BOUNDARY_HIT.with(|hit| hit.set(false));
+//RS         CANCEL_NOW.with(|cancel| cancel.set(false));
+//RS         jet_crypto_set_file_boundary_test_observer(record_oversize_boundary);
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_short_io(boundary: &'static str) {
+//RS         jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::Short(7));
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_zero_progress(boundary: &'static str) {
+//RS         jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::Short(0));
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_eof_after(boundary: &'static str, bytes: usize) {
+//RS         jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::EofAfter(bytes));
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn arm_io_error(boundary: &'static str, code: i32) {
+//RS         jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::Error(code));
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn clear_observed_io_fault() {
+//RS         assert!(jet_crypto_file_io_test_hits() > 0);
+//RS         jet_crypto_clear_file_io_test_fault();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn replace_candidate_at(at: &'static str, parent: &std::path::Path, prefix: &'static str) {
+//RS         arm_publish_race(PublishRace::ReplaceCandidate {
+//RS             at,
+//RS             parent: parent.to_path_buf(),
+//RS             prefix,
+//RS         });
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn assert_attacker_candidates(parent: &std::path::Path, prefix: &str) {
+//RS         assert_eq!(std::fs::read(parent.join(format!(".{prefix}-attacker"))).unwrap(), b"attacker-replacement");
+//RS         assert_eq!(std::fs::read(parent.join(format!(".{prefix}-attacker-moved"))).unwrap(), b"attacker-original");
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     fn assert_not_attacker(path: &std::path::Path) {
+//RS         let bytes = std::fs::read(path).unwrap();
+//RS         assert_ne!(bytes, b"attacker-original");
+//RS         assert_ne!(bytes, b"attacker-replacement");
+//RS     }
+//RS 
+//RS     fn decode_hex(text: &str) -> Vec<u8> {
+//RS         text.as_bytes()
+//RS             .chunks_exact(2)
+//RS             .map(|pair| {
+//RS                 let digit = |byte: u8| match byte {
+//RS                     b'0'..=b'9' => byte - b'0',
+//RS                     b'a'..=b'f' => byte - b'a' + 10,
+//RS                     _ => panic!("invalid test hex"),
+//RS                 };
+//RS                 digit(pair[0]) << 4 | digit(pair[1])
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn file_error_tag(error: &JetFileCryptoError) -> &'static str {
+//RS         match error {
+//RS             JetFileCryptoError::OpenFailed => "open-failed",
+//RS             JetFileCryptoError::SealFailed(_) => "seal-failed",
+//RS             JetFileCryptoError::SourceIo => "source-io",
+//RS             JetFileCryptoError::DestinationExists => "destination-exists",
+//RS             JetFileCryptoError::DestinationIo => "destination-io",
+//RS             JetFileCryptoError::Cancelled => "internal-cancelled",
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn file_crypto_error_projection_is_exhaustive_and_redacted() {
+//RS         let public = [
+//RS             JetFileCryptoError::OpenFailed,
+//RS             JetFileCryptoError::SealFailed(JetCryptoError::EntropyUnavailable),
+//RS             JetFileCryptoError::SourceIo,
+//RS             JetFileCryptoError::DestinationExists,
+//RS             JetFileCryptoError::DestinationIo,
+//RS         ];
+//RS         assert_eq!(
+//RS             public.iter().map(file_error_tag).collect::<Vec<_>>(),
+//RS             ["open-failed", "seal-failed", "source-io", "destination-exists", "destination-io"]
+//RS         );
+//RS         assert_eq!(file_error_tag(&JetFileCryptoError::Cancelled), "internal-cancelled");
+//RS         let rendered = public.iter().map(ToString::to_string).collect::<Vec<_>>();
+//RS         assert_eq!(
+//RS             rendered,
+//RS             [
+//RS                 "encrypted file could not be opened",
+//RS                 "encrypted file seal failed: the operating system could not provide cryptographic randomness",
+//RS                 "encrypted file source I/O failed",
+//RS                 "encrypted file destination already exists",
+//RS                 "encrypted file destination I/O failed",
+//RS             ]
+//RS         );
+//RS         let rendered = rendered.join("\n");
+//RS         for forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
+//RS             assert!(!rendered.contains(forbidden), "file error leaked `{forbidden}`: {rendered}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_bridge_entropy_consumer_fails_without_output() {
+//RS         let plaintext = b"secret".to_vec();
+//RS 
+//RS         fail_entropy();
+//RS         assert!(matches!(
+//RS             jet_crypto_seal_typed_impl(vec![JetX25519PublicKey([7; 32])], &plaintext, &vec![]),
+//RS             Err(JetCryptoError::EntropyUnavailable)
+//RS         ));
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             jet_crypto_keygen_impl(),
+//RS             Err("the operating system could not provide cryptographic randomness".to_string())
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             jet_crypto_password_hash_impl(&"password".to_string()),
+//RS             Err("the operating system could not provide cryptographic randomness".to_string())
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn entropy_failure_stays_typed_until_each_public_bridge_boundary() {
+//RS         let plaintext = b"secret".to_vec();
+//RS 
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             jet_crypto_entropy_bytes(32),
+//RS             Err(JetCryptoError::EntropyUnavailable)
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         fail_entropy();
+//RS         assert!(matches!(
+//RS             jet_crypto_seal_typed_impl(vec![JetX25519PublicKey([7; 32])], &plaintext, &vec![]),
+//RS             Err(JetCryptoError::EntropyUnavailable)
+//RS         ));
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             crypto_keygen(),
+//RS             Err(JetCryptoError::EntropyUnavailable)
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             crypto_password_hash(&"password".to_string()),
+//RS             Err(JetCryptoError::EntropyUnavailable)
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn prior_crypto_suite_still_uses_live_entropy() {
+//RS         let plaintext = b"round trip".to_vec();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let envelope = jet_crypto_seal_typed_impl(
+//RS             vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+//RS             &plaintext,
+//RS             &vec![],
+//RS         ).unwrap();
+//RS         assert_eq!(jet_crypto_open_typed_impl(&recipient, envelope, &vec![]).unwrap(), plaintext);
+//RS 
+//RS         let (seed, public) = jet_crypto_keygen_impl().unwrap();
+//RS         assert_eq!(seed.len(), 32);
+//RS         assert_eq!(public.len(), 32);
+//RS 
+//RS         let stored = jet_crypto_password_hash_impl(&"password".to_string()).unwrap();
+//RS         assert!(jet_crypto_password_verify_impl(
+//RS             &"password".to_string(),
+//RS             &stored
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn keygen_zeroizes_provider_copy_and_stack_seed() {
+//RS         let zeroized = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+//RS         let observed = Rc::clone(&zeroized);
+//RS         jet_crypto_entropy_set_zeroize_test_observer(move |bytes| {
+//RS             if bytes.len() == 32 {
+//RS                 observed.borrow_mut().push(bytes.to_vec());
+//RS             }
+//RS         });
+//RS         let (seed, public) = jet_crypto_keygen_impl().unwrap();
+//RS         jet_crypto_entropy_clear_zeroize_test_observer();
+//RS         assert_eq!(seed.len(), 32);
+//RS         assert_eq!(public.len(), 32);
+//RS         assert!(seed.iter().any(|byte| *byte != 0));
+//RS         assert!(zeroized.borrow().len() >= 2);
+//RS         assert!(zeroized
+//RS             .borrow()
+//RS             .iter()
+//RS             .all(|snapshot| snapshot == &vec![0; 32]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_recipient_envelopes_are_canonical_and_fail_closed() {
+//RS         let alice = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let bob = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let wrong = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let plain = b"purpose-bound payload".to_vec();
+//RS         let aad = b"tenant-7".to_vec();
+//RS         let sealed = jet_crypto_seal_typed_impl(
+//RS             vec![jet_crypto_x25519_public_typed_impl(&bob), jet_crypto_x25519_public_typed_impl(&alice)],
+//RS             &plain,
+//RS             &aad,
+//RS         ).unwrap();
+//RS         let bytes = jet_crypto_sealed_bytes_impl(&sealed);
+//RS         assert_eq!(&bytes[..4], b"JETV");
+//RS         let mut unsupported_version=bytes.clone();unsupported_version[4]=2;
+//RS         assert!(matches!(jet_crypto_sealed_from_bytes_impl(unsupported_version),Err(JetCryptoError::UnsupportedVersion{operation:"Sealed.from_bytes",version:2})));
+//RS         let mut unsupported_algorithm=bytes.clone();unsupported_algorithm[5]=3;
+//RS         match jet_crypto_sealed_from_bytes_impl(unsupported_algorithm){Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm})=>{assert_eq!(operation,"Sealed.from_bytes");assert_eq!(algorithm,"3")},_=>panic!("JETV suite id must remain public")}
+//RS         assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad).unwrap(), plain);
+//RS         assert_eq!(jet_crypto_open_typed_impl(&wrong, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad), Err(JetCryptoError::OpenFailed));
+//RS         assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &b"wrong".to_vec()), Err(JetCryptoError::OpenFailed));
+//RS         let mut tampered = bytes; *tampered.last_mut().unwrap() ^= 1;
+//RS         assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(tampered).unwrap(), &aad), Err(JetCryptoError::OpenFailed));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_secret_wrap_sign_kdf_and_password_paths_preserve_roles() {
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let secret = jet_crypto_secret_from_text_impl("do not print".to_string());
+//RS         let wrapped = jet_crypto_wrap_typed_impl(&secret, jet_crypto_x25519_public_typed_impl(&recipient)).unwrap();
+//RS         let bytes = jet_crypto_wrapped_bytes_impl(&wrapped);
+//RS         assert_eq!(&bytes[..4], b"JETW");
+//RS         let unwrapped = jet_crypto_unwrap_typed_impl(&recipient, jet_crypto_wrapped_from_bytes_impl(bytes).unwrap()).unwrap();
+//RS         assert!(jet_crypto_constant_time_secret_impl(&secret, &unwrapped));
+//RS         let derived = jet_crypto_hkdf_typed_impl(&secret, &vec![], &b"domain".to_vec(), 32).unwrap();
+//RS         assert!(!jet_crypto_constant_time_secret_impl(&secret, &derived));
+//RS         assert_eq!(
+//RS             jet_crypto_hkdf_typed_impl(&secret, &vec![], &vec![], -1).err().unwrap().to_string(),
+//RS             "hkdf_sha256: output length must be 0..8160; got -1"
+//RS         );
+//RS         let signing = jet_crypto_signing_generate_impl().unwrap();
+//RS         let message = b"release".to_vec();
+//RS         let signature = jet_crypto_sign_typed_impl(&signing, &message).unwrap();
+//RS         assert!(jet_crypto_verify_typed_impl(jet_crypto_signing_public_impl(&signing), &message, signature).unwrap());
+//RS         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
+//RS         assert!(jet_crypto_password_verify_typed_impl(&secret, &stored).unwrap());
+//RS         let weak_memory = stored.0.replacen("m=65536", "m=4096", 1);
+//RS         assert!(matches!(
+//RS             jet_crypto_password_parse_impl(weak_memory),
+//RS             Err(JetCryptoError::PasswordPolicy { .. })
+//RS         ));
+//RS         let extra_parameter = stored.0.replacen(",p=1$", ",p=1,x=1$", 1);
+//RS         assert!(matches!(
+//RS             jet_crypto_password_parse_impl(extra_parameter.clone()),
+//RS             Err(JetCryptoError::InvalidEncoding { operation: "PasswordHash.parse", value_kind: "PHC parameters" })
+//RS         ));
+//RS         assert!(matches!(
+//RS             jet_crypto_password_verify_typed_impl(&secret, &JetPasswordHash(extra_parameter)),
+//RS             Err(JetCryptoError::InvalidEncoding { operation: "password_verify", value_kind: "PHC parameters" })
+//RS         ));
+//RS         let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2i$",1));
+//RS         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2i".to_string()}));
+//RS         match jet_crypto_password_parse_impl(wrong_algorithm.0) { Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm}) => { assert_eq!(operation,"PasswordHash.parse"); assert_eq!(algorithm,"argon2i"); }, _ => panic!("argon2i must remain a typed unsupported algorithm") }
+//RS         let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2d$",1));
+//RS         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2d".to_string()}));
+//RS         let unknown_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2x$",1));
+//RS         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&unknown_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2x".to_string()}));
+//RS         let wrong_version=JetPasswordHash(stored.0.replacen("$v=19$","$v=16$",1));
+//RS         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_version),Err(JetCryptoError::UnsupportedVersion{operation:"password_verify",version:16}));
+//RS         assert!(matches!(jet_crypto_password_parse_impl(wrong_version.0),Err(JetCryptoError::UnsupportedVersion{operation:"PasswordHash.parse",version:16})));
+//RS         let wide_version=JetPasswordHash(stored.0.replacen("$v=19$","$v=300$",1));
+//RS         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wide_version),Err(JetCryptoError::UnsupportedVersion{operation:"password_verify",version:300}));
+//RS         let wrong = jet_crypto_secret_from_text_impl("wrong".to_string());
+//RS         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
+//RS         assert!(!jet_crypto_password_verify_typed_impl(&wrong, &stored).unwrap());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn expert_surface_matches_reference_vectors_and_bounds() {
+//RS         let key = vec![0x80; 32];
+//RS         let xnonce = vec![0x24; 24];
+//RS         let anonce = vec![0x12; 12];
+//RS         let message = b"expert crypto".to_vec();
+//RS         let aad = b"tenant".to_vec();
+//RS         let xsealed = jet_crypto_expert_xchacha20poly1305_seal_impl(&key, &xnonce, &message, &aad).unwrap();
+//RS         assert_eq!(jet_crypto_expert_xchacha20poly1305_open_impl(&key, &xnonce, &xsealed, &aad).unwrap(), message);
+//RS         let asealed = jet_crypto_expert_aes256gcm_seal_impl(&key, &anonce, &message, &aad).unwrap();
+//RS         assert_eq!(jet_crypto_expert_aes256gcm_open_impl(&key, &anonce, &asealed, &aad).unwrap(), message);
+//RS         assert_eq!(jet_crypto_expert_xchacha20poly1305_open_impl(&key, &xnonce, &xsealed, &b"wrong".to_vec()), Err(JetCryptoError::OpenFailed));
+//RS         assert!(matches!(jet_crypto_expert_aes256gcm_seal_impl(&key, &xnonce, &message, &aad), Err(JetCryptoError::InvalidLength { parameter: "nonce", .. })));
+//RS 
+//RS         // RFC 8032 test vector 1.
+//RS         let seed = decode_hex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+//RS         let public = decode_hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+//RS         let expected = decode_hex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
+//RS         let signature = jet_crypto_expert_ed25519_sign_impl(&seed, &vec![]).unwrap();
+//RS         assert_eq!(jet_crypto_signature_bytes_impl(&signature), expected);
+//RS         assert!(jet_crypto_expert_ed25519_verify_strict_impl(&public, &vec![], &expected).unwrap());
+//RS 
+//RS         // RFC 7748 X25519 Alice/Bob vector.
+//RS         let alice_secret = decode_hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+//RS         let bob_public = decode_hex("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
+//RS         let expected_shared = decode_hex("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
+//RS         let shared = jet_crypto_expert_x25519_impl(&alice_secret, &bob_public, true).unwrap();
+//RS         assert!(jet_crypto_constant_time_secret_impl(&shared, &jet_crypto_secret_from_bytes_impl(expected_shared)));
+//RS         assert!(matches!(jet_crypto_expert_x25519_impl(&alice_secret, &vec![0; 32], true), Err(JetCryptoError::NonContributoryKey)));
+//RS 
+//RS         // RFC 5869 test case 1.
+//RS         let ikm = vec![0x0b; 22];
+//RS         let salt = decode_hex("000102030405060708090a0b0c");
+//RS         let info = decode_hex("f0f1f2f3f4f5f6f7f8f9");
+//RS         let expected_okm = decode_hex("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865");
+//RS         let okm = jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, 42).unwrap();
+//RS         assert!(jet_crypto_constant_time_secret_impl(&okm, &jet_crypto_secret_from_bytes_impl(expected_okm)));
+//RS         assert!(matches!(jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, 8161), Err(JetCryptoError::OutputLength { .. })));
+//RS         assert_eq!(
+//RS             jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, -1).err().unwrap().to_string(),
+//RS             "expert.hkdf_sha256_raw: output length must be 0..8160; got -1"
+//RS         );
+//RS 
+//RS         let password = jet_crypto_secret_from_text_impl("password".to_string());
+//RS         let derived = jet_crypto_expert_argon2id_impl(&password, &b"12345678".to_vec(), 8192, 1, 1, 32).unwrap();
+//RS         assert_eq!(jet_crypto_expert_secret_bytes_impl(&derived).len(), 32);
+//RS         assert!(matches!(jet_crypto_expert_argon2id_impl(&password, &b"short".to_vec(), 8192, 1, 1, 32), Err(JetCryptoError::InvalidLength { parameter: "salt", .. })));
+//RS         assert_eq!(
+//RS             jet_crypto_expert_argon2id_impl(&password, &b"12345678".to_vec(), 8192, 1, 1, -1).err().unwrap().to_string(),
+//RS             "expert.argon2id: output length must be 16..64; got -1"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn expert_xchacha20poly1305_matches_cfrg_vector() {
+//RS         // draft-irtf-cfrg-xchacha-02, Appendix A.3.1.
+//RS         let key = decode_hex(
+//RS             "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+//RS         );
+//RS         let nonce = decode_hex("404142434445464748494a4b4c4d4e4f5051525354555657");
+//RS         let plaintext = decode_hex(concat!(
+//RS             "4c616469657320616e642047656e746c656d656e206f662074686520636c6173",
+//RS             "73206f66202739393a204966204920636f756c64206f6666657220796f75206f",
+//RS             "6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73",
+//RS             "637265656e20776f756c642062652069742e",
+//RS         ));
+//RS         let aad = decode_hex("50515253c0c1c2c3c4c5c6c7");
+//RS         let expected = decode_hex(concat!(
+//RS             "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb",
+//RS             "731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b452",
+//RS             "2f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff9",
+//RS             "21f9664c97637da9768812f615c68b13b52e",
+//RS             "c0875924c1c7987947deafd8780acf49",
+//RS         ));
+//RS 
+//RS         let sealed = jet_crypto_expert_xchacha20poly1305_seal_impl(
+//RS             &key, &nonce, &plaintext, &aad,
+//RS         )
+//RS         .unwrap();
+//RS         assert_eq!(sealed, expected);
+//RS         assert_eq!(
+//RS             jet_crypto_expert_xchacha20poly1305_open_impl(&key, &nonce, &sealed, &aad),
+//RS             Ok(plaintext)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn expert_aes256gcm_matches_nist_cavs_vector() {
+//RS         // NIST CAVS gcmEncryptExtIV256.rsp, first 96-bit-IV case.
+//RS         let key = decode_hex(
+//RS             "b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4",
+//RS         );
+//RS         let nonce = decode_hex("516c33929df5a3284ff463d7");
+//RS         let expected = decode_hex("bdc1ac884d332457a1d2664f168c76f0");
+//RS         let empty = Vec::new();
+//RS 
+//RS         let sealed =
+//RS             jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &empty, &empty).unwrap();
+//RS         assert_eq!(sealed, expected);
+//RS         assert_eq!(
+//RS             jet_crypto_expert_aes256gcm_open_impl(&key, &nonce, &sealed, &empty),
+//RS             Ok(empty)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn argon2id_rfc_and_expert_known_answers_kill_argon2i_mutation() {
+//RS         // RFC 9106 section 5.3, including its secret and associated data, runs
+//RS         // through the same queued worker that serves Jet's expert surface.
+//RS         let rfc = jet_pwhash_rfc9106_test_run().expect("canonical Argon2id worker");
+//RS         let rfc_expected = decode_hex(
+//RS             "0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659",
+//RS         );
+//RS         assert_eq!(rfc.bytes(), rfc_expected);
+//RS         let rfc_params = argon2::ParamsBuilder::new()
+//RS             .m_cost(32)
+//RS             .t_cost(3)
+//RS             .p_cost(4)
+//RS             .data(argon2::AssociatedData::new(&[0x04; 12]).unwrap())
+//RS             .build()
+//RS             .unwrap();
+//RS         let mut argon2i = [0u8; 32];
+//RS         argon2::Argon2::new_with_secret(
+//RS             &[0x03; 8],
+//RS             argon2::Algorithm::Argon2i,
+//RS             argon2::Version::V0x13,
+//RS             rfc_params,
+//RS         )
+//RS         .unwrap()
+//RS         .hash_password_into(&[0x01; 32], &[0x02; 16], &mut argon2i)
+//RS         .unwrap();
+//RS         assert_ne!(argon2i.as_slice(), rfc_expected, "Argon2i mutation must fail the RFC oracle");
+//RS 
+//RS         // A public expert KAT independently proves the policy seam reaches the
+//RS         // same worker instead of a direct dependency-only test path.
+//RS         let password = jet_crypto_secret_from_text_impl("password".to_string());
+//RS         let salt = b"somesalt".to_vec();
+//RS         let actual = jet_crypto_expert_argon2id_impl(&password, &salt, 65_536, 2, 1, 32)
+//RS             .expect("canonical expert Argon2id worker");
+//RS         let expected = decode_hex(
+//RS             "09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7",
+//RS         );
+//RS         assert_eq!(jet_crypto_expert_secret_bytes_impl(&actual), expected);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v1_expert_open_accepts_only_the_pinned_grammar() {
+//RS         let source = include_str!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
+//RS         for retired in [
+//RS             "fn seal_with_algo(",
+//RS             "fn open_envelope(",
+//RS             "fn jet_crypto_seal_impl(",
+//RS             "fn jet_crypto_open_impl(",
+//RS             "fn jet_crypto_seal_algo_impl(",
+//RS         ] {
+//RS             assert!(!source.contains(retired), "retired JETC v1 path remains: {retired}");
+//RS         }
+//RS         assert_eq!(source.matches("pub fn jet_crypto_expert_open_v1_impl(").count(), 1);
+//RS         let key = (0u8..32).collect::<Vec<_>>();
+//RS         let nonce = (0u8..12).collect::<Vec<_>>();
+//RS         let plaintext = b"historical JETC v1".to_vec();
+//RS 
+//RS         for (algorithm, ciphertext) in [
+//RS             (1u8, ChaCha20Poly1305::new_from_slice(&key).unwrap().encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).map_err(|_| JetCryptoError::OpenFailed)),
+//RS             (2u8, jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &plaintext, &vec![])),
+//RS         ] {
+//RS             let ciphertext = ciphertext.expect("pinned v1 cipher");
+//RS             let mut envelope = b"JETC".to_vec();
+//RS             envelope.extend_from_slice(&[1, algorithm]);
+//RS             envelope.extend_from_slice(&nonce);
+//RS             envelope.extend_from_slice(&ciphertext);
+//RS             assert_eq!(hex_encode(&envelope), match algorithm {
+//RS                 1 => "4a4554430101000102030405060708090a0be1927b744665cc23d6ef1fb9dd494d43bf41ffb4f45df6e23cf92a743b8c2c35892f",
+//RS                 _ => "4a4554430102000102030405060708090a0b2f6ba56faa97ab78ec2db7c1f4bd3b4df5e703347885e9b8d1d5780ecb37c61ac49c",
+//RS             });
+//RS             assert_eq!(jet_crypto_expert_open_v1_impl(&key, &envelope), Ok(plaintext.clone()));
+//RS 
+//RS             for hostile in [
+//RS                 { let mut bytes = envelope.clone(); bytes[0] ^= 1; bytes },
+//RS                 { let mut bytes = envelope.clone(); bytes[4] = 2; bytes },
+//RS                 { let mut bytes = envelope.clone(); bytes[5] = 3; bytes },
+//RS                 { let mut bytes = envelope.clone(); *bytes.last_mut().unwrap() ^= 1; bytes },
+//RS                 { let mut bytes = envelope.clone(); bytes.push(0); bytes },
+//RS             ] {
+//RS                 assert_eq!(jet_crypto_expert_open_v1_impl(&key, &hostile), Err(JetCryptoError::OpenFailed));
+//RS             }
+//RS         }
+//RS 
+//RS         assert_eq!(jet_crypto_expert_open_v1_impl(&vec![0; 31], &vec![0; 34]), Err(JetCryptoError::OpenFailed));
+//RS         assert_eq!(jet_crypto_expert_open_v1_impl(&key, &vec![0; 33]), Err(JetCryptoError::OpenFailed));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v1_migration_reseals_to_verified_v2_without_touching_source() {
+//RS         let root = test_dir("migration");
+//RS         let key = (0u8..32).collect::<Vec<_>>();
+//RS         let nonce = (0u8..12).collect::<Vec<_>>();
+//RS         let plaintext = b"historical migration payload".to_vec();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let recipients = vec![jet_crypto_x25519_public_typed_impl(&recipient)];
+//RS 
+//RS         for (algorithm, ciphertext) in [
+//RS             (1u8, ChaCha20Poly1305::new_from_slice(&key).unwrap().encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).map_err(|_| JetCryptoError::OpenFailed)),
+//RS             (2u8, jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &plaintext, &vec![])),
+//RS         ] {
+//RS             let mut v1 = b"JETC".to_vec();
+//RS             v1.extend_from_slice(&[1, algorithm]);
+//RS             v1.extend_from_slice(&nonce);
+//RS             v1.extend_from_slice(&ciphertext.unwrap());
+//RS             let source = root.join(format!("source-{algorithm}.jetc"));
+//RS             let migrated = root.join(format!("migrated-{algorithm}.jetc"));
+//RS             let restored = root.join(format!("restored-{algorithm}.bin"));
+//RS             std::fs::write(&source, &v1).unwrap();
+//RS 
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 recipients.clone(),
+//RS                 &migrated.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(&source).unwrap(), v1);
+//RS             assert_eq!(&std::fs::read(&migrated).unwrap()[..8], b"JETC\x02\x01\x01\x00");
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &migrated.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         let source = root.join("source-1.jetc");
+//RS         let original = std::fs::read(&source).unwrap();
+//RS         let existing = root.join("existing.jetc");
+//RS         std::fs::write(&existing, b"keep").unwrap();
+//RS         assert_eq!(
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 recipients.clone(),
+//RS                 &existing.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationExists)
+//RS         );
+//RS         assert_eq!(std::fs::read(&existing).unwrap(), b"keep");
+//RS         assert_eq!(std::fs::read(&source).unwrap(), original);
+//RS         assert_eq!(
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 recipients.clone(),
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationExists)
+//RS         );
+//RS         assert_eq!(std::fs::read(&source).unwrap(), original);
+//RS 
+//RS         let wrong_key_output = root.join("wrong-key.jetc");
+//RS         assert_eq!(
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &vec![9; 32],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 recipients.clone(),
+//RS                 &wrong_key_output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::OpenFailed)
+//RS         );
+//RS         assert!(!wrong_key_output.exists());
+//RS 
+//RS         let hostile = root.join("hostile.jetc");
+//RS         let absent = root.join("absent.jetc");
+//RS         std::fs::write(&hostile, b"JETC\x01\x01bad").unwrap();
+//RS         assert_eq!(
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &hostile.to_string_lossy().into_owned(),
+//RS                 recipients,
+//RS                 &absent.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::OpenFailed)
+//RS         );
+//RS         assert!(!absent.exists());
+//RS         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+//RS             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+//RS         }));
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn bech32m_recipient_parser_rejects_hostile_noncanonical_text() {
+//RS         let key = JetX25519PublicKey([0; 32]);
+//RS         let canonical = jet_crypto_x25519_public_text_impl(&key);
+//RS         assert_eq!(canonical.len(), 68);
+//RS         assert_eq!(jet_crypto_x25519_public_from_text_impl(canonical.clone()).unwrap().0, [0; 32]);
+//RS         let mut checksum = canonical.clone().into_bytes();
+//RS         let replacement = if checksum.last() == Some(&b'q') { b'p' } else { b'q' };
+//RS         *checksum.last_mut().unwrap() = replacement;
+//RS         for hostile in [
+//RS             canonical.to_uppercase(),
+//RS             canonical[..67].to_string(),
+//RS             format!("{canonical}q"),
+//RS             canonical.replacen("jetx25519", "jetx25518", 1),
+//RS             String::from_utf8(checksum).unwrap(),
+//RS             format!("jetx255191{}", "q".repeat(58)),
+//RS         ] {
+//RS             assert!(jet_crypto_x25519_public_from_text_impl(hostile).is_err());
+//RS         }
+//RS     }
+//RS 
+//RS     fn never_cancelled() -> bool { false }
+//RS     fn always_cancelled() -> bool { true }
+//RS 
+//RS     fn test_dir(name: &str) -> std::path::PathBuf {
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jetc-v2-{name}-{}-{:?}",
+//RS             std::process::id(),
+//RS             std::thread::current().id()
+//RS         ));
+//RS         let _ = std::fs::remove_dir_all(&path);
+//RS         std::fs::create_dir(&path).unwrap();
+//RS         path
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v2_streams_authenticated_chunks_and_publishes_without_overwrite() {
+//RS         let root = test_dir("roundtrip");
+//RS         let source = root.join("source.bin");
+//RS         let envelope = root.join("sealed.jetc");
+//RS         let restored = root.join("restored.bin");
+//RS         let wrong_output = root.join("wrong.bin");
+//RS         let mut plain = vec![0x5a; JETC_V2_CHUNK + 17];
+//RS         plain[0] = 1;
+//RS         plain[JETC_V2_CHUNK] = 2;
+//RS         std::fs::write(&source, &plain).unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         let encoded = std::fs::read(&envelope).unwrap();
+//RS         assert_eq!(&encoded[..8], b"JETC\x02\x01\x01\x00");
+//RS         let header_len = u32::from_le_bytes(encoded[8..12].try_into().unwrap()) as usize;
+//RS         let body_len = u64::from_le_bytes(encoded[12..20].try_into().unwrap()) as usize;
+//RS         assert_eq!(header_len, JETC_V2_HEADER_BASE + JETC_V2_STANZA + 16);
+//RS         assert_eq!(encoded.len(), 20 + header_len + body_len);
+//RS         let body = &encoded[20 + header_len..];
+//RS         assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), JETC_V2_CHUNK as u32);
+//RS         assert_eq!(body[4], 0);
+//RS         let final_at = 5 + JETC_V2_CHUNK + 16;
+//RS         assert_eq!(u32::from_le_bytes(body[final_at..final_at+4].try_into().unwrap()), 17);
+//RS         assert_eq!(body[final_at+4], 1);
+//RS         jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             &restored.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_eq!(std::fs::read(&restored).unwrap(), plain);
+//RS 
+//RS         let wrong = jet_crypto_x25519_generate_impl().unwrap();
+//RS         assert_eq!(
+//RS             jet_crypto_file_open_impl(
+//RS                 &wrong,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &wrong_output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::OpenFailed)
+//RS         );
+//RS         assert!(!wrong_output.exists());
+//RS 
+//RS         std::fs::write(&restored, b"do not replace").unwrap();
+//RS         assert_eq!(
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationExists)
+//RS         );
+//RS         assert_eq!(std::fs::read(&restored).unwrap(), b"do not replace");
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v2_record_boundaries_are_canonical() {
+//RS         let root = test_dir("record-boundaries");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         for (name, size, expected) in [
+//RS             ("empty", 0, vec![(0, 1)]),
+//RS             ("chunk-minus-one", JETC_V2_CHUNK - 1, vec![((JETC_V2_CHUNK - 1) as u32, 1)]),
+//RS             ("chunk", JETC_V2_CHUNK, vec![(JETC_V2_CHUNK as u32, 0), (0, 1)]),
+//RS             ("chunk-plus-one", JETC_V2_CHUNK + 1, vec![(JETC_V2_CHUNK as u32, 0), (1, 1)]),
+//RS         ] {
+//RS             let source = root.join(format!("{name}.bin"));
+//RS             let envelope = root.join(format!("{name}.jetc"));
+//RS             let restored = root.join(format!("{name}.out"));
+//RS             let plaintext = (0..size).map(|index| (index % 251) as u8).collect::<Vec<_>>();
+//RS             std::fs::write(&source, &plaintext).unwrap();
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             let encoded = std::fs::read(&envelope).unwrap();
+//RS             let header_len = u32::from_le_bytes(encoded[8..12].try_into().unwrap()) as usize;
+//RS             let body_len = u64::from_le_bytes(encoded[12..20].try_into().unwrap());
+//RS             assert_eq!(jetc_v2_plain_len(body_len), Some(size as u64));
+//RS             let mut at = 20 + header_len;
+//RS             let mut records = Vec::new();
+//RS             while at < encoded.len() {
+//RS                 let length = u32::from_le_bytes(encoded[at..at + 4].try_into().unwrap());
+//RS                 let flags = encoded[at + 4];
+//RS                 assert!(jetc_v2_record_shape_valid(length as usize, flags));
+//RS                 records.push((length, flags));
+//RS                 at += 5 + length as usize + 16;
+//RS             }
+//RS             assert_eq!(at, encoded.len());
+//RS             assert_eq!(records, expected);
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(&restored).unwrap(), plaintext);
+//RS             assert_eq!(std::fs::read(&source).unwrap(), plaintext);
+//RS         }
+//RS         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+//RS             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+//RS         }));
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_rechecks_staged_snapshot_hash_and_eof_before_final() {
+//RS         use std::io::{Seek, SeekFrom, Write};
+//RS 
+//RS         let root = test_dir("stage-recheck");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let expected = b"verified bytes";
+//RS         for (name, staged, distinct_identity) in [
+//RS             ("identity", expected.as_slice(), true),
+//RS             ("changed", b"tampered bytes".as_slice(), false),
+//RS             ("trailing", b"verified bytesattacker trailing bytes".as_slice(), false),
+//RS         ] {
+//RS             let destination = root.join(format!("{name}.jetc"));
+//RS             let parent = hold_destination_parent(&destination).unwrap();
+//RS             let mut stage = create_unlinked_stage(&parent).unwrap();
+//RS             stage.write_all(staged).unwrap();
+//RS             stage.sync_all().unwrap();
+//RS             let identity_stage = distinct_identity.then(|| {
+//RS                 let mut file = create_unlinked_stage(&parent).unwrap();
+//RS                 file.write_all(expected).unwrap();
+//RS                 file.sync_all().unwrap();
+//RS                 file
+//RS             });
+//RS             let metadata = identity_stage.as_ref().unwrap_or(&stage).metadata().unwrap();
+//RS             stage.seek(SeekFrom::Start(0)).unwrap();
+//RS             assert_eq!(
+//RS                 seal_jetc_v2_from_snapshot(
+//RS                     vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+//RS                     JetcSnapshot {
+//RS                         file: stage,
+//RS                         length: expected.len() as u64,
+//RS                         hash: Sha256::digest(expected).into(),
+//RS                         metadata,
+//RS                     },
+//RS                     &parent,
+//RS                     &destination.to_string_lossy().into_owned(),
+//RS                     never_cancelled,
+//RS                     false,
+//RS                 ),
+//RS                 Err(JetFileCryptoError::SourceIo),
+//RS                 "stage {name}",
+//RS             );
+//RS             assert!(!destination.exists());
+//RS         }
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_streams_exact_max_and_rejects_oversize_before_staging() {
+//RS         use std::io::{Read, Seek, SeekFrom, Write};
+//RS 
+//RS         let root = test_dir("oversize-source");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS 
+//RS         let exact = root.join("exact-max.bin");
+//RS         let exact_destination = root.join("exact-max.jetc");
+//RS         let mut sparse = std::fs::File::create(&exact).unwrap();
+//RS         sparse.write_all(b"exact-max-source").unwrap();
+//RS         sparse.set_len(JETC_V2_MAX_PLAINTEXT).unwrap();
+//RS         drop(sparse);
+//RS         assert_eq!(std::fs::metadata(&exact).unwrap().len(), JETC_V2_MAX_PLAINTEXT);
+//RS         arm_eof_after("seal-source-read", 1);
+//RS         assert_eq!(
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &exact.to_string_lossy().into_owned(),
+//RS                 &exact_destination.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::SourceIo),
+//RS         );
+//RS         assert!(jet_crypto_file_io_test_hits() >= 2, "exact maximum must enter bounded streaming");
+//RS         jet_crypto_clear_file_io_test_fault();
+//RS         assert!(!exact_destination.exists());
+//RS 
+//RS         let source = root.join("over-max.bin");
+//RS         let destination = root.join("over-max.jetc");
+//RS         let mut sparse = std::fs::File::create(&source).unwrap();
+//RS         sparse.write_all(b"oversize-source").unwrap();
+//RS         sparse.seek(SeekFrom::Start(JETC_V2_MAX_PLAINTEXT)).unwrap();
+//RS         sparse.write_all(&[0x7f]).unwrap();
+//RS         drop(sparse);
+//RS         assert_eq!(std::fs::metadata(&source).unwrap().len(), JETC_V2_MAX_PLAINTEXT + 1);
+//RS 
+//RS         arm_oversize_boundary_trap();
+//RS         assert_eq!(jet_crypto_file_seal_impl(
+//RS             vec![public],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &destination.to_string_lossy().into_owned(),
+//RS             cancel_at_boundary,
+//RS         ), Err(JetFileCryptoError::SourceIo));
+//RS         jet_crypto_clear_file_boundary_test_observer();
+//RS         OVERSIZE_BOUNDARY_HIT.with(|hit| assert!(!hit.get()));
+//RS         CANCEL_NOW.with(|cancel| assert!(!cancel.get()));
+//RS         assert!(!destination.exists());
+//RS         assert_eq!(std::fs::metadata(&source).unwrap().len(), JETC_V2_MAX_PLAINTEXT + 1);
+//RS         let mut preserved = std::fs::File::open(&source).unwrap();
+//RS         let mut prefix = [0u8; 15];
+//RS         preserved.read_exact(&mut prefix).unwrap();
+//RS         assert_eq!(&prefix, b"oversize-source");
+//RS         preserved.seek(SeekFrom::Start(JETC_V2_MAX_PLAINTEXT)).unwrap();
+//RS         let mut marker = [0u8; 1];
+//RS         preserved.read_exact(&mut marker).unwrap();
+//RS         assert_eq!(marker, [0x7f]);
+//RS         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+//RS             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+//RS         }));
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v2_rejects_tamper_truncation_append_and_cancellation_without_output() {
+//RS         let root = test_dir("hostile");
+//RS         let source = root.join("source.bin");
+//RS         let envelope = root.join("sealed.jetc");
+//RS         std::fs::write(&source, b"authenticated file").unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         let canonical = std::fs::read(&envelope).unwrap();
+//RS         let header_len = u32::from_le_bytes(canonical[8..12].try_into().unwrap()) as usize;
+//RS         let body_at = 20 + header_len;
+//RS         assert_eq!(jetc_v2_body_len(0), Some(21));
+//RS         assert_eq!(jetc_v2_body_len((JETC_V2_CHUNK - 1) as u64), Some(JETC_V2_CHUNK as u64 + 20));
+//RS         assert_eq!(jetc_v2_body_len(JETC_V2_CHUNK as u64), Some(JETC_V2_CHUNK as u64 + 42));
+//RS         assert_eq!(jetc_v2_body_len(JETC_V2_CHUNK as u64 + 1), Some(JETC_V2_CHUNK as u64 + 43));
+//RS         assert_eq!(jetc_v2_body_len(JETC_V2_MAX_PLAINTEXT), Some(JETC_V2_MAX_BODY_LEN));
+//RS         assert_eq!(jetc_v2_body_len(JETC_V2_MAX_PLAINTEXT + 1), None);
+//RS         assert_eq!(jetc_v2_plain_len(20), None);
+//RS         assert_eq!(jetc_v2_plain_len(JETC_V2_CHUNK as u64 + 21), None);
+//RS         assert_eq!(jetc_v2_plain_len(JETC_V2_MAX_BODY_LEN), Some(JETC_V2_MAX_PLAINTEXT));
+//RS         assert_eq!(jetc_v2_plain_len(JETC_V2_MAX_BODY_LEN + 1), None);
+//RS         assert!(jetc_v2_record_shape_valid(JETC_V2_CHUNK, 0));
+//RS         assert!(jetc_v2_record_shape_valid(0, 1));
+//RS         assert!(jetc_v2_record_shape_valid(JETC_V2_CHUNK - 1, 1));
+//RS         assert!(!jetc_v2_record_shape_valid(JETC_V2_CHUNK - 1, 0));
+//RS         assert!(!jetc_v2_record_shape_valid(JETC_V2_CHUNK, 1));
+//RS         assert!(!jetc_v2_record_shape_valid(0, 2));
+//RS         assert!(jetc_v2_container_len_matches(
+//RS             20 + header_len as u64 + JETC_V2_MAX_BODY_LEN,
+//RS             header_len,
+//RS             JETC_V2_MAX_BODY_LEN,
+//RS         ));
+//RS         assert!(!jetc_v2_container_len_matches(
+//RS             21 + header_len as u64 + JETC_V2_MAX_BODY_LEN,
+//RS             header_len,
+//RS             JETC_V2_MAX_BODY_LEN + 1,
+//RS         ));
+//RS         let mut tampered = canonical.clone();
+//RS         *tampered.last_mut().unwrap() ^= 1;
+//RS         for (name, hostile) in [
+//RS             ("tampered", tampered),
+//RS             ("truncated", canonical[..canonical.len()-1].to_vec()),
+//RS             ("appended", { let mut b = canonical.clone(); b.push(0); b }),
+//RS             ("v1", { let mut b = canonical.clone(); b[4] = 1; b }),
+//RS             ("kind", { let mut b = canonical.clone(); b[5] = 2; b }),
+//RS             ("suite", { let mut b = canonical.clone(); b[6] = 2; b }),
+//RS             ("fixed-flags", { let mut b = canonical.clone(); b[7] = 1; b }),
+//RS             ("header-cap", { let mut b = canonical.clone(); b[8..12].copy_from_slice(&(32u32 * 1024 * 1024 + 1).to_le_bytes()); b }),
+//RS             ("body-cap", { let mut b = canonical.clone(); b[12..20].copy_from_slice(&(JETC_V2_MAX_BODY_LEN + 1).to_le_bytes()); b }),
+//RS             ("chunk-size", { let mut b = canonical.clone(); b[84..88].copy_from_slice(&1u32.to_le_bytes()); b }),
+//RS             ("recipient-zero", { let mut b = canonical.clone(); b[88..90].copy_from_slice(&0u16.to_le_bytes()); b }),
+//RS             ("recipient-cap", { let mut b = canonical.clone(); b[88..90].copy_from_slice(&257u16.to_le_bytes()); b }),
+//RS             ("metadata", { let mut b = canonical.clone(); b[90..94].copy_from_slice(&1u32.to_le_bytes()); b }),
+//RS             ("recipient-id", { let mut b = canonical.clone(); b[94] ^= 1; b }),
+//RS             ("zero-public", { let mut b = canonical.clone(); b[110..142].fill(0); b }),
+//RS             ("record-length", { let mut b = canonical.clone(); b[body_at..body_at+4].copy_from_slice(&(JETC_V2_CHUNK as u32 + 1).to_le_bytes()); b }),
+//RS             ("record-flags", { let mut b = canonical.clone(); b[body_at+4] = 2; b }),
+//RS         ] {
+//RS             let input = root.join(format!("{name}.jetc"));
+//RS             let output = root.join(format!("{name}.out"));
+//RS             std::fs::write(&input, hostile).unwrap();
+//RS             assert_eq!(
+//RS                 jet_crypto_file_open_impl(
+//RS                     &recipient,
+//RS                     &input.to_string_lossy().into_owned(),
+//RS                     &output.to_string_lossy().into_owned(),
+//RS                     never_cancelled,
+//RS                 ),
+//RS                 Err(JetFileCryptoError::OpenFailed)
+//RS             );
+//RS             assert!(!output.exists());
+//RS         }
+//RS         let cancelled = root.join("cancelled.out");
+//RS         assert_eq!(
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &cancelled.to_string_lossy().into_owned(),
+//RS                 always_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::Cancelled)
+//RS         );
+//RS         assert!(!cancelled.exists());
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_rejects_bytes_appended_after_the_initial_length_check() {
+//RS         let root = test_dir("concurrent-append");
+//RS         let source = root.join("source.bin");
+//RS         let envelope = root.join("sealed.jetc");
+//RS         let output = root.join("restored.bin");
+//RS         std::fs::write(&source, b"authenticated file").unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS 
+//RS         arm_publish_race(PublishRace::AppendFile {
+//RS             at: "open-record",
+//RS             path: envelope.clone(),
+//RS         });
+//RS         assert_eq!(
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::OpenFailed),
+//RS         );
+//RS         PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+//RS         jet_crypto_clear_file_boundary_test_observer();
+//RS         assert!(!output.exists());
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_cancellation_at_stage_record_and_publish_boundaries_publishes_nothing() {
+//RS         let root = test_dir("cancellation-boundaries");
+//RS         let source = root.join("source.bin");
+//RS         let plaintext = vec![0x5a; JETC_V2_CHUNK + 1];
+//RS         std::fs::write(&source, &plaintext).unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let envelope = root.join("stable.jetc");
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public.clone()],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS 
+//RS         for boundary in ["seal-stage", "seal-output", "seal-record", "seal-final", "seal-before-publish"] {
+//RS             let output = root.join(format!("{boundary}.jetc"));
+//RS             arm_cancellation(boundary);
+//RS             assert_eq!(
+//RS                 jet_crypto_file_seal_impl(
+//RS                     vec![public.clone()],
+//RS                     &source.to_string_lossy().into_owned(),
+//RS                     &output.to_string_lossy().into_owned(),
+//RS                     cancel_at_boundary,
+//RS                 ),
+//RS                 Err(JetFileCryptoError::Cancelled),
+//RS                 "seal cancellation boundary {boundary}",
+//RS             );
+//RS             assert_cancellation_fired();
+//RS             assert!(!output.exists());
+//RS         }
+//RS 
+//RS         for boundary in ["open-output", "open-record", "open-before-publish"] {
+//RS             let output = root.join(format!("{boundary}.bin"));
+//RS             arm_cancellation(boundary);
+//RS             assert_eq!(
+//RS                 jet_crypto_file_open_impl(
+//RS                     &recipient,
+//RS                     &envelope.to_string_lossy().into_owned(),
+//RS                     &output.to_string_lossy().into_owned(),
+//RS                     cancel_at_boundary,
+//RS                 ),
+//RS                 Err(JetFileCryptoError::Cancelled),
+//RS                 "open cancellation boundary {boundary}",
+//RS             );
+//RS             assert_cancellation_fired();
+//RS             assert!(!output.exists());
+//RS         }
+//RS 
+//RS         let key = (0u8..32).collect::<Vec<_>>();
+//RS         let nonce = (0u8..12).collect::<Vec<_>>();
+//RS         let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+//RS             .encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).unwrap();
+//RS         let mut v1 = b"JETC".to_vec();
+//RS         v1.extend_from_slice(&[1, 1]);
+//RS         v1.extend_from_slice(&nonce);
+//RS         v1.extend_from_slice(&ciphertext);
+//RS         let v1_source = root.join("historical.jetc");
+//RS         std::fs::write(&v1_source, &v1).unwrap();
+//RS         for boundary in [
+//RS             "migrate-v1-read",
+//RS             "migrate-stage",
+//RS             "migrate-output",
+//RS             "migrate-record",
+//RS             "migrate-final",
+//RS             "migrate-verify-record",
+//RS             "migrate-before-publish",
+//RS         ] {
+//RS             let output = root.join(format!("{boundary}.jetc"));
+//RS             arm_cancellation(boundary);
+//RS             assert_eq!(
+//RS                 jet_crypto_expert_migrate_v1_impl(
+//RS                     &key,
+//RS                     &v1_source.to_string_lossy().into_owned(),
+//RS                     vec![public.clone()],
+//RS                     &output.to_string_lossy().into_owned(),
+//RS                     cancel_at_boundary,
+//RS                 ),
+//RS                 Err(JetFileCryptoError::Cancelled),
+//RS                 "migration cancellation boundary {boundary}",
+//RS             );
+//RS             assert_cancellation_fired();
+//RS             assert!(!output.exists());
+//RS             assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS         }
+//RS 
+//RS         jet_crypto_clear_file_boundary_test_observer();
+//RS         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+//RS             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+//RS         }));
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_short_io_and_faults_preserve_atomic_file_contract() {
+//RS         let root = test_dir("io-faults");
+//RS         let source = root.join("source.bin");
+//RS         let plaintext = vec![0x6d; 4097];
+//RS         std::fs::write(&source, &plaintext).unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS 
+//RS         for boundary in ["seal-source-read", "seal-stage-write", "seal-stage-read", "seal-source-recheck-read", "seal-output-write"] {
+//RS             let envelope = root.join(format!("short-{boundary}.jetc"));
+//RS             arm_short_io(boundary);
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             clear_observed_io_fault();
+//RS             let restored = root.join(format!("short-{boundary}.bin"));
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         let stable = root.join("stable.jetc");
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public.clone()],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &stable.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         for boundary in ["open-input-read", "open-output-write"] {
+//RS             let restored = root.join(format!("short-{boundary}.bin"));
+//RS             arm_short_io(boundary);
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &stable.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             clear_observed_io_fault();
+//RS             assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         let key = (0u8..32).collect::<Vec<_>>();
+//RS         let nonce = (0u8..12).collect::<Vec<_>>();
+//RS         let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+//RS             .encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).unwrap();
+//RS         let mut v1 = b"JETC".to_vec();
+//RS         v1.extend_from_slice(&[1, 1]);
+//RS         v1.extend_from_slice(&nonce);
+//RS         v1.extend_from_slice(&ciphertext);
+//RS         let v1_source = root.join("historical.jetc");
+//RS         std::fs::write(&v1_source, &v1).unwrap();
+//RS         for boundary in ["migrate-v1-read-io", "migrate-stage-write", "migrate-stage-read", "migrate-output-write", "migrate-verify-read"] {
+//RS             let migrated = root.join(format!("short-{boundary}.jetc"));
+//RS             arm_short_io(boundary);
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &v1_source.to_string_lossy().into_owned(),
+//RS                 vec![public.clone()],
+//RS                 &migrated.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             clear_observed_io_fault();
+//RS             assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS             let restored = root.join(format!("short-{boundary}.bin"));
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &migrated.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         for boundary in ["seal-source-read", "seal-stage-read", "seal-source-recheck-read"] {
+//RS             let output = root.join(format!("zero-{boundary}.jetc"));
+//RS             arm_zero_progress(boundary);
+//RS             assert_eq!(jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(JetFileCryptoError::SourceIo));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS             assert_eq!(std::fs::read(&source).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         for boundary in ["seal-stage-write", "seal-output-write"] {
+//RS             let output = root.join(format!("zero-{boundary}.jetc"));
+//RS             arm_zero_progress(boundary);
+//RS             assert_eq!(jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(JetFileCryptoError::DestinationIo));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS             assert_eq!(std::fs::read(&source).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         let zero_open = root.join("zero-open-output-write.bin");
+//RS         arm_zero_progress("open-output-write");
+//RS         assert_eq!(jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &stable.to_string_lossy().into_owned(),
+//RS             &zero_open.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::DestinationIo));
+//RS         clear_observed_io_fault();
+//RS         assert!(!zero_open.exists());
+//RS 
+//RS         let zero_migrate_read = root.join("zero-migrate-read.jetc");
+//RS         arm_zero_progress("migrate-v1-read-io");
+//RS         assert_eq!(jet_crypto_expert_migrate_v1_impl(
+//RS             &key,
+//RS             &v1_source.to_string_lossy().into_owned(),
+//RS             vec![public.clone()],
+//RS             &zero_migrate_read.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::SourceIo));
+//RS         clear_observed_io_fault();
+//RS         assert!(!zero_migrate_read.exists());
+//RS         assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS 
+//RS         for boundary in ["migrate-stage-write", "migrate-output-write"] {
+//RS             let output = root.join(format!("zero-{boundary}.jetc"));
+//RS             arm_zero_progress(boundary);
+//RS             assert_eq!(jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &v1_source.to_string_lossy().into_owned(),
+//RS                 vec![public.clone()],
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(JetFileCryptoError::DestinationIo));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS             assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS         }
+//RS 
+//RS         let mut trailing_v1 = v1.clone();
+//RS         trailing_v1.extend_from_slice(b"unread trailing bytes");
+//RS         let trailing_source = root.join("historical-trailing.jetc");
+//RS         std::fs::write(&trailing_source, &trailing_v1).unwrap();
+//RS         let trailing_output = root.join("trailing-prefix.jetc");
+//RS         arm_eof_after("migrate-v1-read-io", v1.len());
+//RS         assert_eq!(jet_crypto_expert_migrate_v1_impl(
+//RS             &key,
+//RS             &trailing_source.to_string_lossy().into_owned(),
+//RS             vec![public.clone()],
+//RS             &trailing_output.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::SourceIo));
+//RS         clear_observed_io_fault();
+//RS         assert!(!trailing_output.exists());
+//RS         assert_eq!(std::fs::read(&trailing_source).unwrap(), trailing_v1);
+//RS 
+//RS         for boundary in ["seal-source-read", "seal-output-write"] {
+//RS             let output = root.join(format!("eintr-{boundary}.jetc"));
+//RS             arm_io_error(boundary, 4);
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             clear_observed_io_fault();
+//RS             let restored = root.join(format!("eintr-{boundary}.bin"));
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ).unwrap();
+//RS             assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+//RS         }
+//RS 
+//RS         for (boundary, expected) in [
+//RS             ("seal-source-read", JetFileCryptoError::SourceIo),
+//RS             ("seal-stage-write", JetFileCryptoError::DestinationIo),
+//RS             ("seal-stage-fsync", JetFileCryptoError::DestinationIo),
+//RS             ("seal-output-write", JetFileCryptoError::DestinationIo),
+//RS             ("seal-output-fsync", JetFileCryptoError::DestinationIo),
+//RS         ] {
+//RS             let output = root.join(format!("fail-{boundary}.jetc"));
+//RS             arm_io_error(boundary, 28);
+//RS             assert_eq!(jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(expected));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS         }
+//RS 
+//RS         for (boundary, expected) in [
+//RS             ("open-input-read", JetFileCryptoError::OpenFailed),
+//RS             ("open-output-write", JetFileCryptoError::DestinationIo),
+//RS             ("open-output-fsync", JetFileCryptoError::DestinationIo),
+//RS         ] {
+//RS             let output = root.join(format!("fail-{boundary}.bin"));
+//RS             arm_io_error(boundary, 28);
+//RS             assert_eq!(jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &stable.to_string_lossy().into_owned(),
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(expected));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS         }
+//RS 
+//RS         for boundary in [
+//RS             "migrate-v1-read-io",
+//RS             "migrate-stage-write",
+//RS             "migrate-stage-fsync",
+//RS             "migrate-output-write",
+//RS             "migrate-verify-fsync",
+//RS             "migrate-reopen-verify",
+//RS             "migrate-verify-read",
+//RS             "migrate-output-fsync",
+//RS         ] {
+//RS             let output = root.join(format!("fail-{boundary}.jetc"));
+//RS             arm_io_error(boundary, 28);
+//RS             let expected = if boundary == "migrate-v1-read-io" { JetFileCryptoError::SourceIo } else { JetFileCryptoError::DestinationIo };
+//RS             assert_eq!(jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &v1_source.to_string_lossy().into_owned(),
+//RS                 vec![public.clone()],
+//RS                 &output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ), Err(expected));
+//RS             clear_observed_io_fault();
+//RS             assert!(!output.exists());
+//RS             assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS         }
+//RS 
+//RS         let seal_post = root.join("seal-post-install.jetc");
+//RS         arm_io_error("seal-directory-fsync", 5);
+//RS         assert_eq!(jet_crypto_file_seal_impl(
+//RS             vec![public.clone()],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &seal_post.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::DestinationIo));
+//RS         clear_observed_io_fault();
+//RS         assert!(seal_post.exists());
+//RS         let seal_post_restored = root.join("seal-post-install.bin");
+//RS         jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &seal_post.to_string_lossy().into_owned(),
+//RS             &seal_post_restored.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_eq!(std::fs::read(seal_post_restored).unwrap(), plaintext);
+//RS 
+//RS         let open_post = root.join("open-post-install.bin");
+//RS         arm_io_error("open-directory-fsync", 5);
+//RS         assert_eq!(jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &stable.to_string_lossy().into_owned(),
+//RS             &open_post.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::DestinationIo));
+//RS         clear_observed_io_fault();
+//RS         assert_eq!(std::fs::read(&open_post).unwrap(), plaintext);
+//RS 
+//RS         let migrate_post = root.join("migrate-post-install.jetc");
+//RS         arm_io_error("migrate-directory-fsync", 5);
+//RS         assert_eq!(jet_crypto_expert_migrate_v1_impl(
+//RS             &key,
+//RS             &v1_source.to_string_lossy().into_owned(),
+//RS             vec![public.clone()],
+//RS             &migrate_post.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::DestinationIo));
+//RS         clear_observed_io_fault();
+//RS         assert!(migrate_post.exists());
+//RS         assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS         let migrate_post_restored = root.join("migrate-post-install.bin");
+//RS         jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &migrate_post.to_string_lossy().into_owned(),
+//RS             &migrate_post_restored.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_eq!(std::fs::read(migrate_post_restored).unwrap(), plaintext);
+//RS 
+//RS         let winner = root.join("winner.jetc");
+//RS         std::fs::write(&winner, b"winner").unwrap();
+//RS         arm_io_error("seal-directory-fsync", 5);
+//RS         assert_eq!(jet_crypto_file_seal_impl(
+//RS             vec![public],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &winner.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ), Err(JetFileCryptoError::DestinationExists));
+//RS         assert_eq!(jet_crypto_file_io_test_hits(), 0);
+//RS         jet_crypto_clear_file_io_test_fault();
+//RS         assert_eq!(std::fs::read(&winner).unwrap(), b"winner");
+//RS         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+//RS             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+//RS         }));
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jetc_v2_entropy_failure_occurs_after_verified_snapshot_and_publishes_nothing() {
+//RS         let root = test_dir("entropy");
+//RS         let source = root.join("source.bin");
+//RS         let envelope = root.join("sealed.jetc");
+//RS         std::fs::write(&source, b"snapshot first").unwrap();
+//RS         fail_entropy();
+//RS         assert_eq!(
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![JetX25519PublicKey([9; 32])],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::SealFailed(JetCryptoError::EntropyUnavailable))
+//RS         );
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS         assert!(!envelope.exists());
+//RS         assert_eq!(std::fs::read(&source).unwrap(), b"snapshot first");
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_linux_publication_holds_parent_and_never_replaces_a_racer() {
+//RS         let root = test_dir("publish-races");
+//RS         let source = root.join("source.bin");
+//RS         std::fs::write(&source, b"held parent").unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS 
+//RS         let parent = root.join("seal-parent");
+//RS         let moved = root.join("seal-parent-moved");
+//RS         std::fs::create_dir(&parent).unwrap();
+//RS         let destination = parent.join("sealed.jetc");
+//RS         arm_publish_race(PublishRace::SwapParent {
+//RS             at: "seal-stage",
+//RS             parent: parent.clone(),
+//RS             moved: moved.clone(),
+//RS         });
+//RS         assert_eq!(
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &destination.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationIo)
+//RS         );
+//RS         assert!(!destination.exists());
+//RS         assert!(!moved.join("sealed.jetc").exists());
+//RS         assert!(std::fs::read_dir(&moved).unwrap().next().is_none());
+//RS 
+//RS         let race_parent = root.join("race-parent");
+//RS         std::fs::create_dir(&race_parent).unwrap();
+//RS         let raced = race_parent.join("sealed.jetc");
+//RS         arm_publish_race(PublishRace::CreateDestination {
+//RS             at: "seal-output",
+//RS             destination: raced.clone(),
+//RS         });
+//RS         assert_eq!(
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![public.clone()],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &raced.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationExists)
+//RS         );
+//RS         assert_eq!(std::fs::read(&raced).unwrap(), b"racer");
+//RS         assert_eq!(std::fs::read_dir(&race_parent).unwrap().count(), 1);
+//RS 
+//RS         let stable_parent = root.join("stable-parent");
+//RS         std::fs::create_dir(&stable_parent).unwrap();
+//RS         let envelope = stable_parent.join("sealed.jetc");
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         let open_parent = root.join("open-parent");
+//RS         let open_moved = root.join("open-parent-moved");
+//RS         std::fs::create_dir(&open_parent).unwrap();
+//RS         let restored = open_parent.join("restored.bin");
+//RS         arm_publish_race(PublishRace::SwapParent {
+//RS             at: "open-output",
+//RS             parent: open_parent.clone(),
+//RS             moved: open_moved.clone(),
+//RS         });
+//RS         assert_eq!(
+//RS             jet_crypto_file_open_impl(
+//RS                 &recipient,
+//RS                 &envelope.to_string_lossy().into_owned(),
+//RS                 &restored.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationIo)
+//RS         );
+//RS         assert!(!restored.exists());
+//RS         assert!(!open_moved.join("restored.bin").exists());
+//RS         assert!(std::fs::read_dir(&open_moved).unwrap().next().is_none());
+//RS 
+//RS         let real_parent = root.join("real-parent");
+//RS         let linked_parent = root.join("linked-parent");
+//RS         std::fs::create_dir(&real_parent).unwrap();
+//RS         std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
+//RS         let linked_destination = linked_parent.join("sealed.jetc");
+//RS         assert_eq!(
+//RS             jet_crypto_file_seal_impl(
+//RS                 vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+//RS                 &source.to_string_lossy().into_owned(),
+//RS                 &linked_destination.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationIo)
+//RS         );
+//RS         assert!(!real_parent.join("sealed.jetc").exists());
+//RS         PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+//RS         jet_crypto_clear_file_boundary_test_observer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     #[test]
+//RS     fn jetc_v2_linux_anonymous_inodes_ignore_every_former_temp_namespace() {
+//RS         let root = test_dir("anonymous-inodes");
+//RS         let source = root.join("source.bin");
+//RS         let plaintext = b"anonymous inode payload";
+//RS         std::fs::write(&source, plaintext).unwrap();
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS 
+//RS         let stage_parent = root.join("seal-stage-parent");
+//RS         std::fs::create_dir(&stage_parent).unwrap();
+//RS         let stage_envelope = stage_parent.join("sealed.jetc");
+//RS         replace_candidate_at("seal-stage", &stage_parent, "jetc-stage");
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public.clone()],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &stage_envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_attacker_candidates(&stage_parent, "jetc-stage");
+//RS         assert_not_attacker(&stage_envelope);
+//RS 
+//RS         let output_parent = root.join("seal-output-parent");
+//RS         std::fs::create_dir(&output_parent).unwrap();
+//RS         let output_envelope = output_parent.join("sealed.jetc");
+//RS         replace_candidate_at("seal-output", &output_parent, "jetc-output");
+//RS         jet_crypto_file_seal_impl(
+//RS             vec![public.clone()],
+//RS             &source.to_string_lossy().into_owned(),
+//RS             &output_envelope.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_attacker_candidates(&output_parent, "jetc-output");
+//RS         assert_not_attacker(&output_envelope);
+//RS 
+//RS         let open_parent = root.join("open-output-parent");
+//RS         std::fs::create_dir(&open_parent).unwrap();
+//RS         let restored = open_parent.join("restored.bin");
+//RS         replace_candidate_at("open-output", &open_parent, "jetc-open");
+//RS         jet_crypto_file_open_impl(
+//RS             &recipient,
+//RS             &stage_envelope.to_string_lossy().into_owned(),
+//RS             &restored.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_eq!(std::fs::read(&restored).unwrap(), plaintext);
+//RS         assert_attacker_candidates(&open_parent, "jetc-open");
+//RS 
+//RS         let key = (0u8..32).collect::<Vec<_>>();
+//RS         let nonce = (0u8..12).collect::<Vec<_>>();
+//RS         let historical = b"historical anonymous migration";
+//RS         let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+//RS             .encrypt(ChaNonce::from_slice(&nonce), historical.as_slice()).unwrap();
+//RS         let mut v1 = b"JETC".to_vec();
+//RS         v1.extend_from_slice(&[1, 1]);
+//RS         v1.extend_from_slice(&nonce);
+//RS         v1.extend_from_slice(&ciphertext);
+//RS         let v1_source = root.join("historical.jetc");
+//RS         std::fs::write(&v1_source, &v1).unwrap();
+//RS 
+//RS         let migrate_stage_parent = root.join("migrate-stage-parent");
+//RS         std::fs::create_dir(&migrate_stage_parent).unwrap();
+//RS         let migrated_stage = migrate_stage_parent.join("migrated.jetc");
+//RS         replace_candidate_at("migrate-stage", &migrate_stage_parent, "jetc-stage");
+//RS         jet_crypto_expert_migrate_v1_impl(
+//RS             &key,
+//RS             &v1_source.to_string_lossy().into_owned(),
+//RS             vec![public.clone()],
+//RS             &migrated_stage.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_attacker_candidates(&migrate_stage_parent, "jetc-stage");
+//RS         assert_not_attacker(&migrated_stage);
+//RS         assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS 
+//RS         let migrate_output_parent = root.join("migrate-output-parent");
+//RS         std::fs::create_dir(&migrate_output_parent).unwrap();
+//RS         let migrated_output = migrate_output_parent.join("migrated.jetc");
+//RS         replace_candidate_at("migrate-output", &migrate_output_parent, "jetc-output");
+//RS         jet_crypto_expert_migrate_v1_impl(
+//RS             &key,
+//RS             &v1_source.to_string_lossy().into_owned(),
+//RS             vec![public.clone()],
+//RS             &migrated_output.to_string_lossy().into_owned(),
+//RS             never_cancelled,
+//RS         ).unwrap();
+//RS         assert_attacker_candidates(&migrate_output_parent, "jetc-output");
+//RS         assert_not_attacker(&migrated_output);
+//RS         assert_ne!(std::fs::read(&migrated_output).unwrap(), historical);
+//RS 
+//RS         let swapped_parent = root.join("migrate-swapped-parent");
+//RS         let moved_parent = root.join("migrate-swapped-parent-moved");
+//RS         std::fs::create_dir(&swapped_parent).unwrap();
+//RS         let swapped_output = swapped_parent.join("migrated.jetc");
+//RS         arm_publish_race(PublishRace::SwapParent {
+//RS             at: "migrate-output",
+//RS             parent: swapped_parent.clone(),
+//RS             moved: moved_parent.clone(),
+//RS         });
+//RS         assert_eq!(
+//RS             jet_crypto_expert_migrate_v1_impl(
+//RS                 &key,
+//RS                 &v1_source.to_string_lossy().into_owned(),
+//RS                 vec![public],
+//RS                 &swapped_output.to_string_lossy().into_owned(),
+//RS                 never_cancelled,
+//RS             ),
+//RS             Err(JetFileCryptoError::DestinationIo)
+//RS         );
+//RS         assert!(!swapped_output.exists());
+//RS         assert!(!moved_parent.join("migrated.jetc").exists());
+//RS         assert!(std::fs::read_dir(&moved_parent).unwrap().next().is_none());
+//RS         assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+//RS         PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+//RS         jet_crypto_clear_file_boundary_test_observer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn every_secret_bearing_nominal_zeroizes_on_drop() {
+//RS         let observed = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+//RS         let snapshots = Rc::clone(&observed);
+//RS         jet_crypto_set_zeroize_test_observer(move |bytes| {
+//RS             snapshots.borrow_mut().push(bytes.to_vec());
+//RS         });
+//RS         drop(Secret(vec![1; 17]));
+//RS         drop(JetSigningKey(vec![2; 18]));
+//RS         drop(JetX25519SecretKey(vec![3; 19]));
+//RS         drop(JetSharedSecret(vec![4; 20]));
+//RS         jet_crypto_clear_zeroize_test_observer();
+//RS         assert_eq!(
+//RS             *observed.borrow(),
+//RS             vec![vec![0; 17], vec![0; 18], vec![0; 19], vec![0; 20]]
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 1055 tests/fixtures/crypto_bridge_entropy.rs:1-1823
+

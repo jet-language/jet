@@ -1,0 +1,750 @@
+// PORT-PENDING 0132 crates-jet-codegen-src-prelude-corelib-top-encodingstream-module-group-slice-3553: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:1-746
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use jet_foundation::Shape::{ShapeProjection, ShapeProjectionKind};
+//RS 
+//RS // ── core.encoding: Encode / Decode traits + blanket impls (D-SERDE1/2/4) ──────
+//RS // The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1) lowers to
+//RS // these traits. `jet_encode`/`jet_decode` are codegen-internal method names the
+//RS // user never types (they write the verbs `encode`/`decode` only in a hand-impl,
+//RS // D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).
+//RS #[allow(non_camel_case_types)]
+//RS pub trait __jet_Encode {
+//RS     /// True only for the byte scalar that carries native CBOR byte strings.
+//RS     const __JET_IS_BYTE: bool = false;
+//RS 
+//RS     fn jet_encode(&self) -> jet_std::DataTree;
+//RS 
+//RS     /// The byte projection is selected by the scalar fact above, never by a
+//RS     /// runtime type-name comparison.
+//RS     fn jet_encode_byte(&self) -> u8 {
+//RS         unreachable!()
+//RS     }
+//RS }
+//RS #[allow(non_camel_case_types)]
+//RS pub trait __jet_Decode: Sized {
+//RS     /// True only for the byte scalar accepted from native CBOR byte strings.
+//RS     const __JET_IS_BYTE: bool = false;
+//RS 
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+//RS 
+//RS     fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         Self::jet_decode(&jet_std::DataTree::Int(i64::from(value)))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for i64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::jet_datatree_encode_i64(*self)
+//RS     }
+//RS }
+//RS 
+//RS // Exact `Int` owns its one-word carrier.  Values that fit the physical
+//RS // DataTree::Int slot stay there; spilled values retain their decimal lexeme in
+//RS // DataTree::Number instead of exposing the tagged owner word as a number.
+//RS impl __jet_Encode for jet_foundation::Numeric::JetInt {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         self.to_i64()
+//RS             .map(jet_std::jet_datatree_encode_i64)
+//RS             .unwrap_or_else(|| jet_std::DataTree::Number(self.to_string_rep()))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Encode for f64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Float(*self)
+//RS     }
+//RS }
+//RS impl __jet_Encode for bool {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Bool(*self)
+//RS     }
+//RS }
+//RS impl __jet_Encode for String {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(self.clone())
+//RS     }
+//RS }
+//RS impl __jet_Encode for char {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(self.to_string())
+//RS     }
+//RS }
+//RS impl __jet_Encode for JetDate {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(jet_codec_date_encode(self.year(), self.month(), self.day()))
+//RS     }
+//RS }
+//RS impl __jet_Encode for JetLocalTime {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(jet_codec_local_time_encode(
+//RS             self.hour(),
+//RS             self.minute(),
+//RS             self.second(),
+//RS         ))
+//RS     }
+//RS }
+//RS impl __jet_Encode for JetDateTime {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Text(jet_codec_datetime_encode(
+//RS             self.unix_seconds_anchor(),
+//RS             self.nanosecond() as u32,
+//RS             self.is_leap_second(),
+//RS         ))
+//RS     }
+//RS }
+//RS impl __jet_Encode for jet_std::Duration {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Int(jet_codec_duration_encode(self.ns))
+//RS     }
+//RS }
+//RS impl __jet_Encode for u8 {
+//RS     const __JET_IS_BYTE: bool = true;
+//RS 
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Int(i64::from(*self))
+//RS     }
+//RS 
+//RS     fn jet_encode_byte(&self) -> u8 {
+//RS         *self
+//RS     }
+//RS }
+//RS impl __jet_Encode for u64 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::jet_datatree_encode_u64(*self)
+//RS     }
+//RS }
+//RS macro_rules! jet_impl_sized_int_encode {
+//RS     ($($ty:ty),* $(,)?) => {$(
+//RS         impl __jet_Encode for $ty {
+//RS             fn jet_encode(&self) -> jet_std::DataTree {
+//RS                 jet_std::DataTree::Int(*self as i64)
+//RS             }
+//RS         }
+//RS     )*};
+//RS }
+//RS jet_impl_sized_int_encode!(i8, i16, i32, u16, u32);
+//RS impl __jet_Encode for f32 {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Float(*self as f64)
+//RS     }
+//RS }
+//RS impl __jet_Encode for jet_std::JetDecimal {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         // Decimal stays exact through the shared tree; text preserves scale.
+//RS         jet_std::DataTree::Text(jet_codec_decimal_encode(self))
+//RS     }
+//RS }
+//RS impl<T: __jet_Encode> __jet_Encode for Vec<T> {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
+//RS         // Codable tree. Text codecs already render Bytes as a number list, while
+//RS         // CBOR emits major type 2. The byte fact is carried by the scalar
+//RS         // implementation rather than inferred from a Rust type name.
+//RS         if <T as __jet_Encode>::__JET_IS_BYTE {
+//RS             let mut bytes = Vec::with_capacity(self.len());
+//RS             for value in self {
+//RS                 bytes.push(value.jet_encode_byte());
+//RS             }
+//RS             return jet_std::DataTree::Bytes(bytes);
+//RS         }
+//RS         jet_std::DataTree::Array(self.iter().map(|x| x.jet_encode()).collect())
+//RS     }
+//RS }
+//RS impl<T: __jet_Encode, const N: usize> __jet_Encode for [T; N] {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         if <T as __jet_Encode>::__JET_IS_BYTE {
+//RS             let mut bytes = Vec::with_capacity(N);
+//RS             for value in self {
+//RS                 bytes.push(value.jet_encode_byte());
+//RS             }
+//RS             return jet_std::DataTree::Bytes(bytes);
+//RS         }
+//RS         jet_std::DataTree::Array(self.iter().map(|value| value.jet_encode()).collect())
+//RS     }
+//RS }
+//RS // D-FAIL-CARRIER1=A: `?T` is the carrier, so the carrier is what codes.
+//RS impl<T: __jet_Encode> __jet_Encode for JetOutcome<T, JetAbsent> {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         match self {
+//RS             Ok(x) => x.jet_encode(),
+//RS             Err(JetAbsent) => jet_std::DataTree::Null,
+//RS         }
+//RS     }
+//RS }
+//RS impl<V: __jet_Encode> __jet_Encode for std::collections::BTreeMap<String, V> {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         jet_std::DataTree::Object(
+//RS             self.iter()
+//RS                 .map(|(k, v)| (k.clone(), v.jet_encode()))
+//RS                 .collect(),
+//RS         )
+//RS     }
+//RS }
+//RS impl<V: __jet_Encode> __jet_Encode for JetMap<String, V> {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         // Keep the JetMap surface as a transparent BTreeMap codec. Calling
+//RS         // `self.jet_encode()` (or relying on method lookup through Deref)
+//RS         // re-enters this impl for JetMap and recurses forever.
+//RS         <std::collections::BTreeMap<String, V> as __jet_Encode>::jet_encode(&**self)
+//RS     }
+//RS }
+//RS // D-ENC-CBOR-SURFACE1: DataTree itself is Codable. Whole-value codec
+//RS // composition must not fall through to rustc after front-end acceptance.
+//RS impl __jet_Encode for jet_std::DataTree {
+//RS     fn jet_encode(&self) -> jet_std::DataTree { self.clone() }
+//RS }
+//RS 
+//RS impl __jet_Decode for i64 {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::jet_datatree_decode_fixed_integer(t, true, 64, "I64")?
+//RS             .try_into()
+//RS             .map_err(|_| jet_std::FieldError::one("expected I64, found out-of-range Int"))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for jet_foundation::Numeric::JetInt {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_int_with(
+//RS             t,
+//RS             jet_foundation::Numeric::JetInt::from_i64,
+//RS             |text| {
+//RS                 jet_foundation::Numeric::CtBigInt::from_str(text)
+//RS                     .map(jet_foundation::Numeric::JetInt::from_big)
+//RS                     .map_err(|error| error.to_string())
+//RS             },
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS // D-TYPE2-SPELL1: inline ranges are transparent in the Rust carrier, so a
+//RS // generic container decoder cannot see the interval through `T = i64`. Typed
+//RS // DataTree decode emits these Prelude-owned walks whenever a range appears
+//RS // below a list, option, fixed list, or string-keyed map.
+//RS fn jet_decode_inline_range(
+//RS     t: &jet_std::DataTree,
+//RS     lo: i64,
+//RS     hi: i64,
+//RS ) -> Result<i64, Vec<jet_std::FieldError>> {
+//RS     let value = <i64 as __jet_Decode>::jet_decode(t)?;
+//RS     jet_inline_range_from_int(value, lo, hi).map_err(jet_std::FieldError::one)
+//RS }
+//RS 
+//RS fn jet_decode_sequence<T, F>(
+//RS     length: usize,
+//RS     mut decode: F,
+//RS ) -> Result<Vec<T>, Vec<jet_std::FieldError>>
+//RS where
+//RS     F: FnMut(usize) -> Result<T, Vec<jet_std::FieldError>>,
+//RS {
+//RS     let mut out = Vec::with_capacity(length);
+//RS     let mut errors = Vec::new();
+//RS     for index in 0..length {
+//RS         match decode(index) {
+//RS             Ok(value) => out.push(value),
+//RS             Err(error) => errors.extend(jet_std::FieldError::under_errors(
+//RS                 &format!("[{index}]"),
+//RS                 error,
+//RS             )),
+//RS         }
+//RS     }
+//RS     if errors.is_empty() {
+//RS         Ok(out)
+//RS     } else {
+//RS         Err(errors)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_decode_inline_range_list<T, F>(
+//RS     t: &jet_std::DataTree,
+//RS     mut decode: F,
+//RS ) -> Result<Vec<T>, Vec<jet_std::FieldError>>
+//RS where
+//RS     F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+//RS {
+//RS     let jet_std::DataTree::Array(items) = t else {
+//RS         return Err(jet_std::FieldError::one(format!(
+//RS             "expected a list, found {}",
+//RS             jet_std::datatree_kind_for(t)
+//RS         )));
+//RS     };
+//RS     jet_decode_sequence(items.len(), |index| decode(&items[index]))
+//RS }
+//RS 
+//RS fn jet_decode_inline_range_fixed<T, F, const N: usize>(
+//RS     t: &jet_std::DataTree,
+//RS     decode: F,
+//RS ) -> Result<[T; N], Vec<jet_std::FieldError>>
+//RS where
+//RS     F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+//RS {
+//RS     let values = jet_decode_inline_range_list(t, decode)?;
+//RS     let found = values.len();
+//RS     values.try_into().map_err(|_| {
+//RS         jet_std::FieldError::one(format!(
+//RS             "expected a fixed list of length {N}, found {found}"
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_decode_inline_range_option<T, F>(
+//RS     t: &jet_std::DataTree,
+//RS     mut decode: F,
+//RS ) -> Result<JetOutcome<T, JetAbsent>, Vec<jet_std::FieldError>>
+//RS where
+//RS     F: FnMut(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+//RS {
+//RS     match t {
+//RS         jet_std::DataTree::Null => Ok(Err(JetAbsent)),
+//RS         other => Ok(Ok(decode(other)?)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_decode_inline_range_map<V, F>(
+//RS     t: &jet_std::DataTree,
+//RS     mut decode: F,
+//RS ) -> Result<JetMap<String, V>, Vec<jet_std::FieldError>>
+//RS where
+//RS     F: FnMut(&jet_std::DataTree) -> Result<V, Vec<jet_std::FieldError>>,
+//RS {
+//RS     let jet_std::DataTree::Object(entries) = t else {
+//RS         return Err(jet_std::FieldError::one(format!(
+//RS             "expected an object, found {}",
+//RS             jet_std::datatree_kind_for(t)
+//RS         )));
+//RS     };
+//RS     let mut out = Vec::with_capacity(entries.len());
+//RS     let mut errors = Vec::new();
+//RS     for (key, value) in entries {
+//RS         match decode(value) {
+//RS             Ok(value) => out.push((key.clone(), value)),
+//RS             Err(error) => errors.extend(jet_std::FieldError::under_errors(key, error)),
+//RS         }
+//RS     }
+//RS     if errors.is_empty() {
+//RS         Ok(out.into_iter().collect())
+//RS     } else {
+//RS         Err(errors)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Decode for f64 {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_float(t)
+//RS     }
+//RS }
+//RS impl __jet_Decode for bool {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_bool(t)
+//RS     }
+//RS }
+//RS impl __jet_Decode for String {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_string(t)
+//RS     }
+//RS }
+//RS impl __jet_Decode for char {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let s = String::jet_decode(t)?;
+//RS         let mut it = s.chars();
+//RS         match (it.next(), it.next()) {
+//RS             (Some(c), None) => Ok(c),
+//RS             _ => Err(jet_std::FieldError::one(format!(
+//RS                 "expected a single Char, found {:?}",
+//RS                 s
+//RS             ))),
+//RS         }
+//RS     }
+//RS }
+//RS impl __jet_Decode for JetDate {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let value = String::jet_decode(t)?;
+//RS         jet_codec_date_decode(&value)
+//RS             .map(|(year, month, day)| JetDate::new(year, month, day))
+//RS             .map_err(|error| jet_std::FieldError::one(format!("expected Date: {error}")))
+//RS     }
+//RS }
+//RS impl __jet_Decode for JetLocalTime {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let value = String::jet_decode(t)?;
+//RS         jet_codec_local_time_decode(&value)
+//RS             .map(|(hour, minute, second)| JetLocalTime::new(hour, minute, second))
+//RS             .map_err(|error| jet_std::FieldError::one(format!("expected LocalTime: {error}")))
+//RS     }
+//RS }
+//RS impl __jet_Decode for JetDateTime {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let value = String::jet_decode(t)?;
+//RS         jet_codec_datetime_decode(&value)
+//RS             .map(|(secs, nanos, leap_second)| {
+//RS                 JetDateTime::from_timestamp_ns_with_leap(secs, nanos, leap_second)
+//RS             })
+//RS             .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
+//RS     }
+//RS }
+//RS impl __jet_Decode for jet_std::Duration {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let ns = jet_std::decode_int_with(
+//RS             t,
+//RS             |value| value,
+//RS             |text| {
+//RS                 text.parse::<i64>()
+//RS                     .map_err(|_| "exact Int is outside i64".to_owned())
+//RS             },
+//RS         )?;
+//RS         Ok(jet_std::Duration {
+//RS             ns: jet_codec_duration_decode(ns),
+//RS         })
+//RS     }
+//RS }
+//RS impl __jet_Decode for u8 {
+//RS     const __JET_IS_BYTE: bool = true;
+//RS 
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::jet_datatree_decode_fixed_integer(t, false, 8, "U8")?
+//RS             .try_into()
+//RS             .map_err(|_| jet_std::FieldError::one("expected U8, found out-of-range Int"))
+//RS     }
+//RS 
+//RS     fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         Ok(value)
+//RS     }
+//RS }
+//RS macro_rules! jet_impl_sized_int_decode {
+//RS     ($($ty:ty => ($signed:literal, $bits:literal, $name:literal)),* $(,)?) => {$(
+//RS         impl __jet_Decode for $ty {
+//RS             fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS                 jet_std::jet_datatree_decode_fixed_integer(t, $signed, $bits, $name)?
+//RS                     .try_into()
+//RS                     .map_err(|_| {
+//RS                         jet_std::FieldError::one(format!(
+//RS                             "expected {}, found out-of-range Int",
+//RS                             $name
+//RS                         ))
+//RS                     })
+//RS             }
+//RS         }
+//RS     )*};
+//RS }
+//RS jet_impl_sized_int_decode!(
+//RS     i8 => (true, 8, "I8"),
+//RS     i16 => (true, 16, "I16"),
+//RS     i32 => (true, 32, "I32"),
+//RS     u16 => (false, 16, "U16"),
+//RS     u32 => (false, 32, "U32"),
+//RS     u64 => (false, 64, "U64"),
+//RS );
+//RS impl __jet_Decode for f32 {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         jet_std::decode_f32(t)
+//RS     }
+//RS }
+//RS impl __jet_Decode for jet_std::JetDecimal {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         match t {
+//RS             jet_std::DataTree::Number(text) => {
+//RS                 jet_std::JetDecimal::from_json_number(text).map_err(|error| {
+//RS                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
+//RS                 })
+//RS             }
+//RS             jet_std::DataTree::TypedText(text) => Err(jet_std::FieldError::one(format!(
+//RS                 "expected Decimal, found text {:?}",
+//RS                 text
+//RS             ))),
+//RS             jet_std::DataTree::Text(text) => {
+//RS                 jet_codec_decimal_decode_text(text).map_err(|error| {
+//RS                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
+//RS                 })
+//RS             }
+//RS             jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)
+//RS                 .map_err(jet_std::FieldError::one),
+//RS             other => Err(jet_std::FieldError::one(format!(
+//RS                 "expected Decimal, found {}", jet_std::datatree_kind_for(other)
+//RS             ))),
+//RS         }
+//RS     }
+//RS }
+//RS impl<T: __jet_Decode> __jet_Decode for Vec<T> {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         match t {
+//RS             jet_std::DataTree::Bytes(bytes) if <T as __jet_Decode>::__JET_IS_BYTE => {
+//RS                 jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
+//RS             }
+//RS             jet_std::DataTree::Array(items) => {
+//RS                 jet_decode_sequence(items.len(), |index| T::jet_decode(&items[index]))
+//RS             }
+//RS             other => Err(jet_std::FieldError::one(format!(
+//RS                 "expected a list, found {}",
+//RS                 jet_std::datatree_kind_for(other)
+//RS             ))),
+//RS         }
+//RS     }
+//RS }
+//RS impl<T: __jet_Decode, const N: usize> __jet_Decode for [T; N] {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         let values = Vec::<T>::jet_decode(t)?;
+//RS         let found = values.len();
+//RS         values.try_into().map_err(|_| {
+//RS             jet_std::FieldError::one(format!(
+//RS                 "expected a fixed list of length {}, found {}",
+//RS                 N, found
+//RS             ))
+//RS         })
+//RS     }
+//RS }
+//RS impl __jet_Decode for jet_std::DataTree {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> { Ok(t.clone()) }
+//RS }
+//RS impl<T: __jet_Decode> __jet_Decode for JetOutcome<T, JetAbsent> {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         match t {
+//RS             jet_std::DataTree::Null => Ok(Err(JetAbsent)),
+//RS             other => Ok(Ok(T::jet_decode(other)?)),
+//RS         }
+//RS     }
+//RS }
+//RS impl<V: __jet_Decode> __jet_Decode for std::collections::BTreeMap<String, V> {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         match t {
+//RS             jet_std::DataTree::Object(entries) => {
+//RS                 let mut out = std::collections::BTreeMap::new();
+//RS                 let mut errors = Vec::new();
+//RS                 for (k, v) in entries {
+//RS                     match V::jet_decode(v) {
+//RS                         Ok(value) => {
+//RS                             out.insert(k.clone(), value);
+//RS                         }
+//RS                         Err(error) => {
+//RS                             errors.extend(jet_std::FieldError::under_errors(k, error));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if !errors.is_empty() {
+//RS                     return Err(errors);
+//RS                 }
+//RS                 Ok(out)
+//RS             }
+//RS             other => Err(jet_std::FieldError::one(format!(
+//RS                 "expected an object, found {}",
+//RS                 jet_std::datatree_kind_for(other)
+//RS             ))),
+//RS         }
+//RS     }
+//RS }
+//RS impl<V: __jet_Decode> __jet_Decode for JetMap<String, V> {
+//RS     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         <std::collections::BTreeMap<String, V> as __jet_Decode>::jet_decode(t)
+//RS             .map(|map| map.into_iter().collect())
+//RS     }
+//RS }
+//RS 
+//RS // ── core.encoding.datatree: checked DataTree projections ─────────────────────
+//RS // Keep the carrier access policy in `JetDataTreeAccess`; these thin ABI
+//RS // functions only expose that one implementation to generated MIR calls.
+//RS fn jet_datatree_field(
+//RS     tree: &jet_std::DataTree,
+//RS     name: &String,
+//RS ) -> Result<jet_std::DataTree, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, name)
+//RS }
+//RS fn jet_datatree_at(
+//RS     tree: &jet_std::DataTree,
+//RS     index: i64,
+//RS ) -> Result<jet_std::DataTree, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::at(tree, index)
+//RS }
+//RS fn jet_datatree_int(
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<i64, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::int(tree)
+//RS }
+//RS fn jet_datatree_text(
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<String, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::text(tree)
+//RS }
+//RS fn jet_datatree_bool(
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<bool, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::bool(tree)
+//RS }
+//RS fn jet_datatree_float(
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<f64, Vec<jet_std::FieldError>> {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::float(tree)
+//RS }
+//RS fn jet_datatree_to_text(tree: &jet_std::DataTree) -> JetOutcome<String, JetAbsent> {
+//RS     jet_outcome_of(<jet_std::DataTree as jet_std::JetDataTreeAccess>::to_text(tree))
+//RS }
+//RS fn jet_datatree_equal_unordered(
+//RS     tree: &jet_std::DataTree,
+//RS     other: &jet_std::DataTree,
+//RS ) -> bool {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::equal_unordered(tree, other)
+//RS }
+//RS 
+//RS // This route is intentionally generic: TIR carries the checked type argument,
+//RS // while the trait keeps all scalar/container decode policy in one place.
+//RS fn jet_codec_decode_typed<T: __jet_Decode>(
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     T::jet_decode(tree)
+//RS }
+//RS 
+//RS // Shared steps of natively printed derived codecs (MIRRust and the Jet
+//RS // emitter's `emit_native_derived_decode`). One keyed struct field:
+//RS // `FieldError.under(key, (tree.field(key) ?? Null).decode<T>())`, with its
+//RS // failures appended to `errors` in field order; `None` when it failed.
+//RS fn jet_decode_object_field<T: __jet_Decode>(
+//RS     tree: &jet_std::DataTree,
+//RS     key: &str,
+//RS     errors: &mut Vec<jet_std::FieldError>,
+//RS ) -> Option<T> {
+//RS     let field = <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, key)
+//RS         .unwrap_or(jet_std::DataTree::Null);
+//RS     match T::jet_decode(&field) {
+//RS         Ok(value) => Some(value),
+//RS         Err(failures) => {
+//RS             errors.extend(jet_std::FieldError::under_errors(key, failures));
+//RS             None
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // One required struct field (no default, not optional): as
+//RS // `jet_decode_object_field`, except an absent key whose `Null` does not
+//RS // decode appends only `E2410: missing required field `key`` at `key`.
+//RS fn jet_decode_required_field<T: __jet_Decode>(
+//RS     tree: &jet_std::DataTree,
+//RS     key: &str,
+//RS     errors: &mut Vec<jet_std::FieldError>,
+//RS ) -> Option<T> {
+//RS     let Ok(field) = <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, key) else {
+//RS         return match T::jet_decode(&jet_std::DataTree::Null) {
+//RS             Ok(value) => Some(value),
+//RS             Err(_) => {
+//RS                 errors.push(jet_std::FieldError {
+//RS                     path: key.to_string(),
+//RS                     reason: format!("E2410: missing required field `{key}`"),
+//RS                 });
+//RS                 None
+//RS             }
+//RS         };
+//RS     };
+//RS     match T::jet_decode(&field) {
+//RS         Ok(value) => Some(value),
+//RS         Err(failures) => {
+//RS             errors.extend(jet_std::FieldError::under_errors(key, failures));
+//RS             None
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // The payload tree of an externally tagged enum variant:
+//RS // `tree.field(wire) ?? Null`.
+//RS fn jet_decode_enum_candidate(tree: &jet_std::DataTree, wire: &str) -> jet_std::DataTree {
+//RS     <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, wire)
+//RS         .unwrap_or(jet_std::DataTree::Null)
+//RS }
+//RS 
+//RS // One single-payload variant: it matches when the payload tree decodes.
+//RS fn jet_decode_enum_payload<T: __jet_Decode>(tree: &jet_std::DataTree, wire: &str) -> Option<T> {
+//RS     T::jet_decode(&jet_decode_enum_candidate(tree, wire)).ok()
+//RS }
+//RS 
+//RS // ── core.encoding: typed format verbs over Encode/Decode (D-ENC1, D-SERDE6) ────
+//RS // `to_string`/`to_string_pretty` (D-JSONVERB1) and the typed `decode<T>` route
+//RS // every format through the one DataTree model.
+//RS // Internal MIR codec projections carry a checked kind ID so resident hosts can
+//RS // use the same ABI while AOT dispatches to these trait implementations.
+//RS fn jet_codec_encode<T: __jet_Encode>(_kind: i64, value: &T) -> jet_std::DataTree {
+//RS     value.jet_encode()
+//RS }
+//RS fn jet_codec_decode<T: __jet_Decode>(
+//RS     _kind: i64,
+//RS     tree: &jet_std::DataTree,
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     T::jet_decode(tree)
+//RS }
+//RS fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
+//RS     jet_std::render_datatree_json(&v.jet_encode(), false, 0)
+//RS }
+//RS fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
+//RS     jet_std::render_datatree_json(&v.jet_encode(), true, 0)
+//RS }
+//RS 
+//RS fn jet_enc_json_to_string_shape<T: __jet_Encode>(
+//RS     value: &T,
+//RS     projection: &ShapeProjection,
+//RS ) -> Result<String, Vec<jet_std::FieldError>> {
+//RS     if projection.kind != ShapeProjectionKind::Json {
+//RS         return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
+//RS     }
+//RS     let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+//RS     Ok(jet_std::render_datatree_json(&projected, false, 0))
+//RS }
+//RS 
+//RS fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
+//RS     value: &T,
+//RS     projection: &ShapeProjection,
+//RS ) -> Result<String, Vec<jet_std::FieldError>> {
+//RS     if projection.kind != ShapeProjectionKind::Json {
+//RS         return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
+//RS     }
+//RS     let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+//RS     Ok(jet_std::render_datatree_json(&projected, true, 0))
+//RS }
+//RS fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
+//RS         let line = e.line.ok().unwrap_or(0);
+//RS         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
+//RS     })?;
+//RS     // D-MIGRATE4: migration is part of the sole canonical decode operation.
+//RS     T::jet_decode(&tree)
+//RS }
+//RS fn jet_data_json_decode<T: __jet_Decode>(
+//RS     text: &String,
+//RS ) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+//RS     jet_enc_json_decode::<Vec<T>>(text)
+//RS }
+//RS /// Decode an already-projected ordered object through the canonical typed
+//RS /// DataTree trait. DB supplies the entries after its carrier-only projection;
+//RS /// this function stays format-neutral and is shared by every host.
+//RS fn jet_db_decode<T: __jet_Decode>(
+//RS     entries: &[(String, jet_std::DataTree)],
+//RS ) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     T::jet_decode(&jet_std::DataTree::Object(entries.to_vec()))
+//RS }
+//RS 
+//RS // CSV typed decode: header row maps columns to fields by name; each data row
+//RS // becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
+//RS // per-row decode failures are typed `[FieldError]` values naming the 1-based row.
+//RS fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+//RS     let rows = jet_ring_csv_parse(text, &",".to_string(), false, false)
+//RS         .map_err(jet_std::FieldError::one)?;
+//RS     jet_std::jet_enc_csv_decode_rows(
+//RS         rows,
+//RS         |tree| T::jet_decode(&tree),
+//RS         |row, error| jet_std::FieldError::under_errors(row, error),
+//RS         jet_std::DataTree::Text,
+//RS         jet_std::DataTree::Object,
+//RS     )
+//RS }
+//RS 
+//RS trait JetDataCount {
+//RS     fn jet_data_count(&self) -> i64;
+//RS }
+//RS 
+//RS impl<T> JetDataCount for Vec<T> {
+//RS     fn jet_data_count(&self) -> i64 {
+//RS         self.len() as i64
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_data_count<T: JetDataCount + ?Sized>(rows: &T) -> i64 {
+//RS     rows.jet_data_count()
+//RS }
+//RS 
+// END-PORT-PENDING 0132 crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:1-746
+

@@ -1,0 +1,192 @@
+// Prelude/Core/Time.rs:1–483. Private canonical civil payloads; no host policy.
+// I64 is the original field width. R0 lowers these operations to scalar leaves,
+// never back through Date/LocalTime builtins. #4391: spell MIN as subtraction.
+// Parsing retains source UTF-8 spans (#4318/#4392); no owned-span substitute.
+// Original parse/ISO parse/time components (:73–149,322–375) require the
+// canonical retained str-span/I64 parser, gated by #4318/#4392.
+// Original wide date/time delta, duration add/sub, and round (:249–273,
+// 397–413,418–465) require Duration's canonical signed128 owner.
+// Original overflow rejection/formatting (:221–241,274–287,466–480) require
+// canonical padded fixed-number formatting; no per-digit/field String copies.
+// Original today_utc (:288) requires the native/world clock sample before
+// today_from_millis. These are unresolved dependencies, not native fallbacks.
+
+// Rust derive(PartialEq, Eq, PartialOrd, Ord) (:4, :303): equality plus the
+// lexicographic declaration-order compare consumed by Date/LocalTime
+// compare_value (MathRandomTime.rs:923,983). Field order is the sort key.
+#Comparable
+pub struct CivilDate { pub year: I64, pub month: I64, pub day: I64 }
+#Comparable
+pub struct CivilTime { pub hour: I64, pub minute: I64, pub second: I64, pub nanos: U32 }
+
+fn civil_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+fn civil_max() -> I64 Never! { I64{9223372036854775807} }
+// Rust rem_euclid for the positive calendar divisors. Fixed %% retains sign.
+fn civil_rem_euclid(n: I64, divisor: I64) -> I64 Never! {
+    rem :: n %% divisor
+    if rem < (I64{0}) -> return rem + divisor
+    rem
+}
+fn civil_clamp(n: I64, lo: I64, hi: I64) -> I64 Never! {
+    if n < lo -> return lo
+    if n > hi -> return hi
+    n
+}
+fn civil_sat_neg(n: I64) -> I64 Never! {
+    if n == civil_min() -> return civil_max()
+    I64{0} - n
+}
+fn civil_sat_add(a: I64, b: I64) -> I64 Never! {
+    if b > (I64{0}) && a > civil_max() - b -> return civil_max()
+    if b < (I64{0}) && a < civil_min() - b -> return civil_min()
+    a + b
+}
+fn civil_sat_months(years: I64, months: I64) -> I64 Never! {
+    scaled :: if {
+        years > civil_max() /% (I64{12}) -> civil_max()
+        years < (civil_min() /% I64{12} + I64{1}) -> civil_min()
+        else -> years * I64{12}
+    }
+    civil_sat_add(scaled, months)
+}
+
+impl CivilDate {
+    // Rust JetDate::is_leap (:11).
+    pub fn is_leap(y: I64) -> Bool Never! {
+        (y %% I64{4} == I64{0} && y %% I64{100} != I64{0}) || y %% I64{400} == I64{0}
+    }
+    // Rust JetDate::days_in_month_of (:14), including invalid-month default 30.
+    pub fn days_in_month_of(y: I64, m: I64) -> I64 Never! {
+        if {
+            m == (I64{1}) || m == (I64{3}) || m == (I64{5}) || m == (I64{7}) || m == (I64{8}) || m == (I64{10}) || m == (I64{12}) -> I64{31}
+            m == (I64{2}) -> if CivilDate.is_leap(y) -> I64{29} else -> I64{28}
+            else -> I64{30}
+        }
+    }
+    // Rust JetDate::new (:28).
+    pub fn new(y: I64, m: I64, d: I64) -> CivilDate Never! {
+        month :: civil_clamp(m, I64{1}, I64{12})
+        CivilDate{year: y, month: month, day: civil_clamp(d, I64{1}, CivilDate.days_in_month_of(y, month))}
+    }
+    // Rust JetDate::to_day_number (:38). No per-call prefix array allocation.
+    pub fn to_day_number(self) -> I64 Never! {
+        y :: self.year - I64{1}
+        prefix :: if {
+            self.month == (I64{1}) -> I64{0}
+            self.month == (I64{2}) -> I64{31}
+            self.month == (I64{3}) -> I64{59}
+            self.month == (I64{4}) -> I64{90}
+            self.month == (I64{5}) -> I64{120}
+            self.month == (I64{6}) -> I64{151}
+            self.month == (I64{7}) -> I64{181}
+            self.month == (I64{8}) -> I64{212}
+            self.month == (I64{9}) -> I64{243}
+            self.month == (I64{10}) -> I64{273}
+            self.month == (I64{11}) -> I64{304}
+            else -> I64{334}
+        }
+        leap :: if self.month > (I64{2}) && CivilDate.is_leap(self.year) -> I64{1} else -> I64{0}
+        I64{365} * y + y /% I64{4} - y /% I64{100} + y /% I64{400} + prefix + leap + self.day - I64{1}
+    }
+    // Rust JetDate::from_day_number (:51), same estimate/correction order.
+    pub fn from_day_number(number: I64) -> CivilDate Never! {
+        n := number
+        y := n /% I64{365} + I64{1}
+        loop {
+            start :: CivilDate.new(y, I64{1}, I64{1}).to_day_number()
+            end :: CivilDate.new(y + I64{1}, I64{1}, I64{1}).to_day_number()
+            if n >= start && n < end -> break
+            if n < start -> y -= I64{1} else -> y += I64{1}
+        }
+        n -= CivilDate.new(y, I64{1}, I64{1}).to_day_number()
+        m := I64{1}
+        loop m < (I64{12}) && n >= CivilDate.days_in_month_of(y, m) {
+            n -= CivilDate.days_in_month_of(y, m)
+            m += I64{1}
+        }
+        CivilDate.new(y, m, n + I64{1})
+    }
+    // Rust JetDate::{year,month,day} (:151–159) are the fields above.
+    // Rust JetDate::add_days (:160).
+    pub fn add_days(self, n: I64) -> CivilDate Never! { CivilDate.from_day_number(self.to_day_number() + n) }
+    // Rust JetDate::add_months (:163).
+    pub fn add_months(self, n: I64) -> CivilDate Never! {
+        total :: self.month - I64{1} + n
+        y :: self.year + total /% I64{12}
+        m :: civil_rem_euclid(total, I64{12}) + I64{1}
+        CivilDate.new(y, m, civil_clamp(self.day, I64{1}, CivilDate.days_in_month_of(y, m)))
+    }
+    // Rust JetDate::diff_days (:170).
+    pub fn diff_days(self, other: CivilDate) -> I64 Never! { self.to_day_number() - other.to_day_number() }
+    // Rust JetDate::weekday (:173): Sunday=0, Saturday=6.
+    pub fn weekday(self) -> I64 Never! { civil_rem_euclid(self.to_day_number() + I64{1}, I64{7}) }
+    // Rust JetDate::iso_weekday (:177): Monday=1, Sunday=7.
+    pub fn iso_weekday(self) -> I64 Never! { civil_rem_euclid(self.to_day_number(), I64{7}) + I64{1} }
+    // Rust JetDate::day_of_year (:180).
+    pub fn day_of_year(self) -> I64 Never! { self.to_day_number() - CivilDate.new(self.year, I64{1}, I64{1}).to_day_number() + I64{1} }
+    // Rust JetDate::quarter_of_year (:183).
+    pub fn quarter_of_year(self) -> I64 Never! { (self.month - I64{1}) /% I64{3} + I64{1} }
+    // Rust JetDate::is_leap_year (:186).
+    pub fn is_leap_year(self) -> Bool Never! { CivilDate.is_leap(self.year) }
+    // Rust JetDate::days_in_month (:189).
+    pub fn days_in_month(self) -> I64 Never! { CivilDate.days_in_month_of(self.year, self.month) }
+    // Rust JetDate::iso_week (:192).
+    pub fn iso_week(self) -> I64 Never! {
+        thursday :: self.add_days(I64{4} - self.iso_weekday())
+        jan4 :: CivilDate.new(thursday.year, I64{1}, I64{4})
+        monday :: jan4.add_days(I64{1} - jan4.iso_weekday())
+        thursday.add_days(I64{1} - thursday.iso_weekday()).diff_days(monday) /% I64{7} + I64{1}
+    }
+    // Rust JetDate::iso_week_year (:199).
+    pub fn iso_week_year(self) -> I64 Never! { self.add_days(I64{4} - self.iso_weekday()).year }
+    // Rust JetDate::from_iso_week (:202): invalid week 53 is rejected after conversion.
+    pub fn from_iso_week(year: I64, week: I64, weekday: I64) -> CivilDate? Never! {
+        if week < (I64{1}) || week > (I64{53}) || weekday < (I64{1}) || weekday > (I64{7}) -> return None
+        jan4 :: CivilDate.new(year, I64{1}, I64{4})
+        date :: jan4.add_days(I64{1} - jan4.iso_weekday()).add_days((week - I64{1}) * I64{7} + weekday - I64{1})
+        if date.iso_week_year() == year && date.iso_week() == week -> return Val(date)
+        None
+    }
+    // Rust JetDate::truncate (:211).
+    pub fn truncate(self, unit: String) -> CivilDate Never! {
+        if unit == {
+            "year" -> CivilDate.new(self.year, I64{1}, I64{1})
+            "month" -> CivilDate.new(self.year, self.month, I64{1})
+            else -> ~self
+        }
+    }
+    // Rust JetDate::replace (:218).
+    pub fn replace(self, year: I64, month: I64, day: I64) -> CivilDate Never! { CivilDate.new(year, month, day) }
+    // Rust JetDate::add_period (:242). Period owner supplies its three I64 fields.
+    pub fn add_period(self, years: I64, months: I64, days: I64) -> CivilDate Never! { self.add_months(civil_sat_months(years, months)).add_days(days) }
+    // Rust JetDate::subtract_period (:246): negate each field saturating first.
+    pub fn subtract_period(self, years: I64, months: I64, days: I64) -> CivilDate Never! { self.add_period(civil_sat_neg(years), civil_sat_neg(months), civil_sat_neg(days)) }
+    // Rust JetDate::today_utc (:288–300), pure policy after native/world sample.
+    pub fn today_from_millis(millis: I64) -> CivilDate Never! {
+        CivilDate.from_day_number(CivilDate.new(I64{1970}, I64{1}, I64{1}).to_day_number() + millis /% I64{86400000})
+    }
+}
+
+
+impl CivilTime {
+    // Rust JetLocalTime::new (:311).
+    pub fn new(hour: I64, minute: I64, second: I64) -> CivilTime Never! { CivilTime.with_nanosecond(hour, minute, second, U32{0}) }
+    // Rust JetLocalTime::with_nanosecond (:314).
+    pub fn with_nanosecond(hour: I64, minute: I64, second: I64, nanos: U32) -> CivilTime Never! {
+        ns :: if nanos > (U32{999999999}) -> U32{999999999} else -> nanos
+        CivilTime{hour: civil_clamp(hour, I64{0}, I64{23}), minute: civil_clamp(minute, I64{0}, I64{59}), second: civil_clamp(second, I64{0}, I64{59}), nanos: ns}
+    }
+    // Rust JetLocalTime::{hour,minute,second} (:376–384) are fields above.
+    // Rust JetLocalTime::millisecond (:385).
+    pub fn millisecond(self) -> I64 Never! { I64.from_u32(self.nanos /% U32{1000000}) }
+    // Rust JetLocalTime::microsecond (:388).
+    pub fn microsecond(self) -> I64 Never! { I64.from_u32(self.nanos /% U32{1000}) }
+    // Rust JetLocalTime::nanosecond (:391).
+    pub fn nanosecond(self) -> I64 Never! { I64.from_u32(self.nanos) }
+    // Rust JetLocalTime::to_seconds (:394).
+    pub fn to_seconds(self) -> I64 Never! { self.hour * I64{3600} + self.minute * I64{60} + self.second }
+    // Local nanoseconds-in-day fits I64; not the original i128 API (:397).
+    fn nanoseconds_in_day(self) -> I64 Never! { self.to_seconds() * I64{1000000000} + self.nanosecond() }
+    // Rust JetLocalTime::difference_ns (:414), bounded by one day, no clamp needed.
+    pub fn difference_ns(self, other: CivilTime) -> I64 Never! { self.nanoseconds_in_day() - other.nanoseconds_in_day() }
+}

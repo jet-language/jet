@@ -1,0 +1,1804 @@
+// PORT-PENDING 2026 crates-jet-jit-src-sourceresources-slice-3601: crates/jet-jit/src/SourceResources.rs:3601-5400
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     }
+//RS 
+//RS     /// Clone a sender endpoint into a fresh logical arena capability while
+//RS     /// retaining the scheduler's physical sender count.
+//RS     pub fn clone_channel_sender(
+//RS         &self,
+//RS         source_handle: MirHandleId,
+//RS         source_raw: i64,
+//RS         target_handle: MirHandleId,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(
+//RS             source_handle,
+//RS             source_raw,
+//RS             &SourceResourceKind::ChannelSender,
+//RS         )?;
+//RS         let sender = {
+//RS             let owner = owner.lock().map_err(|_| {
+//RS                 MirNativeCursorError::internal("Source resource owner lock is poisoned")
+//RS             })?;
+//RS             let BackendOwner::ChannelSender(sender) = &*owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source channel sender capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             sender.clone()
+//RS         };
+//RS         self.register_channel_sender(target_handle, sender)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     /// Create one canonical sender/receiver endpoint pair. Each endpoint gets
+//RS     /// its own arena capability and scheduler reference count.
+//RS     pub fn register_new_channel(
+//RS         &self,
+//RS         sender_handle: MirHandleId,
+//RS         receiver_handle: MirHandleId,
+//RS         capacity: Option<i64>,
+//RS     ) -> Result<(SourceResourceHandle, SourceResourceHandle), String> {
+//RS         let receiver = match capacity {
+//RS             Some(capacity) => jet_codegen::scheduler::JetSchedulerChannel::bounded(capacity),
+//RS             None => jet_codegen::scheduler::JetSchedulerChannel::new(),
+//RS         };
+//RS         let sender = receiver.sender();
+//RS         let sender_capability = self.register_channel_sender(sender_handle, sender)?;
+//RS         match self.register_channel_receiver(receiver_handle, &receiver) {
+//RS             Ok(receiver_capability) => Ok((sender_capability, receiver_capability)),
+//RS             Err(error) => {
+//RS                 let _ = self.release_capability(&sender_capability);
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register_timer_channel(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         delay_ms: i64,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_channel_receiver(
+//RS             handle,
+//RS             &jet_codegen::scheduler::JetSchedulerChannel::timer(delay_ms),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn register_interval_channel(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         delay_ms: i64,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_channel_receiver(
+//RS             handle,
+//RS             &jet_codegen::scheduler::JetSchedulerChannel::interval(delay_ms),
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS     /// Register a scheduler stream carrying Source runtime values.
+//RS     pub fn register_plain_stream(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         stream: jet_codegen::scheduler::JetStream<MirRuntimeValue>,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::PlainStream(stream))
+//RS     }
+//RS     /// Create a canonical pull-gated stream and register its consumer owner.
+//RS     pub fn register_new_plain_stream(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS     ) -> Result<
+//RS         (
+//RS             SourceResourceHandle,
+//RS             jet_codegen::scheduler::JetStreamSender<MirRuntimeValue>,
+//RS         ),
+//RS         String,
+//RS     > {
+//RS         let (sender, stream) = jet_codegen::scheduler::jet_stream();
+//RS         let capability = self.register_plain_stream(handle, stream)?;
+//RS         Ok((capability, sender))
+//RS     }
+//RS 
+//RS     /// Register an already-constructed canonical encoding reader.
+//RS     pub fn register_encoding_reader(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         reader: SourceEncodingReader,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::Encoding(reader))
+//RS     }
+//RS 
+//RS     /// Adopt a resident typed codec reader without reopening the underlying
+//RS     /// file or retaining a second integer slot owner.
+//RS     pub fn register_encoding_reader_handle(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         reader_handle: i64,
+//RS         reader_type: &str,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_encoding_reader(
+//RS             handle,
+//RS             SourceEncodingReader::from_handle(reader_handle, reader_type)?,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Register an already-constructed canonical encoding writer.
+//RS     pub fn register_encoding_writer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         writer: SourceEncodingWriter,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         self.register_backend(handle, BackendOwner::EncodingWriter(writer))
+//RS     }
+//RS 
+//RS     /// Consume a live file-writer capability into a typed codec writer and
+//RS     /// register the resulting lease under a caller-selected capability.
+//RS     /// The file capability is moved before codec construction; constructor
+//RS     /// failure therefore drops the physical writer instead of reopening it.
+//RS     pub fn register_encoding_writer_from_file(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         writer_type: &str,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         self.register_encoding_writer_from_file_with_options(
+//RS             output_handle,
+//RS             file_handle,
+//RS             file_raw,
+//RS             writer_type,
+//RS             SourceEncodingLimits::safe(),
+//RS             false,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Consume a live file-reader capability into a typed codec reader and
+//RS     /// register the resulting lease under a caller-selected capability.
+//RS     pub fn register_encoding_reader_from_file(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         reader_type: &str,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         self.register_encoding_reader_from_file_with_options(
+//RS             output_handle,
+//RS             file_handle,
+//RS             file_raw,
+//RS             reader_type,
+//RS             SourceEncodingLimits::safe(),
+//RS             ",",
+//RS             false,
+//RS             false,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn register_encoding_reader_from_file_with_options(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         delimiter: &str,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         self.register_encoding_reader_from_file_with_xml_options(
+//RS             output_handle,
+//RS             file_handle,
+//RS             file_raw,
+//RS             reader_type,
+//RS             limits,
+//RS             delimiter,
+//RS             header,
+//RS             skip_blank,
+//RS             SourceXmlParseOptions::safe(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn register_encoding_reader_from_file_with_xml_options(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         delimiter: &str,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS         xml_options: SourceXmlParseOptions,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         if let Err(error) = SourceEncodingReader::validate_type(reader_type) {
+//RS             return SourceResourceTransferOutcome {
+//RS                 consumed: None,
+//RS                 result: Err(error),
+//RS             };
+//RS         }
+//RS         let (source, file) = match self
+//RS             .take_file_owner::<SourceFileReader>(
+//RS                 file_handle,
+//RS                 file_raw,
+//RS                 SourceResourceKind::LinesFile,
+//RS             ) {
+//RS             Ok(owners) => owners,
+//RS             Err(error) => {
+//RS                 return SourceResourceTransferOutcome {
+//RS                     consumed: None,
+//RS                     result: Err(error),
+//RS                 }
+//RS             }
+//RS         };
+//RS         let reader = match SourceEncodingReader::from_file_with_xml_options(
+//RS             file,
+//RS             reader_type,
+//RS             limits,
+//RS             delimiter,
+//RS             header,
+//RS             skip_blank,
+//RS             xml_options,
+//RS         ) {
+//RS             Ok(reader) => reader,
+//RS             Err(error) => {
+//RS                 return SourceResourceTransferOutcome {
+//RS                     consumed: Some(source),
+//RS                     result: Err(error),
+//RS                 }
+//RS             }
+//RS         };
+//RS         let result = self
+//RS             .register_encoding_reader(output_handle, reader)
+//RS             .map_err(MirNativeCursorError::internal);
+//RS         SourceResourceTransferOutcome {
+//RS             consumed: Some(source),
+//RS             result,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register_encoding_writer_from_file_with_options(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         writer_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         canonical: bool,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         self.register_encoding_writer_from_file_with_xml_options(
+//RS             output_handle,
+//RS             file_handle,
+//RS             file_raw,
+//RS             writer_type,
+//RS             limits,
+//RS             canonical,
+//RS             SourceXmlRenderOptions::safe(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn register_encoding_writer_from_file_with_xml_options(
+//RS         &self,
+//RS         output_handle: MirHandleId,
+//RS         file_handle: MirHandleId,
+//RS         file_raw: i64,
+//RS         writer_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         canonical: bool,
+//RS         xml_options: SourceXmlRenderOptions,
+//RS     ) -> SourceResourceTransferOutcome {
+//RS         if let Err(error) = SourceEncodingWriter::validate_type(writer_type) {
+//RS             return SourceResourceTransferOutcome {
+//RS                 consumed: None,
+//RS                 result: Err(error),
+//RS             };
+//RS         }
+//RS         let (source, file) = match self
+//RS             .take_file_owner::<SourceFileWriter>(
+//RS                 file_handle,
+//RS                 file_raw,
+//RS                 SourceResourceKind::FileWriter,
+//RS             ) {
+//RS             Ok(owners) => owners,
+//RS             Err(error) => {
+//RS                 return SourceResourceTransferOutcome {
+//RS                     consumed: None,
+//RS                     result: Err(error),
+//RS                 }
+//RS             }
+//RS         };
+//RS         let writer = match SourceEncodingWriter::from_file_with_xml_options(
+//RS             file,
+//RS             writer_type,
+//RS             limits,
+//RS             canonical,
+//RS             xml_options,
+//RS         ) {
+//RS             Ok(writer) => writer,
+//RS             Err(error) => {
+//RS                 return SourceResourceTransferOutcome {
+//RS                     consumed: Some(source),
+//RS                     result: Err(error),
+//RS                 }
+//RS             }
+//RS         };
+//RS         let result = self
+//RS             .register_encoding_writer(output_handle, writer)
+//RS             .map_err(MirNativeCursorError::internal);
+//RS         SourceResourceTransferOutcome {
+//RS             consumed: Some(source),
+//RS             result,
+//RS         }
+//RS     }
+//RS 
+//RS     /// Open a canonical file and construct one of the checked encoding reader
+//RS     /// owners before registering it in this invocation's table.
+//RS     pub fn open_encoding_reader(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS         reader_type: &str,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let file = SourceFileReader::open(path)?;
+//RS         let reader = SourceEncodingReader::from_file(file, reader_type)?;
+//RS         self.register_encoding_reader(handle, reader)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     pub fn open_encoding_reader_with_limits(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let file = SourceFileReader::open(path)?;
+//RS         let reader = SourceEncodingReader::from_file_with_limits(file, reader_type, limits)?;
+//RS         self.register_encoding_reader(handle, reader)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS     pub fn open_encoding_reader_with_options(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         path: &str,
+//RS         reader_type: &str,
+//RS         limits: SourceEncodingLimits,
+//RS         delimiter: &str,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS     ) -> Result<SourceResourceHandle, MirNativeCursorError> {
+//RS         let file = SourceFileReader::open(path)?;
+//RS         let reader = SourceEncodingReader::from_file_with_options(
+//RS             file,
+//RS             reader_type,
+//RS             limits,
+//RS             delimiter,
+//RS             header,
+//RS             skip_blank,
+//RS         )?;
+//RS         self.register_encoding_reader(handle, reader)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     /// Insert a native cursor carrier under the private checked cursor handle.
+//RS     /// The raw slot and generation are allocated by this arena, not supplied by
+//RS     /// a caller or copied from a backend integer handle.
+//RS     pub fn insert_cursor(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         cursor: MirNativeCursor,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         if handle != loop_cursor_handle_id() {
+//RS             return Err("native cursor uses the checked Prelude cursor handle identity".to_string());
+//RS         }
+//RS         let active_lease = active_source_resource_lease_snapshot();
+//RS         let result = {
+//RS             let mut state = self.lock()?;
+//RS             let allow_deferred_retirement =
+//RS                 self.validate_deferred_execution_authority(&state, active_lease.as_ref())?;
+//RS             Self::allocate_slot(
+//RS                 &mut state,
+//RS                 handle,
+//RS                 SourceResourceKind::NativeCursor,
+//RS                 SlotEntry::Cursor(cursor.clone()),
+//RS                 allow_deferred_retirement,
+//RS             )
+//RS         };
+//RS         drop(cursor);
+//RS         result
+//RS     }
+//RS     /// Adopt an already-created native cursor value without exposing a
+//RS     /// serializable integer representation of its payload.
+//RS     pub fn insert_cursor_value(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         value: &MirRuntimeValue,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let MirRuntimeValue::NativeCursor(cursor) = value else {
+//RS             return Err("cursor slot requires the private NativeCursor carrier".to_string());
+//RS         };
+//RS         self.insert_cursor(handle, cursor.clone())
+//RS     }
+//RS 
+//RS     /// Resolve a cursor carrier only through the exact private cursor handle
+//RS     /// and the arena-issued raw slot.
+//RS     pub fn lookup_cursor(
+//RS         &self,
+//RS 
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<MirNativeCursor, String> {
+//RS         if handle != loop_cursor_handle_id() {
+//RS             return Err("native cursor handle identity mismatch".to_string());
+//RS         }
+//RS         let state = self.lock()?;
+//RS         let (slot_id, generation) = Self::decode_raw(raw)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| "stale or unknown native cursor capability".to_string())?;
+//RS         if slot.generation != generation
+//RS             || slot.handle != handle
+//RS             || slot.kind != SourceResourceKind::NativeCursor
+//RS         {
+//RS             return Err("native cursor capability generation, handle, or kind mismatch".to_string());
+//RS         }
+//RS         match &slot.entry {
+//RS             SlotEntry::Cursor(cursor) => Ok(cursor.clone()),
+//RS             SlotEntry::Backend(_) => Err("native cursor capability payload mismatch".to_string()),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Release a cursor slot after validating its exact identity.
+//RS     pub fn release_cursor(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         self.release(handle, raw, &SourceResourceKind::NativeCursor)
+//RS     }
+//RS 
+//RS     fn finalize_removed_slot(removed: Slot) -> SourceResourceRelease {
+//RS         let values = match removed.entry {
+//RS             SlotEntry::Cursor(_) => Vec::new(),
+//RS             SlotEntry::Backend(owner) => {
+//RS                 let owner = owner
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 match &*owner {
+//RS                     BackendOwner::ChannelReceiver(receiver) => {
+//RS                         receiver.close_receiver_and_drain()
+//RS                     }
+//RS                     BackendOwner::ChannelSender(_)
+//RS                     | BackendOwner::NativeBinding(_)
+//RS                     | BackendOwner::PlainStream(_)
+//RS                     | BackendOwner::File(_)
+//RS                     | BackendOwner::FileWriter(_)
+//RS                     | BackendOwner::Stdin(_)
+//RS                     | BackendOwner::Process(_)
+//RS                     | BackendOwner::Encoding(_)
+//RS                     | BackendOwner::EncodingWriter(_)
+//RS                     | BackendOwner::SharedInteropRoot(_)
+//RS                     | BackendOwner::SharedInteropWeakRoot { .. } => Vec::new(),
+//RS                 }
+//RS             }
+//RS         };
+//RS         if values.is_empty() {
+//RS             SourceResourceRelease::Released
+//RS         } else {
+//RS             SourceResourceRelease::DrainedChannel(values)
+//RS         }
+//RS     }
+//RS 
+//RS     fn drain_removed_slots(slots: HashMap<u32, Slot>) -> Vec<MirRuntimeValue> {
+//RS         let mut values = Vec::new();
+//RS         for slot in slots.into_values() {
+//RS             values.extend(Self::finalize_removed_slot(slot).drained_values());
+//RS         }
+//RS         values
+//RS     }
+//RS 
+//RS     pub fn release_resource(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         let removed = {
+//RS             let mut state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(raw)?;
+//RS             let slot = state
+//RS                 .slots
+//RS                 .get(&slot_id)
+//RS                 .ok_or_else(|| "stale or unknown Source resource capability".to_string())?;
+//RS             if slot.generation != generation || slot.handle != handle {
+//RS                 return Err("Source resource generation or handle mismatch".to_string());
+//RS             }
+//RS             Self::ensure_no_shared_interop_aliases_locked(&state, raw)?;
+//RS             let removed = state.slots.remove(&slot_id).ok_or_else(|| {
+//RS                 "Source resource capability disappeared".to_string()
+//RS             })?;
+//RS             removed
+//RS         };
+//RS         Ok(Self::finalize_removed_slot(removed))
+//RS     }
+//RS 
+//RS     /// Native callback spelling for the shared Core/Cursor release route.
+//RS     pub fn resource_release(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceResourceRelease, MirNativeCursorError> {
+//RS         self.release_resource(handle, raw)
+//RS             .map_err(MirNativeCursorError::internal)
+//RS     }
+//RS     /// Release any backend owner through the exact checked triple.
+//RS     pub fn release(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected_kind: &SourceResourceKind,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         let removed = {
+//RS             let mut state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(raw)?;
+//RS             let slot = state
+//RS                 .slots
+//RS                 .get(&slot_id)
+//RS                 .ok_or_else(|| "stale or unknown Source resource capability".to_string())?;
+//RS             if slot.generation != generation
+//RS                 || slot.handle != handle
+//RS                 || &slot.kind != expected_kind
+//RS             {
+//RS                 return Err("Source resource generation, handle, or kind mismatch".to_string());
+//RS             }
+//RS             Self::ensure_no_shared_interop_aliases_locked(&state, raw)?;
+//RS             let removed = state.slots.remove(&slot_id).ok_or_else(|| {
+//RS                 "Source resource capability disappeared".to_string()
+//RS             })?;
+//RS             removed
+//RS         };
+//RS         Ok(Self::finalize_removed_slot(removed))
+//RS     }
+//RS 
+//RS     /// Release using the generation-bearing capability returned by an insert.
+//RS     pub fn release_capability(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         let removed = {
+//RS             let mut state = self.lock()?;
+//RS             let (slot_id, generation) = Self::decode_raw(capability.raw)?;
+//RS             if generation != capability.generation {
+//RS                 return Err("stale Source resource generation mismatch".to_string());
+//RS             }
+//RS             let slot = state
+//RS                 .slots
+//RS                 .get(&slot_id)
+//RS                 .ok_or_else(|| "stale or unknown Source resource capability".to_string())?;
+//RS             if slot.generation != generation
+//RS                 || slot.handle != capability.handle
+//RS                 || slot.kind != capability.kind
+//RS             {
+//RS                 return Err("stale Source resource generation or kind mismatch".to_string());
+//RS             }
+//RS             Self::ensure_no_shared_interop_aliases_locked(&state, capability.raw)?;
+//RS             let removed = state.slots.remove(&slot_id).ok_or_else(|| {
+//RS                 "Source resource capability disappeared".to_string()
+//RS             })?;
+//RS             removed
+//RS         };
+//RS         Ok(Self::finalize_removed_slot(removed))
+//RS     }
+//RS 
+//RS     /// Validate an opaque `(handle, raw)` packet against this arena and return
+//RS     /// its generation-bearing capability.  Native hosts must use this lookup
+//RS     /// rather than decoding the raw value or manufacturing a resource kind.
+//RS     pub fn lookup_capability(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceResourceHandle, String> {
+//RS         let state = self.lock()?;
+//RS         let (slot_id, generation) = Self::decode_raw(raw)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| "stale or unknown Source resource capability".to_string())?;
+//RS         if slot.generation != generation || slot.handle != handle {
+//RS             return Err("Source resource generation or handle mismatch".to_string());
+//RS         }
+//RS         Ok(SourceResourceHandle {
+//RS             handle: slot.handle,
+//RS             raw,
+//RS             kind: slot.kind.clone(),
+//RS             generation: slot.generation,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Borrow a registered binding after validating the exact value kind,
+//RS     /// execution/artifact scope, and checked MIR type. The physical carrier
+//RS     /// and object identity are returned only after this metadata check; no
+//RS     /// dispatch or Source-level alias policy is implemented here.
+//RS     pub fn borrow_native_binding(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected: &SourceNativeBindingIdentity,
+//RS     ) -> Result<SourceNativeBinding, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::NativeBinding)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("native binding owner lock is poisoned"))?;
+//RS         let BackendOwner::NativeBinding(binding) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "native binding capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         if !binding.matches_expected(expected) {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "native binding value kind, type, or scope mismatch",
+//RS             ));
+//RS         }
+//RS         Ok(binding.clone())
+//RS     }
+//RS 
+//RS     /// Release a native binding capability through the exact checked kind.
+//RS     pub fn release_native_binding(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         self.release(handle, raw, &SourceResourceKind::NativeBinding)
+//RS     }
+//RS 
+//RS     pub fn release_native_binding_capability(
+//RS         &self,
+//RS         capability: &SourceResourceHandle,
+//RS     ) -> Result<SourceResourceRelease, String> {
+//RS         if capability.kind != SourceResourceKind::NativeBinding {
+//RS             return Err("Source capability is not a NativeBinding".to_string());
+//RS         }
+//RS         self.release_capability(capability)
+//RS     }
+//RS 
+//RS     fn owner_for_raw(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected_kind: &SourceResourceKind,
+//RS     ) -> Result<Arc<Mutex<BackendOwner>>, MirNativeCursorError> {
+//RS         let state = self.lock().map_err(MirNativeCursorError::internal)?;
+//RS         let (slot_id, generation) = Self::decode_raw(raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("stale or unknown Source resource capability")
+//RS             })?;
+//RS         if slot.generation != generation
+//RS             || slot.handle != handle
+//RS             || &slot.kind != expected_kind
+//RS         {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source resource generation, handle, or kind mismatch",
+//RS             ));
+//RS         }
+//RS         match &slot.entry {
+//RS             SlotEntry::Backend(owner) => Ok(Arc::clone(owner)),
+//RS             SlotEntry::Cursor(_) => Err(MirNativeCursorError::internal(
+//RS                 "Source resource capability payload mismatch",
+//RS             )),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Atomically consume one sole-owner backend slot into a physical lease.
+//RS     /// The returned capability is committed stale; the lease is the only
+//RS     /// remaining owner and carries no serializable raw capability payload.
+//RS     pub fn take_owned(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected_kind: &SourceResourceKind,
+//RS     ) -> Result<(SourceResourceHandle, SourceOwnedLease), MirNativeCursorError> {
+//RS         let mut state = self.lock().map_err(MirNativeCursorError::internal)?;
+//RS         let (slot_id, generation) =
+//RS             Self::decode_raw(raw).map_err(MirNativeCursorError::internal)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("stale or unknown Source resource capability")
+//RS             })?;
+//RS         if slot.generation != generation
+//RS             || slot.handle != handle
+//RS             || &slot.kind != expected_kind
+//RS         {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source resource generation, handle, or kind mismatch",
+//RS             ));
+//RS         }
+//RS         Self::ensure_no_shared_interop_aliases_locked(&state, raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let consumed = SourceResourceHandle {
+//RS             handle: slot.handle,
+//RS             raw,
+//RS             kind: slot.kind.clone(),
+//RS             generation: slot.generation,
+//RS         };
+//RS         let slot = state
+//RS             .slots
+//RS             .remove(&slot_id)
+//RS             .ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("Source resource capability disappeared")
+//RS             })?;
+//RS         let Slot {
+//RS             handle: slot_handle,
+//RS             kind: slot_kind,
+//RS             generation: slot_generation,
+//RS             entry,
+//RS         } = slot;
+//RS         let owner = match entry {
+//RS             SlotEntry::Backend(owner) => match Arc::try_unwrap(owner) {
+//RS                 Ok(owner) => owner,
+//RS                 Err(owner) => {
+//RS                     state.slots.insert(
+//RS                         slot_id,
+//RS                         Slot {
+//RS                             handle: slot_handle,
+//RS                             kind: slot_kind,
+//RS                             generation: slot_generation,
+//RS                             entry: SlotEntry::Backend(owner),
+//RS                         },
+//RS                     );
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "Source resource owner is still aliased",
+//RS                     ));
+//RS                 }
+//RS             },
+//RS             SlotEntry::Cursor(cursor) => {
+//RS                 state.slots.insert(
+//RS                     slot_id,
+//RS                     Slot {
+//RS                         handle: slot_handle,
+//RS                         kind: slot_kind,
+//RS                         generation: slot_generation,
+//RS                         entry: SlotEntry::Cursor(cursor),
+//RS                     },
+//RS                 );
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source resource capability payload mismatch",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let owner = match owner.into_inner() {
+//RS             Ok(owner) => owner,
+//RS             Err(poison) => {
+//RS                 let owner = poison.into_inner();
+//RS                 state.slots.insert(
+//RS                     slot_id,
+//RS                     Slot {
+//RS                         handle: slot_handle,
+//RS                         kind: slot_kind,
+//RS                         generation: slot_generation,
+//RS                         entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+//RS                     },
+//RS                 );
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source resource owner lock is poisoned",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let lease = SourceOwnedLease {
+//RS             owner: Arc::new(Mutex::new(owner)),
+//RS             consumed: consumed.clone(),
+//RS             kind: slot_kind,
+//RS         };
+//RS         Ok((consumed, lease))
+//RS     }
+//RS 
+//RS     /// Convenience form for a checked transfer whose logical payload is
+//RS     /// already available at the native boundary. Failure returns that payload
+//RS     /// in an owned envelope rather than Rust-dropping it.
+//RS     pub fn take_owned_with_value(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected_kind: &SourceResourceKind,
+//RS         value: MirRuntimeValue,
+//RS     ) -> Result<(SourceResourceHandle, SourceOwnedValue), SourceOwnedTakeError> {
+//RS         match self.take_owned(handle, raw, expected_kind) {
+//RS             Ok((consumed, lease)) => Ok((consumed, lease.with_value(value))),
+//RS             Err(error) => Err(SourceOwnedTakeError { error, value }),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Consume a checked Core owner after deriving its Source kind from the
+//RS     /// canonical owner registration and nominal type. Kind validation happens
+//RS     /// before the capability is taken, while `take_owned_with_value` validates
+//RS     /// the live `(handle, raw, kind)` triple and sole-owner state.
+//RS     pub fn take_owned_with_core_owner_type(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         registration: &MirCoreOwner,
+//RS         owner_type: &MirType,
+//RS         value: MirRuntimeValue,
+//RS     ) -> Result<(SourceResourceHandle, SourceOwnedValue), SourceOwnedTakeError> {
+//RS         let expected_kind = match SourceResourceKind::from_core_owner_type(registration, owner_type)
+//RS         {
+//RS             Ok(kind) => kind,
+//RS             Err(error) => {
+//RS                 return Err(SourceOwnedTakeError {
+//RS                     error: MirNativeCursorError::internal(error),
+//RS                     value,
+//RS                 })
+//RS             }
+//RS         };
+//RS         self.take_owned_with_value(handle, raw, &expected_kind, value)
+//RS     }
+//RS     /// Commit one physical lease into a fresh destination slot. The source
+//RS     /// receipt is stale regardless of destination success. On any failure,
+//RS     /// the complete detached `SourceOwnedValue` remains in the error envelope.
+//RS     pub fn adopt_owned(
+//RS         &self,
+//RS         target_handle: MirHandleId,
+//RS         expected_kind: &SourceResourceKind,
+//RS         owned: SourceOwnedValue,
+//RS     ) -> SourceOwnedTransferOutcome {
+//RS         let SourceOwnedValue {
+//RS             value,
+//RS             owner,
+//RS             consumed,
+//RS             kind,
+//RS         } = owned;
+//RS         if &kind != expected_kind {
+//RS             return SourceOwnedTransferOutcome {
+//RS                 consumed: consumed.clone(),
+//RS                 result: Err(SourceOwnedTransferFailure {
+//RS                     error: MirNativeCursorError::internal(
+//RS                         "Source owned payload kind mismatch",
+//RS                     ),
+//RS                     owned: SourceOwnedValue {
+//RS                         value,
+//RS                         owner,
+//RS                         consumed,
+//RS                         kind,
+//RS                     },
+//RS                 }),
+//RS             };
+//RS         }
+//RS         let result = match self.register_backend_arc_owned(target_handle, kind, owner) {
+//RS             Ok(capability) => Ok((capability, value)),
+//RS             Err((error, owner)) => Err(SourceOwnedTransferFailure {
+//RS                 error: MirNativeCursorError::internal(error),
+//RS                 owned: SourceOwnedValue {
+//RS                     value,
+//RS                     owner,
+//RS                     consumed: consumed.clone(),
+//RS                     kind: expected_kind.clone(),
+//RS                 },
+//RS             }),
+//RS         };
+//RS         SourceOwnedTransferOutcome { consumed, result }
+//RS     }
+//RS 
+//RS     fn adopt_owned_with_cleanup(
+//RS         &self,
+//RS         cleanup: &SourceResourceCleanupLease,
+//RS         target_handle: MirHandleId,
+//RS         expected_kind: &SourceResourceKind,
+//RS         owned: SourceOwnedValue,
+//RS     ) -> SourceOwnedTransferOutcome {
+//RS         let SourceOwnedValue {
+//RS             value,
+//RS             owner,
+//RS             consumed,
+//RS             kind,
+//RS         } = owned;
+//RS         if &kind != expected_kind {
+//RS             return SourceOwnedTransferOutcome {
+//RS                 consumed: consumed.clone(),
+//RS                 result: Err(SourceOwnedTransferFailure {
+//RS                     error: MirNativeCursorError::internal(
+//RS                         "Source owned payload kind mismatch",
+//RS                     ),
+//RS                     owned: SourceOwnedValue {
+//RS                         value,
+//RS                         owner,
+//RS                         consumed,
+//RS                         kind,
+//RS                     },
+//RS                 }),
+//RS             };
+//RS         }
+//RS         let result = match self.register_cleanup_backend_arc_owned(
+//RS             cleanup,
+//RS             target_handle,
+//RS             kind,
+//RS             owner,
+//RS         ) {
+//RS             Ok(capability) => Ok((capability, value)),
+//RS             Err((error, owner)) => Err(SourceOwnedTransferFailure {
+//RS                 error: MirNativeCursorError::internal(error),
+//RS                 owned: SourceOwnedValue {
+//RS                     value,
+//RS                     owner,
+//RS                     consumed: consumed.clone(),
+//RS                     kind: expected_kind.clone(),
+//RS                 },
+//RS             }),
+//RS         };
+//RS         SourceOwnedTransferOutcome { consumed, result }
+//RS     }
+//RS 
+//RS     /// Consume a live file-reader capability into its typed Rust owner.
+//RS     /// Aliased owners are rejected and the slot remains installed.
+//RS     pub fn take_file_reader(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceFileReader, MirNativeCursorError> {
+//RS         self.take_file_owner(handle, raw, SourceResourceKind::LinesFile)
+//RS             .map(|(_, reader)| reader)
+//RS     }
+//RS 
+//RS     /// Consume a live file-writer capability into its typed Rust owner.
+//RS     /// Aliased owners are rejected and the slot remains installed.
+//RS     pub fn take_file_writer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<SourceFileWriter, MirNativeCursorError> {
+//RS         self.take_file_owner(handle, raw, SourceResourceKind::FileWriter)
+//RS             .map(|(_, writer)| writer)
+//RS     }
+//RS 
+//RS     fn take_file_owner<T>(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         expected_kind: SourceResourceKind,
+//RS     ) -> Result<(SourceResourceHandle, T), MirNativeCursorError>
+//RS     where
+//RS         T: FromBackendOwner,
+//RS     {
+//RS         let mut state = self.lock().map_err(MirNativeCursorError::internal)?;
+//RS         let (slot_id, generation) = Self::decode_raw(raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("stale or unknown Source resource capability")
+//RS             })?;
+//RS         if slot.generation != generation
+//RS             || slot.handle != handle
+//RS             || slot.kind != expected_kind
+//RS         {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source resource generation, handle, or kind mismatch",
+//RS             ));
+//RS         }
+//RS         let source = SourceResourceHandle {
+//RS             handle: slot.handle,
+//RS             raw,
+//RS             kind: slot.kind.clone(),
+//RS             generation: slot.generation,
+//RS         };
+//RS         let slot = state
+//RS             .slots
+//RS             .remove(&slot_id)
+//RS             .ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("Source resource capability disappeared")
+//RS             })?;
+//RS         let Slot {
+//RS             handle: slot_handle,
+//RS             kind: slot_kind,
+//RS             generation: slot_generation,
+//RS             entry,
+//RS         } = slot;
+//RS         let owner = match entry {
+//RS             SlotEntry::Backend(owner) => match Arc::try_unwrap(owner) {
+//RS                 Ok(owner) => owner,
+//RS                 Err(owner) => {
+//RS                     state.slots.insert(
+//RS                         slot_id,
+//RS                         Slot {
+//RS                             handle: slot_handle,
+//RS                             kind: slot_kind,
+//RS                             generation: slot_generation,
+//RS                             entry: SlotEntry::Backend(owner),
+//RS                         },
+//RS                     );
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "Source resource owner is still aliased",
+//RS                     ));
+//RS                 }
+//RS             },
+//RS             SlotEntry::Cursor(cursor) => {
+//RS                 state.slots.insert(
+//RS                     slot_id,
+//RS                     Slot {
+//RS                         handle: slot_handle,
+//RS                         kind: slot_kind,
+//RS                         generation: slot_generation,
+//RS                         entry: SlotEntry::Cursor(cursor),
+//RS                     },
+//RS                 );
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source resource capability payload mismatch",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let owner = match owner.into_inner() {
+//RS             Ok(owner) => owner,
+//RS             Err(poison) => {
+//RS                 let owner = poison.into_inner();
+//RS                 state.slots.insert(
+//RS                     slot_id,
+//RS                     Slot {
+//RS                         handle: slot_handle,
+//RS                         kind: slot_kind,
+//RS                         generation: slot_generation,
+//RS                         entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+//RS                     },
+//RS                 );
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source resource owner lock is poisoned",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         match T::from_backend_owner(owner) {
+//RS             Ok(owner) => Ok((source, owner)),
+//RS             Err(owner) => {
+//RS                 state.slots.insert(
+//RS                     slot_id,
+//RS                     Slot {
+//RS                         handle: slot_handle,
+//RS                         kind: slot_kind,
+//RS                         generation: slot_generation,
+//RS                         entry: SlotEntry::Backend(Arc::new(Mutex::new(owner))),
+//RS                     },
+//RS                 );
+//RS                 Err(MirNativeCursorError::internal(
+//RS                     "Source resource capability payload mismatch",
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn file_writer_write_line(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         line: &String,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::FileWriter)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::FileWriter(writer) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source file writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         crate::enc_stream::source_file_writer_write_line(&mut writer.0, line)
+//RS             .map_err(file_error)
+//RS     }
+//RS 
+//RS     pub fn file_writer_flush(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::FileWriter)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::FileWriter(writer) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source file writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         crate::enc_stream::source_file_writer_flush(&mut writer.0).map_err(file_error)
+//RS     }
+//RS 
+//RS     pub fn file_writer_path(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<String, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::FileWriter)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::FileWriter(writer) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source file writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(crate::enc_stream::source_file_writer_path(&writer.0))
+//RS     }
+//RS 
+//RS     pub fn file_reader_read_line(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<Option<String>, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::LinesFile)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::File(reader) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source file reader capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         crate::enc_stream::source_file_next_line(&mut reader.0)
+//RS             .map_err(file_error)
+//RS     }
+//RS 
+//RS     pub fn file_reader_path(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<String, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::LinesFile)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::File(reader) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source file reader capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(reader.0.path.clone())
+//RS     }
+//RS 
+//RS     pub fn stdin_read_line(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<Option<String>, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::LinesStdin)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::Stdin(reader) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source stdin capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         crate::enc_stream::source_stdin_next_line(reader)
+//RS             .map_err(process_error)
+//RS     }
+//RS 
+//RS     pub fn channel_sender_reserve(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<
+//RS         jet_codegen::scheduler::JetSchedulerSendReservation<MirRuntimeValue>,
+//RS         MirNativeCursorError,
+//RS     > {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelSender)?;
+//RS         let sender = {
+//RS             let owner = owner
+//RS                 .lock()
+//RS                 .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS             let BackendOwner::ChannelSender(sender) = &*owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source channel sender capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             sender.clone()
+//RS         };
+//RS         sender.reserve_send().map_err(|error| {
+//RS             let message = match error {
+//RS                 jet_codegen::scheduler::JetSchedulerSendReserveError::Closed => {
+//RS                     "Source channel sender is closed"
+//RS                 }
+//RS                 jet_codegen::scheduler::JetSchedulerSendReserveError::Cancelled => {
+//RS                     "Source channel send was cancelled"
+//RS                 }
+//RS                 jet_codegen::scheduler::JetSchedulerSendReserveError::ReservationCountExhausted => {
+//RS                     "Source channel send reservation count exhausted"
+//RS                 }
+//RS                 jet_codegen::scheduler::JetSchedulerSendReserveError::QueueAllocationFailed => {
+//RS                     "Source channel send queue reservation failed"
+//RS                 }
+//RS             };
+//RS             MirNativeCursorError::internal(message)
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn channel_sender_send(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         value: MirRuntimeValue,
+//RS     ) -> Result<(), SourceChannelSendError> {
+//RS         let reservation = match self.channel_sender_reserve(handle, raw) {
+//RS             Ok(reservation) => reservation,
+//RS             Err(error) => return Err(SourceChannelSendError { error, value }),
+//RS         };
+//RS         reservation
+//RS             .commit(value)
+//RS             .map_err(|value| SourceChannelSendError {
+//RS                 error: MirNativeCursorError::internal("Source channel sender is closed"),
+//RS                 value,
+//RS             })
+//RS     }
+//RS 
+//RS     pub fn channel_sender_close(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelSender)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelSender(sender) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel sender capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         sender.close();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_receive(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<Option<MirRuntimeValue>, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelReceiver)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel receiver capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(receiver.receive())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_try_receive(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<Option<MirRuntimeValue>, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelReceiver)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel receiver capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(receiver.try_receive())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_is_timer(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<bool, MirNativeCursorError> {
+//RS         self.channel_receiver_flag(handle, raw, |receiver| receiver.is_timer())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_is_interval(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<bool, MirNativeCursorError> {
+//RS         self.channel_receiver_flag(handle, raw, |receiver| receiver.is_interval())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_is_cancelled(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<bool, MirNativeCursorError> {
+//RS         self.channel_receiver_flag(handle, raw, |receiver| receiver.is_cancelled())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_is_ready(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<bool, MirNativeCursorError> {
+//RS         self.channel_receiver_flag(handle, raw, |receiver| receiver.is_ready())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_delay_ms(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<i64, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelReceiver)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel receiver capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(receiver.delay_ms())
+//RS     }
+//RS 
+//RS     pub fn channel_receiver_close(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelReceiver)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel receiver capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         receiver.close();
+//RS         Ok(())
+//RS     }
+//RS     /// Select among receiver capabilities while validating and snapshotting
+//RS     /// physical queue views in deterministic owner-lock order. Owner locks and
+//RS     /// endpoint Arcs are released before the scheduler blocks.
+//RS     pub fn channel_receiver_select(
+//RS         &self,
+//RS         receivers: &[(MirHandleId, i64)],
+//RS         after_ns: Vec<i64>,
+//RS     ) -> Result<(i64, Option<MirRuntimeValue>), MirNativeCursorError> {
+//RS         if receivers.is_empty() && after_ns.is_empty() {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel select has no arms",
+//RS             ));
+//RS         }
+//RS         let mut arm_owners = Vec::with_capacity(receivers.len());
+//RS         for (arm, (handle, raw)) in receivers.iter().enumerate() {
+//RS             arm_owners.push((
+//RS                 arm,
+//RS                 self.owner_for_raw(*handle, *raw, &SourceResourceKind::ChannelReceiver)?,
+//RS             ));
+//RS         }
+//RS         let mut lock_order = arm_owners
+//RS             .iter()
+//RS             .map(|(_, owner)| Arc::clone(owner))
+//RS             .collect::<Vec<_>>();
+//RS         lock_order.sort_unstable_by_key(|owner| Arc::as_ptr(owner) as usize);
+//RS         lock_order.dedup_by(|left, right| Arc::ptr_eq(left, right));
+//RS         let guards = lock_order
+//RS             .iter()
+//RS             .map(|owner| {
+//RS                 owner.lock().map_err(|_| {
+//RS                     MirNativeCursorError::internal("Source resource owner lock is poisoned")
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let mut views = Vec::with_capacity(receivers.len());
+//RS         for (_, owner) in &arm_owners {
+//RS             let address = Arc::as_ptr(owner) as usize;
+//RS             let guard_index = lock_order
+//RS                 .binary_search_by_key(&address, |owner| Arc::as_ptr(owner) as usize)
+//RS                 .map_err(|_| {
+//RS                     MirNativeCursorError::internal("Source channel select owner disappeared")
+//RS                 })?;
+//RS             let owner = guards.get(guard_index).ok_or_else(|| {
+//RS                 MirNativeCursorError::internal("Source channel select lock disappeared")
+//RS             })?;
+//RS             let BackendOwner::ChannelReceiver(receiver) = &**owner else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "Source channel receiver capability payload mismatch",
+//RS                 ));
+//RS             };
+//RS             views.push(receiver.select_view());
+//RS         }
+//RS         drop(guards);
+//RS         drop(lock_order);
+//RS         drop(arm_owners);
+//RS         let selected = jet_codegen::scheduler::jet_scheduler_select_channel_views_tagged(
+//RS             views, after_ns,
+//RS         );
+//RS         Ok(selected)
+//RS     }
+//RS 
+//RS     fn channel_receiver_flag(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         flag: impl FnOnce(&jet_codegen::scheduler::JetSchedulerChannel<MirRuntimeValue>) -> bool,
+//RS     ) -> Result<bool, MirNativeCursorError> {
+//RS         let owner = self.owner_for_raw(handle, raw, &SourceResourceKind::ChannelReceiver)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::ChannelReceiver(receiver) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source channel receiver capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         Ok(flag(receiver))
+//RS     }
+//RS 
+//RS     pub fn encoding_writer_write(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS         value: &MirRuntimeValue,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let capability = self
+//RS             .lookup_capability(handle, raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(handle, raw, &capability.kind)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::EncodingWriter(writer) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source encoding writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         match &mut writer.0 {
+//RS             EncodingWriter::Json(writer) => {
+//RS                 let event = data_event_from_value(value)?;
+//RS                 crate::enc_stream::runtime::enc_json_writer_write(writer, event)
+//RS                     .map_err(|error| encoding_error(&error))
+//RS             }
+//RS             EncodingWriter::Jsonl(writer) => {
+//RS                 let tree = data_tree_from_value(value)?;
+//RS                 crate::enc_stream::runtime::enc_jsonl_writer_write(writer, tree)
+//RS                     .map_err(|error| encoding_error(&error))
+//RS             }
+//RS             EncodingWriter::Csv(writer) => {
+//RS                 let row = csv_row_from_value(value)?;
+//RS                 crate::enc_stream::runtime::enc_csv_writer_write(writer, row)
+//RS                     .map_err(|error| encoding_error(&error))
+//RS             }
+//RS             EncodingWriter::Xml(writer) => {
+//RS                 let tree = data_tree_from_value(value)?;
+//RS                 crate::enc_stream::runtime::enc_xml_writer_write(writer, tree)
+//RS                     .map_err(|error| encoding_error(&error))
+//RS             }
+//RS             EncodingWriter::Cbor(writer) => {
+//RS                 let event = data_event_from_value(value)?;
+//RS                 crate::enc_stream::runtime::enc_cbor_writer_write(writer, event)
+//RS                     .map_err(|error| encoding_error(&error))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn encoding_writer_flush(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let capability = self
+//RS             .lookup_capability(handle, raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(handle, raw, &capability.kind)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::EncodingWriter(writer) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source encoding writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         match &mut writer.0 {
+//RS             EncodingWriter::Json(writer) => crate::enc_stream::runtime::enc_json_writer_flush(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Jsonl(writer) => crate::enc_stream::runtime::enc_jsonl_writer_flush(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Csv(writer) => crate::enc_stream::runtime::enc_csv_writer_flush(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_flush(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_flush(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn encoding_writer_finish(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<(), MirNativeCursorError> {
+//RS         let capability = self
+//RS             .lookup_capability(handle, raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(handle, raw, &capability.kind)?;
+//RS         let mut owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::EncodingWriter(writer) = &mut *owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source encoding writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         match &mut writer.0 {
+//RS             EncodingWriter::Json(writer) => crate::enc_stream::runtime::enc_json_writer_finish(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Jsonl(writer) => crate::enc_stream::runtime::enc_jsonl_writer_finish(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Csv(writer) => crate::enc_stream::runtime::enc_csv_writer_finish(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_finish(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_finish(writer)
+//RS                 .map_err(|error| encoding_error(&error)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn encoding_writer_path(
+//RS         &self,
+//RS         handle: MirHandleId,
+//RS         raw: i64,
+//RS     ) -> Result<String, MirNativeCursorError> {
+//RS         let capability = self
+//RS             .lookup_capability(handle, raw)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         let owner = self.owner_for_raw(handle, raw, &capability.kind)?;
+//RS         let owner = owner
+//RS             .lock()
+//RS             .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?;
+//RS         let BackendOwner::EncodingWriter(writer) = &*owner else {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "Source encoding writer capability payload mismatch",
+//RS             ));
+//RS         };
+//RS         let path = match &writer.0 {
+//RS             EncodingWriter::Json(writer) => &writer.output.path,
+//RS             EncodingWriter::Jsonl(writer) => &writer.json.output.path,
+//RS             EncodingWriter::Csv(writer) => &writer.output.path,
+//RS             EncodingWriter::Xml(writer) => &writer.output.path,
+//RS             EncodingWriter::Cbor(writer) => &writer.output.path,
+//RS         };
+//RS         Ok(path.clone())
+//RS     }
+//RS 
+//RS     /// Build a checked cursor from a registered backend owner and retain the
+//RS     /// resulting non-serializable cursor in this same slot authority.
+//RS     ///
+//RS     /// A by-value source returns its stale source receipt even when iterator
+//RS     /// construction or cursor-slot installation fails.  Callers must carry
+//RS     /// that receipt through the native transfer outcome; they must not probe
+//RS     /// this arena after an acquisition failure.
+//RS     pub fn init_cursor(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         step_value: i64,
+//RS         has_step: bool,
+//RS         by_value: bool,
+//RS     ) -> SourceCursorInitOutcome {
+//RS         let acquisition = jet_codegen::Codegen::NativeLoopCursor::init_from_resource_factory(
+//RS             self, key, step_value, has_step, by_value,
+//RS         );
+//RS         let consumed = acquisition
+//RS             .consumed
+//RS             .as_ref()
+//RS             .map(Self::source_receipt_from_loop_key);
+//RS         let value = match acquisition.result {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 return SourceCursorInitOutcome {
+//RS                     consumed,
+//RS                     result: Err(error),
+//RS                 }
+//RS             }
+//RS         };
+//RS         let MirRuntimeValue::NativeCursor(cursor) = value.clone() else {
+//RS             return SourceCursorInitOutcome {
+//RS                 consumed,
+//RS                 result: Err(MirNativeCursorError::internal(
+//RS                     "canonical resource cursor did not produce a native cursor",
+//RS                 )),
+//RS             };
+//RS         };
+//RS         let capability = match self.insert_cursor(loop_cursor_handle_id(), cursor) {
+//RS             Ok(capability) => capability,
+//RS             Err(error) => {
+//RS                 return SourceCursorInitOutcome {
+//RS                     consumed,
+//RS                     result: Err(MirNativeCursorError::internal(error)),
+//RS                 }
+//RS             }
+//RS         };
+//RS         SourceCursorInitOutcome {
+//RS             consumed,
+//RS             result: Ok((capability, value)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn source_receipt_from_loop_key(key: &NativeLoopResourceKey) -> SourceResourceHandle {
+//RS         let (_, generation) = Self::decode_raw(key.raw)
+//RS             .expect("committed native loop receipt must contain a valid capability");
+//RS         let kind = SourceResourceKind::from_loop_source(&key.source_kind)
+//RS             .expect("committed native loop receipt must contain a resource kind");
+//RS         SourceResourceHandle {
+//RS             handle: key.handle,
+//RS             raw: key.raw,
+//RS             kind,
+//RS             generation,
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate_slot<'a>(
+//RS         state: &'a ArenaState,
+//RS         key: &NativeLoopResourceKey,
+//RS         expected: &SourceResourceKind,
+//RS     ) -> Result<&'a Slot, String> {
+//RS         let (slot_id, generation) = Self::decode_raw(key.raw)?;
+//RS         let slot = state
+//RS             .slots
+//RS             .get(&slot_id)
+//RS             .ok_or_else(|| "stale or unknown Source resource capability".to_string())?;
+//RS         if slot.generation != generation || slot.handle != key.handle || &slot.kind != expected {
+//RS             return Err("Source resource handle, generation, or kind mismatch".to_string());
+//RS         }
+//RS         if !expected.matches_loop_source(&key.source_kind) {
+//RS             return Err("Source resource kind does not match checked loop source".to_string());
+//RS         }
+//RS         Ok(slot)
+//RS     }
+//RS 
+//RS     fn take_owner(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         expected: SourceResourceKind,
+//RS     ) -> NativeLoopResourceOutcome<Arc<Mutex<BackendOwner>>> {
+//RS         if !expected.matches_loop_source(&key.source_kind) {
+//RS             return NativeLoopResourceOutcome {
+//RS                 consumed: None,
+//RS                 result: Err(MirNativeCursorError::internal(
+//RS                     "Source resource kind does not match checked loop source",
+//RS                 )),
+//RS             };
+//RS         }
+//RS         match self.take_owned(key.handle, key.raw, &expected) {
+//RS             Ok((consumed, lease)) => NativeLoopResourceOutcome {
+//RS                 consumed: Some(NativeLoopResourceKey {
+//RS                     handle: consumed.handle,
+//RS                     raw: consumed.raw,
+//RS                     source_kind: key.source_kind.clone(),
+//RS                 }),
+//RS                 result: Ok(lease.into_owner()),
+//RS             },
+//RS             Err(error) => NativeLoopResourceOutcome {
+//RS                 consumed: None,
+//RS                 result: Err(error),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn borrow_owner(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         expected: SourceResourceKind,
+//RS     ) -> Result<Arc<Mutex<BackendOwner>>, MirNativeCursorError> {
+//RS         let state = self.lock().map_err(MirNativeCursorError::internal)?;
+//RS         let slot = Self::validate_slot(&state, key, &expected)
+//RS             .map_err(MirNativeCursorError::internal)?;
+//RS         match &slot.entry {
+//RS             SlotEntry::Backend(owner) => Ok(Arc::clone(owner)),
+//RS             SlotEntry::Cursor(_) => Err(MirNativeCursorError::internal(
+//RS                 "native cursor is not a backend producer",
+//RS             )),
+//RS         }
+//RS     }
+//RS 
+//RS     fn iterator_for(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         expected: SourceResourceKind,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         let acquisition = if by_value {
+//RS             self.take_owner(key, expected)
+//RS         } else {
+//RS             NativeLoopResourceOutcome {
+//RS                 consumed: None,
+//RS                 result: self.borrow_owner(key, expected),
+//RS             }
+//RS         };
+//RS         let NativeLoopResourceOutcome { consumed, result } = acquisition;
+//RS         NativeLoopResourceOutcome {
+//RS             consumed,
+//RS             result: result.and_then(|owner| resource_iterator(owner, &key.source_kind)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl NativeLoopResourceFactory for SourceResourceArena {
+//RS     fn plain_stream(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(key, SourceResourceKind::PlainStream, by_value)
+//RS     }
+//RS 
+//RS     fn lines_file(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(key, SourceResourceKind::LinesFile, by_value)
+//RS     }
+//RS 
+//RS     fn lines_stdin(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(key, SourceResourceKind::LinesStdin, by_value)
+//RS     }
+//RS 
+//RS     fn lines_process_stream(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(key, SourceResourceKind::LinesProcessStream, by_value)
+//RS     }
+//RS 
+//RS     fn channel_receiver(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(key, SourceResourceKind::ChannelReceiver, by_value)
+//RS     }
+//RS 
+//RS     fn encoding_reader(
+//RS         &self,
+//RS         key: &NativeLoopResourceKey,
+//RS         reader_type: &str,
+//RS         by_value: bool,
+//RS     ) -> NativeLoopResourceOutcome<NativeIter> {
+//RS         self.iterator_for(
+//RS             key,
+//RS             SourceResourceKind::EncodingReader {
+//RS                 reader_type: reader_type.to_string(),
+//RS             },
+//RS             by_value,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS /// Retain one typed owner lease in every cursor.  A by-value source removes
+//RS /// the arena slot before this function, while a borrow leaves the slot in
+//RS /// place; both paths share this same `Arc` lease and therefore stay lazy
+//RS /// without a second owner or a materialized fallback.
+//RS fn resource_iterator(
+//RS     owner: Arc<Mutex<BackendOwner>>,
+//RS     source: &MirLoopSourceKind,
+//RS ) -> Result<NativeIter, MirNativeCursorError> {
+//RS     let valid = owner
+//RS         .lock()
+//RS         .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))?
+//RS         .kind()
+//RS         .as_loop_source()
+//RS         .ok()
+//RS         .is_some_and(|kind| &kind == source);
+//RS     if !valid {
+//RS         return Err(MirNativeCursorError::internal(
+//RS             "Source resource owner does not match checked loop source",
+//RS         ));
+//RS     }
+//RS     match source {
+//RS         MirLoopSourceKind::Plain => Ok(Box::new(PlainIter { owner })),
+//RS         MirLoopSourceKind::LinesFile => Ok(Box::new(FileIter { owner })),
+//RS         MirLoopSourceKind::LinesStdin => Ok(Box::new(StdinIter { owner })),
+//RS         MirLoopSourceKind::LinesProcessStream => Ok(Box::new(ProcessIter { owner })),
+// END-PORT-PENDING 2026 crates/jet-jit/src/SourceResources.rs:3601-5400
+

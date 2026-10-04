@@ -1,0 +1,160 @@
+use core.collections.runtime.kernel_parallel_plan as pp
+
+// Original ParallelPlan.rs1817–1978 fixtures. Explicit U64 target boundary
+// below is a portable 64-bit fixture, NOT selected-target/host evidence.
+fn pure_map(len: U64) -> pp.JetParallelProof Never! {
+    pp.proof_new(pp.domain_from_len(len), [pp.JetParallelAccessFact]{pp.access_read("input")},
+        [pp.JetParallelEffectFact]{pp.effect_pure()},
+        [pp.JetParallelDependencyFact]{pp.dependency_independent("input")}, None)
+}
+fn fold_proof(len: U64) -> pp.JetParallelProof Never! {
+    pp.proof_new(pp.domain_from_len(len), [pp.JetParallelAccessFact]{pp.access_read("input")},
+        [pp.JetParallelEffectFact]{pp.effect_reduction("sum")},
+        [pp.JetParallelDependencyFact]{}, Val(pp.reduction_proven("sum")))
+}
+#Test("chunks_are_source_ordered_and_worker_bounded") {
+    domain :: pp.domain_from_len(U64{130})
+    bounds :: pp.resources_with_chunk_items(pp.resources_explicit(U64{99}, U64{3}), U64{64})
+    chunks :: pp.resources_deterministic_chunks(bounds, domain, U64{18446744073709551615}) ?? panic("valid chunks rejected")
+    assert_eq(chunks, [pp.JetParallelChunk]{
+        pp.JetParallelChunk{ordinal: U64{0}, start: U64{0}, end: U64{64}, worker: U64{0}},
+        pp.JetParallelChunk{ordinal: U64{1}, start: U64{64}, end: U64{128}, worker: U64{1}},
+        pp.JetParallelChunk{ordinal: U64{2}, start: U64{128}, end: U64{130}, worker: U64{2}}
+    })
+}
+#Test("proof_rejects_exact_dependence_and_external_effects") {
+    dependent :: pp.proof_new(pp.domain_from_len(U64{8}),
+        [pp.JetParallelAccessFact]{pp.access_write("total")},
+        [pp.JetParallelEffectFact]{pp.effect_pure()}, [pp.JetParallelDependencyFact]{}, None)
+    rejection :: pp.proof_rejection(dependent, .Map) ?? panic("dependent callback accepted")
+    assert(pp.rejection_reason(rejection).contains("write-after-write on `total`"))
+    external :: pp.proof_new(pp.domain_from_len(U64{8}),
+        [pp.JetParallelAccessFact]{pp.access_read("input")},
+        [pp.JetParallelEffectFact]{pp.effect_external("stdout")}, [pp.JetParallelDependencyFact]{}, None)
+    external_rejection :: pp.proof_rejection(external, .Map) ?? panic("external callback accepted")
+    assert(pp.rejection_reason(external_rejection).contains("effect `stdout`"))
+}
+#Test("explicit_plan_uses_sequential_fallback_for_one_chunk") {
+    plan :: pp.plan_select_explicit(.Map, pure_map(U64{4}), pp.resources_explicit(U64{8}, U64{8}), U64{18446744073709551615}) ?? panic("valid plan rejected")
+    assert_eq(plan.execution, pp.JetParallelExecution.Sequential(.SingleChunk))
+    assert_eq(pp.chunk_range(plan.chunks[0]), (start: U64{0}, end: U64{4}))
+}
+// EXACT ORIGINAL NATIVE TEST, intentionally not published as a #Test until
+// #4494/#4483 + packets0138/0144 provide the real measured_range callable.
+// It is not replaced by a simulated timing test or counted as exercised parity.
+// #Test("measured_range_does_not_probe_when_worker_limit_is_one") {
+//     output :: pp.jet_list_accel_range_map(
+//         (start: U64{0}, end: pp.JET_ACCEL_STATIC_FLOOR_ITEMS + U64{1}),
+//         U64{1}, true, true, true, None, (index: U64) -> index)
+//     assert_eq(output.values.len(), Int.from_u64(pp.JET_ACCEL_STATIC_FLOOR_ITEMS + U64{1}))
+//     assert_eq(output.decision.status, pp.JetAccelerationGateStatus.SampleNotTimed)
+// }
+#Test("measured_gate_uses_two_times_the_retained_chunk_projection") {
+    costs :: pp.JetAccelerationRuntimeCosts{spawn_nanos: U64{100}, bandwidth_floor_nanos: U64{100},
+        spawn_cost_once_per_process: true, bandwidth_floor_measured: true}
+    selected :: pp.gate_evaluate(pp.gate_d_accel1(), .PooledParallelChunks,
+        pp.gate_input_measured(U64{2048}, U64{64}, U64{100}, costs, true, true, true, false, false, None))
+    assert_eq(selected.status, pp.JetAccelerationGateStatus.Selected)
+    assert_eq(selected.measurement.projected_serial_nanos, Val(U64{3200}))
+    assert_eq(selected.measurement.required_serial_nanos, Val(U64{200}))
+    rejected :: pp.gate_evaluate(pp.gate_d_accel1(), .PooledParallelChunks,
+        pp.gate_input_measured(U64{2048}, U64{64}, U64{6}, costs, true, true, true, false, false, None))
+    assert_eq(rejected.status, pp.JetAccelerationGateStatus.ProjectedGainBelowThreshold)
+}
+#Test("fold_requires_identity_and_associative_merge") {
+    missing :: pure_map(U64{128})
+    rejection :: pp.proof_rejection(missing, .Fold) ?? panic("fold without law accepted")
+    if rejection == { .Reduction(_) -> assert(true) else -> panic("wrong fold rejection") }
+    proof :: fold_proof(U64{128})
+    assert(pp.proof_is_proven_independent(proof, .Fold))
+    plan :: pp.plan_select_explicit(.Fold, ^proof, pp.resources_explicit(U64{2}, U64{2}), U64{18446744073709551615}) ?? panic("valid fold rejected")
+    assert_eq(pp.plan_merge_tree(plan), [(left: U64, right: U64)]{(left: U64{0}, right: U64{1})})
+}
+#Test("receipt_keeps_lowest_failure_and_discards_result_on_cancel") {
+    plan :: pp.plan_select_explicit(.Map, pure_map(U64{128}), pp.resources_explicit(U64{2}, U64{2}), U64{18446744073709551615}) ?? panic("valid plan rejected")
+    receipt := pp.plan_receipt(plan)
+    pp.receipt_record_failure(&receipt, U64{90}, "late")
+    pp.receipt_record_failure(&receipt, U64{4}, "original")
+    pp.receipt_record_cancellation(&receipt, U64{3})
+    assert_eq(pp.receipt_finish(&receipt), pp.JetParallelReceiptStatus.Failed)
+    selected :: pp.receipt_selected_failure(receipt)
+    if selected == { .Val(failure) -> assert_eq(failure.source_index, U64{4}) else -> panic("failure lost") }
+    assert(!pp.receipt_has_result(receipt))
+    assert(!receipt.external_effects_rolled_back)
+}
+// Main-authorized regression for the confirmed missing-inner-loop Rust defect.
+#Test("merge_tree_pairs_all_five_chunks_and_carries_odd_tail") {
+    plan :: pp.plan_select_explicit(.Fold, fold_proof(U64{320}), pp.resources_explicit(U64{3}, U64{3}), U64{18446744073709551615}) ?? panic("valid five-chunk fold rejected")
+    assert_eq(pp.plan_chunk_count(plan), U64{5})
+    pairs :: pp.plan_merge_tree(plan)
+    assert_eq(pairs, [(left: U64, right: U64)]{
+        (left: U64{0}, right: U64{1}), (left: U64{2}, right: U64{3}),
+        (left: U64{0}, right: U64{2}), (left: U64{0}, right: U64{4})
+    })
+    assert_eq(pairs.len(), plan.chunks.len() - 1)
+}
+#Test("proof_validation_keeps_original_error_precedence") {
+    proof :: pp.proof_new(pp.domain_indexed(U64{9}, U64{8}),
+        [pp.JetParallelAccessFact]{pp.access_write("total")}, [pp.JetParallelEffectFact]{},
+        [pp.JetParallelDependencyFact]{}, None)
+    rejection :: pp.proof_rejection(proof, .Fold) ?? panic("invalid domain accepted")
+    assert_eq(pp.rejection_reason(rejection), "iteration domain rejected: indexed domain has start 9 after end 8")
+    missing :: pp.proof_new(pp.domain_from_len(U64{1}), [pp.JetParallelAccessFact]{pp.access_write("total")},
+        [pp.JetParallelEffectFact]{}, [pp.JetParallelDependencyFact]{}, None)
+    assert_eq(pp.proof_rejection(missing, .Map), Val(pp.JetParallelRejection.MissingEffectFacts))
+    read_write :: pp.proof_new(pp.domain_from_len(U64{8}), [pp.JetParallelAccessFact]{pp.access_read_write("total")},
+        [pp.JetParallelEffectFact]{pp.effect_external("stdout")}, [pp.JetParallelDependencyFact]{}, None)
+    rejection_rw :: pp.proof_rejection(read_write, .Map) ?? panic("shared read/write accepted")
+    assert(pp.rejection_reason(rejection_rw).contains("write-after-write on `total`"))
+}
+#Test("resource_bounds_empty_zero_overflow_and_max_chunks") {
+    bounds :: pp.resources_new(U64{0}, U64{0}, U64{64}, U64{1048576})
+    assert_eq(pp.resources_worker_limit(bounds), U64{1})
+    assert_eq(pp.resources_selected_workers(bounds, U64{8}), U64{0})
+    empty :: pp.resources_deterministic_chunks(bounds, pp.domain_from_len(U64{0}), U64{4294967295}) ?? panic("empty domain rejected")
+    assert_eq(empty.len(), 0)
+    zero :: pp.resources_deterministic_chunks(pp.resources_with_chunk_items(bounds, U64{0}), pp.domain_from_len(U64{0}), U64{4294967295})
+    if zero == {
+        .Err(reason) -> assert_eq(pp.rejection_reason(reason), "resource bound rejected: chunk_items must be greater than zero (got 0)")
+        else -> panic("zero chunk_items accepted")
+    }
+    overflow :: pp.resources_deterministic_chunks(pp.resources_explicit(U64{1}, U64{1}), pp.domain_from_len(U64{4294967295}), U64{4294967295})
+    if overflow == {
+        .Err(reason) -> assert_eq(pp.rejection_reason(reason), "resource bound rejected: chunk count overflows usize for 4294967295 items and chunk_items=64")
+        else -> panic("selected usize32 overflow accepted")
+    }
+    capped :: pp.resources_deterministic_chunks(pp.resources_new(U64{2}, U64{2}, U64{64}, U64{1}), pp.domain_from_len(U64{65}), U64{18446744073709551615})
+    if capped == {
+        .Err(reason) -> assert_eq(pp.rejection_reason(reason), "resource bound rejected: chunk count 2 exceeds max_chunks 1")
+        else -> panic("max_chunks exceeded")
+    }
+}
+#Test("gate_preserves_pin_floor_and_checked_ceiling_overflow") {
+    input := pp.gate_input_deferred(U64{1024}, false)
+    input.pin = Val(pp.JetAccelerationPin.Local)
+    assert_eq(pp.gate_evaluate(pp.gate_default(), .TransientColumnCopy, input).status, pp.JetAccelerationGateStatus.BelowStaticFloor)
+    input.items = U64{1025}
+    assert_eq(pp.gate_evaluate(pp.gate_default(), .TransientColumnCopy, input).status, pp.JetAccelerationGateStatus.Pinned(.Local))
+    costs :: pp.JetAccelerationRuntimeCosts{spawn_nanos: U64{100}, bandwidth_floor_nanos: U64{100}, spawn_cost_once_per_process: true, bandwidth_floor_measured: true}
+    overflow :: pp.gate_input_measured(U64{2048}, U64{64}, U64{18446744073709551615}, costs, true, true, true, false, false, None)
+    decision :: pp.gate_evaluate(pp.gate_default(), .PooledParallelChunks, overflow)
+    assert_eq(decision.status, pp.JetAccelerationGateStatus.InvalidMeasurement)
+    assert_eq(decision.measurement.projected_serial_nanos, None)
+}
+#Test("receipt_message_tie_cancellation_and_completed_result") {
+    plan :: pp.plan_select_explicit(.Map, pure_map(U64{128}), pp.resources_explicit(U64{2}, U64{2}), U64{18446744073709551615}) ?? panic("valid plan rejected")
+    done := pp.plan_receipt(plan)
+    assert_eq(pp.receipt_finish(&done), pp.JetParallelReceiptStatus.Completed)
+    assert(pp.receipt_has_result(done))
+    cancelled := pp.plan_receipt(plan)
+    pp.receipt_record_cancellation(&cancelled, U64{9})
+    pp.receipt_record_cancellation(&cancelled, U64{3})
+    assert_eq(cancelled.cancellation_index, Val(U64{3}))
+    assert_eq(pp.receipt_finish(&cancelled), pp.JetParallelReceiptStatus.Cancelled)
+    assert(!pp.receipt_has_result(cancelled))
+    failed := pp.plan_receipt(plan)
+    pp.receipt_record_failure(&failed, U64{4}, "z")
+    pp.receipt_record_failure(&failed, U64{4}, "a")
+    selected :: pp.receipt_selected_failure(failed)
+    if selected == { .Val(failure) -> assert_eq(failure.message, "a") else -> panic("failure lost") }
+}

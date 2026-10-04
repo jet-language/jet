@@ -1,0 +1,573 @@
+// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/Values.rs:1-569
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS trait JetShow {
+//RS     fn jet_show(&self) -> String;
+//RS     /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
+//RS     /// answers yes, so `?T` prints its payload bare and its absence as `null`;
+//RS     /// every failure report answers no, so `T !E` prints its verdict.
+//RS     fn jet_report_is_clean() -> bool
+//RS     where
+//RS         Self: Sized,
+//RS     {
+//RS         false
+//RS     }
+//RS }
+//RS /// D-DISPLAYDBG1: user-facing interpolation (`{value}`).
+//RS trait JetDisplay {
+//RS     fn jet_display(&self) -> String;
+//RS     /// D-FAIL-CARRIER1=A: see `JetShow::jet_report_is_clean`.
+//RS     fn jet_report_is_clean() -> bool
+//RS     where
+//RS         Self: Sized,
+//RS     {
+//RS         false
+//RS     }
+//RS }
+//RS /// D-ATTR4=A: developer interpolation (`{value:Debug}`).
+//RS trait JetDebug {
+//RS     fn jet_debug(&self) -> String;
+//RS     /// D-FAIL-CARRIER1=A: see `JetShow::jet_report_is_clean`.
+//RS     fn jet_report_is_clean() -> bool
+//RS     where
+//RS         Self: Sized,
+//RS     {
+//RS         false
+//RS     }
+//RS }
+//RS /// Shared generic display adapter used by every checked formatting caller.
+//RS ///
+//RS /// The caller's monomorphized `T: JetDisplay` implementation supplies the
+//RS /// semantic formatting. This function only preserves the borrowed argument.
+//RS fn jet_fmt_display<T: JetDisplay + ?Sized>(value: &T) -> String {
+//RS     value.jet_display()
+//RS }
+//RS 
+//RS /// Shared generic debug adapter used by every checked formatting caller.
+//RS ///
+//RS /// The caller's monomorphized `T: JetDebug` implementation supplies the
+//RS /// semantic formatting. This function only preserves the borrowed argument.
+//RS fn jet_fmt_debug<T: JetDebug + ?Sized>(value: &T) -> String {
+//RS     value.jet_debug()
+//RS }
+//RS 
+//RS /// D-QUANTITY-TYPE1=A: internal compile-time bridge for physical-unit generic
+//RS /// bounds. Concrete unit identity stays in the
+//RS /// monomorphized type; this trait adds no runtime metadata.
+//RS trait JetQuantity: Sized {
+//RS     fn raw(&self) -> f64;
+//RS     fn from_float(value: f64) -> Self;
+//RS }
+//RS impl JetQuantity for f64 {
+//RS     fn raw(&self) -> f64 { *self }
+//RS     fn from_float(value: f64) -> Self { value }
+//RS }
+//RS 
+//RS // D-RANGE-VALUE1=A: one allocation-free integer range value. Both source
+//RS // spellings use this type; `exclusive` selects the half-open end.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS struct JetRange {
+//RS     start: i64,
+//RS     end: i64,
+//RS     exclusive: bool,
+//RS }
+//RS impl JetRange {
+//RS     fn contains(&self, value: &i64) -> bool {
+//RS         jet_range_contains(self.start, self.end, self.exclusive, *value)
+//RS     }
+//RS 
+//RS     fn structural_text(&self) -> String {
+//RS         jet_range_structural_text(self.start, self.end, self.exclusive)
+//RS     }
+//RS }
+//RS impl JetShow for JetRange {
+//RS     fn jet_show(&self) -> String {
+//RS         self.structural_text()
+//RS     }
+//RS }
+//RS impl __jet_Display for JetRange {
+//RS     fn display(&self) -> String {
+//RS         self.structural_text()
+//RS     }
+//RS }
+//RS impl JetDisplay for JetRange {
+//RS     fn jet_display(&self) -> String {
+//RS         <Self as __jet_Display>::display(self)
+//RS     }
+//RS }
+//RS impl JetDebug for JetRange {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.structural_text()
+//RS     }
+//RS }
+//RS impl __jet_Equatable for JetRange {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         jet_range_equal(
+//RS             self.start,
+//RS             self.end,
+//RS             self.exclusive,
+//RS             rhs.start,
+//RS             rhs.end,
+//RS             rhs.exclusive,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS // D-FACT-READ1=A: registered plane reads are typed compile-time values. These
+//RS // small carriers keep a baked fact usable by ordinary field/index operations
+//RS // after sema has folded the read; they carry no runtime policy or dispatch.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetDimensionAxis {
+//RS     name: String,
+//RS     exponent: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetDimensionInfo {
+//RS     axes: Vec<JetDimensionAxis>,
+//RS     identity: String,
+//RS     display: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetStateRef {
+//RS     owner: String,
+//RS     name: String,
+//RS     path: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetStateInfo {
+//RS     name: String,
+//RS     path: JetStateRef,
+//RS     terminal: bool,
+//RS     reachable: Option<bool>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetEffectInfo {
+//RS     values: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS struct JetOriginInfo {
+//RS     tracked: bool,
+//RS     source: Option<String>,
+//RS     line: Option<i64>,
+//RS     column: Option<i64>,
+//RS     ambiguity: bool,
+//RS }
+//RS 
+//RS macro_rules! impl_fact_value_traits {
+//RS     ($ty:ty) => {
+//RS         impl JetShow for $ty {
+//RS             fn jet_show(&self) -> String {
+//RS                 format!("{:?}", self)
+//RS             }
+//RS         }
+//RS         impl __jet_Display for $ty {
+//RS             fn display(&self) -> String {
+//RS                 format!("{:?}", self)
+//RS             }
+//RS         }
+//RS         impl JetDisplay for $ty {
+//RS             fn jet_display(&self) -> String {
+//RS                 <Self as __jet_Display>::display(self)
+//RS             }
+//RS         }
+//RS         impl JetDebug for $ty {
+//RS             fn jet_debug(&self) -> String {
+//RS                 format!("{:?}", self)
+//RS             }
+//RS         }
+//RS         impl __jet_Equatable for $ty {
+//RS             fn equal(&self, rhs: &Self) -> bool {
+//RS                 self == rhs
+//RS             }
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS impl_fact_value_traits!(JetDimensionAxis);
+//RS impl_fact_value_traits!(JetDimensionInfo);
+//RS impl_fact_value_traits!(JetStateRef);
+//RS impl_fact_value_traits!(JetStateInfo);
+//RS impl_fact_value_traits!(JetEffectInfo);
+//RS impl_fact_value_traits!(JetOriginInfo);
+//RS 
+//RS // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
+//RS // Drop consumes it exactly once; declaration order gives reverse cleanup order.
+//RS struct JetDeferredClose<F: FnOnce()> {
+//RS     close: Option<F>,
+//RS }
+//RS impl<F: FnOnce()> JetDeferredClose<F> {
+//RS     fn new(close: F) -> Self {
+//RS         Self { close: Some(close) }
+//RS     }
+//RS     fn run(&mut self) {
+//RS         if let Some(close) = self.close.take() {
+//RS             close();
+//RS         }
+//RS     }
+//RS }
+//RS impl<F: FnOnce()> Drop for JetDeferredClose<F> {
+//RS     fn drop(&mut self) {
+//RS         self.run();
+//RS     }
+//RS }
+//RS 
+//RS macro_rules! jet_scalar_show {
+//RS     ($($t:ty),+ $(,)?) => {$(
+//RS         impl JetShow for $t { fn jet_show(&self) -> String { self.to_string() } }
+//RS         impl JetDisplay for $t { fn jet_display(&self) -> String { self.to_string() } }
+//RS         impl JetDebug for $t { fn jet_debug(&self) -> String { self.to_string() } }
+//RS     )+};
+//RS }
+//RS // Exact Int owns its Foundation node. Fixed-width integers stay ordinary Rust
+//RS // scalars; the two carriers must never share a formatter or ABI assumption.
+//RS impl JetShow for jet_foundation::Numeric::JetInt {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_rep()
+//RS     }
+//RS }
+//RS impl JetDisplay for jet_foundation::Numeric::JetInt {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_rep()
+//RS     }
+//RS }
+//RS impl JetDebug for jet_foundation::Numeric::JetInt {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_rep()
+//RS     }
+//RS }
+//RS jet_scalar_show!(i8, i16, i32, i64, u8, u16, u32, u64, bool, char);
+//RS impl JetShow for f32 {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetDisplay for f32 {
+//RS     fn jet_display(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetDebug for f32 {
+//RS     fn jet_debug(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetShow for f64 {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetDisplay for f64 {
+//RS     fn jet_display(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetDebug for f64 {
+//RS     fn jet_debug(&self) -> String {
+//RS         format!("{:?}", self)
+//RS     }
+//RS }
+//RS impl JetShow for String {
+//RS     fn jet_show(&self) -> String {
+//RS         self.clone()
+//RS     }
+//RS }
+//RS impl JetDisplay for String {
+//RS     fn jet_display(&self) -> String {
+//RS         self.clone()
+//RS     }
+//RS }
+//RS impl JetDebug for String {
+//RS     fn jet_debug(&self) -> String {
+//RS         format!("{self:?}")
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for AllocError {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "AllocError {{ requested_bytes: {}, allocator: {:?} }}",
+//RS             self.requested_bytes, self.allocator
+//RS         )
+//RS     }
+//RS }
+//RS impl __jet_Display for AllocError {
+//RS     fn display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS impl JetDisplay for AllocError {
+//RS     fn jet_display(&self) -> String {
+//RS         <Self as __jet_Display>::display(self)
+//RS     }
+//RS }
+//RS impl JetDebug for AllocError {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS impl JetShow for JetErr {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_err_message(self)
+//RS     }
+//RS }
+//RS impl JetDisplay for JetErr {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_err_message(self)
+//RS     }
+//RS }
+//RS impl JetDebug for JetErr {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_err_message(self)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for AllocError {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
+//RS // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
+//RS // `String` stays the one Jet-level type, so anything that already works on a
+//RS // `String` (print/interpolate/debug) must also work on the view directly.
+//RS impl JetShow for str {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string()
+//RS     }
+//RS }
+//RS impl JetDisplay for str {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string()
+//RS     }
+//RS }
+//RS impl JetDebug for str {
+//RS     fn jet_debug(&self) -> String {
+//RS         format!("{self:?}")
+//RS     }
+//RS }
+//RS impl<T: JetShow> JetShow for &T {
+//RS     fn jet_show(&self) -> String {
+//RS         (**self).jet_show()
+//RS     }
+//RS }
+//RS impl<T: JetShow> JetShow for [T] {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS impl<T: JetShow> JetShow for Vec<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`; render it like a list
+//RS // so printing/interpolating a fixed array (or a fan-out result) works.
+//RS impl<T: JetShow, const N: usize> JetShow for [T; N] {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS // D-COLLBREADTH1=A: Set<T> (HashSet) shows lexicographically sorted like a list;
+//RS // Queue<T> shows in order like a list. Sort by string rep for determinism.
+//RS impl<T: JetShow> JetShow for std::collections::HashSet<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         let mut parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         parts.sort();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS impl<T: Ord + JetShow> JetShow for std::collections::BTreeSet<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS impl<T: Ord + Clone + JetShow> JetShow for std::collections::BinaryHeap<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS impl<T: JetShow> JetShow for std::collections::VecDeque<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+//RS         format!("[{}]", parts.join(", "))
+//RS     }
+//RS }
+//RS impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_debug_map(
+//RS             self.iter()
+//RS                 .map(|(key, value)| (key.jet_show(), value.jet_show())),
+//RS         )
+//RS     }
+//RS }
+//RS impl<K: Ord + JetShow, V: JetShow> JetShow for JetMap<K, V> {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_debug_map(self.iter().map(|(key, value)| (key.jet_show(), value.jet_show())))
+//RS     }
+//RS }
+//RS impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for JetMap<K, V> {
+//RS     fn jet_display(&self) -> String {
+//RS         jet_debug_map(self.iter().map(|(key, value)| (key.jet_display(), value.jet_display())))
+//RS     }
+//RS }
+//RS impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
+//RS     fn jet_debug(&self) -> String {
+//RS         jet_debug_map(self.iter().map(|(key, value)| (key.jet_debug(), value.jet_debug())))
+//RS     }
+//RS }
+//RS // D-FAIL-CARRIER1=A: one carrier, so one printer. Show and Display keep clean
+//RS // reports bare and render absence as `null`; Debug projects them as `Val(...)`
+//RS // and `None`. A told report prints its verdict around the payload.
+//RS impl JetShow for JetAbsent {
+//RS     fn jet_show(&self) -> String {
+//RS         "null".to_string()
+//RS     }
+//RS     fn jet_report_is_clean() -> bool {
+//RS         true
+//RS     }
+//RS }
+//RS 
+//RS // D-FAILURE-FOUNDATION1: `!Never` lowers its uninhabited error side to
+//RS // `std::convert::Infallible`. The carrier can never render one, but keeping
+//RS // the three existing value traits total lets `T !Never` flow through generic
+//RS // display/debug surfaces without inventing a second error representation.
+//RS impl JetShow for std::convert::Infallible {
+//RS     fn jet_show(&self) -> String {
+//RS         match *self {}
+//RS     }
+//RS }
+//RS impl JetShow for JetTaskFailure {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             JetTaskFailure::Cancelled => "Cancelled".to_string(),
+//RS             JetTaskFailure::DeadlineBlown => "DeadlineBlown".to_string(),
+//RS             JetTaskFailure::Panicked(reason) => format!("Panicked({reason})"),
+//RS         }
+//RS     }
+//RS }
+//RS impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
+//RS     fn jet_show(&self) -> String {
+//RS         let clean = <E as JetShow>::jet_report_is_clean();
+//RS         match self {
+//RS             Ok(v) if clean => v.jet_show(),
+//RS             Ok(v) => format!("Ok({})", v.jet_show()),
+//RS             Err(e) if clean => e.jet_show(),
+//RS             Err(e) => format!("Err({})", e.jet_show()),
+//RS         }
+//RS     }
+//RS }
+//RS // D-PENDING1=B: async UI state machine — Idle/Loading/Loaded(T)/Failed(E).
+//RS #[derive(Clone, Debug)]
+//RS enum JetLoadable<T: Clone, E: Clone> {
+//RS     Idle,
+//RS     Loading,
+//RS     Loaded(T),
+//RS     Failed(E),
+//RS }
+//RS // D-PENDING1=B: constructors share the checked Loadable carriers with AOT and
+//RS // interpreter dispatch; JIT supplies the packed ABI adapters.
+//RS fn jet_loadable_idle() -> JetLoadable<(), ()> {
+//RS     JetLoadable::Idle
+//RS }
+//RS fn jet_loadable_loading() -> JetLoadable<(), ()> {
+//RS     JetLoadable::Loading
+//RS }
+//RS fn jet_loadable_loaded<T: Clone>(value: T) -> JetLoadable<T, ()> {
+//RS     JetLoadable::Loaded(value)
+//RS }
+//RS fn jet_loadable_failed<E: Clone>(error: E) -> JetLoadable<(), E> {
+//RS     JetLoadable::Failed(error)
+//RS }
+//RS impl<T: Clone, E: Clone> JetLoadable<T, E> {
+//RS     fn loadable_tag(&self) -> u8 {
+//RS         match self {
+//RS             JetLoadable::Idle => JET_LOADABLE_IDLE,
+//RS             JetLoadable::Loading => JET_LOADABLE_LOADING,
+//RS             JetLoadable::Loaded(_) => JET_LOADABLE_LOADED,
+//RS             JetLoadable::Failed(_) => JET_LOADABLE_FAILED,
+//RS         }
+//RS     }
+//RS     fn is_idle(&self) -> bool {
+//RS         jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_IDLE)
+//RS     }
+//RS     fn is_loading(&self) -> bool {
+//RS         jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_LOADING)
+//RS     }
+//RS     fn is_loaded(&self) -> bool {
+//RS         jet_loadable_has_value(self.loadable_tag())
+//RS     }
+//RS     fn is_failed(&self) -> bool {
+//RS         jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_FAILED)
+//RS     }
+//RS     fn loaded(&self) -> JetOutcome<T, JetAbsent> {
+//RS         if jet_loadable_has_value(self.loadable_tag()) {
+//RS             let JetLoadable::Loaded(v) = self else { unreachable!() };
+//RS             Ok(v.clone())
+//RS         } else {
+//RS             Err(JetAbsent)
+//RS         }
+//RS     }
+//RS     fn or_else(&self, default: T) -> T {
+//RS         if jet_loadable_has_value(self.loadable_tag()) {
+//RS             let JetLoadable::Loaded(v) = self else { unreachable!() };
+//RS             v.clone()
+//RS         } else {
+//RS             default
+//RS         }
+//RS     }
+//RS }
+//RS impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             JetLoadable::Idle => "Idle".to_string(),
+//RS             JetLoadable::Loading => "Loading".to_string(),
+//RS             JetLoadable::Loaded(v) => format!("Loaded({})", v.jet_show()),
+//RS             JetLoadable::Failed(e) => format!("Failed({})", e.jet_show()),
+//RS         }
+//RS     }
+//RS }
+//RS // D-CORE-SECRETS1=A: generic TTL remains separate from secret lifecycle.
+//RS #[derive(Clone, Debug)]
+//RS struct JetExpired;
+//RS impl JetShow for JetExpired {
+//RS     fn jet_show(&self) -> String {
+//RS         "Expired".to_string()
+//RS     }
+//RS }
+//RS #[derive(Clone, Debug)]
+//RS struct JetExpiring<T: Clone> {
+//RS     value: T,
+//RS     deadline_ms: i64,
+//RS }
+//RS impl<T: Clone> JetExpiring<T> {
+//RS     fn new(value: T, deadline_ms: i64) -> Self {
+//RS         JetExpiring { value, deadline_ms }
+//RS     }
+//RS     fn get(&self, now_ms: i64) -> Result<T, JetExpired> {
+//RS         if now_ms > self.deadline_ms {
+//RS             Err(JetExpired)
+//RS         } else {
+//RS             Ok(self.value.clone())
+//RS         }
+//RS     }
+//RS     fn is_valid(&self, now_ms: i64) -> bool {
+//RS         now_ms <= self.deadline_ms
+//RS     }
+//RS }
+//RS impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("Expiring(deadline={})", self.deadline_ms)
+//RS     }
+//RS }
+// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/Values.rs:1-569
+

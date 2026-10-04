@@ -1,0 +1,86 @@
+use jet_foundation.RuntimeDiagnostic.[JetRuntimeDiagnostic, jet_render_runtime_stop]
+use core.prelude.runtime.kernel_err.[JetErr, jet_err, jet_render_err]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:1
+// One predicate and report shape for every execution tier. Engines marshal
+// values here and own only control flow and transport, never report wording.
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:8
+pub fn jet_contract_check(condition: Bool) -> Bool Never! { condition }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:11
+pub fn jet_runtime_stop_report(code: String, file: String, line: U32,
+    fn_name: String, source_line: String, col: U32, caret_len: U32,
+    message: String, locals: String) -> JetRuntimeDiagnostic Never! {
+    jet_render_runtime_stop(code, file, line, fn_name, source_line, col, caret_len, message, locals)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:38
+// Exact Int outside a C i64 edge is an entry diagnostic, not a runtime breach.
+pub const JET_C_INT_RANGE_CODE: String = "E1003"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:39
+pub const JET_C_INT_RANGE_MESSAGE: String = "A default Int value does not fit in the C i64 range"
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:42
+pub fn jet_c_int_range_message() -> String Never! { JET_C_INT_RANGE_MESSAGE }
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:46
+pub fn jet_c_int_range_error() -> JetErr Never! {
+    jet_err(jet_c_int_range_message(), Val(JET_C_INT_RANGE_CODE), None)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:54
+pub fn jet_c_int_range_report() -> String Never! { jet_render_err(jet_c_int_range_error()) }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:60
+pub fn jet_runtime_exit_code(code: I64) -> I32 Never! {
+    // Rust `as i32` truncates before reserving 101; checked construction alone
+    // would refuse large codes. Keep the low bits and their signed meaning.
+    bits :: code & I64{0xffffffff}
+    narrowed :: if bits >= I64{0x80000000} { bits - I64{0x100000000} } else { bits }
+    native :: I32{narrowed}
+    if native == I32{101} { I32{1} } else { native }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:70
+pub fn jet_contract_report(clause_kw: String, msg: String, file: String, line: U32) -> JetRuntimeDiagnostic Never! {
+    message :: "#{clause_kw} contract failed: {msg}"
+    jet_runtime_stop_report("E3005", file, line, "", "", U32{1}, U32{1}, message, "")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:82
+pub const JET_ARITHMETIC_CODE: String = "E3010"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:83
+pub const JET_ARITHMETIC_ADD_OVERFLOW: String = "This addition overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:85
+pub const JET_ARITHMETIC_SUB_OVERFLOW: String = "This subtraction overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:87
+pub const JET_ARITHMETIC_MUL_OVERFLOW: String = "This multiplication overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:89
+pub const JET_ARITHMETIC_DIVIDE_ZERO: String = "divided by zero"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:90
+pub const JET_ARITHMETIC_DIVISION_ERROR: String = "This division can't be done (dividing by zero, or overflow)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:92
+pub const JET_ARITHMETIC_DIVIDE_OVERFLOW: String = "This division overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:94
+pub const JET_ARITHMETIC_POWER_NEGATIVE: String = "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:96
+pub const JET_ARITHMETIC_POWER_OVERFLOW: String = "This power overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:98
+pub const JET_ARITHMETIC_ROTATE_NEGATIVE: String = "A rotation count cannot be negative"
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:99
+pub const JET_ARITHMETIC_REMAINDER_OVERFLOW: String = "Attempt to calculate the remainder with overflow"
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Contracts.rs:102
+pub fn jet_arithmetic_message(kind: String) -> String Never! {
+    match kind {
+        "add" => JET_ARITHMETIC_ADD_OVERFLOW,
+        "sub" => JET_ARITHMETIC_SUB_OVERFLOW,
+        "mul" => JET_ARITHMETIC_MUL_OVERFLOW,
+        "div" => JET_ARITHMETIC_DIVISION_ERROR,
+        "divide_zero" => JET_ARITHMETIC_DIVIDE_ZERO,
+        "divide_overflow" => JET_ARITHMETIC_DIVIDE_OVERFLOW,
+        "pow_negative" => JET_ARITHMETIC_POWER_NEGATIVE,
+        "pow" => JET_ARITHMETIC_POWER_OVERFLOW,
+        "rotate_negative" => JET_ARITHMETIC_ROTATE_NEGATIVE,
+        "remainder" => JET_ARITHMETIC_REMAINDER_OVERFLOW,
+        _ => "This operation overflows the value's type (the result is outside its range)",
+    }
+}

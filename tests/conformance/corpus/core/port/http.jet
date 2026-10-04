@@ -1,0 +1,1480 @@
+// PORT-PENDING 1068 tests-http-module-group: tests/http.rs:1-149
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS use std::fs;
+//RS use std::path::{Path, PathBuf};
+//RS 
+//RS use jet::Interpreter::dev_iteration;
+//RS use jet_foundation::JitBackend::RunOutcome;
+//RS 
+//RS mod common;
+//RS 
+//RS struct Output {
+//RS     stdout: String,
+//RS     stderr: String,
+//RS     exit_code: i32,
+//RS }
+//RS 
+//RS fn on_large_stack(work: impl FnOnce() + Send) {
+//RS     std::thread::scope(|scope| {
+//RS         std::thread::Builder::new()
+//RS             .stack_size(64 * 1024 * 1024)
+//RS             .spawn_scoped(scope, work)
+//RS             .unwrap()
+//RS             .join()
+//RS             .unwrap();
+//RS     });
+//RS }
+//RS 
+//RS fn run_dev(path: &Path, use_interpreter: bool) -> Output {
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     match dev_iteration(&shown, false, use_interpreter) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => Output {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         },
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("{} failed: {diags:?}", path.display())
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn example_path(name: &str) -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("Examples/features/net/{name}.jet"))
+//RS }
+//RS 
+//RS #[test]
+//RS fn jit_http_readiness_uses_shared_scheduler_poller() {
+//RS     let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
+//RS     let scheduler = include_str!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
+//RS     let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+//RS     for symbol in [
+//RS         "jet_scheduler_io_wait",
+//RS         "jet_scheduler_tcp_listener_io_wait",
+//RS         "jet_scheduler_tcp_stream_ready_wait",
+//RS         "jet_scheduler_udp_io_wait",
+//RS     ] {
+//RS         assert!(
+//RS             runtime.contains(symbol),
+//RS             "JIT runtime does not import {symbol}"
+//RS         );
+//RS         assert!(
+//RS             scheduler.contains(&format!("pub fn {symbol}")),
+//RS             "Prelude scheduler does not define {symbol}"
+//RS         );
+//RS         assert!(
+//RS             !runtime.contains(&format!("fn {symbol}")),
+//RS             "JIT runtime still defines local {symbol}"
+//RS         );
+//RS     }
+//RS     #[cfg(unix)]
+//RS     assert!(
+//RS         net.contains("jet_scheduler_tcp_stream_ready_wait(stream, read, write, operation)"),
+//RS         "TCP stream waits must use the shared raw-fd poller"
+//RS     );
+//RS     assert!(!runtime.contains("fn jet_scheduler_tcp_stream_io_wait"));
+//RS     assert!(!runtime.contains("thread::sleep"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn resident_http_stop_uses_the_shared_runtime_boundary() {
+//RS     let runtime = include_str!("../crates/jet-jit/src/net_http_rt.rs");
+//RS     assert!(
+//RS         runtime.contains("runtime_host::runtime_stop_unwind(\"E3001\""),
+//RS         "resident HTTP failures must enter the shared runtime report boundary"
+//RS     );
+//RS     assert!(
+//RS         !runtime.contains("std::process::exit"),
+//RS         "resident HTTP helpers must not terminate the host process"
+//RS     );
+//RS }
+//RS 
+//RS fn assert_http_example_matches_all_tiers(name: &str) {
+//RS     let path = example_path(name);
+//RS     let source = fs::read_to_string(&path).unwrap();
+//RS     let expected = fs::read_to_string(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join(format!("Examples/features/expected/net/{name}.out")),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let interpreted = run_dev(&path, true);
+//RS     assert_eq!(interpreted.stdout, expected, "{name} interpreter stdout");
+//RS     assert_eq!(interpreted.stderr, "", "{name} interpreter stderr");
+//RS     assert_eq!(interpreted.exit_code, 0, "{name} interpreter exit code");
+//RS 
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let default = run_dev(&path, false);
+//RS     assert_eq!(default.stdout, expected, "{name} default stdout");
+//RS     assert_eq!(default.stderr, "", "{name} default stderr");
+//RS     assert_eq!(default.exit_code, 0, "{name} default exit code");
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "{name} default run did not execute JIT"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test(),
+//RS         "{name} default run deopted"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "{name} default run fell back"
+//RS     );
+//RS 
+//RS     let (code, aot_stdout, aot_stderr) =
+//RS         common::build_and_run(&format!("jet_{name}"), name, &source);
+//RS     assert_eq!(code, 0, "{name} AOT exit code: {aot_stderr}");
+//RS     assert_eq!(aot_stdout, expected, "{name} AOT stdout");
+//RS     assert_eq!(aot_stderr, "", "{name} AOT stderr");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_examples_match_interpreter_default_jit_and_aot() {
+//RS     if !common::have_rustc() {
+//RS         return;
+//RS     }
+//RS     if !jet_jit::cranelift_host_supported() {
+//RS         if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
+//RS             panic!("Cranelift host required but unavailable");
+//RS         }
+//RS         return;
+//RS     }
+//RS 
+//RS     on_large_stack(|| {
+//RS         assert_http_example_matches_all_tiers("http_readiness");
+//RS         assert_http_example_matches_all_tiers("http_client");
+//RS     });
+//RS }
+// END-PORT-PENDING 1068 tests/http.rs:1-149
+
+// PORT-PENDING 1068 tests-http-module-group: tests/http_dependency_audit.rs:1-155
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-DEP-HTTP2=B evidence: native HTTP/compression stay free of new external crates.
+//RS //! Ratified TLS bridges (rustls*) remain allowed.
+//RS 
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS 
+//RS fn workspace_root() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS }
+//RS 
+//RS fn read(path: &str) -> String {
+//RS     fs::read_to_string(workspace_root().join(path)).unwrap_or_else(|error| {
+//RS         panic!("failed to read {path}: {error}");
+//RS     })
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_manifests_have_no_new_external_http_or_compression_crates() {
+//RS     // Forbidden: new HTTP/compression stacks in compiler/prelude seams.
+//RS     // rustls* is a separately ratified TLS bridge in jet-pkg-model.
+//RS     let forbidden = [
+//RS         "hyper",
+//RS         "reqwest",
+//RS         "ureq",
+//RS         "attohttpc",
+//RS         "isahc",
+//RS         "surf",
+//RS         "awc",
+//RS         "actix-web",
+//RS         "axum",
+//RS         "warp",
+//RS         "tiny_http",
+//RS         "flate2",
+//RS         "libflate",
+//RS         "brotli",
+//RS         "async-compression",
+//RS         "tokio",
+//RS         "h2 ",
+//RS         "http-body",
+//RS     ];
+//RS     for path in [
+//RS         "crates/jet-codegen/Cargo.toml",
+//RS         "crates/jet-pkg-model/Cargo.toml",
+//RS     ] {
+//RS         let text = read(path);
+//RS         for needle in forbidden {
+//RS             if needle == "h2 " {
+//RS                 // Ignore accidental substring matches inside other words.
+//RS                 continue;
+//RS             }
+//RS             // Match Cargo dependency keys only: `name =` at line start or after newline.
+//RS             let needle_eq = format!("{needle} =");
+//RS             let needle_dot = format!("{needle}.");
+//RS             assert!(
+//RS                 !text.contains(&needle_eq)
+//RS                     && !text.lines().any(|line| {
+//RS                         let trimmed = line.trim_start();
+//RS                         trimmed.starts_with(needle)
+//RS                             && (trimmed[needle.len()..].starts_with(" =")
+//RS                                 || trimmed[needle.len()..].starts_with("."))
+//RS                     })
+//RS                     && !text.contains(&needle_dot),
+//RS                 "{path} must not depend on `{needle}`"
+//RS             );
+//RS         }
+//RS         if path.ends_with("jet-pkg-model/Cargo.toml") {
+//RS             assert!(
+//RS                 text.contains("rustls"),
+//RS                 "jet-pkg-model may keep the ratified rustls TLS bridge"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_prelude_sources_do_not_import_forbidden_http_crates() {
+//RS     let forbidden_imports = [
+//RS         "use ureq",
+//RS         "use hyper",
+//RS         "use reqwest",
+//RS         "use flate2",
+//RS         "use brotli",
+//RS         "use tokio",
+//RS         "extern crate ureq",
+//RS         "extern crate hyper",
+//RS         "extern crate flate2",
+//RS     ];
+//RS     let sources = [
+//RS         "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs",
+//RS         "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs",
+//RS         "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs",
+//RS         "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs",
+//RS         "crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs",
+//RS         "crates/jet-pkg-model/src/Prelude/HTTP.rs",
+//RS     ];
+//RS     for path in sources {
+//RS         let text = read(path);
+//RS         for needle in forbidden_imports {
+//RS             assert!(!text.contains(needle), "{path} must not import `{needle}`");
+//RS         }
+//RS     }
+//RS     // Comment noise in HTTPClient.rs historically mentioned ureq; keep it gone.
+//RS     let client = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+//RS     assert!(
+//RS         !client.to_ascii_lowercase().contains("ureq"),
+//RS         "HTTPClient prelude must not mention ureq"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn unsupported_target_variant_is_mapped_from_bridge_and_server_bind() {
+//RS     let bridge = read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs");
+//RS     assert!(
+//RS         bridge.contains("JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget")
+//RS             && bridge.contains("JetHTTPOperation::ClientConnect"),
+//RS         "client bridge must map UnsupportedTarget to ClientConnect"
+//RS     );
+//RS     assert!(
+//RS         bridge.contains("unsupported-target:server-bind"),
+//RS         "server bind must map UnsupportedTarget before IO fallback"
+//RS     );
+//RS     assert!(
+//RS         bridge.contains("JetHTTPOperation::ServerBind"),
+//RS         "server bind UnsupportedTarget must name ServerBind"
+//RS     );
+//RS     let server = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+//RS     assert!(
+//RS         server.contains("unsupported-target:server-bind"),
+//RS         "server bind must preflight unsupported targets"
+//RS     );
+//RS     let client = read("crates/jet-pkg-model/src/Prelude/HTTP.rs");
+//RS     assert!(
+//RS         client.contains("JetHTTPBridgeError::UnsupportedTarget"),
+//RS         "client send must be able to return UnsupportedTarget"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn current_host_supports_http_bind_and_ws_connect() {
+//RS     assert!(
+//RS         cfg!(any(
+//RS             target_os = "linux",
+//RS             target_os = "android",
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             target_os = "freebsd",
+//RS             target_os = "openbsd",
+//RS             target_os = "netbsd",
+//RS             target_os = "windows"
+//RS         )),
+//RS         "http_dependency_audit assumes a supported desktop/server OS"
+//RS     );
+//RS }
+// END-PORT-PENDING 1068 tests/http_dependency_audit.rs:1-155
+
+// PORT-PENDING 1068 tests-http-module-group: tests/resource_close.rs:1-521
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SHAPE-RESOURCE2=A: the sole deferred action is `defer close(^resource)`.
+//RS 
+//RS use std::fs;
+//RS use std::process::{Command, Output};
+//RS 
+//RS mod common;
+//RS 
+//RS const SIMPLE: &str = r#"
+//RS struct Resource { name: String }
+//RS 
+//RS impl Resource.Close {
+//RS     fn close(^self) {
+//RS         print("close {self.name}")
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     resource := Resource{ name: "dev" }
+//RS     defer close(^resource)
+//RS     print("body")
+//RS }
+//RS "#;
+//RS 
+//RS fn compile(src: &str) -> jet::CompileOutput {
+//RS     let root = common::unique_tmp("jet_resource_close_compile");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let path = root.join("main.jet");
+//RS     fs::write(&path, src).unwrap();
+//RS     jet::compile_with_path(src, path.to_str().unwrap()).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "{}",
+//RS             jet::render_diagnostics(path.to_str().unwrap(), src, &diags)
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn codes(src: &str) -> Vec<String> {
+//RS     match jet::compile(src) {
+//RS         Ok(_) => Vec::new(),
+//RS         Err(diags) => diags.into_iter().map(|d| d.code.to_string()).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn compile_and_run(src: &str, tag: &str) -> Output {
+//RS     assert!(
+//RS         common::have_rustc(),
+//RS         "resource-close runtime proof needs rustc"
+//RS     );
+//RS     let compiled = compile(src);
+//RS     run_compiled(compiled.rust, tag)
+//RS }
+//RS 
+//RS fn compile_and_run_with_scheduler_unwind(src: &str, tag: &str) -> Output {
+//RS     assert!(
+//RS         common::have_rustc(),
+//RS         "resource-close runtime proof needs rustc"
+//RS     );
+//RS     let compiled = compile(src);
+//RS     let entry_init = "fn main() {\n    jet_std_env_init();";
+//RS     let rust = compiled.rust.replacen(
+//RS         entry_init,
+//RS         "fn main() {\n    jet_std_env_init();\n    jet_scheduler_task_panic_enter();",
+//RS         1,
+//RS     );
+//RS     assert_ne!(
+//RS         rust, compiled.rust,
+//RS         "scheduler unwind probe did not attach to entry init"
+//RS     );
+//RS     run_compiled(rust, tag)
+//RS }
+//RS 
+//RS fn run_compiled(rust: String, tag: &str) -> Output {
+//RS     let root = common::unique_tmp(tag);
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let rs = root.join("main.rs");
+//RS     let bin = root.join("main");
+//RS     fs::write(&rs, rust).unwrap();
+//RS     let built = Command::new("rustc")
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rs)
+//RS         .arg("-o")
+//RS         .arg(&bin)
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc rejected deferred-close output:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     Command::new(bin).output().unwrap()
+//RS }
+//RS 
+//RS #[test]
+//RS fn defer_close_has_explicit_tir_codegen_and_stable_formatting() {
+//RS     let out = compile(SIMPLE);
+//RS     assert!(out.rust.contains("JetDeferredClose"), "{}", out.rust);
+//RS     assert!(
+//RS         out.rust
+//RS             .contains("__jet_Close::close(__jet___resource_resource_")
+//RS             && out.rust.contains(".take())"),
+//RS         "{}",
+//RS         out.rust
+//RS     );
+//RS 
+//RS     let once = jet::format_source(SIMPLE).expect("deferred close should format");
+//RS     assert!(once.contains("defer close(^resource)"), "{once}");
+//RS     let twice = jet::format_source(&once).expect("formatted deferred close should parse");
+//RS     assert_eq!(once, twice);
+//RS }
+//RS 
+//RS #[test]
+//RS fn defer_rejects_general_actions_blocks_and_values_without_close_capability() {
+//RS     let statement = codes("fn run() { defer print(\"not close\") }");
+//RS     assert!(statement.contains(&"E0003".into()), "{statement:?}");
+//RS 
+//RS     let block = codes("fn run() { defer { print(\"not close\") } }");
+//RS     assert!(block.contains(&"E0003".into()), "{block:?}");
+//RS 
+//RS     let non_resource = codes("fn run() {\n    value := 1\n    defer close(^value)\n}");
+//RS     assert!(non_resource.contains(&"E0905".into()), "{non_resource:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn free_close_function_cannot_shadow_the_nominal_protocol() {
+//RS     let src = r#"
+//RS struct NotClose { value: Int }
+//RS fn close(value: ^NotClose) { print(value.value) }
+//RS fn run() {
+//RS     value := NotClose{ value: 1 }
+//RS     defer close(^value)
+//RS }
+//RS "#;
+//RS     let got = codes(src);
+//RS     assert!(got.contains(&"E0905".into()), "{got:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn nominal_close_is_the_automatic_scope_end_safety_net() {
+//RS     let src = r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("auto {self.name}") }
+//RS }
+//RS 
+//RS fn scoped() {
+//RS     resource := Resource{ name: "scope" }
+//RS     print("body {resource.name}")
+//RS }
+//RS fn run() { scoped() }
+//RS "#;
+//RS     let ran = compile_and_run(src, "jet_resource_close_automatic");
+//RS     assert!(
+//RS         ran.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&ran.stderr)
+//RS     );
+//RS     assert_eq!(ran.stdout, b"body scope\nauto scope\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn automatic_cleanup_runs_before_source_panic_exits_the_process() {
+//RS     let src = r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("auto {self.name}") }
+//RS }
+//RS fn run() {
+//RS     resource := Resource{ name: "panic" }
+//RS     print("body")
+//RS     panic("stop")
+//RS }
+//RS "#;
+//RS     let ran = compile_and_run_with_scheduler_unwind(src, "jet_resource_close_automatic_panic");
+//RS     assert!(!ran.status.success());
+//RS     assert_eq!(ran.status.code(), Some(70));
+//RS     assert_eq!(ran.stdout, b"body\nauto panic\n");
+//RS     let stderr = String::from_utf8_lossy(&ran.stderr);
+//RS     assert_eq!(stderr.matches("Stop [E3001]").count(), 1, "{stderr}");
+//RS     assert!(stderr.contains("Stop [E3001]: `panic: stop`\n"), "{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn typed_runtime_stops_keep_cleanup_and_exit_code_through_native_boundary() {
+//RS     let cases = [
+//RS         (
+//RS             "E3010",
+//RS             "arithmetic",
+//RS             r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("auto {self.name}") }
+//RS }
+//RS fn run() {
+//RS     resource := Resource{ name: "arithmetic" }
+//RS     print("body")
+//RS     zero :: 0
+//RS     print(10 /% zero)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "E3011",
+//RS             "todo",
+//RS             r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("auto {self.name}") }
+//RS }
+//RS fn missing() -> Int -> #Todo
+//RS fn run() {
+//RS     resource := Resource{ name: "todo" }
+//RS     print("body")
+//RS     print(missing())
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "E3012",
+//RS             "stack",
+//RS             r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("auto {self.name}") }
+//RS }
+//RS fn recurse(n: Int) -> Int {
+//RS     return recurse(n + 1)
+//RS }
+//RS fn run() {
+//RS     resource := Resource{ name: "stack" }
+//RS     print("body")
+//RS     print(recurse(0))
+//RS }
+//RS "#,
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (code, name, src) in cases {
+//RS         let ran = compile_and_run_with_scheduler_unwind(src, &format!("jet_resource_close_{code}"));
+//RS         assert_eq!(ran.status.code(), Some(70), "{code}: {ran:?}");
+//RS         assert_eq!(ran.stdout, format!("body\nauto {name}\n").as_bytes());
+//RS         let stderr = String::from_utf8_lossy(&ran.stderr);
+//RS         assert!(
+//RS             stderr.contains(&format!("Stop [{code}]")),
+//RS             "{code}: {stderr}"
+//RS         );
+//RS         assert_eq!(
+//RS             stderr.matches(&format!("Stop [{code}]")).count(),
+//RS             1,
+//RS             "{code}: {stderr}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn consuming_parameters_and_returns_transfer_the_cleanup_guard() {
+//RS     let src = r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("close {self.name}") }
+//RS }
+//RS impl Resource {
+//RS     fn handoff(^self) -> Resource { return self }
+//RS }
+//RS fn relay(^resource: Resource) -> Resource { return resource }
+//RS fn consume(^resource: Resource) { print("consume {resource.name}") }
+//RS fn run() {
+//RS     first := Resource{ name: "transfer" }
+//RS     second := relay(^first)
+//RS     third := second.handoff()
+//RS     consume(^third)
+//RS }
+//RS "#;
+//RS     let compiled = compile(src);
+//RS     assert!(
+//RS         compiled
+//RS             .rust
+//RS             .contains(": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"),
+//RS         "{}",
+//RS         compiled.rust
+//RS     );
+//RS     assert!(
+//RS         compiled
+//RS             .rust
+//RS             .contains("return __jet___resource_param_resource.take();"),
+//RS         "{}",
+//RS         compiled.rust
+//RS     );
+//RS     let out = compile_and_run(src, "jet_resource_close_transfer");
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&out.stdout),
+//RS         "consume transfer\nclose transfer\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn scheduled_transfer_reuses_move_checks_for_every_second_use() {
+//RS     let use_after = codes(&format!(
+//RS         "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    print(resource.name)\n}}"
+//RS     ));
+//RS     assert!(use_after.contains(&"E0121".into()), "{use_after:?}");
+//RS 
+//RS     let double_defer = codes(&format!(
+//RS         "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    defer close(^resource)\n    defer close(^resource)\n}}"
+//RS     ));
+//RS     assert!(double_defer.contains(&"E0121".into()), "{double_defer:?}");
+//RS 
+//RS     let double_close = codes(&format!(
+//RS         "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    close(^resource)\n    close(^resource)\n}}"
+//RS     ));
+//RS     assert!(double_close.contains(&"E0121".into()), "{double_close:?}");
+//RS 
+//RS     let copied = codes(&format!(
+//RS         "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    copied := ~resource\n    print(copied.name)\n}}"
+//RS     ));
+//RS     assert!(copied.contains(&"E0211".into()), "{copied:?}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cleanup_runs_once_in_lifo_order_on_all_scope_exits() {
+//RS     let src = r#"
+//RS struct Resource { name: String }
+//RS 
+//RS impl Resource.Close {
+//RS     fn close(^self) {
+//RS         print("close {self.name}")
+//RS     }
+//RS }
+//RS 
+//RS fn fail() -> Int String! {
+//RS     return Err("stop")
+//RS }
+//RS 
+//RS fn returned() {
+//RS     resource := Resource{ name: "return" }
+//RS     defer close(^resource)
+//RS     print("return body")
+//RS     return
+//RS }
+//RS 
+//RS fn questioned() -> Int String! {
+//RS     resource := Resource{ name: "question" }
+//RS     defer close(^resource)
+//RS     value := fail()
+//RS     return Ok(value)
+//RS }
+//RS 
+//RS fn looped() {
+//RS     loop n in [0, 1] {
+//RS         resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
+//RS         defer close(^resource)
+//RS         if n == 0 { next }
+//RS         break
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     first := Resource{ name: "a" }
+//RS     defer close(^first)
+//RS     second := Resource{ name: "b" }
+//RS     defer close(^second)
+//RS     print("body")
+//RS     returned()
+//RS     questioned().drop("this path intentionally proves `?` cleanup")
+//RS     looped()
+//RS     unwind := Resource{ name: "unwind" }
+//RS     defer close(^unwind)
+//RS     panic("boom")
+//RS }
+//RS "#;
+//RS     let ran = compile_and_run(src, "jet_resource_close_exits");
+//RS     assert!(!ran.status.success(), "panic path must unwind");
+//RS     assert_eq!(
+//RS         String::from_utf8(ran.stdout).unwrap(),
+//RS         "body\nreturn body\nclose return\nclose question\nclose continue\nclose break\nclose unwind\nclose b\nclose a\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn failed_require_drains_resources_only_on_the_failure_path() {
+//RS     let src = r#"
+//RS struct Resource { name: String }
+//RS impl Resource.Close {
+//RS     fn close(^self) { print("close {self.name}") }
+//RS }
+//RS fn run() {
+//RS     automatic := Resource{ name: "automatic" }
+//RS     deferred := Resource{ name: "deferred" }
+//RS     defer close(^deferred)
+//RS     assert(true)
+//RS     print("before failure")
+//RS     assert(false, "stop")
+//RS     print(automatic.name)
+//RS }
+//RS "#;
+//RS     let ran = compile_and_run(src, "jet_resource_close_require");
+//RS     assert!(!ran.status.success());
+//RS     assert_eq!(
+//RS         ran.stdout,
+//RS         b"before failure\nclose deferred\nclose automatic\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn ordinary_scope_drop_and_reasoned_drop_remain_separate() {
+//RS     let src = r#"
+//RS struct Value { number: Int }
+//RS fn maybe() -> Int String! { return Err("unused") }
+//RS fn run() {
+//RS     value := Value{ number: 1 }
+//RS     print(value.number)
+//RS     maybe().drop("best effort remains an explicit value discard")
+//RS }
+//RS "#;
+//RS     let out = compile(src);
+//RS     assert!(out.rust.contains("__jet_maybe();"), "{}", out.rust);
+//RS     assert_eq!(
+//RS         out.rust.matches("JetDeferredClose::new").count(),
+//RS         0,
+//RS         "ordinary scope cleanup must not become explicit deferred close"
+//RS     );
+//RS     let ran = compile_and_run(src, "jet_resource_close_ordinary_drop");
+//RS     assert!(ran.status.success());
+//RS     assert_eq!(ran.stdout, b"1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn allocator_handles_participate_in_nominal_close() {
+//RS     let src = r#"
+//RS use core.mem as mem
+//RS 
+//RS fn run() {
+//RS     arena := mem.Arena.new()
+//RS     close(^arena)
+//RS     bump := mem.Bump.new(capacity: 64)
+//RS     defer close(^bump)
+//RS     pool := mem.Pool.new(slots: 2)
+//RS     close(^pool)
+//RS     print("closed")
+//RS }
+//RS "#;
+//RS     let ran = compile_and_run(src, "jet_resource_close_allocators");
+//RS     assert!(
+//RS         ran.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&ran.stderr)
+//RS     );
+//RS     assert_eq!(ran.stdout, b"closed\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn explicit_close_of_a_database_connection_releases_the_provider_handle() {
+//RS     // D-DBDRIVER1: a DB connection is a host handle with no source `Close`
+//RS     // impl; `close(^conn)` must consume it through the provider's close, not
+//RS     // a missing `DBConnection::close` method.
+//RS     let open_only = r#"
+//RS use core.db as db
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     print("open")
+//RS }
+//RS "#;
+//RS     let closed = r#"
+//RS use core.db as db
+//RS fn run() {
+//RS     conn := db.open_memory()
+//RS     print("open")
+//RS     close(^conn)
+//RS }
+//RS "#;
+//RS     let provider_closes = |src: &str| compile(src).rust.matches("jet_db_close(").count();
+//RS     assert!(
+//RS         provider_closes(closed) > provider_closes(open_only),
+//RS         "explicit close must release the connection through the provider"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn default_dev_runs_deferred_close_with_native_parity() {
+//RS     use jet::Interpreter::RunOutcome;
+//RS     use jet::JitBackend::JitBackend;
+//RS 
+//RS     let root = common::unique_tmp("jet_resource_close_dev");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     let path = root.join("main.jet");
+//RS     fs::write(&path, SIMPLE).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+//RS         .into_iter()
+//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+//RS         .collect();
+//RS     assert!(errors.is_empty(), "{errors:?}");
+//RS 
+//RS     if jet_jit::cranelift_host_supported() {
+//RS         let policy = common::development_policy();
+//RS         let result = common::compile_cranelift_bundle(&bundle, &policy);
+//RS         assert!(
+//RS             result.is_ok(),
+//RS             "JIT must compile typed deferred cleanup: {result:?}"
+//RS         );
+//RS     }
+//RS 
+//RS     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
+//RS     assert!(native.status.success());
+//RS     assert_eq!(native.stdout, b"body\nclose dev\n");
+//RS 
+//RS     let policy = common::development_policy();
+//RS     let mut dev = jet_jit::CraneliftBackend::new();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
+//RS         RunOutcome::Ran { stdout, .. } => {
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test(),
+//RS                 "typed deferred cleanup must stay on the JIT tier"
+//RS             );
+//RS             assert_eq!(stdout, "body\nclose dev\n");
+//RS         }
+//RS         RunOutcome::Problems(diags) => {
+//RS             panic!("typed deferred cleanup failed on the JIT tier: {diags:?}");
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1068 tests/resource_close.rs:1-521
+
+// PORT-PENDING 1068 tests-http-module-group: tests/tir_operators_and_runtime.rs:1-639
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! TIR operator and low-level runtime-language integration tests.
+//RS 
+//RS mod common;
+//RS 
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use tir_support::{
+//RS     assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, compile_source,
+//RS     have_rustc, jit_run_with_env,
+//RS };
+//RS 
+//RS /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
+//RS #[test]
+//RS fn user_operator_traits_route_through_tir() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Vec2 { x: Int y: Int }
+//RS struct Holder { value: Vec2 }
+//RS struct EqBox<T: Equatable> { value: T }
+//RS #Comparable
+//RS struct Tier<T: Comparable> { value: T }
+//RS #Comparable
+//RS struct NestedTier<T: Comparable> {
+//RS     head: T?
+//RS     tail: [T]
+//RS }
+//RS struct Adder<T: Add> { value: T }
+//RS 
+//RS impl Vec2.Add {
+//RS     fn add(self, rhs: Vec2) -> Vec2 {
+//RS         return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
+//RS     }
+//RS }
+//RS 
+//RS impl Vec2.Equatable {
+//RS     fn equal(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
+//RS }
+//RS 
+//RS impl Vec2.Comparable {
+//RS     fn compare(self, rhs: Vec2) -> Ordering {
+//RS         if self.x < rhs.x { return Ordering.Less }
+//RS         if self.x > rhs.x { return Ordering.Greater }
+//RS         return Ordering.Equal
+//RS     }
+//RS }
+//RS 
+//RS fn add_generic<T: Add>(left: T, right: T) -> T { return left + right }
+//RS fn equal_generic<T: Equatable>(left: T, right: T) -> Bool { return left == right }
+//RS fn less_generic<T: Comparable>(left: T, right: T) -> Bool { return left < right }
+//RS 
+//RS fn marked(x: Int) -> Vec2 {
+//RS     print("marked {x}")
+//RS     return Vec2{ x: x, y: 0 }
+//RS }
+//RS 
+//RS fn run() {
+//RS     a :: Vec2{ x: 1, y: 2 }
+//RS     b :: Vec2{ x: 3, y: 4 }
+//RS     c :: add_generic(a, b)
+//RS     d := Vec2{ x: 1, y: 2 }
+//RS     d = { x: 1, y: 2 }
+//RS     d += { x: 3, y: 4 }
+//RS     holder := Holder{ value: Vec2{ x: 1, y: 2 } }
+//RS     holder.value = { x: 1, y: 2 }
+//RS     holder.value += { x: 3, y: 4 }
+//RS     box := EqBox<Int>{ value: 1 }
+//RS     box = { value: 7 }
+//RS     chain :: marked(1) < marked(2) < marked(3)
+//RS     boxes_equal :: equal_generic(EqBox<Int>{ value: 7 }, EqBox<Int>{ value: 7 })
+//RS     ranks_ordered :: less_generic(Tier<Int>{ value: 1 }, Tier<Int>{ value: 2 })
+//RS     nested_ordered :: less_generic(
+//RS         NestedTier<Int>{ head: Val(1), tail: [2, 3] },
+//RS         NestedTier<Int>{ head: Val(1), tail: [2, 4] }
+//RS     )
+//RS     cell := Adder<Int>{ value: 4 }
+//RS     cell.value += 3
+//RS     print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
+//RS }
+//RS "#;
+//RS     let (code, stdout) = build_and_run("tir_user_operator_traits", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "marked 1\nmarked 2\nmarked 3\n4,6 4,6 4,6 true true true true true true true 7 7\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn derived_nested_struct_equality_uses_raw_protocol_return_on_all_tiers() {
+//RS     let src = r#"
+//RS #Comparable
+//RS struct Inner { value: Int }
+//RS #Comparable
+//RS struct Outer { inner: Inner }
+//RS 
+//RS fn run() {
+//RS     first :: Outer{ inner: Inner{ value: 1 } }
+//RS     same :: Outer{ inner: Inner{ value: 1 } }
+//RS     different :: Outer{ inner: Inner{ value: 2 } }
+//RS     print(first == same)
+//RS     print(first == different)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("derived_nested_struct_equality", src, "true\nfalse\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn infallible_operator_method_can_call_ordinary_helper() {
+//RS     let src = r#"
+//RS struct D {
+//RS     value: Int
+//RS }
+//RS struct Pair {
+//RS     a: Int
+//RS     b: Int
+//RS }
+//RS fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+//RS impl D.Add {
+//RS     fn add(self, rhs: D) -> D {
+//RS         pair :: align(self, rhs)
+//RS         return D{value: pair.a + pair.b}
+//RS     }
+//RS }
+//RS fn run() {
+//RS     print(D{value: 1} + D{value: 2})
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("operator_ordinary_helper", src, "D { value: 3 }\n");
+//RS }
+//RS 
+//RS /// D-CMP3WAY1=B: `<=>` is the primitive Ordering result, and a Comparable
+//RS /// hook derives all six Boolean comparison operators from that same result.
+//RS #[test]
+//RS fn spaceship_and_ordering_route_through_tir() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS struct Score { points: Int }
+//RS 
+//RS impl Score.Comparable {
+//RS     fn compare(self, rhs: Score) -> Ordering {
+//RS         if self.points < rhs.points { return Ordering.Less }
+//RS         if self.points > rhs.points { return Ordering.Greater }
+//RS         return Ordering.Equal
+//RS     }
+//RS }
+//RS 
+//RS fn show_text_order(left: String, right: String) {
+//RS     print("{(left < right)} {(left <= right)} {(left > right)} {(left >= right)}")
+//RS }
+//RS 
+//RS fn run() {
+//RS     low :: Score{ points: 10 }
+//RS     high :: Score{ points: 20 }
+//RS     int_cmp :: 1 <=> 2
+//RS     text_cmp :: "alpha" <=> "beta"
+//RS     chained :: (low <=> high).then(high <=> high)
+//RS     then_greater :: (low <=> low).then(high <=> low)
+//RS     reverse_greater :: (high <=> low).reverse()
+//RS     reverse_equal :: (low <=> low).reverse()
+//RS     numbers := [3, 1, 2]
+//RS     &numbers.sort_by((left: Int, right: Int) -> left <=> right)
+//RS     scores := [Score{ points: 30 }, Score{ points: 10 }, Score{ points: 20 }]
+//RS     &scores.sort_by((left: Score, right: Score) -> left.compare(right))
+//RS     print("{(low < high)} {(low <= high)} {(high > low)} {(high >= low)} {(low == low)} {(low != high)}")
+//RS     print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
+//RS     print("{numbers[0]} {numbers[1]} {numbers[2]}")
+//RS     print("{scores[0].points} {scores[1].points} {scores[2].points}")
+//RS     show_text_order("alpha", "beta")
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_spaceship_ordering",
+//RS         src,
+//RS         "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\ntrue true false false\n",
+//RS     );
+//RS }
+//RS 
+//RS /// c109 Phase 26: free-call mutate, move, and shared-read argument conventions.
+//RS #[test]
+//RS fn free_call_arg_conventions() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn show(msg: String) {
+//RS     print(msg)
+//RS }
+//RS fn bump(n: &Int) {
+//RS     n += 1
+//RS }
+//RS fn archive(name: ^String) -> String {
+//RS     return name
+//RS }
+//RS fn run() {
+//RS     score := 41
+//RS     bump(&score)
+//RS     print(score)
+//RS greeting :: \"hello\"
+//RS     show(greeting)
+//RS saved :: archive(^\"vault\")
+//RS     print(saved)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_arg_conv", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "42\nhello\nvault\n");
+//RS }
+//RS 
+//RS /// c109 Phase 26: fixed-size result-list destructuring.
+//RS #[test]
+//RS fn list_destructure() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn double(n: Int) -> Int {
+//RS     return (n * 2)
+//RS }
+//RS fn run() {
+//RS     doubled :: [double(1), double(2), double(3)]
+//RS     [a, b, c] :: doubled
+//RS     print(a)
+//RS     print(b)
+//RS     print(c)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_list_destructure", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "2\n4\n6\n");
+//RS }
+//RS 
+//RS /// c109 Phase 27: stored function values and struct function fields.
+//RS #[test]
+//RS fn fn_value_and_struct_fn_field() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+//RS     return f(f(x))
+//RS }
+//RS fn double(x: Int) -> Int {
+//RS     return (x * 2)
+//RS }
+//RS struct Worker {
+//RS     step: fn(Int) -> Int
+//RS }
+//RS struct TextWorker {
+//RS     step: fn(String) -> Int
+//RS }
+//RS fn text_len(text: String) -> Int {
+//RS     return text.len()
+//RS }
+//RS fn run() {
+//RS     double_fn :: double
+//RS     print(apply_twice(double_fn, 3))
+//RS     print(apply_twice((x: Int) -> (x + 1), 5))
+//RS     w :: Worker{step: (n: Int) -> (n * n)}
+//RS     print(w.step(4))
+//RS     text_worker :: TextWorker{step: text_len}
+//RS     text :: \"read\"
+//RS     print(text_worker.step(text))
+//RS     print(text)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_fn_value_struct_field", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "12\n7\n16\n4\nread\n");
+//RS }
+//RS 
+//RS /// c109 Phase 28: sized integers, conversions, bounds, queries, and overflow modes.
+//RS #[test]
+//RS fn sized_integers() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = "\
+//RS fn run() {
+//RS red :: U8{ 255 }
+//RS channel :: I32{ 100000 }
+//RS depth :: I8{ -120 }
+//RS     print(red)
+//RS     print(channel)
+//RS     print(depth)
+//RS total :: I64{ 9000000000 }
+//RS     print(total + 1)
+//RS half :: U8{ 100 }
+//RS     print(half + half)
+//RS bytes :: [U8]{ 104, 105, 33 }
+//RS     print(bytes)
+//RS wide :: I64{ Int.from_u8(red) }
+//RS     print(wide)
+//RS clamped :: U8.from_i32(channel) ?? 255
+//RS     print(clamped)
+//RS     print(U8.MAX)
+//RS     print(I32.MIN)
+//RS flags :: U8{ 13 }
+//RS     print(flags.count_ones())
+//RS     print(Float.INFINITY.is_infinite())
+//RS hi :: U8{ 200 }
+//RS lo :: U8{ 100 }
+//RS     print(wrapping(hi + lo))
+//RS     print(saturating(hi + lo))
+//RS fallback :: U8{ 0 }
+//RS     print(checked(hi + lo) ?? fallback)
+//RS }
+//RS ";
+//RS     let (code, stdout) = build_and_run("tir_sized_integers", src);
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "255\n100000\n-120\n9000000001\n200\n[104, 105, 33]\n255\n255\n255\n-2147483648\n3\ntrue\n44\n255\n0\n"
+//RS     );
+//RS }
+//RS 
+//RS /// D-INT-WIDEN1: sized integer locals passed to exact `Int` parameters use
+//RS /// the canonical widening path, including both 64-bit representation limits.
+//RS #[test]
+//RS fn sized_integer_locals_widen_to_int_at_i64_u64_boundaries() {
+//RS     if !have_rustc() {
+//RS         return;
+//RS     }
+//RS     let src = r#"
+//RS fn accept(value: Int) -> Int { return value }
+//RS fn pick(values: [U8], slot: I64) -> U8 { return values[slot] }
+//RS 
+//RS fn run() {
+//RS     i64_min :: I64.MIN
+//RS     i64_max :: I64.MAX
+//RS     u64_zero :: U64{0}
+//RS     u64_max :: U64.MAX
+//RS     values :: [U8]{7}
+//RS     print(accept(i64_min))
+//RS     print(accept(i64_max))
+//RS     print(accept(u64_zero))
+//RS     print(accept(u64_max))
+//RS     print(pick(values, I64{0}))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_sized_integer_argument_boundaries",
+//RS         src,
+//RS         "-9223372036854775808\n9223372036854775807\n0\n18446744073709551615\n7\n",
+//RS     );
+//RS 
+//RS     for (name, bad_source) in [
+//RS         (
+//RS             "tir_reject_negative_to_unsigned",
+//RS             r#"
+//RS fn accept(value: U64) -> U64 { return value }
+//RS fn run() {
+//RS     negative :: I64{-1}
+//RS     print(accept(negative))
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "tir_reject_i64_to_i8",
+//RS             r#"
+//RS fn accept(value: I8) -> I8 { return value }
+//RS fn run() {
+//RS     wide :: I64{128}
+//RS     print(accept(wide))
+//RS }
+//RS "#,
+//RS         ),
+//RS     ] {
+//RS         let diagnostics = compile_source(name, bad_source)
+//RS             .expect_err("incompatible sized integer argument must be rejected");
+//RS         assert!(
+//RS             diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+//RS             "{name} produced unexpected diagnostics: {diagnostics:#?}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// D-WRAP-SCOPE1=A / I9: one lexical policy covers functions, methods, and
+//RS /// blocks. It changes only fixed-width add/subtract/multiply/power; division
+//RS /// remains the checked operation inside the wrapping block.
+//RS #[test]
+//RS fn lexical_arithmetic_policy_covers_fixed_width_operations_on_every_tier() {
+//RS     let src = r#"
+//RS #Arithmetic(.Wrapping)
+//RS fn wrapped(left: U8, right: U8) -> U8 {
+//RS     return left + right
+//RS }
+//RS 
+//RS #Arithmetic(.Saturating)
+//RS fn saturated(left: U8, right: U8) -> U8 {
+//RS     return left + right
+//RS }
+//RS 
+//RS struct Accumulator { value: U8 }
+//RS impl Accumulator {
+//RS     #Arithmetic(.Wrapping)
+//RS     fn step(self, right: U8) -> U8 {
+//RS         return self.value + right
+//RS     }
+//RS }
+//RS 
+//RS fn run() {
+//RS     left :: U8{200}
+//RS     right :: U8{100}
+//RS     #Arithmetic(.Wrapping) {
+//RS         print(left + right)
+//RS         print(left - U8{250})
+//RS         print(left * U8{2})
+//RS         print(U8{3} ^ U8{5})
+//RS         print(left / U8{2})
+//RS     }
+//RS     print(wrapped(left, right))
+//RS     print(saturated(left, right))
+//RS     print(Accumulator{value: left}.step(right))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_lexical_arithmetic_policy",
+//RS         src,
+//RS         "44\n206\n144\n243\n100\n44\n255\n44\n",
+//RS     );
+//RS }
+//RS 
+//RS /// D-WRAP-SCOPE1=A: a checked island overrides an enclosing wrapping policy,
+//RS /// and the runtime value prevents comptime folding from hiding the trap.
+//RS #[test]
+//RS fn nested_checked_arithmetic_policy_still_traps() {
+//RS     let src = r#"
+//RS use core.sys as env
+//RS 
+//RS fn run() {
+//RS     raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+//RS     value :: U8.from_int(raw) ?? U8{0}
+//RS     #Arithmetic(.Wrapping) {
+//RS         print(value + U8{100})
+//RS         #Arithmetic(.Checked) {
+//RS             print(value + U8{100})
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = jit_run_with_env(
+//RS         "tir_nested_checked_arithmetic_policy",
+//RS         src,
+//RS         &[("JET_ARITHMETIC_VALUE", "200")],
+//RS     );
+//RS     assert_eq!(
+//RS         code, 70,
+//RS         "checked island must trap: stdout={stdout} stderr={stderr}"
+//RS     );
+//RS     assert_eq!(stdout, "44\n");
+//RS     assert!(stderr.contains("Stop [E3010]"), "{stderr}");
+//RS     assert!(stderr.contains("overflow"), "{stderr}");
+//RS }
+//RS 
+//RS /// D-WRAP-SCOPE1=A: wrapping is deliberately narrower than the existing
+//RS /// safety checks. A checked island still traps, and division, shifts,
+//RS /// conversions, and indexing remain checked inside a wrapping block.
+//RS #[test]
+//RS fn non_arithmetic_checks_remain_checked_inside_wrapping_policy() {
+//RS     let src = r#"
+//RS use core.sys as env
+//RS 
+//RS fn run() {
+//RS     case :: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
+//RS     raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+//RS     value :: U8.from_int(raw) ?? U8{0}
+//RS     #Arithmetic(.Wrapping) {
+//RS         if case == 0 {
+//RS             #Arithmetic(.Checked) {
+//RS                 print(value + U8{100})
+//RS             }
+//RS         }
+//RS         if case == 1 { print(U8{1} / value) }
+//RS         if case == 2 { print(U8{1} << value) }
+//RS         if case == 3 { print(U8{raw}) }
+//RS         if case == 4 {
+//RS             values :: [U8]{U8{10}, U8{20}}
+//RS             print(values[raw])
+//RS         }
+//RS     }
+//RS }
+//RS "#;
+//RS 
+//RS     for (case, value, label) in [
+//RS         ("0", "200", "nested checked arithmetic"),
+//RS         ("1", "0", "division by zero"),
+//RS         ("2", "8", "invalid shift"),
+//RS         ("3", "256", "conversion overflow"),
+//RS         ("4", "2", "out-of-bounds indexing"),
+//RS     ] {
+//RS         let (code, stdout, stderr) = jit_run_with_env(
+//RS             &format!("tir_wrapping_safety_{case}"),
+//RS             src,
+//RS             &[("JET_ARITHMETIC_CASE", case), ("JET_ARITHMETIC_VALUE", value)],
+//RS         );
+//RS         assert_eq!(code, 70, "{label} must trap: stdout={stdout} stderr={stderr}");
+//RS         assert!(stderr.contains("Stop [E3010]"), "{label}: {stderr}");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn list_bounds_stop_keeps_registered_code_across_tiers() {
+//RS     for (body, expected_stdout) in [
+//RS         ("fn run() { print(pick([2, 10], 4)) }", ""),
+//RS         (
+//RS             "fn stop(value: Int) {\nprint(value)\nprint(pick([2, 10], 4))\n}\nfn run() { [7].each(stop) }",
+//RS             "7\n",
+//RS         ),
+//RS     ] {
+//RS         let source = format!(
+//RS             "fn pick(values: [Int], index: Int) -> Int -> values[index]\n{body}"
+//RS         );
+//RS         let files = [("main.jet", source.as_str())];
+//RS         for run in [
+//RS             tir_support::build_release_and_run_multi,
+//RS             tir_support::run_default_multi,
+//RS             tir_support::run_interpret_multi,
+//RS         ] {
+//RS             let (code, stdout, stderr) = run("list_bounds_stop", "main.jet", &files);
+//RS             assert_eq!(code, 70, "stdout={stdout}\nstderr={stderr}");
+//RS             assert_eq!(stdout, expected_stdout);
+//RS             assert!(stderr.contains("Stop [E3010]"), "{stderr}");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn murmur3_port_matches_golden_on_default_release_and_interpreter() {
+//RS     assert_example_cli_tiers_agree(
+//RS         "ports/murmur3_x86_32",
+//RS         include_str!("../Examples/features/expected/ports/murmur3_x86_32.out"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_rotation_boundary_counts_match_every_tier() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     value :: U32{0x80000001}
+//RS     print(value.rotate_left(0))
+//RS     print(value.rotate_left(31))
+//RS     print(value.rotate_right(0))
+//RS     print(value.rotate_right(31))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_fixed_width_rotation_boundaries",
+//RS         src,
+//RS         "2147483649\n3221225472\n2147483649\n3\n",
+//RS     );
+//RS }
+//RS 
+//RS /// Hardening finding lane-5/core-int-checked-add-aot-wrap (card #2832): tier-parity regression fixture.
+//RS #[test]
+//RS fn checked_add_exact_int_matches_every_tier_card_2832() {
+//RS     let src = r#"
+//RS use core.math as math
+//RS 
+//RS fn run() {
+//RS     print(math.checked_add(9223372036854775807, 1))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_card_2832_checked_add_exact_int",
+//RS         src,
+//RS         "9223372036854775808\n",
+//RS     );
+//RS }
+//RS 
+//RS /// Hardening finding lane-2/interpreter-u64-to-int-large (card #2827): tier-parity regression fixture.
+//RS #[test]
+//RS fn interpreter_u64_card_2827() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(Int.from_u64(U64{9223372036854775808}))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_interpreter_u64_card_2827",
+//RS         src,
+//RS         "9223372036854775808\n",
+//RS     );
+//RS }
+//RS 
+//RS /// Hardening finding lane-2/interpreter-u64-high-bit-shift-signs (card #2828): tier-parity regression fixture.
+//RS #[test]
+//RS fn interpreter_u64_card_2828() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(U64{1} << 63)
+//RS }
+//RS "#;
+//RS     assert_tiers_agree(
+//RS         "tir_interpreter_u64_card_2828",
+//RS         src,
+//RS         "9223372036854775808\n",
+//RS     );
+//RS }
+//RS 
+//RS /// Hardening finding lane-2/interpreter-u64-bit-count-unsupported (card #2829): tier-parity regression fixture.
+//RS #[test]
+//RS fn interpreter_u64_card_2829() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     print(U64{9223372036854775808}.count_ones())
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_interpreter_u64_card_2829", src, "1\n");
+//RS }
+//RS 
+//RS /// Hardening finding lane-3/float-nan-aot-ice (card #2838): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2838_float_nan_predicate_tier_parity() {
+//RS     let src = r#"
+//RS fn run() {
+//RS     value :: Float.NAN
+//RS     print(value.is_nan())
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_card_2838_float_nan_predicate", src, "true\n");
+//RS }
+//RS 
+//RS /// Hardening finding lane-5/core-time-calendar-misclassified (card #2833): tier-parity regression fixture.
+//RS #[test]
+//RS fn card_2833_calendar_arithmetic_is_pure_tier_parity() {
+//RS     let src = r#"
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     print(time.days_in_month(2024, 2))
+//RS }
+//RS "#;
+//RS     assert_tiers_agree("tir_card_2833_calendar_arithmetic", src, "29\n");
+//RS }
+// END-PORT-PENDING 1068 tests/tir_operators_and_runtime.rs:1-639
+

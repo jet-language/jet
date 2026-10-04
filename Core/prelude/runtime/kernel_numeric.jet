@@ -1,0 +1,2259 @@
+use jet_jit.[Concurrency, JitRuntime]
+use jet_foundation.Numeric.[CtBigInt, CtDecimal, CtFraction]
+use core.math.runtime.top_math_extra.[JetComplex]
+use core.prelude.runtime.fixed_arithmetic_kernel as fixed_arithmetic_kernel
+use jet_jit.runtime_host as runtime_host
+use jet_jit.types_meta as types_meta
+use jet_foundation.Syntax as Syntax
+use core.sys.target as target
+
+// Rust: crates/jet-jit/src/Numeric.rs:1
+// Packed exact-Int carriers and decimal/fraction/complex side tables share the
+// Foundation algorithms. GATE #4494: retained runtime access and guarded ABI.
+// GATE #4483: handle indices obey selected-target usize width.
+fn handle_index(handle: I64) -> Int Never! {
+    Int.from_u64(handle.saturating_sub(I64{1}) as U64) & Int.from_u64(target.usize_max())
+}
+// Rust: crates/jet-jit/src/Numeric.rs:16
+fn trap_fraction(msg: String) Never! { Concurrency.with_runtime_mut(fn(rt) { rt.set_trap(msg) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:33
+fn divide_by_zero_message() -> String Never! { runtime_host.contract_kernel.jet_arithmetic_message("divide_zero") }
+// Rust: crates/jet-jit/src/Numeric.rs:37
+pub fn push_decimal(d: ^CtDecimal) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { rt.decimal_values.push(Val(^d)); rt.decimal_values.len() as I64 })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:45
+fn with_decimal<R>(handle: I64, f: fn(CtDecimal) -> R) -> R? Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.decimal_values.get(handle_index(handle)) == .Val(.Val(value)) -> return Val(f(value))
+        None
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:51
+fn push_decimal_in_runtime(rt: &JitRuntime, value: ^CtDecimal) -> I64 Never! {
+    rt.decimal_values.push(Val(^value)); rt.decimal_values.len() as I64
+}
+// Rust: crates/jet-jit/src/Numeric.rs:57
+fn decimal_binary(left: I64, right: I64, operation: fn(CtDecimal, CtDecimal) -> CtDecimal) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        left_value :: rt.decimal_values.get(handle_index(left))
+        right_value :: rt.decimal_values.get(handle_index(right))
+        value := CtDecimal.from_int(0)
+        if left_value == .Val(.Val(l)) {
+            if right_value == .Val(.Val(r)) -> value = operation(l, r)
+        }
+        push_decimal_in_runtime(&rt, ^value)
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:80
+fn push_fraction(f: ^CtFraction) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { rt.fraction_values.push(Val(^f)); rt.fraction_values.len() as I64 })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:87
+fn with_fraction<R>(handle: I64, f: fn(CtFraction) -> R) -> R? Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.fraction_values.get(handle_index(handle)) == .Val(.Val(value)) -> return Val(f(value))
+        None
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:94
+fn push_complex(value: JetComplex) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { rt.complex_values.push(Val(value)); rt.complex_values.len() as I64 })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:101
+fn with_complex<R>(handle: I64, f: fn(JetComplex) -> R) -> R? Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.complex_values.get(handle_index(handle)) == .Val(.Val(value)) -> return Val(f(value))
+        None
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:113
+fn jet_jit_int_from_int(n: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_from_i64(n) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:121
+fn jet_jit_int_to_native(value: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_to_i64(value) == .Val(native) -> return native
+        rt.set_arithmetic_stop(U32{0}, "native Int argument exceeds host range"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:131
+fn jet_jit_int_from_u64(n: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_from_u64(n as U64) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:135
+fn jet_jit_int_from_str(str_id: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        text :: rt.heap.clone_string(str_id).unwrap_or("")
+        if rt.heap.int_from_str(text) == .Ok(id) -> return id
+        rt.set_trap("invalid default Int literal"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:148
+fn jet_jit_int_add(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_add(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:152
+fn jet_jit_int_sub(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_sub(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:156
+fn jet_jit_int_mul(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_mul(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:160
+fn jet_jit_int_bit_and(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_bit_and(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:164
+fn jet_jit_int_bit_or(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_bit_or(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:168
+fn jet_jit_int_bit_xor(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_bit_xor(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:172
+fn jet_jit_int_compare(a: I64, b: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_compare(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:176
+fn jet_jit_int_neg(a: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_neg(a) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:180
+fn jet_jit_int_abs(a: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_abs(a) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:184
+fn jet_jit_int_not(a: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { negative :: rt.heap.int_neg(a); one :: rt.heap.int_from_i64(I64{1}); rt.heap.int_sub(negative, one) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:192
+fn jet_jit_int_shl(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_shl(a, b) == .Val(value) -> return value
+        rt.set_trap("invalid shift count"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:202
+fn jet_jit_int_shr(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_shr(a, b) == .Val(value) -> return value
+        rt.set_trap("invalid shift count"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:212
+fn jet_jit_int_to_string(a: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { text :: rt.heap.int_to_string(a); rt.heap.alloc_string(^text) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:219
+fn jet_jit_int_to_radix(value: I64, radix: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_to_i64(radix) == .Val(r) {
+            if r < I64{0} || r > I64{4294967295} {
+                rt.set_trap("integer radix must be between 2 and 36"); return I64{0}
+            }
+            text :: rt.heap.int_to_string(value)
+            if CtBigInt.from_str(text) == {
+                .Ok(big) -> {
+                    if big.to_radix(r as U32) == {
+                        .Ok(rendered) -> return rt.heap.alloc_string(^rendered)
+                        .Err(message) -> rt.set_trap(message)
+                    }
+                }
+                .Err(message) -> rt.set_trap(message)
+            }
+            return I64{0}
+        }
+        rt.set_trap("integer radix must fit in Int"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:244
+// Bad digits/radices are result errors, not traps.
+fn jet_jit_int_from_radix(text: I64, radix: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        parsed :: fn() -> I64 Err! {
+            if rt.heap.int_to_i64(radix) == .Val(r) {
+                if r < I64{0} || r > I64{4294967295} -> return Err("integer radix must be between 2 and 36, got {r}")
+                source :: rt.heap.clone_string(text).unwrap_or("")
+                value :: CtBigInt.from_radix(source, r as U32)?
+                return rt.heap.int_from_str(value.to_string_rep())
+            }
+            Err("integer radix must be between 2 and 36")
+        }()
+        if parsed == {
+            .Ok(value) -> runtime_host.alloc_jit_result(&rt, true, value as U64)
+            .Err(message) -> {
+                error :: rt.heap.alloc_string(^message)
+                runtime_host.alloc_jit_result(&rt, false, error as U64)
+            }
+        }
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:270
+fn jet_jit_int_to_f64(a: I64) -> F64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_to_f64(a) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:274
+fn jet_jit_int_div(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_div(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:284
+fn jet_jit_int_div_euclid(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_div_euclid(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:294
+fn jet_jit_int_rem_euclid(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_rem_euclid(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:304
+fn jet_jit_int_floor_div(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_floor_div(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:314
+fn jet_jit_int_mod(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_mod(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:324
+fn jet_jit_int_rem(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_rem(a, b) == .Val(value) -> return value; rt.set_arithmetic_stop(U32{0}, divide_by_zero_message()); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:334
+fn jet_jit_int_pow(a: I64, b: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { if rt.heap.int_pow(a, b) == .Val(value) -> return value; rt.set_trap("invalid default Int exponent"); I64{0} })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:352
+fn located_int_op(line: I64, failure: String, op: fn(&JitRuntime) -> I64?) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if op(&rt) == .Val(value) -> return value
+        rt.set_arithmetic_stop(line as U32, failure); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:366
+fn jet_jit_int_div_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, divide_by_zero_message(), fn(rt) { rt.heap.int_div(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:370
+fn jet_jit_int_rem_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, divide_by_zero_message(), fn(rt) { rt.heap.int_rem(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:374
+fn jet_jit_int_floor_div_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, divide_by_zero_message(), fn(rt) { rt.heap.int_floor_div(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:378
+fn jet_jit_int_mod_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, divide_by_zero_message(), fn(rt) { rt.heap.int_mod(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:382
+fn jet_jit_int_pow_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, "Negative default Int exponent", fn(rt) { rt.heap.int_pow(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:386
+fn jet_jit_int_shl_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, "Invalid shift count", fn(rt) { rt.heap.int_shl(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:390
+fn jet_jit_int_shr_at(a: I64, b: I64, _file: I64, line: I64) -> I64 Never! { located_int_op(line, "Invalid shift count", fn(rt) { rt.heap.int_shr(a, b) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:394
+fn jet_jit_fixed_trap(left: I64, right: I64, file: I64, line: I64, op: I64, signed: Bool, bits: U8) -> I64 Never! {
+    jet_jit_fixed_arith(left, right, file, line, op, fixed_arithmetic_kernel.JET_FIXED_MODE_TRAP, signed, bits)
+}
+// Rust: crates/jet-jit/src/Numeric.rs:406
+fn jet_jit_fixed_arith(left: I64, right: I64, _file: I64, line: I64, op: I64, mode: I64, signed: Bool, bits: U8) -> I64 Never! {
+    if fixed_arithmetic_kernel.jet_fixed_arithmetic(left, right as I128, op, mode, signed, bits, signed) == {
+        .Value(value) -> value
+        .Absent -> I64{0}
+        .Trap(error) -> {
+            message :: error.to_string()
+            Concurrency.with_runtime_mut(fn(rt) { rt.set_arithmetic_stop(line as U32, message) })
+            I64{0}
+        }
+    }
+}
+
+// Rust: crates/jet-jit/src/Numeric.rs:435-537
+// fixed_trap_hosts expansion: every wrapper retains its own native ABI.
+use core.prelude.runtime.fixed_arithmetic_kernel.[JET_FIXED_OP_ADD, JET_FIXED_OP_SUB, JET_FIXED_OP_MUL, JET_FIXED_OP_DIV, JET_FIXED_OP_REM, JET_FIXED_OP_SHL, JET_FIXED_OP_SHR, JET_FIXED_OP_POW, JET_FIXED_OP_FLOOR_DIV, JET_FIXED_OP_MOD, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_WRAPPING, JET_FIXED_MODE_SATURATING, JET_FIXED_MODE_CHECKED]
+// Rust: crates/jet-jit/src/Numeric.rs:454
+fn jet_jit_i8_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:455
+fn jet_jit_i8_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:456
+fn jet_jit_i8_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:457
+fn jet_jit_i8_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:458
+fn jet_jit_i8_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:459
+fn jet_jit_u8_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:460
+fn jet_jit_u8_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:461
+fn jet_jit_u8_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:462
+fn jet_jit_u8_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:463
+fn jet_jit_u8_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:464
+fn jet_jit_i16_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:465
+fn jet_jit_i16_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:466
+fn jet_jit_i16_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:467
+fn jet_jit_i16_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:468
+fn jet_jit_i16_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:469
+fn jet_jit_u16_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:470
+fn jet_jit_u16_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:471
+fn jet_jit_u16_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:472
+fn jet_jit_u16_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:473
+fn jet_jit_u16_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:474
+fn jet_jit_i32_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:475
+fn jet_jit_i32_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:476
+fn jet_jit_i32_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:477
+fn jet_jit_i32_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:478
+fn jet_jit_i32_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:479
+fn jet_jit_u32_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:480
+fn jet_jit_u32_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:481
+fn jet_jit_u32_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:482
+fn jet_jit_u32_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:483
+fn jet_jit_u32_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:484
+fn jet_jit_u32_rotate_left(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ROTATE_LEFT,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:485
+fn jet_jit_i64_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:486
+fn jet_jit_i64_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:487
+fn jet_jit_i64_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:488
+fn jet_jit_i64_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:489
+fn jet_jit_i64_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:490
+fn jet_jit_u64_trap_add(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ADD,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:491
+fn jet_jit_u64_trap_sub(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SUB,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:492
+fn jet_jit_u64_trap_mul(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MUL,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:493
+fn jet_jit_u64_trap_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_DIV,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:494
+fn jet_jit_u64_trap_rem(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_REM,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:495
+fn jet_jit_u64_rotate_left(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ROTATE_LEFT,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:496
+fn jet_jit_u64_rotate_right(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_ROTATE_RIGHT,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:497
+fn jet_jit_i8_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:498
+fn jet_jit_i8_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:499
+fn jet_jit_i8_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:500
+fn jet_jit_i8_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:501
+fn jet_jit_i8_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:502
+fn jet_jit_u8_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:503
+fn jet_jit_u8_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:504
+fn jet_jit_u8_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:505
+fn jet_jit_u8_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:506
+fn jet_jit_u8_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:507
+fn jet_jit_i16_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:508
+fn jet_jit_i16_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:509
+fn jet_jit_i16_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:510
+fn jet_jit_i16_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:511
+fn jet_jit_i16_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:512
+fn jet_jit_u16_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:513
+fn jet_jit_u16_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:514
+fn jet_jit_u16_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:515
+fn jet_jit_u16_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:516
+fn jet_jit_u16_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:517
+fn jet_jit_i32_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:518
+fn jet_jit_i32_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:519
+fn jet_jit_i32_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:520
+fn jet_jit_i32_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:521
+fn jet_jit_i32_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:522
+fn jet_jit_u32_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:523
+fn jet_jit_u32_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:524
+fn jet_jit_u32_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:525
+fn jet_jit_u32_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:526
+fn jet_jit_u32_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:527
+fn jet_jit_i64_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:528
+fn jet_jit_i64_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:529
+fn jet_jit_i64_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:530
+fn jet_jit_i64_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:531
+fn jet_jit_i64_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:532
+fn jet_jit_u64_trap_shl(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHL,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:533
+fn jet_jit_u64_trap_shr(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_SHR,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:534
+fn jet_jit_u64_trap_pow(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_POW,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:535
+fn jet_jit_u64_trap_floor_div(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_FLOOR_DIV,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:536
+fn jet_jit_u64_trap_mod(l: I64, r: I64, f: I64, n: I64) -> I64 Never! { jet_jit_fixed_trap(l,r,f,n,JET_FIXED_OP_MOD,false,U8{64}) }
+
+// Rust: crates/jet-jit/src/Numeric.rs:541
+fn jet_jit_int_factorial(a: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_factorial(a); int_option(&rt, result) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:548
+fn int_option(rt: &JitRuntime, value: I64?) -> I64 Never! {
+    if value == .Val(v) -> return runtime_host.alloc_jit_result(&rt, true, v as U64)
+    runtime_host.alloc_jit_result(&rt, false, U64{0})
+}
+// Rust: crates/jet-jit/src/Numeric.rs:555
+fn int_pair(rt: &JitRuntime, quotient: I64, remainder: I64) -> I64 Never! {
+    handle :: rt.heap.alloc_record(2)
+    _ :: rt.heap.record_set_int(handle, 0, quotient)
+    _ :: rt.heap.record_set_int(handle, 1, remainder)
+    handle
+}
+// Rust: crates/jet-jit/src/Numeric.rs:562
+fn jet_jit_int_is_even(value: I64) -> I8 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_is_even(value) as I8 }) }
+// Rust: crates/jet-jit/src/Numeric.rs:566
+fn jet_jit_int_is_odd(value: I64) -> I8 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_is_odd(value) as I8 }) }
+// Rust: crates/jet-jit/src/Numeric.rs:570
+fn jet_jit_int_isqrt(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_isqrt(value); int_option(&rt, result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:577
+fn jet_jit_int_binomial(n: I64, k: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_binomial(n,k); int_option(&rt, result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:584
+fn jet_jit_int_digits(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_digits(value) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:588
+fn jet_jit_int_leading_ones(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_leading_ones(value) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:592
+fn jet_jit_int_trailing_ones(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_trailing_ones(value) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:596
+fn jet_jit_int_checked_abs(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_abs(value); int_option(&rt, result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:603
+fn jet_jit_int_checked_neg(value: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_neg(value); int_option(&rt, result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:610
+fn jet_jit_int_checked_add(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_add(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:617
+fn jet_jit_int_checked_sub(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_sub(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:624
+fn jet_jit_int_checked_mul(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_mul(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:631
+fn jet_jit_int_checked_div(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_div(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:638
+fn jet_jit_int_checked_rem(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_rem(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:645
+fn jet_jit_int_checked_pow(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { result :: rt.heap.int_checked_pow(l,r); int_option(&rt,result) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:652
+fn jet_jit_int_saturating_add(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_saturating_add(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:656
+fn jet_jit_int_saturating_sub(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_saturating_sub(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:660
+fn jet_jit_int_saturating_mul(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_saturating_mul(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:664
+fn jet_jit_int_int_pow(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_int_pow(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:668
+fn jet_jit_int_gcd(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_gcd(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:671
+fn jet_jit_int_lcm(l: I64,r: I64) -> I64 Never! { Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_lcm(l,r) }) }
+// Rust: crates/jet-jit/src/Numeric.rs:675
+fn jet_jit_int_div_mod(l: I64,r: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_div_mod(l,r) == .Val((q,rem)) -> return int_pair(&rt,q,rem)
+        rt.set_arithmetic_stop(U32{0},divide_by_zero_message()); int_pair(&rt,I64{0},I64{0})
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:686
+fn jet_jit_int_div_rem_pair(l: I64,r: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.int_div_rem(l,r) == .Val((q,rem)) -> return int_pair(&rt,q,rem)
+        rt.set_arithmetic_stop(U32{0},divide_by_zero_message()); int_pair(&rt,I64{0},I64{0})
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:696
+fn jet_jit_decimal_from_str(str_id: I64) -> I64 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.heap.get_string(str_id) == .Val(text) {
+            if CtDecimal.from_str(text) == .Ok(value) -> return push_decimal_in_runtime(&rt,^value)
+        }
+        rt.set_trap("invalid Decimal string"); I64{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:708
+fn jet_jit_decimal_add(a: I64,b: I64) -> I64 Never! { decimal_binary(a,b,CtDecimal.add) }
+// Rust: crates/jet-jit/src/Numeric.rs:712
+fn jet_jit_decimal_sub(a: I64,b: I64) -> I64 Never! { decimal_binary(a,b,CtDecimal.sub) }
+// Rust: crates/jet-jit/src/Numeric.rs:716
+fn jet_jit_decimal_mul(a: I64,b: I64) -> I64 Never! { decimal_binary(a,b,CtDecimal.mul) }
+// Rust: crates/jet-jit/src/Numeric.rs:720
+fn jet_jit_decimal_div(a: I64,b: I64) -> I64 Never! {
+    fraction :: Concurrency.with_runtime_mut(fn(rt) -> CtFraction? {
+        if rt.decimal_values.get(handle_index(a)) == .Val(.Val(left)) {
+            if rt.decimal_values.get(handle_index(b)) == .Val(.Val(right)) -> return left.div(right)
+        }
+        None
+    })
+    if fraction == .Val(value) -> return push_fraction(^value)
+    trap_fraction("divided by zero"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:743
+fn jet_jit_decimal_equal(a: I64,b: I64) -> I8 Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if rt.decimal_values.get(handle_index(a)) == .Val(.Val(left)) {
+            if rt.decimal_values.get(handle_index(b)) == .Val(.Val(right)) -> return (left == right) as I8
+        }
+        I8{0}
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:761
+fn jet_jit_decimal_compare(a: I64,b: I64) -> I64 Never! {
+    order :: Concurrency.with_runtime_mut(fn(rt) {
+        if rt.decimal_values.get(handle_index(a)) == .Val(.Val(left)) {
+            if rt.decimal_values.get(handle_index(b)) == .Val(.Val(right)) -> return left.cmp(right) as I8
+        }
+        I8{0}
+    })
+    variant := "Equal"
+    if order < I8{0} -> variant = "Less"
+    if order > I8{0} -> variant = "Greater"
+    types_meta.prelude_enum_variant_index(Syntax.TYPE_ORDERING,variant).expect("Prelude Ordering variants must be registered")
+}
+// Rust: crates/jet-jit/src/Numeric.rs:785
+fn jet_jit_decimal_to_string(a: I64) -> I64 Never! {
+    text :: with_decimal(a,fn(d) { d.to_string_rep() }).unwrap_or("0")
+    Concurrency.with_runtime_mut(fn(rt) { rt.heap.alloc_string(^text) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:791
+fn fraction_from_int_handles(numerator: I64,denominator: I64) -> CtFraction? Never! {
+    Concurrency.with_runtime_mut(fn(rt) {
+        if CtBigInt.from_str(rt.heap.int_to_string(numerator)) == .Ok(n) {
+            if CtBigInt.from_str(rt.heap.int_to_string(denominator)) == .Ok(d) -> return CtFraction.from_bigints(^n,^d)
+        }
+        None
+    })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:799
+fn jet_jit_fraction_new(n: I64,d: I64) -> I64 Never! {
+    if fraction_from_int_handles(n,d) == .Val(f) -> return push_fraction(^f).wrapping_add(I64{1})
+    I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:806
+fn jet_jit_fraction_from_parts(n: I64,d: I64) -> I64 Never! {
+    if fraction_from_int_handles(n,d) == .Val(f) -> return push_fraction(^f)
+    trap_fraction("invalid exact quotient"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:816
+fn zero_fraction() -> CtFraction Never! { CtFraction{numerator: CtBigInt.from_int(0),denominator: CtBigInt.from_int(1)} }
+// Rust: crates/jet-jit/src/Numeric.rs:823
+fn jet_jit_fraction_add(a: I64,b: I64) -> I64 Never! {
+    left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    if left.add(right) == .Val(out) -> return push_fraction(^out)
+    trap_fraction("this sum of ratios overflows the value type"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:835
+fn jet_jit_fraction_sub(a: I64,b: I64) -> I64 Never! {
+    left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    if left.sub(right) == .Val(out) -> return push_fraction(^out)
+    trap_fraction("this difference of ratios overflows the value type"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:847
+fn jet_jit_fraction_mul(a: I64,b: I64) -> I64 Never! {
+    left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    if left.mul(right) == .Val(out) -> return push_fraction(^out)
+    trap_fraction("this product of ratios overflows the value type"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:859
+fn jet_jit_fraction_div(a: I64,b: I64) -> I64 Never! {
+    left :: with_fraction(a,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    right :: with_fraction(b,fn(f) { f.clone() }).unwrap_or_else(zero_fraction)
+    if left.div(right) == .Val(out) -> return push_fraction(^out)
+    trap_fraction("divided by zero"); I64{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:871
+fn jet_jit_fraction_equal(a: I64,b: I64) -> I8 Never! {
+    left :: with_fraction(a,fn(f) { f.clone() })
+    right :: with_fraction(b,fn(f) { f.clone() })
+    if left == .Val(l) { if right == .Val(r) -> return (l == r) as I8 }
+    I8{0}
+}
+// Rust: crates/jet-jit/src/Numeric.rs:880
+fn jet_jit_fraction_numerator(a: I64) -> I64 Never! {
+    text :: with_fraction(a,fn(f) { f.numerator.to_string_rep() }).unwrap_or("0")
+    Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_from_str(text).unwrap_or(I64{0}) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:886
+fn jet_jit_fraction_denominator(a: I64) -> I64 Never! {
+    text :: with_fraction(a,fn(f) { f.denominator.to_string_rep() }).unwrap_or("1")
+    Concurrency.with_runtime_mut(fn(rt) { rt.heap.int_from_str(text).unwrap_or(I64{1}) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:892
+fn jet_jit_fraction_to_string(a: I64) -> I64 Never! {
+    text :: with_fraction(a,fn(f) { f.to_string_rep() }).unwrap_or("0/1")
+    Concurrency.with_runtime_mut(fn(rt) { rt.heap.alloc_string(^text) })
+}
+// Rust: crates/jet-jit/src/Numeric.rs:900
+fn jet_jit_decimal_to_float(a: I64) -> F64 Never! { with_decimal(a,CtDecimal.to_f64).unwrap_or(F64.NAN) }
+// Rust: crates/jet-jit/src/Numeric.rs:904
+fn jet_jit_fraction_to_float(a: I64) -> F64 Never! { with_fraction(a,CtFraction.to_float).unwrap_or(F64{0.0}) }
+// Rust: crates/jet-jit/src/Numeric.rs:908
+fn jet_jit_fraction_is_zero(a: I64) -> I8 Never! { with_fraction(a,CtFraction.is_zero).unwrap_or(false) as I8 }
+// Rust: crates/jet-jit/src/Numeric.rs:912
+fn jet_jit_complex_from_parts(real: F64,imaginary: F64) -> I64 Never! { push_complex(JetComplex.from_parts(real,imaginary)) }
+// Rust: crates/jet-jit/src/Numeric.rs:916
+fn jet_jit_complex_add(a: I64,b: I64) -> I64 Never! {
+    left :: with_complex(a,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    right :: with_complex(b,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    push_complex(left.add(right))
+}
+// Rust: crates/jet-jit/src/Numeric.rs:922
+fn jet_jit_complex_sub(a: I64,b: I64) -> I64 Never! {
+    left :: with_complex(a,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    right :: with_complex(b,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    push_complex(left.sub(right))
+}
+// Rust: crates/jet-jit/src/Numeric.rs:928
+fn jet_jit_complex_mul(a: I64,b: I64) -> I64 Never! {
+    left :: with_complex(a,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    right :: with_complex(b,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    push_complex(left.mul(right))
+}
+// Rust: crates/jet-jit/src/Numeric.rs:934
+fn jet_jit_complex_div(a: I64,b: I64) -> I64 Never! {
+    left :: with_complex(a,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    right :: with_complex(b,fn(v) { v }).unwrap_or_else(fn() { JetComplex.from_parts(F64{0.0},F64{0.0}) })
+    push_complex(left.div(right))
+}
+// Rust: crates/jet-jit/src/Numeric.rs:940
+fn jet_jit_complex_abs(a: I64) -> F64 Never! { with_complex(a,fn(v) { v.abs() }).unwrap_or(F64{0.0}) }
+// Rust: crates/jet-jit/src/Numeric.rs:944
+fn jet_jit_complex_to_string(a: I64) -> I64 Never! {
+    text :: with_complex(a,fn(v) { v.to_string_rep() }).unwrap_or("0 + 0i")
+    Concurrency.with_runtime_mut(fn(rt) { rt.heap.alloc_string(^text) })
+}
+
+// Rust: crates/jet-jit/src/Numeric.rs:950
+// fixed_wrap_hosts expands to binary wrappers below.
+// Rust: crates/jet-jit/src/Numeric.rs:961
+// fixed_sat_hosts expands to binary wrappers below.
+// Rust: crates/jet-jit/src/Numeric.rs:972
+// fixed_checked_hosts expands to binary wrappers below.
+// Rust: crates/jet-jit/src/Numeric.rs:983
+fn jet_jit_i8_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:984
+fn jet_jit_i8_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:985
+fn jet_jit_i8_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:986
+fn jet_jit_u8_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:987
+fn jet_jit_u8_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:988
+fn jet_jit_u8_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:989
+fn jet_jit_i16_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:990
+fn jet_jit_i16_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:991
+fn jet_jit_i16_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:992
+fn jet_jit_u16_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:993
+fn jet_jit_u16_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:994
+fn jet_jit_u16_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:995
+fn jet_jit_i32_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:996
+fn jet_jit_i32_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:997
+fn jet_jit_i32_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:998
+fn jet_jit_u32_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:999
+fn jet_jit_u32_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1000
+fn jet_jit_u32_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1001
+fn jet_jit_i64_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1002
+fn jet_jit_i64_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1003
+fn jet_jit_i64_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1004
+fn jet_jit_u64_saturating_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_SATURATING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1005
+fn jet_jit_u64_saturating_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_SATURATING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1006
+fn jet_jit_u64_saturating_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_SATURATING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1010
+fn jet_jit_i8_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1011
+fn jet_jit_i8_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1012
+fn jet_jit_i8_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1013
+fn jet_jit_i8_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1014
+fn jet_jit_i8_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1015
+fn jet_jit_u8_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1016
+fn jet_jit_u8_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1017
+fn jet_jit_u8_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1018
+fn jet_jit_u8_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1019
+fn jet_jit_u8_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1020
+fn jet_jit_i16_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1021
+fn jet_jit_i16_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1022
+fn jet_jit_i16_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1023
+fn jet_jit_i16_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1024
+fn jet_jit_i16_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1025
+fn jet_jit_u16_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1026
+fn jet_jit_u16_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1027
+fn jet_jit_u16_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1028
+fn jet_jit_u16_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1029
+fn jet_jit_u16_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1030
+fn jet_jit_i32_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1031
+fn jet_jit_i32_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1032
+fn jet_jit_i32_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1033
+fn jet_jit_i32_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1034
+fn jet_jit_i32_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1035
+fn jet_jit_u32_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1036
+fn jet_jit_u32_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1037
+fn jet_jit_u32_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1038
+fn jet_jit_u32_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1039
+fn jet_jit_u32_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1040
+fn jet_jit_i64_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1041
+fn jet_jit_i64_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1042
+fn jet_jit_i64_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1043
+fn jet_jit_i64_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1044
+fn jet_jit_i64_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1045
+fn jet_jit_u64_checked_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1046
+fn jet_jit_u64_checked_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1047
+fn jet_jit_u64_checked_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1048
+fn jet_jit_u64_checked_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1049
+fn jet_jit_u64_checked_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1053
+fn jet_jit_i8_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1054
+fn jet_jit_i8_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1055
+fn jet_jit_i8_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1056
+fn jet_jit_i8_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1057
+fn jet_jit_i8_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1058
+fn jet_jit_i8_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1059
+fn jet_jit_i8_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,true,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1060
+fn jet_jit_u8_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1061
+fn jet_jit_u8_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1062
+fn jet_jit_u8_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1063
+fn jet_jit_u8_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1064
+fn jet_jit_u8_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1065
+fn jet_jit_u8_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1066
+fn jet_jit_u8_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,false,U8{8}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1067
+fn jet_jit_i16_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1068
+fn jet_jit_i16_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1069
+fn jet_jit_i16_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1070
+fn jet_jit_i16_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1071
+fn jet_jit_i16_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1072
+fn jet_jit_i16_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1073
+fn jet_jit_i16_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,true,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1074
+fn jet_jit_u16_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1075
+fn jet_jit_u16_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1076
+fn jet_jit_u16_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1077
+fn jet_jit_u16_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1078
+fn jet_jit_u16_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1079
+fn jet_jit_u16_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1080
+fn jet_jit_u16_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,false,U8{16}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1081
+fn jet_jit_i32_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1082
+fn jet_jit_i32_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1083
+fn jet_jit_i32_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1084
+fn jet_jit_i32_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1085
+fn jet_jit_i32_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1086
+fn jet_jit_i32_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1087
+fn jet_jit_i32_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,true,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1088
+fn jet_jit_u32_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1089
+fn jet_jit_u32_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1090
+fn jet_jit_u32_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1091
+fn jet_jit_u32_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1092
+fn jet_jit_u32_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1093
+fn jet_jit_u32_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1094
+fn jet_jit_u32_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,false,U8{32}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1095
+fn jet_jit_i64_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1096
+fn jet_jit_i64_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1097
+fn jet_jit_i64_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1098
+fn jet_jit_i64_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1099
+fn jet_jit_i64_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1100
+fn jet_jit_i64_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1101
+fn jet_jit_i64_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,true,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1102
+fn jet_jit_u64_wrapping_add(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_ADD,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1103
+fn jet_jit_u64_wrapping_sub(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SUB,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1104
+fn jet_jit_u64_wrapping_mul(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_MUL,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1105
+fn jet_jit_u64_wrapping_div(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1106
+fn jet_jit_u64_wrapping_rem(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_REM,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1107
+fn jet_jit_u64_wrapping_shl(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHL,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+// Rust: crates/jet-jit/src/Numeric.rs:1108
+fn jet_jit_u64_wrapping_shr(l: I64,r: I64) -> I64 Never! { jet_jit_fixed_arith(l,r,I64{0},I64{0},JET_FIXED_OP_SHR,JET_FIXED_MODE_WRAPPING,false,U8{64}) }
+
+use cranelift_codegen.ir.[types, AbiParam, Signature]
+use cranelift_module.[Module, FuncId, Linkage]
+use cranelift_jit.[JITBuilder]
+use jet_jit.host_seam.[guarded, GuardedAddress]
+use jet_jit.host_fns_audit as audit
+
+// Rust: crates/jet-jit/src/Numeric.rs:1112
+// The macro's FuncId record is kept inline: no duplicate maps or heap table.
+pub struct NumericHostFns {
+    pub i8_trap_add: FuncId
+    pub i8_trap_sub: FuncId
+    pub i8_trap_mul: FuncId
+    pub i8_trap_div: FuncId
+    pub i8_trap_rem: FuncId
+    pub u8_trap_add: FuncId
+    pub u8_trap_sub: FuncId
+    pub u8_trap_mul: FuncId
+    pub u8_trap_div: FuncId
+    pub u8_trap_rem: FuncId
+    pub i16_trap_add: FuncId
+    pub i16_trap_sub: FuncId
+    pub i16_trap_mul: FuncId
+    pub i16_trap_div: FuncId
+    pub i16_trap_rem: FuncId
+    pub u16_trap_add: FuncId
+    pub u16_trap_sub: FuncId
+    pub u16_trap_mul: FuncId
+    pub u16_trap_div: FuncId
+    pub u16_trap_rem: FuncId
+    pub i32_trap_add: FuncId
+    pub i32_trap_sub: FuncId
+    pub i32_trap_mul: FuncId
+    pub i32_trap_div: FuncId
+    pub i32_trap_rem: FuncId
+    pub u32_trap_add: FuncId
+    pub u32_trap_sub: FuncId
+    pub u32_trap_mul: FuncId
+    pub u32_trap_div: FuncId
+    pub u32_trap_rem: FuncId
+    pub u32_rotate_left: FuncId
+    pub i64_trap_add: FuncId
+    pub i64_trap_sub: FuncId
+    pub i64_trap_mul: FuncId
+    pub i64_trap_div: FuncId
+    pub i64_trap_rem: FuncId
+    pub u64_trap_add: FuncId
+    pub u64_trap_sub: FuncId
+    pub u64_trap_mul: FuncId
+    pub u64_trap_div: FuncId
+    pub u64_trap_rem: FuncId
+    pub u64_rotate_left: FuncId
+    pub u64_rotate_right: FuncId
+    pub i8_trap_shl: FuncId
+    pub i8_trap_shr: FuncId
+    pub i8_trap_pow: FuncId
+    pub i8_trap_floor_div: FuncId
+    pub i8_trap_mod: FuncId
+    pub u8_trap_shl: FuncId
+    pub u8_trap_shr: FuncId
+    pub u8_trap_pow: FuncId
+    pub u8_trap_floor_div: FuncId
+    pub u8_trap_mod: FuncId
+    pub i16_trap_shl: FuncId
+    pub i16_trap_shr: FuncId
+    pub i16_trap_pow: FuncId
+    pub i16_trap_floor_div: FuncId
+    pub i16_trap_mod: FuncId
+    pub u16_trap_shl: FuncId
+    pub u16_trap_shr: FuncId
+    pub u16_trap_pow: FuncId
+    pub u16_trap_floor_div: FuncId
+    pub u16_trap_mod: FuncId
+    pub i32_trap_shl: FuncId
+    pub i32_trap_shr: FuncId
+    pub i32_trap_pow: FuncId
+    pub i32_trap_floor_div: FuncId
+    pub i32_trap_mod: FuncId
+    pub u32_trap_shl: FuncId
+    pub u32_trap_shr: FuncId
+    pub u32_trap_pow: FuncId
+    pub u32_trap_floor_div: FuncId
+    pub u32_trap_mod: FuncId
+    pub i64_trap_shl: FuncId
+    pub i64_trap_shr: FuncId
+    pub i64_trap_pow: FuncId
+    pub i64_trap_floor_div: FuncId
+    pub i64_trap_mod: FuncId
+    pub u64_trap_shl: FuncId
+    pub u64_trap_shr: FuncId
+    pub u64_trap_pow: FuncId
+    pub u64_trap_floor_div: FuncId
+    pub u64_trap_mod: FuncId
+    pub i8_wrapping_add: FuncId
+    pub i8_wrapping_sub: FuncId
+    pub i8_wrapping_mul: FuncId
+    pub i8_wrapping_div: FuncId
+    pub i8_wrapping_rem: FuncId
+    pub i8_wrapping_shl: FuncId
+    pub i8_wrapping_shr: FuncId
+    pub u8_wrapping_add: FuncId
+    pub u8_wrapping_sub: FuncId
+    pub u8_wrapping_mul: FuncId
+    pub u8_wrapping_div: FuncId
+    pub u8_wrapping_rem: FuncId
+    pub u8_wrapping_shl: FuncId
+    pub u8_wrapping_shr: FuncId
+    pub i16_wrapping_add: FuncId
+    pub i16_wrapping_sub: FuncId
+    pub i16_wrapping_mul: FuncId
+    pub i16_wrapping_div: FuncId
+    pub i16_wrapping_rem: FuncId
+    pub i16_wrapping_shl: FuncId
+    pub i16_wrapping_shr: FuncId
+    pub u16_wrapping_add: FuncId
+    pub u16_wrapping_sub: FuncId
+    pub u16_wrapping_mul: FuncId
+    pub u16_wrapping_div: FuncId
+    pub u16_wrapping_rem: FuncId
+    pub u16_wrapping_shl: FuncId
+    pub u16_wrapping_shr: FuncId
+    pub i32_wrapping_add: FuncId
+    pub i32_wrapping_sub: FuncId
+    pub i32_wrapping_mul: FuncId
+    pub i32_wrapping_div: FuncId
+    pub i32_wrapping_rem: FuncId
+    pub i32_wrapping_shl: FuncId
+    pub i32_wrapping_shr: FuncId
+    pub u32_wrapping_add: FuncId
+    pub u32_wrapping_sub: FuncId
+    pub u32_wrapping_mul: FuncId
+    pub u32_wrapping_div: FuncId
+    pub u32_wrapping_rem: FuncId
+    pub u32_wrapping_shl: FuncId
+    pub u32_wrapping_shr: FuncId
+    pub i64_wrapping_add: FuncId
+    pub i64_wrapping_sub: FuncId
+    pub i64_wrapping_mul: FuncId
+    pub i64_wrapping_div: FuncId
+    pub i64_wrapping_rem: FuncId
+    pub i64_wrapping_shl: FuncId
+    pub i64_wrapping_shr: FuncId
+    pub u64_wrapping_add: FuncId
+    pub u64_wrapping_sub: FuncId
+    pub u64_wrapping_mul: FuncId
+    pub u64_wrapping_div: FuncId
+    pub u64_wrapping_rem: FuncId
+    pub u64_wrapping_shl: FuncId
+    pub u64_wrapping_shr: FuncId
+    pub i8_saturating_add: FuncId
+    pub i8_saturating_sub: FuncId
+    pub i8_saturating_mul: FuncId
+    pub u8_saturating_add: FuncId
+    pub u8_saturating_sub: FuncId
+    pub u8_saturating_mul: FuncId
+    pub i16_saturating_add: FuncId
+    pub i16_saturating_sub: FuncId
+    pub i16_saturating_mul: FuncId
+    pub u16_saturating_add: FuncId
+    pub u16_saturating_sub: FuncId
+    pub u16_saturating_mul: FuncId
+    pub i32_saturating_add: FuncId
+    pub i32_saturating_sub: FuncId
+    pub i32_saturating_mul: FuncId
+    pub u32_saturating_add: FuncId
+    pub u32_saturating_sub: FuncId
+    pub u32_saturating_mul: FuncId
+    pub i64_saturating_add: FuncId
+    pub i64_saturating_sub: FuncId
+    pub i64_saturating_mul: FuncId
+    pub u64_saturating_add: FuncId
+    pub u64_saturating_sub: FuncId
+    pub u64_saturating_mul: FuncId
+    pub i8_checked_add: FuncId
+    pub i8_checked_sub: FuncId
+    pub i8_checked_mul: FuncId
+    pub i8_checked_div: FuncId
+    pub i8_checked_rem: FuncId
+    pub u8_checked_add: FuncId
+    pub u8_checked_sub: FuncId
+    pub u8_checked_mul: FuncId
+    pub u8_checked_div: FuncId
+    pub u8_checked_rem: FuncId
+    pub i16_checked_add: FuncId
+    pub i16_checked_sub: FuncId
+    pub i16_checked_mul: FuncId
+    pub i16_checked_div: FuncId
+    pub i16_checked_rem: FuncId
+    pub u16_checked_add: FuncId
+    pub u16_checked_sub: FuncId
+    pub u16_checked_mul: FuncId
+    pub u16_checked_div: FuncId
+    pub u16_checked_rem: FuncId
+    pub i32_checked_add: FuncId
+    pub i32_checked_sub: FuncId
+    pub i32_checked_mul: FuncId
+    pub i32_checked_div: FuncId
+    pub i32_checked_rem: FuncId
+    pub u32_checked_add: FuncId
+    pub u32_checked_sub: FuncId
+    pub u32_checked_mul: FuncId
+    pub u32_checked_div: FuncId
+    pub u32_checked_rem: FuncId
+    pub i64_checked_add: FuncId
+    pub i64_checked_sub: FuncId
+    pub i64_checked_mul: FuncId
+    pub i64_checked_div: FuncId
+    pub i64_checked_rem: FuncId
+    pub u64_checked_add: FuncId
+    pub u64_checked_sub: FuncId
+    pub u64_checked_mul: FuncId
+    pub u64_checked_div: FuncId
+    pub u64_checked_rem: FuncId
+    pub row_int_add: FuncId
+    pub row_int_sub: FuncId
+    pub row_int_mul: FuncId
+    pub row_int_bit_and: FuncId
+    pub row_int_bit_or: FuncId
+    pub row_int_bit_xor: FuncId
+    pub row_int_div: FuncId
+    pub row_int_rem: FuncId
+    pub row_int_floor_div: FuncId
+    pub row_int_mod: FuncId
+    pub row_int_pow: FuncId
+    pub row_int_shl: FuncId
+    pub row_int_shr: FuncId
+    pub row_int_div_euclid: FuncId
+    pub row_int_rem_euclid: FuncId
+    pub row_int_abs: FuncId
+    pub row_int_compare: FuncId
+    pub row_decimal_from_str: FuncId
+    pub row_decimal_add: FuncId
+    pub row_decimal_sub: FuncId
+    pub row_decimal_mul: FuncId
+    pub row_decimal_div: FuncId
+    pub row_decimal_equal: FuncId
+    pub row_decimal_compare: FuncId
+    pub row_decimal_to_string: FuncId
+    pub row_decimal_to_float: FuncId
+    pub row_fraction_from_parts: FuncId
+    pub row_fraction_add: FuncId
+    pub row_fraction_sub: FuncId
+    pub row_fraction_mul: FuncId
+    pub row_fraction_div: FuncId
+    pub row_fraction_equal: FuncId
+    pub row_fraction_to_string: FuncId
+    pub row_fraction_to_float: FuncId
+    pub int_from_int: FuncId
+    pub int_to_native: FuncId
+    pub int_from_u64: FuncId
+    pub int_from_str: FuncId
+    pub int_add: FuncId
+    pub int_sub: FuncId
+    pub int_mul: FuncId
+    pub int_bit_and: FuncId
+    pub int_bit_or: FuncId
+    pub int_bit_xor: FuncId
+    pub int_compare: FuncId
+    pub int_neg: FuncId
+    pub int_abs: FuncId
+    pub int_not: FuncId
+    pub int_shl: FuncId
+    pub int_shr: FuncId
+    pub int_to_string: FuncId
+    pub int_to_radix: FuncId
+    pub int_from_radix: FuncId
+    pub int_to_f64: FuncId
+    pub int_div: FuncId
+    pub int_div_euclid: FuncId
+    pub int_floor_div: FuncId
+    pub int_mod: FuncId
+    pub int_rem: FuncId
+    pub int_rem_euclid: FuncId
+    pub int_pow: FuncId
+    pub int_factorial: FuncId
+    pub int_is_even: FuncId
+    pub int_is_odd: FuncId
+    pub int_isqrt: FuncId
+    pub int_binomial: FuncId
+    pub int_digits: FuncId
+    pub int_leading_ones: FuncId
+    pub int_trailing_ones: FuncId
+    pub int_checked_abs: FuncId
+    pub int_checked_neg: FuncId
+    pub int_checked_add: FuncId
+    pub int_checked_sub: FuncId
+    pub int_checked_mul: FuncId
+    pub int_checked_div: FuncId
+    pub int_checked_rem: FuncId
+    pub int_checked_pow: FuncId
+    pub int_saturating_add: FuncId
+    pub int_saturating_sub: FuncId
+    pub int_saturating_mul: FuncId
+    pub int_int_pow: FuncId
+    pub int_gcd: FuncId
+    pub int_lcm: FuncId
+    pub int_div_mod: FuncId
+    pub int_div_rem_pair: FuncId
+    pub decimal_from_str: FuncId
+    pub decimal_add: FuncId
+    pub decimal_sub: FuncId
+    pub decimal_mul: FuncId
+    pub decimal_div: FuncId
+    pub decimal_equal: FuncId
+    pub decimal_compare: FuncId
+    pub decimal_to_string: FuncId
+    pub decimal_to_float: FuncId
+    pub fraction_new: FuncId
+    pub fraction_from_parts: FuncId
+    pub fraction_add: FuncId
+    pub fraction_sub: FuncId
+    pub fraction_mul: FuncId
+    pub fraction_div: FuncId
+    pub fraction_equal: FuncId
+    pub fraction_numerator: FuncId
+    pub fraction_denominator: FuncId
+    pub fraction_to_string: FuncId
+    pub fraction_to_float: FuncId
+    pub fraction_is_zero: FuncId
+    pub complex_from_parts: FuncId
+    pub row_complex_from_parts: FuncId
+    pub complex_add: FuncId
+    pub row_complex_add: FuncId
+    pub complex_sub: FuncId
+    pub row_complex_sub: FuncId
+    pub complex_mul: FuncId
+    pub row_complex_mul: FuncId
+    pub complex_div: FuncId
+    pub row_complex_div: FuncId
+    pub complex_abs: FuncId
+    pub row_complex_abs: FuncId
+    pub complex_to_string: FuncId
+    pub row_complex_to_string: FuncId
+}
+impl NumericHostFns {
+    // Rust: crates/jet-jit/src/lib.rs:116 (Numeric.rs host_fns expansion)
+    pub fn lookup(self, symbol: String) -> FuncId? Never! {
+        if symbol == {
+            "jet_i8_trap_add" -> Val(self.i8_trap_add)
+            "jet_i8_trap_sub" -> Val(self.i8_trap_sub)
+            "jet_i8_trap_mul" -> Val(self.i8_trap_mul)
+            "jet_i8_trap_div" -> Val(self.i8_trap_div)
+            "jet_i8_trap_rem" -> Val(self.i8_trap_rem)
+            "jet_u8_trap_add" -> Val(self.u8_trap_add)
+            "jet_u8_trap_sub" -> Val(self.u8_trap_sub)
+            "jet_u8_trap_mul" -> Val(self.u8_trap_mul)
+            "jet_u8_trap_div" -> Val(self.u8_trap_div)
+            "jet_u8_trap_rem" -> Val(self.u8_trap_rem)
+            "jet_i16_trap_add" -> Val(self.i16_trap_add)
+            "jet_i16_trap_sub" -> Val(self.i16_trap_sub)
+            "jet_i16_trap_mul" -> Val(self.i16_trap_mul)
+            "jet_i16_trap_div" -> Val(self.i16_trap_div)
+            "jet_i16_trap_rem" -> Val(self.i16_trap_rem)
+            "jet_u16_trap_add" -> Val(self.u16_trap_add)
+            "jet_u16_trap_sub" -> Val(self.u16_trap_sub)
+            "jet_u16_trap_mul" -> Val(self.u16_trap_mul)
+            "jet_u16_trap_div" -> Val(self.u16_trap_div)
+            "jet_u16_trap_rem" -> Val(self.u16_trap_rem)
+            "jet_i32_trap_add" -> Val(self.i32_trap_add)
+            "jet_i32_trap_sub" -> Val(self.i32_trap_sub)
+            "jet_i32_trap_mul" -> Val(self.i32_trap_mul)
+            "jet_i32_trap_div" -> Val(self.i32_trap_div)
+            "jet_i32_trap_rem" -> Val(self.i32_trap_rem)
+            "jet_u32_trap_add" -> Val(self.u32_trap_add)
+            "jet_u32_trap_sub" -> Val(self.u32_trap_sub)
+            "jet_u32_trap_mul" -> Val(self.u32_trap_mul)
+            "jet_u32_trap_div" -> Val(self.u32_trap_div)
+            "jet_u32_trap_rem" -> Val(self.u32_trap_rem)
+            "jet_u32_rotate_left" -> Val(self.u32_rotate_left)
+            "jet_i64_trap_add" -> Val(self.i64_trap_add)
+            "jet_i64_trap_sub" -> Val(self.i64_trap_sub)
+            "jet_i64_trap_mul" -> Val(self.i64_trap_mul)
+            "jet_i64_trap_div" -> Val(self.i64_trap_div)
+            "jet_i64_trap_rem" -> Val(self.i64_trap_rem)
+            "jet_u64_trap_add" -> Val(self.u64_trap_add)
+            "jet_u64_trap_sub" -> Val(self.u64_trap_sub)
+            "jet_u64_trap_mul" -> Val(self.u64_trap_mul)
+            "jet_u64_trap_div" -> Val(self.u64_trap_div)
+            "jet_u64_trap_rem" -> Val(self.u64_trap_rem)
+            "jet_u64_rotate_left" -> Val(self.u64_rotate_left)
+            "jet_u64_rotate_right" -> Val(self.u64_rotate_right)
+            "jet_i8_trap_shl" -> Val(self.i8_trap_shl)
+            "jet_i8_trap_shr" -> Val(self.i8_trap_shr)
+            "jet_i8_trap_pow" -> Val(self.i8_trap_pow)
+            "jet_i8_trap_floor_div" -> Val(self.i8_trap_floor_div)
+            "jet_i8_trap_mod" -> Val(self.i8_trap_mod)
+            "jet_u8_trap_shl" -> Val(self.u8_trap_shl)
+            "jet_u8_trap_shr" -> Val(self.u8_trap_shr)
+            "jet_u8_trap_pow" -> Val(self.u8_trap_pow)
+            "jet_u8_trap_floor_div" -> Val(self.u8_trap_floor_div)
+            "jet_u8_trap_mod" -> Val(self.u8_trap_mod)
+            "jet_i16_trap_shl" -> Val(self.i16_trap_shl)
+            "jet_i16_trap_shr" -> Val(self.i16_trap_shr)
+            "jet_i16_trap_pow" -> Val(self.i16_trap_pow)
+            "jet_i16_trap_floor_div" -> Val(self.i16_trap_floor_div)
+            "jet_i16_trap_mod" -> Val(self.i16_trap_mod)
+            "jet_u16_trap_shl" -> Val(self.u16_trap_shl)
+            "jet_u16_trap_shr" -> Val(self.u16_trap_shr)
+            "jet_u16_trap_pow" -> Val(self.u16_trap_pow)
+            "jet_u16_trap_floor_div" -> Val(self.u16_trap_floor_div)
+            "jet_u16_trap_mod" -> Val(self.u16_trap_mod)
+            "jet_i32_trap_shl" -> Val(self.i32_trap_shl)
+            "jet_i32_trap_shr" -> Val(self.i32_trap_shr)
+            "jet_i32_trap_pow" -> Val(self.i32_trap_pow)
+            "jet_i32_trap_floor_div" -> Val(self.i32_trap_floor_div)
+            "jet_i32_trap_mod" -> Val(self.i32_trap_mod)
+            "jet_u32_trap_shl" -> Val(self.u32_trap_shl)
+            "jet_u32_trap_shr" -> Val(self.u32_trap_shr)
+            "jet_u32_trap_pow" -> Val(self.u32_trap_pow)
+            "jet_u32_trap_floor_div" -> Val(self.u32_trap_floor_div)
+            "jet_u32_trap_mod" -> Val(self.u32_trap_mod)
+            "jet_i64_trap_shl" -> Val(self.i64_trap_shl)
+            "jet_i64_trap_shr" -> Val(self.i64_trap_shr)
+            "jet_i64_trap_pow" -> Val(self.i64_trap_pow)
+            "jet_i64_trap_floor_div" -> Val(self.i64_trap_floor_div)
+            "jet_i64_trap_mod" -> Val(self.i64_trap_mod)
+            "jet_u64_trap_shl" -> Val(self.u64_trap_shl)
+            "jet_u64_trap_shr" -> Val(self.u64_trap_shr)
+            "jet_u64_trap_pow" -> Val(self.u64_trap_pow)
+            "jet_u64_trap_floor_div" -> Val(self.u64_trap_floor_div)
+            "jet_u64_trap_mod" -> Val(self.u64_trap_mod)
+            "jet_i8_wrapping_add" -> Val(self.i8_wrapping_add)
+            "jet_i8_wrapping_sub" -> Val(self.i8_wrapping_sub)
+            "jet_i8_wrapping_mul" -> Val(self.i8_wrapping_mul)
+            "jet_i8_wrapping_div" -> Val(self.i8_wrapping_div)
+            "jet_i8_wrapping_rem" -> Val(self.i8_wrapping_rem)
+            "jet_i8_wrapping_shl" -> Val(self.i8_wrapping_shl)
+            "jet_i8_wrapping_shr" -> Val(self.i8_wrapping_shr)
+            "jet_u8_wrapping_add" -> Val(self.u8_wrapping_add)
+            "jet_u8_wrapping_sub" -> Val(self.u8_wrapping_sub)
+            "jet_u8_wrapping_mul" -> Val(self.u8_wrapping_mul)
+            "jet_u8_wrapping_div" -> Val(self.u8_wrapping_div)
+            "jet_u8_wrapping_rem" -> Val(self.u8_wrapping_rem)
+            "jet_u8_wrapping_shl" -> Val(self.u8_wrapping_shl)
+            "jet_u8_wrapping_shr" -> Val(self.u8_wrapping_shr)
+            "jet_i16_wrapping_add" -> Val(self.i16_wrapping_add)
+            "jet_i16_wrapping_sub" -> Val(self.i16_wrapping_sub)
+            "jet_i16_wrapping_mul" -> Val(self.i16_wrapping_mul)
+            "jet_i16_wrapping_div" -> Val(self.i16_wrapping_div)
+            "jet_i16_wrapping_rem" -> Val(self.i16_wrapping_rem)
+            "jet_i16_wrapping_shl" -> Val(self.i16_wrapping_shl)
+            "jet_i16_wrapping_shr" -> Val(self.i16_wrapping_shr)
+            "jet_u16_wrapping_add" -> Val(self.u16_wrapping_add)
+            "jet_u16_wrapping_sub" -> Val(self.u16_wrapping_sub)
+            "jet_u16_wrapping_mul" -> Val(self.u16_wrapping_mul)
+            "jet_u16_wrapping_div" -> Val(self.u16_wrapping_div)
+            "jet_u16_wrapping_rem" -> Val(self.u16_wrapping_rem)
+            "jet_u16_wrapping_shl" -> Val(self.u16_wrapping_shl)
+            "jet_u16_wrapping_shr" -> Val(self.u16_wrapping_shr)
+            "jet_i32_wrapping_add" -> Val(self.i32_wrapping_add)
+            "jet_i32_wrapping_sub" -> Val(self.i32_wrapping_sub)
+            "jet_i32_wrapping_mul" -> Val(self.i32_wrapping_mul)
+            "jet_i32_wrapping_div" -> Val(self.i32_wrapping_div)
+            "jet_i32_wrapping_rem" -> Val(self.i32_wrapping_rem)
+            "jet_i32_wrapping_shl" -> Val(self.i32_wrapping_shl)
+            "jet_i32_wrapping_shr" -> Val(self.i32_wrapping_shr)
+            "jet_u32_wrapping_add" -> Val(self.u32_wrapping_add)
+            "jet_u32_wrapping_sub" -> Val(self.u32_wrapping_sub)
+            "jet_u32_wrapping_mul" -> Val(self.u32_wrapping_mul)
+            "jet_u32_wrapping_div" -> Val(self.u32_wrapping_div)
+            "jet_u32_wrapping_rem" -> Val(self.u32_wrapping_rem)
+            "jet_u32_wrapping_shl" -> Val(self.u32_wrapping_shl)
+            "jet_u32_wrapping_shr" -> Val(self.u32_wrapping_shr)
+            "jet_i64_wrapping_add" -> Val(self.i64_wrapping_add)
+            "jet_i64_wrapping_sub" -> Val(self.i64_wrapping_sub)
+            "jet_i64_wrapping_mul" -> Val(self.i64_wrapping_mul)
+            "jet_i64_wrapping_div" -> Val(self.i64_wrapping_div)
+            "jet_i64_wrapping_rem" -> Val(self.i64_wrapping_rem)
+            "jet_i64_wrapping_shl" -> Val(self.i64_wrapping_shl)
+            "jet_i64_wrapping_shr" -> Val(self.i64_wrapping_shr)
+            "jet_u64_wrapping_add" -> Val(self.u64_wrapping_add)
+            "jet_u64_wrapping_sub" -> Val(self.u64_wrapping_sub)
+            "jet_u64_wrapping_mul" -> Val(self.u64_wrapping_mul)
+            "jet_u64_wrapping_div" -> Val(self.u64_wrapping_div)
+            "jet_u64_wrapping_rem" -> Val(self.u64_wrapping_rem)
+            "jet_u64_wrapping_shl" -> Val(self.u64_wrapping_shl)
+            "jet_u64_wrapping_shr" -> Val(self.u64_wrapping_shr)
+            "jet_i8_saturating_add" -> Val(self.i8_saturating_add)
+            "jet_i8_saturating_sub" -> Val(self.i8_saturating_sub)
+            "jet_i8_saturating_mul" -> Val(self.i8_saturating_mul)
+            "jet_u8_saturating_add" -> Val(self.u8_saturating_add)
+            "jet_u8_saturating_sub" -> Val(self.u8_saturating_sub)
+            "jet_u8_saturating_mul" -> Val(self.u8_saturating_mul)
+            "jet_i16_saturating_add" -> Val(self.i16_saturating_add)
+            "jet_i16_saturating_sub" -> Val(self.i16_saturating_sub)
+            "jet_i16_saturating_mul" -> Val(self.i16_saturating_mul)
+            "jet_u16_saturating_add" -> Val(self.u16_saturating_add)
+            "jet_u16_saturating_sub" -> Val(self.u16_saturating_sub)
+            "jet_u16_saturating_mul" -> Val(self.u16_saturating_mul)
+            "jet_i32_saturating_add" -> Val(self.i32_saturating_add)
+            "jet_i32_saturating_sub" -> Val(self.i32_saturating_sub)
+            "jet_i32_saturating_mul" -> Val(self.i32_saturating_mul)
+            "jet_u32_saturating_add" -> Val(self.u32_saturating_add)
+            "jet_u32_saturating_sub" -> Val(self.u32_saturating_sub)
+            "jet_u32_saturating_mul" -> Val(self.u32_saturating_mul)
+            "jet_i64_saturating_add" -> Val(self.i64_saturating_add)
+            "jet_i64_saturating_sub" -> Val(self.i64_saturating_sub)
+            "jet_i64_saturating_mul" -> Val(self.i64_saturating_mul)
+            "jet_u64_saturating_add" -> Val(self.u64_saturating_add)
+            "jet_u64_saturating_sub" -> Val(self.u64_saturating_sub)
+            "jet_u64_saturating_mul" -> Val(self.u64_saturating_mul)
+            "jet_i8_checked_add" -> Val(self.i8_checked_add)
+            "jet_i8_checked_sub" -> Val(self.i8_checked_sub)
+            "jet_i8_checked_mul" -> Val(self.i8_checked_mul)
+            "jet_i8_checked_div" -> Val(self.i8_checked_div)
+            "jet_i8_checked_rem" -> Val(self.i8_checked_rem)
+            "jet_u8_checked_add" -> Val(self.u8_checked_add)
+            "jet_u8_checked_sub" -> Val(self.u8_checked_sub)
+            "jet_u8_checked_mul" -> Val(self.u8_checked_mul)
+            "jet_u8_checked_div" -> Val(self.u8_checked_div)
+            "jet_u8_checked_rem" -> Val(self.u8_checked_rem)
+            "jet_i16_checked_add" -> Val(self.i16_checked_add)
+            "jet_i16_checked_sub" -> Val(self.i16_checked_sub)
+            "jet_i16_checked_mul" -> Val(self.i16_checked_mul)
+            "jet_i16_checked_div" -> Val(self.i16_checked_div)
+            "jet_i16_checked_rem" -> Val(self.i16_checked_rem)
+            "jet_u16_checked_add" -> Val(self.u16_checked_add)
+            "jet_u16_checked_sub" -> Val(self.u16_checked_sub)
+            "jet_u16_checked_mul" -> Val(self.u16_checked_mul)
+            "jet_u16_checked_div" -> Val(self.u16_checked_div)
+            "jet_u16_checked_rem" -> Val(self.u16_checked_rem)
+            "jet_i32_checked_add" -> Val(self.i32_checked_add)
+            "jet_i32_checked_sub" -> Val(self.i32_checked_sub)
+            "jet_i32_checked_mul" -> Val(self.i32_checked_mul)
+            "jet_i32_checked_div" -> Val(self.i32_checked_div)
+            "jet_i32_checked_rem" -> Val(self.i32_checked_rem)
+            "jet_u32_checked_add" -> Val(self.u32_checked_add)
+            "jet_u32_checked_sub" -> Val(self.u32_checked_sub)
+            "jet_u32_checked_mul" -> Val(self.u32_checked_mul)
+            "jet_u32_checked_div" -> Val(self.u32_checked_div)
+            "jet_u32_checked_rem" -> Val(self.u32_checked_rem)
+            "jet_i64_checked_add" -> Val(self.i64_checked_add)
+            "jet_i64_checked_sub" -> Val(self.i64_checked_sub)
+            "jet_i64_checked_mul" -> Val(self.i64_checked_mul)
+            "jet_i64_checked_div" -> Val(self.i64_checked_div)
+            "jet_i64_checked_rem" -> Val(self.i64_checked_rem)
+            "jet_u64_checked_add" -> Val(self.u64_checked_add)
+            "jet_u64_checked_sub" -> Val(self.u64_checked_sub)
+            "jet_u64_checked_mul" -> Val(self.u64_checked_mul)
+            "jet_u64_checked_div" -> Val(self.u64_checked_div)
+            "jet_u64_checked_rem" -> Val(self.u64_checked_rem)
+            "jet_std::jet_int_add" -> Val(self.row_int_add)
+            "jet_std::jet_int_sub" -> Val(self.row_int_sub)
+            "jet_std::jet_int_mul" -> Val(self.row_int_mul)
+            "jet_std::jet_int_bit_and" -> Val(self.row_int_bit_and)
+            "jet_std::jet_int_bit_or" -> Val(self.row_int_bit_or)
+            "jet_std::jet_int_bit_xor" -> Val(self.row_int_bit_xor)
+            "jet_std::jet_int_div" -> Val(self.row_int_div)
+            "jet_std::jet_int_rem" -> Val(self.row_int_rem)
+            "jet_std::jet_int_floor_div" -> Val(self.row_int_floor_div)
+            "jet_std::jet_int_mod" -> Val(self.row_int_mod)
+            "jet_std::jet_int_pow" -> Val(self.row_int_pow)
+            "jet_std::jet_int_shl" -> Val(self.row_int_shl)
+            "jet_std::jet_int_shr" -> Val(self.row_int_shr)
+            "jet_std::jet_int_div_euclid" -> Val(self.row_int_div_euclid)
+            "jet_std::jet_int_rem_euclid" -> Val(self.row_int_rem_euclid)
+            "jet_std::jet_int_abs" -> Val(self.row_int_abs)
+            "jet_int_compare" -> Val(self.row_int_compare)
+            "jet_decimal_from_str" -> Val(self.row_decimal_from_str)
+            "jet_decimal_add" -> Val(self.row_decimal_add)
+            "jet_decimal_sub" -> Val(self.row_decimal_sub)
+            "jet_decimal_mul" -> Val(self.row_decimal_mul)
+            "jet_decimal_div" -> Val(self.row_decimal_div)
+            "jet_decimal_equal" -> Val(self.row_decimal_equal)
+            "jet_decimal_compare" -> Val(self.row_decimal_compare)
+            "jet_decimal_to_string" -> Val(self.row_decimal_to_string)
+            "jet_decimal_to_float" -> Val(self.row_decimal_to_float)
+            "jet_fraction_from_parts" -> Val(self.row_fraction_from_parts)
+            "jet_fraction_add" -> Val(self.row_fraction_add)
+            "jet_fraction_sub" -> Val(self.row_fraction_sub)
+            "jet_fraction_mul" -> Val(self.row_fraction_mul)
+            "jet_fraction_div" -> Val(self.row_fraction_div)
+            "jet_fraction_equal" -> Val(self.row_fraction_equal)
+            "jet_fraction_to_string" -> Val(self.row_fraction_to_string)
+            "jet_fraction_to_float" -> Val(self.row_fraction_to_float)
+            "jet_jit_int_from_int" -> Val(self.int_from_int)
+            "jet_jit_int_to_native" -> Val(self.int_to_native)
+            "jet_jit_int_from_u64" -> Val(self.int_from_u64)
+            "jet_jit_int_from_str" -> Val(self.int_from_str)
+            "jet_jit_int_add" -> Val(self.int_add)
+            "jet_jit_int_sub" -> Val(self.int_sub)
+            "jet_jit_int_mul" -> Val(self.int_mul)
+            "jet_jit_int_bit_and" -> Val(self.int_bit_and)
+            "jet_jit_int_bit_or" -> Val(self.int_bit_or)
+            "jet_jit_int_bit_xor" -> Val(self.int_bit_xor)
+            "jet_jit_int_compare" -> Val(self.int_compare)
+            "jet_jit_int_neg" -> Val(self.int_neg)
+            "jet_jit_int_abs" -> Val(self.int_abs)
+            "jet_jit_int_not" -> Val(self.int_not)
+            "jet_jit_int_shl" -> Val(self.int_shl)
+            "jet_jit_int_shr" -> Val(self.int_shr)
+            "jet_jit_int_to_string" -> Val(self.int_to_string)
+            "jet_std::jet_int_to_radix" -> Val(self.int_to_radix)
+            "jet_std::jet_int_from_radix" -> Val(self.int_from_radix)
+            "jet_jit_int_to_f64" -> Val(self.int_to_f64)
+            "jet_jit_int_div" -> Val(self.int_div)
+            "jet_jit_int_div_euclid" -> Val(self.int_div_euclid)
+            "jet_jit_int_floor_div" -> Val(self.int_floor_div)
+            "jet_jit_int_mod" -> Val(self.int_mod)
+            "jet_jit_int_rem" -> Val(self.int_rem)
+            "jet_jit_int_rem_euclid" -> Val(self.int_rem_euclid)
+            "jet_jit_int_pow" -> Val(self.int_pow)
+            "jet_jit_int_factorial" -> Val(self.int_factorial)
+            "jet_jit_int_is_even" -> Val(self.int_is_even)
+            "jet_jit_int_is_odd" -> Val(self.int_is_odd)
+            "jet_jit_int_isqrt" -> Val(self.int_isqrt)
+            "jet_jit_int_binomial" -> Val(self.int_binomial)
+            "jet_jit_int_digits" -> Val(self.int_digits)
+            "jet_jit_int_leading_ones" -> Val(self.int_leading_ones)
+            "jet_jit_int_trailing_ones" -> Val(self.int_trailing_ones)
+            "jet_jit_int_checked_abs" -> Val(self.int_checked_abs)
+            "jet_jit_int_checked_neg" -> Val(self.int_checked_neg)
+            "jet_jit_int_checked_add" -> Val(self.int_checked_add)
+            "jet_jit_int_checked_sub" -> Val(self.int_checked_sub)
+            "jet_jit_int_checked_mul" -> Val(self.int_checked_mul)
+            "jet_jit_int_checked_div" -> Val(self.int_checked_div)
+            "jet_jit_int_checked_rem" -> Val(self.int_checked_rem)
+            "jet_jit_int_checked_pow" -> Val(self.int_checked_pow)
+            "jet_jit_int_saturating_add" -> Val(self.int_saturating_add)
+            "jet_jit_int_saturating_sub" -> Val(self.int_saturating_sub)
+            "jet_jit_int_saturating_mul" -> Val(self.int_saturating_mul)
+            "jet_jit_int_int_pow" -> Val(self.int_int_pow)
+            "jet_jit_int_gcd" -> Val(self.int_gcd)
+            "jet_jit_int_lcm" -> Val(self.int_lcm)
+            "jet_jit_int_div_mod" -> Val(self.int_div_mod)
+            "jet_jit_int_div_rem_pair" -> Val(self.int_div_rem_pair)
+            "jet_jit_decimal_from_str" -> Val(self.decimal_from_str)
+            "jet_jit_decimal_add" -> Val(self.decimal_add)
+            "jet_jit_decimal_sub" -> Val(self.decimal_sub)
+            "jet_jit_decimal_mul" -> Val(self.decimal_mul)
+            "jet_jit_decimal_div" -> Val(self.decimal_div)
+            "jet_jit_decimal_equal" -> Val(self.decimal_equal)
+            "jet_jit_decimal_compare" -> Val(self.decimal_compare)
+            "jet_jit_decimal_to_string" -> Val(self.decimal_to_string)
+            "jet_jit_decimal_to_float" -> Val(self.decimal_to_float)
+            "jet_jit_fraction_new" -> Val(self.fraction_new)
+            "jet_jit_fraction_from_parts" -> Val(self.fraction_from_parts)
+            "jet_jit_fraction_add" -> Val(self.fraction_add)
+            "jet_jit_fraction_sub" -> Val(self.fraction_sub)
+            "jet_jit_fraction_mul" -> Val(self.fraction_mul)
+            "jet_jit_fraction_div" -> Val(self.fraction_div)
+            "jet_jit_fraction_equal" -> Val(self.fraction_equal)
+            "jet_jit_fraction_numerator" -> Val(self.fraction_numerator)
+            "jet_jit_fraction_denominator" -> Val(self.fraction_denominator)
+            "jet_jit_fraction_to_string" -> Val(self.fraction_to_string)
+            "jet_jit_fraction_to_float" -> Val(self.fraction_to_float)
+            "jet_jit_fraction_is_zero" -> Val(self.fraction_is_zero)
+            "jet_jit_complex_from_parts" -> Val(self.complex_from_parts)
+            "jet_complex_from_parts" -> Val(self.row_complex_from_parts)
+            "jet_jit_complex_add" -> Val(self.complex_add)
+            "jet_complex_add" -> Val(self.row_complex_add)
+            "jet_jit_complex_sub" -> Val(self.complex_sub)
+            "jet_complex_sub" -> Val(self.row_complex_sub)
+            "jet_jit_complex_mul" -> Val(self.complex_mul)
+            "jet_complex_mul" -> Val(self.row_complex_mul)
+            "jet_jit_complex_div" -> Val(self.complex_div)
+            "jet_complex_div" -> Val(self.row_complex_div)
+            "jet_jit_complex_abs" -> Val(self.complex_abs)
+            "jet_complex_abs" -> Val(self.row_complex_abs)
+            "jet_jit_complex_to_string" -> Val(self.complex_to_string)
+            "jet_complex_to_string" -> Val(self.row_complex_to_string)
+            _ -> None
+        }
+    }
+}
+enum NumericSignature { Unary, Binary, Compare, CompareI64, UnaryBool, UnaryF64, ComplexParts, Located }
+
+// Rust: crates/jet-jit/src/Numeric.rs:1114
+pub fn register_numeric_symbols(builder: &JITBuilder) Never! {
+    // GATE #4494: guarded supplies an audited native C-ABI address, not Rust.
+    numeric_entries(fn(field, symbol, address, shape) {
+        builder.symbol(symbol, address())
+        #If(test) { audit.record_registered(symbol) }
+        Ok(())
+    }).expect("numeric symbol registration is infallible")
+}
+// Rust: crates/jet-jit/src/Numeric.rs:1115-1146
+pub fn declare_numeric_host_fns<M: Module>(module: &M) -> NumericHostFns Err! {
+    cc :: module.target_config().default_call_conv
+    sig_unary := Signature.new(cc)
+    sig_unary.params.push(AbiParam.new(types.I64)); sig_unary.returns.push(AbiParam.new(types.I64))
+    sig_binary := Signature.new(cc)
+    sig_binary.params.push(AbiParam.new(types.I64)); sig_binary.params.push(AbiParam.new(types.I64))
+    sig_binary.returns.push(AbiParam.new(types.I64))
+    sig_compare := Signature.new(cc)
+    sig_compare.params.push(AbiParam.new(types.I64)); sig_compare.params.push(AbiParam.new(types.I64))
+    sig_compare.returns.push(AbiParam.new(types.I8))
+    sig_compare_i64 := Signature.new(cc)
+    sig_compare_i64.params.push(AbiParam.new(types.I64)); sig_compare_i64.params.push(AbiParam.new(types.I64))
+    sig_compare_i64.returns.push(AbiParam.new(types.I64))
+    sig_unary_bool := Signature.new(cc)
+    sig_unary_bool.params.push(AbiParam.new(types.I64)); sig_unary_bool.returns.push(AbiParam.new(types.I8))
+    sig_unary_f64 := Signature.new(cc)
+    sig_unary_f64.params.push(AbiParam.new(types.I64)); sig_unary_f64.returns.push(AbiParam.new(types.F64))
+    sig_complex_parts := Signature.new(cc)
+    sig_complex_parts.params.push(AbiParam.new(types.F64)); sig_complex_parts.params.push(AbiParam.new(types.F64))
+    sig_complex_parts.returns.push(AbiParam.new(types.I64))
+    sig_located := Signature.new(cc)
+    loop i in 0..<4 -> sig_located.params.push(AbiParam.new(types.I64))
+    sig_located.returns.push(AbiParam.new(types.I64))
+    import :: fn(name: String, signature: Signature) -> FuncId Err! {
+        #If(test) { audit.record_declared(name) }
+        if module.declare_function(name,Linkage.Import,signature) == {
+            .Ok(id) -> Ok(id)
+            .Err(error) -> Err(error.to_string())
+        }
+    }
+    Ok(NumericHostFns{
+        i8_trap_add: import("jet_i8_trap_add",sig_located)?,
+        i8_trap_sub: import("jet_i8_trap_sub",sig_located)?,
+        i8_trap_mul: import("jet_i8_trap_mul",sig_located)?,
+        i8_trap_div: import("jet_i8_trap_div",sig_located)?,
+        i8_trap_rem: import("jet_i8_trap_rem",sig_located)?,
+        u8_trap_add: import("jet_u8_trap_add",sig_located)?,
+        u8_trap_sub: import("jet_u8_trap_sub",sig_located)?,
+        u8_trap_mul: import("jet_u8_trap_mul",sig_located)?,
+        u8_trap_div: import("jet_u8_trap_div",sig_located)?,
+        u8_trap_rem: import("jet_u8_trap_rem",sig_located)?,
+        i16_trap_add: import("jet_i16_trap_add",sig_located)?,
+        i16_trap_sub: import("jet_i16_trap_sub",sig_located)?,
+        i16_trap_mul: import("jet_i16_trap_mul",sig_located)?,
+        i16_trap_div: import("jet_i16_trap_div",sig_located)?,
+        i16_trap_rem: import("jet_i16_trap_rem",sig_located)?,
+        u16_trap_add: import("jet_u16_trap_add",sig_located)?,
+        u16_trap_sub: import("jet_u16_trap_sub",sig_located)?,
+        u16_trap_mul: import("jet_u16_trap_mul",sig_located)?,
+        u16_trap_div: import("jet_u16_trap_div",sig_located)?,
+        u16_trap_rem: import("jet_u16_trap_rem",sig_located)?,
+        i32_trap_add: import("jet_i32_trap_add",sig_located)?,
+        i32_trap_sub: import("jet_i32_trap_sub",sig_located)?,
+        i32_trap_mul: import("jet_i32_trap_mul",sig_located)?,
+        i32_trap_div: import("jet_i32_trap_div",sig_located)?,
+        i32_trap_rem: import("jet_i32_trap_rem",sig_located)?,
+        u32_trap_add: import("jet_u32_trap_add",sig_located)?,
+        u32_trap_sub: import("jet_u32_trap_sub",sig_located)?,
+        u32_trap_mul: import("jet_u32_trap_mul",sig_located)?,
+        u32_trap_div: import("jet_u32_trap_div",sig_located)?,
+        u32_trap_rem: import("jet_u32_trap_rem",sig_located)?,
+        u32_rotate_left: import("jet_u32_rotate_left",sig_located)?,
+        i64_trap_add: import("jet_i64_trap_add",sig_located)?,
+        i64_trap_sub: import("jet_i64_trap_sub",sig_located)?,
+        i64_trap_mul: import("jet_i64_trap_mul",sig_located)?,
+        i64_trap_div: import("jet_i64_trap_div",sig_located)?,
+        i64_trap_rem: import("jet_i64_trap_rem",sig_located)?,
+        u64_trap_add: import("jet_u64_trap_add",sig_located)?,
+        u64_trap_sub: import("jet_u64_trap_sub",sig_located)?,
+        u64_trap_mul: import("jet_u64_trap_mul",sig_located)?,
+        u64_trap_div: import("jet_u64_trap_div",sig_located)?,
+        u64_trap_rem: import("jet_u64_trap_rem",sig_located)?,
+        u64_rotate_left: import("jet_u64_rotate_left",sig_located)?,
+        u64_rotate_right: import("jet_u64_rotate_right",sig_located)?,
+        i8_trap_shl: import("jet_i8_trap_shl",sig_located)?,
+        i8_trap_shr: import("jet_i8_trap_shr",sig_located)?,
+        i8_trap_pow: import("jet_i8_trap_pow",sig_located)?,
+        i8_trap_floor_div: import("jet_i8_trap_floor_div",sig_located)?,
+        i8_trap_mod: import("jet_i8_trap_mod",sig_located)?,
+        u8_trap_shl: import("jet_u8_trap_shl",sig_located)?,
+        u8_trap_shr: import("jet_u8_trap_shr",sig_located)?,
+        u8_trap_pow: import("jet_u8_trap_pow",sig_located)?,
+        u8_trap_floor_div: import("jet_u8_trap_floor_div",sig_located)?,
+        u8_trap_mod: import("jet_u8_trap_mod",sig_located)?,
+        i16_trap_shl: import("jet_i16_trap_shl",sig_located)?,
+        i16_trap_shr: import("jet_i16_trap_shr",sig_located)?,
+        i16_trap_pow: import("jet_i16_trap_pow",sig_located)?,
+        i16_trap_floor_div: import("jet_i16_trap_floor_div",sig_located)?,
+        i16_trap_mod: import("jet_i16_trap_mod",sig_located)?,
+        u16_trap_shl: import("jet_u16_trap_shl",sig_located)?,
+        u16_trap_shr: import("jet_u16_trap_shr",sig_located)?,
+        u16_trap_pow: import("jet_u16_trap_pow",sig_located)?,
+        u16_trap_floor_div: import("jet_u16_trap_floor_div",sig_located)?,
+        u16_trap_mod: import("jet_u16_trap_mod",sig_located)?,
+        i32_trap_shl: import("jet_i32_trap_shl",sig_located)?,
+        i32_trap_shr: import("jet_i32_trap_shr",sig_located)?,
+        i32_trap_pow: import("jet_i32_trap_pow",sig_located)?,
+        i32_trap_floor_div: import("jet_i32_trap_floor_div",sig_located)?,
+        i32_trap_mod: import("jet_i32_trap_mod",sig_located)?,
+        u32_trap_shl: import("jet_u32_trap_shl",sig_located)?,
+        u32_trap_shr: import("jet_u32_trap_shr",sig_located)?,
+        u32_trap_pow: import("jet_u32_trap_pow",sig_located)?,
+        u32_trap_floor_div: import("jet_u32_trap_floor_div",sig_located)?,
+        u32_trap_mod: import("jet_u32_trap_mod",sig_located)?,
+        i64_trap_shl: import("jet_i64_trap_shl",sig_located)?,
+        i64_trap_shr: import("jet_i64_trap_shr",sig_located)?,
+        i64_trap_pow: import("jet_i64_trap_pow",sig_located)?,
+        i64_trap_floor_div: import("jet_i64_trap_floor_div",sig_located)?,
+        i64_trap_mod: import("jet_i64_trap_mod",sig_located)?,
+        u64_trap_shl: import("jet_u64_trap_shl",sig_located)?,
+        u64_trap_shr: import("jet_u64_trap_shr",sig_located)?,
+        u64_trap_pow: import("jet_u64_trap_pow",sig_located)?,
+        u64_trap_floor_div: import("jet_u64_trap_floor_div",sig_located)?,
+        u64_trap_mod: import("jet_u64_trap_mod",sig_binary)?,
+        i8_wrapping_add: import("jet_i8_wrapping_add",sig_binary)?,
+        i8_wrapping_sub: import("jet_i8_wrapping_sub",sig_binary)?,
+        i8_wrapping_mul: import("jet_i8_wrapping_mul",sig_binary)?,
+        i8_wrapping_div: import("jet_i8_wrapping_div",sig_binary)?,
+        i8_wrapping_rem: import("jet_i8_wrapping_rem",sig_binary)?,
+        i8_wrapping_shl: import("jet_i8_wrapping_shl",sig_binary)?,
+        i8_wrapping_shr: import("jet_i8_wrapping_shr",sig_binary)?,
+        u8_wrapping_add: import("jet_u8_wrapping_add",sig_binary)?,
+        u8_wrapping_sub: import("jet_u8_wrapping_sub",sig_binary)?,
+        u8_wrapping_mul: import("jet_u8_wrapping_mul",sig_binary)?,
+        u8_wrapping_div: import("jet_u8_wrapping_div",sig_binary)?,
+        u8_wrapping_rem: import("jet_u8_wrapping_rem",sig_binary)?,
+        u8_wrapping_shl: import("jet_u8_wrapping_shl",sig_binary)?,
+        u8_wrapping_shr: import("jet_u8_wrapping_shr",sig_binary)?,
+        i16_wrapping_add: import("jet_i16_wrapping_add",sig_binary)?,
+        i16_wrapping_sub: import("jet_i16_wrapping_sub",sig_binary)?,
+        i16_wrapping_mul: import("jet_i16_wrapping_mul",sig_binary)?,
+        i16_wrapping_div: import("jet_i16_wrapping_div",sig_binary)?,
+        i16_wrapping_rem: import("jet_i16_wrapping_rem",sig_binary)?,
+        i16_wrapping_shl: import("jet_i16_wrapping_shl",sig_binary)?,
+        i16_wrapping_shr: import("jet_i16_wrapping_shr",sig_binary)?,
+        u16_wrapping_add: import("jet_u16_wrapping_add",sig_binary)?,
+        u16_wrapping_sub: import("jet_u16_wrapping_sub",sig_binary)?,
+        u16_wrapping_mul: import("jet_u16_wrapping_mul",sig_binary)?,
+        u16_wrapping_div: import("jet_u16_wrapping_div",sig_binary)?,
+        u16_wrapping_rem: import("jet_u16_wrapping_rem",sig_binary)?,
+        u16_wrapping_shl: import("jet_u16_wrapping_shl",sig_binary)?,
+        u16_wrapping_shr: import("jet_u16_wrapping_shr",sig_binary)?,
+        i32_wrapping_add: import("jet_i32_wrapping_add",sig_binary)?,
+        i32_wrapping_sub: import("jet_i32_wrapping_sub",sig_binary)?,
+        i32_wrapping_mul: import("jet_i32_wrapping_mul",sig_binary)?,
+        i32_wrapping_div: import("jet_i32_wrapping_div",sig_binary)?,
+        i32_wrapping_rem: import("jet_i32_wrapping_rem",sig_binary)?,
+        i32_wrapping_shl: import("jet_i32_wrapping_shl",sig_binary)?,
+        i32_wrapping_shr: import("jet_i32_wrapping_shr",sig_binary)?,
+        u32_wrapping_add: import("jet_u32_wrapping_add",sig_binary)?,
+        u32_wrapping_sub: import("jet_u32_wrapping_sub",sig_binary)?,
+        u32_wrapping_mul: import("jet_u32_wrapping_mul",sig_binary)?,
+        u32_wrapping_div: import("jet_u32_wrapping_div",sig_binary)?,
+        u32_wrapping_rem: import("jet_u32_wrapping_rem",sig_binary)?,
+        u32_wrapping_shl: import("jet_u32_wrapping_shl",sig_binary)?,
+        u32_wrapping_shr: import("jet_u32_wrapping_shr",sig_binary)?,
+        i64_wrapping_add: import("jet_i64_wrapping_add",sig_binary)?,
+        i64_wrapping_sub: import("jet_i64_wrapping_sub",sig_binary)?,
+        i64_wrapping_mul: import("jet_i64_wrapping_mul",sig_binary)?,
+        i64_wrapping_div: import("jet_i64_wrapping_div",sig_binary)?,
+        i64_wrapping_rem: import("jet_i64_wrapping_rem",sig_binary)?,
+        i64_wrapping_shl: import("jet_i64_wrapping_shl",sig_binary)?,
+        i64_wrapping_shr: import("jet_i64_wrapping_shr",sig_binary)?,
+        u64_wrapping_add: import("jet_u64_wrapping_add",sig_binary)?,
+        u64_wrapping_sub: import("jet_u64_wrapping_sub",sig_binary)?,
+        u64_wrapping_mul: import("jet_u64_wrapping_mul",sig_binary)?,
+        u64_wrapping_div: import("jet_u64_wrapping_div",sig_binary)?,
+        u64_wrapping_rem: import("jet_u64_wrapping_rem",sig_binary)?,
+        u64_wrapping_shl: import("jet_u64_wrapping_shl",sig_binary)?,
+        u64_wrapping_shr: import("jet_u64_wrapping_shr",sig_binary)?,
+        i8_saturating_add: import("jet_i8_saturating_add",sig_binary)?,
+        i8_saturating_sub: import("jet_i8_saturating_sub",sig_binary)?,
+        i8_saturating_mul: import("jet_i8_saturating_mul",sig_binary)?,
+        u8_saturating_add: import("jet_u8_saturating_add",sig_binary)?,
+        u8_saturating_sub: import("jet_u8_saturating_sub",sig_binary)?,
+        u8_saturating_mul: import("jet_u8_saturating_mul",sig_binary)?,
+        i16_saturating_add: import("jet_i16_saturating_add",sig_binary)?,
+        i16_saturating_sub: import("jet_i16_saturating_sub",sig_binary)?,
+        i16_saturating_mul: import("jet_i16_saturating_mul",sig_binary)?,
+        u16_saturating_add: import("jet_u16_saturating_add",sig_binary)?,
+        u16_saturating_sub: import("jet_u16_saturating_sub",sig_binary)?,
+        u16_saturating_mul: import("jet_u16_saturating_mul",sig_binary)?,
+        i32_saturating_add: import("jet_i32_saturating_add",sig_binary)?,
+        i32_saturating_sub: import("jet_i32_saturating_sub",sig_binary)?,
+        i32_saturating_mul: import("jet_i32_saturating_mul",sig_binary)?,
+        u32_saturating_add: import("jet_u32_saturating_add",sig_binary)?,
+        u32_saturating_sub: import("jet_u32_saturating_sub",sig_binary)?,
+        u32_saturating_mul: import("jet_u32_saturating_mul",sig_binary)?,
+        i64_saturating_add: import("jet_i64_saturating_add",sig_binary)?,
+        i64_saturating_sub: import("jet_i64_saturating_sub",sig_binary)?,
+        i64_saturating_mul: import("jet_i64_saturating_mul",sig_binary)?,
+        u64_saturating_add: import("jet_u64_saturating_add",sig_binary)?,
+        u64_saturating_sub: import("jet_u64_saturating_sub",sig_binary)?,
+        u64_saturating_mul: import("jet_u64_saturating_mul",sig_binary)?,
+        i8_checked_add: import("jet_i8_checked_add",sig_binary)?,
+        i8_checked_sub: import("jet_i8_checked_sub",sig_binary)?,
+        i8_checked_mul: import("jet_i8_checked_mul",sig_binary)?,
+        i8_checked_div: import("jet_i8_checked_div",sig_binary)?,
+        i8_checked_rem: import("jet_i8_checked_rem",sig_binary)?,
+        u8_checked_add: import("jet_u8_checked_add",sig_binary)?,
+        u8_checked_sub: import("jet_u8_checked_sub",sig_binary)?,
+        u8_checked_mul: import("jet_u8_checked_mul",sig_binary)?,
+        u8_checked_div: import("jet_u8_checked_div",sig_binary)?,
+        u8_checked_rem: import("jet_u8_checked_rem",sig_binary)?,
+        i16_checked_add: import("jet_i16_checked_add",sig_binary)?,
+        i16_checked_sub: import("jet_i16_checked_sub",sig_binary)?,
+        i16_checked_mul: import("jet_i16_checked_mul",sig_binary)?,
+        i16_checked_div: import("jet_i16_checked_div",sig_binary)?,
+        i16_checked_rem: import("jet_i16_checked_rem",sig_binary)?,
+        u16_checked_add: import("jet_u16_checked_add",sig_binary)?,
+        u16_checked_sub: import("jet_u16_checked_sub",sig_binary)?,
+        u16_checked_mul: import("jet_u16_checked_mul",sig_binary)?,
+        u16_checked_div: import("jet_u16_checked_div",sig_binary)?,
+        u16_checked_rem: import("jet_u16_checked_rem",sig_binary)?,
+        i32_checked_add: import("jet_i32_checked_add",sig_binary)?,
+        i32_checked_sub: import("jet_i32_checked_sub",sig_binary)?,
+        i32_checked_mul: import("jet_i32_checked_mul",sig_binary)?,
+        i32_checked_div: import("jet_i32_checked_div",sig_binary)?,
+        i32_checked_rem: import("jet_i32_checked_rem",sig_binary)?,
+        u32_checked_add: import("jet_u32_checked_add",sig_binary)?,
+        u32_checked_sub: import("jet_u32_checked_sub",sig_binary)?,
+        u32_checked_mul: import("jet_u32_checked_mul",sig_binary)?,
+        u32_checked_div: import("jet_u32_checked_div",sig_binary)?,
+        u32_checked_rem: import("jet_u32_checked_rem",sig_binary)?,
+        i64_checked_add: import("jet_i64_checked_add",sig_binary)?,
+        i64_checked_sub: import("jet_i64_checked_sub",sig_binary)?,
+        i64_checked_mul: import("jet_i64_checked_mul",sig_binary)?,
+        i64_checked_div: import("jet_i64_checked_div",sig_binary)?,
+        i64_checked_rem: import("jet_i64_checked_rem",sig_binary)?,
+        u64_checked_add: import("jet_u64_checked_add",sig_binary)?,
+        u64_checked_sub: import("jet_u64_checked_sub",sig_binary)?,
+        u64_checked_mul: import("jet_u64_checked_mul",sig_binary)?,
+        u64_checked_div: import("jet_u64_checked_div",sig_binary)?,
+        u64_checked_rem: import("jet_u64_checked_rem",sig_binary)?,
+        row_int_add: import("jet_std::jet_int_add",sig_binary)?,
+        row_int_sub: import("jet_std::jet_int_sub",sig_binary)?,
+        row_int_mul: import("jet_std::jet_int_mul",sig_binary)?,
+        row_int_bit_and: import("jet_std::jet_int_bit_and",sig_binary)?,
+        row_int_bit_or: import("jet_std::jet_int_bit_or",sig_binary)?,
+        row_int_bit_xor: import("jet_std::jet_int_bit_xor",sig_binary)?,
+        row_int_div: import("jet_std::jet_int_div",sig_located)?,
+        row_int_rem: import("jet_std::jet_int_rem",sig_located)?,
+        row_int_floor_div: import("jet_std::jet_int_floor_div",sig_located)?,
+        row_int_mod: import("jet_std::jet_int_mod",sig_located)?,
+        row_int_pow: import("jet_std::jet_int_pow",sig_located)?,
+        row_int_shl: import("jet_std::jet_int_shl",sig_located)?,
+        row_int_shr: import("jet_std::jet_int_shr",sig_located)?,
+        row_int_div_euclid: import("jet_std::jet_int_div_euclid",sig_binary)?,
+        row_int_rem_euclid: import("jet_std::jet_int_rem_euclid",sig_binary)?,
+        row_int_abs: import("jet_std::jet_int_abs",sig_unary)?,
+        row_int_compare: import("jet_int_compare",sig_compare_i64)?,
+        row_decimal_from_str: import("jet_decimal_from_str",sig_unary)?,
+        row_decimal_add: import("jet_decimal_add",sig_binary)?,
+        row_decimal_sub: import("jet_decimal_sub",sig_binary)?,
+        row_decimal_mul: import("jet_decimal_mul",sig_binary)?,
+        row_decimal_div: import("jet_decimal_div",sig_binary)?,
+        row_decimal_equal: import("jet_decimal_equal",sig_compare)?,
+        row_decimal_compare: import("jet_decimal_compare",sig_binary)?,
+        row_decimal_to_string: import("jet_decimal_to_string",sig_unary)?,
+        row_decimal_to_float: import("jet_decimal_to_float",sig_unary_f64)?,
+        row_fraction_from_parts: import("jet_fraction_from_parts",sig_binary)?,
+        row_fraction_add: import("jet_fraction_add",sig_binary)?,
+        row_fraction_sub: import("jet_fraction_sub",sig_binary)?,
+        row_fraction_mul: import("jet_fraction_mul",sig_binary)?,
+        row_fraction_div: import("jet_fraction_div",sig_binary)?,
+        row_fraction_equal: import("jet_fraction_equal",sig_compare)?,
+        row_fraction_to_string: import("jet_fraction_to_string",sig_unary)?,
+        row_fraction_to_float: import("jet_fraction_to_float",sig_unary_f64)?,
+        int_from_int: import("jet_jit_int_from_int",sig_unary)?,
+        int_to_native: import("jet_jit_int_to_native",sig_unary)?,
+        int_from_u64: import("jet_jit_int_from_u64",sig_unary)?,
+        int_from_str: import("jet_jit_int_from_str",sig_unary)?,
+        int_add: import("jet_jit_int_add",sig_binary)?,
+        int_sub: import("jet_jit_int_sub",sig_binary)?,
+        int_mul: import("jet_jit_int_mul",sig_binary)?,
+        int_bit_and: import("jet_jit_int_bit_and",sig_binary)?,
+        int_bit_or: import("jet_jit_int_bit_or",sig_binary)?,
+        int_bit_xor: import("jet_jit_int_bit_xor",sig_binary)?,
+        int_compare: import("jet_jit_int_compare",sig_compare_i64)?,
+        int_neg: import("jet_jit_int_neg",sig_unary)?,
+        int_abs: import("jet_jit_int_abs",sig_unary)?,
+        int_not: import("jet_jit_int_not",sig_unary)?,
+        int_shl: import("jet_jit_int_shl",sig_binary)?,
+        int_shr: import("jet_jit_int_shr",sig_binary)?,
+        int_to_string: import("jet_jit_int_to_string",sig_unary)?,
+        int_to_radix: import("jet_std::jet_int_to_radix",sig_binary)?,
+        int_from_radix: import("jet_std::jet_int_from_radix",sig_binary)?,
+        int_to_f64: import("jet_jit_int_to_f64",sig_unary_f64)?,
+        int_div: import("jet_jit_int_div",sig_binary)?,
+        int_div_euclid: import("jet_jit_int_div_euclid",sig_binary)?,
+        int_floor_div: import("jet_jit_int_floor_div",sig_binary)?,
+        int_mod: import("jet_jit_int_mod",sig_binary)?,
+        int_rem: import("jet_jit_int_rem",sig_binary)?,
+        int_rem_euclid: import("jet_jit_int_rem_euclid",sig_binary)?,
+        int_pow: import("jet_jit_int_pow",sig_binary)?,
+        int_factorial: import("jet_jit_int_factorial",sig_unary)?,
+        int_is_even: import("jet_jit_int_is_even",sig_unary_bool)?,
+        int_is_odd: import("jet_jit_int_is_odd",sig_unary_bool)?,
+        int_isqrt: import("jet_jit_int_isqrt",sig_unary)?,
+        int_binomial: import("jet_jit_int_binomial",sig_binary)?,
+        int_digits: import("jet_jit_int_digits",sig_unary)?,
+        int_leading_ones: import("jet_jit_int_leading_ones",sig_unary)?,
+        int_trailing_ones: import("jet_jit_int_trailing_ones",sig_unary)?,
+        int_checked_abs: import("jet_jit_int_checked_abs",sig_unary)?,
+        int_checked_neg: import("jet_jit_int_checked_neg",sig_unary)?,
+        int_checked_add: import("jet_jit_int_checked_add",sig_binary)?,
+        int_checked_sub: import("jet_jit_int_checked_sub",sig_binary)?,
+        int_checked_mul: import("jet_jit_int_checked_mul",sig_binary)?,
+        int_checked_div: import("jet_jit_int_checked_div",sig_binary)?,
+        int_checked_rem: import("jet_jit_int_checked_rem",sig_binary)?,
+        int_checked_pow: import("jet_jit_int_checked_pow",sig_binary)?,
+        int_saturating_add: import("jet_jit_int_saturating_add",sig_binary)?,
+        int_saturating_sub: import("jet_jit_int_saturating_sub",sig_binary)?,
+        int_saturating_mul: import("jet_jit_int_saturating_mul",sig_binary)?,
+        int_int_pow: import("jet_jit_int_int_pow",sig_binary)?,
+        int_gcd: import("jet_jit_int_gcd",sig_binary)?,
+        int_lcm: import("jet_jit_int_lcm",sig_binary)?,
+        int_div_mod: import("jet_jit_int_div_mod",sig_binary)?,
+        int_div_rem_pair: import("jet_jit_int_div_rem_pair",sig_binary)?,
+        decimal_from_str: import("jet_jit_decimal_from_str",sig_unary)?,
+        decimal_add: import("jet_jit_decimal_add",sig_binary)?,
+        decimal_sub: import("jet_jit_decimal_sub",sig_binary)?,
+        decimal_mul: import("jet_jit_decimal_mul",sig_binary)?,
+        decimal_div: import("jet_jit_decimal_div",sig_binary)?,
+        decimal_equal: import("jet_jit_decimal_equal",sig_compare)?,
+        decimal_compare: import("jet_jit_decimal_compare",sig_binary)?,
+        decimal_to_string: import("jet_jit_decimal_to_string",sig_unary)?,
+        decimal_to_float: import("jet_jit_decimal_to_float",sig_unary_f64)?,
+        fraction_new: import("jet_jit_fraction_new",sig_binary)?,
+        fraction_from_parts: import("jet_jit_fraction_from_parts",sig_binary)?,
+        fraction_add: import("jet_jit_fraction_add",sig_binary)?,
+        fraction_sub: import("jet_jit_fraction_sub",sig_binary)?,
+        fraction_mul: import("jet_jit_fraction_mul",sig_binary)?,
+        fraction_div: import("jet_jit_fraction_div",sig_binary)?,
+        fraction_equal: import("jet_jit_fraction_equal",sig_compare)?,
+        fraction_numerator: import("jet_jit_fraction_numerator",sig_unary)?,
+        fraction_denominator: import("jet_jit_fraction_denominator",sig_unary)?,
+        fraction_to_string: import("jet_jit_fraction_to_string",sig_unary)?,
+        fraction_to_float: import("jet_jit_fraction_to_float",sig_unary_f64)?,
+        fraction_is_zero: import("jet_jit_fraction_is_zero",sig_unary_bool)?,
+        complex_from_parts: import("jet_jit_complex_from_parts",sig_complex_parts)?,
+        row_complex_from_parts: import("jet_complex_from_parts",sig_complex_parts)?,
+        complex_add: import("jet_jit_complex_add",sig_binary)?,
+        row_complex_add: import("jet_complex_add",sig_binary)?,
+        complex_sub: import("jet_jit_complex_sub",sig_binary)?,
+        row_complex_sub: import("jet_complex_sub",sig_binary)?,
+        complex_mul: import("jet_jit_complex_mul",sig_binary)?,
+        row_complex_mul: import("jet_complex_mul",sig_binary)?,
+        complex_div: import("jet_jit_complex_div",sig_binary)?,
+        row_complex_div: import("jet_complex_div",sig_binary)?,
+        complex_abs: import("jet_jit_complex_abs",sig_unary_f64)?,
+        row_complex_abs: import("jet_complex_abs",sig_unary_f64)?,
+        complex_to_string: import("jet_jit_complex_to_string",sig_unary)?,
+        row_complex_to_string: import("jet_complex_to_string",sig_unary)?,
+    })
+}
+
+// Rust: crates/jet-jit/src/Numeric.rs:1152-1474
+// Lazy guarded addresses preserve declaration-only calls: they never touch the
+// native address seam. Entries are streamed in original order with early errors.
+fn numeric_entries(visit: fn(String, String, fn() -> GuardedAddress, NumericSignature) Err!) Err! {
+    // Rust: crates/jet-jit/src/Numeric.rs:1152
+    visit("i8_trap_add","jet_i8_trap_add",fn() { guarded(jet_jit_i8_trap_add) },.Located)?
+    visit("i8_trap_sub","jet_i8_trap_sub",fn() { guarded(jet_jit_i8_trap_sub) },.Located)?
+    visit("i8_trap_mul","jet_i8_trap_mul",fn() { guarded(jet_jit_i8_trap_mul) },.Located)?
+    visit("i8_trap_div","jet_i8_trap_div",fn() { guarded(jet_jit_i8_trap_div) },.Located)?
+    visit("i8_trap_rem","jet_i8_trap_rem",fn() { guarded(jet_jit_i8_trap_rem) },.Located)?
+    visit("u8_trap_add","jet_u8_trap_add",fn() { guarded(jet_jit_u8_trap_add) },.Located)?
+    visit("u8_trap_sub","jet_u8_trap_sub",fn() { guarded(jet_jit_u8_trap_sub) },.Located)?
+    visit("u8_trap_mul","jet_u8_trap_mul",fn() { guarded(jet_jit_u8_trap_mul) },.Located)?
+    visit("u8_trap_div","jet_u8_trap_div",fn() { guarded(jet_jit_u8_trap_div) },.Located)?
+    visit("u8_trap_rem","jet_u8_trap_rem",fn() { guarded(jet_jit_u8_trap_rem) },.Located)?
+    visit("i16_trap_add","jet_i16_trap_add",fn() { guarded(jet_jit_i16_trap_add) },.Located)?
+    visit("i16_trap_sub","jet_i16_trap_sub",fn() { guarded(jet_jit_i16_trap_sub) },.Located)?
+    visit("i16_trap_mul","jet_i16_trap_mul",fn() { guarded(jet_jit_i16_trap_mul) },.Located)?
+    visit("i16_trap_div","jet_i16_trap_div",fn() { guarded(jet_jit_i16_trap_div) },.Located)?
+    visit("i16_trap_rem","jet_i16_trap_rem",fn() { guarded(jet_jit_i16_trap_rem) },.Located)?
+    visit("u16_trap_add","jet_u16_trap_add",fn() { guarded(jet_jit_u16_trap_add) },.Located)?
+    visit("u16_trap_sub","jet_u16_trap_sub",fn() { guarded(jet_jit_u16_trap_sub) },.Located)?
+    visit("u16_trap_mul","jet_u16_trap_mul",fn() { guarded(jet_jit_u16_trap_mul) },.Located)?
+    visit("u16_trap_div","jet_u16_trap_div",fn() { guarded(jet_jit_u16_trap_div) },.Located)?
+    visit("u16_trap_rem","jet_u16_trap_rem",fn() { guarded(jet_jit_u16_trap_rem) },.Located)?
+    visit("i32_trap_add","jet_i32_trap_add",fn() { guarded(jet_jit_i32_trap_add) },.Located)?
+    visit("i32_trap_sub","jet_i32_trap_sub",fn() { guarded(jet_jit_i32_trap_sub) },.Located)?
+    visit("i32_trap_mul","jet_i32_trap_mul",fn() { guarded(jet_jit_i32_trap_mul) },.Located)?
+    visit("i32_trap_div","jet_i32_trap_div",fn() { guarded(jet_jit_i32_trap_div) },.Located)?
+    visit("i32_trap_rem","jet_i32_trap_rem",fn() { guarded(jet_jit_i32_trap_rem) },.Located)?
+    visit("u32_trap_add","jet_u32_trap_add",fn() { guarded(jet_jit_u32_trap_add) },.Located)?
+    visit("u32_trap_sub","jet_u32_trap_sub",fn() { guarded(jet_jit_u32_trap_sub) },.Located)?
+    visit("u32_trap_mul","jet_u32_trap_mul",fn() { guarded(jet_jit_u32_trap_mul) },.Located)?
+    visit("u32_trap_div","jet_u32_trap_div",fn() { guarded(jet_jit_u32_trap_div) },.Located)?
+    visit("u32_trap_rem","jet_u32_trap_rem",fn() { guarded(jet_jit_u32_trap_rem) },.Located)?
+    visit("u32_rotate_left","jet_u32_rotate_left",fn() { guarded(jet_jit_u32_rotate_left) },.Located)?
+    visit("i64_trap_add","jet_i64_trap_add",fn() { guarded(jet_jit_i64_trap_add) },.Located)?
+    visit("i64_trap_sub","jet_i64_trap_sub",fn() { guarded(jet_jit_i64_trap_sub) },.Located)?
+    visit("i64_trap_mul","jet_i64_trap_mul",fn() { guarded(jet_jit_i64_trap_mul) },.Located)?
+    visit("i64_trap_div","jet_i64_trap_div",fn() { guarded(jet_jit_i64_trap_div) },.Located)?
+    visit("i64_trap_rem","jet_i64_trap_rem",fn() { guarded(jet_jit_i64_trap_rem) },.Located)?
+    visit("u64_trap_add","jet_u64_trap_add",fn() { guarded(jet_jit_u64_trap_add) },.Located)?
+    visit("u64_trap_sub","jet_u64_trap_sub",fn() { guarded(jet_jit_u64_trap_sub) },.Located)?
+    visit("u64_trap_mul","jet_u64_trap_mul",fn() { guarded(jet_jit_u64_trap_mul) },.Located)?
+    visit("u64_trap_div","jet_u64_trap_div",fn() { guarded(jet_jit_u64_trap_div) },.Located)?
+    visit("u64_trap_rem","jet_u64_trap_rem",fn() { guarded(jet_jit_u64_trap_rem) },.Located)?
+    visit("u64_rotate_left","jet_u64_rotate_left",fn() { guarded(jet_jit_u64_rotate_left) },.Located)?
+    visit("u64_rotate_right","jet_u64_rotate_right",fn() { guarded(jet_jit_u64_rotate_right) },.Located)?
+    visit("i8_trap_shl","jet_i8_trap_shl",fn() { guarded(jet_jit_i8_trap_shl) },.Located)?
+    visit("i8_trap_shr","jet_i8_trap_shr",fn() { guarded(jet_jit_i8_trap_shr) },.Located)?
+    visit("i8_trap_pow","jet_i8_trap_pow",fn() { guarded(jet_jit_i8_trap_pow) },.Located)?
+    visit("i8_trap_floor_div","jet_i8_trap_floor_div",fn() { guarded(jet_jit_i8_trap_floor_div) },.Located)?
+    visit("i8_trap_mod","jet_i8_trap_mod",fn() { guarded(jet_jit_i8_trap_mod) },.Located)?
+    visit("u8_trap_shl","jet_u8_trap_shl",fn() { guarded(jet_jit_u8_trap_shl) },.Located)?
+    visit("u8_trap_shr","jet_u8_trap_shr",fn() { guarded(jet_jit_u8_trap_shr) },.Located)?
+    visit("u8_trap_pow","jet_u8_trap_pow",fn() { guarded(jet_jit_u8_trap_pow) },.Located)?
+    visit("u8_trap_floor_div","jet_u8_trap_floor_div",fn() { guarded(jet_jit_u8_trap_floor_div) },.Located)?
+    visit("u8_trap_mod","jet_u8_trap_mod",fn() { guarded(jet_jit_u8_trap_mod) },.Located)?
+    visit("i16_trap_shl","jet_i16_trap_shl",fn() { guarded(jet_jit_i16_trap_shl) },.Located)?
+    visit("i16_trap_shr","jet_i16_trap_shr",fn() { guarded(jet_jit_i16_trap_shr) },.Located)?
+    visit("i16_trap_pow","jet_i16_trap_pow",fn() { guarded(jet_jit_i16_trap_pow) },.Located)?
+    visit("i16_trap_floor_div","jet_i16_trap_floor_div",fn() { guarded(jet_jit_i16_trap_floor_div) },.Located)?
+    visit("i16_trap_mod","jet_i16_trap_mod",fn() { guarded(jet_jit_i16_trap_mod) },.Located)?
+    visit("u16_trap_shl","jet_u16_trap_shl",fn() { guarded(jet_jit_u16_trap_shl) },.Located)?
+    visit("u16_trap_shr","jet_u16_trap_shr",fn() { guarded(jet_jit_u16_trap_shr) },.Located)?
+    visit("u16_trap_pow","jet_u16_trap_pow",fn() { guarded(jet_jit_u16_trap_pow) },.Located)?
+    visit("u16_trap_floor_div","jet_u16_trap_floor_div",fn() { guarded(jet_jit_u16_trap_floor_div) },.Located)?
+    visit("u16_trap_mod","jet_u16_trap_mod",fn() { guarded(jet_jit_u16_trap_mod) },.Located)?
+    visit("i32_trap_shl","jet_i32_trap_shl",fn() { guarded(jet_jit_i32_trap_shl) },.Located)?
+    visit("i32_trap_shr","jet_i32_trap_shr",fn() { guarded(jet_jit_i32_trap_shr) },.Located)?
+    visit("i32_trap_pow","jet_i32_trap_pow",fn() { guarded(jet_jit_i32_trap_pow) },.Located)?
+    visit("i32_trap_floor_div","jet_i32_trap_floor_div",fn() { guarded(jet_jit_i32_trap_floor_div) },.Located)?
+    visit("i32_trap_mod","jet_i32_trap_mod",fn() { guarded(jet_jit_i32_trap_mod) },.Located)?
+    visit("u32_trap_shl","jet_u32_trap_shl",fn() { guarded(jet_jit_u32_trap_shl) },.Located)?
+    visit("u32_trap_shr","jet_u32_trap_shr",fn() { guarded(jet_jit_u32_trap_shr) },.Located)?
+    visit("u32_trap_pow","jet_u32_trap_pow",fn() { guarded(jet_jit_u32_trap_pow) },.Located)?
+    visit("u32_trap_floor_div","jet_u32_trap_floor_div",fn() { guarded(jet_jit_u32_trap_floor_div) },.Located)?
+    visit("u32_trap_mod","jet_u32_trap_mod",fn() { guarded(jet_jit_u32_trap_mod) },.Located)?
+    visit("i64_trap_shl","jet_i64_trap_shl",fn() { guarded(jet_jit_i64_trap_shl) },.Located)?
+    visit("i64_trap_shr","jet_i64_trap_shr",fn() { guarded(jet_jit_i64_trap_shr) },.Located)?
+    visit("i64_trap_pow","jet_i64_trap_pow",fn() { guarded(jet_jit_i64_trap_pow) },.Located)?
+    visit("i64_trap_floor_div","jet_i64_trap_floor_div",fn() { guarded(jet_jit_i64_trap_floor_div) },.Located)?
+    visit("i64_trap_mod","jet_i64_trap_mod",fn() { guarded(jet_jit_i64_trap_mod) },.Located)?
+    visit("u64_trap_shl","jet_u64_trap_shl",fn() { guarded(jet_jit_u64_trap_shl) },.Located)?
+    visit("u64_trap_shr","jet_u64_trap_shr",fn() { guarded(jet_jit_u64_trap_shr) },.Located)?
+    visit("u64_trap_pow","jet_u64_trap_pow",fn() { guarded(jet_jit_u64_trap_pow) },.Located)?
+    visit("u64_trap_floor_div","jet_u64_trap_floor_div",fn() { guarded(jet_jit_u64_trap_floor_div) },.Located)?
+    // Rust: crates/jet-jit/src/Numeric.rs:1234 (original binary signature retained)
+    visit("u64_trap_mod","jet_u64_trap_mod",fn() { guarded(jet_jit_u64_trap_mod) },.Binary)?
+    visit("i8_wrapping_add","jet_i8_wrapping_add",fn() { guarded(jet_jit_i8_wrapping_add) },.Binary)?
+    visit("i8_wrapping_sub","jet_i8_wrapping_sub",fn() { guarded(jet_jit_i8_wrapping_sub) },.Binary)?
+    visit("i8_wrapping_mul","jet_i8_wrapping_mul",fn() { guarded(jet_jit_i8_wrapping_mul) },.Binary)?
+    visit("i8_wrapping_div","jet_i8_wrapping_div",fn() { guarded(jet_jit_i8_wrapping_div) },.Binary)?
+    visit("i8_wrapping_rem","jet_i8_wrapping_rem",fn() { guarded(jet_jit_i8_wrapping_rem) },.Binary)?
+    visit("i8_wrapping_shl","jet_i8_wrapping_shl",fn() { guarded(jet_jit_i8_wrapping_shl) },.Binary)?
+    visit("i8_wrapping_shr","jet_i8_wrapping_shr",fn() { guarded(jet_jit_i8_wrapping_shr) },.Binary)?
+    visit("u8_wrapping_add","jet_u8_wrapping_add",fn() { guarded(jet_jit_u8_wrapping_add) },.Binary)?
+    visit("u8_wrapping_sub","jet_u8_wrapping_sub",fn() { guarded(jet_jit_u8_wrapping_sub) },.Binary)?
+    visit("u8_wrapping_mul","jet_u8_wrapping_mul",fn() { guarded(jet_jit_u8_wrapping_mul) },.Binary)?
+    visit("u8_wrapping_div","jet_u8_wrapping_div",fn() { guarded(jet_jit_u8_wrapping_div) },.Binary)?
+    visit("u8_wrapping_rem","jet_u8_wrapping_rem",fn() { guarded(jet_jit_u8_wrapping_rem) },.Binary)?
+    visit("u8_wrapping_shl","jet_u8_wrapping_shl",fn() { guarded(jet_jit_u8_wrapping_shl) },.Binary)?
+    visit("u8_wrapping_shr","jet_u8_wrapping_shr",fn() { guarded(jet_jit_u8_wrapping_shr) },.Binary)?
+    visit("i16_wrapping_add","jet_i16_wrapping_add",fn() { guarded(jet_jit_i16_wrapping_add) },.Binary)?
+    visit("i16_wrapping_sub","jet_i16_wrapping_sub",fn() { guarded(jet_jit_i16_wrapping_sub) },.Binary)?
+    visit("i16_wrapping_mul","jet_i16_wrapping_mul",fn() { guarded(jet_jit_i16_wrapping_mul) },.Binary)?
+    visit("i16_wrapping_div","jet_i16_wrapping_div",fn() { guarded(jet_jit_i16_wrapping_div) },.Binary)?
+    visit("i16_wrapping_rem","jet_i16_wrapping_rem",fn() { guarded(jet_jit_i16_wrapping_rem) },.Binary)?
+    visit("i16_wrapping_shl","jet_i16_wrapping_shl",fn() { guarded(jet_jit_i16_wrapping_shl) },.Binary)?
+    visit("i16_wrapping_shr","jet_i16_wrapping_shr",fn() { guarded(jet_jit_i16_wrapping_shr) },.Binary)?
+    visit("u16_wrapping_add","jet_u16_wrapping_add",fn() { guarded(jet_jit_u16_wrapping_add) },.Binary)?
+    visit("u16_wrapping_sub","jet_u16_wrapping_sub",fn() { guarded(jet_jit_u16_wrapping_sub) },.Binary)?
+    visit("u16_wrapping_mul","jet_u16_wrapping_mul",fn() { guarded(jet_jit_u16_wrapping_mul) },.Binary)?
+    visit("u16_wrapping_div","jet_u16_wrapping_div",fn() { guarded(jet_jit_u16_wrapping_div) },.Binary)?
+    visit("u16_wrapping_rem","jet_u16_wrapping_rem",fn() { guarded(jet_jit_u16_wrapping_rem) },.Binary)?
+    visit("u16_wrapping_shl","jet_u16_wrapping_shl",fn() { guarded(jet_jit_u16_wrapping_shl) },.Binary)?
+    visit("u16_wrapping_shr","jet_u16_wrapping_shr",fn() { guarded(jet_jit_u16_wrapping_shr) },.Binary)?
+    visit("i32_wrapping_add","jet_i32_wrapping_add",fn() { guarded(jet_jit_i32_wrapping_add) },.Binary)?
+    visit("i32_wrapping_sub","jet_i32_wrapping_sub",fn() { guarded(jet_jit_i32_wrapping_sub) },.Binary)?
+    visit("i32_wrapping_mul","jet_i32_wrapping_mul",fn() { guarded(jet_jit_i32_wrapping_mul) },.Binary)?
+    visit("i32_wrapping_div","jet_i32_wrapping_div",fn() { guarded(jet_jit_i32_wrapping_div) },.Binary)?
+    visit("i32_wrapping_rem","jet_i32_wrapping_rem",fn() { guarded(jet_jit_i32_wrapping_rem) },.Binary)?
+    visit("i32_wrapping_shl","jet_i32_wrapping_shl",fn() { guarded(jet_jit_i32_wrapping_shl) },.Binary)?
+    visit("i32_wrapping_shr","jet_i32_wrapping_shr",fn() { guarded(jet_jit_i32_wrapping_shr) },.Binary)?
+    visit("u32_wrapping_add","jet_u32_wrapping_add",fn() { guarded(jet_jit_u32_wrapping_add) },.Binary)?
+    visit("u32_wrapping_sub","jet_u32_wrapping_sub",fn() { guarded(jet_jit_u32_wrapping_sub) },.Binary)?
+    visit("u32_wrapping_mul","jet_u32_wrapping_mul",fn() { guarded(jet_jit_u32_wrapping_mul) },.Binary)?
+    visit("u32_wrapping_div","jet_u32_wrapping_div",fn() { guarded(jet_jit_u32_wrapping_div) },.Binary)?
+    visit("u32_wrapping_rem","jet_u32_wrapping_rem",fn() { guarded(jet_jit_u32_wrapping_rem) },.Binary)?
+    visit("u32_wrapping_shl","jet_u32_wrapping_shl",fn() { guarded(jet_jit_u32_wrapping_shl) },.Binary)?
+    visit("u32_wrapping_shr","jet_u32_wrapping_shr",fn() { guarded(jet_jit_u32_wrapping_shr) },.Binary)?
+    visit("i64_wrapping_add","jet_i64_wrapping_add",fn() { guarded(jet_jit_i64_wrapping_add) },.Binary)?
+    visit("i64_wrapping_sub","jet_i64_wrapping_sub",fn() { guarded(jet_jit_i64_wrapping_sub) },.Binary)?
+    visit("i64_wrapping_mul","jet_i64_wrapping_mul",fn() { guarded(jet_jit_i64_wrapping_mul) },.Binary)?
+    visit("i64_wrapping_div","jet_i64_wrapping_div",fn() { guarded(jet_jit_i64_wrapping_div) },.Binary)?
+    visit("i64_wrapping_rem","jet_i64_wrapping_rem",fn() { guarded(jet_jit_i64_wrapping_rem) },.Binary)?
+    visit("i64_wrapping_shl","jet_i64_wrapping_shl",fn() { guarded(jet_jit_i64_wrapping_shl) },.Binary)?
+    visit("i64_wrapping_shr","jet_i64_wrapping_shr",fn() { guarded(jet_jit_i64_wrapping_shr) },.Binary)?
+    visit("u64_wrapping_add","jet_u64_wrapping_add",fn() { guarded(jet_jit_u64_wrapping_add) },.Binary)?
+    visit("u64_wrapping_sub","jet_u64_wrapping_sub",fn() { guarded(jet_jit_u64_wrapping_sub) },.Binary)?
+    visit("u64_wrapping_mul","jet_u64_wrapping_mul",fn() { guarded(jet_jit_u64_wrapping_mul) },.Binary)?
+    visit("u64_wrapping_div","jet_u64_wrapping_div",fn() { guarded(jet_jit_u64_wrapping_div) },.Binary)?
+    visit("u64_wrapping_rem","jet_u64_wrapping_rem",fn() { guarded(jet_jit_u64_wrapping_rem) },.Binary)?
+    visit("u64_wrapping_shl","jet_u64_wrapping_shl",fn() { guarded(jet_jit_u64_wrapping_shl) },.Binary)?
+    visit("u64_wrapping_shr","jet_u64_wrapping_shr",fn() { guarded(jet_jit_u64_wrapping_shr) },.Binary)?
+    visit("i8_saturating_add","jet_i8_saturating_add",fn() { guarded(jet_jit_i8_saturating_add) },.Binary)?
+    visit("i8_saturating_sub","jet_i8_saturating_sub",fn() { guarded(jet_jit_i8_saturating_sub) },.Binary)?
+    visit("i8_saturating_mul","jet_i8_saturating_mul",fn() { guarded(jet_jit_i8_saturating_mul) },.Binary)?
+    visit("u8_saturating_add","jet_u8_saturating_add",fn() { guarded(jet_jit_u8_saturating_add) },.Binary)?
+    visit("u8_saturating_sub","jet_u8_saturating_sub",fn() { guarded(jet_jit_u8_saturating_sub) },.Binary)?
+    visit("u8_saturating_mul","jet_u8_saturating_mul",fn() { guarded(jet_jit_u8_saturating_mul) },.Binary)?
+    visit("i16_saturating_add","jet_i16_saturating_add",fn() { guarded(jet_jit_i16_saturating_add) },.Binary)?
+    visit("i16_saturating_sub","jet_i16_saturating_sub",fn() { guarded(jet_jit_i16_saturating_sub) },.Binary)?
+    visit("i16_saturating_mul","jet_i16_saturating_mul",fn() { guarded(jet_jit_i16_saturating_mul) },.Binary)?
+    visit("u16_saturating_add","jet_u16_saturating_add",fn() { guarded(jet_jit_u16_saturating_add) },.Binary)?
+    visit("u16_saturating_sub","jet_u16_saturating_sub",fn() { guarded(jet_jit_u16_saturating_sub) },.Binary)?
+    visit("u16_saturating_mul","jet_u16_saturating_mul",fn() { guarded(jet_jit_u16_saturating_mul) },.Binary)?
+    visit("i32_saturating_add","jet_i32_saturating_add",fn() { guarded(jet_jit_i32_saturating_add) },.Binary)?
+    visit("i32_saturating_sub","jet_i32_saturating_sub",fn() { guarded(jet_jit_i32_saturating_sub) },.Binary)?
+    visit("i32_saturating_mul","jet_i32_saturating_mul",fn() { guarded(jet_jit_i32_saturating_mul) },.Binary)?
+    visit("u32_saturating_add","jet_u32_saturating_add",fn() { guarded(jet_jit_u32_saturating_add) },.Binary)?
+    visit("u32_saturating_sub","jet_u32_saturating_sub",fn() { guarded(jet_jit_u32_saturating_sub) },.Binary)?
+    visit("u32_saturating_mul","jet_u32_saturating_mul",fn() { guarded(jet_jit_u32_saturating_mul) },.Binary)?
+    visit("i64_saturating_add","jet_i64_saturating_add",fn() { guarded(jet_jit_i64_saturating_add) },.Binary)?
+    visit("i64_saturating_sub","jet_i64_saturating_sub",fn() { guarded(jet_jit_i64_saturating_sub) },.Binary)?
+    visit("i64_saturating_mul","jet_i64_saturating_mul",fn() { guarded(jet_jit_i64_saturating_mul) },.Binary)?
+    visit("u64_saturating_add","jet_u64_saturating_add",fn() { guarded(jet_jit_u64_saturating_add) },.Binary)?
+    visit("u64_saturating_sub","jet_u64_saturating_sub",fn() { guarded(jet_jit_u64_saturating_sub) },.Binary)?
+    visit("u64_saturating_mul","jet_u64_saturating_mul",fn() { guarded(jet_jit_u64_saturating_mul) },.Binary)?
+    visit("i8_checked_add","jet_i8_checked_add",fn() { guarded(jet_jit_i8_checked_add) },.Binary)?
+    visit("i8_checked_sub","jet_i8_checked_sub",fn() { guarded(jet_jit_i8_checked_sub) },.Binary)?
+    visit("i8_checked_mul","jet_i8_checked_mul",fn() { guarded(jet_jit_i8_checked_mul) },.Binary)?
+    visit("i8_checked_div","jet_i8_checked_div",fn() { guarded(jet_jit_i8_checked_div) },.Binary)?
+    visit("i8_checked_rem","jet_i8_checked_rem",fn() { guarded(jet_jit_i8_checked_rem) },.Binary)?
+    visit("u8_checked_add","jet_u8_checked_add",fn() { guarded(jet_jit_u8_checked_add) },.Binary)?
+    visit("u8_checked_sub","jet_u8_checked_sub",fn() { guarded(jet_jit_u8_checked_sub) },.Binary)?
+    visit("u8_checked_mul","jet_u8_checked_mul",fn() { guarded(jet_jit_u8_checked_mul) },.Binary)?
+    visit("u8_checked_div","jet_u8_checked_div",fn() { guarded(jet_jit_u8_checked_div) },.Binary)?
+    visit("u8_checked_rem","jet_u8_checked_rem",fn() { guarded(jet_jit_u8_checked_rem) },.Binary)?
+    visit("i16_checked_add","jet_i16_checked_add",fn() { guarded(jet_jit_i16_checked_add) },.Binary)?
+    visit("i16_checked_sub","jet_i16_checked_sub",fn() { guarded(jet_jit_i16_checked_sub) },.Binary)?
+    visit("i16_checked_mul","jet_i16_checked_mul",fn() { guarded(jet_jit_i16_checked_mul) },.Binary)?
+    visit("i16_checked_div","jet_i16_checked_div",fn() { guarded(jet_jit_i16_checked_div) },.Binary)?
+    visit("i16_checked_rem","jet_i16_checked_rem",fn() { guarded(jet_jit_i16_checked_rem) },.Binary)?
+    visit("u16_checked_add","jet_u16_checked_add",fn() { guarded(jet_jit_u16_checked_add) },.Binary)?
+    visit("u16_checked_sub","jet_u16_checked_sub",fn() { guarded(jet_jit_u16_checked_sub) },.Binary)?
+    visit("u16_checked_mul","jet_u16_checked_mul",fn() { guarded(jet_jit_u16_checked_mul) },.Binary)?
+    visit("u16_checked_div","jet_u16_checked_div",fn() { guarded(jet_jit_u16_checked_div) },.Binary)?
+    visit("u16_checked_rem","jet_u16_checked_rem",fn() { guarded(jet_jit_u16_checked_rem) },.Binary)?
+    visit("i32_checked_add","jet_i32_checked_add",fn() { guarded(jet_jit_i32_checked_add) },.Binary)?
+    visit("i32_checked_sub","jet_i32_checked_sub",fn() { guarded(jet_jit_i32_checked_sub) },.Binary)?
+    visit("i32_checked_mul","jet_i32_checked_mul",fn() { guarded(jet_jit_i32_checked_mul) },.Binary)?
+    visit("i32_checked_div","jet_i32_checked_div",fn() { guarded(jet_jit_i32_checked_div) },.Binary)?
+    visit("i32_checked_rem","jet_i32_checked_rem",fn() { guarded(jet_jit_i32_checked_rem) },.Binary)?
+    visit("u32_checked_add","jet_u32_checked_add",fn() { guarded(jet_jit_u32_checked_add) },.Binary)?
+    visit("u32_checked_sub","jet_u32_checked_sub",fn() { guarded(jet_jit_u32_checked_sub) },.Binary)?
+    visit("u32_checked_mul","jet_u32_checked_mul",fn() { guarded(jet_jit_u32_checked_mul) },.Binary)?
+    visit("u32_checked_div","jet_u32_checked_div",fn() { guarded(jet_jit_u32_checked_div) },.Binary)?
+    visit("u32_checked_rem","jet_u32_checked_rem",fn() { guarded(jet_jit_u32_checked_rem) },.Binary)?
+    visit("i64_checked_add","jet_i64_checked_add",fn() { guarded(jet_jit_i64_checked_add) },.Binary)?
+    visit("i64_checked_sub","jet_i64_checked_sub",fn() { guarded(jet_jit_i64_checked_sub) },.Binary)?
+    visit("i64_checked_mul","jet_i64_checked_mul",fn() { guarded(jet_jit_i64_checked_mul) },.Binary)?
+    visit("i64_checked_div","jet_i64_checked_div",fn() { guarded(jet_jit_i64_checked_div) },.Binary)?
+    visit("i64_checked_rem","jet_i64_checked_rem",fn() { guarded(jet_jit_i64_checked_rem) },.Binary)?
+    visit("u64_checked_add","jet_u64_checked_add",fn() { guarded(jet_jit_u64_checked_add) },.Binary)?
+    visit("u64_checked_sub","jet_u64_checked_sub",fn() { guarded(jet_jit_u64_checked_sub) },.Binary)?
+    visit("u64_checked_mul","jet_u64_checked_mul",fn() { guarded(jet_jit_u64_checked_mul) },.Binary)?
+    visit("u64_checked_div","jet_u64_checked_div",fn() { guarded(jet_jit_u64_checked_div) },.Binary)?
+    visit("u64_checked_rem","jet_u64_checked_rem",fn() { guarded(jet_jit_u64_checked_rem) },.Binary)?
+    // Rust: crates/jet-jit/src/Numeric.rs:1355
+    visit("row_int_add","jet_std::jet_int_add",fn() { guarded(jet_jit_int_add) },.Binary)?
+    visit("row_int_sub","jet_std::jet_int_sub",fn() { guarded(jet_jit_int_sub) },.Binary)?
+    visit("row_int_mul","jet_std::jet_int_mul",fn() { guarded(jet_jit_int_mul) },.Binary)?
+    visit("row_int_bit_and","jet_std::jet_int_bit_and",fn() { guarded(jet_jit_int_bit_and) },.Binary)?
+    visit("row_int_bit_or","jet_std::jet_int_bit_or",fn() { guarded(jet_jit_int_bit_or) },.Binary)?
+    visit("row_int_bit_xor","jet_std::jet_int_bit_xor",fn() { guarded(jet_jit_int_bit_xor) },.Binary)?
+    visit("row_int_div","jet_std::jet_int_div",fn() { guarded(jet_jit_int_div_at) },.Located)?
+    visit("row_int_rem","jet_std::jet_int_rem",fn() { guarded(jet_jit_int_rem_at) },.Located)?
+    visit("row_int_floor_div","jet_std::jet_int_floor_div",fn() { guarded(jet_jit_int_floor_div_at) },.Located)?
+    visit("row_int_mod","jet_std::jet_int_mod",fn() { guarded(jet_jit_int_mod_at) },.Located)?
+    visit("row_int_pow","jet_std::jet_int_pow",fn() { guarded(jet_jit_int_pow_at) },.Located)?
+    visit("row_int_shl","jet_std::jet_int_shl",fn() { guarded(jet_jit_int_shl_at) },.Located)?
+    visit("row_int_shr","jet_std::jet_int_shr",fn() { guarded(jet_jit_int_shr_at) },.Located)?
+    visit("row_int_div_euclid","jet_std::jet_int_div_euclid",fn() { guarded(jet_jit_int_div_euclid) },.Binary)?
+    visit("row_int_rem_euclid","jet_std::jet_int_rem_euclid",fn() { guarded(jet_jit_int_rem_euclid) },.Binary)?
+    visit("row_int_abs","jet_std::jet_int_abs",fn() { guarded(jet_jit_int_abs) },.Unary)?
+    visit("row_int_compare","jet_int_compare",fn() { guarded(jet_jit_int_compare) },.CompareI64)?
+    visit("row_decimal_from_str","jet_decimal_from_str",fn() { guarded(jet_jit_decimal_from_str) },.Unary)?
+    visit("row_decimal_add","jet_decimal_add",fn() { guarded(jet_jit_decimal_add) },.Binary)?
+    visit("row_decimal_sub","jet_decimal_sub",fn() { guarded(jet_jit_decimal_sub) },.Binary)?
+    visit("row_decimal_mul","jet_decimal_mul",fn() { guarded(jet_jit_decimal_mul) },.Binary)?
+    visit("row_decimal_div","jet_decimal_div",fn() { guarded(jet_jit_decimal_div) },.Binary)?
+    visit("row_decimal_equal","jet_decimal_equal",fn() { guarded(jet_jit_decimal_equal) },.Compare)?
+    visit("row_decimal_compare","jet_decimal_compare",fn() { guarded(jet_jit_decimal_compare) },.Binary)?
+    visit("row_decimal_to_string","jet_decimal_to_string",fn() { guarded(jet_jit_decimal_to_string) },.Unary)?
+    visit("row_decimal_to_float","jet_decimal_to_float",fn() { guarded(jet_jit_decimal_to_float) },.UnaryF64)?
+    visit("row_fraction_from_parts","jet_fraction_from_parts",fn() { guarded(jet_jit_fraction_from_parts) },.Binary)?
+    visit("row_fraction_add","jet_fraction_add",fn() { guarded(jet_jit_fraction_add) },.Binary)?
+    visit("row_fraction_sub","jet_fraction_sub",fn() { guarded(jet_jit_fraction_sub) },.Binary)?
+    visit("row_fraction_mul","jet_fraction_mul",fn() { guarded(jet_jit_fraction_mul) },.Binary)?
+    visit("row_fraction_div","jet_fraction_div",fn() { guarded(jet_jit_fraction_div) },.Binary)?
+    visit("row_fraction_equal","jet_fraction_equal",fn() { guarded(jet_jit_fraction_equal) },.Compare)?
+    visit("row_fraction_to_string","jet_fraction_to_string",fn() { guarded(jet_jit_fraction_to_string) },.Unary)?
+    visit("row_fraction_to_float","jet_fraction_to_float",fn() { guarded(jet_jit_fraction_to_float) },.UnaryF64)?
+    // Rust: crates/jet-jit/src/Numeric.rs:1389
+    visit("int_from_int","jet_jit_int_from_int",fn() { guarded(jet_jit_int_from_int) },.Unary)?
+    visit("int_to_native","jet_jit_int_to_native",fn() { guarded(jet_jit_int_to_native) },.Unary)?
+    visit("int_from_u64","jet_jit_int_from_u64",fn() { guarded(jet_jit_int_from_u64) },.Unary)?
+    visit("int_from_str","jet_jit_int_from_str",fn() { guarded(jet_jit_int_from_str) },.Unary)?
+    visit("int_add","jet_jit_int_add",fn() { guarded(jet_jit_int_add) },.Binary)?
+    visit("int_sub","jet_jit_int_sub",fn() { guarded(jet_jit_int_sub) },.Binary)?
+    visit("int_mul","jet_jit_int_mul",fn() { guarded(jet_jit_int_mul) },.Binary)?
+    visit("int_bit_and","jet_jit_int_bit_and",fn() { guarded(jet_jit_int_bit_and) },.Binary)?
+    visit("int_bit_or","jet_jit_int_bit_or",fn() { guarded(jet_jit_int_bit_or) },.Binary)?
+    visit("int_bit_xor","jet_jit_int_bit_xor",fn() { guarded(jet_jit_int_bit_xor) },.Binary)?
+    visit("int_compare","jet_jit_int_compare",fn() { guarded(jet_jit_int_compare) },.CompareI64)?
+    visit("int_neg","jet_jit_int_neg",fn() { guarded(jet_jit_int_neg) },.Unary)?
+    visit("int_abs","jet_jit_int_abs",fn() { guarded(jet_jit_int_abs) },.Unary)?
+    visit("int_not","jet_jit_int_not",fn() { guarded(jet_jit_int_not) },.Unary)?
+    visit("int_shl","jet_jit_int_shl",fn() { guarded(jet_jit_int_shl) },.Binary)?
+    visit("int_shr","jet_jit_int_shr",fn() { guarded(jet_jit_int_shr) },.Binary)?
+    visit("int_to_string","jet_jit_int_to_string",fn() { guarded(jet_jit_int_to_string) },.Unary)?
+    visit("int_to_radix","jet_std::jet_int_to_radix",fn() { guarded(jet_jit_int_to_radix) },.Binary)?
+    visit("int_from_radix","jet_std::jet_int_from_radix",fn() { guarded(jet_jit_int_from_radix) },.Binary)?
+    visit("int_to_f64","jet_jit_int_to_f64",fn() { guarded(jet_jit_int_to_f64) },.UnaryF64)?
+    visit("int_div","jet_jit_int_div",fn() { guarded(jet_jit_int_div) },.Binary)?
+    visit("int_div_euclid","jet_jit_int_div_euclid",fn() { guarded(jet_jit_int_div_euclid) },.Binary)?
+    visit("int_floor_div","jet_jit_int_floor_div",fn() { guarded(jet_jit_int_floor_div) },.Binary)?
+    visit("int_mod","jet_jit_int_mod",fn() { guarded(jet_jit_int_mod) },.Binary)?
+    visit("int_rem","jet_jit_int_rem",fn() { guarded(jet_jit_int_rem) },.Binary)?
+    visit("int_rem_euclid","jet_jit_int_rem_euclid",fn() { guarded(jet_jit_int_rem_euclid) },.Binary)?
+    visit("int_pow","jet_jit_int_pow",fn() { guarded(jet_jit_int_pow) },.Binary)?
+    visit("int_factorial","jet_jit_int_factorial",fn() { guarded(jet_jit_int_factorial) },.Unary)?
+    visit("int_is_even","jet_jit_int_is_even",fn() { guarded(jet_jit_int_is_even) },.UnaryBool)?
+    visit("int_is_odd","jet_jit_int_is_odd",fn() { guarded(jet_jit_int_is_odd) },.UnaryBool)?
+    visit("int_isqrt","jet_jit_int_isqrt",fn() { guarded(jet_jit_int_isqrt) },.Unary)?
+    visit("int_binomial","jet_jit_int_binomial",fn() { guarded(jet_jit_int_binomial) },.Binary)?
+    visit("int_digits","jet_jit_int_digits",fn() { guarded(jet_jit_int_digits) },.Unary)?
+    visit("int_leading_ones","jet_jit_int_leading_ones",fn() { guarded(jet_jit_int_leading_ones) },.Unary)?
+    visit("int_trailing_ones","jet_jit_int_trailing_ones",fn() { guarded(jet_jit_int_trailing_ones) },.Unary)?
+    visit("int_checked_abs","jet_jit_int_checked_abs",fn() { guarded(jet_jit_int_checked_abs) },.Unary)?
+    visit("int_checked_neg","jet_jit_int_checked_neg",fn() { guarded(jet_jit_int_checked_neg) },.Unary)?
+    visit("int_checked_add","jet_jit_int_checked_add",fn() { guarded(jet_jit_int_checked_add) },.Binary)?
+    visit("int_checked_sub","jet_jit_int_checked_sub",fn() { guarded(jet_jit_int_checked_sub) },.Binary)?
+    visit("int_checked_mul","jet_jit_int_checked_mul",fn() { guarded(jet_jit_int_checked_mul) },.Binary)?
+    visit("int_checked_div","jet_jit_int_checked_div",fn() { guarded(jet_jit_int_checked_div) },.Binary)?
+    visit("int_checked_rem","jet_jit_int_checked_rem",fn() { guarded(jet_jit_int_checked_rem) },.Binary)?
+    visit("int_checked_pow","jet_jit_int_checked_pow",fn() { guarded(jet_jit_int_checked_pow) },.Binary)?
+    visit("int_saturating_add","jet_jit_int_saturating_add",fn() { guarded(jet_jit_int_saturating_add) },.Binary)?
+    visit("int_saturating_sub","jet_jit_int_saturating_sub",fn() { guarded(jet_jit_int_saturating_sub) },.Binary)?
+    visit("int_saturating_mul","jet_jit_int_saturating_mul",fn() { guarded(jet_jit_int_saturating_mul) },.Binary)?
+    visit("int_int_pow","jet_jit_int_int_pow",fn() { guarded(jet_jit_int_int_pow) },.Binary)?
+    visit("int_gcd","jet_jit_int_gcd",fn() { guarded(jet_jit_int_gcd) },.Binary)?
+    visit("int_lcm","jet_jit_int_lcm",fn() { guarded(jet_jit_int_lcm) },.Binary)?
+    visit("int_div_mod","jet_jit_int_div_mod",fn() { guarded(jet_jit_int_div_mod) },.Binary)?
+    visit("int_div_rem_pair","jet_jit_int_div_rem_pair",fn() { guarded(jet_jit_int_div_rem_pair) },.Binary)?
+    visit("decimal_from_str","jet_jit_decimal_from_str",fn() { guarded(jet_jit_decimal_from_str) },.Unary)?
+    visit("decimal_add","jet_jit_decimal_add",fn() { guarded(jet_jit_decimal_add) },.Binary)?
+    visit("decimal_sub","jet_jit_decimal_sub",fn() { guarded(jet_jit_decimal_sub) },.Binary)?
+    visit("decimal_mul","jet_jit_decimal_mul",fn() { guarded(jet_jit_decimal_mul) },.Binary)?
+    visit("decimal_div","jet_jit_decimal_div",fn() { guarded(jet_jit_decimal_div) },.Binary)?
+    visit("decimal_equal","jet_jit_decimal_equal",fn() { guarded(jet_jit_decimal_equal) },.Compare)?
+    visit("decimal_compare","jet_jit_decimal_compare",fn() { guarded(jet_jit_decimal_compare) },.Binary)?
+    visit("decimal_to_string","jet_jit_decimal_to_string",fn() { guarded(jet_jit_decimal_to_string) },.Unary)?
+    visit("decimal_to_float","jet_jit_decimal_to_float",fn() { guarded(jet_jit_decimal_to_float) },.UnaryF64)?
+    visit("fraction_new","jet_jit_fraction_new",fn() { guarded(jet_jit_fraction_new) },.Binary)?
+    visit("fraction_from_parts","jet_jit_fraction_from_parts",fn() { guarded(jet_jit_fraction_from_parts) },.Binary)?
+    visit("fraction_add","jet_jit_fraction_add",fn() { guarded(jet_jit_fraction_add) },.Binary)?
+    visit("fraction_sub","jet_jit_fraction_sub",fn() { guarded(jet_jit_fraction_sub) },.Binary)?
+    visit("fraction_mul","jet_jit_fraction_mul",fn() { guarded(jet_jit_fraction_mul) },.Binary)?
+    visit("fraction_div","jet_jit_fraction_div",fn() { guarded(jet_jit_fraction_div) },.Binary)?
+    visit("fraction_equal","jet_jit_fraction_equal",fn() { guarded(jet_jit_fraction_equal) },.Compare)?
+    visit("fraction_numerator","jet_jit_fraction_numerator",fn() { guarded(jet_jit_fraction_numerator) },.Unary)?
+    visit("fraction_denominator","jet_jit_fraction_denominator",fn() { guarded(jet_jit_fraction_denominator) },.Unary)?
+    visit("fraction_to_string","jet_jit_fraction_to_string",fn() { guarded(jet_jit_fraction_to_string) },.Unary)?
+    visit("fraction_to_float","jet_jit_fraction_to_float",fn() { guarded(jet_jit_fraction_to_float) },.UnaryF64)?
+    visit("fraction_is_zero","jet_jit_fraction_is_zero",fn() { guarded(jet_jit_fraction_is_zero) },.UnaryBool)?
+    visit("complex_from_parts","jet_jit_complex_from_parts",fn() { guarded(jet_jit_complex_from_parts) },.ComplexParts)?
+    visit("row_complex_from_parts","jet_complex_from_parts",fn() { guarded(jet_jit_complex_from_parts) },.ComplexParts)?
+    visit("complex_add","jet_jit_complex_add",fn() { guarded(jet_jit_complex_add) },.Binary)?
+    visit("row_complex_add","jet_complex_add",fn() { guarded(jet_jit_complex_add) },.Binary)?
+    visit("complex_sub","jet_jit_complex_sub",fn() { guarded(jet_jit_complex_sub) },.Binary)?
+    visit("row_complex_sub","jet_complex_sub",fn() { guarded(jet_jit_complex_sub) },.Binary)?
+    visit("complex_mul","jet_jit_complex_mul",fn() { guarded(jet_jit_complex_mul) },.Binary)?
+    visit("row_complex_mul","jet_complex_mul",fn() { guarded(jet_jit_complex_mul) },.Binary)?
+    visit("complex_div","jet_jit_complex_div",fn() { guarded(jet_jit_complex_div) },.Binary)?
+    visit("row_complex_div","jet_complex_div",fn() { guarded(jet_jit_complex_div) },.Binary)?
+    visit("complex_abs","jet_jit_complex_abs",fn() { guarded(jet_jit_complex_abs) },.UnaryF64)?
+    visit("row_complex_abs","jet_complex_abs",fn() { guarded(jet_jit_complex_abs) },.UnaryF64)?
+    visit("complex_to_string","jet_jit_complex_to_string",fn() { guarded(jet_jit_complex_to_string) },.Unary)?
+    visit("row_complex_to_string","jet_complex_to_string",fn() { guarded(jet_jit_complex_to_string) },.Unary)?
+    Ok(())
+}

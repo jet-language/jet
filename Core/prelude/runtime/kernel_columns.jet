@@ -1,0 +1,231 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/Columns.rs:1-227
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS /// D-SOA-TIER1=A / D-SOA1: THE shared struct-of-arrays column store.
+//RS ///
+//RS /// A `#Layout(columnar)` struct `S` stores its `[S]` collection column-major:
+//RS /// one column per stored field, so a scan of one field walks one contiguous
+//RS /// column instead of striding whole records. Every execution tier keeps a
+//RS /// columnar list this way and pulls a record out of it through THE ONE read
+//RS /// below (`jet_columns_gather`). AOT emit, the Cranelift host and the
+//RS /// interpreter ambient differ only in the cell vocabulary `C` they marshal into
+//RS /// the columns — never in the layout, the row bookkeeping, the bounds policy, or
+//RS /// the read (I9).
+//RS ///
+//RS /// `C` is the tier's cell: `JetVal` for Cranelift, `CtValue` for the ambient,
+//RS /// and a generated per-struct cell enum for AOT. Holding the cell abstract is
+//RS /// exactly what the ratified tradeoff bought — a tagged cell costs a little
+//RS /// speed against a layout tuned per struct, and a tuned column can be added
+//RS /// later behind this same read without moving the policy back into an engine.
+//RS ///
+//RS /// The borrowed helpers below keep the same read contract for tiers that own
+//RS /// column slices elsewhere. `JetColumns` is the owning store for tiers that
+//RS /// hold columns directly, and its methods index those slices in place rather
+//RS /// than materializing a temporary `Vec<&[C]>` per read.
+//RS /// One record's cells pulled out of a column store, in declaration order.
+//RS pub type JetRowCells<C> = Vec<C>;
+//RS 
+//RS /// Row count for a borrowed column set. Every column holds the same number of
+//RS /// rows, so column 0 answers for all of them; a zero-field record has no column
+//RS /// and therefore no rows.
+//RS #[inline(always)]
+//RS pub fn jet_columns_rows<C>(columns: &[&[C]]) -> usize {
+//RS     match columns.first() {
+//RS         Some(column) => column.len(),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS /// THE read that pulls one record out of a column store.
+//RS ///
+//RS /// Takes a column set and an index, returns that record's cells in declaration
+//RS /// order. Bounds selection and wording come from the shared fixed-list stop, so
+//RS /// `xs[i]` reports identically whether `xs` is stored columnar or
+//RS /// array-of-structs; each tier only maps the returned error onto its own stop.
+//RS #[inline(always)]
+//RS pub fn jet_columns_gather<C: Clone>(
+//RS     columns: &[&[C]],
+//RS     index: i64,
+//RS ) -> Result<JetRowCells<C>, JetFixedListIndexError> {
+//RS     let row = jet_fixed_list_index(jet_columns_rows(columns), index, |row| row)?;
+//RS     Ok(columns.iter().map(|column| column[row].clone()).collect())
+//RS }
+//RS 
+//RS /// The fused single-field read behind `xs[i].field`: one cell straight out of
+//RS /// that field's column, with no whole-record gather. Same store, same bounds
+//RS /// policy, same error as the whole-record read above — this is the
+//RS /// cache-friendly access the layout exists for.
+//RS #[inline(always)]
+//RS pub fn jet_columns_gather_cell<C: Clone>(
+//RS     columns: &[&[C]],
+//RS     field: usize,
+//RS     index: i64,
+//RS ) -> Result<C, JetFixedListIndexError> {
+//RS     // Bounds are the row bounds of the whole store, not of one column, so a
+//RS     // fused read on a zero-width record still reports the record's row count.
+//RS     let row = jet_fixed_list_index(jet_columns_rows(columns), index, |row| row)?;
+//RS     Ok(columns[field][row].clone())
+//RS }
+//RS 
+//RS /// The owning column store, for a tier that holds the columns itself.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetColumns<C> {
+//RS     /// One column per stored field, in declaration order (a computed field is
+//RS     /// never a column, D-FIELDPOL1). `push_row` appends to every column
+//RS     /// together, which is what keeps their lengths equal.
+//RS     cols: Vec<Vec<C>>,
+//RS }
+//RS 
+//RS impl<C> JetColumns<C> {
+//RS     /// An empty store for a record of `width` stored fields.
+//RS     pub fn new(width: usize) -> Self {
+//RS         Self {
+//RS             cols: (0..width).map(|_| Vec::new()).collect(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Stored-field count — the number of columns.
+//RS     pub fn width(&self) -> usize {
+//RS         self.cols.len()
+//RS     }
+//RS 
+//RS     #[inline(always)]
+//RS     pub fn len(&self) -> usize {
+//RS         self.cols.first().map_or(0, Vec::len)
+//RS     }
+//RS 
+//RS     #[inline(always)]
+//RS     pub fn is_empty(&self) -> bool {
+//RS         self.len() == 0
+//RS     }
+//RS 
+//RS     /// Project one stored cell column into its typed hot-loop representation.
+//RS     ///
+//RS     /// The cell enum is matched once per row here, before an eligible loop
+//RS     /// starts; the loop itself receives the contiguous typed `Vec<T>`.  An
+//RS     /// invalid canonical field index follows `column()`'s empty-column
+//RS     /// fallback rather than introducing a second bounds policy.
+//RS     #[inline]
+//RS     pub fn project<T, F>(&self, field: usize, project: F) -> Vec<T>
+//RS     where
+//RS         F: FnMut(&C) -> T,
+//RS     {
+//RS         self.cols
+//RS             .get(field)
+//RS             .map(|column| column.iter().map(project).collect())
+//RS             .unwrap_or_default()
+//RS     }
+//RS 
+//RS     /// One whole column, for a caller scanning a single field.
+//RS     #[inline(always)]
+//RS     pub fn column(&self, field: usize) -> &[C] {
+//RS         match self.cols.get(field) {
+//RS             Some(column) => column.as_slice(),
+//RS             None => &[],
+//RS         }
+//RS     }
+//RS 
+//RS     /// Scatter one record across the columns — the write side of the layout.
+//RS     ///
+//RS     /// The row arrives in declaration order, one cell per column. `zip` pairs
+//RS     /// each cell with its column, so a row of the wrong width can never index
+//RS     /// past a column or panic inside generated code (I2); every tier's
+//RS     /// marshalling adapter builds the row from the same field list the columns
+//RS     /// were sized from, which is what keeps the widths equal.
+//RS     pub fn push_row(&mut self, row: impl IntoIterator<Item = C>) {
+//RS         for (column, cell) in self.cols.iter_mut().zip(row) {
+//RS             column.push(cell);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<C: Clone> JetColumns<C> {
+//RS     /// THE read, for an owning store: one record's cells at `index`.
+//RS     #[inline(always)]
+//RS     pub fn gather(&self, index: i64) -> Result<JetRowCells<C>, JetFixedListIndexError> {
+//RS         let row = jet_fixed_list_index(self.len(), index, |row| row)?;
+//RS         Ok(self
+//RS             .cols
+//RS             .iter()
+//RS             .map(|column| column[row].clone())
+//RS             .collect())
+//RS     }
+//RS 
+//RS     /// The fused single-field read, for an owning store.
+//RS     #[inline(always)]
+//RS     pub fn gather_cell(
+//RS         &self,
+//RS         field: usize,
+//RS         index: i64,
+//RS     ) -> Result<C, JetFixedListIndexError> {
+//RS         let row = jet_fixed_list_index(self.len(), index, |row| row)?;
+//RS         Ok(self.cols[field][row].clone())
+//RS     }
+//RS 
+//RS     /// Every record in row order — the array-of-structs view of the store.
+//RS     /// Iteration, rendering and serialization all read the layout through here,
+//RS     /// which is what keeps a columnar list observationally identical to a plain
+//RS     /// one (D-SOA2D).
+//RS     pub fn rows(&self) -> impl Iterator<Item = JetRowCells<C>> + '_ {
+//RS         (0..self.len()).map(move |row| {
+//RS             self.cols
+//RS                 .iter()
+//RS                 .map(|column| column[row].clone())
+//RS                 .collect()
+//RS         })
+//RS     }
+//RS 
+//RS     /// Build a store of `width` columns from records in row order.
+//RS     pub fn from_rows(width: usize, rows: impl IntoIterator<Item = JetRowCells<C>>) -> Self {
+//RS         let mut columns = Self::new(width);
+//RS         for row in rows {
+//RS             columns.push_row(row);
+//RS         }
+//RS         columns
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod column_store_tests {
+//RS     use super::JetColumns;
+//RS 
+//RS     #[test]
+//RS     fn gather_and_cell_keep_row_order_and_shared_bounds() {
+//RS         let columns = JetColumns::from_rows(
+//RS             2,
+//RS             vec![
+//RS                 vec!["x0".to_owned(), "y0".to_owned()],
+//RS                 vec!["x1".to_owned(), "y1".to_owned()],
+//RS             ],
+//RS         );
+//RS 
+//RS         assert_eq!(
+//RS             columns.column(0),
+//RS             ["x0".to_owned(), "x1".to_owned()].as_slice()
+//RS         );
+//RS         assert_eq!(
+//RS             columns.column(1),
+//RS             ["y0".to_owned(), "y1".to_owned()].as_slice()
+//RS         );
+//RS         assert_eq!(
+//RS             columns.gather(1).expect("row 1 is present"),
+//RS             vec!["x1".to_owned(), "y1".to_owned()]
+//RS         );
+//RS         assert_eq!(
+//RS             columns.gather_cell(1, 0).expect("row 0 is present"),
+//RS             "y0"
+//RS         );
+//RS 
+//RS         for index in [-1, 2] {
+//RS             let whole = columns.gather(index).expect_err("row must be rejected");
+//RS             let cell = columns
+//RS                 .gather_cell(1, index)
+//RS                 .expect_err("cell row must use the same bounds");
+//RS             assert_eq!((whole.index, whole.len), (index, 2));
+//RS             assert_eq!((cell.index, cell.len), (index, 2));
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/Columns.rs:1-227
+

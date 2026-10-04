@@ -1,0 +1,1555 @@
+// PORT-PENDING 2028 crates-jet-jit-src-sourceresources-slice-7201: crates/jet-jit/src/SourceResources.rs:7201-8751
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     #[test]
+//RS     fn final_receiver_release_returns_queued_values() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(27), test_handle(28), None)
+//RS             .expect("admit channel endpoints");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(13))
+//RS             .expect("queue channel value");
+//RS         let drained = arena
+//RS             .release_resource(receiver.handle, receiver.raw)
+//RS             .expect("release final receiver endpoint");
+//RS         assert_eq!(
+//RS             drained.drained_values(),
+//RS             vec![MirRuntimeValue::Int(13)]
+//RS         );
+//RS         arena
+//RS             .release_resource(sender.handle, sender.raw)
+//RS             .expect("release sender endpoint");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn receiver_alias_keeps_queue_until_last_physical_receiver() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(29), test_handle(30), None)
+//RS             .expect("admit channel endpoints");
+//RS         let receiver_alias = arena
+//RS             .clone_channel_receiver(receiver.handle, receiver.raw, test_handle(31))
+//RS             .expect("clone receiver endpoint");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(14))
+//RS             .expect("queue channel value");
+//RS         assert!(matches!(
+//RS             arena
+//RS                 .release_resource(receiver.handle, receiver.raw)
+//RS                 .expect("release aliased receiver"),
+//RS             SourceResourceRelease::Released
+//RS         ));
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver_alias.handle, receiver_alias.raw)
+//RS                 .expect("receive through surviving alias"),
+//RS             Some(MirRuntimeValue::Int(14))
+//RS         );
+//RS         arena
+//RS             .release_resource(sender.handle, sender.raw)
+//RS             .expect("release sender endpoint");
+//RS         arena
+//RS             .release_resource(receiver_alias.handle, receiver_alias.raw)
+//RS             .expect("release final receiver alias");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn receiver_select_uses_canonical_arm_order_for_source_values() {
+//RS         let arena = test_channel_arena();
+//RS         let (first_sender, first_receiver) = arena
+//RS             .register_new_channel(test_handle(60), test_handle(61), None)
+//RS             .expect("register first select arm");
+//RS         let (second_sender, second_receiver) = arena
+//RS             .register_new_channel(test_handle(62), test_handle(63), None)
+//RS             .expect("register second select arm");
+//RS         arena
+//RS             .channel_sender_send(first_sender.handle, first_sender.raw, MirRuntimeValue::Int(61))
+//RS             .expect("queue first arm");
+//RS         arena
+//RS             .channel_sender_send(second_sender.handle, second_sender.raw, MirRuntimeValue::Int(63))
+//RS             .expect("queue second arm");
+//RS 
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_select(
+//RS                     &[
+//RS                         (second_receiver.handle, second_receiver.raw),
+//RS                         (first_receiver.handle, first_receiver.raw),
+//RS                     ],
+//RS                     Vec::new(),
+//RS                 )
+//RS                 .expect("select ready Source receiver"),
+//RS             (0, Some(MirRuntimeValue::Int(63)))
+//RS         );
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_select(
+//RS                     &[(first_receiver.handle, first_receiver.raw)],
+//RS                     Vec::new(),
+//RS                 )
+//RS                 .expect("select remaining Source receiver"),
+//RS             (0, Some(MirRuntimeValue::Int(61)))
+//RS         );
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_select(&[], vec![0])
+//RS                 .expect("select immediate timer arm"),
+//RS             (0, None)
+//RS         );
+//RS         for capability in [
+//RS             first_sender,
+//RS             first_receiver,
+//RS             second_sender,
+//RS             second_receiver,
+//RS         ] {
+//RS             arena
+//RS                 .release_capability(&capability)
+//RS                 .expect("release selected endpoint");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn explicit_cleanup_retires_queued_source_values() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, _receiver) = arena
+//RS             .register_new_channel(test_handle(32), test_handle(33), None)
+//RS             .expect("admit channel endpoints");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(15))
+//RS             .expect("queue source value");
+//RS         let mut cleaned = Vec::new();
+//RS         arena
+//RS             .retire_with_cleanup(|value| {
+//RS                 cleaned.push(value);
+//RS                 Ok(())
+//RS             })
+//RS             .expect("explicit retirement cleanup");
+//RS         assert_eq!(cleaned, vec![MirRuntimeValue::Int(15)]);
+//RS         assert!(arena.is_retired().expect("retired after cleanup"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn retirement_keeps_nested_receivers_live_and_retries_exact_values() {
+//RS         let nested_receiver = Arc::new(Mutex::new(None::<SourceResourceHandle>));
+//RS         let observed_nested = Arc::new(AtomicUsize::new(0));
+//RS         let finalized = Arc::new(Mutex::new(Vec::new()));
+//RS         let attempts = Arc::new(AtomicUsize::new(0));
+//RS         let nested = nested_receiver.clone();
+//RS         let observed = observed_nested.clone();
+//RS         let sink = finalized.clone();
+//RS         let calls = attempts.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 finalization.with_live_scope(|arena, _lease, values, _completions| {
+//RS                     if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+//RS                         let capability = nested
+//RS                             .lock()
+//RS                             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                             .clone()
+//RS                             .expect("nested receiver registered before retirement");
+//RS                         assert!(arena
+//RS                             .lookup_capability(capability.handle, capability.raw)
+//RS                             .is_ok());
+//RS                         let nested_value = arena
+//RS                             .channel_receiver_try_receive(capability.handle, capability.raw)
+//RS                             .expect("nested receiver remains usable during cleanup")
+//RS                             .expect("nested receiver has queued Source value");
+//RS                         observed.fetch_add(1, Ordering::SeqCst);
+//RS                         values.push(nested_value);
+//RS                         Err("retry this Source cleanup".to_string())
+//RS                     } else {
+//RS                         sink.lock()
+//RS                             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                             .extend(std::mem::take(values));
+//RS                         Ok(())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(|error| panic!("unexpected automatic finalization failure: {error:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let (first_sender, first_receiver) = arena
+//RS             .register_new_channel(test_handle(54), test_handle(55), None)
+//RS             .expect("register first receiver");
+//RS         let (second_sender, second_receiver) = arena
+//RS             .register_new_channel(test_handle(56), test_handle(57), None)
+//RS             .expect("register nested receiver");
+//RS         *nested_receiver
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(second_receiver.clone());
+//RS         arena
+//RS             .channel_sender_send(
+//RS                 first_sender.handle,
+//RS                 first_sender.raw,
+//RS                 MirRuntimeValue::Int(15),
+//RS             )
+//RS             .expect("queue first Source value");
+//RS         arena
+//RS             .channel_sender_send(
+//RS                 second_sender.handle,
+//RS                 second_sender.raw,
+//RS                 MirRuntimeValue::Int(16),
+//RS             )
+//RS             .expect("queue nested Source value");
+//RS 
+//RS         let failure = session
+//RS             .retire()
+//RS             .expect_err("first Source cleanup returns exact untouched values");
+//RS         assert_eq!(
+//RS             failure.values,
+//RS             vec![MirRuntimeValue::Int(15), MirRuntimeValue::Int(16)]
+//RS         );
+//RS         assert_eq!(observed_nested.load(Ordering::SeqCst), 1);
+//RS         assert!(arena
+//RS             .lookup_capability(first_receiver.handle, first_receiver.raw)
+//RS             .is_ok());
+//RS         assert!(arena
+//RS             .lookup_capability(second_receiver.handle, second_receiver.raw)
+//RS             .is_ok());
+//RS         session
+//RS             .retry_retire(failure)
+//RS             .expect("retry exact untouched Source values");
+//RS         assert_eq!(
+//RS             *finalized.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+//RS             vec![MirRuntimeValue::Int(15), MirRuntimeValue::Int(16)]
+//RS         );
+//RS         assert!(arena.is_retired().expect("retirement completes after retry"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn final_root_uses_explicit_origin_finalizer_for_channel_values() {
+//RS         let cleaned = Arc::new(Mutex::new(Vec::new()));
+//RS         let sink = cleaned.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 finalization.with_live_scope(|_, _lease, values, _completions| {
+//RS                     sink.lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .extend(std::mem::take(values));
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(|error| panic!("unexpected finalization failure: {error:?}")),
+//RS         );
+//RS         let root = session.retain_root().expect("retain source root");
+//RS         let arena = root.arena();
+//RS         let (sender, _receiver) = arena
+//RS             .register_new_channel(test_handle(34), test_handle(35), None)
+//RS             .expect("admit channel endpoints");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(16))
+//RS             .expect("queue source value");
+//RS         session.retire().expect("request source retirement");
+//RS         drop(root);
+//RS         assert!(arena.is_retired().expect("finalizer retires arena"));
+//RS 
+//RS         assert_eq!(
+//RS             *cleaned.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+//RS             vec![MirRuntimeValue::Int(16)]
+//RS         );
+//RS     }
+//RS     #[test]
+//RS     fn finalizer_lease_keeps_nested_capabilities_live_until_helper_completion() {
+//RS         let nested_capability = Arc::new(Mutex::new(None::<SourceResourceHandle>));
+//RS         let escaped_lease = Arc::new(Mutex::new(None::<SourceResourceLease>));
+//RS         let shared_root_capability = Arc::new(Mutex::new(None::<SourceResourceHandle>));
+//RS         let shared_weak_capability = Arc::new(Mutex::new(None::<SourceResourceHandle>));
+//RS         let nested = nested_capability.clone();
+//RS         let escaped = escaped_lease.clone();
+//RS         let shared_root_for_finalizer = shared_root_capability.clone();
+//RS         let shared_weak_for_finalizer = shared_weak_capability.clone();
+//RS         let shared_type_identity = 0xfeed_beef_cafe_5680;
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 let result =
+//RS                     finalization.with_live_scope(|arena, lease, values, _completions| {
+//RS                     assert_eq!(values.len(), 1);
+//RS                     assert_eq!(values[0], MirRuntimeValue::Int(16));
+//RS                     let nested = nested
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .clone()
+//RS                         .expect("nested capability registered before finalization");
+//RS                     assert!(arena
+//RS                         .lookup_capability(nested.handle, nested.raw)
+//RS                         .is_ok());
+//RS 
+//RS                     let shared_root = shared_root_for_finalizer
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .clone()
+//RS                         .expect("Shared root capability is registered");
+//RS                     let (_, shared_lease) = arena
+//RS                         .borrow_shared_interop_root(&shared_root, shared_type_identity)
+//RS                         .map_err(|error| {
+//RS                             error
+//RS                                 .internal_message()
+//RS                                 .unwrap_or("finalizer Shared root borrow failed")
+//RS                                 .to_string()
+//RS                         })?;
+//RS                     assert!(Arc::ptr_eq(&shared_lease.inner, &lease.inner));
+//RS                     drop(shared_lease);
+//RS 
+//RS                     let shared_weak = shared_weak_for_finalizer
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .clone()
+//RS                         .expect("Shared weak-root capability is registered");
+//RS                     let (_, weak_lease) = arena
+//RS                         .borrow_shared_interop_weak_root(&shared_weak, shared_type_identity)
+//RS                         .map_err(|error| {
+//RS                             error
+//RS                                 .internal_message()
+//RS                                 .unwrap_or("finalizer Shared weak-root borrow failed")
+//RS                                 .to_string()
+//RS                         })?;
+//RS                     assert!(Arc::ptr_eq(&weak_lease.inner, &lease.inner));
+//RS                     drop(weak_lease);
+//RS 
+//RS                     *escaped
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(lease.clone());
+//RS                     values.clear();
+//RS                     Ok(())
+//RS                 });
+//RS                 let escaped_lease = escaped
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                     .as_ref()
+//RS                     .expect("finalizer lease escaped for lifetime retention")
+//RS                     .clone();
+//RS                 let activation = escaped_lease.activate();
+//RS                 assert!(
+//RS                     escaped_lease.cleanup_lease().is_err(),
+//RS                     "closed finalizer phase cannot be reopened by an escaped lease"
+//RS                 );
+//RS                 drop(activation);
+//RS                 result
+//RS             }),
+//RS             Arc::new(|error| panic!("unexpected automatic finalization failure: {error:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let nested = arena
+//RS             .register_stdin(test_handle(59))
+//RS             .expect("register nested Source capability");
+//RS         *nested_capability
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(nested.clone());
+//RS 
+//RS         let owner_slot = Arc::new(Mutex::new(None));
+//RS         let weak_owner_slot = Arc::downgrade(&owner_slot);
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let next_token_id = Arc::new(AtomicU32::new(1));
+//RS         let weak_count = owner_count.clone();
+//RS         let weak_token_id = next_token_id.clone();
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let token_for_retain = next_token_id.clone();
+//RS         let owner_identity = usize::MAX - 21;
+//RS         let shared_root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             shared_type_identity,
+//RS             MirRuntimeValue::Int(23),
+//RS         )
+//RS         .with_owner_identity(owner_identity)
+//RS         .with_owner_lifecycle(move || {
+//RS             Box::new(TestSharedInteropWeakOwner {
+//RS                 owner_slot: weak_owner_slot.clone(),
+//RS                 owner_count: weak_count.clone(),
+//RS                 next_token_id: weak_token_id.clone(),
+//RS             })
+//RS         })
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 let token_id = i64::from(token_for_retain.fetch_add(1, Ordering::AcqRel));
+//RS                 reserve_test_shared_alias(&count_for_retain, token_id)?.ok_or_else(|| {
+//RS                     "test Source Shared owner has no live logical aliases".to_string()
+//RS                 })
+//RS             },
+//RS         );
+//RS         *owner_slot
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(shared_root.clone());
+//RS         let shared_root_cap = arena
+//RS             .register_shared_interop_root(shared_type_identity, &shared_root)
+//RS             .expect("register Shared root");
+//RS         let shared_weak_cap = arena
+//RS             .downgrade_shared_interop_root(&shared_root_cap)
+//RS             .expect("register Shared weak root");
+//RS         *shared_root_capability
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(shared_root_cap);
+//RS         *shared_weak_capability
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(shared_weak_cap);
+//RS 
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(60), test_handle(61), None)
+//RS             .expect("register receiver to finalize");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(16))
+//RS             .expect("queue Source value for finalizer");
+//RS 
+//RS         let failure = session
+//RS             .retire()
+//RS             .expect_err("finalizer lease must block premature slot removal");
+//RS         assert!(failure.values.is_empty());
+//RS         assert_eq!(session.retained_root_count().expect("finalizer root count"), 1);
+//RS         assert!(!arena.is_retired().expect("finalizer lease preserves arena"));
+//RS         assert!(arena.lookup_capability(nested.handle, nested.raw).is_ok());
+//RS 
+//RS         drop(
+//RS             escaped_lease
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .take()
+//RS                 .expect("helper releases its counted lease"),
+//RS         );
+//RS         assert!(arena.is_retired().expect("helper completion permits retirement"));
+//RS         assert!(arena.lookup_capability(nested.handle, nested.raw).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn finalizer_cleanup_lease_adopts_queued_owner_and_registers_fresh_binding() {
+//RS         use jet_foundation::MIR::{
+//RS             MirArtifactBuildMode, MirArtifactIdentity, MirArtifactKind, MirArtifactTarget,
+//RS             MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION,
+//RS         };
+//RS 
+//RS         let logical_values = Arc::new(Mutex::new(Vec::new()));
+//RS         let adopted_values = logical_values.clone();
+//RS         let artifact = jet_foundation::MIR::MirArtifactId(9101);
+//RS         let execution = MirExecutionIdentity {
+//RS             schema_version: 1,
+//RS             artifact: MirArtifactIdentity {
+//RS                 schema_version: 1,
+//RS                 mir_schema_version: MIR_SCHEMA_VERSION,
+//RS                 program_digest: [0; 32],
+//RS                 package_identity: "source-finalizer-test".to_string(),
+//RS                 artifact,
+//RS                 name: "owned-root-cleanup".to_string(),
+//RS                 kind: MirArtifactKind::NativeExecutable,
+//RS                 target: MirArtifactTarget::Cranelift,
+//RS                 mode: MirArtifactBuildMode::Dev,
+//RS                 provider_identity: String::new(),
+//RS                 closure_identity: String::new(),
+//RS                 artifact_identity: String::new(),
+//RS                 program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                 )),
+//RS             },
+//RS         };
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 finalization.with_live_scope(|arena, lease, values, _completions| {
+//RS                     if values.len() != 1 {
+//RS                         return Err("finalizer expected one queued owned payload".to_string());
+//RS                     }
+//RS                     let carrier = values.pop().expect("queued carrier is present");
+//RS                     let owned = source_owned_from_runtime_value(carrier).map_err(|error| {
+//RS                         error
+//RS                             .internal_message()
+//RS                             .unwrap_or("queued owner carrier was invalid")
+//RS                             .to_string()
+//RS                     })?;
+//RS                     let cleanup = lease.cleanup_lease()?;
+//RS                     let outcome = cleanup.adopt_owned(
+//RS                         test_handle(92),
+//RS                         &SourceResourceKind::LinesStdin,
+//RS                         owned,
+//RS                     );
+//RS                     let (adopted, logical_value) = match outcome.result {
+//RS                         Ok(adopted) => adopted,
+//RS                         Err(failure) => {
+//RS                             let (error, owned) = failure.into_parts();
+//RS                             values.push(owned.into_runtime_value());
+//RS                             return Err(error
+//RS                                 .internal_message()
+//RS                                 .unwrap_or("queued Source owner adoption failed")
+//RS                                 .to_string());
+//RS                         }
+//RS                     };
+//RS                     if logical_value != MirRuntimeValue::String("queued owner".to_string()) {
+//RS                         return Err("queued Source logical value changed during adoption".to_string());
+//RS                     }
+//RS                     if arena
+//RS                         .lookup_capability(adopted.handle, adopted.raw)
+//RS                         .is_err()
+//RS                     {
+//RS                         return Err("cleanup adoption did not publish its physical owner".to_string());
+//RS                     }
+//RS                     arena.release_capability(&adopted)?;
+//RS 
+//RS                     let bindings = crate::SourceInterfaces::NativeInterfaceBindings::new();
+//RS                     let object = bindings
+//RS                         .create_object("cleanup-scope")
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let binding = SourceNativeBinding::interface(
+//RS                         &object,
+//RS                         execution.clone(),
+//RS                         artifact,
+//RS                         MirType::from_kind(MirTypeKind::Int),
+//RS                     )?;
+//RS                     assert!(arena.register_native_binding_root(binding.clone()).is_err());
+//RS                     let fresh_scope = cleanup.register_native_binding_root(binding)?;
+//RS                     assert_eq!(fresh_scope.kind, SourceResourceKind::NativeBinding);
+//RS                     assert!(arena
+//RS                         .lookup_capability(fresh_scope.handle, fresh_scope.raw)
+//RS                         .is_ok());
+//RS                     arena.release_native_binding_capability(&fresh_scope)?;
+//RS                     adopted_values
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .push(logical_value);
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(|error| panic!("unexpected finalizer cleanup failure: {error:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let source = arena
+//RS             .register_stdin(test_handle(91))
+//RS             .expect("register Source-owned stream");
+//RS         let (_, owned) = arena
+//RS             .take_owned_with_value(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS                 MirRuntimeValue::String("queued owner".to_string()),
+//RS             )
+//RS             .expect("detach checked Source owner");
+//RS         let owned_carrier = owned.into_runtime_value();
+//RS         let (sender, _receiver) = arena
+//RS             .register_new_channel(test_handle(93), test_handle(94), None)
+//RS             .expect("register finalizer channel");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, owned_carrier)
+//RS             .expect("queue detached owner for Source cleanup");
+//RS 
+//RS         session
+//RS             .retire()
+//RS             .expect("finalizer adopts queued owner and binds fresh cleanup scope");
+//RS         assert_eq!(
+//RS             *logical_values
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
+//RS             [MirRuntimeValue::String("queued owner".to_string())]
+//RS         );
+//RS         assert!(arena.is_retired().expect("finalizer cleanup completes retirement"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn deferred_retirement_creation_requires_existing_normal_lease() {
+//RS         let finalizer_runs = Arc::new(AtomicUsize::new(0));
+//RS         let observed_runs = finalizer_runs.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 observed_runs.fetch_add(1, Ordering::SeqCst);
+//RS                 finalization.with_live_scope(|_, _, values, _completions| {
+//RS                     if values.len() != 1 || values[0] != MirRuntimeValue::Int(77) {
+//RS                         return Err("deferred channel finalizer received the wrong value".to_string());
+//RS                     }
+//RS                     values.clear();
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(|error| panic!("deferred retirement finalization failed: {error:?}")),
+//RS         );
+//RS         let lease = session.retain_root().expect("retain normal callback lease");
+//RS         let arena = lease.arena();
+//RS 
+//RS         session.retire().expect("request deferred retirement");
+//RS         assert!(session.is_retirement_requested().unwrap());
+//RS         assert!(!arena.is_retired().unwrap());
+//RS         assert_eq!(session.retained_root_count().unwrap(), 1);
+//RS         assert_eq!(finalizer_runs.load(Ordering::SeqCst), 0);
+//RS         assert!(session.retain_root().is_err());
+//RS         assert!(arena.register_stdin(test_handle(96)).is_err());
+//RS 
+//RS         let binding = test_native_binding(9302, "deferred-normal-callback");
+//RS         assert!(arena.register_native_binding_root(binding.clone()).is_err());
+//RS         let activation = lease.activate();
+//RS         let binding_capability = arena
+//RS             .register_native_binding_root(binding)
+//RS             .expect("existing normal lease authorizes a fresh binding");
+//RS         let resource_capability = arena
+//RS             .register_stdin(test_handle(97))
+//RS             .expect("existing normal lease authorizes a fresh resource");
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(98), test_handle(99), Some(1))
+//RS             .expect("existing normal lease authorizes fresh channel endpoints");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(77))
+//RS             .expect("queue one value for exactly-once finalization");
+//RS         assert_eq!(session.retained_root_count().unwrap(), 1);
+//RS         drop(activation);
+//RS         assert_eq!(session.retained_root_count().unwrap(), 1);
+//RS 
+//RS         drop(lease);
+//RS         assert!(arena.is_retired().unwrap());
+//RS         assert_eq!(session.retained_root_count().unwrap(), 0);
+//RS         assert_eq!(finalizer_runs.load(Ordering::SeqCst), 1);
+//RS         assert!(arena
+//RS             .lookup_capability(binding_capability.handle, binding_capability.raw)
+//RS             .is_err());
+//RS         assert!(arena
+//RS             .lookup_capability(resource_capability.handle, resource_capability.raw)
+//RS             .is_err());
+//RS         assert!(arena
+//RS             .lookup_capability(receiver.handle, receiver.raw)
+//RS             .is_err());
+//RS 
+//RS         session.retire().expect("retirement is idempotent");
+//RS         assert_eq!(finalizer_runs.load(Ordering::SeqCst), 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_interop_root_capability_and_alias_leases_keep_nested_resources_live() {
+//RS         let session = test_shared_interop_session();
+//RS         let arena = session.arena();
+//RS         let nested = arena
+//RS             .register_stdin(test_handle(58))
+//RS             .expect("register nested Source resource");
+//RS         let type_identity = u64::MAX;
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             type_identity,
+//RS             MirRuntimeValue::Int(17),
+//RS         );
+//RS         let capability = arena
+//RS             .register_shared_interop_root(type_identity, &root)
+//RS             .expect("register checked SharedInterop root");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .resolve_shared_interop_root(&root)
+//RS                 .expect("resolve the existing SharedInterop capability"),
+//RS             capability
+//RS         );
+//RS         assert_eq!(capability.handle, shared_interop_root_handle_id());
+//RS         assert_eq!(
+//RS             capability.kind,
+//RS             SourceResourceKind::SharedInteropRoot { type_identity }
+//RS         );
+//RS         assert!(arena
+//RS             .borrow_shared_interop_root(&capability, type_identity - 1)
+//RS             .is_err());
+//RS         let (root, lease) = arena
+//RS             .borrow_shared_interop_root(&capability, type_identity)
+//RS             .expect("borrow exact SharedInterop root");
+//RS         let alias = root.clone();
+//RS         let alias_lease = lease.clone();
+//RS 
+//RS         session.retire().expect("defer while native aliases are live");
+//RS         arena
+//RS             .release_shared_interop_root(&capability)
+//RS             .expect("release Source registry root");
+//RS         assert!(arena.resolve_shared_interop_root(&root).is_err());
+//RS         assert!(!arena.is_retired().expect("alias lease retains arena"));
+//RS         assert!(arena.lookup_capability(nested.handle, nested.raw).is_ok());
+//RS         drop(root);
+//RS         drop(lease);
+//RS         assert!(!arena.is_retired().expect("second alias remains live"));
+//RS         assert_eq!(
+//RS             alias
+//RS                 .with_read(|value| Ok(value.clone()))
+//RS                 .expect("native alias remains usable"),
+//RS             MirRuntimeValue::Int(17)
+//RS         );
+//RS         drop(alias);
+//RS         drop(alias_lease);
+//RS         assert!(arena.is_retired().expect("last native alias releases arena"));
+//RS         assert!(arena.lookup_capability(nested.handle, nested.raw).is_err());
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn shared_interop_weak_root_upgrades_only_a_live_owner() {
+//RS         let session = test_shared_interop_session();
+//RS         let arena = session.arena();
+//RS         let owner_slot = Arc::new(Mutex::new(None));
+//RS         let weak_slot = Arc::downgrade(&owner_slot);
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let next_token_id = Arc::new(AtomicU32::new(1));
+//RS         let type_identity = 0xfeed_beef_cafe_1234;
+//RS         let owner_identity = usize::MAX - 9;
+//RS         let count_for_weak = owner_count.clone();
+//RS         let token_for_weak = next_token_id.clone();
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let token_for_retain = next_token_id.clone();
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             type_identity,
+//RS             MirRuntimeValue::Int(27),
+//RS         )
+//RS         .with_owner_identity(owner_identity)
+//RS         .with_owner_lifecycle(move || {
+//RS             Box::new(TestSharedInteropWeakOwner {
+//RS                 owner_slot: weak_slot.clone(),
+//RS                 owner_count: count_for_weak.clone(),
+//RS                 next_token_id: token_for_weak.clone(),
+//RS             })
+//RS         })
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 let token_id = i64::from(token_for_retain.fetch_add(1, Ordering::AcqRel));
+//RS                 reserve_test_shared_alias(&count_for_retain, token_id)?.ok_or_else(|| {
+//RS                     "test Source Shared owner has no live logical aliases".to_string()
+//RS                 })
+//RS             },
+//RS         );
+//RS         *owner_slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+//RS             Some(root.clone());
+//RS         let strong = arena
+//RS             .register_shared_interop_root(type_identity, &root)
+//RS             .expect("register strong SharedInterop root");
+//RS         let weak_capability = arena
+//RS             .downgrade_shared_interop_root(&strong)
+//RS             .expect("downgrade physical Shared owner");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         let mut stale_strong = strong.clone();
+//RS         stale_strong.generation = stale_strong.generation.wrapping_add(1);
+//RS         assert!(arena.downgrade_shared_interop_root(&stale_strong).is_err());
+//RS         assert!(arena
+//RS             .borrow_shared_interop_weak_root(&weak_capability, type_identity + 1)
+//RS             .is_err());
+//RS         let mut stale_weak = weak_capability.clone();
+//RS         stale_weak.generation = stale_weak.generation.wrapping_add(1);
+//RS         assert!(arena
+//RS             .borrow_shared_interop_weak_root(&stale_weak, type_identity)
+//RS             .is_err());
+//RS         let (weak, weak_lease) = arena
+//RS             .borrow_shared_interop_weak_root(&weak_capability, type_identity)
+//RS             .expect("borrow weak root capability");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         let weak_upgrade = weak
+//RS             .upgrade()
+//RS             .expect("upgrade live Shared owner")
+//RS             .expect("owner remains live");
+//RS         assert_eq!(weak_upgrade.interop().identity(), owner_identity);
+//RS         drop(weak_upgrade);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS 
+//RS         drop(root);
+//RS         arena
+//RS             .release_shared_interop_root(&strong)
+//RS             .expect("release original strong capability");
+//RS         let (upgraded, fresh_strong, fresh_lease, token_id) = arena
+//RS             .upgrade_shared_interop_weak_root(&weak_capability)
+//RS             .expect("upgrade through weak capability")
+//RS             .expect("logical strong owner keeps physical root alive");
+//RS         assert_eq!(upgraded.identity(), owner_identity);
+//RS         assert_eq!(
+//RS             fresh_strong.kind,
+//RS             SourceResourceKind::SharedInteropRoot { type_identity }
+//RS         );
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         let direct_token = arena
+//RS             .retain_shared_interop_alias(&fresh_strong)
+//RS             .expect("reserve a Source Shared logical alias");
+//RS         assert_ne!(direct_token, token_id);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 3);
+//RS         assert!(arena
+//RS             .release_shared_interop_alias(&fresh_strong, direct_token.wrapping_add(1000))
+//RS             .is_err());
+//RS         release_test_shared_alias(&arena, &fresh_strong, direct_token);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         assert!(arena.release_shared_interop_root(&fresh_strong).is_err());
+//RS         let mut stale_fresh = fresh_strong.clone();
+//RS         stale_fresh.generation = stale_fresh.generation.wrapping_add(1);
+//RS         assert!(arena
+//RS             .release_shared_interop_alias(&stale_fresh, token_id)
+//RS             .is_err());
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         let carrier = arena
+//RS             .adopt_shared_interop_alias(&fresh_strong, token_id)
+//RS             .expect("adopt the reserved owner alias");
+//RS         assert_eq!(carrier.owner_alias_token_id(), Some(token_id));
+//RS         assert!(arena
+//RS             .release_shared_interop_alias(&fresh_strong, token_id)
+//RS             .is_err());
+//RS         arena
+//RS             .release_shared_interop_root(&fresh_strong)
+//RS             .expect("release fresh physical root after alias adoption");
+//RS         drop(upgraded);
+//RS         drop(fresh_lease);
+//RS         drop(carrier);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS 
+//RS         owner_count.store(0, Ordering::Release);
+//RS         owner_slot
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .take();
+//RS         assert!(weak
+//RS             .upgrade()
+//RS             .expect("observe expired Source owner")
+//RS             .is_none());
+//RS         assert!(arena
+//RS             .upgrade_shared_interop_weak_root(&weak_capability)
+//RS             .expect("weak upgrade of expired owner")
+//RS             .is_none());
+//RS 
+//RS         session.retire().expect("defer while weak alias lease is live");
+//RS         assert_eq!(session.retained_root_count().expect("weak alias root count"), 1);
+//RS         assert!(!arena.is_retired().expect("weak alias lease preserves arena"));
+//RS         arena
+//RS             .release_shared_interop_weak_root(&weak_capability)
+//RS             .expect("release weak registry capability");
+//RS         drop(weak);
+//RS         drop(weak_lease);
+//RS         assert!(arena.is_retired().expect("last weak alias releases arena"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn shared_alias_release_returns_completion_even_when_operation_fails() {
+//RS         let session = test_shared_interop_session();
+//RS         let arena = session.arena();
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let completion: crate::Memory::shared_protocol::JetSharedPhysicalCompletion =
+//RS             Box::new(test_nested_completion());
+//RS         let completion_pointer = completion
+//RS             .as_ref()
+//RS             .downcast_ref::<SourceExecutionCompletion>()
+//RS             .expect("test completion is stored as its canonical receipt type")
+//RS             as *const SourceExecutionCompletion as usize;
+//RS         let completion_for_retain = Arc::new(Mutex::new(Some(completion)));
+//RS         let completion_packet = completion_for_retain.clone();
+//RS         let type_identity = 0xdead_beef_cafe_4321;
+//RS         let owner_identity = usize::MAX - 31;
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             type_identity,
+//RS             MirRuntimeValue::Int(3),
+//RS         )
+//RS         .with_owner_identity(owner_identity)
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 let completion = completion_packet
+//RS                     .lock()
+//RS                     .map_err(|_| "test completion packet is poisoned".to_string())?
+//RS                     .take()
+//RS                     .ok_or_else(|| "test completion packet was already consumed".to_string())?;
+//RS                 reserve_test_shared_alias_with_completion(
+//RS                     &count_for_retain,
+//RS                     0x117,
+//RS                     Some(completion),
+//RS                     Some("physical alias release failed".to_string()),
+//RS                 )?
+//RS                 .ok_or_else(|| "test Shared owner has no live logical aliases".to_string())
+//RS             },
+//RS         );
+//RS         let capability = arena
+//RS             .register_shared_interop_root(type_identity, &root)
+//RS             .expect("register Shared owner root");
+//RS         let token_id = arena
+//RS             .retain_shared_interop_alias(&capability)
+//RS             .expect("retain Source Shared logical alias");
+//RS         assert_eq!(token_id, 0x117);
+//RS 
+//RS         let outcome = arena
+//RS             .release_shared_interop_alias(&capability, token_id)
+//RS             .expect("release Source Shared logical alias");
+//RS         assert_eq!(
+//RS             outcome.result,
+//RS             Err("physical alias release failed".to_string())
+//RS         );
+//RS         let completion = outcome
+//RS             .completion
+//RS             .expect("physical alias release returns its completion packet");
+//RS         let completion = match completion.downcast::<SourceExecutionCompletion>() {
+//RS             Ok(completion) => completion,
+//RS             Err(_) => panic!("physical completion packet lost its typed Source receipt"),
+//RS         };
+//RS         assert_eq!(
+//RS             completion.as_ref() as *const SourceExecutionCompletion as usize,
+//RS             completion_pointer
+//RS         );
+//RS         assert_nested_completion(&completion);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS 
+//RS         arena
+//RS             .release_shared_interop_root(&capability)
+//RS             .expect("release Shared owner root");
+//RS         session.retire().expect("retire empty Source session");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pending_shared_alias_blocks_root_release_and_arena_retirement() {
+//RS         let session = test_shared_interop_session();
+//RS         let arena = session.arena();
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let next_token_id = Arc::new(AtomicU32::new(41));
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let token_for_retain = next_token_id.clone();
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             0x91,
+//RS             MirRuntimeValue::Int(1),
+//RS         )
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 let token_id = i64::from(token_for_retain.fetch_add(1, Ordering::AcqRel));
+//RS                 reserve_test_shared_alias(&count_for_retain, token_id)?.ok_or_else(|| {
+//RS                     "test Source Shared owner has no live logical aliases".to_string()
+//RS                 })
+//RS             },
+//RS         );
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         let root_capability = arena
+//RS             .register_shared_interop_root(0x91, &root)
+//RS             .expect("register physical Shared root");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         let token_id = arena
+//RS             .retain_shared_interop_alias(&root_capability)
+//RS             .expect("retain Source logical alias");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         assert!(arena
+//RS             .release_shared_interop_root(&root_capability)
+//RS             .is_err());
+//RS 
+//RS         let failure = session
+//RS             .retire()
+//RS             .expect_err("retirement cannot erase a pending owner alias");
+//RS         assert!(failure.error.contains("pending Shared owner aliases"));
+//RS         assert!(failure.values.is_empty());
+//RS         assert!(!arena.is_retired().expect("alias registry keeps arena live"));
+//RS         assert!(arena
+//RS             .lookup_capability(root_capability.handle, root_capability.raw)
+//RS             .is_ok());
+//RS 
+//RS         release_test_shared_alias(&arena, &root_capability, token_id);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         arena
+//RS             .release_shared_interop_root(&root_capability)
+//RS             .expect("release physical root after alias cleanup");
+//RS         session
+//RS             .retire()
+//RS             .expect("retirement completes after pending alias release");
+//RS         assert!(arena.is_retired().expect("arena retires after alias release"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn deferred_retirement_shared_alias_uses_existing_lease() {
+//RS         let session = test_shared_interop_session();
+//RS         let arena = session.arena();
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let next_token_id = Arc::new(AtomicU32::new(81));
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let token_for_retain = next_token_id.clone();
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             0x92,
+//RS             MirRuntimeValue::Int(2),
+//RS         )
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 let token_id = i64::from(token_for_retain.fetch_add(1, Ordering::AcqRel));
+//RS                 reserve_test_shared_alias(&count_for_retain, token_id)?.ok_or_else(|| {
+//RS                     "test Source Shared owner has no live logical aliases".to_string()
+//RS                 })
+//RS             },
+//RS         );
+//RS         let capability = arena
+//RS             .register_shared_interop_root(0x92, &root)
+//RS             .expect("register physical Shared root");
+//RS         let lease = session.retain_root().expect("retain normal callback lease");
+//RS 
+//RS         session.retire().expect("request deferred retirement");
+//RS         assert!(arena.retain_shared_interop_alias(&capability).is_err());
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         let activation = lease.activate();
+//RS         let token = arena
+//RS             .retain_shared_interop_alias(&capability)
+//RS             .expect("existing normal lease authorizes a deferred alias");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         drop(activation);
+//RS 
+//RS         release_test_shared_alias(&arena, &capability, token);
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         arena
+//RS             .release_shared_interop_root(&capability)
+//RS             .expect("release root after pending alias");
+//RS         drop(root);
+//RS         drop(lease);
+//RS         assert!(arena.is_retired().unwrap());
+//RS         assert_eq!(session.retained_root_count().unwrap(), 0);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn encoding_writer_consumes_file_writer_without_reopening_path() {
+//RS         let path = test_path("encoding-writer");
+//RS         let arena = SourceResourceArena::new();
+//RS         let file = arena
+//RS             .open_file_writer(test_handle(14), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit file writer");
+//RS         let transfer = arena.register_encoding_writer_from_file(
+//RS             test_handle(15),
+//RS             file.handle,
+//RS             file.raw,
+//RS             "JSONLWriter",
+//RS         );
+//RS         assert!(transfer.consumed.is_some());
+//RS         let writer = transfer.result.expect("admit encoding writer");
+//RS         assert_eq!(
+//RS             writer.kind,
+//RS             SourceResourceKind::EncodingWriter {
+//RS                 writer_type: "JSONLWriter".to_string()
+//RS             }
+//RS         );
+//RS         let value = MirRuntimeValue::Enum {
+//RS             type_name: "DataTree".to_string(),
+//RS             variant: "Int".to_string(),
+//RS             args: vec![(None, MirRuntimeValue::Int(7))],
+//RS         };
+//RS         arena
+//RS             .encoding_writer_write(writer.handle, writer.raw, &value)
+//RS             .expect("write encoded value");
+//RS         arena
+//RS             .encoding_writer_finish(writer.handle, writer.raw)
+//RS             .expect("finish encoded writer");
+//RS         assert_eq!(
+//RS             std::fs::read_to_string(&path).expect("read encoded output"),
+//RS             "7\n"
+//RS         );
+//RS         arena
+//RS             .release_resource(writer.handle, writer.raw)
+//RS             .expect("release encoding writer");
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn encoding_reader_consumes_existing_file_reader_lease() {
+//RS         let path = test_path("encoding-reader");
+//RS         std::fs::write(&path, b"7\n").expect("create encoded source");
+//RS         let arena = SourceResourceArena::new();
+//RS         let file = arena
+//RS             .open_file(test_handle(18), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit file reader");
+//RS         let transfer = arena.register_encoding_reader_from_file(
+//RS             test_handle(19),
+//RS             file.handle,
+//RS             file.raw,
+//RS             "JSONLReader",
+//RS         );
+//RS         assert!(transfer.consumed.is_some());
+//RS         let reader = transfer.result.expect("admit encoding reader");
+//RS         assert!(arena.lookup_capability(file.handle, file.raw).is_err());
+//RS         let key = reader.native_loop_key().expect("encoding loop key");
+//RS         let mut iterator = arena
+//RS             .encoding_reader(&key, "JSONLReader", false)
+//RS             .result
+//RS             .expect("borrow encoding reader");
+//RS         assert_eq!(
+//RS             iterator.next(),
+//RS             Some(Ok(MirRuntimeValue::Enum {
+//RS                 type_name: "DataTree".to_string(),
+//RS                 variant: "Int".to_string(),
+//RS                 args: vec![(None, MirRuntimeValue::Int(7))],
+//RS             }))
+//RS         );
+//RS         assert_eq!(iterator.next(), None);
+//RS         drop(iterator);
+//RS         arena
+//RS             .release_resource(reader.handle, reader.raw)
+//RS             .expect("release encoding reader");
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn encoding_transfer_outcome_distinguishes_preflight_and_post_take_failures() {
+//RS         let preflight_path = test_path("encoding-transfer-preflight");
+//RS         std::fs::write(&preflight_path, b"7\n").expect("create preflight source");
+//RS         let arena = SourceResourceArena::new();
+//RS         let preflight_file = arena
+//RS             .open_file(
+//RS                 test_handle(25),
+//RS                 preflight_path.to_str().expect("utf8 scratch path"),
+//RS             )
+//RS             .expect("admit preflight reader");
+//RS         let preflight = arena.register_encoding_reader_from_file(
+//RS             test_handle(26),
+//RS             preflight_file.handle,
+//RS             preflight_file.raw,
+//RS             "UnknownReader",
+//RS         );
+//RS         assert!(preflight.consumed.is_none());
+//RS         assert!(preflight.result.is_err());
+//RS         assert!(arena
+//RS             .lookup_capability(preflight_file.handle, preflight_file.raw)
+//RS             .is_ok());
+//RS         arena
+//RS             .release_resource(preflight_file.handle, preflight_file.raw)
+//RS             .expect("release preflight reader");
+//RS         let _ = std::fs::remove_file(preflight_path);
+//RS 
+//RS         let post_take_path = test_path("encoding-transfer-post-take");
+//RS         std::fs::write(&post_take_path, b"a,b\n").expect("create post-take source");
+//RS         let post_take_file = arena
+//RS             .open_file(
+//RS                 test_handle(27),
+//RS                 post_take_path.to_str().expect("utf8 scratch path"),
+//RS             )
+//RS             .expect("admit post-take reader");
+//RS         let post_take = arena.register_encoding_reader_from_file_with_options(
+//RS             test_handle(28),
+//RS             post_take_file.handle,
+//RS             post_take_file.raw,
+//RS             "CSVReader",
+//RS             SourceEncodingLimits::safe(),
+//RS             ",,",
+//RS             false,
+//RS             false,
+//RS         );
+//RS         assert!(post_take.consumed.is_some());
+//RS         assert!(post_take.result.is_err());
+//RS         assert!(arena
+//RS             .lookup_capability(post_take_file.handle, post_take_file.raw)
+//RS             .is_err());
+//RS         let _ = std::fs::remove_file(post_take_path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_writer_refuses_live_mapped_path() {
+//RS         let path = test_path("mapped-writer");
+//RS         let path_text = path.to_str().expect("utf8 scratch path");
+//RS         std::fs::write(&path, b"mapped\n").expect("create mapped source");
+//RS         let mapped = match crate::CoreHost::os_rt::jet_std::jet_std_files_map(
+//RS             &path_text.to_string(),
+//RS         ) {
+//RS             Ok(mapped) => mapped,
+//RS             Err(_) => panic!("mapped source must be admitted"),
+//RS         };
+//RS         let result = SourceResourceArena::new().open_file_writer(test_handle(10), path_text);
+//RS         drop(mapped);
+//RS         let error = match result {
+//RS             Ok(_) => panic!("writer must refuse a path held by a mapped reader"),
+//RS             Err(error) => error,
+//RS         };
+//RS         let value = value_of(error);
+//RS         assert!(matches!(
+//RS             value,
+//RS             MirRuntimeValue::Enum { type_name, variant, args }
+//RS                 if type_name == "IOError"
+//RS                     && variant == "Other"
+//RS                     && matches!(
+//RS                         &args[0].1,
+//RS                         MirRuntimeValue::Struct { type_name, fields }
+//RS                             if type_name == "IOContext"
+//RS                                 && matches!(
+//RS                                     &fields[0].1,
+//RS                                     MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                                         if type_name == "IOOperation" && variant == "Write"
+//RS                                 )
+//RS                                 && matches!(
+//RS                                     &fields[3].1,
+//RS                                     MirRuntimeValue::Present(value)
+//RS                                         if matches!(
+//RS                                             value.as_ref(),
+//RS                                             MirRuntimeValue::String(message)
+//RS                                                 if message == "file is mapped read-only"
+//RS                                         )
+//RS                                 )
+//RS                     )
+//RS         ));
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_resource_rejects_wrong_scope_stale_and_kind() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena.register_stdin(test_handle(4)).expect("stdin owner");
+//RS         let key = capability.native_loop_key().expect("stdin loop key");
+//RS         let wrong_kind = NativeLoopResourceKey {
+//RS             handle: key.handle,
+//RS             raw: key.raw,
+//RS             source_kind: MirLoopSourceKind::Plain,
+//RS         };
+//RS         assert!(arena.lines_file(&wrong_kind, false).result.is_err());
+//RS 
+//RS         let other_arena = SourceResourceArena::new();
+//RS         assert!(other_arena.lines_stdin(&key, false).result.is_err());
+//RS         arena
+//RS             .release_resource(capability.handle, capability.raw)
+//RS             .expect("release exact source slot");
+//RS         assert!(arena.lines_stdin(&key, false).result.is_err());
+//RS         assert!(arena.release_resource(capability.handle, capability.raw).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_activation_restores_nested_and_unwind_without_implicit_retirement() {
+//RS         let outer_session = SourceResourceSession::new();
+//RS         let outer_arena = outer_session.arena();
+//RS         let outer_capability = outer_arena.register_stdin(test_handle(5)).unwrap();
+//RS         let retained_capability = outer_arena.register_stdin(test_handle(6)).unwrap();
+//RS         let inner_session = SourceResourceSession::new();
+//RS         let inner_arena = inner_session.arena();
+//RS         let inner_capability = inner_arena.register_stdin(test_handle(7)).unwrap();
+//RS 
+//RS         {
+//RS             let _outer_activation = outer_session.activate();
+//RS             let active = active_source_resource_arena().expect("outer activation");
+//RS             assert!(Arc::ptr_eq(&active.state, &outer_arena.state));
+//RS             let result = catch_unwind(AssertUnwindSafe(|| {
+//RS                 let _inner_activation = inner_session.activate();
+//RS                 let active = active_source_resource_arena().expect("inner activation");
+//RS                 assert!(Arc::ptr_eq(&active.state, &inner_arena.state));
+//RS                 panic!("abort nested source callback");
+//RS             }));
+//RS             assert!(result.is_err());
+//RS             let active = active_source_resource_arena().expect("outer restoration");
+//RS             assert!(Arc::ptr_eq(&active.state, &outer_arena.state));
+//RS         }
+//RS         assert!(active_source_resource_arena().is_none());
+//RS         assert!(outer_arena.release_capability(&outer_capability).is_ok());
+//RS         assert!(inner_arena.release_capability(&inner_capability).is_ok());
+//RS         let retained_key = retained_capability.native_loop_key().unwrap();
+//RS         outer_session.retire().expect("explicit source retirement");
+//RS         assert!(outer_arena.release_capability(&retained_capability).is_err());
+//RS         assert!(outer_arena.register_stdin(test_handle(9)).is_err());
+//RS         assert!(outer_arena.lines_stdin(&retained_key, false).result.is_err());
+//RS 
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_open_preserves_canonical_io_error_value() {
+//RS         let path = test_path("missing");
+//RS         let _ = std::fs::remove_file(&path);
+//RS         let error = SourceResourceArena::new()
+//RS             .open_file(test_handle(7), path.to_str().expect("utf8 scratch path"))
+//RS             .expect_err("missing source file must be a typed IO error");
+//RS         let value = value_of(error);
+//RS         assert!(matches!(
+//RS             value,
+//RS             MirRuntimeValue::Enum { type_name, variant, args }
+//RS                 if type_name == "IOError"
+//RS                     && variant == "NotFound"
+//RS                     && matches!(
+//RS                         &args[0].1,
+//RS                         MirRuntimeValue::Struct { type_name, fields }
+//RS                             if type_name == "IOContext"
+//RS                                 && matches!(
+//RS                                     &fields[0].1,
+//RS                                     MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                                         if type_name == "IOOperation" && variant == "Read"
+//RS                                 )
+//RS                     )
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_error_shapes_preserve_canonical_enums_and_context() {
+//RS         let context = IOContext::new(
+//RS             IOOperation::Read,
+//RS             Some("source.dat".to_string()),
+//RS             Some(2),
+//RS             Some("denied".to_string()),
+//RS         );
+//RS         let file_value = value_of(file_error(IOError::PermissionDenied(context.clone())));
+//RS         let MirRuntimeValue::Enum {
+//RS             type_name,
+//RS             variant,
+//RS             args,
+//RS         } = file_value
+//RS         else {
+//RS             panic!("file error was not an IOError enum");
+//RS         };
+//RS         assert_eq!(type_name, "IOError");
+//RS         assert_eq!(variant, "PermissionDenied");
+//RS         assert!(matches!(
+//RS             &args[0].1,
+//RS             MirRuntimeValue::Struct { type_name, fields }
+//RS                 if type_name == "IOContext"
+//RS                     && matches!(
+//RS                         &fields[0].1,
+//RS                         MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                             if type_name == "IOOperation" && variant == "Read"
+//RS                     )
+//RS         ));
+//RS 
+//RS         let limit_value = value_of(process_error(IOError::ResourceLimit(
+//RS             ProcessResourceLimit::Memory,
+//RS         )));
+//RS         assert!(matches!(
+//RS             limit_value,
+//RS             MirRuntimeValue::Enum { type_name, variant, args }
+//RS                 if type_name == "IOError"
+//RS                     && variant == "ResourceLimit"
+//RS                     && matches!(
+//RS                         &args[0].1,
+//RS                         MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                             if type_name == "ProcessResourceLimit" && variant == "Memory"
+//RS                     )
+//RS         ));
+//RS 
+//RS         let encoding = EncodingError::new(
+//RS             EncodingFormat::JSON,
+//RS             EncodingErrorKind::Syntax,
+//RS             9,
+//RS             Ok(3),
+//RS             Err(JetAbsent),
+//RS             "source.dat",
+//RS             "bad token",
+//RS         )
+//RS         .with_cause(EncodingCause {
+//RS             kind: "os".to_string(),
+//RS             os_code: Ok(2),
+//RS             message: "parse".to_string(),
+//RS         });
+//RS         let encoding_value = value_of(encoding_error(&encoding));
+//RS         assert!(matches!(
+//RS             encoding_value,
+//RS             MirRuntimeValue::Struct { type_name, fields }
+//RS                 if type_name == "EncodingError"
+//RS                     && matches!(
+//RS                         &fields[0].1,
+//RS                         MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                             if type_name == "EncodingFormat" && variant == "JSON"
+//RS                     )
+//RS                     && matches!(
+//RS                         &fields[1].1,
+//RS                         MirRuntimeValue::Enum { type_name, variant, .. }
+//RS                             if type_name == "EncodingErrorKind" && variant == "Syntax"
+//RS                     )
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cursor_by_value_preserves_consumed_receipt_on_success() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let source = arena.register_stdin(test_handle(43)).expect("admit stdin owner");
+//RS         let key = source.native_loop_key().expect("stdin loop key");
+//RS         let outcome = arena.init_cursor(&key, 1, false, true);
+//RS         assert_eq!(outcome.consumed, Some(source.clone()));
+//RS         let (cursor, value) = outcome.result.expect("install native cursor");
+//RS         assert_eq!(cursor.kind, SourceResourceKind::NativeCursor);
+//RS         assert!(matches!(value, MirRuntimeValue::NativeCursor(_)));
+//RS         assert!(arena.lookup_capability(source.handle, source.raw).is_err());
+//RS         arena
+//RS             .release_capability(&cursor)
+//RS             .expect("release native cursor");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cursor_by_value_preserves_consumed_receipt_on_slot_failure() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let source = arena.register_stdin(test_handle(44)).expect("admit stdin owner");
+//RS         let key = source.native_loop_key().expect("stdin loop key");
+//RS         arena
+//RS             .state
+//RS             .lock()
+//RS             .expect("lock source arena")
+//RS             .next_slot = u32::MAX;
+//RS         let outcome = arena.init_cursor(&key, 1, false, true);
+//RS         assert_eq!(outcome.consumed, Some(source.clone()));
+//RS         assert!(outcome.result.is_err());
+//RS         assert!(arena.lookup_capability(source.handle, source.raw).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn take_owned_with_value_returns_logical_value_on_validation_failure() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let value = MirRuntimeValue::String("preserve".to_string());
+//RS         let error = match arena.take_owned_with_value(
+//RS             test_handle(45),
+//RS             1,
+//RS             &SourceResourceKind::LinesStdin,
+//RS             value.clone(),
+//RS         ) {
+//RS             Err(error) => error,
+//RS             Ok(_) => panic!("stale owner was accepted"),
+//RS         };
+//RS         assert_eq!(error.value, value);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn failed_adoption_returns_complete_owned_value() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let source = arena.register_stdin(test_handle(46)).expect("admit source owner");
+//RS         let (_, lease) = arena
+//RS             .take_owned(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS             )
+//RS             .expect("take source owner");
+//RS         let owned = lease.with_value(MirRuntimeValue::String("rollback".to_string()));
+//RS         arena
+//RS             .state
+//RS             .lock()
+//RS             .expect("lock source arena")
+//RS             .next_slot = u32::MAX;
+//RS         let outcome = arena.adopt_owned(
+//RS             test_handle(47),
+//RS             &SourceResourceKind::LinesStdin,
+//RS             owned,
+//RS         );
+//RS         let failure = outcome.result.expect_err("destination must reject");
+//RS         let (error, owned) = failure.into_parts();
+//RS         assert!(matches!(error, MirNativeCursorError::Internal(_)));
+//RS         assert_eq!(owned.value(), &MirRuntimeValue::String("rollback".to_string()));
+//RS         drop(owned);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn owned_payload_take_carrier_adopt_commits_and_stales_source() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let source = arena.register_stdin(test_handle(40)).expect("admit stdin owner");
+//RS         let (consumed, lease) = arena
+//RS             .take_owned(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS             )
+//RS             .expect("take sole source owner");
+//RS         assert_eq!(consumed, source);
+//RS         let carrier = lease
+//RS             .with_value(MirRuntimeValue::String("owned".to_string()))
+//RS             .into_runtime_value();
+//RS         let alias = carrier.clone();
+//RS         assert!(source_owned_from_runtime_value(alias).is_err());
+//RS         let owned = source_owned_from_runtime_value(carrier).expect("unwrap owned carrier");
+//RS         let outcome = arena.adopt_owned(
+//RS             test_handle(41),
+//RS             &SourceResourceKind::LinesStdin,
+//RS             owned,
+//RS         );
+//RS         assert_eq!(outcome.consumed, source);
+//RS         let (destination, value) = outcome.result.expect("commit destination owner");
+//RS         assert_eq!(value, MirRuntimeValue::String("owned".to_string()));
+//RS         assert!(arena
+//RS             .lookup_capability(source.handle, source.raw)
+//RS             .is_err());
+//RS         assert_eq!(
+//RS             arena
+//RS                 .lookup_capability(destination.handle, destination.raw)
+//RS                 .expect("lookup adopted owner")
+//RS                 .kind,
+//RS             SourceResourceKind::LinesStdin
+//RS         );
+//RS         arena
+//RS             .release_capability(&destination)
+//RS             .expect("release adopted owner");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn owned_payload_take_rejects_alias_and_preserves_source_slot() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let source = arena.register_stdin(test_handle(42)).expect("admit stdin owner");
+//RS         let alias = arena
+//RS             .owner_for_raw(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS             )
+//RS             .expect("borrow source owner");
+//RS         assert!(arena
+//RS             .take_owned(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS             )
+//RS             .is_err());
+//RS         assert_eq!(
+//RS             arena
+//RS                 .lookup_capability(source.handle, source.raw)
+//RS                 .expect("source remains after alias rejection"),
+//RS             source
+//RS         );
+//RS         drop(alias);
+//RS         let (_, lease) = arena
+//RS             .take_owned(
+//RS                 source.handle,
+//RS                 source.raw,
+//RS                 &SourceResourceKind::LinesStdin,
+//RS             )
+//RS             .expect("take after alias release");
+//RS         drop(lease);
+//RS     }
+//RS     #[test]
+//RS     fn retained_root_defers_retirement_until_last_lease_and_clears_slots() {
+//RS         let session = SourceResourceSession::new();
+//RS         let root = session.retain_root().expect("retain Source callback root");
+//RS         let arena = root.arena();
+//RS         let capability = arena
+//RS             .register_stdin(test_handle(51))
+//RS             .expect("register retained callback resource");
+//RS 
+//RS         session.retire().expect("retirement request");
+//RS         assert!(session.is_retirement_requested().expect("retirement state"));
+//RS         assert!(!arena.is_retired().expect("deferred retirement state"));
+//RS         assert!(arena.lookup_capability(capability.handle, capability.raw).is_ok());
+//RS 
+//RS         let alias = root.clone();
+//RS         drop(root);
+//RS         assert_eq!(session.retained_root_count().expect("root count"), 1);
+//RS         assert!(!arena.is_retired().expect("last alias still live"));
+//RS         drop(alias);
+//RS 
+//RS         assert_eq!(session.retained_root_count().expect("root count"), 0);
+//RS         assert!(arena.is_retired().expect("last root retires arena"));
+//RS         assert!(arena.lookup_capability(capability.handle, capability.raw).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn retirement_request_rejects_new_roots_and_resources() {
+//RS         let session = SourceResourceSession::new();
+//RS         let root = session.retain_root().expect("retain Source callback root");
+//RS         let arena = root.arena();
+//RS         let existing = arena
+//RS             .register_stdin(test_handle(52))
+//RS             .expect("register existing callback resource");
+//RS         session.retire().expect("retirement request");
+//RS 
+//RS         assert!(session
+//RS             .retain_root()
+//RS             .is_err(), "retirement must reject unrelated new owners");
+//RS         assert!(arena
+//RS             .register_stdin(test_handle(53))
+//RS             .is_err(), "retirement must reject new resource slots");
+//RS         assert!(arena
+//RS             .lookup_capability(existing.handle, existing.raw)
+//RS             .is_ok(), "the existing root remains physically usable");
+//RS         assert!(!arena.is_retired().expect("retained root defers retirement"));
+//RS 
+//RS         drop(root);
+//RS         assert!(arena.is_retired().expect("last root retires arena"));
+//RS         assert!(arena
+//RS             .lookup_capability(existing.handle, existing.raw)
+//RS             .is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn last_root_release_allows_reentrant_arena_cleanup() {
+//RS         let session = SourceResourceSession::new();
+//RS         let root = session.retain_root().expect("retain Source callback root");
+//RS         let arena = root.arena();
+//RS         let capability = arena
+//RS             .register_stdin(test_handle(53))
+//RS             .expect("register reentrant cleanup resource");
+//RS         session.retire().expect("retirement request");
+//RS 
+//RS         let reentered_after_release = Arc::new(AtomicUsize::new(0));
+//RS         let cleanup = ReentrantLeaseDrop {
+//RS             lease: Some(root),
+//RS             arena: arena.clone(),
+//RS             reentered_after_release: reentered_after_release.clone(),
+//RS         };
+//RS         drop(cleanup);
+//RS 
+//RS         assert_eq!(
+//RS             reentered_after_release.load(Ordering::SeqCst),
+//RS             1,
+//RS             "last-root cleanup must unlock before reentrant arena access"
+//RS         );
+//RS         assert!(arena.is_retired().expect("retired arena"));
+//RS         assert!(arena.lookup_capability(capability.handle, capability.raw).is_err());
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2028 crates/jet-jit/src/SourceResources.rs:7201-8751
+

@@ -1,0 +1,235 @@
+// PORT-PENDING 0141 crates-jet-codegen-src-prelude-core-authority-module-group: crates/jet-codegen/src/Prelude/Core/Authority.rs:1-231
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Mapped-file authority is shared by every filesystem adapter.  A writer must
+//RS // consult this registry before truncating or replacing a path while a mapped
+//RS // read owner is live.
+//RS static JET_MAPPED_PATHS: std::sync::LazyLock<
+//RS     std::sync::Mutex<std::collections::BTreeMap<String, usize>>,
+//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+//RS 
+//RS pub(crate) fn jet_mapped_path_key(path: &str) -> String {
+//RS     std::fs::canonicalize(path)
+//RS         .unwrap_or_else(|_| std::path::PathBuf::from(path))
+//RS         .to_string_lossy()
+//RS         .into_owned()
+//RS }
+//RS 
+//RS pub(crate) fn jet_mapped_register(key: &str) {
+//RS     let mut paths = JET_MAPPED_PATHS
+//RS         .lock()
+//RS         .unwrap_or_else(std::sync::PoisonError::into_inner);
+//RS     *paths.entry(key.to_owned()).or_insert(0) += 1;
+//RS }
+//RS 
+//RS pub(crate) fn jet_mapped_unregister(key: &str) {
+//RS     let mut paths = JET_MAPPED_PATHS
+//RS         .lock()
+//RS         .unwrap_or_else(std::sync::PoisonError::into_inner);
+//RS     match paths.get_mut(key) {
+//RS         Some(count) if *count > 1 => *count -= 1,
+//RS         Some(_) => {
+//RS             paths.remove(key);
+//RS         }
+//RS         None => {}
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_mapped_path_is_live(path: &str) -> bool {
+//RS     let key = jet_mapped_path_key(path);
+//RS     let paths = JET_MAPPED_PATHS
+//RS         .lock()
+//RS         .unwrap_or_else(std::sync::PoisonError::into_inner);
+//RS     paths.get(&key).copied().unwrap_or(0) != 0
+//RS }
+//RS 
+//RS /// Shared writer-policy fact returned before any adapter constructs its
+//RS /// tier-specific IOError carrier.
+//RS pub(crate) struct JetMappedWriterRefusal {
+//RS     pub(crate) path: String,
+//RS     pub(crate) reason: &'static str,
+//RS }
+//RS 
+//RS pub(crate) fn jet_mapped_writer_refusal(path: &str) -> Option<JetMappedWriterRefusal> {
+//RS     jet_mapped_path_is_live(path).then(|| JetMappedWriterRefusal {
+//RS         path: path.to_owned(),
+//RS         reason: "file is mapped read-only",
+//RS     })
+//RS }
+//RS 
+//RS /// D-ABILITY-NAME2=A: the one named Authority value that crosses boundaries.
+//RS /// Authority remains ordinary data; every engine calls
+//RS /// the helpers below instead of keeping a second policy implementation.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetAuthority {
+//RS     rights: std::collections::BTreeSet<String>,
+//RS }
+//RS 
+//RS impl JetAuthority {
+//RS     /// Build the one runtime carrier for a checked named `#FX` scope.
+//RS     /// The caller has already resolved the names; this method only stores the
+//RS     /// rights set, so every execution tier shares the same relation.
+//RS     pub fn from_rights(rights: Vec<String>) -> Self {
+//RS         Self {
+//RS             rights: jet_authority_rights_from_strings(rights),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Generated TIR uses the prefixed constructor name to keep the runtime
+//RS     /// helper distinct from a user-defined static method. Both spellings use
+//RS     /// this one authority constructor.
+//RS     pub fn __jet_from_rights(rights: Vec<String>) -> Self {
+//RS         Self::from_rights(rights)
+//RS     }
+//RS 
+//RS     /// D-AUTHORITY-NAME1=A / D-AGENT-EXEC1: the workspace value names the
+//RS     /// default resource boundary explicitly. The executor treats omitted
+//RS     /// resources as denied; these entries are the only default grants.
+//RS     pub fn workspace() -> Self {
+//RS         Self {
+//RS             rights: jet_authority_workspace_rights(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_authority_from_rights(rights: Vec<String>) -> JetAuthority {
+//RS     JetAuthority::from_rights(rights)
+//RS }
+//RS /// D-FILES-SCOPE1: a file scope is an owned attenuation of an Authority.
+//RS /// It keeps only explicit resource-qualified read roots; a bare `FS.Read`
+//RS /// grant never becomes an ambient filesystem handle.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetFileScope {
+//RS     roots: Vec<JetFileScopeRoot>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetFileScopeRoot {
+//RS     path: std::path::PathBuf,
+//RS     allow_absolute: bool,
+//RS }
+//RS 
+//RS impl JetFileScope {
+//RS     pub(crate) fn from_authority(authority: &JetAuthority) -> Self {
+//RS         let roots = authority
+//RS             .rights
+//RS             .iter()
+//RS             .filter_map(|right| {
+//RS                 let root = right.strip_prefix("FS.Read:")?;
+//RS                 if root.is_empty() {
+//RS                     return None;
+//RS                 }
+//RS                 let path = if root == "repo" {
+//RS                     std::path::PathBuf::from(".")
+//RS                 } else {
+//RS                     let path = std::path::PathBuf::from(root);
+//RS                     if path
+//RS                         .components()
+//RS                         .any(|component| matches!(component, std::path::Component::ParentDir))
+//RS                     {
+//RS                         return None;
+//RS                     }
+//RS                     path
+//RS                 };
+//RS                 Some(JetFileScopeRoot {
+//RS                     allow_absolute: root != "repo" && path.is_absolute(),
+//RS                     path,
+//RS                 })
+//RS             })
+//RS             .collect();
+//RS         Self { roots }
+//RS     }
+//RS 
+//RS     pub(crate) fn roots(&self) -> &[JetFileScopeRoot] {
+//RS         &self.roots
+//RS     }
+//RS }
+//RS 
+//RS impl JetFileScopeRoot {
+//RS     pub(crate) fn path(&self) -> &std::path::Path {
+//RS         &self.path
+//RS     }
+//RS 
+//RS     pub(crate) fn allow_absolute(&self) -> bool {
+//RS         self.allow_absolute
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_authority_rights_from_strings(
+//RS     rights: Vec<String>,
+//RS ) -> std::collections::BTreeSet<String> {
+//RS     rights.into_iter().collect()
+//RS }
+//RS 
+//RS /// Marshal the ordinary Authority carrier across the sandboxed plugin bridge.
+//RS /// The plugin runtime stores this wire value; it never turns it into host
+//RS /// imports or a second permission policy.
+//RS pub(crate) fn jet_authority_to_wire(authority: &JetAuthority) -> String {
+//RS     authority.rights.iter().cloned().collect::<Vec<_>>().join("\n")
+//RS }
+//RS 
+//RS fn jet_authority_covers(held: &str, requested: &str) -> bool {
+//RS     held == requested
+//RS         || requested
+//RS             .strip_prefix(held)
+//RS             .is_some_and(|tail| tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/'))
+//RS }
+//RS 
+//RS /// D-AGENT-EXEC1: the default workspace process scope is a repository read
+//RS /// plus a private build write. Network, home, secrets, devices, inherited
+//RS /// handles, and every other resource stay absent and therefore denied.
+//RS pub(crate) fn jet_authority_workspace_rights() -> std::collections::BTreeSet<String> {
+//RS     [
+//RS         "FS.Read:repo".to_string(),
+//RS         "FS.Write:.jet/build".to_string(),
+//RS     ]
+//RS     .into_iter()
+//RS     .collect()
+//RS }
+//RS 
+//RS /// D-AUTHORITY-NAME1=A: `with` can only attenuate a right already held.
+//RS pub(crate) fn jet_authority_with_right(
+//RS     held: &std::collections::BTreeSet<String>,
+//RS     requested: &str,
+//RS ) -> Result<std::collections::BTreeSet<String>, String> {
+//RS     if held.iter().any(|bound| jet_authority_covers(bound, requested)) {
+//RS         Ok([requested.to_string()].into_iter().collect())
+//RS     } else {
+//RS         Err(format!(
+//RS             "E0712: authority cannot narrow to `{requested}` outside its held rights"
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS /// D-AUTHORITY-NAME1=A: `without` removes a right subtree and never widens.
+//RS pub(crate) fn jet_authority_without_right(
+//RS     held: &std::collections::BTreeSet<String>,
+//RS     requested: &str,
+//RS ) -> std::collections::BTreeSet<String> {
+//RS     held.iter()
+//RS         .filter(|held_right| !jet_authority_covers(requested, held_right))
+//RS         .cloned()
+//RS         .collect()
+//RS }
+//RS 
+//RS /// Shared AOT/Wasm operation for the `with` family member.
+//RS pub(crate) fn jet_authority_with(
+//RS     authority: &JetAuthority,
+//RS     requested: &str,
+//RS ) -> JetAuthority {
+//RS     match jet_authority_with_right(&authority.rights, requested) {
+//RS         Ok(rights) => JetAuthority { rights },
+//RS         Err(message) => panic!("{message}"),
+//RS     }
+//RS }
+//RS 
+//RS /// Shared AOT/Wasm operation for the `without` family member.
+//RS pub(crate) fn jet_authority_without(
+//RS     authority: &JetAuthority,
+//RS     requested: &str,
+//RS ) -> JetAuthority {
+//RS     JetAuthority {
+//RS         rights: jet_authority_without_right(&authority.rights, requested),
+//RS     }
+//RS }
+// END-PORT-PENDING 0141 crates/jet-codegen/src/Prelude/Core/Authority.rs:1-231
+

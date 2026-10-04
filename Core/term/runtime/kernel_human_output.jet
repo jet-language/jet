@@ -1,0 +1,775 @@
+// HumanOutput.rs:1-1431. Pure presentation policy; never reads env or writes IO.
+// Main wires this private owner as core.term.runtime.kernel_human_output.
+// #4392/#4318: unicode.utf8_bytes currently materializes upstream. Retained
+// byte/field loans and consuming String.from_bytes must land before allocation
+// parity; no local substitute byte provider is introduced here.
+// #4483: Int length/count/dimension carriers require selected-target usize
+// range checks at the Prelude ABI boundary (including i64 -> usize on 32-bit).
+use core.text.runtime.kernel_unicode_string as unicode
+use core.math as math
+// Main/RtW41 canonical scalar owner; pending ABI reconciliation/publication.
+use core.text.runtime.kernel_float_format as output_float
+
+#Equatable
+pub enum JetOutputColorMode {
+    Auto
+    Always
+    Never
+    pub fn default() -> JetOutputColorMode Never! { .Auto }
+    pub fn parse(value: String) -> JetOutputColorMode Never! {
+        if value == { "always" -> .Always, "never" -> .Never, _ -> .Auto }
+    }
+    pub fn as_str(self) -> String Never! {
+        if self == { .Auto -> "auto", .Always -> "always", .Never -> "never" }
+    }
+}
+#Equatable
+pub enum JetOutputChannel {
+    HumanStdout
+    HumanStderr
+    MachineStdout
+    Hidden
+    pub fn is_human(self) -> Bool Never! { self == .HumanStdout || self == .HumanStderr }
+    pub fn is_machine(self) -> Bool Never! { self == .MachineStdout }
+    pub fn is_hidden(self) -> Bool Never! { self == .Hidden }
+}
+#Equatable
+pub enum JetOutputKind {
+    Renderable
+    Status
+    Log
+    Progress
+    Machine
+    pub fn is_machine(self) -> Bool Never! { self == .Machine }
+}
+#Equatable
+pub struct JetOutputCapabilities {
+    pub channel: JetOutputChannel
+    pub requested_color: JetOutputColorMode
+    pub stdin_is_terminal: Bool
+    pub stdout_is_terminal: Bool
+    pub stderr_is_terminal: Bool
+    pub term_is_dumb: Bool
+    pub no_color: Bool
+    pub force_color: Bool
+    pub json: Bool
+    pub color_enabled: Bool
+    pub unicode_enabled: Bool
+    pub progress_enabled: Bool
+    pub width: Int
+    pub height: Int
+    pub fn human(self) -> Bool Never! { self.channel.is_human() }
+    pub fn machine(self) -> Bool Never! { self.channel.is_machine() }
+    pub fn human_enabled(self) -> Bool Never! { self.human() }
+    pub fn machine_enabled(self) -> Bool Never! { self.machine() }
+    pub fn ansi_enabled(self) -> Bool Never! { self.color_enabled }
+    pub fn unicode_enabled(self) -> Bool Never! { self.unicode_enabled }
+    pub fn progress_enabled(self) -> Bool Never! { self.progress_enabled }
+    pub fn channel(self, kind: JetOutputKind) -> JetOutputChannel Never! { self.channel_for(kind) }
+    pub fn channel_for(self, kind: JetOutputKind) -> JetOutputChannel Never! {
+        if self.channel.is_machine() -> return if kind.is_machine() -> .MachineStdout else -> .Hidden
+        if self.channel.is_hidden() -> return .Hidden
+        if kind == {
+            .Renderable -> .HumanStdout
+            .Status | .Log | .Progress -> .HumanStderr
+            .Machine -> .Hidden
+        }
+    }
+    pub fn allows(self, kind: JetOutputKind) -> Bool Never! { !self.channel_for(kind).is_hidden() }
+}
+// Rust:151. Encoding capability and stream facts supplied by the host.
+pub fn jet_output_capabilities_with_mode(channel: JetOutputChannel, requested_color: JetOutputColorMode, stdin_is_terminal: Bool, stdout_is_terminal: Bool, stderr_is_terminal: Bool, term: String?, no_color: Bool, force_color: Bool, width: Int, height: Int, unicode: Bool) -> JetOutputCapabilities Never! {
+    dumb :: term == Val("dumb")
+    human :: channel.is_human()
+    terminal :: if channel == { .HumanStderr -> stderr_is_terminal, .HumanStdout -> stdout_is_terminal, _ -> false }
+    color :: human && if requested_color == { .Always -> true, .Never -> false, .Auto -> !no_color && (force_color || terminal) }
+    JetOutputCapabilities{channel, requested_color, stdin_is_terminal, stdout_is_terminal, stderr_is_terminal, term_is_dumb: dumb, no_color, force_color, json: channel.is_machine(), color_enabled: color, unicode_enabled: human && terminal && !dumb && unicode, progress_enabled: human && !dumb && terminal, width: if width > 0 -> width else -> 80, height: if height > 0 -> height else -> 24}
+}
+// Rust:215. Width is clamped BEFORE the signed conversion; target usize gate
+// also applies to with_mode's positive dimensions, never infer host bit width.
+pub fn jet_output_capabilities_from_host(channel: JetOutputChannel, requested_color: JetOutputColorMode, tty: Bool, term: String?, no_color: Bool, force_color: Bool, width: Int?, unicode: Bool) -> JetOutputCapabilities Never! {
+    jet_output_capabilities_with_mode(channel, requested_color, tty, tty, tty, term, no_color, force_color, min(width ?? 80, 9223372036854775807), 24, unicode)
+}
+pub JET_OUTPUT_MAX_TASKS :: 64
+pub JET_OUTPUT_MAX_COLUMNS :: 8
+pub JET_OUTPUT_MAX_TEXT :: 256
+pub JET_OUTPUT_MAX_TABLE_COLUMNS :: 64
+pub JET_OUTPUT_MAX_TABLE_ROWS :: 4096
+pub JET_OUTPUT_MAX_WIDTH :: 256
+pub JET_OUTPUT_MAX_FRAME_LINES :: 64
+pub JET_OUTPUT_MAX_FRAME_BYTES :: 16384
+
+#Equatable
+pub struct JetOutputTable {
+    pub headers: [String]
+    pub rows: [[String]]
+    pub fn new(headers: ^[String], rows: ^[[String]]) -> JetOutputTable Never! {
+        h := ^headers
+        r := ^rows
+        loop h.len() > JET_OUTPUT_MAX_TABLE_COLUMNS -> _ :: &h.pop()
+        loop r.len() > JET_OUTPUT_MAX_TABLE_ROWS -> _ :: &r.pop()
+        loop i in 0..<h.len() -> h[i] = jet_output_bound_text(h[i])
+        loop i in 0..<r.len() {
+            loop r[i].len() > JET_OUTPUT_MAX_TABLE_COLUMNS -> _ :: &r[i].pop()
+            loop j in 0..<r[i].len() -> r[i][j] = jet_output_bound_text(r[i][j])
+        }
+        JetOutputTable{headers: ^h, rows: ^r}
+    }
+}
+#Equatable
+pub struct JetOutputStatus {
+    pub label: String
+    pub value: String
+    pub fn new(label: String, value: String) -> JetOutputStatus Never! {
+        JetOutputStatus{label: jet_output_bound_text(label), value: jet_output_bound_text(value)}
+    }
+}
+#Equatable
+pub enum JetHumanRenderable {
+    Text(String)
+    Table(JetOutputTable)
+    Status(JetOutputStatus)
+}
+pub fn jet_output_human_only(channel: JetOutputChannel, renderable: JetHumanRenderable, width: Int, unicode: Bool) -> String? Never! {
+    if !channel.is_human() -> return None
+    Val(if renderable == { .Text(text) -> jet_output_strip_ansi(text), .Table(table) -> jet_output_table_human(table, width, unicode), .Status(status) -> jet_output_status_human(status) })
+}
+pub fn jet_output_render(capabilities: JetOutputCapabilities, kind: JetOutputKind, renderable: JetHumanRenderable) -> String? Never! {
+    channel :: capabilities.channel_for(kind)
+    if channel.is_hidden() || (kind == .Progress && !capabilities.progress_enabled) -> return None
+    if channel.is_machine() {
+        return Val(if renderable == {
+            .Text(text) -> "{{\"text\":\"{jet_output_json_escape(text)}\"}}"
+            .Table(table) -> jet_output_table_json(table)
+            .Status(status) -> jet_output_status_json(status)
+        })
+    }
+    Val(if renderable == {
+        .Text(text) -> if capabilities.color_enabled -> ~text else -> jet_output_strip_ansi(text)
+        .Table(table) -> jet_output_table_human(table, capabilities.width, capabilities.unicode_enabled)
+        .Status(status) -> jet_output_status_human(status)
+    })
+}
+#Equatable
+pub enum JetOutputProgressState {
+    Running
+    Complete
+    Failed
+    pub fn as_str(self) -> String Never! { if self == { .Running -> "running", .Complete -> "complete", .Failed -> "failed" } }
+}
+// Rust:367-430 JetOutputProgressIterState (new/advance/finish) is explicitly
+// gated, NOT replaced by a wall-clock Stopwatch or caller timestamp. Required
+// canonical runtime capability: owned monotonic Instant, now(), elapsed()
+// as_secs_f64(), selected usize saturating_add, and fallible FnOnce callbacks
+// preserving generic E and borrowed text through synchronous emit (#4494,
+// #4483, #4500). advance: finished=>Ok; saturating count then min(total);
+// render using SAME started.elapsed; emit? BEFORE displayed=true; if total==
+// count invoke finish?; finish marks finished BEFORE callback and calls it only
+// when displayed. No declarations or success placeholders for missing leaves.
+// Rust:562-622. SAME RtW41 fixed/display owners, pending ABI reconciliation
+// and real formatter publication (#4500); no host/string-format fallback.
+pub fn jet_output_progress_legacy(description: String, format: String, count: Int, total: Int?, elapsed: Float, color_enabled: Bool) -> String Never! {
+    count := count
+    total_text := "?"
+    percent := "?"
+    elapsed :: if math.is_finite(elapsed) -> if elapsed > 0.0 -> elapsed else -> 0.0 else -> 0.0
+    remaining := "?"
+    if total == .Val(limit) {
+        count = min(count, limit)
+        total_text = "{limit}"
+        percent = progress_percent(count, limit)
+        if count >= limit -> remaining = "0.00s"
+        else if count > 0 {
+            // Preserve Rust's multiply THEN divide (not precomputed rate).
+            value :: elapsed * Float{limit - count} / Float{count}
+            remaining = "{output_float.fixed(value, 2)}s"
+        }
+    }
+    rate :: if elapsed > 0.0 -> "{output_float.fixed(Float{count} / elapsed, 2)}/s" else -> "?/s"
+    default_format :: "{{description}} {{percent}}% {{count}}/{{total}} elapsed {{elapsed}} remaining {{remaining}} rate {{rate}}"
+    rendered := jet_output_bound_raw_text(if format.is_empty() -> default_format else -> format)
+    bounded_description :: jet_output_bound_raw_text(description)
+    // Sequential replacement intentionally expands tokens in earlier values.
+    // Seven bounded passes, not recursive token expansion or a new template
+    // parser. Original order is observable for descriptions containing tokens.
+    rendered = rendered.replace("{{description}}", bounded_description)
+    rendered = rendered.replace("{{percent}}", percent)
+    rendered = rendered.replace("{{count}}", "{count}")
+    rendered = rendered.replace("{{total}}", total_text)
+    rendered = rendered.replace("{{elapsed}}", "{output_float.fixed(elapsed, 2)}s")
+    rendered = rendered.replace("{{remaining}}", remaining)
+    rendered = rendered.replace("{{rate}}", rate)
+    rendered = jet_output_bound_raw_text(rendered)
+    if color_enabled -> ^rendered else -> jet_output_strip_ansi(rendered)
+}
+// Equivalent to source u128 count*100/total without an allocating exact-Int
+// intermediate. Count <= total; selected usize facts fit U64 (#4483). Seven
+// binary multiply/divide steps retain remainder < divisor, avoiding overflow
+// even at usize::MAX. Only the final quotient (0..100) becomes display text.
+fn progress_percent(count: Int, total: Int) -> String Never! {
+    if total == 0 -> return "100"
+    n :: U64{count}
+    d :: U64{total}
+    remainder := U64{0}
+    quotient := U64{0}
+    bit := 6
+    loop bit >= 0 {
+        quotient = quotient * U64{2}
+        gap :: d - remainder
+        if remainder >= gap {
+            remainder = remainder - gap
+            quotient = quotient + U64{1}
+        } else -> remainder = remainder + remainder
+        if ((100 >> bit) & 1) != 0 {
+            gap :: d - n
+            if remainder >= gap {
+                remainder = remainder - gap
+                quotient = quotient + U64{1}
+            } else -> remainder = remainder + n
+        }
+        bit -= 1
+    }
+    "{quotient}"
+}
+
+#Equatable
+pub struct JetOutputProgressColumn { pub key: String, pub value: String }
+#Equatable
+pub struct JetOutputProgressTask {
+    pub id: String
+    pub description: String
+    pub count: Int
+    pub total: Int?
+    pub elapsed: Float
+    pub state: JetOutputProgressState
+    pub transient: Bool
+    pub columns: [JetOutputProgressColumn]
+    pub fn new(id: String, description: String, total: Int?) -> JetOutputProgressTask Never! {
+        JetOutputProgressTask{id: jet_output_bound_text(id), description: jet_output_bound_text(description), count: 0, total, elapsed: 0.0, state: if total == Val(0) -> .Complete else -> .Running, transient: false, columns: [JetOutputProgressColumn]{}}
+    }
+    pub fn update(&self, count: Int, elapsed: Float) Never! {
+        self.elapsed = if math.is_finite(elapsed) -> if elapsed > 0.0 -> elapsed else -> 0.0 else -> 0.0
+        if self.total == .Val(total) {
+            self.count = min(count, total)
+            if self.state == .Running && self.count >= total {
+                self.count = total
+                self.state = .Complete
+            } else if self.state == .Complete -> self.count = total
+        } else -> self.count = count
+    }
+    pub fn complete(&self) Never! {
+        self.state = .Complete
+        if self.total == .Val(total) -> self.count = total
+    }
+    pub fn fail(&self) Never! { self.state = .Failed }
+    pub fn set_transient(&self, transient: Bool) Never! { self.transient = transient }
+    pub fn set_column(&self, key: String, value: String) Never! {
+        bounded :: jet_output_bound_text(key)
+        if bounded.is_empty() -> return
+        value :: jet_output_bound_text(value)
+        loop i in 0..<self.columns.len() {
+            if self.columns[i].key == bounded {
+                self.columns[i].value = ^value
+                return
+            }
+        }
+        if self.columns.len() < JET_OUTPUT_MAX_COLUMNS -> &self.columns.push(JetOutputProgressColumn{key: ^bounded, value: ^value})
+    }
+}
+#Equatable
+pub struct JetOutputProgressSnapshot {
+    pub tasks: [JetOutputProgressTask]
+    pub fn default() -> JetOutputProgressSnapshot Never! { JetOutputProgressSnapshot{tasks: [JetOutputProgressTask]{}} }
+    pub fn new() -> JetOutputProgressSnapshot Never! { JetOutputProgressSnapshot.default() }
+    pub fn upsert(&self, task: ^JetOutputProgressTask) Never! {
+        loop i in 0..<self.tasks.len() {
+            if self.tasks[i].id == task.id {
+                self.tasks[i] = ^task
+                return
+            }
+        }
+        if self.tasks.len() < JET_OUTPUT_MAX_TASKS -> &self.tasks.push(^task)
+    }
+    pub fn remove(&self, id: String) -> JetOutputProgressTask? Never! {
+        loop i in 0..<self.tasks.len() {
+            if self.tasks[i].id == id {
+                // Stable removal: one bounded shift, preserving insertion order.
+                loop j in i..<(self.tasks.len() - 1) -> &self.tasks.swap(j, j + 1)
+                return &self.tasks.pop()
+            }
+        }
+        None
+    }
+    pub fn render(self, width: Int, unicode: Bool) -> String Never! { jet_output_progress_render_tasks(self.tasks, width, unicode) }
+}
+#Equatable
+pub struct JetOutputProgressFrame {
+    pub sequence: U64
+    pub width: Int
+    pub height: Int
+    pub clear_lines: Int
+    pub lines: [String]
+    pub final_frame: Bool
+    pub fn text(self) -> String Never! { join(self.lines, "\n") }
+    pub fn is_empty(self) -> Bool Never! { self.lines.is_empty() }
+}
+pub fn jet_output_progress_render_tasks(tasks: [JetOutputProgressTask], width: Int, unicode: Bool) -> String Never! {
+    join(jet_output_progress_lines(tasks, width, unicode), "\n")
+}
+fn jet_output_progress_lines(tasks: [JetOutputProgressTask], width: Int, unicode: Bool) -> [String] Never! {
+    lines := [String]{}
+    loop i in 0..<min(tasks.len(), JET_OUTPUT_MAX_TASKS) {
+        if tasks[i].state == .Complete && tasks[i].transient -> next
+        line := jet_output_progress_line(tasks[i], unicode)
+        if line.is_empty() -> line = " "
+        wrapped := jet_output_wrap_cell(line, width)
+        loop j in 0..<wrapped.len() -> &lines.push(^wrapped[j])
+    }
+    lines
+}
+fn jet_output_progress_line(task: JetOutputProgressTask, unicode: Bool) -> String Never! {
+    description :: jet_output_bound_text(task.description)
+    total := "?"
+    count := task.count
+    percent := "?"
+    if task.total == .Val(limit) {
+        total = "{limit}"
+        count = min(count, limit)
+        percent = progress_percent(count, limit)
+    }
+    out := [U8]{}
+    append(&out, if task.state == {
+        .Running -> "{description} {percent}% {count}/{total}"
+        .Complete -> "{description} {count}/{total}"
+        .Failed -> "{description} failed at {count}/{total}"
+    })
+    if task.state == .Complete -> append(&out, if unicode -> " ✓" else -> " done")
+    loop i in 0..<min(task.columns.len(), JET_OUTPUT_MAX_COLUMNS) {
+        append(&out, " ")
+        append(&out, jet_output_bound_text(task.columns[i].key))
+        append(&out, "=")
+        append(&out, jet_output_bound_text(task.columns[i].value))
+    }
+    finish(^out)
+}
+pub fn jet_output_progress_frame(capabilities: JetOutputCapabilities, sequence: U64, previous_line_count: Int, snapshot: JetOutputProgressSnapshot) -> JetOutputProgressFrame? Never! {
+    if !capabilities.progress_enabled || capabilities.channel_for(.Progress).is_hidden() -> return None
+    width :: max(1, min(capabilities.width, JET_OUTPUT_MAX_WIDTH))
+    height :: min(max(capabilities.height, 1), JET_OUTPUT_MAX_FRAME_LINES)
+    lines := jet_output_progress_lines(snapshot.tasks, width, capabilities.unicode_enabled)
+    loop lines.len() > height -> _ :: &lines.pop()
+    lines = jet_output_bound_frame_lines(^lines)
+    final_frame := true
+    loop i in 0..<min(snapshot.tasks.len(), JET_OUTPUT_MAX_TASKS) {
+        if snapshot.tasks[i].state == .Complete && snapshot.tasks[i].transient -> next
+        if snapshot.tasks[i].state == .Running -> final_frame = false
+    }
+    Val(JetOutputProgressFrame{sequence, width, height, clear_lines: min(previous_line_count, JET_OUTPUT_MAX_FRAME_LINES), lines: ^lines, final_frame})
+}
+pub fn jet_output_progress_render_if_enabled(capabilities: JetOutputCapabilities, snapshot: JetOutputProgressSnapshot) -> String? Never! {
+    if jet_output_progress_frame(capabilities, U64{0}, 0, snapshot) == .Val(frame) -> return Val(frame.text())
+    None
+}
+pub fn jet_output_progress_json(snapshot: JetOutputProgressSnapshot) -> String Never! {
+    out := [U8]{}
+    append(&out, "{{\"tasks\":[")
+    loop i in 0..<min(snapshot.tasks.len(), JET_OUTPUT_MAX_TASKS) {
+        if i > 0 -> append(&out, ",")
+        task :: snapshot.tasks[i]
+        append(&out, "{{\"id\":")
+        quote(&out, jet_output_bound_text(task.id))
+        append(&out, ",\"description\":")
+        quote(&out, jet_output_bound_text(task.description))
+        total :: if task.total == .Val(n) -> "{n}" else -> "null"
+        // SAME exact Rust f64 Display owner, not host interpolation. Float
+        // carrier -> F64 producer signature is pending ABI reconciliation.
+        elapsed :: if math.is_finite(task.elapsed) && task.elapsed >= 0.0 -> output_float.display(task.elapsed) else -> "0"
+        append(&out, ",\"count\":{task.count},\"total\":{total},\"elapsed\":{elapsed},\"state\":\"{task.state.as_str()}\",\"transient\":{task.transient},\"columns\":{{")
+        loop j in 0..<min(task.columns.len(), JET_OUTPUT_MAX_COLUMNS) {
+            if j > 0 -> append(&out, ",")
+            quote(&out, jet_output_bound_text(task.columns[j].key))
+            append(&out, ":")
+            quote(&out, jet_output_bound_text(task.columns[j].value))
+        }
+        append(&out, "}}}}")
+    }
+    append(&out, "]}}")
+    finish(^out)
+}
+pub fn jet_output_machine_progress_only(channel: JetOutputChannel, snapshot: JetOutputProgressSnapshot) -> String? Never! {
+    if channel.is_machine() -> return Val(jet_output_progress_json(snapshot))
+    None
+}
+fn jet_output_bound_raw_text(text: String) -> String Never! {
+    raw :: unicode.utf8_bytes(text)
+    out := [U8]{}
+    at := 0
+    count := 0
+    loop at < raw.len() && count < JET_OUTPUT_MAX_TEXT {
+        end :: at + unicode.utf8_width_at(raw, at)
+        append_span(&out, raw, at, end)
+        at = end
+        count += 1
+    }
+    finish(^out)
+}
+fn jet_output_bound_text(text: String) -> String Never! { jet_output_bound_raw_text(jet_output_strip_ansi(text)) }
+fn jet_output_bound_frame_lines(lines: ^[String]) -> [String] Never! {
+    input := ^lines
+    retained := [String]{}
+    bytes := 0
+    loop i in 0..<input.len() {
+        separator :: if retained.is_empty() -> 0 else -> 1
+        available :: max(0, JET_OUTPUT_MAX_FRAME_BYTES - bytes - separator)
+        if available == 0 -> break
+        if input[i].count_bytes() > available {
+            raw :: unicode.utf8_bytes(input[i])
+            at := 0
+            loop at < raw.len() {
+                end :: at + unicode.utf8_width_at(raw, at)
+                if end > available -> break
+                at = end
+            }
+            out := [U8]{}
+            append_span(&out, raw, 0, at)
+            input[i] = finish(^out)
+        }
+        bytes += separator + input[i].count_bytes()
+        &retained.push(^input[i])
+        if bytes >= JET_OUTPUT_MAX_FRAME_BYTES -> break
+    }
+    retained
+}
+pub fn jet_output_status_human(status: JetOutputStatus) -> String Never! {
+    label :: jet_output_strip_ansi(status.label)
+    value :: jet_output_strip_ansi(status.value)
+    if value.is_empty() -> return ^label
+    if label.is_empty() -> return ^value
+    "{label}: {value}"
+}
+pub fn jet_output_table_human(table: JetOutputTable, width: Int, unicode: Bool) -> String Never! {
+    width :: max(width, 1)
+    columns := table.headers.len()
+    loop row in table.rows -> columns = max(columns, row.len())
+    columns = min(columns, JET_OUTPUT_MAX_TABLE_COLUMNS)
+    if columns == 0 -> return ""
+    lines := [String]{}
+    overhead :: columns * 3 + 1
+    if width < overhead {
+        if !table.headers.is_empty() -> append_narrow_row(&lines, table.headers, columns, width)
+        loop i in 0..<min(table.rows.len(), JET_OUTPUT_MAX_TABLE_ROWS) -> append_narrow_row(&lines, table.rows[i], columns, width)
+        return join(lines, "\n")
+    }
+    natural := [Int]{}
+    loop i in 0..<columns -> &natural.push(1)
+    loop i in 0..<min(table.headers.len(), columns) -> natural[i] = max(natural[i], jet_output_visible_width(table.headers[i]))
+    loop r in 0..<min(table.rows.len(), JET_OUTPUT_MAX_TABLE_ROWS) {
+        loop i in 0..<min(table.rows[r].len(), columns) -> natural[i] = max(natural[i], jet_output_visible_width(table.rows[r][i]))
+    }
+    budget :: max(0, width - overhead)
+    sum := 0
+    loop n in natural -> sum += n
+    widths :: if sum <= budget -> ^natural else -> jet_output_fit_widths(natural, budget, columns)
+    separator :: if unicode -> "│" else -> "|"
+    &lines.push(if unicode -> jet_output_border(widths, "┌", "┬", "┐", "─") else -> jet_output_border(widths, "+", "+", "+", "-"))
+    if !table.headers.is_empty() {
+        append_cells(&lines, table.headers, widths, separator)
+        &lines.push(if unicode -> jet_output_border(widths, "├", "┼", "┤", "─") else -> jet_output_border(widths, "+", "+", "+", "-"))
+    }
+    loop r in 0..<min(table.rows.len(), JET_OUTPUT_MAX_TABLE_ROWS) -> append_cells(&lines, table.rows[r], widths, separator)
+    &lines.push(if unicode -> jet_output_border(widths, "└", "┴", "┘", "─") else -> jet_output_border(widths, "+", "+", "+", "-"))
+    join(lines, "\n")
+}
+fn append_narrow_row(lines: &[String], cells: [String], columns: Int, width: Int) Never! {
+    out := [U8]{}
+    loop i in 0..<min(cells.len(), columns) {
+        if i > 0 -> append(&out, " | ")
+        append(&out, jet_output_strip_ansi(cells[i]))
+    }
+    wrapped := jet_output_wrap(finish(^out), width)
+    loop i in 0..<wrapped.len() -> &lines.push(^wrapped[i])
+}
+fn jet_output_fit_widths(natural: [Int], budget: Int, columns: Int) -> [Int] Never! {
+    widths := [Int]{}
+    loop i in 0..<columns -> &widths.push(1)
+    remaining := max(0, budget - columns)
+    loop remaining > 0 {
+        grew := false
+        loop i in 0..<columns {
+            if widths[i] < natural[i] && remaining > 0 {
+                widths[i] += 1
+                remaining -= 1
+                grew = true
+            }
+        }
+        if !grew -> break
+    }
+    widths
+}
+fn jet_output_border(widths: [Int], left: String, joint: String, right: String, fill: String) -> String Never! {
+    out := [U8]{}
+    append(&out, left)
+    loop i in 0..<widths.len() {
+        if i > 0 -> append(&out, joint)
+        loop j in 0..<(widths[i] + 2) -> append(&out, fill)
+    }
+    append(&out, right)
+    finish(^out)
+}
+fn append_cells(lines: &[String], cells: [String], widths: [Int], separator: String) Never! {
+    wrapped := jet_output_cells(cells, widths, separator)
+    loop i in 0..<wrapped.len() -> &lines.push(^wrapped[i])
+}
+fn jet_output_cells(cells: [String], widths: [Int], separator: String) -> [String] Never! {
+    wrapped := [[String]]{}
+    height := 1
+    loop i in 0..<widths.len() {
+        parts :: if i < cells.len() -> jet_output_wrap_cell(cells[i], widths[i]) else -> [String]{""}
+        height = max(height, parts.len())
+        &wrapped.push(^parts)
+    }
+    lines := [String]{}
+    loop row in 0..<height {
+        out := [U8]{}
+        append(&out, separator)
+        loop col in 0..<widths.len() {
+            if col > 0 -> append(&out, separator)
+            append(&out, " ")
+            if row < wrapped[col].len() {
+                append(&out, wrapped[col][row])
+                loop j in 0..<(max(0, widths[col] - jet_output_visible_width(wrapped[col][row])) + 1) -> &out.push(U8{32})
+            } else {
+                loop j in 0..<(widths[col] + 1) -> &out.push(U8{32})
+            }
+        }
+        append(&out, separator)
+        &lines.push(finish(^out))
+    }
+    lines
+}
+// Rust:1305 callback traversal is fused into a borrowed span cursor: each
+// scalar is inspected a bounded number of times, no cluster list or rescans.
+struct OutputCluster { end: Int, width: Int }
+fn next_cluster(raw: [U8], start: Int, limit: Int) -> OutputCluster Never! {
+    first :: unicode.scalar_at(raw, start)
+    end := start + unicode.utf8_width_at(raw, start)
+    width := jet_output_char_width(first)
+    if jet_output_is_regional_indicator(first) {
+        if end < limit && jet_output_is_regional_indicator(unicode.scalar_at(raw, end)) {
+            end += unicode.utf8_width_at(raw, end)
+            width = 2
+        }
+    } else {
+        loop {
+            loop end < limit && jet_output_is_combining(unicode.scalar_at(raw, end)) -> end += unicode.utf8_width_at(raw, end)
+            if end >= limit || unicode.scalar_at(raw, end) != 0x200d -> break
+            end += unicode.utf8_width_at(raw, end)
+            if end >= limit -> break
+            width = max(width, jet_output_char_width(unicode.scalar_at(raw, end)))
+            end += unicode.utf8_width_at(raw, end)
+        }
+    }
+    OutputCluster{end, width}
+}
+pub fn jet_output_wrap(text: String, width: Int) -> [String] Never! {
+    width :: max(width, 1)
+    stripped :: jet_output_strip_ansi(text)
+    raw :: unicode.utf8_bytes(stripped)
+    lines := [String]{}
+    start := 0
+    // Inclusive terminal boundary retains empty input and trailing newline.
+    loop start <= raw.len() {
+        limit := start
+        loop limit < raw.len() && raw[limit] != U8{10} -> limit += 1
+        if limit == start -> &lines.push("")
+        else {
+            line := [U8]{}
+            line_width := 0
+            emitted := false
+            at := start
+            loop at < limit {
+                cluster :: next_cluster(raw, at, limit)
+                if cluster.width == 0 {
+                    if line_width < width -> append_span(&line, raw, at, cluster.end)
+                } else if cluster.width > width {
+                    if !line.is_empty() {
+                        &lines.push(finish(^line))
+                        line = [U8]{}
+                        line_width = 0
+                    }
+                    &lines.push("?")
+                    emitted = true
+                } else {
+                    if line_width != 0 && line_width + cluster.width > width {
+                        &lines.push(finish(^line))
+                        line = [U8]{}
+                        line_width = 0
+                    }
+                    append_span(&line, raw, at, cluster.end)
+                    line_width += cluster.width
+                }
+                at = cluster.end
+            }
+            if !line.is_empty() || !emitted -> &lines.push(finish(^line))
+        }
+        if limit == raw.len() -> break
+        start = limit + 1
+    }
+    lines
+}
+fn jet_output_wrap_cell(text: String, width: Int) -> [String] Never! { jet_output_wrap(text, width) }
+pub fn jet_output_visible_width(text: String) -> Int Never! {
+    raw :: unicode.utf8_bytes(jet_output_strip_ansi(text))
+    result := 0
+    start := 0
+    loop start < raw.len() {
+        limit := start
+        loop limit < raw.len() && raw[limit] != U8{10} -> limit += 1
+        width := 0
+        at := start
+        loop at < limit {
+            cluster :: next_cluster(raw, at, limit)
+            width += cluster.width
+            at = cluster.end
+        }
+        result = max(result, width)
+        start = limit + 1
+    }
+    result
+}
+fn is_control(cp: Int) -> Bool Never! { cp < 32 || (cp >= 127 && cp <= 159) }
+pub fn jet_output_char_width(character: Int) -> Int Never! {
+    if is_control(character) || jet_output_is_combining(character) -> return 0
+    if jet_output_is_wide(character) -> return 2
+    1
+}
+// These are the original HumanOutput table, NOT modern general-category or
+// grapheme assets: replacing them would change this kernel's pinned semantics.
+fn between(cp: Int, low: Int, high: Int) -> Bool Never! { cp >= low && cp <= high }
+fn jet_output_is_combining(c: Int) -> Bool Never! {
+    between(c,0x0300,0x036f) || between(c,0x0483,0x0489) || between(c,0x0591,0x05bd) || c==0x05bf || between(c,0x05c1,0x05c2) || between(c,0x05c4,0x05c5) ||
+    between(c,0x0610,0x061a) || between(c,0x064b,0x065f) || c==0x0670 || between(c,0x06d6,0x06dc) || between(c,0x06df,0x06e4) || between(c,0x06e7,0x06e8) || between(c,0x06ea,0x06ed) ||
+    c==0x0711 || between(c,0x0730,0x074a) || between(c,0x07a6,0x07b0) || between(c,0x07eb,0x07f3) || between(c,0x0816,0x0819) || between(c,0x081b,0x0823) || between(c,0x0825,0x0827) || between(c,0x0829,0x082d) || between(c,0x0859,0x085b) ||
+    between(c,0x08d3,0x0903) || between(c,0x093a,0x093c) || between(c,0x093e,0x094f) || between(c,0x0951,0x0957) || between(c,0x0962,0x0963) || between(c,0x0981,0x0984) || between(c,0x09be,0x09c4) || between(c,0x09c7,0x09c8) ||
+    between(c,0x09cb,0x09cd) || c==0x09d7 || between(c,0x09e2,0x09e3) ||
+    between(c,0x0a01,0x0a03) || c==0x0a3c || between(c,0x0a3e,0x0a42) || between(c,0x0a47,0x0a48) || between(c,0x0a4b,0x0a4d) || c==0x0a51 || between(c,0x0a70,0x0a71) || c==0x0a75 ||
+    c==0x0abc || between(c,0x0abe,0x0ac5) || between(c,0x0ac7,0x0ac9) || between(c,0x0acb,0x0acd) || between(c,0x0ae2,0x0ae3) ||
+    between(c,0x0b01,0x0b03) || c==0x0b3c || between(c,0x0b3e,0x0b44) || between(c,0x0b47,0x0b48) || between(c,0x0b4b,0x0b4d) || between(c,0x0b56,0x0b57) || between(c,0x0b62,0x0b63) ||
+    between(c,0x0c00,0x0c04) || between(c,0x0c3e,0x0c44) || between(c,0x0c46,0x0c48) || between(c,0x0c4a,0x0c4d) || between(c,0x0c55,0x0c56) || between(c,0x0c62,0x0c63) ||
+    between(c,0x0d00,0x0d03) || between(c,0x0d3b,0x0d44) || between(c,0x0d46,0x0d48) || between(c,0x0d4a,0x0d4d) || c==0x0d57 || between(c,0x0d62,0x0d63) ||
+    between(c,0x0e31,0x0e31) || between(c,0x0e34,0x0e3a) || between(c,0x0e47,0x0e4e) || c==0x0eb1 || between(c,0x0eb4,0x0ebc) || between(c,0x0ec8,0x0ecd) ||
+    c==0x0f18 || c==0x0f35 || c==0x0f37 || c==0x0f39 || between(c,0x0f71,0x0f84) || between(c,0x0f86,0x0f87) || between(c,0x0f8d,0x0fbc) || c==0x0fc6 ||
+    between(c,0x102b,0x103e) || between(c,0x1056,0x1059) || between(c,0x105e,0x1060) || between(c,0x1062,0x1064) || between(c,0x1067,0x106d) || between(c,0x1071,0x1074) || c==0x1082 || c==0x1084 || between(c,0x1087,0x108d) || c==0x108f || between(c,0x109a,0x109d) ||
+    between(c,0x135d,0x135f) || between(c,0x1712,0x1714) || between(c,0x1732,0x1734) || between(c,0x1752,0x1753) || between(c,0x1772,0x1773) || between(c,0x17b4,0x17d3) || c==0x17dd || between(c,0x180b,0x180f) || between(c,0x1885,0x1886) || c==0x18a9 || between(c,0x1920,0x193b) ||
+    between(c,0x1a17,0x1a1b) || between(c,0x1a55,0x1a5e) || c==0x1a60 || between(c,0x1a62,0x1a6f) || between(c,0x1a70,0x1a7c) || c==0x1a7f || between(c,0x1ab0,0x1aff) || between(c,0x1b00,0x1b04) || c==0x1b34 || between(c,0x1b36,0x1b44) || between(c,0x1b6b,0x1b73) || between(c,0x1b80,0x1b82) || between(c,0x1ba1,0x1bad) || between(c,0x1be6,0x1bf3) ||
+    between(c,0x1c24,0x1c37) || between(c,0x1cd0,0x1cd2) || between(c,0x1cd4,0x1ce8) || c==0x1ced || c==0x1cf4 || between(c,0x1cf7,0x1cf9) || between(c,0x1cfb,0x1cfc) || between(c,0x1d167,0x1d1ff) || between(c,0x1dc00,0x1dfff) ||
+    between(c,0x20d0,0x20f0) || between(c,0x2cef,0x2cf1) || between(c,0x2de0,0x2dff) || between(c,0x302a,0x302f) || between(c,0x3099,0x309a) || between(c,0xa66f,0xa672) || between(c,0xa674,0xa67d) || between(c,0xa69e,0xa69f) || between(c,0xa6f0,0xa6f1) ||
+    c==0xa802 || c==0xa806 || c==0xa80b || between(c,0xa823,0xa827) || c==0xa82c || between(c,0xa880,0xa881) || between(c,0xa8b4,0xa8c5) || between(c,0xa8e0,0xa8f1) || c==0xa8ff || between(c,0xa926,0xa92f) || between(c,0xa947,0xa953) || between(c,0xa980,0xa983) || between(c,0xa9b3,0xa9c0) || c==0xa9c6 || c==0xa9e5 ||
+    between(c,0xaa29,0xaa3f) || c==0xaa43 || between(c,0xaa4c,0xaa4d) || between(c,0xaa7b,0xaa7d) || c==0xaab0 || between(c,0xaab2,0xaab4) || between(c,0xaab7,0xaab8) || between(c,0xaabe,0xaabf) || c==0xaac1 || between(c,0xaaeb,0xaaef) || between(c,0xaaf5,0xaaf6) || between(c,0xabe3,0xabe4) || between(c,0xabe6,0xabe7) || c==0xabe9 || c==0xabec || between(c,0xabf0,0xabf1) ||
+    between(c,0xfe00,0xfe0f) || between(c,0xfe20,0xfe2f) || between(c,0xff9e,0xff9f) || between(c,0x1f3fb,0x1f3ff)
+}
+fn jet_output_is_wide(c: Int) -> Bool Never! {
+    between(c,0x1100,0x115f) || between(c,0x231a,0x231b) || between(c,0x2329,0x232a) || between(c,0x23e9,0x23ec) || c==0x23f0 || c==0x23f3 || between(c,0x25fd,0x25fe) || between(c,0x2614,0x2615) || between(c,0x2648,0x2653) || c==0x267f || c==0x2693 || c==0x26a1 || between(c,0x26aa,0x26ab) || between(c,0x26bd,0x26be) || between(c,0x26c4,0x26c5) ||
+    c==0x26ce || c==0x26d4 || c==0x26ea || between(c,0x26f2,0x26f3) || c==0x26f5 || c==0x26fa || c==0x26fd || c==0x2705 || between(c,0x270a,0x270b) || c==0x2728 || c==0x274c || c==0x274e || between(c,0x2753,0x2755) || c==0x2757 || between(c,0x2795,0x2797) || c==0x27b0 || c==0x27bf || between(c,0x2b1b,0x2b1c) || c==0x2b50 || c==0x2b55 ||
+    between(c,0x2e80,0x2ffb) || between(c,0x3000,0x303e) || between(c,0x3041,0x3247) || between(c,0x3250,0x4dbf) || between(c,0x4e00,0xa4c6) || between(c,0xa960,0xa97c) || between(c,0xac00,0xd7a3) || between(c,0xf900,0xfaff) || between(c,0xfe10,0xfe19) || between(c,0xfe30,0xfe6b) || between(c,0xff01,0xff60) || between(c,0xffe0,0xffe6) || between(c,0x1f300,0x1f64f) || between(c,0x1f680,0x1f6ff) || between(c,0x1f900,0x1f9ff) || between(c,0x20000,0x3fffd)
+}
+fn jet_output_is_regional_indicator(c: Int) -> Bool Never! { between(c, 0x1f1e6, 0x1f1ff) }
+pub fn jet_output_strip_ansi(text: String) -> String Never! {
+    raw :: unicode.utf8_bytes(text)
+    out := [U8]{}
+    state := 0
+    at := 0
+    loop at < raw.len() {
+        cp :: unicode.scalar_at(raw, at)
+        end :: at + unicode.utf8_width_at(raw, at)
+        if state == 0 {
+            if cp == 27 -> state = 1 else -> append_span(&out, raw, at, end)
+        } else if state == 1 {
+            if cp == 91 -> state = 2
+            else if cp == 93 -> state = 3
+            else -> state = 0
+        } else if state == 2 {
+            if between(cp, 64, 126) -> state = 0
+        } else if state == 3 {
+            if cp == 7 -> state = 0
+            else if cp == 27 -> state = 4
+        } else if state == 4 {
+            state = if cp == 92 -> 0 else -> 3
+        } else -> state = 0
+        at = end
+    }
+    finish(^out)
+}
+pub fn jet_output_table_json(table: JetOutputTable) -> String Never! {
+    out := [U8]{}
+    append(&out, "{{\"headers\":[")
+    loop i in 0..<min(table.headers.len(), JET_OUTPUT_MAX_TABLE_COLUMNS) {
+        if i > 0 -> append(&out, ",")
+        quote(&out, table.headers[i])
+    }
+    append(&out, "],\"rows\":[")
+    loop r in 0..<min(table.rows.len(), JET_OUTPUT_MAX_TABLE_ROWS) {
+        if r > 0 -> append(&out, ",")
+        append(&out, "[")
+        loop i in 0..<min(table.rows[r].len(), JET_OUTPUT_MAX_TABLE_COLUMNS) {
+            if i > 0 -> append(&out, ",")
+            quote(&out, table.rows[r][i])
+        }
+        append(&out, "]")
+    }
+    append(&out, "]}}")
+    finish(^out)
+}
+pub fn jet_output_status_json(status: JetOutputStatus) -> String Never! {
+    "{{\"label\":\"{jet_output_json_escape(status.label)}\",\"value\":\"{jet_output_json_escape(status.value)}\"}}"
+}
+pub fn jet_output_machine_table_only(channel: JetOutputChannel, table: JetOutputTable) -> String? Never! {
+    if channel.is_machine() -> return Val(jet_output_table_json(table))
+    None
+}
+fn jet_output_json_escape(text: String) -> String Never! {
+    out := [U8]{}
+    escape_into(&out, text)
+    finish(^out)
+}
+fn quote(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
+    escape_into(&out, text)
+    &out.push(U8{34})
+}
+fn escape_into(out: &[U8], text: String) Never! {
+    raw :: unicode.utf8_bytes(jet_output_strip_ansi(text))
+    at := 0
+    loop at < raw.len() {
+        cp :: unicode.scalar_at(raw, at)
+        end :: at + unicode.utf8_width_at(raw, at)
+        if cp == 34 -> append(&out, "\\\"")
+        else if cp == 92 -> append(&out, "\\\\")
+        else if cp == 10 -> append(&out, "\\n")
+        else if cp == 13 -> append(&out, "\\r")
+        else if cp == 9 -> append(&out, "\\t")
+        else if is_control(cp) {
+            append(&out, "\\u")
+            shift := 12
+            loop shift >= 0 {
+                digit :: (cp >> shift) & 15
+                &out.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+                shift -= 4
+            }
+        } else -> append_span(&out, raw, at, end)
+        at = end
+    }
+}
+fn min(a: Int, b: Int) -> Int Never! { if a < b -> a else -> b }
+fn max(a: Int, b: Int) -> Int Never! { if a > b -> a else -> b }
+fn append_span(out: &[U8], raw: [U8], start: Int, end: Int) Never! { loop i in start..<end -> &out.push(raw[i]) }
+fn append(out: &[U8], text: String) Never! { loop b in unicode.utf8_bytes(text) -> &out.push(b) }
+fn finish(out: ^[U8]) -> String Never! { String.from_bytes(^out) ?? panic("human output produced invalid UTF-8") }
+fn join(lines: [String], separator: String) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<lines.len() {
+        if i > 0 -> append(&out, separator)
+        append(&out, lines[i])
+    }
+    finish(^out)
+}

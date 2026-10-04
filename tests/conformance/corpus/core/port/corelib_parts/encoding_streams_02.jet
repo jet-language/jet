@@ -1,0 +1,1011 @@
+// PORT-PENDING 1016 tests-corelib-parts-encoding-streams-slice-1787: tests/corelib_parts/encoding_streams.rs:1787-2793
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn cbor_stream_is_incremental_bounded_deterministic_and_terminal() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_stream_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let output = dir.join("output.cbor");
+//RS     let float_output = dir.join("float.cbor");
+//RS     let indefinite = dir.join("indefinite.cbor");
+//RS     let truncated = dir.join("truncated.cbor");
+//RS     let half = dir.join("half.cbor");
+//RS     let non_shortest = dir.join("non-shortest.cbor");
+//RS     let nested = dir.join("nested.cbor");
+//RS     fs::write(&indefinite, [0x9f, 0x01, 0x7f, 0x61, b'a', 0xff, 0x42, 0x01, 0x02, 0xff]).unwrap();
+//RS     fs::write(&truncated, [0x63, b'a']).unwrap();
+//RS     fs::write(&half, [0xf9, 0x3c, 0x00]).unwrap();
+//RS     fs::write(&non_shortest, [0x18, 0x01]).unwrap();
+//RS     fs::write(&nested, [0x81, 0x80]).unwrap();
+//RS     let output_text = output.to_string_lossy().replace('\\', "\\\\");
+//RS     let float_output_text = float_output.to_string_lossy().replace('\\', "\\\\");
+//RS     let indefinite_text = indefinite.to_string_lossy().replace('\\', "\\\\");
+//RS     let truncated_text = truncated.to_string_lossy().replace('\\', "\\\\");
+//RS     let half_text = half.to_string_lossy().replace('\\', "\\\\");
+//RS     let non_shortest_text = non_shortest.to_string_lossy().replace('\\', "\\\\");
+//RS     let nested_text = nested.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output_text}") ?? panic("create")
+//RS     writer :: cbor.writer(^output) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
+//RS     writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Text("xy")) ?? panic("text")
+//RS     writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+//RS     &writer.flush() ?? panic("flush")
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("finish twice")
+//RS     float_file :: files.create("{float_output_text}") ?? panic("float create")
+//RS     float_writer :: cbor.writer(^float_file) ?? panic("float writer")
+//RS     float_writer.write(encoding.DataEvent.ArrayStart) ?? panic("float array")
+//RS     float_writer.write(encoding.DataEvent.Float(1.0)) ?? panic("float write")
+//RS     float_writer.write(encoding.DataEvent.Float(100000.0)) ?? panic("float32 write")
+//RS     float_writer.write(encoding.DataEvent.Float(1.1)) ?? panic("float64 write")
+//RS     float_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) ?? panic("nan write")
+//RS     float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
+//RS     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
+//RS     float_writer.finish() ?? panic("float finish")
+//RS     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+//RS     expected_whole :: [U8]{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
+//RS     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
+//RS     after :: writer.write(encoding.DataEvent.Null)
+//RS     if after == {{
+//RS         .Ok(_) -> print(false)
+//RS         .Err(writer_first) -> {{
+//RS             again :: &writer.flush()
+//RS             if again == {{
+//RS                 .Ok(_) -> print(false)
+//RS                 .Err(writer_second) -> print(writer_first.reason == writer_second.reason)
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     input :: files.open("{output_text}") ?? panic("open")
+//RS     reader :: cbor.reader(^input) ?? panic("reader")
+//RS     count := 0
+//RS     loop count < 6 {{
+//RS         event :: reader.next() ?? panic("next")
+//RS         if event == {{
+//RS             Val(_) -> count += 1
+//RS             None -> print("early")
+//RS         }}
+//RS     }}
+//RS     eof :: reader.next() ?? panic("eof")
+//RS     if eof == {{
+//RS         None -> print(count)
+//RS         Val(_) -> print("late")
+//RS     }}
+//RS 
+//RS     indef_input :: files.open("{indefinite_text}") ?? panic("indef open")
+//RS     indef_reader :: cbor.reader(^indef_input) ?? panic("indef reader")
+//RS     indef_count := 0
+//RS     loop indef_count < 5 {{
+//RS         indef_event :: indef_reader.next() ?? panic("indef next")
+//RS         if indef_event == {{
+//RS             Val(_) -> indef_count += 1
+//RS             None -> print("indef early")
+//RS         }}
+//RS     }}
+//RS     print(indef_count)
+//RS 
+//RS     half_input :: files.open("{half_text}") ?? panic("half open")
+//RS     half_reader :: cbor.reader(^half_input) ?? panic("half reader")
+//RS     if half_reader.next() == {{
+//RS         .Ok(_) -> print(true)
+//RS         .Err(_) -> print(false)
+//RS     }}
+//RS 
+//RS     short_input :: files.open("{non_shortest_text}") ?? panic("short open")
+//RS     short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+//RS     if short_reader.next() == {{
+//RS         .Ok(_) -> print(true)
+//RS         .Err(_) -> print(false)
+//RS     }}
+//RS 
+//RS     depth_limits := encoding.EncodingLimits.safe()
+//RS     depth_limits.max_depth = 1
+//RS     nested_input :: files.open("{nested_text}") ?? panic("nested open")
+//RS     nested_reader :: cbor.reader(^nested_input, depth_limits) ?? panic("nested reader")
+//RS     root_event :: nested_reader.next() ?? panic("root array")
+//RS     if nested_reader.next() == {{
+//RS         .Ok(_) -> print(false)
+//RS         .Err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")
+//RS     }}
+//RS 
+//RS     bad_input :: files.open("{truncated_text}") ?? panic("bad open")
+//RS     bad_reader :: cbor.reader(^bad_input) ?? panic("bad reader")
+//RS     first_bad :: bad_reader.next()
+//RS     if first_bad == {{
+//RS         .Ok(_) -> print("missed")
+//RS         .Err(bad_first) -> {{
+//RS             second_bad :: bad_reader.next()
+//RS             if second_bad == {{
+//RS                 .Ok(_) -> print("unlatched")
+//RS                 .Err(bad_second) -> {{
+//RS                     print(bad_first.byte_offset)
+//RS                     print(bad_first.path)
+//RS                     print(bad_first.reason == bad_second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#);
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout, "true\ntrue\n6\n5\ntrue\ntrue\ntrue\n2\n$\ntrue\n");
+//RS     assert_eq!(fs::read(&output).unwrap(), [0xa2, 0x61, b'a', 0x01, 0x61, b'b', 0x62, b'x', b'y']);
+//RS     assert_eq!(fs::read(&float_output).unwrap(), [
+//RS         0x85, 0xf9, 0x3c, 0x00, 0xfa, 0x47, 0xc3, 0x50, 0x00,
+//RS         0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a,
+//RS         0xf9, 0x7e, 0x00, 0xf9, 0x80, 0x00,
+//RS     ]);
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("cbor_stream.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("CBOR stream default-dev failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_stream_hostile_inputs_and_replacement_limits_are_exact() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_hostile_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let fixtures: &[(&str, &[u8])] = &[
+//RS         ("indef-map.cbor", &[0xbf, 0x61, b'a', 0x7f, 0x61, b'x', 0x61, b'y', 0xff, 0xff]),
+//RS         ("indef-bytes.cbor", &[0x5f, 0x42, 1, 2, 0x41, 3, 0xff]),
+//RS         ("duplicate.cbor", &[0xbf, 0x61, b'a', 1, 0x61, b'a', 2, 0xff]),
+//RS         ("nontext.cbor", &[0xa1, 1, 2]),
+//RS         ("tag.cbor", &[0xc0, 1]),
+//RS         ("range.cbor", &[0x1b, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+//RS         ("trunc-int.cbor", &[0x1a, 0]),
+//RS         ("trunc-float.cbor", &[0xfa, 0, 0]),
+//RS         ("trunc-indef.cbor", &[0x7f, 0x62, b'a']),
+//RS         ("trailing.cbor", &[1, 2]),
+//RS         ("nested.cbor", &[0x81, 0xa1, 0x61, b'x', 0x1a, 0]),
+//RS     ];
+//RS     for (name, bytes) in fixtures { fs::write(dir.join(name), bytes).unwrap(); }
+//RS     let path = |name: &str| dir.join(name).to_string_lossy().replace('\\', "\\\\");
+//RS     let array_ok = path("array-ok.cbor");
+//RS     let array_fail = path("array-fail.cbor");
+//RS     let object_ok = path("object-ok.cbor");
+//RS     let object_fail = path("object-fail.cbor");
+//RS     let incomplete = path("incomplete.cbor");
+//RS     let source = format!(r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+//RS     repeated :: reader.next()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.reason == reason
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+//RS     repeated :: writer.flush()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.reason == reason
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     map_limits := encoding.EncodingLimits.safe()
+//RS     map_limits.max_item_bytes = 3
+//RS     map_input :: files.open("{}") ?? panic("map open")
+//RS     map_reader :: cbor.reader(^map_input, map_limits) ?? panic("map reader")
+//RS     map_count := 0
+//RS     loop map_count < 4 {{
+//RS         map_event :: map_reader.next() ?? panic("map error")
+//RS         if map_event == {{
+//RS             Val(_) -> map_count += 1
+//RS             None -> panic("map eof")
+//RS         }}
+//RS     }}
+//RS     print(map_count)
+//RS 
+//RS     tight_limits := encoding.EncodingLimits.safe()
+//RS     tight_limits.max_item_bytes = 2
+//RS     tight_input :: files.open("{}") ?? panic("tight open")
+//RS     tight_reader := cbor.reader(^tight_input, tight_limits) ?? panic("tight reader")
+//RS     tight_object :: tight_reader.next() ?? panic("tight object")
+//RS     tight_key :: tight_reader.next() ?? panic("tight key")
+//RS     tight_first :: tight_reader.next()
+//RS     if tight_first == {{
+//RS         .Ok(_) -> panic("combined key/chunk budget missed")
+//RS         .Err(first) -> {{
+//RS             print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
+//RS         }}
+//RS     }}
+//RS 
+//RS     bytes_input :: files.open("{}") ?? panic("bytes open")
+//RS     bytes_reader :: cbor.reader(^bytes_input) ?? panic("bytes reader")
+//RS     bytes_event :: bytes_reader.next() ?? panic("bytes event")
+//RS     if bytes_event == {{
+//RS         Val(_) -> print(true)
+//RS         None -> print(false)
+//RS     }}
+//RS 
+//RS     short_input :: files.open("{}") ?? panic("short open")
+//RS     short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+//RS     short_event :: short_reader.next() ?? panic("short event")
+//RS     if short_event == {{
+//RS         Val(_) -> print(true)
+//RS         None -> print(false)
+//RS     }}
+//RS 
+//RS     duplicate_input :: files.open("{}") ?? panic("duplicate open")
+//RS     duplicate_reader := cbor.reader(^duplicate_input) ?? panic("duplicate reader")
+//RS     duplicate_object :: duplicate_reader.next() ?? panic("duplicate object")
+//RS     duplicate_key :: duplicate_reader.next() ?? panic("duplicate key")
+//RS     duplicate_value :: duplicate_reader.next() ?? panic("duplicate value")
+//RS     duplicate_first :: duplicate_reader.next()
+//RS     if duplicate_first == {{
+//RS         .Err(first) -> {{
+//RS             print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     nontext_input :: files.open("{}") ?? panic("nontext open")
+//RS     nontext_reader :: cbor.reader(^nontext_input) ?? panic("nontext reader")
+//RS     nontext_object :: nontext_reader.next() ?? panic("nontext object")
+//RS     if nontext_reader.next() == {{
+//RS         .Err(e) -> print(e.byte_offset == 1 && e.path == "$" && e.reason == "CBOR map key must be text")
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     tag_input :: files.open("{}") ?? panic("tag open")
+//RS     tag_reader :: cbor.reader(^tag_input) ?? panic("tag reader")
+//RS     if tag_reader.next() == {{
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "CBOR tags are outside DataEvent")
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     range_input :: files.open("{}") ?? panic("range open")
+//RS     range_reader :: cbor.reader(^range_input) ?? panic("range reader")
+//RS     if range_reader.next() == {{
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     int_input :: files.open("{}") ?? panic("int open")
+//RS     int_reader := cbor.reader(^int_input) ?? panic("int reader")
+//RS     if int_reader.next() == {{
+//RS         .Err(first) -> {{
+//RS             print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     float_input :: files.open("{}") ?? panic("float open")
+//RS     float_reader := cbor.reader(^float_input) ?? panic("float reader")
+//RS     if float_reader.next() == {{
+//RS         .Err(first) -> {{
+//RS             print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     indef_input :: files.open("{}") ?? panic("indef open")
+//RS     indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
+//RS     if indef_reader.next() == {{
+//RS         .Err(first) -> {{
+//RS             print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     trailing_input :: files.open("{}") ?? panic("trailing open")
+//RS     trailing_reader := cbor.reader(^trailing_input) ?? panic("trailing reader")
+//RS     trailing_root :: trailing_reader.next() ?? panic("root")
+//RS     if trailing_reader.next() == {{
+//RS         .Err(first) -> {{
+//RS             print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     nested_input :: files.open("{}") ?? panic("nested open")
+//RS     nested_reader :: cbor.reader(^nested_input) ?? panic("nested reader")
+//RS     nested_array :: nested_reader.next() ?? panic("nested array")
+//RS     nested_object :: nested_reader.next() ?? panic("nested object")
+//RS     nested_key :: nested_reader.next() ?? panic("nested key")
+//RS     if nested_reader.next() == {{
+//RS         .Err(e) -> print(e.byte_offset == 6 && e.path == "$[0][\"x\"]")
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     array_limits := encoding.EncodingLimits.safe()
+//RS     array_limits.max_item_bytes = 2
+//RS     array_output :: files.create("{array_ok}") ?? panic("array output")
+//RS     array_writer :: cbor.writer(^array_output, array_limits) ?? panic("array writer")
+//RS     array_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array start")
+//RS     array_writer.write(encoding.DataEvent.Null) ?? panic("array null")
+//RS     array_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+//RS     array_writer.finish() ?? panic("array finish")
+//RS 
+//RS     array_tight := encoding.EncodingLimits.safe()
+//RS     array_tight.max_item_bytes = 1
+//RS     array_fail_output :: files.create("{array_fail}") ?? panic("array fail output")
+//RS     array_fail_writer := cbor.writer(^array_fail_output, array_tight) ?? panic("array fail writer")
+//RS     array_fail_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array fail start")
+//RS     array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
+//RS     if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
+//RS         .Err(first) -> {{
+//RS             print(writer_terminal(&array_fail_writer, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     object_limits := encoding.EncodingLimits.safe()
+//RS     object_limits.max_item_bytes = 4
+//RS     object_output :: files.create("{object_ok}") ?? panic("object output")
+//RS     object_writer :: cbor.writer(^object_output, object_limits) ?? panic("object writer")
+//RS     object_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object start")
+//RS     object_writer.write(encoding.DataEvent.Key("a")) ?? panic("object key")
+//RS     object_writer.write(encoding.DataEvent.Null) ?? panic("object null")
+//RS     object_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+//RS     object_writer.finish() ?? panic("object finish")
+//RS 
+//RS     object_tight := encoding.EncodingLimits.safe()
+//RS     object_tight.max_item_bytes = 3
+//RS     object_fail_output :: files.create("{object_fail}") ?? panic("object fail output")
+//RS     object_fail_writer :: cbor.writer(^object_fail_output, object_tight) ?? panic("object fail writer")
+//RS     object_fail_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object fail start")
+//RS     object_fail_writer.write(encoding.DataEvent.Key("a")) ?? panic("object fail key")
+//RS     object_fail_writer.write(encoding.DataEvent.Null) ?? panic("object fail null")
+//RS     if object_fail_writer.write(encoding.DataEvent.ObjectEnd) == {{
+//RS         .Err(_) -> print(true)
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS 
+//RS     incomplete_output :: files.create("{incomplete}") ?? panic("incomplete output")
+//RS     incomplete_writer := cbor.writer(^incomplete_output) ?? panic("incomplete writer")
+//RS     incomplete_writer.write(encoding.DataEvent.ArrayStart) ?? panic("incomplete start")
+//RS     incomplete_writer.flush() ?? panic("incomplete flush")
+//RS     if incomplete_writer.finish() == {{
+//RS         .Err(first) -> {{
+//RS             print(writer_terminal(&incomplete_writer, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS }}
+//RS "#,
+//RS         path("indef-map.cbor"), path("indef-map.cbor"), path("indef-bytes.cbor"),
+//RS         path("non-shortest.cbor"), path("duplicate.cbor"), path("nontext.cbor"),
+//RS         path("tag.cbor"), path("range.cbor"), path("trunc-int.cbor"),
+//RS         path("trunc-float.cbor"), path("trunc-indef.cbor"), path("trailing.cbor"),
+//RS         path("nested.cbor"),
+//RS     );
+//RS     fs::write(dir.join("non-shortest.cbor"), [0x18, 0x01]).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_hostile", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}\nsource:\n{source}");
+//RS     assert_eq!(stdout, "4\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+//RS     assert_eq!(fs::read(&array_ok).unwrap(), [0x81, 0xf6]);
+//RS     assert_eq!(fs::read(&object_ok).unwrap(), [0xa1, 0x61, b'a', 0xf6]);
+//RS     assert!(fs::read(&incomplete).unwrap().is_empty());
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_stream_workspace_growth_is_prospective_and_terminal() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_workspace_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let success = dir.join("success.cbor").to_string_lossy().replace('\\', "\\\\");
+//RS     let rejected = dir.join("rejected.cbor").to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+//RS     repeated :: writer.finish()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.reason == reason
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn close_array(writer: &cbor.CBORWriter) {{
+//RS     result :: writer.write(encoding.DataEvent.ArrayEnd)
+//RS     if result == {{
+//RS         .Err(error) -> panic("{{error.reason}}")
+//RS         .Ok(_) -> return
+//RS     }}
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     roomy := encoding.EncodingLimits.safe()
+//RS     roomy.max_item_bytes = 9
+//RS     output :: files.create("{success}") ?? panic("create")
+//RS     writer := cbor.writer(^output, roomy) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
+//RS     loop _ in 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
+//RS     close_array(&writer)
+//RS     writer.finish() ?? panic("finish")
+//RS 
+//RS     tight := encoding.EncodingLimits.safe()
+//RS     tight.max_item_bytes = 7
+//RS     rejected_output :: files.create("{rejected}") ?? panic("create rejected")
+//RS     rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
+//RS     rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
+//RS     loop _ in 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
+//RS     if rejected_writer.write(encoding.DataEvent.Null) == {{
+//RS         .Err(first) -> {{
+//RS             print(first.reason == "max_item_bytes 7 exceeded")
+//RS             print(terminal(&rejected_writer, ~first.reason))
+//RS         }}
+//RS         .Ok(_) -> {{
+//RS             print(false)
+//RS             print(false)
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#);
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_workspace", &source, &[], None);
+//RS     assert_eq!(code, 0, "CBOR workspace program failed: {stderr}");
+//RS     assert_eq!(stdout, "true\ntrue\n");
+//RS     assert_eq!(fs::read(dir.join("success.cbor")).unwrap(), [0x88, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6, 0xf6]);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn cbor_stream_io_errors_latch_in_aot_and_default_dev() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_io_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let directory = dir.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+//RS     repeated :: reader.next()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.reason == reason
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+//RS     repeated :: &writer.flush()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.reason == reason
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     directory_input :: files.open("{directory}") ?? panic("directory open")
+//RS     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
+//RS     if directory_reader.next() == {{
+//RS         .Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS     full_output :: files.create("/dev/full") ?? panic("full open")
+//RS     full_writer := cbor.writer(^full_output) ?? panic("full writer")
+//RS     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
+//RS     if &full_writer.flush() == {{
+//RS         .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+//RS         .Ok(_) -> print(false)
+//RS     }}
+//RS }}
+//RS "#);
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_io", &source, &[], None);
+//RS     assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
+//RS     let path = dir.join("cbor_io.jet");
+//RS     fs::write(&path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
+//RS         }
+//RS         other => panic!("CBOR default-dev fallback failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
+//RS     std::thread::Builder::new()
+//RS         .stack_size(64 * 1024 * 1024)
+//RS         .spawn(cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner)
+//RS         .expect("spawn CBOR parity worker")
+//RS         .join()
+//RS         .expect("CBOR parity worker must not panic");
+//RS }
+//RS 
+//RS fn cbor_whole_codable_bytes_and_original_wire_canonical_validation_inner() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping cbor whole-value test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_whole_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS 
+//RS #Codable
+//RS struct Packet { id: Int, payload: [U8] }
+//RS 
+//RS fn run() {
+//RS     packet := Packet{ id: 7, payload: [222, 173] }
+//RS     wire := cbor.to_bytes(packet) ?? panic("encode")
+//RS     stable := cbor.to_bytes_canonical(packet) ?? panic("canonical encode")
+//RS     back := Packet{ cbor.decode<Packet>(wire) ?? panic("decode") }
+//RS     raw_wire := cbor.to_bytes([1, 2, 255]) ?? panic("byte encode")
+//RS     raw := [U8]{ cbor.decode<[U8]>(raw_wire) ?? panic("byte decode") }
+//RS     print(wire)
+//RS     print(stable == wire)
+//RS     print(back.id)
+//RS     print(back.payload)
+//RS     print(raw)
+//RS 
+//RS     strict := cbor.CBOROptions{
+//RS         max_depth: 256,
+//RS         max_items: 1000000,
+//RS         max_bytes: 1073741824,
+//RS         require_canonical: true,
+//RS     }
+//RS     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
+//RS     rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
+//RS     print(rejected.int() ?? -2)
+//RS     strict_decode := cbor.CBOROptions{
+//RS         max_depth: 256,
+//RS         max_items: 1000000,
+//RS         max_bytes: 1073741824,
+//RS         require_canonical: true,
+//RS     }
+//RS     if cbor.decode<[Int]>([129, 97, 120], strict_decode) == {
+//RS         .Ok(_) -> print("unexpected success")
+//RS         .Err(error) -> print("{error[0].path}|{error[0].reason}")
+//RS     }
+//RS     if cbor.decode<Int>([65, 0]) == {
+//RS         .Ok(_) -> print("unexpected success")
+//RS         .Err(error) -> print("{error[0].path}|{error[0].reason}")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole", source, &[], None);
+//RS     assert_eq!(code, 0, "CBOR whole-value program failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n[0]|expected Int, found text \"x\"\n|expected Int, found Bytes\n"
+//RS     );
+//RS     let path = dir.join("cbor_whole.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("CBOR fixture loads");
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .all(|diag| !matches!(diag.severity, jet::Diagnostics::Severity::Error)),
+//RS         "CBOR fixture must type-check: {diagnostics:?}"
+//RS     );
+//RS     common::compile_cranelift_bundle(&bundle, &common::development_policy())
+//RS         .expect("CBOR fixture must compile for resident JIT");
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout: dev_stdout,
+//RS             stderr: dev_stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(
+//RS                 (exit_code, dev_stdout, dev_stderr),
+//RS                 (0, stdout.clone(), String::new())
+//RS             );
+//RS             assert!(
+//RS                 jet_jit::jit_executed_for_test(),
+//RS                 "CBOR whole-value fixture must execute resident JIT"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::deopt_invoked_for_test(),
+//RS                 "CBOR whole-value fixture must not silently deopt"
+//RS             );
+//RS             assert!(
+//RS                 !jet_jit::fallback_invoked_for_test(),
+//RS                 "CBOR whole-value fixture must not fall back"
+//RS             );
+//RS         }
+//RS         other => panic!("CBOR whole-value default-dev failed: {other:?}"),
+//RS     }
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout: interpreter_stdout,
+//RS             stderr: interpreter_stderr,
+//RS             exit_code,
+//RS         } => assert_eq!(
+//RS             (exit_code, interpreter_stdout, interpreter_stderr),
+//RS             (0, stdout, String::new()),
+//RS             "CBOR whole-value interpreter drifted from AOT/JIT"
+//RS         ),
+//RS         other => panic!("CBOR whole-value forced interpreter failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_whole_live_allocation_and_preferred_float_validation() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping cbor whole-value limits test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_whole_limits_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.cbor as cbor
+//RS 
+//RS fn run() {
+//RS     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
+//RS     if cbor.parse([249, 62, 0], ~strict) == {
+//RS         .Ok(value) -> print(value.float() ?? -1.0)
+//RS         .Err(_) -> print(-2.0)
+//RS     }
+//RS     if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
+//RS     }
+//RS     if cbor.parse([249, 126, 1], ~strict) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
+//RS     }
+//RS     if cbor.parse([249, 126, 0], ~strict) == {
+//RS         .Ok(_) -> print(true)
+//RS         .Err(_) -> print(false)
+//RS     }
+//RS 
+//RS     tiny := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
+//RS     if cbor.parse([130, 1, 2], tiny) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole_limits", source, &[], None);
+//RS     assert_eq!(code, 0, "CBOR whole-value limits program failed: {stderr}");
+//RS     assert_eq!(stdout, "1.5\ntrue\ntrue\ntrue\ntrue\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping CBOR indefinite-value test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_indefinite_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS 
+//RS #Codable
+//RS struct Packet { name: String, data: [U8] }
+//RS 
+//RS fn run() {
+//RS     array := [Int]{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
+//RS     text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
+//RS     print(array)
+//RS     print(text.text() ?? "bad")
+//RS 
+//RS     // {_ "name": (_ "J", "et"), "data": (_ h'0102', h'03')}
+//RS     packet := Packet{ cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode") }
+//RS     print(packet.name)
+//RS     print(packet.data)
+//RS 
+//RS     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+//RS     if cbor.parse([159, 1, 255], ~strict) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
+//RS     }
+//RS     if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
+//RS     }
+//RS 
+//RS     item_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+//RS     if cbor.parse([159, 1, 2, 255], item_limited) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
+//RS     }
+//RS     chunk_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+//RS     if cbor.parse([127, 97, 97, 97, 98, 255], chunk_limited) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
+//RS     }
+//RS     depth_limited := cbor.CBOROptions{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
+//RS     if cbor.parse([159, 127, 97, 120, 255, 255], depth_limited) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
+//RS     }
+//RS 
+//RS     if cbor.parse([127, 65, 120, 255]) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 1 && e.reason == "indefinite CBOR string contains a wrong or indefinite chunk")
+//RS     }
+//RS     if cbor.parse([159, 1]) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 2 && e.reason == "indefinite CBOR array ended before its break")
+//RS     }
+//RS     if cbor.parse([191, 97, 107, 255]) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 3 && e.reason == "indefinite CBOR map break appears where a value is required")
+//RS     }
+//RS     if cbor.parse([255]) == {
+//RS         .Ok(_) -> print(false)
+//RS         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR break outside an indefinite container")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_indefinite", source, &[], None);
+//RS     assert_eq!(code, 0, "CBOR indefinite-value program failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "[1, 2]\nabc\nJet\n[1, 2, 3]\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping CBOR hostile whole-value corpus (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_whole_corpus_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.cbor as cbor
+//RS 
+//RS fn wire(values: [Int]) -> [U8] {
+//RS     bytes := [U8]{}
+//RS     loop value in values {
+//RS         &bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
+//RS     }
+//RS     return bytes
+//RS }
+//RS 
+//RS fn accepted(values: [Int]) -> Bool {
+//RS     if cbor.parse(wire(values)) == {
+//RS         .Ok(_) -> return true
+//RS         .Err(_) -> return false
+//RS     }
+//RS     return false
+//RS }
+//RS 
+//RS fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+//RS     if cbor.parse(wire(values)) == {
+//RS         .Ok(_) -> return false
+//RS         .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+//RS     }
+//RS     return false
+//RS }
+//RS 
+//RS fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+//RS     strict := cbor.CBOROptions{
+//RS         max_depth: 256,
+//RS         max_items: 1000000,
+//RS         max_bytes: 1073741824,
+//RS         require_canonical: true,
+//RS     }
+//RS     if cbor.parse(wire(values), strict) == {
+//RS         .Ok(_) -> return false
+//RS         .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+//RS     }
+//RS     return false
+//RS }
+//RS 
+//RS fn run() {
+//RS     empty := [Int]{}
+//RS     // RFC 8949 argument widths, scalar families, nested containers, preferred
+//RS     // floats, and every supported normal-mode indefinite family.
+//RS     print(accepted([0]))
+//RS     print(accepted([23]))
+//RS     print(accepted([24, 24]))
+//RS     print(accepted([25, 1, 0]))
+//RS     print(accepted([26, 0, 1, 0, 0]))
+//RS     print(accepted([27, 0, 0, 0, 1, 0, 0, 0, 0]))
+//RS     print(accepted([32]))
+//RS     print(accepted([56, 24]))
+//RS     print(accepted([96]))
+//RS     print(accepted([99, 226, 130, 172]))
+//RS     print(accepted([131, 1, 130, 2, 3, 161, 97, 107, 245]))
+//RS     print(accepted([246]))
+//RS     print(accepted([249, 62, 0]))
+//RS     print(accepted([250, 71, 195, 80, 0]))
+//RS     print(accepted([127, 97, 97, 98, 98, 99, 255]))
+//RS     print(accepted([159, 1, 2, 255]))
+//RS     print(accepted([191, 97, 107, 1, 255]))
+//RS 
+//RS     // Truncation at each structural layer, reserved heads, invalid text,
+//RS     // closed DataTree byte identity, duplicate/non-text keys, tags/simple
+//RS     // values, stray breaks, trailing roots, and signed-range overflow.
+//RS     print(rejected(empty, 0, "$", "CBOR value is missing"))
+//RS     print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
+//RS     print(rejected([26, 0], 2, "$", "CBOR length argument is truncated"))
+//RS     print(rejected([27, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+//RS     print(rejected([59, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+//RS     print(rejected([65, 0], 0, "$", "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+//RS     print(rejected([98, 97], 2, "$", "CBOR byte/text string is truncated"))
+//RS     print(rejected([97, 255], 0, "$", "CBOR text is not UTF-8"))
+//RS     print(rejected([127, 98, 97], 3, "$", "CBOR byte/text string chunk is truncated"))
+//RS     print(rejected([130, 1], 2, "$[1]", "CBOR value is missing"))
+//RS     print(rejected([161, 1, 2], 1, "$", "CBOR map key must be text"))
+//RS     print(rejected([162, 97, 97, 1, 97, 97, 2], 4, "$", "duplicate CBOR text map key"))
+//RS     print(rejected([161, 97, 97], 3, "$[\"a\"]", "CBOR value is missing"))
+//RS     print(rejected([192, 1], 0, "$", "CBOR tags are unsupported"))
+//RS     print(rejected([247], 0, "$", "unsupported CBOR simple value 23"))
+//RS     print(rejected([255], 0, "$", "CBOR break outside an indefinite container"))
+//RS     print(rejected([249, 0], 2, "$", "CBOR Float16 is truncated"))
+//RS     print(rejected([1, 2], 1, "$", "trailing CBOR data after root value"))
+//RS 
+//RS     // Original wire, not a normalized tree, determines strict acceptance.
+//RS     print(canonical_rejected([24, 1], 0, "$", "CBOR argument does not use its shortest form"))
+//RS     print(canonical_rejected([120, 1, 97], 0, "$", "CBOR argument does not use its shortest form"))
+//RS     print(canonical_rejected([162, 97, 98, 1, 97, 97, 2], 4, "$", "CBOR map keys are not in Core deterministic bytewise order"))
+//RS     print(canonical_rejected([250, 63, 192, 0, 0], 0, "$", "CBOR Float does not use its preferred shortest encoding"))
+//RS     print(canonical_rejected([159, 1, 255], 0, "$", "indefinite-length CBOR is not Core deterministic"))
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole_corpus", source, &[], None);
+//RS     assert_eq!(code, 0, "CBOR hostile whole-value corpus failed: {stderr}");
+//RS     let lines: Vec<&str> = stdout.lines().collect();
+//RS     assert_eq!(lines.len(), 40, "hostile corpus case count drifted: {stdout}");
+//RS     assert!(lines.iter().all(|line| *line == "true"), "hostile corpus mismatch: {stdout}");
+//RS     assert_eq!(stderr, "");
+//RS 
+//RS     let path = dir.join("cbor_whole_corpus.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout: dev_stdout,
+//RS             stderr: dev_stderr,
+//RS             exit_code,
+//RS         } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+//RS         other => panic!("CBOR hostile corpus default-dev failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping cbor counting-allocator test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_counted_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.cbor as cbor
+//RS 
+//RS fn run() {
+//RS     options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
+//RS     value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
+//RS     indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
+//RS     if cbor.parse([130, 97, 120], options) == {
+//RS         .Ok(_) -> panic("truncated array accepted")
+//RS         .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
+//RS     }
+//RS 
+//RS     roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
+//RS     if cbor.parse([129, 130, 97, 120], ~roomy) == {
+//RS         .Ok(_) -> panic("nested truncation accepted")
+//RS         .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
+//RS     }
+//RS     if cbor.parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
+//RS         .Ok(_) -> panic("duplicate key accepted")
+//RS         .Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
+//RS     }
+//RS     if cbor.decode<[Int]>([129, 97, 120], roomy) == {
+//RS         .Ok(_) -> panic("typed mismatch accepted")
+//RS         .Err(e) -> print(e[0].path == "[0]" && e[0].reason.contains("expected Int"))
+//RS     }
+//RS     print(true)
+//RS }
+//RS "#;
+//RS     let path = dir.join("counted.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+//RS         panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
+//RS     });
+//RS     let parse_renamed = out.rust.replacen("fn jet_enc_cbor_parse(", "fn jet_enc_cbor_parse_inner(", 1);
+//RS     assert_ne!(parse_renamed, out.rust, "generated CBOR parser seam changed");
+//RS     let renamed = parse_renamed.replacen("fn jet_enc_cbor_decode<T: __jet_Decode>(", "fn jet_enc_cbor_decode_inner<T: __jet_Decode>(", 1);
+//RS     assert_ne!(renamed, parse_renamed, "generated CBOR typed decoder seam changed");
+//RS     let allocator = r#"
+//RS mod jet_cbor_alloc_probe {
+//RS     use std::alloc::{GlobalAlloc, Layout, System};
+//RS     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//RS     pub struct CountingAlloc;
+//RS     static COUNTING: AtomicBool = AtomicBool::new(false);
+//RS     static LIVE: AtomicUsize = AtomicUsize::new(0);
+//RS     static PEAK: AtomicUsize = AtomicUsize::new(0);
+//RS     fn add(size: usize) {
+//RS         let live = LIVE.fetch_add(size, Ordering::SeqCst) + size;
+//RS         let mut peak = PEAK.load(Ordering::SeqCst);
+//RS         while live > peak {
+//RS             match PEAK.compare_exchange(peak, live, Ordering::SeqCst, Ordering::SeqCst) {
+//RS                 Ok(_) => break,
+//RS                 Err(next) => peak = next,
+//RS             }
+//RS         }
+//RS     }
+//RS     unsafe impl GlobalAlloc for CountingAlloc {
+//RS         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+//RS             let ptr = System.alloc(layout);
+//RS             if !ptr.is_null() && COUNTING.load(Ordering::SeqCst) { add(layout.size()); }
+//RS             ptr
+//RS         }
+//RS         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+//RS             if COUNTING.load(Ordering::SeqCst) { LIVE.fetch_sub(layout.size(), Ordering::SeqCst); }
+//RS             System.dealloc(ptr, layout);
+//RS         }
+//RS         unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+//RS             let counting = COUNTING.load(Ordering::SeqCst);
+//RS             if counting { LIVE.fetch_sub(old.size(), Ordering::SeqCst); }
+//RS             let next = System.realloc(ptr, old, new_size);
+//RS             if counting { if next.is_null() { add(old.size()); } else { add(new_size); } }
+//RS             next
+//RS         }
+//RS     }
+//RS     pub fn begin() { LIVE.store(0, Ordering::SeqCst); PEAK.store(0, Ordering::SeqCst); COUNTING.store(true, Ordering::SeqCst); }
+//RS     pub fn finish() -> usize { COUNTING.store(false, Ordering::SeqCst); PEAK.load(Ordering::SeqCst) }
+//RS }
+//RS #[global_allocator]
+//RS static JET_CBOR_ALLOC: jet_cbor_alloc_probe::CountingAlloc = jet_cbor_alloc_probe::CountingAlloc;
+//RS fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::DataTree, jet_std::CBORError> {
+//RS     let ceiling = options.max_bytes as usize;
+//RS     jet_cbor_alloc_probe::begin();
+//RS     let result = jet_enc_cbor_parse_inner(bytes, options);
+//RS     let peak = jet_cbor_alloc_probe::finish();
+//RS     assert!(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}");
+//RS     result
+//RS }
+//RS fn jet_enc_cbor_decode<T: __jet_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let ceiling = options.max_bytes as usize;
+//RS     jet_cbor_alloc_probe::begin();
+//RS     let result = jet_enc_cbor_decode_inner(bytes, options);
+//RS     let peak = jet_cbor_alloc_probe::finish();
+//RS     assert!(peak <= ceiling, "CBOR typed requested allocation peak {peak} exceeded {ceiling}");
+//RS     result
+//RS }
+//RS "#;
+//RS     let rs = dir.join("counted.rs");
+//RS     let bin = dir.join("counted");
+//RS     let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+//RS     assert_ne!(generated, renamed, "generated crate attribute changed");
+//RS     let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+//RS     let rustc = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(rustc.status.success(), "rustc rejected counted CBOR program:\n{}", String::from_utf8_lossy(&rustc.stderr));
+//RS     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+//RS     assert!(run.status.success(), "counted CBOR program failed:\n{}", String::from_utf8_lossy(&run.stderr));
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "true\ntrue\ntrue\ntrue\ntrue\n");
+//RS }
+// END-PORT-PENDING 1016 tests/corelib_parts/encoding_streams.rs:1787-2793
+

@@ -1,0 +1,161 @@
+// DevtoolsPanelCatalog.rs:934-1026 original fixtures/assertions, plus branch controls.
+use core.devtools.runtime.kernel_devtools_panel_catalog as panels
+
+fn expect_catalog_error(rows: ^[panels.JetDevtoolsPanelDescriptor], expected: panels.JetDevtoolsPanelCatalogError) Never! {
+    if panels.JetDevtoolsPanelCatalog.new(^rows) == {
+        .Ok(_) -> assert(false)
+        .Err(actual) -> assert(actual == expected)
+    }
+}
+
+#Test("canonical_catalog_is_ordered_and_unique") {
+    catalog :: panels.canonical() ?? panic("canonical panel catalog")
+    descriptors :: catalog.descriptors()
+    assert(descriptors.len() == panels.PANEL_COUNT)
+    loop i in 0..<panels.PANEL_COUNT {
+        assert(descriptors[i].id == panels.PANEL_ALL[i])
+        assert(descriptors[i].order == descriptors[i].id.canonical_order())
+        assert(descriptors[i].title == descriptors[i].id.title())
+        if i > 0 -> assert(descriptors[i - 1].order < descriptors[i].order)
+    }
+}
+
+#Test("duplicate_ids_and_orders_are_rejected") {
+    descriptor :: panels.JET_DEVTOOLS_PANEL_DESCRIPTORS[0]
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{descriptor, descriptor}, panels.JetDevtoolsPanelCatalogError.DuplicateId(.Build))
+    duplicate_order :: panels.JetDevtoolsPanelDescriptor.new(.Routes, "Routes", descriptor.order, panels.ROUTES_CAPABILITIES, .RequestRead, panels.ALL_HOSTS, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{descriptor, duplicate_order}, panels.JetDevtoolsPanelCatalogError.DuplicateOrder(U16{1}))
+}
+
+#Test("availability_keeps_unauthorized_rows") {
+    catalog :: panels.canonical() ?? panic("canonical panel catalog")
+    rows :: catalog.available_for(.Terminal, [panels.JetDevtoolsPanelCapability]{.BuildRead})
+    assert(rows.len() == panels.PANEL_COUNT)
+    assert(rows[0].is_available())
+    reasons :: rows[1].unavailable_reasons()
+    assert(reasons.len() == 2)
+    assert(reasons[0] == panels.JetDevtoolsPanelUnavailableReason.MissingCapability(.RequestRead))
+    assert(reasons[1] == panels.JetDevtoolsPanelUnavailableReason.MissingCapability(.SourceRead))
+    database := false
+    loop row in rows {
+        if row.descriptor.id == panels.JetDevtoolsPanelId.Database -> database = true
+    }
+    assert(database)
+}
+
+#Test("unsupported_host_is_an_explicit_reason") {
+    headless :: [panels.JetDevtoolsHostKind]{.Headless}
+    descriptor :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, panels.BUILD_CAPABILITIES, .BuildRead, headless, .EventDriven)
+    catalog :: panels.JetDevtoolsPanelCatalog.new([panels.JetDevtoolsPanelDescriptor]{descriptor}) ?? panic("catalog")
+    rows := catalog.available_for(.Terminal, [panels.JetDevtoolsPanelCapability]{.BuildRead})
+    row :: &rows.pop() ?? panic("availability row")
+    reasons :: row.unavailable_reasons()
+    assert(reasons.len() == 1)
+    assert(reasons[0] == panels.JetDevtoolsPanelUnavailableReason.UnsupportedHost(.Terminal))
+    assert(!row.is_available())
+    assert(reasons[0].as_str() == "unsupported-host")
+    assert(reasons[0].host() == Val(panels.JetDevtoolsHostKind.Terminal))
+    assert(reasons[0].capability() == None)
+}
+
+#Test("catalog structural validation precedence and first repeated position") {
+    empty_caps :: [panels.JetDevtoolsPanelCapability]{}
+    empty_hosts :: [panels.JetDevtoolsHostKind]{}
+    repeated_caps :: [panels.JetDevtoolsPanelCapability]{.BuildRead, .SourceRead, .SourceRead, .BuildRead}
+    repeated_hosts :: [panels.JetDevtoolsHostKind]{.Terminal, .Headless, .Headless, .Terminal}
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{}, panels.JetDevtoolsPanelCatalogError.Empty)
+    zero :: panels.JetDevtoolsPanelDescriptor.new(.Build, "", U16{0}, empty_caps, .BuildRead, empty_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{zero}, panels.JetDevtoolsPanelCatalogError.ZeroOrder(.Build))
+    title :: panels.JetDevtoolsPanelDescriptor.new(.Build, "", U16{1}, empty_caps, .BuildRead, empty_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{title}, panels.JetDevtoolsPanelCatalogError.EmptyTitle(.Build))
+    capabilities :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, empty_caps, .BuildRead, empty_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{capabilities}, panels.JetDevtoolsPanelCatalogError.NoCapabilities(.Build))
+    hosts :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, panels.BUILD_CAPABILITIES, .BuildRead, empty_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{hosts}, panels.JetDevtoolsPanelCatalogError.NoSupportedHosts(.Build))
+    authority :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, panels.BUILD_CAPABILITIES, .SourceRead, panels.ALL_HOSTS, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{authority}, panels.JetDevtoolsPanelCatalogError.AuthorityNotRequired(.Build, .SourceRead))
+    caps :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, repeated_caps, .BuildRead, repeated_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{caps}, panels.JetDevtoolsPanelCatalogError.DuplicateCapability(.Build, .BuildRead))
+    host :: panels.JetDevtoolsPanelDescriptor.new(.Build, "Build", U16{1}, panels.BUILD_CAPABILITIES, .BuildRead, repeated_hosts, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{host}, panels.JetDevtoolsPanelCatalogError.DuplicateHost(.Build, .Terminal))
+    // Per-descriptor structural validation completes before catalog duplicates.
+    build :: panels.JET_DEVTOOLS_PANEL_DESCRIPTORS[0]
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{build, build, zero}, panels.JetDevtoolsPanelCatalogError.ZeroOrder(.Build))
+    // An early order collision outranks a later id collision.
+    routes :: panels.JetDevtoolsPanelDescriptor.new(.Routes, "Routes", U16{1}, panels.ROUTES_CAPABILITIES, .RequestRead, panels.ALL_HOSTS, .EventDriven)
+    expect_catalog_error([panels.JetDevtoolsPanelDescriptor]{build, routes, routes}, panels.JetDevtoolsPanelCatalogError.DuplicateOrder(U16{1}))
+    // Titles consisting only of whitespace are nonempty and must not be trimmed.
+    spaced_title :: "  "
+    spaced :: panels.JetDevtoolsPanelDescriptor.new(.Build, spaced_title, U16{65535}, panels.BUILD_CAPABILITIES, .BuildRead, panels.ALL_HOSTS, .EventDriven)
+    catalog :: panels.JetDevtoolsPanelCatalog.new([panels.JetDevtoolsPanelDescriptor]{spaced}) ?? panic("whitespace title")
+    assert(catalog.descriptors()[0].title == "  ")
+    assert(catalog.descriptors()[0].order == U16{65535})
+}
+
+#Test("catalog sorting lookup conjunctions and deterministic host-first reasons") {
+    build :: panels.JET_DEVTOOLS_PANEL_DESCRIPTORS[0]
+    routes :: panels.JET_DEVTOOLS_PANEL_DESCRIPTORS[1]
+    catalog :: panels.JetDevtoolsPanelCatalog.new([panels.JetDevtoolsPanelDescriptor]{routes, build}) ?? panic("unordered catalog")
+    assert(catalog.descriptors()[0].id == panels.JetDevtoolsPanelId.Build)
+    found :: catalog.get(.Routes) ?? panic("routes lookup")
+    assert(found.len() == 1 && found[0].id == panels.JetDevtoolsPanelId.Routes)
+    assert(catalog.get(.Database) == None)
+    headless :: [panels.JetDevtoolsHostKind]{.Headless}
+    descriptor :: panels.JetDevtoolsPanelDescriptor.new(.Routes, "Routes", U16{2}, panels.ROUTES_CAPABILITIES, .RequestRead, headless, .EventDriven)
+    restricted :: panels.JetDevtoolsPanelCatalog.new([panels.JetDevtoolsPanelDescriptor]{descriptor}) ?? panic("restricted catalog")
+    rows :: restricted.available_for(.Terminal, [panels.JetDevtoolsPanelCapability]{})
+    reasons :: rows[0].unavailable_reasons()
+    assert(reasons.len() == 3)
+    assert(reasons[0] == panels.JetDevtoolsPanelUnavailableReason.UnsupportedHost(.Terminal))
+    assert(reasons[1] == panels.JetDevtoolsPanelUnavailableReason.MissingCapability(.RequestRead))
+    assert(reasons[2] == panels.JetDevtoolsPanelUnavailableReason.MissingCapability(.SourceRead))
+    assert(reasons[1].as_str() == "missing-capability")
+    assert(reasons[1].host() == None)
+    assert(reasons[1].capability() == Val(panels.JetDevtoolsPanelCapability.RequestRead))
+    partial :: restricted.available_for(.Headless, [panels.JetDevtoolsPanelCapability]{.RequestRead})
+    assert(!partial[0].is_available())
+    assert(partial[0].unavailable_reasons().len() == 1)
+    authorized :: restricted.available_for(.Headless, [panels.JetDevtoolsPanelCapability]{.RequestRead, .SourceRead, .SourceRead})
+    assert(authorized[0].is_available())
+    assert(authorized[0].unavailable_reasons().is_empty())
+    canonical :: panels.available_for(.Terminal, panels.CAPABILITY_ALL) ?? panic("module availability")
+    assert(canonical.len() == panels.PANEL_COUNT)
+    loop row in canonical -> assert(row.is_available())
+}
+
+#Test("catalog exact structural error display text") {
+    errors :: [panels.JetDevtoolsPanelCatalogError]{
+        .Empty,
+        .DuplicateId(.Build),
+        .DuplicateOrder(U16{1}),
+        .ZeroOrder(.Build),
+        .EmptyTitle(.Build),
+        .NoCapabilities(.Build),
+        .NoSupportedHosts(.Build),
+        .AuthorityNotRequired(.Build, .SourceRead),
+        .DuplicateCapability(.Build, .BuildRead),
+        .DuplicateHost(.Build, .Terminal),
+    }
+    text :: [String]{
+        "devtools panel catalog is empty",
+        "devtools panel id `build` is duplicated",
+        "devtools panel order `1` is duplicated",
+        "devtools panel `build` has zero order",
+        "devtools panel `build` has an empty title",
+        "devtools panel `build` has no required authority",
+        "devtools panel `build` has no supported host",
+        "devtools panel `build` primary authority `Devtools.SourceRead` is not required",
+        "devtools panel `build` repeats authority `Devtools.BuildRead`",
+        "devtools panel `build` repeats host `terminal`",
+    }
+    loop i in 0..<errors.len() -> assert(errors[i].text() == text[i])
+    assert(panels.JetDevtoolsHostKind.default() == panels.JetDevtoolsHostKind.BrowserInApp)
+    assert(panels.ALL_HOSTS.len() == panels.HOST_COUNT)
+    assert(panels.CAPABILITY_ALL.len() == panels.CAPABILITY_COUNT)
+    loop capability in panels.CAPABILITY_ALL -> assert(capability.as_str() == capability.grant())
+    assert(panels.JetDevtoolsPanelFreshnessPolicy.EventDriven.as_str() == "event-driven")
+    assert(panels.JetDevtoolsPanelFreshnessPolicy.TimeCursor.as_str() == "time-cursor")
+    assert(panels.JetDevtoolsPanelFreshnessPolicy.Snapshot.as_str() == "snapshot")
+    assert(panels.JetDevtoolsPanelFreshnessPolicy.Frame.as_str() == "frame")
+    assert(panels.JetDevtoolsPanelFreshnessPolicy.OnDemand.as_str() == "on-demand")
+}

@@ -9,6 +9,7 @@ package {
     }
 }
 use core.text as unicode
+use core.text.runtime.kernel_unicode_string as parse_unicode_string
 
 // core.text.parse — scanning, splitting, and number parsers.
 //
@@ -269,16 +270,8 @@ pub fn is_digit(text: String) -> Bool Never! {
     true
 }
 
-pub fn is_alnum(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    loop b in text.bytes() {
-        n :: b
-        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-        digit := n >= 48 && n <= 57
-        if !letter && !digit -> return false
-    }
-    true
-}
+// Rust Text.rs:1643-1645: Unicode Alphabetic or Numeric, nonempty.
+pub fn is_alnum(text: String) -> Bool Never! { parse_unicode_string.is_alnum(text) }
 
 fn chars(text: String) -> [String] Never! { unicode.scalars(text) }
 
@@ -344,29 +337,11 @@ pub fn splitlines(text: String, keepends: Bool) -> [String] Never! {
     out
 }
 
-pub fn lstrip(text: String) -> String Never! {
-    raw :: text.bytes()
-    i := 0
-    loop i < raw.len() {
-        n :: raw[i]
-        if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, i, raw.len())
-        i = i + 1
-    }
-    ""
-}
+pub fn lstrip(text: String) -> String Never! { parse_unicode_string.trim_start(text) }
 
-pub fn rstrip(text: String) -> String Never! {
-    raw :: text.bytes()
-    i := raw.len()
-    loop i > 0 {
-        n :: raw[i - 1]
-        if n != 32 && n != 9 && n != 10 && n != 13 -> return slice_b(raw, 0, i)
-        i = i - 1
-    }
-    ""
-}
+pub fn rstrip(text: String) -> String Never! { parse_unicode_string.trim_end(text) }
 
-pub fn strip(text: String) -> String Never! { lstrip(rstrip(text)) }
+pub fn strip(text: String) -> String Never! { parse_unicode_string.trim(text) }
 
 pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
@@ -403,36 +378,9 @@ pub fn zfill(text: String, width: Int) -> String Never! {
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
-pub fn capitalize(text: String) -> String Never! {
-    raw :: text.bytes()
-    if raw.len() == 0 -> return ~text
-    first :: ascii_case(raw[0], true)
-    out := [U8]{first}
-    i := 1
-    loop i < raw.len() {
-        &out.push(ascii_case(raw[i], false))
-        i = i + 1
-    }
-    String.from_bytes(out) ?? text
-}
+pub fn capitalize(text: String) -> String Never! { parse_unicode_string.capitalize(text) }
 
-pub fn title(text: String) -> String Never! {
-    raw :: text.bytes()
-    out := [U8]{}
-    word := true
-    loop b in raw {
-        n :: b
-        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-        if letter {
-            &out.push(ascii_case(b, word))
-            word = false
-        } else {
-            &out.push(b)
-            word = true
-        }
-    }
-    String.from_bytes(out) ?? text
-}
+pub fn title(text: String) -> String Never! { parse_unicode_string.title(text) }
 
 /// Python `string.capwords`: collapse whitespace and capitalize each word.
 pub fn capwords(text: String) -> String Never! {
@@ -445,46 +393,16 @@ pub fn capwords(text: String) -> String Never! {
     join(parts, " ")
 }
 
-pub fn swapcase(text: String) -> String Never! {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if {
-            n >= 65 && n <= 90 -> { &out.push(U8{n + 32}) }
-            n >= 97 && n <= 122 -> { &out.push(U8{n - 32}) }
-            else -> { &out.push(b) }
-        }
-    }
-    String.from_bytes(out) ?? text
-}
+pub fn swapcase(text: String) -> String Never! { parse_unicode_string.swapcase(text) }
 
-pub fn lower(text: String) -> String Never! {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
-    }
-    String.from_bytes(out) ?? text
-}
+pub fn lower(text: String) -> String Never! { parse_unicode_string.lower(text) }
 
-pub fn upper(text: String) -> String Never! {
-    out := [U8]{}
-    loop b in text.bytes() {
-        n :: b
-        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
-    }
-    String.from_bytes(out) ?? text
-}
+pub fn upper(text: String) -> String Never! { parse_unicode_string.upper(text) }
 
-pub fn is_space(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    loop b in text.bytes() {
-        n :: b
-        if n != 32 && n != 9 && n != 10 && n != 13 -> return false
-    }
-    true
-}
+pub fn is_space(text: String) -> Bool Never! { parse_unicode_string.is_whitespace(text) }
 
+// Owner gate: mapping-based Rust predicates accept U+01C5 for both cases.
+// Preserve this existing public contract until that contradiction is ratified.
 pub fn is_lower(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {
@@ -505,6 +423,8 @@ pub fn is_upper(text: String) -> Bool Never! {
     any
 }
 
+// Owner gate: Rust istitle accepts repeated uppercase and rejects uncased
+// alphabetic; equality with title has a different existing public contract.
 pub fn is_title(text: String) -> Bool Never! { text == title(text) && text.bytes().len() > 0 }
 
 pub fn is_ascii(text: String) -> Bool Never! {
@@ -539,16 +459,9 @@ pub fn removeprefix(text: String, prefix: String) -> String Never! { strip_prefi
 pub fn removesuffix(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
 pub fn rindex(text: String, needle: String) -> Int Never! { rfind(text, needle) }
 pub fn encode(text: String) -> [U8] Never! { text.bytes() }
-pub fn isalpha(text: String) -> Bool Never! {
-    if text.bytes().len() == 0 -> return false
-    loop b in text.bytes() {
-        n :: b
-        if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122)) -> return false
-    }
-    true
-}
+pub fn isalpha(text: String) -> Bool Never! { parse_unicode_string.is_alphabetic(text) }
 pub fn isdecimal(text: String) -> Bool Never! { is_digit(text) }
-pub fn isnumeric(text: String) -> Bool Never! { is_digit(text) }
+pub fn isnumeric(text: String) -> Bool Never! { parse_unicode_string.is_numeric(text) }
 pub fn isalnum(text: String) -> Bool Never! { is_alnum(text) }
 pub fn isascii(text: String) -> Bool Never! { is_ascii(text) }
 pub fn isdigit(text: String) -> Bool Never! { is_digit(text) }
@@ -557,13 +470,8 @@ pub fn islower(text: String) -> Bool Never! { is_lower(text) }
 pub fn isspace(text: String) -> Bool Never! { is_space(text) }
 pub fn istitle(text: String) -> Bool Never! { is_title(text) }
 pub fn isupper(text: String) -> Bool Never! { is_upper(text) }
-pub fn isprintable(text: String) -> Bool Never! {
-    loop b in text.bytes() {
-        n :: b
-        if n < 32 || n > 126 -> return false
-    }
-    true
-}
+// Rust Text.rs:1669-1671 tests controls, not ASCII or Python printability.
+pub fn isprintable(text: String) -> Bool Never! { parse_unicode_string.isprintable(text) }
 pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
     out := ""
     column := 0
@@ -708,12 +616,3 @@ fn repeat_char(ch: String, n: Int) -> String {
     s
 }
 
-fn ascii_case(b: U8, upper: Bool) -> U8 {
-    n :: b
-    if upper {
-        if n >= 97 && n <= 122 -> return (U8{n - 32})
-        return b
-    }
-    if n >= 65 && n <= 90 -> return (U8{n + 32})
-    b
-}

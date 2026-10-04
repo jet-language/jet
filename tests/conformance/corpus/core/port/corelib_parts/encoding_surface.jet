@@ -1,0 +1,1336 @@
+// PORT-PENDING 1017 tests-corelib-parts-encoding-surface: tests/corelib_parts/encoding_surface.rs:1-1332
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn random_and_time_output_pins_with_seed_and_epoch() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping random/time pin test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_time_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, _stderr) = build_and_run(
+//RS         &dir,
+//RS         "time_random",
+//RS         r#"
+//RS use core.math.random as random
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     random.seed(42)
+//RS     print(random.int(1, 100))
+//RS     print(random.float())
+//RS     print(time.now())
+//RS }
+//RS "#,
+//RS         &[("LEX_TEST_EPOCH", "1700000000000")],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0);
+//RS     assert_eq!(stdout, "9\n0.05534409481976061\n1700000000000\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1788/#1781: an immutable `::` binding of a `core.math.random` call must read
+//RS /// the runtime-seeded PRNG exactly like a mutable `:=` binding does. Before
+//RS /// the fix, sema's D-VERDICT-1308-1 implicit fold treated `random.float()` as
+//RS /// a foldable pure call and baked its value at compile time from a disjoint
+//RS /// ambient interpreter PRNG, so two identical `seed(11); x :: random.float()`
+//RS /// pairs never matched and never landed on the seeded stream either.
+//RS #[test]
+//RS fn immutable_binding_of_random_call_reads_the_seeded_stream() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping immutable-random-binding test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_corelib_random_immutable_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "random_immutable",
+//RS         r#"
+//RS use core.math.random as random
+//RS 
+//RS fn run() {
+//RS     random.seed(11)
+//RS     a :: random.float()
+//RS     random.seed(11)
+//RS     b :: random.float()
+//RS     print(a == b)
+//RS     random.seed(11)
+//RS     c := random.float()
+//RS     print(a == c)
+//RS }
+//RS "#,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(
+//RS         stdout, "true\ntrue\n",
+//RS         "reseeded `::` bindings must match each other and the `:=` binding's seeded draw"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1488: immutable ambient normal draws must stay runtime reads, while the
+//RS /// seed still controls the shared Prelude stream.
+//RS #[test]
+//RS fn immutable_binding_of_random_normal_reads_the_seeded_stream() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping immutable-random-normal-binding test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_random_normal_immutable_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "random_normal_immutable",
+//RS         r#"
+//RS use core.math.random as random
+//RS 
+//RS fn run() {
+//RS     random.seed(11)
+//RS     a :: random.normal(0.0, 1.0)
+//RS     random.seed(11)
+//RS     b :: random.normal(0.0, 1.0)
+//RS     print(a == b)
+//RS }
+//RS "#,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "true\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1799: an immutable `::` binding of `date.today()` must read the runtime
+//RS /// clock. Before the fix, D-VERDICT-1308-1 folded the ambient wall-clock read
+//RS /// into the generated literal, so the artifact kept the build date forever.
+//RS #[test]
+//RS fn immutable_binding_of_date_today_reads_the_runtime_clock() {
+//RS     let src = r#"
+//RS use core.time as date
+//RS 
+//RS fn run() {
+//RS     a :: date.today()
+//RS     b :: date.today()
+//RS     print(a == b)
+//RS }
+//RS "#;
+//RS     let compiled = compile_temp("date_today_immutable", src);
+//RS     let user_run = compiled
+//RS         .rust
+//RS         .split_once("pub fn __jet_run() {")
+//RS         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
+//RS         .expect("generated Rust must contain the __jet_run body");
+//RS     assert_eq!(
+//RS         user_run.matches("JetDate::today_utc()").count(),
+//RS         2,
+//RS         "both immutable date.today() calls must remain runtime reads:\n{user_run}"
+//RS     );
+//RS 
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping immutable-date-today-binding test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_corelib_date_today_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "date_today_immutable", src, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "true\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1488: immutable ambient `time.now()` calls must remain separate runtime
+//RS /// reads. The generated body is the tier-neutral proof; the run also checks
+//RS /// the call is live under the pinned test clock.
+//RS #[test]
+//RS fn immutable_binding_of_time_now_reads_the_runtime_clock() {
+//RS     let src = r#"
+//RS use core.time as time
+//RS 
+//RS fn run() {
+//RS     a :: time.now()
+//RS     b :: time.now()
+//RS     print(a == b)
+//RS }
+//RS "#;
+//RS     let compiled = compile_temp("time_now_immutable", src);
+//RS     let user_run = compiled
+//RS         .rust
+//RS         .split_once("pub fn __jet_run() {")
+//RS         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
+//RS         .expect("generated Rust must contain the __jet_run body");
+//RS     assert_eq!(
+//RS         user_run.matches("jet_std_time_now()").count(),
+//RS         2,
+//RS         "both immutable time.now() calls must remain runtime reads:\n{user_run}"
+//RS     );
+//RS 
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping immutable-time-now-binding test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_time_now_immutable_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "time_now_immutable",
+//RS         src,
+//RS         &[("LEX_TEST_EPOCH", "1700000000000")],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "true\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn random_distribution_surface_is_deterministic() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping random distribution test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_random_dist_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "random_dist",
+//RS         r#"
+//RS use core.math.random as random
+//RS 
+//RS fn run() -[Rand]> {
+//RS     random.seed(7)
+//RS     print(random.bool())
+//RS     print(random.float_range(10.0, 20.0) >= 10.0)
+//RS     random.seed(11)
+//RS     a := random.normal(0.0, 1.0)
+//RS     random.seed(11)
+//RS     b := random.normal(0.0, 1.0)
+//RS     print(a == b)
+//RS     print(random.exponential(2.0) >= 0.0)
+//RS     items := ["red", "green", "blue"]
+//RS     weights := [0.0, 1.0, 0.0]
+//RS     print(random.weighted_pick(items, weights) ?? "none")
+//RS     sample_items := [1, 2, 3]
+//RS     print(random.sample(sample_items, 2).len())
+//RS     print(random.bytes(4).len())
+//RS     rng := random.rng(99)
+//RS     print(rng.float_range(1.0, 2.0) >= 1.0)
+//RS     print(rng.bool())
+//RS     print(rng.weighted_pick(items, weights) ?? "none")
+//RS     print(rng.sample(sample_items, 2).len())
+//RS     print(rng.bytes(3).len())
+//RS     child := rng.split()
+//RS     print(child.int(1, 1))
+//RS }
+//RS "#,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "random distribution test failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\ntrue\ntrue\ngreen\n2\n4\ntrue\ntrue\ngreen\n2\n3\n1\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS /// #1488: every ambient random/time/crypto row stays live in AOT, resident JIT,
+//RS /// and the forced interpreter. Seeded draws keep one state sequence;
+//RS /// `shuffle` mutates its place and remains a Unit expression.
+//RS #[test]
+//RS fn nondeterministic_core_matrix_matches_all_execution_tiers() {
+//RS     let fold_src = r#"
+//RS use core.math.random as random
+//RS 
+//RS fn run() {
+//RS     values := [1, 2, 3]
+//RS     folded :: prep { random.shuffle(&values) }
+//RS }
+//RS "#;
+//RS     let fold_diagnostics = jet::compile(fold_src).expect_err("ambient shuffle must not fold");
+//RS     assert!(
+//RS         fold_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+//RS         "implicit random.shuffle fold must report E3403: {fold_diagnostics:#?}"
+//RS     );
+//RS     let impure_fold_src = r#"
+//RS use core.math.random as random
+//RS 
+//RS fn run() {
+//RS     #Impure("the gate must not authorize nondeterministic folding") {
+//RS         folded :: prep { random.int(1, 6) }
+//RS     }
+//RS }
+//RS "#;
+//RS     let impure_diagnostics =
+//RS         jet::compile(impure_fold_src).expect_err("#Impure must not bypass E3403");
+//RS     assert!(
+//RS         impure_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+//RS         "#Impure must not bypass nondeterministic folding law: {impure_diagnostics:#?}"
+//RS     );
+//RS 
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping nondeterministic tier matrix (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_nondeterministic_matrix_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source_name = "nondeterministic_matrix";
+//RS     let source = r#"
+//RS use core.math.random as random
+//RS use core.time as time
+//RS use core.time as date
+//RS use core.time as datetime
+//RS use core.crypto.random as crypto_rand
+//RS 
+//RS fn shuffle_unit() -[Rand]> {
+//RS     values := [1, 2, 3]
+//RS     return random.shuffle(&values)
+//RS }
+//RS 
+//RS fn run() -[Rand, Time]> {
+//RS     random.seed(31)
+//RS     print(random.int(1, 6))
+//RS     print(random.float() >= 0.0)
+//RS     print(random.float_range(10.0, 20.0) >= 10.0)
+//RS     print(random.bool())
+//RS     print(random.normal(0.0, 1.0) == random.normal(0.0, 1.0))
+//RS     print(random.exponential(2.0) >= 0.0)
+//RS     items := ["red", "green", "blue"]
+//RS     weights := [0.0, 1.0, 0.0]
+//RS     print(random.pick(items) ?? "none")
+//RS     print(random.weighted_pick(items, weights) ?? "none")
+//RS     sample_items := [1, 2, 3]
+//RS     print(random.sample(sample_items, 2))
+//RS     shuffle_items := [1, 2, 3]
+//RS     random.shuffle(&shuffle_items)
+//RS     print("shuffle-unit-ok")
+//RS     print(shuffle_items[0])
+//RS     print(shuffle_items[1])
+//RS     print(shuffle_items[2])
+//RS     shuffle_unit()
+//RS     print(random.split(9).float() >= 0.0)
+//RS     print(random.bytes(4).len())
+//RS 
+//RS     rng := random.rng(99)
+//RS     twin := random.rng(99)
+//RS     print(rng.int(1, 100) == twin.int(1, 100))
+//RS     print(rng.float() == twin.float())
+//RS     print(rng.float_range(1.0, 2.0) == twin.float_range(1.0, 2.0))
+//RS     print(rng.bool() == twin.bool())
+//RS     print(rng.bool() == twin.bool())
+//RS     print(rng.normal(0.0, 1.0) == twin.normal(0.0, 1.0))
+//RS     print(rng.exponential(2.0) == twin.exponential(2.0))
+//RS     rng_items := ["red", "green", "blue"]
+//RS     twin_items := ["red", "green", "blue"]
+//RS     print((rng.pick(rng_items) ?? "none") == (twin.pick(twin_items) ?? "none"))
+//RS     print((rng.weighted_pick(rng_items, weights) ?? "none") == (twin.weighted_pick(twin_items, weights) ?? "none"))
+//RS     print(rng.sample(rng_items, 2) == twin.sample(twin_items, 2))
+//RS     rng.shuffle(&rng_items)
+//RS     twin.shuffle(&twin_items)
+//RS     print(rng_items == twin_items)
+//RS     rng_float_items := [1.5, 2.5, 3.5]
+//RS     twin_float_items := [1.5, 2.5, 3.5]
+//RS     print((rng.pick(rng_float_items) ?? -1.0) == (twin.pick(twin_float_items) ?? -1.0))
+//RS     print((rng.weighted_pick(rng_float_items, weights) ?? -1.0) == (twin.weighted_pick(twin_float_items, weights) ?? -1.0))
+//RS     print(rng.sample(rng_float_items, 2) == twin.sample(twin_float_items, 2))
+//RS     rng.shuffle(&rng_float_items)
+//RS     twin.shuffle(&twin_float_items)
+//RS     print(rng_float_items == twin_float_items)
+//RS     print(rng.bytes(3) == twin.bytes(3))
+//RS     child := rng.split()
+//RS     twin_child := twin.split()
+//RS     print(child.int(1, 100) == twin_child.int(1, 100))
+//RS 
+//RS     print(time.now() >= 0)
+//RS     print(time.now_utc().to_timestamp() > 0)
+//RS     print(time.today().to_string().len() > 0)
+//RS     print(time.instant().elapsed_millis() >= 0)
+//RS     time.sleep(0ms)
+//RS     stopwatch := time.start()
+//RS     print(stopwatch.elapsed_millis() >= 0)
+//RS     print(date.today().to_string().len() > 0)
+//RS     print(time.now_utc().to_timestamp() > 0)
+//RS     print((crypto_rand.bytes(4) ?? panic("crypto bytes")).len())
+//RS }
+//RS "#;
+//RS     let (code, aot_stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         source_name,
+//RS         source,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "nondeterministic AOT matrix failed: {stderr}");
+//RS     assert!(
+//RS         aot_stdout.lines().any(|line| line == "shuffle-unit-ok"),
+//RS         "ambient random.shuffle must run as a Unit expression: {aot_stdout}"
+//RS     );
+//RS 
+//RS     let path = dir.join("nondeterministic_matrix.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "resident JIT stderr");
+//RS             stdout
+//RS         }
+//RS         other => panic!("nondeterministic matrix resident JIT failed: {other:?}"),
+//RS     };
+//RS     assert!(jet_jit::jit_executed_for_test(), "random/time matrix must execute in resident JIT");
+//RS     assert!(!jet_jit::deopt_invoked_for_test(), "random/time matrix must not deopt");
+//RS     assert!(!jet_jit::fallback_invoked_for_test(), "random/time matrix must not fall back");
+//RS 
+//RS     let forced_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "forced interpreter stderr");
+//RS             stdout
+//RS         }
+//RS         other => panic!("nondeterministic matrix forced interpreter failed: {other:?}"),
+//RS     };
+//RS     assert_eq!(resident_stdout, aot_stdout, "resident JIT diverged from AOT matrix");
+//RS     assert_eq!(forced_stdout, aot_stdout, "forced interpreter diverged from AOT matrix");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_breadth_codecs_share_data_tree() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping encoding breadth test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_encoding_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let (code, stdout, stderr) = build_and_run(
+//RS         &dir,
+//RS         "encoding_breadth",
+//RS         r#"
+//RS use core.encoding.json as json
+//RS use core.encoding.jsonl as jsonl
+//RS use core.encoding.xml as xml
+//RS use core.encoding.cbor as cbor
+//RS use core.encoding.base64 as base64
+//RS use core.encoding.base32 as base32
+//RS 
+//RS fn run() {
+//RS     data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
+//RS     print(json.canonical(data) ?? panic("value is not canonical JSON"))
+//RS     print(json.events(data).contains("object_start $"))
+//RS     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
+//RS     print(rows.len())
+//RS     print(jsonl.to_string(rows).contains("\"a\":1"))
+//RS     source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
+//RS     doc := xml.parse(source) ?? panic("xml")
+//RS     print(xml.to_string(doc))
+//RS     print((&doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
+//RS     root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+//RS     name := &root.field("name") ?? panic("root name")
+//RS     print((&name.field("namespace_uri") ?? panic("root namespace")).text() ?? "bad")
+//RS     content := &root.field("children") ?? panic("root children")
+//RS     entity := content.at(1) ?? panic("entity")
+//RS     comment := content.at(2) ?? panic("comment")
+//RS     cdata := content.at(3) ?? panic("cdata")
+//RS     pi := content.at(4) ?? panic("pi")
+//RS     print((&entity.field("$xml") ?? panic("entity tag")).text() ?? "bad")
+//RS     print((&comment.field("$xml") ?? panic("comment tag")).text() ?? "bad")
+//RS     print((&cdata.field("$xml") ?? panic("cdata tag")).text() ?? "bad")
+//RS     print((&pi.field("$xml") ?? panic("pi tag")).text() ?? "bad")
+//RS     encoded := cbor.to_bytes(data) ?? panic("cbor encode")
+//RS     print(encoded.len() > 0)
+//RS     decoded := cbor.parse(encoded) ?? panic("cbor parse")
+//RS     print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
+//RS     bytes :: [U8]{ 104, 105 }
+//RS     u := base64.encode_url(bytes)
+//RS     print(u)
+//RS     print((base64.decode_url(u) ?? panic("base64url")).len())
+//RS     b32 := base32.encode(bytes)
+//RS     print(b32)
+//RS     print((base32.decode(b32) ?? panic("base32")).len())
+//RS }
+//RS "#,
+//RS         &[],
+//RS         None,
+//RS     );
+//RS     assert_eq!(code, 0, "encoding breadth test failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>\ndocument\nurn:r\nentity_ref\ncomment\ncdata\nprocessing_instruction\ntrue\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_dual_limits_validate_in_ratified_order_and_fuse_stronger_bounds() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML dual-limits test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_xml_dual_limits_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let probe = dir.join("probe.xml");
+//RS     fs::write(&probe, "<a><b><c/></b></a>").unwrap();
+//RS     let probe = probe.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.xml as xml
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     // EncodingLimits fail first even when XMLLimits are also illegal.
+//RS     enc_bad := encoding.EncodingLimits.safe()
+//RS     enc_bad.buffer_bytes = 1
+//RS     xml_bad := xml.XMLParseOptions.safe()
+//RS     xml_bad.limits.max_depth = 0
+//RS     input1 :: files.open("{probe}") ?? panic("open1")
+//RS     if xml.reader(^input1, enc_bad, xml_bad) == {{
+//RS         .Ok(_) -> {{ print("accepted") }}
+//RS         .Err(error) -> {{
+//RS             print(error.format == encoding.EncodingFormat.XML)
+//RS             print(error.kind == encoding.EncodingErrorKind.Limit)
+//RS             print(error.byte_offset)
+//RS             print(error.line ?? -1)
+//RS             print(error.column ?? -1)
+//RS             print(error.path)
+//RS             print(error.reason)
+//RS         }}
+//RS     }}
+//RS 
+//RS     // EncodingLimits ok → XMLLimits field order: max_depth before max_nodes.
+//RS     enc_ok := encoding.EncodingLimits.safe()
+//RS     xml_depth := xml.XMLParseOptions.safe()
+//RS     xml_depth.limits.max_depth = 0
+//RS     xml_depth.limits.max_nodes = 0
+//RS     input2 :: files.open("{probe}") ?? panic("open2")
+//RS     if xml.reader(^input2, enc_ok, xml_depth) == {{
+//RS         .Ok(_) -> {{ print("accepted") }}
+//RS         .Err(error) -> {{
+//RS             print(error.format == encoding.EncodingFormat.XML)
+//RS             print(error.kind == encoding.EncodingErrorKind.Limit)
+//RS             print(error.byte_offset)
+//RS             print(error.line ?? -1)
+//RS             print(error.column ?? -1)
+//RS             print(error.path)
+//RS             print(error.reason)
+//RS         }}
+//RS     }}
+//RS 
+//RS     // Cross-field XMLLimits after ranges.
+//RS     enc_ok2 := encoding.EncodingLimits.safe()
+//RS     xml_cross := xml.XMLParseOptions.safe()
+//RS     xml_cross.limits.max_depth = 2
+//RS     xml_cross.limits.max_entity_depth = 3
+//RS     input3 :: files.open("{probe}") ?? panic("open3")
+//RS     if xml.reader(^input3, enc_ok2, xml_cross) == {{
+//RS         .Ok(_) -> {{ print("accepted") }}
+//RS         .Err(error) -> {{
+//RS             print(error.format == encoding.EncodingFormat.XML)
+//RS             print(error.kind == encoding.EncodingErrorKind.Limit)
+//RS             print(error.byte_offset)
+//RS             print(error.line ?? -1)
+//RS             print(error.column ?? -1)
+//RS             print(error.path)
+//RS             print(error.reason)
+//RS         }}
+//RS     }}
+//RS 
+//RS     // Encoding depth tighter than XML depth: error names the fused bound.
+//RS     // XMLLimits must be self-valid before EncodingLimits fusion.
+//RS     enc_tight := encoding.EncodingLimits.safe()
+//RS     enc_tight.max_depth = 2
+//RS     xml_loose := xml.XMLParseOptions.safe()
+//RS     xml_loose.limits.max_depth = 8
+//RS     xml_loose.limits.max_entity_depth = 8
+//RS     input4 :: files.open("{probe}") ?? panic("open4")
+//RS     reader :: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
+//RS     loop true {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == {{
+//RS                     Val(_) -> {{}}
+//RS                     None -> {{
+//RS                         print("depth-missed")
+//RS                         break
+//RS                     }}
+//RS                 }}
+//RS             }}
+//RS             .Err(error) -> {{
+//RS                 print(error.kind == encoding.EncodingErrorKind.Limit)
+//RS                 print(error.reason)
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     // XML depth tighter than Encoding depth.
+//RS     enc_loose := encoding.EncodingLimits.safe()
+//RS     xml_tight := xml.XMLParseOptions.safe()
+//RS     xml_tight.limits.max_depth = 1
+//RS     xml_tight.limits.max_entity_depth = 1
+//RS     deep_input :: files.open("{probe}") ?? panic("open deep")
+//RS     deep_reader :: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+//RS     loop true {{
+//RS         result :: deep_reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == {{
+//RS                     Val(_) -> {{}}
+//RS                     None -> {{
+//RS                         print("xml-depth-missed")
+//RS                         break
+//RS                     }}
+//RS                 }}
+//RS             }}
+//RS             .Err(error) -> {{
+//RS                 print(error.kind == encoding.EncodingErrorKind.Limit)
+//RS                 print(error.reason)
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_dual_limits", &source, &[], None);
+//RS     assert_eq!(code, 0, "XML dual-limits test failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         concat!(
+//RS             "true\n",
+//RS             "true\n",
+//RS             "0\n",
+//RS             "-1\n",
+//RS             "-1\n",
+//RS             "\n",
+//RS             "buffer_bytes 1 is outside 4096..16777216\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "0\n",
+//RS             "-1\n",
+//RS             "-1\n",
+//RS             "\n",
+//RS             "XML limit `max_depth` must be between 1 and 4096\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "0\n",
+//RS             "-1\n",
+//RS             "-1\n",
+//RS             "\n",
+//RS             "XML limit `max_entity_depth` exceeds `max_depth`\n",
+//RS             "true\n",
+//RS             "XML element nesting exceeds max_depth (2)\n",
+//RS             "true\n",
+//RS             "XML element nesting exceeds max_depth (1)\n",
+//RS         )
+//RS     );
+//RS     assert_eq!(stderr, "$xml_event");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML whole-byte parity test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_xml_whole_bytes_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.xml as xml
+//RS 
+//RS fn same_bytes(left: [U8], right: [U8]) -> Bool {
+//RS     if left.len() != right.len() { return false }
+//RS     loop index in 0..<left.len() {
+//RS         if left[index] != right[index] { return false }
+//RS     }
+//RS     return true
+//RS }
+//RS 
+//RS fn summarize() -> String {
+//RS     plain :: [U8]{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
+//RS     utf8_bom :: [U8]{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
+//RS     utf16 :: [U8]{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
+//RS     conflict :: [U8]{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0 }
+//RS 
+//RS     plain_doc :: xml.parse_bytes(plain) ?? panic("plain parse")
+//RS     plain_out :: xml.to_bytes(plain_doc) ?? panic("plain render")
+//RS     utf8_doc :: xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
+//RS     utf8_out :: xml.to_bytes(utf8_doc, xml.XMLRenderOptions{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
+//RS     utf16_doc :: xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
+//RS     utf16_out :: xml.to_bytes(utf16_doc, xml.XMLRenderOptions{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
+//RS 
+//RS     conflict_result :: xml.parse_bytes(conflict)
+//RS     if conflict_result == {
+//RS         .Ok(_) -> return "encoding-conflict-missed"
+//RS         .Err(error) -> {
+//RS             reason_ok :: error.reason == "XML declaration conflicts with detected input encoding"
+//RS             return "{same_bytes(plain_out, plain)}|{same_bytes(utf8_out, utf8_bom)}|{same_bytes(utf16_out, utf16)}|{reason_ok}|{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+//RS         }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS EXPECTED :: prep { summarize() }
+//RS 
+//RS fn run() {
+//RS     print(EXPECTED)
+//RS     print(summarize())
+//RS }
+//RS "#;
+//RS     let expected = concat!(
+//RS         "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+//RS         "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_whole_bytes", source, &[], None);
+//RS     assert_eq!(code, 0, "XML whole-byte AOT fixture failed: {stderr}");
+//RS     assert_eq!(stdout, expected);
+//RS     assert_eq!(stderr, "$xml_event");
+//RS 
+//RS     let dev_path = dir.join("xml_whole_bytes.jet");
+//RS     fs::write(&dev_path, source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+//RS         }
+//RS         other => panic!("XML whole-byte default-dev fixture failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML character parity test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_xml_chars_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.xml as xml
+//RS 
+//RS fn show(result: DataTree XMLError!) -> String {
+//RS     if result == {
+//RS         .Ok(_) -> { return "accepted" }
+//RS         .Err(error) -> {
+//RS             return "{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+//RS         }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS NUMERIC :: prep { show(xml.parse("<r>&#0;</r>")) }
+//RS ATTRIBUTE :: prep { show(xml.parse("<r a='&#0;'/>")) }
+//RS NAMESPACE :: prep { show(xml.parse("<r xmlns='&#0;'/>")) }
+//RS 
+//RS fn run() {
+//RS     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
+//RS     runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
+//RS     runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+//RS     print("{NUMERIC}|{runtime_numeric}")
+//RS     print("{ATTRIBUTE}|{runtime_attribute}")
+//RS     print("{NAMESPACE}|{runtime_namespace}")
+//RS }
+//RS "#;
+//RS     let expected = concat!(
+//RS         "3|1|4|$/r|invalid numeric character reference|3|1|4|$/r|invalid numeric character reference\n",
+//RS         "6|1|7|$|invalid numeric character reference|6|1|7|$|invalid numeric character reference\n",
+//RS         "10|1|11|$|invalid numeric character reference|10|1|11|$|invalid numeric character reference\n",
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_chars", &source, &[], None);
+//RS     assert_eq!(code, 0, "XML character AOT fixture failed: {stderr}");
+//RS     assert_eq!(stdout, expected);
+//RS     assert_eq!(stderr, "$xml_event");
+//RS 
+//RS     let dev_path = dir.join("xml_chars.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+//RS         }
+//RS         other => panic!("XML character default-dev fixture failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML attribute normalization parity test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_xml_attribute_normalization_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.xml as xml
+//RS 
+//RS fn summarize(source: String) -> String {
+//RS     doc := xml.parse(source) ?? panic("xml")
+//RS     root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+//RS     namespace := ((&root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
+//RS     attributes := &root.field("attributes") ?? panic("attributes")
+//RS     literal := ((attributes.at(0) ?? panic("literal attribute")).field("normalized_value") ?? panic("literal normalized value")).text() ?? "bad"
+//RS     reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
+//RS     namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
+//RS     literal_ok := literal == "A B C D E"
+//RS     lexical_ok := xml.to_string(doc) == source
+//RS     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
+//RS }
+//RS 
+//RS CR :: prep { String.from_bytes([13]) ?? panic("CR") }
+//RS CLOSE :: prep { "/>" }
+//RS SOURCE :: prep { "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{CR}\nD{CR}E' b='&#xD;&#xA;&#x9;'{CLOSE}" }
+//RS NORMALIZED :: prep { summarize(SOURCE) }
+//RS 
+//RS fn run() {
+//RS     runtime := summarize(SOURCE)
+//RS     print("{NORMALIZED}|{runtime}")
+//RS }
+//RS "#;
+//RS     let expected = "true|true|3|true|true|true|3|true\n";
+//RS     let (code, stdout, stderr) =
+//RS         build_and_run(&dir, "xml_attribute_normalization", source, &[], None);
+//RS     assert_eq!(
+//RS         code, 0,
+//RS         "XML attribute normalization AOT fixture failed: {stderr}"
+//RS     );
+//RS     assert_eq!(stdout, expected);
+//RS     assert_eq!(stderr, "$xml_event");
+//RS 
+//RS     let dev_path = dir.join("xml_attribute_normalization.jet");
+//RS     fs::write(&dev_path, source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+//RS             assert_eq!(
+//RS                 (exit_code, stdout, stderr),
+//RS                 (0, expected.to_string(), String::new())
+//RS             );
+//RS         }
+//RS         other => panic!("XML attribute normalization default-dev fixture failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping base decoder parity test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_corelib_base_decoder_parity_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"corelib_base_decoder\"\nversion: \"0.1.0\"\nedition: \"2026\"\n",
+//RS     )
+//RS     .unwrap();
+//RS     let source = r#"
+//RS use core.encoding.base64 as base64
+//RS use core.encoding.base32 as base32
+//RS 
+//RS fn show64(text: String) -> String {
+//RS     if base64.decode(text) == {
+//RS         .Ok(bytes) -> { return "OK:{bytes}" }
+//RS         .Err(reason) -> { return "ERR:{reason}" }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS fn show64url(text: String) -> String {
+//RS     if base64.decode_url(text) == {
+//RS         .Ok(bytes) -> { return "OK:{bytes}" }
+//RS         .Err(reason) -> { return "ERR:{reason}" }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS fn show32(text: String) -> String {
+//RS     if base32.decode(text) == {
+//RS         .Ok(bytes) -> { return "OK:{bytes}" }
+//RS         .Err(reason) -> { return "ERR:{reason}" }
+//RS     }
+//RS     return "unreachable"
+//RS }
+//RS 
+//RS STANDARD_WS :: prep { show64("Z g = =\n") }
+//RS STANDARD_UNPADDED :: prep { show64("Zg") }
+//RS STANDARD_INTERIOR :: prep { show64("Zg=A") }
+//RS STANDARD_EXCESS :: prep { show64("Zg====") }
+//RS STANDARD_BITS :: prep { show64("Zh==") }
+//RS STANDARD_PADDING :: prep { show64("=AAA") }
+//RS STANDARD_ALPHABET :: prep { show64("Zg-=") }
+//RS STANDARD_SIZE :: prep { show64("A") }
+//RS URL_OUTER_WS :: prep { show64url(" \tZg==\n") }
+//RS URL_INTERIOR :: prep { show64url("Zg=A") }
+//RS URL_STANDARD_ALPHABET :: prep { show64url("+w") }
+//RS URL_BITS :: prep { show64url("Zh") }
+//RS URL_PADDING :: prep { show64url("=AAA") }
+//RS URL_SIZE :: prep { show64url("A") }
+//RS BASE32_LOOSE :: prep { show32("m=y======\n") }
+//RS BASE32_BITS :: prep { show32("MZ======") }
+//RS BASE32_SHORT :: prep { show32("A") }
+//RS BASE32_ALPHABET :: prep { show32("M0======") }
+//RS 
+//RS fn run() {
+//RS     r_standard_ws := show64("Z g = =\n")
+//RS     r_standard_unpadded := show64("Zg")
+//RS     r_standard_interior := show64("Zg=A")
+//RS     r_standard_excess := show64("Zg====")
+//RS     r_standard_bits := show64("Zh==")
+//RS     r_standard_padding := show64("=AAA")
+//RS     r_standard_alphabet := show64("Zg-=")
+//RS     r_standard_size := show64("A")
+//RS     r_url_outer_ws := show64url(" \tZg==\n")
+//RS     r_url_interior := show64url("Zg=A")
+//RS     r_url_standard_alphabet := show64url("+w")
+//RS     r_url_bits := show64url("Zh")
+//RS     r_url_padding := show64url("=AAA")
+//RS     r_url_size := show64url("A")
+//RS     r_base32_loose := show32("m=y======\n")
+//RS     r_base32_bits := show32("MZ======")
+//RS     r_base32_short := show32("A")
+//RS     r_base32_alphabet := show32("M0======")
+//RS     print("{STANDARD_WS}|{r_standard_ws}")
+//RS     print("{STANDARD_UNPADDED}|{r_standard_unpadded}")
+//RS     print("{STANDARD_INTERIOR}|{r_standard_interior}")
+//RS     print("{STANDARD_EXCESS}|{r_standard_excess}")
+//RS     print("{STANDARD_BITS}|{r_standard_bits}")
+//RS     print("{STANDARD_PADDING}|{r_standard_padding}")
+//RS     print("{STANDARD_ALPHABET}|{r_standard_alphabet}")
+//RS     print("{STANDARD_SIZE}|{r_standard_size}")
+//RS     print("{URL_OUTER_WS}|{r_url_outer_ws}")
+//RS     print("{URL_INTERIOR}|{r_url_interior}")
+//RS     print("{URL_STANDARD_ALPHABET}|{r_url_standard_alphabet}")
+//RS     print("{URL_BITS}|{r_url_bits}")
+//RS     print("{URL_PADDING}|{r_url_padding}")
+//RS     print("{URL_SIZE}|{r_url_size}")
+//RS     print("{BASE32_LOOSE}|{r_base32_loose}")
+//RS     print("{BASE32_BITS}|{r_base32_bits}")
+//RS     print("{BASE32_SHORT}|{r_base32_short}")
+//RS     print("{BASE32_ALPHABET}|{r_base32_alphabet}")
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "base_decoder_parity", source, &[], None);
+//RS     assert_eq!(code, 0, "base decoder AOT parity fixture failed: {stderr}");
+//RS     let expected = concat!(
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "ERR:invalid base64 at byte 0: padding may appear only at the end|ERR:invalid base64 at byte 0: padding may appear only at the end\n",
+//RS         "ERR:invalid base64 at byte 2: byte 0x2D is not in the standard base64 alphabet|ERR:invalid base64 at byte 2: byte 0x2D is not in the standard base64 alphabet\n",
+//RS         "ERR:invalid base64 at byte 1: encoded length cannot represent whole bytes|ERR:invalid base64 at byte 1: encoded length cannot represent whole bytes\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[251]|OK:[251]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "ERR:invalid base64url at byte 0: padding may appear only at the end|ERR:invalid base64url at byte 0: padding may appear only at the end\n",
+//RS         "ERR:invalid base64url at byte 1: encoded length cannot represent whole bytes|ERR:invalid base64url at byte 1: encoded length cannot represent whole bytes\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[102]|OK:[102]\n",
+//RS         "OK:[]|OK:[]\n",
+//RS         "ERR:invalid base32 at byte 1: byte 0x30 is not in the base32 alphabet|ERR:invalid base32 at byte 1: byte 0x30 is not in the base32 alphabet\n",
+//RS     );
+//RS     assert_eq!(stdout, expected);
+//RS     let dev_path = dir.join("base_decoder_parity.jet");
+//RS     fs::write(&dev_path, source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new())),
+//RS         other => panic!("base decoder default-dev parity fixture failed: {other:?}"),
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_stream_reader_is_incremental_exact_and_terminal() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML stream test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_xml_stream_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let boundary_paths = (4078..=4110)
+//RS         .map(|padding| {
+//RS             let path = dir.join(format!("boundary-{padding}.xml"));
+//RS             fs::write(
+//RS                 &path,
+//RS                 format!(
+//RS                     "{}<r xmlns=\"urn:r\" a=\"x&amp;y\">é</r>",
+//RS                     " ".repeat(padding)
+//RS                 ),
+//RS             )
+//RS             .unwrap();
+//RS             format!("\"{}\"$xml_event", path.to_string_lossy().replace('\\', "\\\\"))
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(", ");
+//RS     let malformed = dir.join("malformed.xml");
+//RS     fs::write(&malformed, "<r>").unwrap();
+//RS     let invalid_char = dir.join("invalid-char.xml");
+//RS     fs::write(&invalid_char, b"<r>\x01</r>").unwrap();
+//RS     let limited = dir.join("limited.xml");
+//RS     fs::write(&limited, "<root>text</root>").unwrap();
+//RS     let encoding_conflict = dir.join("encoding-conflict.xml");
+//RS     let mut encoding_conflict_bytes = vec![0xff, 0xfe];
+//RS     encoding_conflict_bytes.extend(
+//RS         "<?xml version='1.0' encoding='UTF-8'?><r/>"
+//RS             .encode_utf16()
+//RS             .flat_map(u16::to_le_bytes),
+//RS     );
+//RS     fs::write(&encoding_conflict, encoding_conflict_bytes).unwrap();
+//RS     let malformed = malformed.to_string_lossy().replace('\\', "\\\\");
+//RS     let invalid_char = invalid_char.to_string_lossy().replace('\\', "\\\\");
+//RS     let limited = limited.to_string_lossy().replace('\\', "\\\\");
+//RS     let encoding_conflict = encoding_conflict.to_string_lossy().replace('\\', "\\\\");
+//RS 
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.xml as xml
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     paths :: [String]{{ {boundary_paths} }}
+//RS     passed := 0
+//RS     loop path in paths {{
+//RS         input :: files.open(path) ?? panic("open boundary")
+//RS         reader :: xml.reader(^input) ?? panic("reader defaults")
+//RS         document_start := false
+//RS         root_start := false
+//RS         document_end := false
+//RS         loop true {{
+//RS             maybe :: reader.next() ?? panic("boundary next")
+//RS             if maybe == {{
+//RS                 Val(event) -> {{
+//RS                     event_kind := (&event.field("$xml_event") ?? panic("event tag")).text() ?? "$xml_event"
+//RS                     if event_kind == "document_start" {{
+//RS                         wire_encoding := (&event.field("encoding") ?? panic("encoding")).text() ?? "$xml_event"
+//RS                         document_start = wire_encoding == "UTF-8"
+//RS                     }}
+//RS                     if event_kind == "element_start" {{
+//RS                         name := &event.field("name") ?? panic("name")
+//RS                         local := (&name.field("local") ?? panic("local")).text() ?? "$xml_event"
+//RS                         namespace := (&name.field("namespace_uri") ?? panic("namespace")).text() ?? "$xml_event"
+//RS                         root_start = local == "r" && namespace == "urn:r"
+//RS                     }}
+//RS                     if event_kind == "document_end" {{ document_end = true }}
+//RS                 }}
+//RS                 None -> {{ break }}
+//RS             }}
+//RS         }}
+//RS         eof_again :: reader.next() ?? panic("fused eof")
+//RS         if eof_again == {{
+//RS             Val(_) -> {{}}
+//RS             None -> {{ if document_start && root_start && document_end {{ passed++ }} }}
+//RS         }}
+//RS     }}
+//RS     print(passed)
+//RS 
+//RS     malformed_input :: files.open("{malformed}") ?? panic("open malformed")
+//RS     malformed_reader :: xml.reader(^malformed_input) ?? panic("malformed reader")
+//RS     loop true {{
+//RS         result :: malformed_reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == {{
+//RS                     Val(_) -> {{}}
+//RS                     None -> {{
+//RS                         print("malformed-missed")
+//RS                         break
+//RS                     }}
+//RS                 }}
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 again :: malformed_reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("terminal-missed") }}
+//RS                     .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     invalid_char_input :: files.open("{invalid_char}") ?? panic("open invalid character")
+//RS     invalid_char_reader :: xml.reader(^invalid_char_input) ?? panic("invalid character reader")
+//RS     loop true {{
+//RS         result :: invalid_char_reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == {{
+//RS                     Val(_) -> {{}}
+//RS                     None -> {{
+//RS                         print("invalid-character-missed")
+//RS                         break
+//RS                     }}
+//RS                 }}
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 print(first.kind == encoding.EncodingErrorKind.Syntax)
+//RS                 print(first.byte_offset)
+//RS                 print(first.line ?? -1)
+//RS                 print(first.column ?? -1)
+//RS                 print(first.path)
+//RS                 print(first.reason)
+//RS                 again :: invalid_char_reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("invalid-character-terminal-missed") }}
+//RS                     .Err(second) -> {{ print(first.reason == second.reason) }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     total_limits := encoding.EncodingLimits.safe()
+//RS     total_limits.max_total_bytes = Val(6)
+//RS     total_input :: files.open("{limited}") ?? panic("open total")
+//RS     total_reader :: xml.reader(^total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
+//RS     loop true {{
+//RS         result :: total_reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == {{
+//RS                     Val(_) -> {{}}
+//RS                     None -> {{
+//RS                         print("total-missed")
+//RS                         break
+//RS                     }}
+//RS                 }}
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 again :: total_reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("total-terminal-missed") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     conflict_input :: files.open("{encoding_conflict}") ?? panic("open encoding conflict")
+//RS     conflict_reader :: xml.reader(^conflict_input) ?? panic("encoding conflict reader")
+//RS     conflict_start :: conflict_reader.next() ?? panic("encoding conflict document start")
+//RS     if conflict_start == None {{ panic("missing document start") }}
+//RS     conflict :: conflict_reader.next()
+//RS     if conflict == {{
+//RS         .Ok(_) -> {{ print("encoding-conflict-missed") }}
+//RS         .Err(error) -> {{
+//RS             print(error.kind == encoding.EncodingErrorKind.Syntax)
+//RS             print(error.byte_offset)
+//RS             print(error.reason)
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "XML stream test failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\ntrue\n2\nXML declaration conflicts with detected input encoding\n"
+//RS     );
+//RS     assert_eq!(stderr, "$xml_event");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_stream_writer_and_canonical_surface_run_end_to_end() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML writer test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_xml_writer_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let input = dir.join("input.xml");
+//RS     let output = dir.join("output.xml");
+//RS     let utf16 = dir.join("output-utf16.xml");
+//RS     let source = "<?xml version='1.0'?><r xmlns:p='urn:p' p:a='x&amp;y'>z<p:e/></r>";
+//RS     fs::write(&input, source).unwrap();
+//RS     let source_code = format!(r#"
+//RS use core.encoding.xml as xml
+//RS use core.encoding as encoding
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{}") ?? panic("open")
+//RS     output :: files.create("{}") ?? panic("create")
+//RS     reader :: xml.reader(^input) ?? panic("reader")
+//RS     writer :: xml.writer(^output) ?? panic("writer")
+//RS     loop true {{
+//RS         maybe :: reader.next() ?? panic("next")
+//RS         if maybe == {{
+//RS             Val(event) -> {{ writer.write(event) ?? panic("write") }}
+//RS             None -> {{ break }}
+//RS         }}
+//RS     }}
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("idempotent finish")
+//RS     input16 :: files.open("{}") ?? panic("open utf16 source")
+//RS     output16 :: files.create("{}") ?? panic("create utf16")
+//RS     reader16 :: xml.reader(^input16) ?? panic("reader utf16")
+//RS     render16 := xml.XMLRenderOptions{{ encoding: .UTF16LE, lexical: .Deterministic }}
+//RS     writer16 :: xml.writer(^output16, encoding.EncodingLimits.safe(), render16) ?? panic("writer utf16")
+//RS     loop true {{
+//RS         maybe :: reader16.next() ?? panic("next utf16")
+//RS         if maybe == {{
+//RS             Val(event) -> {{ writer16.write(event) ?? panic("write utf16") }}
+//RS             None -> {{ break }}
+//RS         }}
+//RS     }}
+//RS     writer16.finish() ?? panic("finish utf16")
+//RS     tree :: xml.parse("<r xmlns:q='urn:q' q:z='2' a='1'><e/></r>") ?? panic("parse")
+//RS     options := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }}
+//RS     print(xml.canonical(tree, options) ?? panic("canonical"))
+//RS }}
+//RS "#, input.to_string_lossy().replace('\\', "\\\\"), output.to_string_lossy().replace('\\', "\\\\"), input.to_string_lossy().replace('\\', "\\\\"), utf16.to_string_lossy().replace('\\', "\\\\"));
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_writer", &source_code, &[], None);
+//RS     assert_eq!(code, 0, "XML writer test failed: {stderr}");
+//RS     assert_eq!(stdout, "<r xmlns:q=\"urn:q\" a=\"1\" q:z=\"2\"><e></e></r>\n");
+//RS     assert_eq!(fs::read(&output).unwrap(), source.as_bytes());
+//RS     let deterministic =
+//RS         "<?xml version=\"1.0\"?><r xmlns:p='urn:p' p:a='x&amp;y'>z<p:e/></r>";
+//RS     let mut expected16 = vec![0xff, 0xfe];
+//RS     expected16.extend(deterministic.encode_utf16().flat_map(u16::to_le_bytes));
+//RS     assert_eq!(fs::read(&utf16).unwrap(), expected16);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_reader_writer_hostile_state_and_exclusive_c14n() {
+//RS     let have_rustc = common::have_rustc();
+//RS     if !have_rustc {
+//RS         eprintln!("note: skipping XML hostile/c14n surface test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_xml_hostile_c14n_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let input = dir.join("round.xml");
+//RS     fs::write(
+//RS         &input,
+//RS         "<?xml version='1.0'?>\n<!--c-->\n<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>\n",
+//RS     )
+//RS     .unwrap();
+//RS     let input = input.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.xml as xml
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     // Fold/unfold round trip through XMLReader/XMLWriter keeps order + lexical.
+//RS     input :: files.open("{input}") ?? panic("open")
+//RS     out_path := "{input}.out"
+//RS     output :: files.create(out_path) ?? panic("create")
+//RS     reader :: xml.reader(^input) ?? panic("reader")
+//RS     writer :: xml.writer(^output) ?? panic("writer")
+//RS     loop true {{
+//RS         maybe :: reader.next() ?? panic("next")
+//RS         if maybe == {{
+//RS             Val(event) -> {{ writer.write(event) ?? panic("write") }}
+//RS             None -> {{ break }}
+//RS         }}
+//RS     }}
+//RS     writer.finish() ?? panic("finish")
+//RS     print(files.read(out_path) ?? panic("read out"))
+//RS 
+//RS     // Hostile: document_end before document_start → State, no bytes.
+//RS     bad_out :: files.create("{input}.bad") ?? panic("bad create")
+//RS     bad :: xml.writer(^bad_out) ?? panic("bad writer")
+//RS     end := DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+//RS     if bad.write(end) == {{
+//RS         .Ok(_) -> {{ print("hostile-missed") }}
+//RS         .Err(error) -> {{
+//RS             print(error.kind == encoding.EncodingErrorKind.State)
+//RS             print(error.reason)
+//RS         }}
+//RS     }}
+//RS 
+//RS     // Exclusive C14N omits unused xmlns on ancestors; utilized prefixes move down.
+//RS     tree :: xml.parse("<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>") ?? panic("parse")
+//RS     options := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }}
+//RS     print(xml.canonical(tree, options) ?? panic("canonical"))
+//RS 
+//RS     // InclusiveNamespaces PrefixList forces unused b onto the apex.
+//RS     forced := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }}
+//RS     print(xml.canonical(tree, forced) ?? panic("forced"))
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_hostile_c14n", &source, &[], None);
+//RS     assert_eq!(code, 0, "XML hostile/c14n surface failed: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "<?xml version='1.0'?>\n<!--c-->\n<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>\n\ntrue\nXML writer expects document_start first\n<root><a:child xmlns:a=\"urn:a\" xmlns:b=\"urn:b\" b:x=\"1\"></a:child></root>\n<root xmlns:b=\"urn:b\"><a:child xmlns:a=\"urn:a\" b:x=\"1\"></a:child></root>\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1017 tests/corelib_parts/encoding_surface.rs:1-1332
+

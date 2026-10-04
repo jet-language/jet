@@ -1,0 +1,232 @@
+// MathLibPure.rs:1425–1477,1520–1671. Source policy assertions, not tier proof.
+// Native-bit/powi cases below stay HELD until the approved private jet_rt_float_*
+// symbols are registered in the real shared provider; no fake implementation.
+// #4467 blocks the import's infallible scalar ABI lowering before symbol lookup.
+use core.math as float_policy_test
+use core.math as float_policy_native
+use core.math.runtime.kernel_float_ordering as float_policy_ordering
+
+fn float_policy_near(actual: Float, expected: Float) -> Bool Never! {
+    float_policy_native.fabs(actual - expected) <= Float{1.0e-12} * float_policy_native.fabs(expected) + Float{1.0e-14}
+}
+
+#Test("float policy truncated fmod and ties-even remainder") {
+    assert_eq(float_policy_test.fmod(Float{7.0}, Float{2.0}), Float{1.0})
+    assert_eq(float_policy_test.fmod(-Float{7.0}, Float{2.0}), -Float{1.0})
+    assert_eq(float_policy_test.fmod(Float{7.0}, -Float{2.0}), Float{1.0})
+    assert_eq(float_policy_test.remainder(Float{7.0}, Float{2.0}), -Float{1.0})
+    assert_eq(float_policy_test.remainder(Float{5.0}, Float{2.0}), Float{1.0})
+    assert_eq(float_policy_test.remainder(-Float{7.0}, Float{2.0}), Float{1.0})
+    assert_eq(float_policy_test.remainder(-Float{5.0}, Float{2.0}), -Float{1.0})
+    assert_eq(float_policy_test.remainder(Float{7.0}, -Float{2.0}), -Float{1.0})
+    assert_eq(float_policy_test.remainder(Float{6.0}, Float{2.0}), Float{0.0})
+    assert_eq(float_policy_test.remainder(Float{6.75}, Float{2.0}), Float{0.75})
+    assert_eq(float_policy_test.remainder(Float{7.25}, Float{2.0}), -Float{0.75})
+}
+
+#Test("float policy remainder IEEE guards cancellation and quotient overflow") {
+    nan :: Float.NAN
+    inf :: Float.INFINITY
+    tiny :: Float{4.9406564584124654e-324}
+    assert(float_policy_native.is_nan(float_policy_test.remainder(inf, Float{2.0})))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(-inf, Float{2.0})))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(Float{2.0}, inf)))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(Float{2.0}, -inf)))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(nan, Float{2.0})))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(Float{2.0}, nan)))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(Float{1.0}, Float{0.0})))
+    assert(float_policy_native.is_nan(float_policy_test.remainder(Float{1.0}, -Float{0.0})))
+    assert(float_policy_native.sign_bit(float_policy_test.fmod(-Float{0.0}, Float{2.0})))
+    assert(!float_policy_native.sign_bit(float_policy_test.remainder(-Float{0.0}, Float{2.0})))
+    assert(!float_policy_native.sign_bit(float_policy_test.remainder(-Float{6.0}, Float{2.0})))
+    assert_eq(float_policy_test.remainder(tiny, Float{2.0}), tiny)
+    // Source does not prevent a finite / finite quotient from overflowing.
+    assert_eq(float_policy_test.remainder(Float{1.7976931348623157e308}, tiny), -inf)
+    assert_eq(float_policy_test.remainder(-Float{1.7976931348623157e308}, tiny), inf)
+    assert_eq(float_policy_test.fmod(Float{2.0}, inf), Float{2.0})
+    assert(float_policy_native.is_nan(float_policy_test.fmod(inf, Float{2.0})))
+    assert(float_policy_native.is_nan(float_policy_test.fmod(Float{2.0}, Float{0.0})))
+}
+
+#Test("float policy isclose precedence tolerance boundaries and NaN maxima") {
+    zero :: Float{0.0}
+    nan :: Float.NAN
+    inf :: Float.INFINITY
+    assert(float_policy_test.isclose(inf, inf, zero, zero))
+    assert(float_policy_test.isclose(-inf, -inf, zero, zero))
+    assert(!float_policy_test.isclose(inf, inf, -Float{1.0}, zero))
+    assert(!float_policy_test.isclose(Float{1.0}, Float{1.0}, zero, -Float{1.0}))
+    assert(float_policy_test.isclose(zero, -zero, -zero, -zero))
+    assert(!float_policy_test.isclose(inf, -inf, inf, inf))
+    assert(!float_policy_test.isclose(inf, Float{1.0}, inf, inf))
+    assert(!float_policy_test.isclose(nan, nan, inf, inf))
+    assert(float_policy_test.isclose(Float{1.0}, Float{1.0}, nan, nan))
+    assert(float_policy_test.isclose(Float{10.0}, Float{11.0}, Float{0.1}, zero))
+    assert(!float_policy_test.isclose(Float{10.0}, Float{11.0}, Float{0.01}, zero))
+    assert(float_policy_test.isclose(Float{1.0}, Float{2.0}, zero, Float{1.0}))
+    assert(!float_policy_test.isclose(Float{1.0}, Float{2.0}, zero, Float{0.5}))
+    assert(float_policy_test.isclose(Float{1.0}, Float{2.0}, nan, Float{1.0}))
+    assert(float_policy_test.isclose(Float{1.0}, Float{2.0}, Float{1.0}, nan))
+    assert(!float_policy_test.isclose(Float{1.0}, Float{2.0}, nan, nan))
+    assert(float_policy_test.isclose(zero, Float{4.9406564584124654e-324}, zero, Float{4.9406564584124654e-324}))
+}
+
+#Test("float policy distance length mismatch naive ordered sum and IEEE") {
+    empty :: [Float]{}
+    assert_eq(float_policy_test.dist(empty, empty), -Float{0.0})
+    assert(float_policy_native.sign_bit(float_policy_test.dist(empty, empty)))
+    assert(float_policy_native.is_nan(float_policy_test.dist([Float]{1.0}, empty)))
+    assert(float_policy_native.is_nan(float_policy_test.dist(empty, [Float]{1.0})))
+    assert_eq(float_policy_test.dist([Float]{0.0, 0.0}, [Float]{3.0, 4.0}), Float{5.0})
+    assert(!float_policy_native.sign_bit(float_policy_test.dist([Float]{-0.0}, [Float]{0.0})))
+    assert_eq(float_policy_test.dist([Float]{4.9406564584124654e-324}, [Float]{0.0}), Float{0.0})
+    assert_eq(float_policy_test.dist([Float]{1.0e308}, [Float]{0.0}), Float.INFINITY)
+    assert(float_policy_native.is_nan(float_policy_test.dist([Float]{Float.NAN}, [Float]{0.0})))
+    assert(float_policy_native.is_nan(float_policy_test.dist([Float]{Float.INFINITY}, [Float]{Float.INFINITY})))
+    assert_eq(float_policy_test.dist([Float]{Float.INFINITY}, [Float]{0.0}), Float.INFINITY)
+    early :: float_policy_test.dist([Float]{1.0e8, 1.0, 1.0, 1.0}, [Float]{0.0, 0.0, 0.0, 0.0})
+    late :: float_policy_test.dist([Float]{1.0, 1.0, 1.0, 1.0e8}, [Float]{0.0, 0.0, 0.0, 0.0})
+    assert_eq(early, Float{1.0e8})
+    assert(late > early)
+}
+
+#Test("float policy ilogb logb log2 rounding and exceptional source meaning") {
+    assert_eq(float_policy_test.ilogb(Float{8.0}) ?? 99, 3)
+    assert_eq(float_policy_test.ilogb(-Float{12.0}) ?? 99, 3)
+    assert_eq(float_policy_test.ilogb(Float{0.5}) ?? 99, -1)
+    assert_eq(float_policy_test.ilogb(Float{4.9406564584124654e-324}) ?? 99, -1074)
+    assert_eq(float_policy_test.ilogb(Float{2.2250738585072014e-308}) ?? 99, -1022)
+    assert_eq(float_policy_test.ilogb(Float{1.7976931348623157e308}) ?? 99, 1024)
+    assert(float_policy_test.ilogb(Float{0.0}) == None)
+    assert(float_policy_test.ilogb(-Float{0.0}) == None)
+    assert(float_policy_test.ilogb(Float.NAN) == None)
+    assert(float_policy_test.ilogb(Float.INFINITY) == None)
+    assert(float_policy_test.ilogb(-Float.INFINITY) == None)
+    assert_eq(float_policy_test.logb(Float{8.0}), Float{3.0})
+    assert_eq(float_policy_test.logb(Float{0.0}), -Float.INFINITY)
+    assert_eq(float_policy_test.logb(-Float{0.0}), -Float.INFINITY)
+    assert_eq(float_policy_test.logb(Float.NAN), Float.INFINITY)
+    assert_eq(float_policy_test.logb(Float.INFINITY), Float.INFINITY)
+    assert_eq(float_policy_test.logb(-Float.INFINITY), Float.INFINITY)
+}
+
+#Test("float policy erf Abramowitz polynomial and complement") {
+    assert(float_policy_near(float_policy_test.erf(Float{1.0}), Float{0.8427006897475899}))
+    assert(float_policy_near(float_policy_test.erf(-Float{1.0}), -Float{0.8427006897475899}))
+    assert(float_policy_near(float_policy_test.erf(Float{0.5}), Float{0.5205000163047472}))
+    assert(float_policy_near(float_policy_test.erf(Float{2.0}), Float{0.9953221395812188}))
+    // The source approximation intentionally does not special-case zero.
+    assert_eq(float_policy_test.erf(Float{0.0}), Float{9.999999717180685e-10})
+    assert_eq(float_policy_test.erf(-Float{0.0}), Float{9.999999717180685e-10})
+    assert_eq(float_policy_test.erf(Float{4.9406564584124654e-324}), float_policy_test.erf(Float{0.0}))
+    assert_eq(float_policy_test.erf(Float.INFINITY), Float{1.0})
+    assert_eq(float_policy_test.erf(-Float.INFINITY), -Float{1.0})
+    assert(float_policy_native.is_nan(float_policy_test.erf(Float.NAN)))
+    assert_eq(float_policy_test.erfc(Float{1.0}), Float{1.0} - float_policy_test.erf(Float{1.0}))
+    assert_eq(float_policy_test.erfc(Float{0.0}), Float{0.999999999})
+    assert_eq(float_policy_test.erfc(Float.INFINITY), Float{0.0})
+    assert_eq(float_policy_test.erfc(-Float.INFINITY), Float{2.0})
+    assert(float_policy_native.is_nan(float_policy_test.erfc(Float.NAN)))
+}
+
+#Test("float policy gamma Lanczos positive and both reflection branches") {
+    assert(float_policy_near(float_policy_test.gamma(Float{1.0}), Float{1.0}))
+    assert(float_policy_near(float_policy_test.gamma(Float{2.0}), Float{1.0}))
+    assert(float_policy_near(float_policy_test.gamma(Float{5.0}), Float{24.0}))
+    assert(float_policy_near(float_policy_test.gamma(Float{0.5}), Float{1.7724538509055159}))
+    assert(float_policy_near(float_policy_test.gamma(Float{0.25}), Float{3.625609908221908}))
+    assert(float_policy_near(float_policy_test.gamma(Float{0.49999999999999994}), Float{1.772453850905516}))
+    assert(float_policy_near(float_policy_test.gamma(-Float{0.5}), -Float{3.5449077018110318}))
+    assert(float_policy_near(float_policy_test.gamma(-Float{1.5}), Float{2.3632718012073547}))
+    assert(float_policy_near(float_policy_test.gamma(-Float{2.5}), -Float{0.9453087204829419}))
+    assert_eq(float_policy_test.gamma(Float{4.9406564584124654e-324}), Float.INFINITY)
+    assert_eq(float_policy_test.gamma(-Float{4.9406564584124654e-324}), -Float.INFINITY)
+    poles :: [Float]{0.0, -0.0, -1.0, -2.0, Float.NAN, Float.INFINITY, -Float.INFINITY}
+    loop value in poles -> assert(float_policy_native.is_nan(float_policy_test.gamma(value)))
+    assert(float_policy_near(float_policy_test.lgamma(Float{5.0}), Float{3.1780538303479458}))
+    assert(float_policy_native.is_nan(float_policy_test.lgamma(-Float{0.5})))
+    assert(float_policy_near(float_policy_test.lgamma(-Float{1.5}), Float{0.860047015376481}))
+    assert(float_policy_native.is_nan(float_policy_test.lgamma(Float{0.0})))
+    assert(float_policy_native.is_nan(float_policy_test.lgamma(Float.NAN)))
+    assert(float_policy_native.is_nan(float_policy_test.lgamma(Float.INFINITY)))
+    assert_eq(float_policy_test.lgamma(Float{172.0}), Float.INFINITY)
+}
+
+#Test("float policy reuses canonical FloatOrdering NaN order") {
+    assert_eq(float_policy_ordering.jet_float_sort_cmp_code(Float.NAN, Float.NAN), I64{0})
+    assert_eq(float_policy_ordering.jet_float_sort_cmp_code(Float.NAN, Float.INFINITY), I64{1})
+    assert_eq(float_policy_ordering.jet_float_sort_cmp_code(-Float.INFINITY, Float.NAN), I64{-1})
+    assert_eq(float_policy_ordering.jet_float_sort_cmp_code(-Float{0.0}, Float{0.0}), I64{0})
+}
+
+// HELD NATIVE BASIS: these original cases are retained, not replaced by mocks.
+#Test("float policy native IEEE ulp subnormal normal and finite maximum") {
+    tiny :: Float{4.9406564584124654e-324}
+    assert_eq(float_policy_test.ulp(Float{0.0}), tiny)
+    assert_eq(float_policy_test.ulp(-Float{0.0}), tiny)
+    assert_eq(float_policy_test.ulp(tiny), tiny)
+    assert_eq(float_policy_test.ulp(-tiny), tiny)
+    assert_eq(float_policy_test.ulp(Float{2.2250738585072014e-308}), tiny)
+    assert_eq(float_policy_test.ulp(Float{1.0}), Float{2.220446049250313e-16})
+    assert_eq(float_policy_test.ulp(-Float{1.0}), Float{2.220446049250313e-16})
+    assert_eq(float_policy_test.ulp(Float{1.7976931348623157e308}), Float.INFINITY)
+    assert_eq(float_policy_test.ulp(Float.INFINITY), Float.INFINITY)
+    assert_eq(float_policy_test.ulp(-Float.INFINITY), Float.INFINITY)
+    assert(float_policy_native.is_nan(float_policy_test.ulp(Float.NAN)))
+}
+
+#Test("float policy native significand preserves exceptional bits and signs") {
+    assert_eq(float_policy_test.significand(Float{12.0}), Float{1.5})
+    assert_eq(float_policy_test.significand(-Float{12.0}), -Float{1.5})
+    assert_eq(float_policy_test.significand(Float{4.9406564584124654e-324}), Float{1.0})
+    assert_eq(float_policy_test.significand(-Float{4.9406564584124654e-324}), -Float{1.0})
+    assert_eq(float_policy_test.significand(Float{1.4821969375237396e-323}), Float{1.5})
+    assert_eq(float_policy_test.significand(Float{2.2250738585072014e-308}), Float{1.0})
+    assert_eq(float_policy_test.significand(Float{2.225073858507201e-308}), Float{1.9999999999999996})
+    assert_eq(float_policy_test.significand(Float{1.7976931348623157e308}), Float{1.9999999999999998})
+    assert_eq(float_policy_test.significand(Float.INFINITY), Float.INFINITY)
+    assert_eq(float_policy_test.significand(-Float.INFINITY), -Float.INFINITY)
+    assert(float_policy_native.sign_bit(float_policy_test.significand(-Float{0.0})))
+    assert(!float_policy_native.sign_bit(float_policy_test.significand(Float{0.0})))
+    nan :: float_policy_native.from_bits(9221120237041090626)
+    assert_eq(float_policy_native.to_bits(float_policy_test.significand(nan)), float_policy_native.to_bits(nan))
+}
+
+#Test("float policy native nextafter signed zeros infinities and adjacent words") {
+    tiny :: Float{4.9406564584124654e-324}
+    assert_eq(float_policy_test.next_after(Float{0.0}, Float{1.0}), tiny)
+    assert_eq(float_policy_test.next_after(-Float{0.0}, -Float{1.0}), -tiny)
+    assert(float_policy_native.sign_bit(float_policy_test.next_after(Float{0.0}, -Float{0.0})))
+    assert(!float_policy_native.sign_bit(float_policy_test.next_after(-Float{0.0}, Float{0.0})))
+    assert_eq(float_policy_test.next_after(tiny, Float{0.0}), Float{0.0})
+    assert(float_policy_native.sign_bit(float_policy_test.next_after(-tiny, Float{0.0})))
+    assert_eq(float_policy_test.next_after(Float{2.225073858507201e-308}, Float.INFINITY), Float{2.2250738585072014e-308})
+    assert_eq(float_policy_test.next_after(Float{2.2250738585072014e-308}, Float{0.0}), Float{2.225073858507201e-308})
+    assert_eq(float_policy_test.next_after(Float{1.0}, Float{2.0}), Float{1.0000000000000002})
+    assert_eq(float_policy_test.next_after(Float{1.0}, Float{0.0}), Float{0.9999999999999999})
+    assert_eq(float_policy_test.next_after(-Float{1.0}, -Float{2.0}), -Float{1.0000000000000002})
+    assert_eq(float_policy_test.next_after(-Float{1.0}, Float{0.0}), -Float{0.9999999999999999})
+    assert_eq(float_policy_test.nextafter(Float.INFINITY, Float{0.0}), Float{1.7976931348623157e308})
+    assert_eq(float_policy_test.next_after(-Float.INFINITY, Float{0.0}), -Float{1.7976931348623157e308})
+    assert_eq(float_policy_test.next_after(Float{1.7976931348623157e308}, Float.INFINITY), Float.INFINITY)
+    assert_eq(float_policy_test.next_after(Float.INFINITY, Float.INFINITY), Float.INFINITY)
+    assert(float_policy_native.is_nan(float_policy_test.next_after(Float.NAN, Float{0.0})))
+    assert(float_policy_native.is_nan(float_policy_test.next_after(Float{0.0}, Float.NAN)))
+}
+
+#Test("float policy native ldexp preserves source powi intermediate and clamp") {
+    assert_eq(float_policy_test.ldexp(Float{0.5}, 3), Float{4.0})
+    assert_eq(float_policy_test.scaleb(Float{4.0}, -3), Float{0.5})
+    assert_eq(float_policy_test.ldexp(-Float{0.0}, 2099), -Float{0.0})
+    assert(float_policy_native.sign_bit(float_policy_test.ldexp(-Float{0.0}, 999999999999999999999999999)))
+    assert_eq(float_policy_test.ldexp(Float{4.9406564584124654e-324}, 0), Float{4.9406564584124654e-324})
+    assert_eq(float_policy_test.ldexp(Float.INFINITY, -2099), Float.INFINITY)
+    assert_eq(float_policy_test.ldexp(-Float.INFINITY, 2099), -Float.INFINITY)
+    assert(float_policy_native.is_nan(float_policy_test.ldexp(Float.NAN, 1)))
+    assert_eq(float_policy_test.ldexp(Float{1.0}, 2099), Float.INFINITY)
+    assert_eq(float_policy_test.ldexp(Float{1.0}, -2099), Float{0.0})
+    assert_eq(float_policy_test.ldexp(Float{1.0}, 999999999999999999999999999), Float.INFINITY)
+    assert_eq(float_policy_test.ldexp(Float{1.0}, -999999999999999999999999999), Float{0.0})
+    // Multiply after powi: this is not the correctly scaled libc ldexp result.
+    assert_eq(float_policy_test.ldexp(Float{4.9406564584124654e-324}, 1024), Float.INFINITY)
+}

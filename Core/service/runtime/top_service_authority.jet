@@ -1,0 +1,1795 @@
+// PORT-PENDING 0299 crates-jet-codegen-src-prelude-corelib-top-serviceauthority-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1-1791
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SERVICE-AUTHORITY1: one durable authority for AOT and ambient execution.
+//RS // The log is append-only, length/hex framed, and fsync'd after every commit.
+//RS // Process and filesystem locks close read/append and same-operation races.
+//RS 
+//RS use std::fs::OpenOptions;
+//RS use std::io::{Read, Seek, SeekFrom, Write};
+//RS use std::path::{Component, Path, PathBuf};
+//RS use std::time::{Duration, SystemTime, UNIX_EPOCH};
+//RS 
+//RS const SERVICE_AUTH_MAX_STORE: usize = 4096;
+//RS const SERVICE_AUTH_MAX_KEY: usize = 1024;
+//RS const SERVICE_AUTH_MAX_MESSAGE: usize = 1024 * 1024;
+//RS const SERVICE_AUTH_MAX_RECORDS: usize = 100_000;
+//RS const SERVICE_AUTH_MAX_BYTES: u64 = 128 * 1024 * 1024;
+//RS const SERVICE_AUTH_MAX_PENDING: usize = 100_000;
+//RS const SERVICE_AUTHORITY_TOKEN_PREFIX: &str = "sa-";
+//RS const SERVICE_AUTHORITY_TOKEN_BYTES: usize = 32;
+//RS const SERVICE_AUTH_LOCK_TIMEOUT_MS: i64 = 30_000;
+//RS const SERVICE_AUTH_LOCK_STALE_MS: i64 = 120_000;
+//RS 
+//RS enum JetServiceChannelError<T> {
+//RS     Full(T),
+//RS     Empty,
+//RS     Closed,
+//RS }
+//RS 
+//RS /// One bounded FIFO shared by a typed endpoint and its owning tree mailbox.
+//RS /// Keeping it in the authority fragment lets endpoint methods and tree methods
+//RS /// use the same queue on AOT and ambient tiers.
+//RS #[derive(Debug)]
+//RS struct JetServiceChannel<T> {
+//RS     capacity: usize,
+//RS     values: std::sync::Mutex<std::collections::VecDeque<T>>,
+//RS     closed: std::sync::atomic::AtomicBool,
+//RS     wake: std::sync::Condvar,
+//RS }
+//RS 
+//RS impl<T> JetServiceChannel<T> {
+//RS     fn new(capacity: usize, values: impl IntoIterator<Item = T>) -> Result<Self, ()> {
+//RS         if capacity == 0 {
+//RS             return Err(());
+//RS         }
+//RS         let values = values
+//RS             .into_iter()
+//RS             .collect::<std::collections::VecDeque<_>>();
+//RS         if values.len() > capacity {
+//RS             return Err(());
+//RS         }
+//RS         Ok(Self {
+//RS             capacity,
+//RS             values: std::sync::Mutex::new(values),
+//RS             closed: std::sync::atomic::AtomicBool::new(false),
+//RS             wake: std::sync::Condvar::new(),
+//RS         })
+//RS     }
+//RS 
+//RS     fn try_send(&self, value: T) -> Result<(), JetServiceChannelError<T>> {
+//RS         let mut values = self.values.lock().unwrap();
+//RS         if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+//RS             return Err(JetServiceChannelError::Closed);
+//RS         }
+//RS         if values.len() >= self.capacity {
+//RS             return Err(JetServiceChannelError::Full(value));
+//RS         }
+//RS         values.push_back(value);
+//RS         self.wake.notify_one();
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn try_recv(&self) -> Result<T, JetServiceChannelError<T>> {
+//RS         let mut values = self.values.lock().unwrap();
+//RS         if let Some(value) = values.pop_front() {
+//RS             return Ok(value);
+//RS         }
+//RS         if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+//RS             Err(JetServiceChannelError::Closed)
+//RS         } else {
+//RS             Err(JetServiceChannelError::Empty)
+//RS         }
+//RS     }
+//RS 
+//RS     fn snapshot(&self) -> Vec<T>
+//RS     where
+//RS         T: Clone,
+//RS     {
+//RS         self.values.lock().unwrap().iter().cloned().collect()
+//RS     }
+//RS 
+//RS     fn depth(&self) -> usize {
+//RS         self.values.lock().unwrap().len()
+//RS     }
+//RS 
+//RS     fn clear(&self) {
+//RS         self.values.lock().unwrap().clear();
+//RS     }
+//RS 
+//RS     fn close(&self) {
+//RS         let _values = self.values.lock().unwrap();
+//RS         self.closed
+//RS             .store(true, std::sync::atomic::Ordering::Release);
+//RS         self.wake.notify_all();
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetServiceRuntime {
+//RS     pub store: String,
+//RS     pub retention_ms: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetDeliveryState {
+//RS     Pending,
+//RS     Accepted,
+//RS     Delivering,
+//RS     Delivered,
+//RS     DeadLettered,
+//RS     Cancelled,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDelivery {
+//RS     pub id: String,
+//RS     pub store: String,
+//RS     pub duplicate: bool,
+//RS     pub authority: String,
+//RS     pub generation: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDeliveryReceipt {
+//RS     pub id: String,
+//RS     pub state: JetDeliveryState,
+//RS     pub attempts: i64,
+//RS     pub retention_until: i64,
+//RS     pub deadline: i64,
+//RS     pub idempotency_key: String,
+//RS     pub duplicate: bool,
+//RS     pub authority: String,
+//RS     pub generation: i64,
+//RS     pub signature: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDeliveryEvent {
+//RS     pub sequence: i64,
+//RS     pub state: JetDeliveryState,
+//RS     pub attempts: i64,
+//RS     pub timestamp: i64,
+//RS     pub signature: String,
+//RS }
+//RS 
+//RS impl Clone for JetServiceEndpoint {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             tree: self.tree.clone(),
+//RS             worker: self.worker.clone(),
+//RS             generation: self.generation,
+//RS             authority: self.authority.clone(),
+//RS             channel: self.channel.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Debug for JetServiceEndpoint {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         formatter
+//RS             .debug_struct("JetServiceEndpoint")
+//RS             .field("tree", &self.tree)
+//RS             .field("worker", &self.worker)
+//RS             .field("generation", &self.generation)
+//RS             .field("authority", &"<redacted>")
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS impl PartialEq for JetServiceEndpoint {
+//RS     fn eq(&self, other: &Self) -> bool {
+//RS         self.tree == other.tree
+//RS             && self.worker == other.worker
+//RS             && self.generation == other.generation
+//RS             && self.authority == other.authority
+//RS     }
+//RS }
+//RS 
+//RS impl Eq for JetServiceEndpoint {}
+//RS 
+//RS pub struct JetServiceEndpoint {
+//RS     pub tree: String,
+//RS     pub worker: String,
+//RS     pub generation: i64,
+//RS     /// Opaque provider-issued authority proof. It is carried by the endpoint value but
+//RS     /// never exposed as a user-selectable field.
+//RS     pub authority: String,
+//RS     channel: Option<std::sync::Arc<JetServiceChannel<String>>>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum JetServiceError {
+//RS     Full(String),
+//RS     Ambiguous(String),
+//RS     Unknown(String),
+//RS     NotStarted(String),
+//RS     Policy(String),
+//RS     Unavailable(String),
+//RS     /// The authority is not reachable in this process/partition. Durable
+//RS     /// receipts remain the only retry path; no ambient reconnect is attempted.
+//RS     Partitioned(String),
+//RS     /// The endpoint was issued by another tree/authority or its proof no
+//RS     /// longer validates.
+//RS     Revoked(String),
+//RS     /// The endpoint generation is no longer the active routing generation.
+//RS     Stale(String),
+//RS     /// A bounded directory/retention window has elapsed.
+//RS     Expired(String),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct ServiceAuthorityEntry {
+//RS     id: String,
+//RS     key: String,
+//RS     tree: String,
+//RS     worker: String,
+//RS     authority: String,
+//RS     generation: i64,
+//RS     message: String,
+//RS     created: i64,
+//RS     expires: i64,
+//RS     retained_until: Option<i64>,
+//RS     attempts: i64,
+//RS     state: JetDeliveryState,
+//RS     event_sequence: i64,
+//RS     delivered_to_worker: bool,
+//RS     delivered: bool,
+//RS     dead: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct ServiceAuthorityEndpointState {
+//RS     tree: String,
+//RS     worker: String,
+//RS     authority: String,
+//RS     generation: i64,
+//RS     started: bool,
+//RS     draining: bool,
+//RS     partitioned: bool,
+//RS     store: Option<(String, i64)>,
+//RS     channel: Option<std::sync::Arc<JetServiceChannel<String>>>,
+//RS }
+//RS 
+//RS static SERVICE_AUTHORITY_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+//RS     std::sync::OnceLock::new();
+//RS 
+//RS fn service_authority_lock() -> &'static std::sync::Mutex<()> {
+//RS     SERVICE_AUTHORITY_LOCK.get_or_init(std::sync::Mutex::default)
+//RS }
+//RS 
+//RS static SERVICE_ENDPOINTS: std::sync::OnceLock<
+//RS     std::sync::Mutex<std::collections::HashMap<String, ServiceAuthorityEndpointState>>,
+//RS > = std::sync::OnceLock::new();
+//RS static SERVICE_PENDING: std::sync::OnceLock<
+//RS     std::sync::Mutex<std::collections::HashMap<String, Vec<(String, String, String)>>>,
+//RS > = std::sync::OnceLock::new();
+//RS 
+//RS fn service_endpoint_registry(
+//RS ) -> &'static std::sync::Mutex<std::collections::HashMap<String, ServiceAuthorityEndpointState>> {
+//RS     SERVICE_ENDPOINTS.get_or_init(std::sync::Mutex::default)
+//RS }
+//RS 
+//RS fn service_pending_registry(
+//RS ) -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<(String, String, String)>>> {
+//RS     SERVICE_PENDING.get_or_init(std::sync::Mutex::default)
+//RS }
+//RS thread_local! {
+//RS     /// The active job/service invocation carries the already-issued endpoint,
+//RS     /// not a second authority token. Job graph entry points install this scope
+//RS     /// before invoking checked work; queue dispatch reads it without scanning
+//RS     /// registries.
+//RS     static JET_SERVICE_EXECUTION_ENDPOINT: std::cell::RefCell<Option<JetServiceEndpoint>> =
+//RS         const { std::cell::RefCell::new(None) };
+//RS }
+//RS 
+//RS pub struct JetServiceExecutionScope {
+//RS     previous: Option<JetServiceEndpoint>,
+//RS }
+//RS 
+//RS impl Drop for JetServiceExecutionScope {
+//RS     fn drop(&mut self) {
+//RS         JET_SERVICE_EXECUTION_ENDPOINT.with(|slot| {
+//RS             slot.replace(self.previous.take());
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// Enter an execution scope using an endpoint issued by the existing service
+//RS /// authority.  Validation is performed on entry and again when read so
+//RS /// rotation, partition, stop, and revocation remain visible to queue callers.
+//RS pub fn jet_services_execution_scope(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<JetServiceExecutionScope, JetServiceError> {
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     let previous = JET_SERVICE_EXECUTION_ENDPOINT.with(|slot| slot.replace(Some(endpoint.clone())));
+//RS     Ok(JetServiceExecutionScope { previous })
+//RS }
+//RS 
+//RS /// Read an installed endpoint without converting a genuinely empty execution
+//RS /// scope into the same `NotStarted` error used for a stopped worker.
+//RS fn jet_services_active_execution_endpoint_if_present(
+//RS ) -> Result<Option<JetServiceEndpoint>, JetServiceError> {
+//RS     let endpoint = JET_SERVICE_EXECUTION_ENDPOINT.with(|slot| slot.borrow().clone());
+//RS     let Some(endpoint) = endpoint else {
+//RS         return Ok(None);
+//RS     };
+//RS     jet_services_authority_validate(&endpoint)?;
+//RS     Ok(Some(endpoint))
+//RS }
+//RS 
+//RS /// Return the currently checked endpoint for an in-process job invocation.
+//RS /// There is no ambient authority fallback: a job without an installed scope
+//RS /// receives a typed not-started error.
+//RS pub fn jet_services_active_execution_endpoint() -> Result<JetServiceEndpoint, JetServiceError> {
+//RS     jet_services_active_execution_endpoint_if_present()?.ok_or_else(|| {
+//RS         JetServiceError::NotStarted(
+//RS             "job queue requires an active issued service endpoint".to_string(),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn service_authority_require_issued(authority: &str) -> Result<(), JetServiceError> {
+//RS     // Issuance is recorded by the one endpoint authority registry. Do not
+//RS     // maintain a second process-local rights table for directory proofs.
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     if registry.values().any(|state| state.authority == authority) {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(JetServiceError::Revoked(
+//RS             "service authority is not registered by this provider".to_string(),
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_now() -> i64 {
+//RS     SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .ok()
+//RS         .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+//RS         .unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS fn service_authority_error(message: impl Into<String>) -> JetServiceError {
+//RS     JetServiceError::Unavailable(message.into())
+//RS }
+//RS 
+//RS struct ServiceAuthorityFileLock {
+//RS     path: PathBuf,
+//RS }
+//RS 
+//RS impl Drop for ServiceAuthorityFileLock {
+//RS     fn drop(&mut self) {
+//RS         let _ = std::fs::remove_file(&self.path);
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_file_lock(
+//RS     store: &str,
+//RS     suffix: &str,
+//RS ) -> Result<ServiceAuthorityFileLock, JetServiceError> {
+//RS     service_authority_validate_store_path(store)?;
+//RS     let path = PathBuf::from(format!("{store}.{suffix}.lock"));
+//RS     if let Some(parent) = path
+//RS         .parent()
+//RS         .filter(|parent| !parent.as_os_str().is_empty())
+//RS     {
+//RS         std::fs::create_dir_all(parent).map_err(|error| {
+//RS             service_authority_error(format!("could not create service lock directory: {error}"))
+//RS         })?;
+//RS     }
+//RS     let started = service_authority_now();
+//RS     loop {
+//RS         let mut options = OpenOptions::new();
+//RS         options.write(true).create_new(true);
+//RS         #[cfg(unix)]
+//RS         {
+//RS             use std::os::unix::fs::OpenOptionsExt;
+//RS             options.mode(0o600);
+//RS         }
+//RS         match options.open(&path) {
+//RS             Ok(mut file) => {
+//RS                 let marker = service_authority_now().to_string();
+//RS                 file.write_all(marker.as_bytes()).map_err(|error| {
+//RS                     service_authority_error(format!("could not initialize service lock: {error}"))
+//RS                 })?;
+//RS                 file.sync_all().map_err(|error| {
+//RS                     service_authority_error(format!("could not commit service lock: {error}"))
+//RS                 })?;
+//RS                 return Ok(ServiceAuthorityFileLock { path });
+//RS             }
+//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+//RS                 let now = service_authority_now();
+//RS                 let stale = std::fs::metadata(&path)
+//RS                     .and_then(|metadata| metadata.modified())
+//RS                     .ok()
+//RS                     .and_then(|modified| modified.elapsed().ok())
+//RS                     .is_some_and(|age| {
+//RS                         age >= Duration::from_millis(SERVICE_AUTH_LOCK_STALE_MS as u64)
+//RS                     });
+//RS                 if stale {
+//RS                     let _ = std::fs::remove_file(&path);
+//RS                     continue;
+//RS                 }
+//RS                 if now.saturating_sub(started) >= SERVICE_AUTH_LOCK_TIMEOUT_MS {
+//RS                     return Err(service_authority_error(
+//RS                         "service authority lock remained held beyond its recovery budget",
+//RS                     ));
+//RS                 }
+//RS                 std::thread::sleep(Duration::from_millis(1));
+//RS             }
+//RS             Err(error) => {
+//RS                 return Err(service_authority_error(format!(
+//RS                     "could not create service authority lock: {error}"
+//RS                 )))
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_operation_lock(
+//RS     runtime: &JetServiceRuntime,
+//RS     operation: &str,
+//RS ) -> Result<ServiceAuthorityFileLock, JetServiceError> {
+//RS     let mut input = Vec::new();
+//RS     let store = service_authority_store_identity(&runtime.store);
+//RS     for field in [store.as_bytes(), operation.as_bytes()] {
+//RS         input.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         input.extend_from_slice(field);
+//RS     }
+//RS     let digest = jet_sha256_raw(&input);
+//RS     service_authority_file_lock(
+//RS         &runtime.store,
+//RS         &format!("op-{}", service_authority_hex(&digest)),
+//RS     )
+//RS }
+//RS 
+//RS fn service_authority_validate_text(
+//RS     value: &str,
+//RS     label: &str,
+//RS     max: usize,
+//RS     allow_empty: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if (!allow_empty && value.is_empty())
+//RS         || value.len() > max
+//RS         || value.chars().any(char::is_control)
+//RS     {
+//RS         return Err(JetServiceError::Policy(format!(
+//RS             "{label} is empty, too long, or contains control characters"
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_validate_runtime(runtime: &JetServiceRuntime) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_text(
+//RS         &runtime.store,
+//RS         "service store",
+//RS         SERVICE_AUTH_MAX_STORE,
+//RS         false,
+//RS     )?;
+//RS     if runtime.retention_ms < 0 {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service retention must be zero or positive".to_string(),
+//RS         ));
+//RS     }
+//RS     service_authority_validate_store_path(&runtime.store)
+//RS }
+//RS 
+//RS fn service_authority_store_identity(store: &str) -> String {
+//RS     let path = Path::new(store);
+//RS     let absolute = if path.is_absolute() {
+//RS         path.to_path_buf()
+//RS     } else {
+//RS         std::env::current_dir()
+//RS             .map(|directory| directory.join(path))
+//RS             .unwrap_or_else(|_| path.to_path_buf())
+//RS     };
+//RS     let mut normalized = PathBuf::new();
+//RS     for component in absolute.components() {
+//RS         match component {
+//RS             Component::CurDir => {}
+//RS             Component::ParentDir => {
+//RS                 normalized.pop();
+//RS             }
+//RS             component => normalized.push(component.as_os_str()),
+//RS         }
+//RS     }
+//RS     normalized.to_string_lossy().into_owned()
+//RS }
+//RS 
+//RS fn service_authority_retention_deadline(now: i64, retention_ms: i64) -> i64 {
+//RS     if retention_ms == 0 {
+//RS         i64::MAX
+//RS     } else {
+//RS         now.saturating_add(retention_ms)
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_entry_expired(entry: &ServiceAuthorityEntry, now: i64) -> bool {
+//RS     !matches!(
+//RS         entry.state,
+//RS         JetDeliveryState::DeadLettered | JetDeliveryState::Cancelled
+//RS     ) && match entry.retained_until {
+//RS         Some(until) => until <= now,
+//RS         None => entry.expires <= now,
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_validate_store_path(store: &str) -> Result<(), JetServiceError> {
+//RS     let path = Path::new(store);
+//RS     match std::fs::symlink_metadata(path) {
+//RS         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_file() => {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "service authority store must be a regular file, not a symlink".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(_) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Err(error) => {
+//RS             return Err(service_authority_error(format!(
+//RS                 "could not inspect service authority store: {error}"
+//RS             )))
+//RS         }
+//RS     }
+//RS     let mut parent = path.parent();
+//RS     while let Some(directory) = parent {
+//RS         match std::fs::symlink_metadata(directory) {
+//RS             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+//RS                 return Err(JetServiceError::Policy(
+//RS                     "service authority store parent must be a real directory".to_string(),
+//RS                 ));
+//RS             }
+//RS             Ok(_) => {}
+//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS             Err(error) => {
+//RS                 return Err(service_authority_error(format!(
+//RS                     "could not inspect service store parent: {error}"
+//RS                 )))
+//RS             }
+//RS         }
+//RS         parent = directory.parent();
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_validate_endpoint(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_text(&endpoint.tree, "service tree", 256, false)?;
+//RS     service_authority_validate_text(&endpoint.worker, "service worker", 256, false)?;
+//RS     service_authority_validate_opaque_token(&endpoint.authority)?;
+//RS     let _ = service_authority_signing_key(&endpoint.authority)?;
+//RS     if endpoint.generation < 1 {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service endpoint generation must be positive".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// A crossed-tier endpoint may carry a valid-looking token, but only an
+//RS /// endpoint already issued into this authority registry can be rehydrated or
+//RS /// validate a directory proof.  This keeps issuance, revocation, rotation,
+//RS /// and routing on the same substrate instead of letting a serialized value
+//RS /// mint a registry entry.
+//RS fn service_authority_require_registered_endpoint(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = registry.get(&key).ok_or_else(|| {
+//RS         JetServiceError::Revoked(
+//RS             "service endpoint authority was not issued in this process".to_string(),
+//RS         )
+//RS     })?;
+//RS     if state.tree != endpoint.tree
+//RS         || state.worker != endpoint.worker
+//RS         || state.authority != endpoint.authority
+//RS         || state.generation != endpoint.generation
+//RS     {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its issued identity".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_validate_opaque_token(value: &str) -> Result<(), JetServiceError> {
+//RS     let token = value
+//RS         .strip_prefix(SERVICE_AUTHORITY_TOKEN_PREFIX)
+//RS         .filter(|token| token.len() == SERVICE_AUTHORITY_TOKEN_BYTES * 2)
+//RS         .filter(|token| {
+//RS             token
+//RS                 .bytes()
+//RS                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+//RS         })
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Policy(
+//RS                 "service authority must be a provider-issued opaque token".to_string(),
+//RS             )
+//RS         })?;
+//RS     if token.is_empty() {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service authority must be a provider-issued opaque token".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_endpoint_key(authority: &str, worker: &str, generation: i64) -> String {
+//RS     format!("{authority}\u{1f}{worker}\u{1f}{generation}")
+//RS }
+//RS 
+//RS fn service_pending_key(store: &str, endpoint: &JetServiceEndpoint) -> String {
+//RS     format!(
+//RS         "{}\u{1e}{}",
+//RS         service_authority_store_identity(store),
+//RS         service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation),
+//RS     )
+//RS }
+//RS 
+//RS fn service_authority_provider_issue() -> Result<String, JetServiceError> {
+//RS     let token = jet_crypto_entropy_bytes(SERVICE_AUTHORITY_TOKEN_BYTES as i64).map_err(|_| {
+//RS         JetServiceError::Policy("service authority cannot obtain cryptographic entropy".to_string())
+//RS     })?;
+//RS     let mut authority = String::with_capacity(
+//RS         SERVICE_AUTHORITY_TOKEN_PREFIX.len() + SERVICE_AUTHORITY_TOKEN_BYTES * 2,
+//RS     );
+//RS     authority.push_str(SERVICE_AUTHORITY_TOKEN_PREFIX);
+//RS     for byte in token {
+//RS         authority.push_str(&format!("{byte:02x}"));
+//RS     }
+//RS     Ok(authority)
+//RS }
+//RS 
+//RS fn service_authority_signing_key(
+//RS     authority: &str,
+//RS ) -> Result<[u8; SERVICE_AUTHORITY_TOKEN_BYTES], JetServiceError> {
+//RS     let encoded = authority
+//RS         .strip_prefix(SERVICE_AUTHORITY_TOKEN_PREFIX)
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Revoked("service authority proof is malformed".to_string())
+//RS         })?;
+//RS     let bytes = service_authority_unhex(encoded)
+//RS         .filter(|bytes| bytes.len() == SERVICE_AUTHORITY_TOKEN_BYTES)
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Revoked("service authority proof is malformed".to_string())
+//RS         })?;
+//RS     bytes.try_into().map_err(|_| {
+//RS         JetServiceError::Revoked("service authority proof has the wrong size".to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn service_authority_directory_payload(
+//RS     authority: &str,
+//RS     tree_name: &str,
+//RS     name: &str,
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Vec<u8> {
+//RS     let generation = endpoint.generation.to_string();
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-directory-v2".as_bytes(),
+//RS         authority.as_bytes(),
+//RS         tree_name.as_bytes(),
+//RS         name.as_bytes(),
+//RS         endpoint.tree.as_bytes(),
+//RS         endpoint.worker.as_bytes(),
+//RS         generation.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     payload
+//RS }
+//RS 
+//RS /// Sign a directory entry with the vetted Prelude HMAC-SHA-256 primitive and
+//RS /// the same provider-issued authority that authenticates endpoint routing.
+//RS /// Directory keys do not form a second table.
+//RS fn service_authority_sign_directory(
+//RS     authority: &str,
+//RS     tree_name: &str,
+//RS     name: &str,
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<String, JetServiceError> {
+//RS     service_authority_require_issued(authority)?;
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     if endpoint.authority != authority || endpoint.tree != tree_name {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service directory endpoint is outside its authority tree".to_string(),
+//RS         ));
+//RS     }
+//RS     let key = service_authority_signing_key(authority)?;
+//RS     let signature = jet_hmac_sha256(
+//RS         &key,
+//RS         &service_authority_directory_payload(authority, tree_name, name, endpoint),
+//RS     );
+//RS     Ok(service_authority_hex(&signature))
+//RS }
+//RS 
+//RS /// Validate a signed directory entry without re-encoding the policy in the
+//RS /// service engine. Invalid or rotated proofs are typed revocations.
+//RS fn service_authority_validate_directory(
+//RS     authority: &str,
+//RS     tree_name: &str,
+//RS     name: &str,
+//RS     endpoint: &JetServiceEndpoint,
+//RS     signature: &str,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_require_issued(authority)?;
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     if endpoint.authority != authority || endpoint.tree != tree_name {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service directory endpoint is outside its authority tree".to_string(),
+//RS         ));
+//RS     }
+//RS     service_authority_require_registered_endpoint(endpoint)?;
+//RS     let supplied = service_authority_unhex(signature).ok_or_else(|| {
+//RS         JetServiceError::Revoked("service directory proof is malformed".to_string())
+//RS     })?;
+//RS     let key = service_authority_signing_key(authority)?;
+//RS     let expected = jet_hmac_sha256(
+//RS         &key,
+//RS         &service_authority_directory_payload(authority, tree_name, name, endpoint),
+//RS     );
+//RS     if supplied.len() != expected.len() || !jet_ct_eq(&expected, &supplied) {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service directory proof does not validate".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_endpoint_unchecked(
+//RS     tree: String,
+//RS     worker: String,
+//RS     generation: i64,
+//RS     authority: String,
+//RS ) -> Result<JetServiceEndpoint, JetServiceError> {
+//RS     let endpoint = JetServiceEndpoint {
+//RS         tree,
+//RS         worker,
+//RS         generation,
+//RS         authority,
+//RS         channel: None,
+//RS     };
+//RS     service_authority_validate_endpoint(&endpoint)?;
+//RS     Ok(endpoint)
+//RS }
+//RS 
+//RS pub fn jet_services_authority_endpoint(
+//RS     tree: String,
+//RS     worker: String,
+//RS     generation: i64,
+//RS     authority: String,
+//RS ) -> Result<JetServiceEndpoint, JetServiceError> {
+//RS     let mut endpoint = service_authority_endpoint_unchecked(tree, worker, generation, authority)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     endpoint.channel = service_endpoint_registry()
+//RS         .lock()
+//RS         .ok()
+//RS         .and_then(|registry| registry.get(&key).and_then(|state| state.channel.clone()));
+//RS     Ok(endpoint)
+//RS }
+//RS 
+//RS /// Rebind an already-issued endpoint after a tree crosses a comptime or
+//RS /// interpreter boundary. A serialized endpoint never creates authority.
+//RS pub fn jet_services_authority_hydrate(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     started: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_require_registered_endpoint(endpoint)?;
+//RS     service_authority_register(endpoint, started)
+//RS }
+//RS 
+//RS fn service_authority_register(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     started: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let mut registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     if !registry.contains_key(&key)
+//RS         && registry
+//RS             .values()
+//RS             .any(|state| state.authority == endpoint.authority && state.tree != endpoint.tree)
+//RS     {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service authority does not match its registered tree".to_string(),
+//RS         ));
+//RS     }
+//RS     if let Some(state) = registry.get_mut(&key) {
+//RS         if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match its tree".to_string(),
+//RS             ));
+//RS         }
+//RS         if started && state.partitioned {
+//RS             return Err(JetServiceError::Partitioned(
+//RS                 "service endpoint authority is partitioned".to_string(),
+//RS             ));
+//RS         }
+//RS         if state.generation != endpoint.generation {
+//RS             state.store = None;
+//RS             state.draining = false;
+//RS         }
+//RS         state.generation = endpoint.generation;
+//RS         state.started = started;
+//RS         if endpoint.channel.is_some() {
+//RS             state.channel = endpoint.channel.clone();
+//RS         }
+//RS         return Ok(());
+//RS     }
+//RS     registry.insert(
+//RS         key,
+//RS         ServiceAuthorityEndpointState {
+//RS             tree: endpoint.tree.clone(),
+//RS             worker: endpoint.worker.clone(),
+//RS             authority: endpoint.authority.clone(),
+//RS             generation: endpoint.generation,
+//RS             started,
+//RS             draining: false,
+//RS             partitioned: false,
+//RS             store: None,
+//RS             channel: endpoint.channel.clone(),
+//RS         },
+//RS     );
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Move one routing shard between generations while holding the authority
+//RS /// registry lock. A caller can therefore observe either the old endpoint or
+//RS /// the new endpoint, never a live old endpoint after the new one is published.
+//RS /// The old entry remains registered but stopped so stale endpoint values fail
+//RS /// closed instead of retaining send rights.
+//RS fn service_authority_rotate(
+//RS     old_endpoint: &JetServiceEndpoint,
+//RS     new_endpoint: &JetServiceEndpoint,
+//RS     started: bool,
+//RS     draining: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(old_endpoint)?;
+//RS     service_authority_validate_endpoint(new_endpoint)?;
+//RS     if old_endpoint.tree != new_endpoint.tree
+//RS         || old_endpoint.worker != new_endpoint.worker
+//RS         || old_endpoint.authority != new_endpoint.authority
+//RS         || old_endpoint.generation == new_endpoint.generation
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service authority rotation must stay within one worker and change generation"
+//RS                 .to_string(),
+//RS         ));
+//RS     }
+//RS     let old_key = service_endpoint_key(
+//RS         &old_endpoint.authority,
+//RS         &old_endpoint.worker,
+//RS         old_endpoint.generation,
+//RS     );
+//RS     let new_key = service_endpoint_key(
+//RS         &new_endpoint.authority,
+//RS         &new_endpoint.worker,
+//RS         new_endpoint.generation,
+//RS     );
+//RS     let mut registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let old_state = registry.get(&old_key).cloned().ok_or_else(|| {
+//RS         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS     })?;
+//RS     if old_state.tree != old_endpoint.tree
+//RS         || old_state.worker != old_endpoint.worker
+//RS         || old_state.authority != old_endpoint.authority
+//RS         || old_state.generation != old_endpoint.generation
+//RS     {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its worker".to_string(),
+//RS         ));
+//RS     }
+//RS 
+//RS     let mut new_state =
+//RS         registry
+//RS             .get(&new_key)
+//RS             .cloned()
+//RS             .unwrap_or_else(|| ServiceAuthorityEndpointState {
+//RS                 tree: new_endpoint.tree.clone(),
+//RS                 worker: new_endpoint.worker.clone(),
+//RS                 authority: new_endpoint.authority.clone(),
+//RS                 generation: new_endpoint.generation,
+//RS                 started: false,
+//RS                 draining: false,
+//RS                 partitioned: false,
+//RS                 store: None,
+//RS                 channel: None,
+//RS             });
+//RS     if new_state.tree != new_endpoint.tree
+//RS         || new_state.worker != new_endpoint.worker
+//RS         || new_state.authority != new_endpoint.authority
+//RS     {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "new service endpoint authority does not match its worker".to_string(),
+//RS         ));
+//RS     }
+//RS     if started && new_state.partitioned {
+//RS         return Err(JetServiceError::Partitioned(
+//RS             "new service endpoint authority is partitioned".to_string(),
+//RS         ));
+//RS     }
+//RS 
+//RS     new_state.generation = new_endpoint.generation;
+//RS     new_state.started = started;
+//RS     new_state.draining = draining;
+//RS     new_state.partitioned = false;
+//RS     new_state.channel = new_endpoint
+//RS         .channel
+//RS         .clone()
+//RS         .or_else(|| old_state.channel.clone());
+//RS 
+//RS     let old_state = registry.get_mut(&old_key).ok_or_else(|| {
+//RS         service_authority_error("old service endpoint disappeared during rotation")
+//RS     })?;
+//RS     old_state.started = false;
+//RS     old_state.draining = false;
+//RS     registry.insert(new_key, new_state);
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Rebind a durable receipt's authority to the restarted worker that owns the
+//RS /// same tree/worker/generation. The receipt record is the proof that this
+//RS /// alias is in scope; the alias shares the source channel and store binding,
+//RS /// so it cannot create a second mailbox or rights table.
+//RS fn service_authority_adopt_alias(
+//RS     source: &JetServiceEndpoint,
+//RS     authority: String,
+//RS ) -> Result<JetServiceEndpoint, JetServiceError> {
+//RS     jet_services_authority_validate(source)?;
+//RS     let alias = service_authority_endpoint_unchecked(
+//RS         source.tree.clone(),
+//RS         source.worker.clone(),
+//RS         source.generation,
+//RS         authority,
+//RS     )?;
+//RS     let source_key = service_endpoint_key(&source.authority, &source.worker, source.generation);
+//RS     let alias_key = service_endpoint_key(&alias.authority, &alias.worker, alias.generation);
+//RS     let mut registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let source_state = registry.get(&source_key).cloned().ok_or_else(|| {
+//RS         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS     })?;
+//RS     if source_state.tree != alias.tree || source_state.worker != alias.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service authority alias does not match its worker".to_string(),
+//RS         ));
+//RS     }
+//RS     if source_state.partitioned || !source_state.started {
+//RS         return Err(JetServiceError::Partitioned(
+//RS             "service authority alias source is not active".to_string(),
+//RS         ));
+//RS     }
+//RS     if let Some(existing) = registry.get(&alias_key) {
+//RS         if existing.tree != alias.tree
+//RS             || existing.worker != alias.worker
+//RS             || existing.generation != alias.generation
+//RS         {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service authority alias is already bound to another worker".to_string(),
+//RS             ));
+//RS         }
+//RS     } else {
+//RS         let mut alias_state = source_state.clone();
+//RS         alias_state.authority = alias.authority.clone();
+//RS         registry.insert(alias_key, alias_state);
+//RS     }
+//RS     let mut hydrated = alias;
+//RS     hydrated.channel = registry
+//RS         .get(&service_endpoint_key(
+//RS             &hydrated.authority,
+//RS             &hydrated.worker,
+//RS             hydrated.generation,
+//RS         ))
+//RS         .and_then(|state| state.channel.clone());
+//RS     Ok(hydrated)
+//RS }
+//RS 
+//RS pub fn jet_services_authority_update(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     started: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let authority_state = {
+//RS         let mut registry = service_endpoint_registry()
+//RS             .lock()
+//RS             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS         let state = registry.get_mut(&key).ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS         })?;
+//RS         if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match its tree".to_string(),
+//RS             ));
+//RS         }
+//RS         if started && state.partitioned {
+//RS             return Err(JetServiceError::Partitioned(
+//RS                 "service endpoint authority is partitioned".to_string(),
+//RS             ));
+//RS         }
+//RS         if state.generation != endpoint.generation {
+//RS             state.store = None;
+//RS             state.draining = false;
+//RS         }
+//RS         state.generation = endpoint.generation;
+//RS         state.started = started;
+//RS         if endpoint.channel.is_some() {
+//RS             state.channel = endpoint.channel.clone();
+//RS         }
+//RS         if state.partitioned {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Revoked
+//RS         } else if state.started {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Verified
+//RS         } else {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Unverified
+//RS         }
+//RS     };
+//RS     jet_services_publish_endpoint_fact(endpoint, authority_state);
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Partition is an authority fact. Routing reads this bit before it reads a
+//RS /// mailbox, so an endpoint cannot bypass a tree's partition decision.
+//RS pub fn jet_services_authority_update_partitioned(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     partitioned: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let authority_state = {
+//RS         let mut registry = service_endpoint_registry()
+//RS             .lock()
+//RS             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS         let state = registry.get_mut(&key).ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS         })?;
+//RS         if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match its tree".to_string(),
+//RS             ));
+//RS         }
+//RS         state.partitioned = partitioned;
+//RS         if partitioned {
+//RS             state.started = false;
+//RS         }
+//RS         if endpoint.channel.is_some() {
+//RS             state.channel = endpoint.channel.clone();
+//RS         }
+//RS         if state.partitioned {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Revoked
+//RS         } else if state.started {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Verified
+//RS         } else {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Unverified
+//RS         }
+//RS     };
+//RS     jet_services_publish_endpoint_fact(endpoint, authority_state);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_channel(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<(bool, bool, std::sync::Arc<JetServiceChannel<String>>), JetServiceError> {
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = registry.get(&key).ok_or_else(|| {
+//RS         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS     })?;
+//RS     if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its tree".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.partitioned {
+//RS         return Err(JetServiceError::Partitioned(
+//RS             "service endpoint authority is partitioned".to_string(),
+//RS         ));
+//RS     }
+//RS     let channel = state
+//RS         .channel
+//RS         .clone()
+//RS         .or_else(|| endpoint.channel.clone())
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint mailbox is not connected".to_string())
+//RS         })?;
+//RS     Ok((state.started, state.draining, channel))
+//RS }
+//RS 
+//RS /// The rollout controller owns this bit. Endpoint sends read it through the
+//RS /// same authority registry, so an endpoint cannot race a tree-local drain by
+//RS /// bypassing `ServiceTree.send`.
+//RS pub fn jet_services_authority_update_draining(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     draining: bool,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let authority_state = {
+//RS         let mut registry = service_endpoint_registry()
+//RS             .lock()
+//RS             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS         let state = registry.get_mut(&key).ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS         })?;
+//RS         if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match its tree".to_string(),
+//RS             ));
+//RS         }
+//RS         state.draining = draining;
+//RS         if endpoint.channel.is_some() {
+//RS             state.channel = endpoint.channel.clone();
+//RS         }
+//RS         if state.partitioned {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Revoked
+//RS         } else if state.started {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Verified
+//RS         } else {
+//RS             JetDevtoolsTopologyEndpointAuthorityState::Unverified
+//RS         }
+//RS     };
+//RS     jet_services_publish_endpoint_fact(endpoint, authority_state);
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Enqueue through the authority gate while holding the registry lock. Drain,
+//RS /// partition, handoff, and endpoint send therefore have one linearization
+//RS /// point: a send either enters the mailbox before the gate changes, or it is
+//RS /// rejected after the gate changes. A separate read of `draining` followed by
+//RS /// a queue write would strand a message after an empty-drain observation.
+//RS fn service_authority_try_send(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     message: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     if message.len() > SERVICE_AUTH_MAX_MESSAGE || message.chars().any(char::is_control) {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service message exceeds the 1 MiB limit".to_string(),
+//RS         ));
+//RS     }
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = match registry.get(&key) {
+//RS         Some(state) => state,
+//RS         None if registry.values().any(|candidate| {
+//RS             candidate.tree == endpoint.tree
+//RS                 && candidate.worker == endpoint.worker
+//RS                 && candidate.generation == endpoint.generation
+//RS         }) =>
+//RS         {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match the registered worker".to_string(),
+//RS             ));
+//RS         }
+//RS         None if registry.values().any(|candidate| {
+//RS             candidate.tree == endpoint.tree
+//RS                 && candidate.worker == endpoint.worker
+//RS                 && candidate.authority == endpoint.authority
+//RS                 && candidate.generation > endpoint.generation
+//RS                 && !candidate.partitioned
+//RS         }) =>
+//RS         {
+//RS             return Err(JetServiceError::Stale(format!(
+//RS                 "service endpoint generation {} is no longer current",
+//RS                 endpoint.generation
+//RS             )));
+//RS         }
+//RS         None => {
+//RS             return Err(JetServiceError::Partitioned(
+//RS                 "service endpoint authority is not registered".to_string(),
+//RS             ));
+//RS         }
+//RS     };
+//RS     if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its tree".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.partitioned {
+//RS         return Err(JetServiceError::Partitioned(
+//RS             "service endpoint authority is partitioned".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.generation != endpoint.generation {
+//RS         return Err(JetServiceError::Stale(format!(
+//RS             "service endpoint generation {} is not current (current generation {})",
+//RS             endpoint.generation, state.generation
+//RS         )));
+//RS     }
+//RS     if !state.started {
+//RS         return Err(JetServiceError::NotStarted(format!(
+//RS             "service worker `{}` is not running",
+//RS             endpoint.worker
+//RS         )));
+//RS     }
+//RS     if state.draining {
+//RS         return Err(JetServiceError::NotStarted(
+//RS             "service endpoint is draining".to_string(),
+//RS         ));
+//RS     }
+//RS     let channel = state
+//RS         .channel
+//RS         .clone()
+//RS         .or_else(|| endpoint.channel.clone())
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint mailbox is not connected".to_string())
+//RS         })?;
+//RS     match channel.try_send(message) {
+//RS         Ok(()) => Ok(()),
+//RS         Err(JetServiceChannelError::Full(_)) => Err(JetServiceError::Full(
+//RS             "service endpoint mailbox is full".to_string(),
+//RS         )),
+//RS         Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
+//RS             "service endpoint mailbox is closed".to_string(),
+//RS         )),
+//RS         Err(JetServiceChannelError::Empty) => Err(JetServiceError::Policy(
+//RS             "service channel returned an invalid send result".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_services_endpoint_send(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     message: String,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_try_send(endpoint, message)
+//RS }
+//RS 
+//RS pub fn jet_services_endpoint_receive(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<String, JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let (started, draining, channel) = service_authority_channel(endpoint)?;
+//RS     if !started && (!draining || channel.depth() == 0) {
+//RS         return Err(JetServiceError::NotStarted(
+//RS             "service worker is not running".to_string(),
+//RS         ));
+//RS     }
+//RS     match channel.try_recv() {
+//RS         Ok(message) => Ok(message),
+//RS         Err(JetServiceChannelError::Empty) => Err(JetServiceError::Ambiguous(
+//RS             "service endpoint mailbox is empty".to_string(),
+//RS         )),
+//RS         Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
+//RS             "service endpoint mailbox is closed".to_string(),
+//RS         )),
+//RS         Err(JetServiceChannelError::Full(_)) => Err(JetServiceError::Policy(
+//RS             "service channel returned an invalid receive result".to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_current_endpoint(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS ) -> Result<JetServiceEndpoint, JetServiceError> {
+//RS     let store = service_authority_store_identity(&runtime.store);
+//RS     let (exact, newer_exact, candidates, exact_stopped, newer_generation) = {
+//RS         let registry = service_endpoint_registry()
+//RS             .lock()
+//RS             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS         let mut exact = None;
+//RS         let mut newer_exact = None;
+//RS         let mut candidates = Vec::new();
+//RS         let mut exact_stopped = false;
+//RS         let mut newer_generation = false;
+//RS         for state in registry.values() {
+//RS             if state.tree != entry.tree || state.worker != entry.worker {
+//RS                 continue;
+//RS             }
+//RS             if state.partitioned {
+//RS                 continue;
+//RS             }
+//RS             // A stopped replacement does not revoke a still-running source
+//RS             // generation. Only an active newer generation can move a durable
+//RS             // receipt during restart/reconcile.
+//RS             if state.generation > entry.generation && state.started {
+//RS                 newer_generation = true;
+//RS             }
+//RS             let candidate = (
+//RS                 state.authority.clone(),
+//RS                 state.tree.clone(),
+//RS                 state.worker.clone(),
+//RS                 state.generation,
+//RS                 state.store.as_ref().and_then(|(bound, generation)| {
+//RS                     (*generation == state.generation).then(|| bound.clone())
+//RS                 }),
+//RS             );
+//RS             if state.authority == entry.authority {
+//RS                 if state.generation == entry.generation && state.started {
+//RS                     exact = Some(candidate);
+//RS                 } else if state.generation == entry.generation {
+//RS                     exact_stopped = true;
+//RS                 } else if state.generation > entry.generation && state.started {
+//RS                     if newer_exact.as_ref().is_none_or(
+//RS                         |current: &(String, String, String, i64, Option<String>)| {
+//RS                             current.3 < state.generation
+//RS                         },
+//RS                     ) {
+//RS                         newer_exact = Some(candidate);
+//RS                     }
+//RS                 }
+//RS             } else if state.generation == entry.generation && state.started {
+//RS                 candidates.push(candidate);
+//RS             }
+//RS         }
+//RS         (
+//RS             exact,
+//RS             newer_exact,
+//RS             candidates,
+//RS             exact_stopped,
+//RS             newer_generation,
+//RS         )
+//RS     };
+//RS     let selected = if let Some(exact) = exact {
+//RS         exact
+//RS     } else if let Some(newer_exact) = newer_exact {
+//RS         newer_exact
+//RS     } else {
+//RS         let bound: Vec<_> = candidates
+//RS             .iter()
+//RS             .filter(|candidate| candidate.4.as_deref() == Some(store.as_str()))
+//RS             .collect();
+//RS         if bound.len() == 1 {
+//RS             bound[0].clone()
+//RS         } else if bound.len() > 1 {
+//RS             return Err(JetServiceError::Ambiguous(
+//RS                 "multiple active service authorities are bound to this store".to_string(),
+//RS             ));
+//RS         } else if candidates.len() == 1 {
+//RS             candidates[0].clone()
+//RS         } else if candidates.len() > 1 {
+//RS             return Err(JetServiceError::Ambiguous(
+//RS                 "service receipt matches multiple active provider authorities".to_string(),
+//RS             ));
+//RS         } else if exact_stopped {
+//RS             return Err(JetServiceError::NotStarted(format!(
+//RS                 "service worker `{}` is not running",
+//RS                 entry.worker
+//RS             )));
+//RS         } else if newer_generation {
+//RS             return Err(JetServiceError::Stale(format!(
+//RS                 "service receipt generation {} is no longer current",
+//RS                 entry.generation
+//RS             )));
+//RS         } else {
+//RS             return Err(JetServiceError::Partitioned(
+//RS                 "service receipt provider authority is not registered".to_string(),
+//RS             ));
+//RS         }
+//RS     };
+//RS     let endpoint =
+//RS         service_authority_endpoint_unchecked(selected.1, selected.2, selected.3, selected.0)?;
+//RS     service_authority_bind_store(runtime, &endpoint)?;
+//RS     if endpoint.authority == entry.authority {
+//RS         Ok(endpoint)
+//RS     } else {
+//RS         let alias = service_authority_adopt_alias(&endpoint, entry.authority.clone())?;
+//RS         service_authority_bind_store(runtime, &alias)?;
+//RS         Ok(alias)
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_services_authority_validate(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = match registry.get(&key) {
+//RS         Some(state) => state,
+//RS         None if registry.values().any(|candidate| {
+//RS             candidate.tree == endpoint.tree
+//RS                 && candidate.worker == endpoint.worker
+//RS                 && candidate.generation == endpoint.generation
+//RS         }) =>
+//RS         {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match the registered worker".to_string(),
+//RS             ));
+//RS         }
+//RS         None if registry.values().any(|candidate| {
+//RS             candidate.tree == endpoint.tree
+//RS                 && candidate.worker == endpoint.worker
+//RS                 && candidate.authority == endpoint.authority
+//RS                 && candidate.generation > endpoint.generation
+//RS                 && !candidate.partitioned
+//RS         }) =>
+//RS         {
+//RS             return Err(JetServiceError::Stale(format!(
+//RS                 "service endpoint generation {} is no longer current",
+//RS                 endpoint.generation
+//RS             )));
+//RS         }
+//RS         None => {
+//RS             return Err(JetServiceError::Partitioned(
+//RS                 "service endpoint authority is not registered".to_string(),
+//RS             ));
+//RS         }
+//RS     };
+//RS     if state.tree != endpoint.tree {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint belongs to another tree".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.worker != endpoint.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint belongs to another worker".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.partitioned {
+//RS         return Err(JetServiceError::Partitioned(
+//RS             "service endpoint authority is partitioned".to_string(),
+//RS         ));
+//RS     }
+//RS     if state.generation != endpoint.generation {
+//RS         return Err(JetServiceError::Stale(format!(
+//RS             "service endpoint generation {} is not current (current generation {})",
+//RS             endpoint.generation, state.generation
+//RS         )));
+//RS     }
+//RS     if !state.started && !state.draining {
+//RS         if registry.values().any(|candidate| {
+//RS             candidate.tree == endpoint.tree
+//RS                 && candidate.worker == endpoint.worker
+//RS                 && candidate.authority == endpoint.authority
+//RS                 && candidate.generation > endpoint.generation
+//RS                 && candidate.started
+//RS                 && !candidate.partitioned
+//RS         }) {
+//RS             return Err(JetServiceError::Stale(format!(
+//RS                 "service endpoint generation {} is no longer current",
+//RS                 endpoint.generation
+//RS             )));
+//RS         }
+//RS         return Err(JetServiceError::NotStarted(format!(
+//RS             "service worker `{}` is not running",
+//RS             endpoint.worker
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_bound_store(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<Option<String>, JetServiceError> {
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = registry.get(&key).ok_or_else(|| {
+//RS         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS     })?;
+//RS     if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its tree".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(state.store.as_ref().and_then(|(store, generation)| {
+//RS         (*generation == endpoint.generation).then(|| store.clone())
+//RS     }))
+//RS }
+//RS 
+//RS fn service_authority_bind_store(
+//RS     runtime: &JetServiceRuntime,
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<String, JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     let store = service_authority_store_identity(&runtime.store);
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let mut registry = service_endpoint_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS     let state = registry.get_mut(&key).ok_or_else(|| {
+//RS         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS     })?;
+//RS     if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service endpoint authority does not match its tree".to_string(),
+//RS         ));
+//RS     }
+//RS     match state.store.as_ref() {
+//RS         Some((bound, generation)) if *generation == endpoint.generation => {
+//RS             if bound != &store {
+//RS                 return Err(JetServiceError::Revoked(
+//RS                     "service endpoint authority is bound to another store".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Some(_) => {
+//RS             state.store = None;
+//RS         }
+//RS         None => {}
+//RS     }
+//RS     if state.store.is_none() {
+//RS         state.store = Some((store.clone(), endpoint.generation));
+//RS     }
+//RS     Ok(store)
+//RS }
+//RS 
+//RS fn service_authority_remove_pending(store: &str, id: &str) -> Result<(), JetServiceError> {
+//RS     let mut pending = service_pending_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service pending registry lock is poisoned"))?;
+//RS     let store_identity = service_authority_store_identity(store);
+//RS     for queue in pending.values_mut() {
+//RS         queue.retain(|(queued_id, _, queued_store)| {
+//RS             queued_id != id || service_authority_store_identity(queued_store) != store_identity
+//RS         });
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn service_authority_remove_pending_entry(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if entry.authority.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     service_authority_remove_pending(&runtime.store, &entry.id)
+//RS }
+//RS 
+//RS fn service_authority_cleanup_expired(
+//RS     runtime: &JetServiceRuntime,
+//RS     entries: &[ServiceAuthorityEntry],
+//RS     now: i64,
+//RS ) -> Result<bool, JetServiceError> {
+//RS     let mut cleaned = false;
+//RS     for entry in entries {
+//RS         if service_authority_entry_expired(entry, now) {
+//RS             service_authority_append_event(
+//RS                 runtime,
+//RS                 entry,
+//RS                 JetDeliveryState::DeadLettered,
+//RS                 entry.attempts,
+//RS                 now,
+//RS             )?;
+//RS             service_authority_remove_pending_entry(runtime, entry)?;
+//RS             cleaned = true;
+//RS         }
+//RS     }
+//RS     Ok(cleaned)
+//RS }
+//RS 
+//RS pub fn jet_services_authority_enqueue(
+//RS     runtime: &JetServiceRuntime,
+//RS     endpoint: &JetServiceEndpoint,
+//RS     id: &str,
+//RS     message: &str,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     let store = service_authority_bind_store(runtime, endpoint)?;
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     service_authority_validate_text(message, "service message", SERVICE_AUTH_MAX_MESSAGE, true)?;
+//RS     let key = service_pending_key(&store, endpoint);
+//RS     let mut pending = service_pending_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service pending registry lock is poisoned"))?;
+//RS     let queue = pending.entry(key).or_default();
+//RS     if queue
+//RS         .iter()
+//RS         .any(|(queued_id, _, queued_store)| queued_id == id && queued_store == &store)
+//RS     {
+//RS         return Ok(());
+//RS     }
+//RS     if queue.len() >= SERVICE_AUTH_MAX_PENDING {
+//RS         return Err(JetServiceError::Full(
+//RS             "service authority pending delivery queue is full".to_string(),
+//RS         ));
+//RS     }
+//RS     queue.push((id.to_string(), message.to_string(), store));
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn jet_services_authority_take_pending(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     capacity: i64,
+//RS     skip_ids: &[String],
+//RS ) -> Result<Vec<(String, String, String)>, JetServiceError> {
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     if capacity <= 0 {
+//RS         return Ok(Vec::new());
+//RS     }
+//RS     let Some(store) = service_authority_bound_store(endpoint)? else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let runtime = JetServiceRuntime {
+//RS         store: store.clone(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let records = service_authority_read(&runtime)?;
+//RS     let mut entries = service_authority_entries(&runtime, &records)?;
+//RS     if service_authority_cleanup_expired(&runtime, &entries, service_authority_now())? {
+//RS         entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     }
+//RS     let key = service_pending_key(&store, endpoint);
+//RS     let mut pending = service_pending_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service pending registry lock is poisoned"))?;
+//RS     let queue = pending.entry(key).or_default();
+//RS     let store_identity = service_authority_store_identity(&store);
+//RS     for entry in &entries {
+//RS         let queued = queue.iter().any(|(queued_id, _, queued_store)| {
+//RS             queued_id == &entry.id
+//RS                 && service_authority_store_identity(queued_store) == store_identity
+//RS         });
+//RS         if entry.authority.is_empty()
+//RS             || entry.tree != endpoint.tree
+//RS             || entry.worker != endpoint.worker
+//RS             || entry.state == JetDeliveryState::Cancelled
+//RS             || entry.dead
+//RS             || !service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
+//RS             || (entry.delivered_to_worker && entry.delivered)
+//RS             // A retained receipt is eligible only after retry explicitly
+//RS             // places it back in the bounded pending queue.
+//RS             || (entry.retained_until.is_some() && !queued)
+//RS             || service_authority_entry_expired(entry, service_authority_now())
+//RS             || skip_ids.iter().any(|id| id == &entry.id)
+//RS             // Never silently retry a receipt already handed to the worker. An
+//RS             // explicit retry appends R and resets delivered_to_worker.
+//RS             || (entry.delivered_to_worker && !entry.delivered)
+//RS         {
+//RS             continue;
+//RS         }
+//RS         if queued {
+//RS             continue;
+//RS         }
+//RS         if queue.len() >= SERVICE_AUTH_MAX_PENDING {
+//RS             return Err(JetServiceError::Full(
+//RS                 "service authority pending delivery queue is full".to_string(),
+//RS             ));
+//RS         }
+//RS         queue.push((entry.id.clone(), entry.message.clone(), store.clone()));
+//RS     }
+//RS     let count = capacity as usize;
+//RS     let mut selected = Vec::new();
+//RS     let mut retained = Vec::with_capacity(queue.len());
+//RS     for entry in queue.drain(..) {
+//RS         if selected.len() < count && !skip_ids.iter().any(|id| id == &entry.0) {
+//RS             selected.push(entry);
+//RS         } else {
+//RS             retained.push(entry);
+//RS         }
+//RS     }
+//RS     *queue = retained;
+//RS     Ok(selected)
+//RS }
+//RS 
+//RS /// Put undelivered authority records back at the head of the queue after a
+//RS /// mailbox boundary rejects a batch.  Delivery is at-least-once: a record
+//RS /// already handed to the worker remains eligible for retry if its durable
+//RS /// delivery marker could not be written.
+//RS pub fn jet_services_authority_requeue_pending(
+//RS     endpoint: &JetServiceEndpoint,
+//RS     entries: Vec<(String, String, String)>,
+//RS ) -> Result<(), JetServiceError> {
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     if entries.is_empty() {
+//RS         return Ok(());
+//RS     }
+//RS     let store = service_authority_bound_store(endpoint)?.ok_or_else(|| {
+//RS         JetServiceError::Partitioned(
+//RS             "service endpoint has no bound authority store for pending delivery".to_string(),
+//RS         )
+//RS     })?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: store.clone(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     let _authority_guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let mut authority_entries =
+//RS         service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     if service_authority_cleanup_expired(&runtime, &authority_entries, service_authority_now())? {
+//RS         authority_entries =
+//RS             service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     }
+//RS     let mut normalized_entries = Vec::with_capacity(entries.len());
+//RS     for (id, message, entry_store) in entries {
+//RS         service_authority_validate_text(id.as_str(), "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS         service_authority_validate_text(
+//RS             message.as_str(),
+//RS             "service message",
+//RS             SERVICE_AUTH_MAX_MESSAGE,
+//RS             true,
+//RS         )?;
+//RS         service_authority_validate_text(
+//RS             entry_store.as_str(),
+//RS             "service store",
+//RS             SERVICE_AUTH_MAX_STORE,
+//RS             false,
+//RS         )?;
+//RS         if service_authority_store_identity(&entry_store) != store {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "pending delivery belongs to another authority store".to_string(),
+//RS             ));
+//RS         }
+//RS         let authority_entry = authority_entries
+//RS             .iter()
+//RS             .find(|entry| entry.id == id)
+//RS             .ok_or_else(|| JetServiceError::Unknown(format!("service id `{id}` is unknown")))?;
+//RS         if authority_entry.authority.is_empty()
+//RS             || authority_entry.tree != endpoint.tree
+//RS             || authority_entry.worker != endpoint.worker
+//RS             || !service_authority_entry_routes_to_endpoint(&runtime, authority_entry, endpoint)
+//RS             || authority_entry.message != message
+//RS         {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "pending delivery does not match its authority receipt".to_string(),
+//RS             ));
+//RS         }
+//RS         if authority_entry.dead {
+//RS             return Err(JetServiceError::Unavailable(
+//RS                 "cannot requeue a dead-lettered service receipt".to_string(),
+//RS             ));
+//RS         }
+//RS         if authority_entry.state == JetDeliveryState::Cancelled {
+//RS             return Err(JetServiceError::Unavailable(
+//RS                 "cannot requeue a cancelled service receipt".to_string(),
+//RS             ));
+//RS         }
+//RS         if service_authority_entry_expired(authority_entry, service_authority_now()) {
+//RS             return Err(JetServiceError::Expired(
+//RS                 "service receipt retention expired during delivery rollback".to_string(),
+//RS             ));
+//RS         }
+//RS         normalized_entries.push((id, message, store.clone()));
+//RS     }
+//RS     let key = service_pending_key(&store, endpoint);
+//RS     let mut pending = service_pending_registry()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service pending registry lock is poisoned"))?;
+//RS     let queue = pending.entry(key).or_default();
+//RS     if queue.len().saturating_add(normalized_entries.len()) > SERVICE_AUTH_MAX_PENDING {
+//RS         return Err(JetServiceError::Full(
+//RS             "service authority pending delivery queue is full".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut restored = Vec::with_capacity(normalized_entries.len() + queue.len());
+//RS     for entry in normalized_entries {
+//RS         if !queue.iter().any(|queued| queued == &entry)
+//RS             && !restored.iter().any(|queued| queued == &entry)
+//RS         {
+//RS             restored.push(entry);
+//RS         }
+//RS     }
+//RS     restored.append(queue);
+//RS     *queue = restored;
+//RS     drop(_authority_guard);
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Record that a pending receipt reached the worker mailbox. This is separate
+//RS /// from `commit`: a crash after this record and before application commit is
+//RS /// still retryable, while a crash before this record is rebuilt from `S`.
+// END-PORT-PENDING 0299 crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1-1791
+

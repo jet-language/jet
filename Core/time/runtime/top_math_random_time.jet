@@ -1,0 +1,1835 @@
+// PORT-PENDING 0289 crates-jet-codegen-src-prelude-corelib-top-mathrandomtime-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1-1831
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-TIME-INSTANT-SPLIT1=A: JetInstant trait impls stay beside the Core-owned
+//RS // carrier. The Date-family carriers and their traits live in the fixed runtime
+//RS // (`Prelude/Core.rs`) so the optional Core crate does not violate orphan rules.
+//RS impl JetShow for JetInstant {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetInstant {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetInstant {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_deadline_exceeded(wait_kind: &str) -> ! {
+//RS     let rendered = jet_std::jet_task_deadline(wait_kind).render();
+//RS     jet_std::jet_task_deadline_mark_pending();
+//RS     if jet_interrupt_handler_should_unwind()
+//RS         || jet_scheduler_wait_boundary_should_unwind()
+//RS         || jet_typed_deadline_boundary_should_unwind()
+//RS     {
+//RS         std::panic::panic_any(JetDeadlineUnwind { rendered });
+//RS     }
+//RS     jet_runtime_diagnostic(rendered);
+//RS }
+//RS 
+//RS fn jet_std_time_start() -> jet_std::Stopwatch {
+//RS     jet_scheduler_world_reject_uncontrolled("clock");
+//RS     jet_std::Stopwatch {
+//RS         start: std::time::Instant::now(),
+//RS     }
+//RS }
+//RS 
+//RS // ── D-DET1: deterministic injected Clock / Rng capabilities ───────────────────
+//RS // Built from a caller-supplied seed (a pure value), so a `#Pure fn` may read
+//RS // time/randomness THROUGH the handle and stay reproducible. No wall-clock or
+//RS // OS-RNG read; std-only (no external crate, I6).
+//RS fn jet_std_clock_new(seed: i64) -> jet_std::Clock {
+//RS     jet_std::Clock::manual(seed)
+//RS }
+//RS fn jet_std_clock_system() -> jet_std::Clock {
+//RS     jet_std::Clock::system()
+//RS }
+//RS fn jet_clock_now(c: &jet_std::Clock) -> i64 {
+//RS     c.now()
+//RS }
+//RS fn jet_clock_tick(c: &mut jet_std::Clock, ms: i64) -> i64 {
+//RS     let now = c.now().saturating_add(ms);
+//RS     c.set(now);
+//RS     c.now()
+//RS }
+//RS // D-DET-CAPAPI: `clock.advance(to_ms)` sets the clock to an ABSOLUTE instant;
+//RS // `clock.wait(d)` advances by a `Duration` (relative). Both return the new value.
+//RS fn jet_clock_advance(c: &mut jet_std::Clock, to_ms: i64) -> i64 {
+//RS     c.set(to_ms);
+//RS     c.now()
+//RS }
+//RS fn jet_clock_wait(c: &mut jet_std::Clock, d: &jet_std::Duration) -> i64 {
+//RS     let now = c.now().saturating_add(jet_std_time_duration_to_millis(d.ns));
+//RS     c.set(now);
+//RS     c.now()
+//RS }
+//RS fn jet_std_rng_new(seed: i64) -> jet_std::Rng {
+//RS     jet_std::Rng { state: seed as u64 }
+//RS }
+//RS // SplitMix64 step — a small, well-distributed deterministic PRNG (public domain).
+//RS fn jet_det_rng_next(r: &mut jet_std::Rng) -> u64 {
+//RS     jet_seeded_rng_next(&mut r.state)
+//RS }
+//RS fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
+//RS     let lo = jet_std::jet_int_to_i64(lo).unwrap_or_else(|| {
+//RS         jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+//RS     });
+//RS     let hi = jet_std::jet_int_to_i64(hi).unwrap_or_else(|| {
+//RS         jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+//RS     });
+//RS     match jet_seeded_rng_int_checked(&mut r.state, lo, hi) {
+//RS         Ok(value) => jet_std::jet_int_from_i64(value),
+//RS         Err(message) => jet_runtime_stop("E3010", "", 0, message),
+//RS     }
+//RS }
+//RS fn jet_rng_float(r: &mut jet_std::Rng) -> f64 {
+//RS     jet_seeded_rng_float(&mut r.state)
+//RS }
+//RS fn jet_rng_float_open(r: &mut jet_std::Rng) -> f64 {
+//RS     jet_seeded_rng_float_open(&mut r.state)
+//RS }
+//RS fn jet_rng_float_range(r: &mut jet_std::Rng, low: f64, high: f64) -> f64 {
+//RS     jet_seeded_rng_float_range(&mut r.state, low, high)
+//RS }
+//RS // D-DET-CAPAPI: the widened deterministic draws — coin, uniform choice, in-place
+//RS // Fisher–Yates shuffle. Each advances the SplitMix64 stream, so they are
+//RS // reproducible from the seed and mirror the ambient `random.*` set.
+//RS fn jet_rng_bool(r: &mut jet_std::Rng) -> bool {
+//RS     jet_seeded_rng_bool(&mut r.state)
+//RS }
+//RS fn jet_rng_bool_p(r: &mut jet_std::Rng, p: f64) -> bool {
+//RS     jet_seeded_rng_bool_p(&mut r.state, p)
+//RS }
+//RS fn jet_rng_normal(r: &mut jet_std::Rng, mean: f64, stddev: f64) -> f64 {
+//RS     jet_seeded_rng_normal(&mut r.state, mean, stddev)
+//RS }
+//RS fn jet_rng_exponential(r: &mut jet_std::Rng, lambda: f64) -> f64 {
+//RS     jet_seeded_rng_exponential(&mut r.state, lambda)
+//RS }
+//RS fn jet_rng_bytes(r: &mut jet_std::Rng, n: i64) -> Vec<u8> {
+//RS     jet_seeded_rng_bytes(&mut r.state, n)
+//RS }
+//RS fn jet_rng_split(r: &mut jet_std::Rng) -> jet_std::Rng {
+//RS     jet_std::Rng {
+//RS         state: jet_seeded_rng_split(&mut r.state),
+//RS     }
+//RS }
+//RS fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> JetOutcome<T, JetAbsent> {
+//RS     jet_seeded_rng_pick(&mut r.state, xs).ok_or(JetAbsent)
+//RS }
+//RS fn jet_rng_weighted_pick<T: Clone>(
+//RS     r: &mut jet_std::Rng,
+//RS     xs: &Vec<T>,
+//RS     weights: &Vec<f64>,
+//RS ) -> JetOutcome<T, JetAbsent> {
+//RS     jet_seeded_rng_weighted_pick(&mut r.state, xs, weights).ok_or(JetAbsent)
+//RS }
+//RS fn jet_rng_sample<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>, k: i64) -> Vec<T> {
+//RS     jet_seeded_rng_sample(&mut r.state, xs, k)
+//RS }
+//RS fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
+//RS     jet_seeded_rng_shuffle(&mut r.state, xs);
+//RS }
+//RS // D-TIMERES1=A / D-SHAPE-DURATIONCONVERT1=A: one checked nanosecond unit
+//RS // model for every runtime constructor and whole-unit read.
+//RS fn jet_duration_from_int(
+//RS     n: jet_foundation::Numeric::JetInt,
+//RS     unit: jet_std::DurationUnit,
+//RS ) -> Result<jet_std::Duration, jet_std::RangeError> {
+//RS     let n = jet_std::jet_int_owned_to_i64(&n).map_err(|_| jet_std::RangeError {
+//RS         reason: jet_duration_kernel_int_error_reason().to_string(),
+//RS     })?;
+//RS     jet_duration_kernel_from_int(n, unit.nanoseconds())
+//RS         .map(|ns| jet_std::Duration { ns })
+//RS         .ok_or_else(|| jet_std::RangeError {
+//RS             reason: jet_duration_kernel_int_error_reason().to_string(),
+//RS         })
+//RS }
+//RS fn jet_duration_from_float(
+//RS     n: f64,
+//RS     unit: jet_std::DurationUnit,
+//RS ) -> Result<jet_std::Duration, jet_std::RangeError> {
+//RS     jet_duration_kernel_from_float(n, unit.nanoseconds())
+//RS         .map(|ns| jet_std::Duration { ns })
+//RS         .ok_or_else(|| jet_std::RangeError {
+//RS             reason: jet_duration_kernel_float_error_reason().to_string(),
+//RS         })
+//RS }
+//RS fn jet_duration_in(
+//RS     d: &jet_std::Duration,
+//RS     unit: &jet_std::DurationUnit,
+//RS ) -> Result<i64, jet_std::RangeError> {
+//RS     Ok(jet_duration_kernel_in(d.ns, unit.nanoseconds()))
+//RS }
+//RS fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
+//RS     d.as_millis()
+//RS }
+//RS fn jet_duration_ns_value(d: &jet_std::Duration) -> i64 {
+//RS     d.ns
+//RS }
+//RS /// AOT's checked Core route carries Duration by reference; keep conversion at
+//RS /// this boundary while the shared sleep policy remains nanosecond-based.
+//RS fn jet_std_time_sleep_duration(duration: &jet_std::Duration) {
+//RS     jet_std_time_sleep_duration_ns(duration.ns);
+//RS }
+//RS fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
+//RS     jet_duration_kernel_is_zero(d.ns)
+//RS }
+//RS fn jet_duration_total_seconds(d: &jet_std::Duration) -> i64 {
+//RS     jet_duration_kernel_total_seconds(d.ns)
+//RS }
+//RS fn jet_duration_seconds_value(d: &jet_std::Duration) -> f64 {
+//RS     jet_duration_kernel_seconds_value(d.ns)
+//RS }
+//RS fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: jet_duration_kernel_difference(a.ns, b.ns),
+//RS     }
+//RS }
+//RS fn jet_duration_abs(d: &jet_std::Duration) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: jet_duration_kernel_abs(d.ns),
+//RS     }
+//RS }
+//RS fn jet_duration_negated(d: &jet_std::Duration) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: jet_duration_kernel_negated(d.ns),
+//RS     }
+//RS }
+//RS fn jet_duration_sign(d: &jet_std::Duration) -> i64 {
+//RS     jet_duration_kernel_sign(d.ns)
+//RS }
+//RS fn jet_duration_total_in(d: &jet_std::Duration, unit: &String) -> f64 {
+//RS     jet_duration_kernel_total_in(d.ns, unit)
+//RS }
+//RS fn jet_duration_round(
+//RS     d: &jet_std::Duration,
+//RS     unit: &String,
+//RS     increment: &i64,
+//RS     mode: &String,
+//RS ) -> jet_std::Duration {
+//RS     let ns = jet_duration_kernel_round(d.ns, unit, *increment, mode).unwrap_or(d.ns);
+//RS     jet_std::Duration { ns }
+//RS }
+//RS fn jet_duration_scale(d: &jet_std::Duration, factor: &i64) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: jet_duration_kernel_scale(d.ns, *factor)
+//RS             .unwrap_or_else(|| panic!("{}", jet_duration_kernel_scale_error_reason())),
+//RS     }
+//RS }
+//RS fn jet_duration_divide(d: &jet_std::Duration, factor: &i64) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: jet_duration_kernel_divide(d.ns, *factor)
+//RS             .unwrap_or_else(|| panic!("{}", jet_duration_kernel_scale_error_reason())),
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Add for jet_std::Duration {
+//RS     type Output = jet_std::Duration;
+//RS 
+//RS     fn add(self, rhs: Self) -> Self::Output {
+//RS         jet_std::Duration {
+//RS             ns: jet_duration_kernel_add(self.ns, rhs.ns),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Sub for jet_std::Duration {
+//RS     type Output = jet_std::Duration;
+//RS 
+//RS     fn sub(self, rhs: Self) -> Self::Output {
+//RS         jet_std::Duration {
+//RS             ns: jet_duration_kernel_sub(self.ns, rhs.ns),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Add<jet_std::Duration> for JetInstant {
+//RS     type Output = JetInstant;
+//RS 
+//RS     fn add(self, rhs: jet_std::Duration) -> Self::Output {
+//RS         self.plus_duration_ns(rhs.ns)
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Sub<jet_std::Duration> for JetInstant {
+//RS     type Output = JetInstant;
+//RS 
+//RS     fn sub(self, rhs: jet_std::Duration) -> Self::Output {
+//RS         self.minus_duration_ns(rhs.ns)
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Sub for JetInstant {
+//RS     type Output = jet_std::Duration;
+//RS 
+//RS     fn sub(self, rhs: Self) -> Self::Output {
+//RS         jet_std::Duration {
+//RS             ns: self.difference_ns(&rhs),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::ops::Add<JetInstant> for jet_std::Duration {
+//RS     type Output = JetInstant;
+//RS 
+//RS     fn add(self, rhs: JetInstant) -> Self::Output {
+//RS         rhs.plus_duration_ns(self.ns)
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for jet_std::Duration {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self.ns == rhs.ns
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for jet_std::Duration {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.ns.cmp(&rhs.ns))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for JetInstant {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for JetInstant {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(rhs))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_time_instant_now() -> JetInstant {
+//RS     JetInstant::now()
+//RS }
+//RS fn jet_instant_elapsed_millis(i: &JetInstant) -> i64 {
+//RS     i.elapsed_millis()
+//RS }
+//RS fn jet_instant_elapsed(i: &JetInstant) -> jet_std::Duration {
+//RS     jet_std::Duration {
+//RS         ns: i.elapsed_nanos(),
+//RS     }
+//RS }
+//RS // D-TIME-INT-ADAPTER1: the native temporal kernel uses i64 while AOT's
+//RS // default-Int ABI carries an exact packed word. Decode once at the surface
+//RS // boundary; constructors below keep all temporal policy in Core/Time.rs.
+//RS fn jet_time_unix_input(value: i64) -> i64 {
+//RS     jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
+//RS         jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+//RS     })
+//RS }
+//RS fn jet_time_owned_input(value: &jet_foundation::Numeric::JetInt) -> i64 {
+//RS     jet_std::jet_int_owned_to_i64(value).unwrap_or_else(|_| {
+//RS         jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+//RS     })
+//RS }
+//RS fn jet_local_date_owned(
+//RS     year: &jet_foundation::Numeric::JetInt,
+//RS     month: &jet_foundation::Numeric::JetInt,
+//RS     day: &jet_foundation::Numeric::JetInt,
+//RS ) -> JetDate {
+//RS     JetDate::new(
+//RS         jet_time_owned_input(year),
+//RS         jet_time_owned_input(month),
+//RS         jet_time_owned_input(day),
+//RS     )
+//RS }
+//RS fn jet_local_time_owned(
+//RS     hour: &jet_foundation::Numeric::JetInt,
+//RS     minute: &jet_foundation::Numeric::JetInt,
+//RS     second: &jet_foundation::Numeric::JetInt,
+//RS ) -> JetLocalTime {
+//RS     JetLocalTime::new(
+//RS         jet_time_owned_input(hour),
+//RS         jet_time_owned_input(minute),
+//RS         jet_time_owned_input(second),
+//RS     )
+//RS }
+//RS fn jet_period_owned(
+//RS     years: &jet_foundation::Numeric::JetInt,
+//RS     months: &jet_foundation::Numeric::JetInt,
+//RS     days: &jet_foundation::Numeric::JetInt,
+//RS ) -> JetPeriod {
+//RS     JetPeriod::new(
+//RS         jet_time_owned_input(years),
+//RS         jet_time_owned_input(months),
+//RS         jet_time_owned_input(days),
+//RS     )
+//RS }
+//RS fn jet_time_datetime(
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS     hour: i64,
+//RS     minute: i64,
+//RS     second: i64,
+//RS ) -> JetDateTime {
+//RS     JetDateTime::from_parts(
+//RS         jet_time_unix_input(year),
+//RS         jet_time_unix_input(month),
+//RS         jet_time_unix_input(day),
+//RS         jet_time_unix_input(hour),
+//RS         jet_time_unix_input(minute),
+//RS         jet_time_unix_input(second),
+//RS         0,
+//RS     )
+//RS }
+//RS fn jet_time_time(hour: i64, minute: i64, second: i64) -> JetLocalTime {
+//RS     JetLocalTime::new(
+//RS         jet_time_unix_input(hour),
+//RS         jet_time_unix_input(minute),
+//RS         jet_time_unix_input(second),
+//RS     )
+//RS }
+//RS fn jet_time_days_in_month(year: i64, month: i64) -> i64 {
+//RS     JetDate::days_in_month_of(jet_time_unix_input(year), jet_time_unix_input(month))
+//RS }
+//RS fn jet_time_is_leap_year(year: i64) -> bool {
+//RS     JetDate::is_leap(jet_time_unix_input(year))
+//RS }
+//RS fn jet_calendar_isleap(year: i64) -> bool {
+//RS     jet_time_is_leap_year(year)
+//RS }
+//RS fn jet_calendar_leapdays(
+//RS     first: i64,
+//RS     second: i64,
+//RS ) -> jet_foundation::Numeric::JetInt {
+//RS     let (start, end) = if first <= second {
+//RS         (first, second)
+//RS     } else {
+//RS         (second, first)
+//RS     };
+//RS     jet_std::jet_int_owned_from_i64(
+//RS         (start..end)
+//RS             .filter(|year| JetDate::is_leap(*year))
+//RS             .count() as i64,
+//RS     )
+//RS }
+//RS fn jet_calendar_weekday_i64(year: i64, month: i64, day: i64) -> i64 {
+//RS     let adjusted_year = if month < 3 { year - 1 } else { year };
+//RS     let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+//RS     let month_index = month.saturating_sub(1).clamp(0, 11) as usize;
+//RS     let sunday_zero = (adjusted_year
+//RS         + adjusted_year.div_euclid(4)
+//RS         - adjusted_year.div_euclid(100)
+//RS         + adjusted_year.div_euclid(400)
+//RS         + offsets[month_index]
+//RS         + day)
+//RS         .rem_euclid(7);
+//RS     (sunday_zero + 6).rem_euclid(7)
+//RS }
+//RS fn jet_coll_owned_values(
+//RS     values: Vec<i64>,
+//RS ) -> Vec<jet_foundation::Numeric::JetInt> {
+//RS     values
+//RS         .into_iter()
+//RS         .map(jet_std::jet_int_owned_from_i64)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_coll_sift_down_aot(values: &mut [i64], mut index: usize) {
+//RS     loop {
+//RS         let left = index.saturating_mul(2).saturating_add(1);
+//RS         if left >= values.len() {
+//RS             break;
+//RS         }
+//RS         let right = left + 1;
+//RS         let child = if right < values.len() && values[right] < values[left] {
+//RS             right
+//RS         } else {
+//RS             left
+//RS         };
+//RS         if values[index] <= values[child] {
+//RS             break;
+//RS         }
+//RS         values.swap(index, child);
+//RS         index = child;
+//RS     }
+//RS }
+//RS 
+//RS fn jet_coll_heappop_aot(values: &[i64]) -> (Vec<i64>, Option<i64>) {
+//RS     if values.is_empty() {
+//RS         return (Vec::new(), None);
+//RS     }
+//RS     if values.len() == 1 {
+//RS         return (Vec::new(), Some(values[0]));
+//RS     }
+//RS     let mut heap = Vec::with_capacity(values.len() - 1);
+//RS     heap.push(values[values.len() - 1]);
+//RS     heap.extend_from_slice(&values[1..values.len() - 1]);
+//RS     let value = values[0];
+//RS     jet_coll_sift_down_aot(&mut heap, 0);
+//RS     (heap, Some(value))
+//RS }
+//RS 
+//RS fn jet_coll_heappushpop_aot(values: &[i64], value: i64) -> (Vec<i64>, i64) {
+//RS     if values.is_empty() || value <= values[0] {
+//RS         return (values.to_vec(), value);
+//RS     }
+//RS     let popped = values[0];
+//RS     let mut heap = Vec::with_capacity(values.len());
+//RS     heap.push(value);
+//RS     heap.extend_from_slice(&values[1..]);
+//RS     jet_coll_sift_down_aot(&mut heap, 0);
+//RS     (heap, popped)
+//RS }
+//RS 
+//RS fn jet_coll_heapreplace_aot(values: &[i64], value: i64) -> (Vec<i64>, Option<i64>) {
+//RS     if values.is_empty() {
+//RS         return (vec![value], None);
+//RS     }
+//RS     let popped = values[0];
+//RS     let mut heap = Vec::with_capacity(values.len());
+//RS     heap.push(value);
+//RS     heap.extend_from_slice(&values[1..]);
+//RS     jet_coll_sift_down_aot(&mut heap, 0);
+//RS     (heap, Some(popped))
+//RS }
+//RS 
+//RS fn jet_coll_heappop(
+//RS     values: &[i64],
+//RS ) -> (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS ) {
+//RS     let (heap, value) = jet_coll_heappop_aot(values);
+//RS     (
+//RS         jet_coll_owned_values(heap),
+//RS         value
+//RS             .map(jet_std::jet_int_owned_from_i64)
+//RS             .ok_or(JetAbsent),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_coll_heappushpop(
+//RS     values: &[i64],
+//RS     value: i64,
+//RS ) -> (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     jet_foundation::Numeric::JetInt,
+//RS ) {
+//RS     let (heap, popped) = jet_coll_heappushpop_aot(values, value);
+//RS     (
+//RS         jet_coll_owned_values(heap),
+//RS         jet_std::jet_int_owned_from_i64(popped),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_coll_heapreplace(
+//RS     values: &[i64],
+//RS     value: i64,
+//RS ) -> (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS ) {
+//RS     let (heap, popped) = jet_coll_heapreplace_aot(values, value);
+//RS     (
+//RS         jet_coll_owned_values(heap),
+//RS         popped
+//RS             .map(jet_std::jet_int_owned_from_i64)
+//RS             .ok_or(JetAbsent),
+//RS     )
+//RS }
+//RS impl JetShow for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS ) {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "(heap,value) {{ heap: {}, value: {} }}",
+//RS             self.0.jet_show(),
+//RS             self.1.jet_show(),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS ) {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
+//RS ) {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     jet_foundation::Numeric::JetInt,
+//RS ) {
+//RS     fn jet_show(&self) -> String {
+//RS         format!(
+//RS             "(heap,value) {{ heap: {}, value: {} }}",
+//RS             self.0.jet_show(),
+//RS             self.1.jet_show(),
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     jet_foundation::Numeric::JetInt,
+//RS ) {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for (
+//RS     Vec<jet_foundation::Numeric::JetInt>,
+//RS     jet_foundation::Numeric::JetInt,
+//RS ) {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS impl JetShow for (String, String) {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("({}, {})", self.0.jet_show(), self.1.jet_show())
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for (String, String) {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for (String, String) {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_calendar_weekday(
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS ) -> jet_foundation::Numeric::JetInt {
+//RS     jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, day))
+//RS }
+//RS fn jet_calendar_monthrange(
+//RS     year: i64,
+//RS     month: i64,
+//RS ) -> (
+//RS     jet_foundation::Numeric::JetInt,
+//RS     jet_foundation::Numeric::JetInt,
+//RS ) {
+//RS     (
+//RS         jet_std::jet_int_owned_from_i64(jet_time_days_in_month(year, month)),
+//RS         jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, 1)),
+//RS     )
+//RS }
+//RS fn jet_calendar_monthcalendar(
+//RS     year: i64,
+//RS     month: i64,
+//RS ) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
+//RS     jet_calendar_monthcalendar_start(year, month, 0)
+//RS }
+//RS fn jet_calendar_monthcalendar_start(
+//RS     year: i64,
+//RS     month: i64,
+//RS     firstweekday: i64,
+//RS ) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
+//RS     let days = jet_time_days_in_month(year, month);
+//RS     let start = (jet_calendar_weekday_i64(year, month, 1) - firstweekday).rem_euclid(7);
+//RS     let mut weeks = Vec::new();
+//RS     let mut week = Vec::new();
+//RS     for _ in 0..start {
+//RS         week.push(jet_std::jet_int_owned_from_i64(0));
+//RS     }
+//RS     for day in 1..=days {
+//RS         week.push(jet_std::jet_int_owned_from_i64(day));
+//RS         if week.len() == 7 {
+//RS             weeks.push(week);
+//RS             week = Vec::new();
+//RS         }
+//RS     }
+//RS     if !week.is_empty() {
+//RS         while week.len() < 7 {
+//RS             week.push(jet_std::jet_int_owned_from_i64(0));
+//RS         }
+//RS         weeks.push(week);
+//RS     }
+//RS     weeks
+//RS }
+//RS fn jet_calendar_yearcalendar(
+//RS     year: i64,
+//RS ) -> Vec<Vec<Vec<jet_foundation::Numeric::JetInt>>> {
+//RS     (1..=12)
+//RS         .map(|month| jet_calendar_monthcalendar(year, month))
+//RS         .collect()
+//RS }
+//RS fn jet_calendar_weekheader(width: i64, firstweekday: i64) -> Vec<String> {
+//RS     let width = width.max(1) as usize;
+//RS     (0..7)
+//RS         .map(|index| {
+//RS             let text = jet_calendar_day_abbr((index + firstweekday).rem_euclid(7));
+//RS             let bytes = text.as_bytes();
+//RS             if bytes.len() >= width {
+//RS                 String::from_utf8_lossy(&bytes[..width]).into_owned()
+//RS             } else {
+//RS                 format!("{text}{}", " ".repeat(width - bytes.len()))
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS fn jet_calendar_formatmonth(year: i64, month: i64, width: i64) -> String {
+//RS     let width = width.max(2) as usize;
+//RS     let title = format!("{} {year}", jet_calendar_month_name(month));
+//RS     let title_width = width.saturating_mul(7).saturating_add(6);
+//RS     let title_bytes = title.as_bytes();
+//RS     let title = if title_bytes.len() >= title_width {
+//RS         String::from_utf8_lossy(&title_bytes[..title_width]).into_owned()
+//RS     } else {
+//RS         let left = (title_width - title_bytes.len()) / 2;
+//RS         let right = title_width - title_bytes.len() - left;
+//RS         format!("{}{}{}", " ".repeat(left), title, " ".repeat(right))
+//RS     };
+//RS     let cells = jet_calendar_weekheader(width as i64, 0);
+//RS     let mut out = format!("{title}\n{}\n", cells.join(" "));
+//RS     for week in jet_calendar_monthcalendar(year, month) {
+//RS         let row = week
+//RS             .into_iter()
+//RS             .map(|day| {
+//RS                 let day = day.to_raw().to_string();
+//RS                 let cell = if day == "0" { String::new() } else { day };
+//RS                 if cell.len() >= width {
+//RS                     cell[..width].to_string()
+//RS                 } else {
+//RS                     format!("{}{}", " ".repeat(width - cell.len()), cell)
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(" ");
+//RS         out.push_str(&row);
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS fn jet_calendar_formatyear(year: i64) -> String {
+//RS     let mut out = String::new();
+//RS     for month in 1..=12 {
+//RS         out.push_str(&jet_calendar_formatmonth(year, month, 3));
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS fn jet_calendar_day_name(weekday: i64) -> String {
+//RS     [
+//RS         "Monday",
+//RS         "Tuesday",
+//RS         "Wednesday",
+//RS         "Thursday",
+//RS         "Friday",
+//RS         "Saturday",
+//RS         "Sunday",
+//RS     ]
+//RS     .get(weekday.clamp(0, 6) as usize)
+//RS     .unwrap_or(&"Sunday")
+//RS     .to_string()
+//RS }
+//RS fn jet_calendar_day_abbr(weekday: i64) -> String {
+//RS     ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+//RS         .get(weekday.clamp(0, 6) as usize)
+//RS         .unwrap_or(&"Sun")
+//RS         .to_string()
+//RS }
+//RS fn jet_calendar_month_name(month: i64) -> String {
+//RS     [
+//RS         "January",
+//RS         "February",
+//RS         "March",
+//RS         "April",
+//RS         "May",
+//RS         "June",
+//RS         "July",
+//RS         "August",
+//RS         "September",
+//RS         "October",
+//RS         "November",
+//RS         "December",
+//RS     ]
+//RS     .get(month.saturating_sub(1).clamp(0, 11) as usize)
+//RS     .unwrap_or(&"December")
+//RS     .to_string()
+//RS }
+//RS fn jet_calendar_month_abbr(month: i64) -> String {
+//RS     [
+//RS         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+//RS         "Dec",
+//RS     ]
+//RS     .get(month.saturating_sub(1).clamp(0, 11) as usize)
+//RS     .unwrap_or(&"Dec")
+//RS     .to_string()
+//RS }
+//RS fn jet_calendar_timegm(
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS     hour: i64,
+//RS     minute: i64,
+//RS     second: i64,
+//RS ) -> jet_foundation::Numeric::JetInt {
+//RS     jet_std::jet_int_owned_from_i64(
+//RS         JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds(),
+//RS     )
+//RS }
+//RS fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
+//RS     JetPeriod::new(
+//RS         jet_time_unix_input(years),
+//RS         jet_time_unix_input(months),
+//RS         jet_time_unix_input(days),
+//RS     )
+//RS }
+//RS fn jet_time_period_days(days: i64) -> JetPeriod {
+//RS     JetPeriod::days(jet_time_unix_input(days))
+//RS }
+//RS fn jet_time_period_months(months: i64) -> JetPeriod {
+//RS     JetPeriod::months(jet_time_unix_input(months))
+//RS }
+//RS fn jet_time_period_years(years: i64) -> JetPeriod {
+//RS     JetPeriod::years(jet_time_unix_input(years))
+//RS }
+//RS fn jet_time_from_unix_ms(value: i64) -> JetDateTime {
+//RS     JetDateTime::from_unix_ms(jet_time_unix_input(value))
+//RS }
+//RS fn jet_time_from_unix_seconds(value: i64) -> JetDateTime {
+//RS     JetDateTime::from_unix_seconds(jet_time_unix_input(value))
+//RS }
+//RS fn jet_time_from_unix_microseconds(value: i64) -> JetDateTime {
+//RS     JetDateTime::from_unix_microseconds(jet_time_unix_input(value))
+//RS }
+//RS fn jet_time_from_unix_nanoseconds(value: i64) -> JetDateTime {
+//RS     JetDateTime::from_unix_nanoseconds(jet_time_unix_input(value))
+//RS }
+//RS 
+//RS fn jet_time_now_utc() -> JetDateTime {
+//RS     JetDateTime::now()
+//RS }
+//RS fn jet_time_today() -> JetDate {
+//RS     JetDate::today_utc()
+//RS }
+//RS fn jet_time_zone_named(name: &String) -> Result<JetZone, String> {
+//RS     JetZone::named(name)
+//RS }
+//RS fn jet_time_zone_utc() -> JetZone {
+//RS     JetZone::utc()
+//RS }
+//RS fn jet_time_zoned(dt: &JetDateTime, zone: &JetZone) -> JetZonedDateTime {
+//RS     dt.in_zone(zone)
+//RS }
+//RS fn jet_time_zoned_local(
+//RS     date: &JetDate,
+//RS     time: &JetLocalTime,
+//RS     zone: &JetZone,
+//RS     disambiguation: &String,
+//RS ) -> Result<JetZonedDateTime, String> {
+//RS     JetZonedDateTime::from_local_with_disambiguation(date, time, zone, disambiguation)
+//RS }
+//RS fn jet_datetime_plus_duration(dt: &JetDateTime, d: &crate::jet_std::Duration) -> JetDateTime {
+//RS     dt.plus_duration_ns(d.ns)
+//RS }
+//RS fn jet_datetime_difference(a: &JetDateTime, b: &JetDateTime) -> crate::jet_std::Duration {
+//RS     crate::jet_std::Duration {
+//RS         ns: a.difference_ns(b),
+//RS     }
+//RS }
+//RS fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &crate::jet_std::Duration) -> JetZonedDateTime {
+//RS     z.add_duration_ns(d.ns)
+//RS }
+//RS fn jet_time_text_error(message: String) -> jet_std::TextError {
+//RS     jet_std::TextError { message }
+//RS }
+//RS 
+//RS fn jet_time_range_error(reason: String) -> jet_std::RangeError {
+//RS     jet_std::RangeError { reason }
+//RS }
+//RS 
+//RS impl JetDate {
+//RS     fn diff_days_value(&self, other: JetDate) -> i64 {
+//RS         self.diff_days(&other)
+//RS     }
+//RS 
+//RS     fn add_period_value(&self, period: JetPeriod) -> JetDate {
+//RS         self.add_period(&period)
+//RS     }
+//RS 
+//RS     fn subtract_period_value(&self, period: JetPeriod) -> JetDate {
+//RS         self.subtract_period(&period)
+//RS     }
+//RS 
+//RS     fn until_duration(
+//RS         &self,
+//RS         other: JetDate,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.until_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn since_duration(
+//RS         &self,
+//RS         other: JetDate,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.since_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+//RS         self.format_checked(pattern).map_err(jet_time_text_error)
+//RS     }
+//RS 
+//RS     fn equal_value(&self, other: JetDate) -> bool {
+//RS         self == &other
+//RS     }
+//RS 
+//RS     fn compare_value(&self, other: JetDate) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(&other))
+//RS     }
+//RS }
+//RS 
+//RS impl JetLocalTime {
+//RS     fn add_duration_value(&self, duration: jet_std::Duration) -> JetLocalTime {
+//RS         self.add_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetLocalTime {
+//RS         self.subtract_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn until_duration(
+//RS         &self,
+//RS         other: JetLocalTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.until_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn since_duration(
+//RS         &self,
+//RS         other: JetLocalTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.since_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+//RS         self.format_checked(pattern).map_err(jet_time_text_error)
+//RS     }
+//RS 
+//RS     fn equal_value(&self, other: JetLocalTime) -> bool {
+//RS         self == &other
+//RS     }
+//RS 
+//RS     fn compare_value(&self, other: JetLocalTime) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(&other))
+//RS     }
+//RS }
+//RS 
+//RS impl JetDateTime {
+//RS     fn to_unix_ms_value(&self) -> jet_foundation::Numeric::JetInt {
+//RS         jet_std::jet_int_owned_from_i64(self.to_unix_ms())
+//RS     }
+//RS 
+//RS     fn to_unix_seconds_value(&self) -> jet_foundation::Numeric::JetInt {
+//RS         jet_std::jet_int_owned_from_i64(self.to_unix_seconds())
+//RS     }
+//RS 
+//RS     fn to_unix_microseconds_value(
+//RS         &self,
+//RS     ) -> Result<jet_foundation::Numeric::JetInt, jet_std::RangeError> {
+//RS         self.to_unix_microseconds()
+//RS             .map(jet_std::jet_int_owned_from_i64)
+//RS             .map_err(jet_time_range_error)
+//RS     }
+//RS 
+//RS     fn to_unix_nanoseconds_value(
+//RS         &self,
+//RS     ) -> Result<jet_foundation::Numeric::JetInt, jet_std::RangeError> {
+//RS         self.to_unix_nanoseconds()
+//RS             .map(jet_std::jet_int_owned_from_i64)
+//RS             .map_err(jet_time_range_error)
+//RS     }
+//RS 
+//RS     fn plus_duration_value(&self, duration: jet_std::Duration) -> JetDateTime {
+//RS         self.plus_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetDateTime {
+//RS         self.subtract_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn difference_duration(&self, other: JetDateTime) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.difference_ns(&other),
+//RS         }
+//RS     }
+//RS 
+//RS     fn add_period_value(&self, period: JetPeriod) -> JetDateTime {
+//RS         self.add_period(&period)
+//RS     }
+//RS 
+//RS     fn subtract_period_value(&self, period: JetPeriod) -> JetDateTime {
+//RS         self.subtract_period(&period)
+//RS     }
+//RS 
+//RS     fn until_duration(
+//RS         &self,
+//RS         other: JetDateTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.until_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn since_duration(
+//RS         &self,
+//RS         other: JetDateTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.since_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn in_zone_value(&self, zone: JetZone) -> JetZonedDateTime {
+//RS         self.in_zone(&zone)
+//RS     }
+//RS 
+//RS     fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+//RS         self.format_checked(pattern).map_err(jet_time_text_error)
+//RS     }
+//RS 
+//RS     fn equal_value(&self, other: JetDateTime) -> bool {
+//RS         self == &other
+//RS     }
+//RS 
+//RS     fn compare_value(&self, other: JetDateTime) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(&other))
+//RS     }
+//RS }
+//RS 
+//RS impl JetInstant {
+//RS     fn elapsed_duration(&self) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.elapsed_nanos(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn equal_value(&self, other: JetInstant) -> bool {
+//RS         self == &other
+//RS     }
+//RS 
+//RS     fn compare_value(&self, other: JetInstant) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(&other))
+//RS     }
+//RS }
+//RS 
+//RS impl JetPeriod {
+//RS     fn add_value(&self, other: JetPeriod) -> JetPeriod {
+//RS         self.add(&other)
+//RS     }
+//RS 
+//RS     fn sub_value(&self, other: JetPeriod) -> JetPeriod {
+//RS         self.sub(&other)
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) trait JetPeriodAnchor {
+//RS     fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64;
+//RS }
+//RS 
+//RS impl JetPeriodAnchor for JetDate {
+//RS     fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+//RS         period.total_in_date(unit, self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetPeriodAnchor for JetDateTime {
+//RS     fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+//RS         period.total_in_datetime(unit, self)
+//RS     }
+//RS }
+//RS 
+//RS impl JetPeriod {
+//RS     fn total_in_value<A: JetPeriodAnchor>(&self, unit: &String, anchor: &A) -> f64 {
+//RS         anchor.period_total_in(self, unit)
+//RS     }
+//RS }
+//RS 
+//RS impl JetZone {
+//RS     fn next_transition_value(&self, utc_seconds: i64) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_outcome_of(self.next_transition(utc_seconds))
+//RS     }
+//RS 
+//RS     fn previous_transition_value(&self, utc_seconds: i64) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_outcome_of(self.previous_transition(utc_seconds))
+//RS     }
+//RS 
+//RS     fn start_of_day_value(&self, date: JetDate) -> JetZonedDateTime {
+//RS         self.start_of_day_zoned(&date)
+//RS     }
+//RS 
+//RS     fn hours_in_day_value(&self, date: JetDate) -> i64 {
+//RS         self.hours_in_day(&date)
+//RS     }
+//RS }
+//RS 
+//RS impl JetZonedDateTime {
+//RS     fn add_duration_value(&self, duration: jet_std::Duration) -> JetZonedDateTime {
+//RS         self.add_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetZonedDateTime {
+//RS         self.subtract_duration_ns(duration.ns)
+//RS     }
+//RS 
+//RS     fn add_period_value(&self, period: JetPeriod) -> JetZonedDateTime {
+//RS         self.add_period(&period)
+//RS     }
+//RS 
+//RS     fn subtract_period_value(&self, period: JetPeriod) -> JetZonedDateTime {
+//RS         self.subtract_period(&period)
+//RS     }
+//RS 
+//RS     fn until_duration(
+//RS         &self,
+//RS         other: JetZonedDateTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.until_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn since_duration(
+//RS         &self,
+//RS         other: JetZonedDateTime,
+//RS         largest_unit: &String,
+//RS         smallest_unit: &String,
+//RS         rounding_mode: &String,
+//RS         increment: i64,
+//RS     ) -> jet_std::Duration {
+//RS         jet_std::Duration {
+//RS             ns: self.since_ns(
+//RS                 &other,
+//RS                 largest_unit,
+//RS                 smallest_unit,
+//RS                 rounding_mode,
+//RS                 increment,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn next_transition_value(&self) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_outcome_of(self.next_transition())
+//RS     }
+//RS 
+//RS     fn previous_transition_value(&self) -> JetOutcome<i64, JetAbsent> {
+//RS         jet_outcome_of(self.previous_transition())
+//RS     }
+//RS 
+//RS     fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+//RS         self.format_checked(pattern).map_err(jet_time_text_error)
+//RS     }
+//RS 
+//RS     fn equal_value(&self, other: JetZonedDateTime) -> bool {
+//RS         self == &other
+//RS     }
+//RS 
+//RS     fn compare_value(&self, other: JetZonedDateTime) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(&other))
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
+//RS     crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
+//RS /// already rejected holes that could make the literal invalid.
+//RS fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateTime {
+//RS     let text = jet_typed_datetime_interpolate(literals, &holes);
+//RS     match jet_time_parse_rfc3339(&text) {
+//RS         Ok(value) => value,
+//RS         Err(error) => unreachable!("sema accepted an invalid DateTime typed head: {error}"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_url_from_parts(
+//RS     scheme: &String,
+//RS     host: &String,
+//RS     path: &String,
+//RS     query: &Vec<Vec<String>>,
+//RS     fragment: &String,
+//RS ) -> Result<crate::jet_std::JetURL, String> {
+//RS     crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
+//RS         .map(crate::jet_std::JetURL::from_url_parts)
+//RS }
+//RS fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
+//RS     crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
+//RS }
+//RS fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
+//RS     crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
+//RS }
+//RS fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
+//RS     let rows: Vec<(String, String)> = pairs
+//RS         .iter()
+//RS         .filter(|r| !r.is_empty())
+//RS         .map(|r| {
+//RS             (
+//RS                 r.get(0).cloned().unwrap_or_default(),
+//RS                 r.get(1).cloned().unwrap_or_default(),
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     rows.iter()
+//RS         .map(|(k, v)| {
+//RS             format!(
+//RS                 "{}={}",
+//RS                 crate::jet_std::jet_url_percent_encode(k, false),
+//RS                 crate::jet_std::jet_url_percent_encode(v, false)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("&")
+//RS }
+//RS fn jet_url_percent_encode_component(s: &String) -> String {
+//RS     crate::jet_std::jet_url_percent_encode(s, false)
+//RS }
+//RS fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
+//RS     crate::jet_std::jet_url_percent_decode_str(s)
+//RS }
+//RS fn jet_url_join(base: &String, rel: &String) -> String {
+//RS     crate::jet_std::jet_url_join_text(base, rel)
+//RS }
+//RS fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
+//RS     crate::jet_std::jet_url_parse_qsl_rows(query)
+//RS }
+//RS fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
+//RS     crate::jet_std::jet_url_query_rows(pairs)
+//RS }
+//RS fn jet_url_split_fragment(text: &String) -> (String, String) {
+//RS     let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
+//RS     (fragment, url)
+//RS }
+//RS fn jet_url_quote(text: &String) -> String {
+//RS     crate::jet_std::jet_url_quote(text)
+//RS }
+//RS fn jet_url_quote_from_bytes(data: &Vec<u8>) -> String {
+//RS     crate::jet_std::jet_url_quote_from_bytes(data)
+//RS }
+//RS fn jet_url_quote_plus(text: &String) -> String {
+//RS     crate::jet_std::jet_url_quote_plus(text)
+//RS }
+//RS fn jet_url_unquote(text: &String) -> Result<String, String> {
+//RS     crate::jet_std::jet_url_unquote(text)
+//RS }
+//RS fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
+//RS     crate::jet_std::jet_url_unquote_to_bytes(text)
+//RS }
+//RS fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
+//RS     crate::jet_std::jet_url_unquote_plus(text)
+//RS }
+//RS fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
+//RS     url.to_string_value()
+//RS }
+//RS fn jet_url_urldefrag(text: &String) -> (String, String) {
+//RS     crate::jet_std::jet_url_split_fragment(text)
+//RS }
+//RS 
+//RS fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
+//RS     crate::jet_std::JetMIME::parse(s)
+//RS }
+//RS fn jet_mime_from_extension(ext: &String) -> Option<String> {
+//RS     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
+//RS }
+//RS fn jet_mime_extension(mime: &String) -> Option<String> {
+//RS     crate::jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
+//RS }
+//RS 
+//RS // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
+//RS #[inline(always)]
+//RS fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
+//RS     crate::jet_precise_numeric::decimal_from_str(s)
+//RS         .map(crate::jet_std::jet_std_decimal_from_exact)
+//RS         .unwrap_or_else(|_| {
+//RS             jet_panic(
+//RS                 "",
+//RS                 0,
+//RS                 crate::jet_precise_numeric::failure_message("Decimal", "from_str"),
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS impl __jet_Comparable for jet_std::JetDecimal {
+//RS     #[inline(always)]
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(crate::jet_precise_numeric::decimal_compare(
+//RS             &crate::jet_std::jet_std_decimal_to_exact(self),
+//RS             &crate::jet_std::jet_std_decimal_to_exact(rhs),
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS // D-NUMTYPE1=A: exact ratios. Every answer is optional, because a zero bottom
+//RS // has no value and a product can leave the range.
+//RS fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFraction> {
+//RS     crate::jet_precise_numeric::fraction_new(
+//RS         crate::jet_std::jet_std_raw_to_exact(numerator),
+//RS         crate::jet_std::jet_std_raw_to_exact(denominator),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS }
+//RS fn jet_fraction_from_parts(numerator: i64, denominator: i64) -> jet_std::JetFraction {
+//RS     jet_fraction_new(numerator, denominator).unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "from_parts")
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_fraction_from_owned_parts(
+//RS     numerator: &jet_foundation::Numeric::JetInt,
+//RS     denominator: &jet_foundation::Numeric::JetInt,
+//RS ) -> jet_std::JetFraction {
+//RS     jet_fraction_from_parts(numerator.to_raw(), denominator.to_raw())
+//RS }
+//RS fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+//RS     let value = crate::jet_precise_numeric::fraction_add(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS         &crate::jet_std::jet_std_fraction_to_exact(b),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "add")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_fraction_from_exact(value)
+//RS }
+//RS fn jet_fraction_sub(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+//RS     let value = crate::jet_precise_numeric::fraction_sub(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS         &crate::jet_std::jet_std_fraction_to_exact(b),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "sub")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_fraction_from_exact(value)
+//RS }
+//RS fn jet_fraction_mul(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+//RS     let value = crate::jet_precise_numeric::fraction_mul(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS         &crate::jet_std::jet_std_fraction_to_exact(b),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "mul")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_fraction_from_exact(value)
+//RS }
+//RS fn jet_fraction_div(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+//RS     let value = crate::jet_precise_numeric::fraction_div(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS         &crate::jet_std::jet_std_fraction_to_exact(b),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "div")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_fraction_from_exact(value)
+//RS }
+//RS fn jet_fraction_from_int(value: i64) -> jet_std::JetFraction {
+//RS     crate::jet_precise_numeric::fraction_from_int(crate::jet_std::jet_std_raw_to_exact(value))
+//RS         .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS         .unwrap_or_else(|| {
+//RS             panic!(
+//RS                 "{}",
+//RS                 crate::jet_precise_numeric::failure_message("Fraction", "from_int")
+//RS             )
+//RS         })
+//RS }
+//RS fn jet_fraction_from_float(value: f64) -> jet_std::JetFraction {
+//RS     crate::jet_precise_numeric::fraction_from_float(value)
+//RS         .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS         .unwrap_or_else(|| {
+//RS             panic!(
+//RS                 "{}",
+//RS                 crate::jet_precise_numeric::failure_message("Fraction", "from_float")
+//RS             )
+//RS         })
+//RS }
+//RS fn jet_fraction_from_decimal(value: jet_std::JetDecimal) -> jet_std::JetFraction {
+//RS     crate::jet_precise_numeric::fraction_from_decimal(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(&value),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "from_decimal")
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_fraction_equal(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> bool {
+//RS     crate::jet_precise_numeric::fraction_equal(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS         &crate::jet_std::jet_std_fraction_to_exact(b),
+//RS     )
+//RS }
+//RS fn jet_fraction_numerator(a: &jet_std::JetFraction) -> i64 {
+//RS     crate::jet_std::jet_std_exact_to_raw(crate::jet_precise_numeric::fraction_numerator(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     ))
+//RS }
+//RS fn jet_fraction_denominator(a: &jet_std::JetFraction) -> i64 {
+//RS     crate::jet_std::jet_std_exact_to_raw(crate::jet_precise_numeric::fraction_denominator(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     ))
+//RS }
+//RS fn jet_fraction_to_string(a: &jet_std::JetFraction) -> String {
+//RS     crate::jet_precise_numeric::fraction_to_string(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     )
+//RS }
+//RS fn jet_fraction_to_float(a: &jet_std::JetFraction) -> f64 {
+//RS     crate::jet_precise_numeric::fraction_to_float(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     )
+//RS }
+//RS fn jet_fraction_is_zero(a: &jet_std::JetFraction) -> bool {
+//RS     crate::jet_precise_numeric::fraction_is_zero(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     )
+//RS }
+//RS fn jet_fraction_to_int(a: &jet_std::JetFraction) -> i64 {
+//RS     let value = crate::jet_precise_numeric::fraction_to_int(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "to_int")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_exact_to_raw(value)
+//RS }
+//RS fn jet_fraction_to_decimal(a: &jet_std::JetFraction) -> jet_std::JetDecimal {
+//RS     crate::jet_precise_numeric::fraction_to_decimal(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(a),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_decimal_from_exact)
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Fraction", "to_decimal")
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_decimal_from_int(value: i64) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_from_int(
+//RS         crate::jet_std::jet_std_raw_to_exact(value),
+//RS     ))
+//RS }
+//RS fn jet_decimal_from_float(value: f64) -> jet_std::JetDecimal {
+//RS     crate::jet_precise_numeric::decimal_from_float(value)
+//RS         .map(crate::jet_std::jet_std_decimal_from_exact)
+//RS         .unwrap_or_else(|| {
+//RS             panic!(
+//RS                 "{}",
+//RS                 crate::jet_precise_numeric::failure_message("Decimal", "from_float")
+//RS             )
+//RS         })
+//RS }
+//RS fn jet_decimal_from_fraction(value: jet_std::JetFraction) -> jet_std::JetDecimal {
+//RS     crate::jet_precise_numeric::decimal_from_fraction(
+//RS         &crate::jet_std::jet_std_fraction_to_exact(&value),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_decimal_from_exact)
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Decimal", "from_fraction")
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_decimal_div(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetFraction {
+//RS     crate::jet_precise_numeric::decimal_div(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Decimal", "div")
+//RS         )
+//RS     })
+//RS }
+//RS fn jet_decimal_round(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_round(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     ))
+//RS }
+//RS fn jet_decimal_floor(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_floor(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     ))
+//RS }
+//RS fn jet_decimal_ceil(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_ceil(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     ))
+//RS }
+//RS fn jet_decimal_to_int(a: &jet_std::JetDecimal) -> i64 {
+//RS     let value = crate::jet_precise_numeric::decimal_to_int(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     )
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Decimal", "to_int")
+//RS         )
+//RS     });
+//RS     crate::jet_std::jet_std_exact_to_raw(value)
+//RS }
+//RS fn jet_decimal_to_fraction(a: &jet_std::JetDecimal) -> jet_std::JetFraction {
+//RS     crate::jet_precise_numeric::decimal_to_fraction(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     )
+//RS     .map(crate::jet_std::jet_std_fraction_from_exact)
+//RS     .unwrap_or_else(|| {
+//RS         panic!(
+//RS             "{}",
+//RS             crate::jet_precise_numeric::failure_message("Decimal", "to_fraction")
+//RS         )
+//RS     })
+//RS }
+//RS #[inline(always)]
+//RS fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_add(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     ))
+//RS }
+//RS #[inline(always)]
+//RS fn jet_decimal_sub(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_sub(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     ))
+//RS }
+//RS fn jet_decimal_mul(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+//RS     crate::jet_std::jet_std_decimal_from_exact(crate::jet_precise_numeric::decimal_mul(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     ))
+//RS }
+//RS fn jet_decimal_equal(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> bool {
+//RS     crate::jet_precise_numeric::decimal_equal(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     )
+//RS }
+//RS #[inline(always)]
+//RS fn jet_decimal_compare(
+//RS     a: &jet_std::JetDecimal,
+//RS     b: &jet_std::JetDecimal,
+//RS ) -> __jet_Ordering {
+//RS     jet_time_ordering(crate::jet_precise_numeric::decimal_compare(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS         &crate::jet_std::jet_std_decimal_to_exact(b),
+//RS     ))
+//RS }
+//RS #[inline(always)]
+//RS fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
+//RS     crate::jet_precise_numeric::decimal_to_string(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     )
+//RS }
+//RS // D-TYPE2-DEFAULT1=A: the AOT half of the exact-to-approximate crossing. The
+//RS // checker admits an exact Decimal at the irrational-result math functions
+//RS // exactly as it admits a Fraction, so every tier needs this conversion, not
+//RS // only the evaluator.
+//RS #[inline(always)]
+//RS fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
+//RS     crate::jet_precise_numeric::decimal_to_float(
+//RS         &crate::jet_std::jet_std_decimal_to_exact(a),
+//RS     )
+//RS }
+//RS 
+//RS // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
+//RS // user-facing face of `DataTree`). JSON text parses directly to the canonical
+//RS // ordered `DataTree` carrier.
+//RS fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     jet_std::parse_json_datatree(text)
+//RS }
+//RS fn jet_std_json_render(d: &jet_std::DataTree) -> String {
+//RS     jet_std::render_datatree_json(d, false, 0)
+//RS }
+//RS fn jet_std_json_render_pretty(d: &jet_std::DataTree) -> String {
+//RS     jet_std::render_datatree_json(d, true, 0)
+//RS }
+//RS fn jet_quote_json_local(s: &str) -> String {
+//RS     let mut out = String::from("\"");
+//RS     for ch in s.chars() {
+//RS         match ch {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+//RS             c => out.push(c),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
+//RS     fn render(t: &jet_std::DataTree) -> String {
+//RS         match t {
+//RS             jet_std::DataTree::Null => "null".to_string(),
+//RS             jet_std::DataTree::Bool(b) => b.to_string(),
+//RS             jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
+//RS             jet_std::DataTree::Float(f) => format!("{:?}", f),
+//RS             jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+//RS                 unreachable!("internal JSON carrier escaped typed decode")
+//RS             }
+//RS             jet_std::DataTree::Text(s) => jet_quote_json_local(s),
+//RS             jet_std::DataTree::Bytes(bs) => {
+//RS                 format!("[{}]", bs.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","))
+//RS             }
+//RS             jet_std::DataTree::Array(xs) => {
+//RS                 format!("[{}]", xs.iter().map(render).collect::<Vec<_>>().join(","))
+//RS             }
+//RS             jet_std::DataTree::Object(entries) => {
+//RS                 let mut sorted = entries.clone();
+//RS                 sorted.sort_by(|a, b| a.0.cmp(&b.0));
+//RS                 let parts: Vec<String> = sorted
+//RS                     .iter()
+//RS                     .map(|(k, v)| format!("{}:{}", jet_quote_json_local(k), render(v)))
+//RS                     .collect();
+//RS                 format!("{{{}}}", parts.join(","))
+//RS             }
+//RS         }
+//RS     }
+//RS     render(d)
+//RS }
+//RS fn jet_std_json_events(d: &jet_std::DataTree) -> String {
+//RS     fn walk(path: String, t: &jet_std::DataTree, out: &mut Vec<String>) {
+//RS         let here = if path.is_empty() { "$".to_string() } else { path };
+//RS         match t {
+//RS             jet_std::DataTree::Object(entries) => {
+//RS                 out.push(format!("object_start {here}"));
+//RS                 for (k, v) in entries {
+//RS                     walk(format!("{}.{}", here, k), v, out);
+//RS                 }
+//RS                 out.push(format!("object_end {here}"));
+//RS             }
+//RS             jet_std::DataTree::Array(items) => {
+//RS                 out.push(format!("array_start {here}"));
+//RS                 for (i, v) in items.iter().enumerate() {
+//RS                     walk(format!("{}[{}]", here, i), v, out);
+//RS                 }
+//RS                 out.push(format!("array_end {here}"));
+//RS             }
+//RS             _ => out.push(format!("value {here} {}", jet_std_json_render_canonical(t))),
+//RS         }
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     walk(String::new(), d, &mut out);
+//RS     out.join("\n")
+//RS }
+//RS fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
+//RS     let mut out = Vec::new();
+//RS     for (idx, line) in text.lines().enumerate() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS         match jet_std_json_parse(&trimmed.to_string()) {
+//RS             Ok(v) => out.push(v),
+//RS             Err(mut error) => {
+//RS                 error.format = jet_std::EncodingFormat::JSONL;
+//RS                 error.line = error.line.map(|line| idx as i64 + line);
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
+//RS     let mut out = rows
+//RS         .iter()
+//RS         .map(jet_std_json_render_canonical)
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     if !out.is_empty() {
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
+//RS     jet_std::jet_int_owned_from_i64(
+//RS         text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
+//RS     )
+//RS }
+//RS fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
+//RS     let rendered = jet_std_json_render_canonical(value);
+//RS     if text.is_empty() {
+//RS         return format!("{rendered}\n");
+//RS     }
+//RS     if text.ends_with('\n') {
+//RS         format!("{text}{rendered}\n")
+//RS     } else {
+//RS         format!("{text}\n{rendered}\n")
+//RS     }
+//RS }
+//RS fn jet_std_jsonl_first(
+//RS     text: &String,
+//RS ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+//RS     for (idx, line) in text.lines().enumerate() {
+//RS         let trimmed = line.trim();
+//RS         if trimmed.is_empty() {
+//RS             continue;
+//RS         }
+//RS         match jet_std_json_parse(&trimmed.to_string()) {
+//RS             Ok(value) => return Ok(Some(value)),
+//RS             Err(mut error) => {
+//RS                 error.format = jet_std::EncodingFormat::JSONL;
+//RS                 error.line = error.line.map(|line| idx as i64 + line);
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(None)
+//RS }
+//RS 
+//RS // D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
+//RS // walk, the coercion message and the audit-line shape are ONE policy in
+//RS // `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
+//RS // used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
+//RS // owns: the process's own stderr.
+//RS fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+//RS     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
+//RS }
+//RS 
+//RS fn jet_string_bytes(s: &String) -> Vec<u8> {
+//RS     s.as_bytes().to_vec()
+//RS }
+//RS fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {
+//RS     jet_string_decode_utf8(bs).map_err(|message| jet_std::UTF8Error {
+//RS         message,
+//RS     })
+//RS }
+//RS fn jet_string_from_bytes_lossy(bs: &Vec<u8>) -> String {
+//RS     jet_string_decode_utf8_lossy(bs)
+//RS }
+//RS fn jet_int_to_u8(n: i64) -> Result<u8, String> {
+//RS     if (0..=255).contains(&n) {
+//RS         Ok(n as u8)
+//RS     } else {
+//RS         Err("a U8 holds 0..255".to_string())
+//RS     }
+//RS }
+// END-PORT-PENDING 0289 crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:1-1831
+

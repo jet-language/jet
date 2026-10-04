@@ -1,0 +1,2255 @@
+// PORT-PENDING 1070 tests-http-client-law-slice-1803: tests/http_client_law.rs:1803-4053
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn unknown_length_upload_uses_h1_chunked_transfer_encoding() {
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_upload_chunked_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let fifo = dir.join("upload.fifo");
+//RS     assert!(
+//RS         Command::new("mkfifo")
+//RS             .arg(&fifo)
+//RS             .status()
+//RS             .unwrap()
+//RS             .success(),
+//RS         "mkfifo failed"
+//RS     );
+//RS     let accepted = Arc::new(AtomicBool::new(false));
+//RS     let accepted_flag = accepted.clone();
+//RS     let seen_chunked = Arc::new(AtomicBool::new(false));
+//RS     let seen_flag = seen_chunked.clone();
+//RS     let body_len = 96 * 1024usize;
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         accepted_flag.store(true, Ordering::SeqCst);
+//RS         let head = request_head(&mut stream);
+//RS         assert!(head.starts_with(b"POST /chunked HTTP/1.1\r\n"));
+//RS         let head_text = String::from_utf8_lossy(&head).to_ascii_lowercase();
+//RS         assert!(
+//RS             head_text.contains("transfer-encoding: chunked"),
+//RS             "missing chunked transfer: {head_text}"
+//RS         );
+//RS         assert!(
+//RS             !head_text.contains("content-length:"),
+//RS             "unexpected content-length: {head_text}"
+//RS         );
+//RS         let mut got = 0usize;
+//RS         let mut buf = [0u8; 4096];
+//RS         let mut pending = Vec::new();
+//RS         loop {
+//RS             let read = stream.read(&mut buf).unwrap();
+//RS             assert_ne!(read, 0, "chunked upload ended early at {got}");
+//RS             pending.extend_from_slice(&buf[..read]);
+//RS             while let Some(line_end) = pending.windows(2).position(|window| window == b"\r\n") {
+//RS                 let line = String::from_utf8_lossy(&pending[..line_end]).to_string();
+//RS                 pending.drain(..line_end + 2);
+//RS                 let size = usize::from_str_radix(line.trim(), 16).expect("chunk size");
+//RS                 if size == 0 {
+//RS                     assert!(
+//RS                         pending.starts_with(b"\r\n") || pending.is_empty() || pending == b"\r\n"
+//RS                     );
+//RS                     stream
+//RS                         .write_all(
+//RS                             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+//RS                         )
+//RS                         .unwrap();
+//RS                     return got;
+//RS                 }
+//RS                 while pending.len() < size + 2 {
+//RS                     let read = stream.read(&mut buf).unwrap();
+//RS                     assert_ne!(read, 0, "chunked body truncated at {got}");
+//RS                     pending.extend_from_slice(&buf[..read]);
+//RS                 }
+//RS                 assert_eq!(&pending[size..size + 2], b"\r\n");
+//RS                 got += size;
+//RS                 pending.drain(..size + 2);
+//RS                 if got >= 64 * 1024 {
+//RS                     seen_flag.store(true, Ordering::SeqCst);
+//RS                 }
+//RS             }
+//RS         }
+//RS     });
+//RS     let fifo_writer = fifo.clone();
+//RS     let writer = std::thread::spawn(move || {
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .open(&fifo_writer)
+//RS             .unwrap();
+//RS         let first = vec![b'a'; 32 * 1024];
+//RS         file.write_all(&first).unwrap();
+//RS         let deadline = Instant::now() + Duration::from_secs(5);
+//RS         while !accepted.load(Ordering::SeqCst) {
+//RS             assert!(
+//RS                 Instant::now() < deadline,
+//RS                 "client buffered the chunked upload before connecting"
+//RS             );
+//RS             std::thread::yield_now();
+//RS         }
+//RS         let rest = vec![b'b'; body_len - first.len()];
+//RS         file.write_all(&rest).unwrap();
+//RS     });
+//RS     let fifo_path = fifo
+//RS         .to_string_lossy()
+//RS         .replace('\\', "\\\\")
+//RS         .replace('"', "\\\"");
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.http as message
+//RS use core.files as files
+//RS fn run() {{
+//RS     input :: files.open("{fifo_path}") ?? panic("open")
+//RS     body :: message.Body.reader(^input) ?? panic("reader")
+//RS     req :: http.request("POST", "http://{addr}/chunked").body(body).redirects(0)
+//RS     resp :: req.send() ?? panic("send")
+//RS     print(resp.body().text(8) ?? panic("body"))
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "upload_chunked", &src);
+//RS     let got = server.join().unwrap();
+//RS     writer.join().unwrap();
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "ok\n");
+//RS     assert_eq!(got, body_len);
+//RS     assert!(
+//RS         seen_chunked.load(Ordering::SeqCst),
+//RS         "server never saw a streamed chunked upload boundary"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn h2_upload_streams_data_frames_before_body_eof() {
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_http_client_upload_h2_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let fifo = dir.join("upload.fifo");
+//RS     assert!(
+//RS         Command::new("mkfifo")
+//RS             .arg(&fifo)
+//RS             .status()
+//RS             .unwrap()
+//RS             .success(),
+//RS         "mkfifo failed"
+//RS     );
+//RS     let accepted = Arc::new(AtomicBool::new(false));
+//RS     let accepted_flag = accepted.clone();
+//RS     let seen_data = Arc::new(AtomicBool::new(false));
+//RS     let seen_flag = seen_data.clone();
+//RS     let body_len = 40 * 1024usize;
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         accepted_flag.store(true, Ordering::SeqCst);
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_secs(5)))
+//RS             .unwrap();
+//RS         let mut preface = [0; 24];
+//RS         stream.read_exact(&mut preface).unwrap();
+//RS         assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+//RS         assert_eq!(read_h2_frame(&mut stream).0, 4);
+//RS         write_h2_frame(&mut stream, 4, 0, 0, &[]);
+//RS         let mut got = 0usize;
+//RS         let mut end = false;
+//RS         while !end {
+//RS             let frame = read_h2_frame(&mut stream);
+//RS             if frame.0 == 6 && frame.1 & 1 == 0 {
+//RS                 write_h2_frame(&mut stream, 6, 1, 0, &frame.3);
+//RS                 continue;
+//RS             }
+//RS             if frame.0 == 1 {
+//RS                 continue;
+//RS             }
+//RS             if frame.0 == 0 {
+//RS                 got += frame.3.len();
+//RS                 if got >= 16 * 1024 {
+//RS                     seen_flag.store(true, Ordering::SeqCst);
+//RS                 }
+//RS                 if frame.1 & 1 != 0 {
+//RS                     end = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS         assert_eq!(got, body_len);
+//RS         write_h2_frame(&mut stream, 1, 4, 1, &[0x88, 0x0f, 0x0d, 0x01, b'2']);
+//RS         write_h2_frame(&mut stream, 0, 1, 1, b"ok");
+//RS         let _ = read_h2_frame(&mut stream);
+//RS         got
+//RS     });
+//RS     let fifo_writer = fifo.clone();
+//RS     let writer = std::thread::spawn(move || {
+//RS         let mut file = fs::OpenOptions::new()
+//RS             .write(true)
+//RS             .open(&fifo_writer)
+//RS             .unwrap();
+//RS         let first = vec![b'x'; 8 * 1024];
+//RS         file.write_all(&first).unwrap();
+//RS         let deadline = Instant::now() + Duration::from_secs(5);
+//RS         while !accepted.load(Ordering::SeqCst) {
+//RS             assert!(
+//RS                 Instant::now() < deadline,
+//RS                 "H2 client buffered the upload before connecting"
+//RS             );
+//RS             std::thread::yield_now();
+//RS         }
+//RS         let rest = vec![b'y'; body_len - first.len()];
+//RS         file.write_all(&rest).unwrap();
+//RS     });
+//RS 
+//RS     let shown = dir.join("seed.jet");
+//RS     let source = "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("h2_upload.rs");
+//RS     let bin = dir.join("h2_upload");
+//RS     let fifo_path = fifo.display().to_string();
+//RS     fs::write(
+//RS         &harness,
+//RS         format!(
+//RS             r#"
+//RS use std::io::Read;
+//RS fn main() {{
+//RS     let url = std::env::args().nth(1).unwrap();
+//RS     let path = std::env::args().nth(2).unwrap();
+//RS     let root = bridge::jet_http_client_new_impl();
+//RS     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+//RS     let mut file = std::fs::File::open(path).unwrap();
+//RS     let mut offset = 0usize;
+//RS     let total = {body_len}usize;
+//RS     let mut body_read = || -> Result<Option<Vec<u8>>, bridge::JetHTTPBridgeError> {{
+//RS         if offset >= total {{
+//RS             return Ok(None);
+//RS         }}
+//RS         let want = (64 * 1024).min(total - offset);
+//RS         let mut chunk = vec![0; want];
+//RS         let mut filled = 0usize;
+//RS         while filled < want {{
+//RS             let read = file.read(&mut chunk[filled..]).map_err(|_| bridge::JetHTTPBridgeError::IO)?;
+//RS             if read == 0 {{
+//RS                 break;
+//RS             }}
+//RS             filled += read;
+//RS         }}
+//RS         if filled == 0 {{
+//RS             return Ok(None);
+//RS         }}
+//RS         chunk.truncate(filled);
+//RS         offset += filled;
+//RS         Ok(Some(chunk))
+//RS     }};
+//RS     let response = bridge::jet_http_client_send_with_stream_parts_impl(
+//RS         client, "POST", &url, &[], Some(total as i64), true, &mut body_read,
+//RS         None, None, None, None, None, None, None, None, Some(0), None, &[], &[], &[],
+//RS     ).unwrap();
+//RS     assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 8).unwrap(), Some(b"ok".to_vec()));
+//RS     assert_eq!(response.context.protocol, "HTTP/2");
+//RS }}
+//RS "#,
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "bridge H2 upload harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin)
+//RS         .arg(format!("http://{addr}/h2"))
+//RS         .arg(&fifo_path)
+//RS         .output()
+//RS         .unwrap();
+//RS     let got = server.join().unwrap();
+//RS     writer.join().unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bridge H2 upload harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(got, body_len);
+//RS     assert!(
+//RS         seen_data.load(Ordering::SeqCst),
+//RS         "server never saw streamed H2 DATA before EOF"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_proxy_none_ignores_environment_proxy() {
+//RS     let origin = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let origin_addr = origin.local_addr().unwrap();
+//RS     let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let proxy_addr = proxy.local_addr().unwrap();
+//RS     let origin_server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = origin.accept().unwrap();
+//RS         let head = request_head(&mut stream);
+//RS         assert!(
+//RS             String::from_utf8_lossy(&head).starts_with("GET /direct HTTP/1.1\r\n"),
+//RS             "expected direct origin request, got {}",
+//RS             String::from_utf8_lossy(&head)
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
+//RS             .unwrap();
+//RS     });
+//RS     let proxy_server = std::thread::spawn(move || {
+//RS         proxy.set_nonblocking(true).unwrap();
+//RS         let deadline = Instant::now() + Duration::from_millis(400);
+//RS         loop {
+//RS             match proxy.accept() {
+//RS                 Ok(_) => panic!("environment proxy should not receive traffic"),
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                     if Instant::now() >= deadline {
+//RS                         break;
+//RS                     }
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS                 Err(error) => panic!("proxy accept failed: {error}"),
+//RS             }
+//RS         }
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS fn run() {{
+//RS     client :: http.Client.new().proxy(.None)
+//RS     resp :: client.send(http.request("GET", "http://{origin_addr}/direct")) ?? panic("send")
+//RS     print(resp.body().text(16) ?? panic("body"))
+//RS }}
+//RS "#
+//RS     );
+//RS     let dir = common::unique_tmp("jet_http_client_law");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let jet_path = dir.join("public_proxy_none.jet");
+//RS     fs::write(&jet_path, &src).unwrap();
+//RS     let shown = jet_path.to_string_lossy().into_owned();
+//RS     let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected:\n{}",
+//RS             jet::render_diagnostics(&shown, &src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join("public_proxy_none.rs");
+//RS     let bin = dir.join("public_proxy_none");
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code (I2 violation):\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let run = Command::new(&bin)
+//RS         .env("http_proxy", format!("http://{proxy_addr}"))
+//RS         .env("HTTP_PROXY", format!("http://{proxy_addr}"))
+//RS         .env("all_proxy", format!("http://{proxy_addr}"))
+//RS         .env("ALL_PROXY", format!("http://{proxy_addr}"))
+//RS         .env_remove("no_proxy")
+//RS         .env_remove("NO_PROXY")
+//RS         .output()
+//RS         .unwrap();
+//RS     origin_server.join().unwrap();
+//RS     proxy_server.join().unwrap();
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     assert_eq!(
+//RS         run.status.code().unwrap_or(0),
+//RS         0,
+//RS         "stderr:\n{}",
+//RS         String::from_utf8_lossy(&run.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "direct\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_proxy_url_sends_absolute_form() {
+//RS     let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let proxy_addr = proxy.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = proxy.accept().unwrap();
+//RS         let head = request_head(&mut stream);
+//RS         let text = String::from_utf8_lossy(&head);
+//RS         assert!(
+//RS             text.starts_with("GET http://example.invalid/via-proxy HTTP/1.1\r\n"),
+//RS             "expected absolute-form proxy request, got {text}"
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy")
+//RS             .unwrap();
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS fn run() {{
+//RS     client :: http.Client.new().proxy(.URL("http://{proxy_addr}"))
+//RS     resp :: client.send(http.request("GET", "http://example.invalid/via-proxy")) ?? panic("send")
+//RS     print(resp.body().text(16) ?? panic("body"))
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "public_proxy_url", &src);
+//RS     server.join().unwrap();
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "proxy\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_tls_custom_only_trust() {
+//RS     use std::process::{Command, Stdio};
+//RS 
+//RS     let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let port = probe.local_addr().unwrap().port();
+//RS     drop(probe);
+//RS     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+//RS     let ca = root.join("tests/fixtures/tls/smtp.ca.cert.pem");
+//RS     let wrong_ca = root.join("tests/fixtures/tls/localhost.cert.pem");
+//RS     let cert = root.join("tests/fixtures/tls/smtp.server.cert.pem");
+//RS     let key = root.join("tests/fixtures/tls/smtp.server.key.pem");
+//RS     let mut server = Command::new("openssl")
+//RS         .args([
+//RS             "s_server",
+//RS             "-quiet",
+//RS             "-www",
+//RS             "-accept",
+//RS             &port.to_string(),
+//RS             "-cert",
+//RS         ])
+//RS         .arg(&cert)
+//RS         .arg("-key")
+//RS         .arg(&key)
+//RS         .arg("-CAfile")
+//RS         .arg(&ca)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("openssl s_server");
+//RS     std::thread::sleep(Duration::from_millis(250));
+//RS 
+//RS     let empty_src = r#"
+//RS use core.net.tls as tls
+//RS fn run() {
+//RS     empty :: [U8]{}
+//RS     if tls.RootCertificates.from_pem(empty) == {
+//RS         .Ok(_) -> print("empty-ok")
+//RS         .Err(_) -> print("empty-fail")
+//RS     }
+//RS }
+//RS "#;
+//RS     let (empty_code, empty_out, empty_err) =
+//RS         common::build_and_run("jet_http_client_law", "public_tls_empty_root", empty_src);
+//RS     assert_eq!(empty_code, 0, "stderr:\n{empty_err}");
+//RS     assert_eq!(empty_out, "empty-fail\n");
+//RS 
+//RS     let wrong_src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.net.tls as tls
+//RS use core.files as fs
+//RS fn run() {{
+//RS     pem :: fs.read_bytes("{wrong}") ?? panic("wrong ca")
+//RS     roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+//RS     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+//RS     client :: http.Client.new().tls(cfg).protocols(false, true, false)
+//RS     if client.send(http.request("GET", "https://localhost:{port}/")) == {{
+//RS         .Ok(_) -> print("ok")
+//RS         .Err(_) -> print("tls-fail")
+//RS     }}
+//RS }}
+//RS "#,
+//RS         wrong = wrong_ca.display(),
+//RS         port = port
+//RS     );
+//RS     let (wrong_code, wrong_out, wrong_err) =
+//RS         common::build_and_run("jet_http_client_law", "public_tls_wrong_root", &wrong_src);
+//RS     assert_eq!(wrong_code, 0, "stderr:\n{wrong_err}");
+//RS     assert_eq!(wrong_out, "tls-fail\n");
+//RS 
+//RS     let pass_src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.net.tls as tls
+//RS use core.files as fs
+//RS fn run() {{
+//RS     pem :: fs.read_bytes("{ca}") ?? panic("ca")
+//RS     roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+//RS     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+//RS     client :: http.Client.new().tls(cfg).protocols(false, true, false)
+//RS     resp :: client.send(http.request("GET", "https://localhost:{port}/")) ?? panic("send")
+//RS     print(resp.status())
+//RS }}
+//RS "#,
+//RS         ca = ca.display(),
+//RS         port = port
+//RS     );
+//RS     let (pass_code, pass_out, pass_err) =
+//RS         common::build_and_run("jet_http_client_law", "public_tls_custom_only", &pass_src);
+//RS     let _ = server.kill();
+//RS     let _ = server.wait();
+//RS     assert_eq!(pass_code, 0, "stderr:\n{pass_err}");
+//RS     assert_eq!(pass_out, "200\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_tls_identity_and_version_bounds() {
+//RS     use std::process::{Command, Stdio};
+//RS 
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet_http_client_tls_policy_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let ca_key = dir.join("ca.key.pem");
+//RS     let ca_cert = dir.join("ca.cert.pem");
+//RS     let ca = Command::new("openssl")
+//RS         .args([
+//RS             "req",
+//RS             "-x509",
+//RS             "-newkey",
+//RS             "rsa:2048",
+//RS             "-nodes",
+//RS             "-days",
+//RS             "1",
+//RS             "-subj",
+//RS             "/CN=jet-http-ca",
+//RS             "-keyout",
+//RS         ])
+//RS         .arg(&ca_key)
+//RS         .arg("-out")
+//RS         .arg(&ca_cert)
+//RS         .output()
+//RS         .expect("openssl ca");
+//RS     assert!(
+//RS         ca.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&ca.stderr)
+//RS     );
+//RS 
+//RS     let make_cert = |name: &str, usage: &str| {
+//RS         let key = dir.join(format!("{name}.key.pem"));
+//RS         let csr = dir.join(format!("{name}.csr.pem"));
+//RS         let cert = dir.join(format!("{name}.cert.pem"));
+//RS         let ext = dir.join(format!("{name}.ext"));
+//RS         let serial = dir.join(format!("{name}.srl"));
+//RS         fs::write(
+//RS             &ext,
+//RS             format!("subjectAltName=DNS:localhost\nextendedKeyUsage={usage}\n"),
+//RS         )
+//RS         .unwrap();
+//RS         let req = Command::new("openssl")
+//RS             .args([
+//RS                 "req",
+//RS                 "-new",
+//RS                 "-newkey",
+//RS                 "rsa:2048",
+//RS                 "-nodes",
+//RS                 "-subj",
+//RS                 &format!("/CN={name}"),
+//RS                 "-keyout",
+//RS             ])
+//RS             .arg(&key)
+//RS             .arg("-out")
+//RS             .arg(&csr)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             req.status.success(),
+//RS             "{}",
+//RS             String::from_utf8_lossy(&req.stderr)
+//RS         );
+//RS         let sign = Command::new("openssl")
+//RS             .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
+//RS             .arg(&serial)
+//RS             .arg("-CA")
+//RS             .arg(&ca_cert)
+//RS             .arg("-CAkey")
+//RS             .arg(&ca_key)
+//RS             .arg("-extfile")
+//RS             .arg(&ext)
+//RS             .arg("-in")
+//RS             .arg(&csr)
+//RS             .arg("-out")
+//RS             .arg(&cert)
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             sign.status.success(),
+//RS             "{}",
+//RS             String::from_utf8_lossy(&sign.stderr)
+//RS         );
+//RS         (cert, key)
+//RS     };
+//RS     let (server_cert, server_key) = make_cert("localhost", "serverAuth");
+//RS     let (client_cert, client_key) = make_cert("jet-client", "clientAuth");
+//RS 
+//RS     let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let version_port = probe.local_addr().unwrap().port();
+//RS     drop(probe);
+//RS     let mut tls12_server = Command::new("openssl")
+//RS         .args([
+//RS             "s_server",
+//RS             "-quiet",
+//RS             "-www",
+//RS             "-tls1_2",
+//RS             "-accept",
+//RS             &version_port.to_string(),
+//RS             "-CAfile",
+//RS         ])
+//RS         .arg(&ca_cert)
+//RS         .arg("-cert")
+//RS         .arg(&server_cert)
+//RS         .arg("-key")
+//RS         .arg(&server_key)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("openssl tls1_2 s_server");
+//RS     std::thread::sleep(Duration::from_millis(250));
+//RS 
+//RS     let version_src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.net.tls as tls
+//RS use core.files as fs
+//RS fn run() {{
+//RS     pem :: fs.read_bytes("{ca}") ?? panic("ca")
+//RS     roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+//RS     base :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+//RS     only13 :: base.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("tls13")
+//RS     client13 :: http.Client.new().tls(only13).protocols(false, true, false)
+//RS     if client13.send(http.request("GET", "https://localhost:{port}/")) == {{
+//RS         .Ok(_) -> print("tls13-ok")
+//RS         .Err(_) -> print("tls13-fail")
+//RS     }}
+//RS     only12 :: base.with_version_bounds(min: .TLS12, max: .TLS12) ?? panic("tls12")
+//RS     client12 :: http.Client.new().tls(only12).protocols(false, true, false)
+//RS     resp :: client12.send(http.request("GET", "https://localhost:{port}/")) ?? panic("tls12 send")
+//RS     print(resp.status())
+//RS }}
+//RS "#,
+//RS         ca = ca_cert.display(),
+//RS         port = version_port
+//RS     );
+//RS     let (version_code, version_out, version_err) = common::build_and_run(
+//RS         "jet_http_client_law",
+//RS         "public_tls_version_bounds",
+//RS         &version_src,
+//RS     );
+//RS     let _ = tls12_server.kill();
+//RS     let _ = tls12_server.wait();
+//RS     assert_eq!(version_code, 0, "stderr:\n{version_err}");
+//RS     assert_eq!(version_out, "tls13-fail\n200\n");
+//RS 
+//RS     let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let mtls_port = probe.local_addr().unwrap().port();
+//RS     drop(probe);
+//RS     let mut mtls_server = Command::new("openssl")
+//RS         .args([
+//RS             "s_server",
+//RS             "-quiet",
+//RS             "-www",
+//RS             "-Verify",
+//RS             "1",
+//RS             "-verify_return_error",
+//RS             "-accept",
+//RS             &mtls_port.to_string(),
+//RS             "-CAfile",
+//RS         ])
+//RS         .arg(&ca_cert)
+//RS         .arg("-cert")
+//RS         .arg(&server_cert)
+//RS         .arg("-key")
+//RS         .arg(&server_key)
+//RS         .stdout(Stdio::null())
+//RS         .stderr(Stdio::null())
+//RS         .spawn()
+//RS         .expect("openssl mtls s_server");
+//RS     std::thread::sleep(Duration::from_millis(250));
+//RS 
+//RS     let mtls_src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.net.tls as tls
+//RS use core.files as fs
+//RS fn run() {{
+//RS     ca :: fs.read_bytes("{ca}") ?? panic("ca")
+//RS     cert :: fs.read_bytes("{cert}") ?? panic("cert")
+//RS     key :: fs.read_bytes("{key}") ?? panic("key")
+//RS     roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+//RS     identity :: tls.ClientIdentity.from_pem(cert_chain: cert, private_key: key) ?? panic("identity")
+//RS     bare :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("bare")
+//RS     client_bare :: http.Client.new().tls(bare).protocols(false, true, false)
+//RS     if client_bare.send(http.request("GET", "https://localhost:{port}/")) == {{
+//RS         .Ok(_) -> print("bare-ok")
+//RS         .Err(_) -> print("bare-fail")
+//RS     }}
+//RS     cfg :: bare.with_client_identity(identity) ?? panic("with identity")
+//RS     client :: http.Client.new().tls(cfg).protocols(false, true, false)
+//RS     resp :: client.send(http.request("GET", "https://localhost:{port}/")) ?? panic("mtls send")
+//RS     print(resp.status())
+//RS }}
+//RS "#,
+//RS         ca = ca_cert.display(),
+//RS         cert = client_cert.display(),
+//RS         key = client_key.display(),
+//RS         port = mtls_port
+//RS     );
+//RS     let (mtls_code, mtls_out, mtls_err) = common::build_and_run(
+//RS         "jet_http_client_law",
+//RS         "public_tls_client_identity",
+//RS         &mtls_src,
+//RS     );
+//RS     let _ = mtls_server.kill();
+//RS     let _ = mtls_server.wait();
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     assert_eq!(mtls_code, 0, "stderr:\n{mtls_err}");
+//RS     assert_eq!(mtls_out, "bare-fail\n200\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn https_to_http_redirect_denied_unless_allow_http_downgrade() {
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_law_downgrade_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source =
+//RS         "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"https://127.0.0.1/\") }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("bridge_https_downgrade.rs");
+//RS     let bin = dir.join("bridge_https_downgrade");
+//RS     fs::write(
+//RS         &harness,
+//RS         r#"
+//RS use std::io::{Read, Write};
+//RS use std::net::TcpListener;
+//RS use std::sync::Arc;
+//RS use std::thread;
+//RS use std::time::Duration;
+//RS 
+//RS fn pem(path: &str) -> Vec<u8> {
+//RS     let text = std::fs::read_to_string(path).unwrap();
+//RS     let encoded: String = text.lines().filter(|line| !line.starts_with("-----")).collect();
+//RS     let mut out = Vec::new();
+//RS     let mut bits = 0u32;
+//RS     let mut count = 0u8;
+//RS     for byte in encoded.bytes() {
+//RS         let value = match byte {
+//RS             b'A'..=b'Z' => byte - b'A',
+//RS             b'a'..=b'z' => byte - b'a' + 26,
+//RS             b'0'..=b'9' => byte - b'0' + 52,
+//RS             b'+' => 62,
+//RS             b'/' => 63,
+//RS             b'=' => break,
+//RS             _ => continue,
+//RS         };
+//RS         bits = bits << 6 | u32::from(value);
+//RS         count += 6;
+//RS         if count >= 8 {
+//RS             count -= 8;
+//RS             out.push((bits >> count) as u8);
+//RS             bits &= (1u32 << count).wrapping_sub(1);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn request_head(stream: &mut impl Read) -> Vec<u8> {
+//RS     let mut out = Vec::new();
+//RS     let mut chunk = [0; 512];
+//RS     while !out.windows(4).any(|window| window == b"\r\n\r\n") {
+//RS         let read = stream.read(&mut chunk).unwrap();
+//RS         assert_ne!(read, 0);
+//RS         out.extend_from_slice(&chunk[..read]);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn main() {
+//RS     let cert = pem(&std::env::args().nth(1).unwrap());
+//RS     let key = pem(&std::env::args().nth(2).unwrap());
+//RS     let root_cert = pem(&std::env::args().nth(3).unwrap());
+//RS     let _ = rustls::crypto::ring::default_provider().install_default();
+//RS 
+//RS     let http = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let http_addr = http.local_addr().unwrap();
+//RS     let http_server = thread::spawn(move || {
+//RS         let (mut stream, _) = http.accept().unwrap();
+//RS         let _ = request_head(&mut stream);
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+//RS             .unwrap();
+//RS     });
+//RS 
+//RS     let mut server = rustls::ServerConfig::builder()
+//RS         .with_no_client_auth()
+//RS         .with_single_cert(
+//RS             vec![rustls::pki_types::CertificateDer::from(cert)],
+//RS             rustls::pki_types::PrivateKeyDer::Pkcs8(
+//RS                 rustls::pki_types::PrivatePkcs8KeyDer::from(key),
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS     server.alpn_protocols = vec![b"http/1.1".to_vec()];
+//RS     let server = Arc::new(server);
+//RS     let https = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let https_addr = https.local_addr().unwrap();
+//RS     let location = format!("http://{http_addr}/ok");
+//RS     let redirect_tls = server.clone();
+//RS     let https_server = thread::spawn(move || {
+//RS         for _ in 0..2 {
+//RS             let (socket, _) = https.accept().unwrap();
+//RS             socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+//RS             let connection = rustls::ServerConnection::new(redirect_tls.clone()).unwrap();
+//RS             let mut stream = rustls::StreamOwned::new(connection, socket);
+//RS             let _ = request_head(&mut stream);
+//RS             let body = format!(
+//RS                 "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+//RS             );
+//RS             stream.write_all(body.as_bytes()).unwrap();
+//RS             stream.flush().unwrap();
+//RS         }
+//RS     });
+//RS 
+//RS     let root = bridge::jet_http_client_new_impl();
+//RS     let rooted = bridge::jet_http_client_root_certificate_impl(root, &root_cert, false).unwrap();
+//RS     let client = bridge::jet_http_client_protocols_impl(rooted, false, true, false).unwrap();
+//RS     let url = format!("https://localhost:{}/from", https_addr.port());
+//RS     let denied = bridge::jet_http_client_send_with_impl(
+//RS         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+//RS     )
+//RS     .unwrap_err();
+//RS     assert!(matches!(denied, bridge::JetHTTPBridgeError::Redirect));
+//RS     assert_eq!(
+//RS         bridge::jet_http_client_open_body_count_impl(),
+//RS         0,
+//RS         "HTTPS→HTTP deny must close the redirect response body"
+//RS     );
+//RS 
+//RS     let allowed_root = bridge::jet_http_client_new_impl();
+//RS     let allowed_rooted =
+//RS         bridge::jet_http_client_root_certificate_impl(allowed_root, &root_cert, false).unwrap();
+//RS     let allowed_proto =
+//RS         bridge::jet_http_client_protocols_impl(allowed_rooted, false, true, false).unwrap();
+//RS     let allowed =
+//RS         bridge::jet_http_client_allow_http_downgrade_impl(allowed_proto, true).unwrap();
+//RS     let response = bridge::jet_http_client_send_with_impl(
+//RS         allowed, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(response.status, 200);
+//RS     assert_eq!(
+//RS         bridge::jet_http_client_body_read_impl(response.body_handle, 8).unwrap(),
+//RS         Some(b"ok".to_vec())
+//RS     );
+//RS     https_server.join().unwrap();
+//RS     http_server.join().unwrap();
+//RS 
+//RS     let cookie_http = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let cookie_http_addr = cookie_http.local_addr().unwrap();
+//RS     let cookie_http_server = thread::spawn(move || {
+//RS         let (mut stream, _) = cookie_http.accept().unwrap();
+//RS         let head = String::from_utf8(request_head(&mut stream)).unwrap().to_ascii_lowercase();
+//RS         assert!(!head.contains("\r\ncookie:"), "Secure cookie leaked over HTTP: {head}");
+//RS         stream.write_all(
+//RS             b"HTTP/1.1 200 OK\r\nSet-Cookie: session=insecure; Path=/\r\nSet-Cookie: injected=bad; Path=/; Secure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS         ).unwrap();
+//RS     });
+//RS     let cookie_https = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let cookie_https_addr = cookie_https.local_addr().unwrap();
+//RS     let cookie_https_server = thread::spawn(move || {
+//RS         for request in 0..3 {
+//RS             let (socket, _) = cookie_https.accept().unwrap();
+//RS             let connection = rustls::ServerConnection::new(server.clone()).unwrap();
+//RS             let mut stream = rustls::StreamOwned::new(connection, socket);
+//RS             let head = String::from_utf8(request_head(&mut stream)).unwrap().to_ascii_lowercase();
+//RS             if request == 0 {
+//RS                 assert!(!head.contains("\r\ncookie:"), "unexpected seed cookie: {head}");
+//RS                 stream.write_all(
+//RS                     b"HTTP/1.1 200 OK\r\nSet-Cookie: session=secure; Path=/; Secure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS                 ).unwrap();
+//RS             } else if request == 1 {
+//RS                 assert!(head.contains("\r\ncookie: session=secure\r\n"), "insecure overwrite won: {head}");
+//RS                 assert!(!head.contains("injected="), "HTTP set a Secure cookie: {head}");
+//RS                 stream.write_all(
+//RS                     b"HTTP/1.1 200 OK\r\nSet-Cookie: session=https-plain; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS                 ).unwrap();
+//RS             } else {
+//RS                 assert!(head.contains("\r\ncookie: session=https-plain\r\n"), "HTTPS replacement lost: {head}");
+//RS                 stream.write_all(
+//RS                     b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+//RS                 ).unwrap();
+//RS             }
+//RS             stream.flush().unwrap();
+//RS         }
+//RS     });
+//RS     let cookie_root = bridge::jet_http_client_new_impl();
+//RS     let cookie_rooted =
+//RS         bridge::jet_http_client_root_certificate_impl(cookie_root, &root_cert, false).unwrap();
+//RS     let cookie_proto =
+//RS         bridge::jet_http_client_protocols_impl(cookie_rooted, false, true, false).unwrap();
+//RS     let cookie_client = bridge::jet_http_client_cookies_impl(cookie_proto, true).unwrap();
+//RS     let secure_url = format!("https://localhost:{}/cookie", cookie_https_addr.port());
+//RS     let insecure_url = format!("http://localhost:{}/cookie", cookie_http_addr.port());
+//RS     for url in [&secure_url, &insecure_url, &secure_url, &secure_url] {
+//RS         let response = bridge::jet_http_client_send_with_impl(
+//RS             cookie_client, "GET", url, &[], None, None, None, None, None, None, None, None, None,
+//RS             None, None, &[], &[], &[],
+//RS         ).unwrap();
+//RS         assert_eq!(bridge::jet_http_client_body_read_impl(response.body_handle, 1).unwrap(), None);
+//RS     }
+//RS     cookie_https_server.join().unwrap();
+//RS     cookie_http_server.join().unwrap();
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let dependency_dirs: Vec<_> = link
+//RS         .dependency_dirs()
+//RS         .filter(|path| path.is_dir())
+//RS         .collect();
+//RS     let rustls = dependency_dirs
+//RS         .iter()
+//RS         .flat_map(|directory| fs::read_dir(directory).unwrap())
+//RS         .filter_map(Result::ok)
+//RS         .map(|entry| entry.path())
+//RS         .find(|path| {
+//RS             path.file_name()
+//RS                 .and_then(|name| name.to_str())
+//RS                 .is_some_and(|name| name.starts_with("librustls-") && name.ends_with(".rlib"))
+//RS         })
+//RS         .expect("generated bridge rustls dependency");
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()))
+//RS         .arg("--extern")
+//RS         .arg(format!("rustls={}", rustls.display()));
+//RS     for dependency in &dependency_dirs {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "bridge downgrade harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin)
+//RS         .arg(fs::canonicalize("tests/fixtures/tls/smtp.server.cert.pem").unwrap())
+//RS         .arg(fs::canonicalize("tests/fixtures/tls/smtp.server.key.pem").unwrap())
+//RS         .arg(fs::canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap())
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bridge downgrade harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ambient_context_deadline_upper_bounds_client_total_timeout() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let _ = request_head(&mut stream);
+//RS         std::thread::sleep(Duration::from_millis(250));
+//RS         let _ = stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate");
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.time as time
+//RS fn run() {{
+//RS     client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+//RS     #Context(deadline: time.now() + 40) {{
+//RS         if client.send(http.request("GET", "http://{addr}/slow")) == {{
+//RS             .Ok(_) -> print("ok")
+//RS             .Err(_) -> print("timeout")
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "ambient_deadline", &src);
+//RS     server.join().unwrap();
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "timeout\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_get_expired_ambient_deadline_fails_closed() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let hits = Arc::new(AtomicUsize::new(0));
+//RS     let server_hits = hits.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         let Ok((mut stream, _)) = listener.accept() else {
+//RS             return;
+//RS         };
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_millis(100)))
+//RS             .ok();
+//RS         let mut buf = [0; 1];
+//RS         // Only count a real dial that sent at least one request byte.
+//RS         if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
+//RS             server_hits.fetch_add(1, Ordering::SeqCst);
+//RS             let _ = stream
+//RS                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+//RS         }
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.time as time
+//RS fn run() {{
+//RS     #Context(deadline: time.now()) {{
+//RS         if http.get("http://{addr}/expired") == {{
+//RS             .Ok(_) -> print("ok")
+//RS             .Err(_) -> print("timeout")
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "get_ambient_expired", &src);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "timeout\n");
+//RS     assert_eq!(
+//RS         hits.load(Ordering::SeqCst),
+//RS         0,
+//RS         "expired ambient must fail before dialing http.get"
+//RS     );
+//RS     let _ = TcpStream::connect(addr);
+//RS     let _ = server.join();
+//RS }
+//RS 
+//RS #[test]
+//RS fn http_post_expired_ambient_deadline_fails_closed() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let hits = Arc::new(AtomicUsize::new(0));
+//RS     let server_hits = hits.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         let Ok((mut stream, _)) = listener.accept() else {
+//RS             return;
+//RS         };
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_millis(100)))
+//RS             .ok();
+//RS         let mut buf = [0; 1];
+//RS         if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
+//RS             server_hits.fetch_add(1, Ordering::SeqCst);
+//RS             let _ = stream
+//RS                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+//RS         }
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS use core.time as time
+//RS fn run() {{
+//RS     #Context(deadline: time.now()) {{
+//RS         if http.post("http://{addr}/expired", "body") == {{
+//RS             .Ok(_) -> print("ok")
+//RS             .Err(_) -> print("timeout")
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "post_ambient_expired", &src);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "timeout\n");
+//RS     assert_eq!(
+//RS         hits.load(Ordering::SeqCst),
+//RS         0,
+//RS         "expired ambient must fail before dialing http.post"
+//RS     );
+//RS     let _ = TcpStream::connect(addr);
+//RS     let _ = server.join();
+//RS }
+//RS 
+//RS #[test]
+//RS fn unreplayable_307_closes_redirect_body() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let _ = request_head(&mut stream);
+//RS         stream
+//RS             .write_all(
+//RS                 b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /to\r\nContent-Length: 5\r\nConnection: close\r\n\r\nleak!",
+//RS             )
+//RS             .unwrap();
+//RS     });
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_law_307_body_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source = "use core.http.client as http\nfn run() { _ :: http.Client.new() }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("unreplayable_307.rs");
+//RS     let bin = dir.join("unreplayable_307");
+//RS     let url = format!("http://{addr}/from");
+//RS     fs::write(
+//RS         &harness,
+//RS         format!(
+//RS             r#"
+//RS fn main() {{
+//RS     let url = {url:?}.to_string();
+//RS     let client = bridge::jet_http_client_new_impl();
+//RS     // POST with no buffered body: 307/308 cannot replay → Redirect, must close body.
+//RS     let err = bridge::jet_http_client_send_with_impl(
+//RS         client, "POST", &url, &[], None,
+//RS         None, None, None, None, None, None, None, None, Some(2), None,
+//RS         &[], &[], &[],
+//RS     )
+//RS     .unwrap_err();
+//RS     assert!(matches!(err, bridge::JetHTTPBridgeError::Redirect), "{{err:?}}");
+//RS     assert_eq!(
+//RS         bridge::jet_http_client_open_body_count_impl(),
+//RS         0,
+//RS         "unreplayable 307 must close the redirect response body"
+//RS     );
+//RS }}
+//RS "#
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "unreplayable 307 harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin).output().unwrap();
+//RS     server.join().unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "unreplayable 307 harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn ambient_deadline_absolute_instant_survives_prep_delay() {
+//RS     // Residual-ms storage would revive Instant::now()+budget after a sleep between
+//RS     // push and compose; absolute Instant at push must still time out before dial.
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_law_ambient_abs_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source = concat!(
+//RS         "use core.http.client as http\n",
+//RS         "fn run() {\n",
+//RS         "    _ :: http.Client.new()\n",
+//RS         "    req :: http.request(\"GET\", \"http://127.0.0.1/ambient-abs-deadline\")\n",
+//RS         "}\n",
+//RS     );
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("bridge_ambient_abs.rs");
+//RS     let bin = dir.join("bridge_ambient_abs");
+//RS     fs::write(
+//RS         &harness,
+//RS         r#"
+//RS use std::time::Duration;
+//RS 
+//RS fn main() {
+//RS     let url = "http://127.0.0.1:9/slow".to_string();
+//RS     let client = bridge::jet_http_client_new_impl();
+//RS     let _guard = bridge::JetHTTPAmbientDeadline::push(Some(60)).expect("ambient push");
+//RS     std::thread::sleep(Duration::from_millis(80));
+//RS     let err = bridge::jet_http_client_send_with_impl(
+//RS         client, "GET", &url, &[], None,
+//RS         Some(5000), Some(5000), Some(5000), Some(5000),
+//RS         None, None, None, None,
+//RS         None, None, &[], &[], &[],
+//RS     )
+//RS     .unwrap_err();
+//RS     assert!(
+//RS         matches!(err, bridge::JetHTTPBridgeError::Timeout),
+//RS         "expected Timeout after prep delay past absolute ambient deadline, got {err:?}"
+//RS     );
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "ambient absolute harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin).output().unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "ambient absolute harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_allow_http_downgrade_method_typechecks() {
+//RS     let src = r#"
+//RS use core.http.client as http
+//RS fn run() {
+//RS     _ :: http.Client.new().allow_http_downgrade(true).allow_http_downgrade(false)
+//RS }
+//RS "#;
+//RS     let (code, _stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "allow_http_downgrade_type", src);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn follow_same_origin_credentials_strips_authorization_on_redirect() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         for expected_auth in [true, false] {
+//RS             let (mut stream, _) = listener.accept().unwrap();
+//RS             let first = request_head(&mut stream);
+//RS             let first = String::from_utf8_lossy(&first).to_ascii_lowercase();
+//RS             assert!(first.contains("authorization: bearer secret\r\n"));
+//RS             assert!(first.starts_with("get /start "));
+//RS             stream
+//RS                 .write_all(b"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+//RS                 .unwrap();
+//RS             drop(stream);
+//RS 
+//RS             let (mut stream, _) = listener.accept().unwrap();
+//RS             let second = request_head(&mut stream);
+//RS             let second = String::from_utf8_lossy(&second).to_ascii_lowercase();
+//RS             assert!(second.starts_with("get /next "));
+//RS             if expected_auth {
+//RS                 assert!(
+//RS                     second.contains("authorization: bearer secret\r\n"),
+//RS                     "same_origin_credentials:true must keep Authorization on same-origin hop: {second}"
+//RS                 );
+//RS             } else {
+//RS                 assert!(
+//RS                     !second.contains("authorization:"),
+//RS                     "same_origin_credentials:false must strip Authorization on same-origin hop: {second}"
+//RS                 );
+//RS             }
+//RS             stream
+//RS                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+//RS                 .unwrap();
+//RS         }
+//RS     });
+//RS 
+//RS     for (label, keep) in [("keep", true), ("strip", false)] {
+//RS         let src = format!(
+//RS             r#"
+//RS use core.http.client as http
+//RS fn run() {{
+//RS     client :: http.Client.new()
+//RS         .redirects(.Follow{{ max: 2, same_origin_credentials: {keep} }})
+//RS         .protocols(false, true, false)
+//RS     req :: http.request("GET", "http://{addr}/start")
+//RS         .header("Authorization", "Bearer secret")
+//RS     resp :: client.send(req) ?? panic("send")
+//RS     print(resp.body().text(8) ?? panic("body"))
+//RS     print(resp.redirect_history().len())
+//RS }}
+//RS "#
+//RS         );
+//RS         let (code, stdout, stderr) = common::build_and_run(
+//RS             "jet_http_client_law",
+//RS             &format!("follow_creds_{label}"),
+//RS             &src,
+//RS         );
+//RS         assert_eq!(code, 0, "{label} stderr:\n{stderr}");
+//RS         assert_eq!(stdout, "ok\n1\n", "{label}");
+//RS     }
+//RS     server.join().unwrap();
+//RS }
+//RS 
+//RS #[test]
+//RS fn cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth() {
+//RS     let first_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let second_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let forbidden_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     forbidden_listener.set_nonblocking(true).unwrap();
+//RS     let first_addr = first_listener.local_addr().unwrap();
+//RS     let second_addr = second_listener.local_addr().unwrap();
+//RS     let forbidden_addr = forbidden_listener.local_addr().unwrap();
+//RS     let forbidden = std::thread::spawn(move || {
+//RS         let deadline = Instant::now() + Duration::from_secs(1);
+//RS         loop {
+//RS             match forbidden_listener.accept() {
+//RS                 Ok(_) => return true,
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                     if Instant::now() >= deadline {
+//RS                         return false;
+//RS                     }
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS                 Err(_) => return false,
+//RS             }
+//RS         }
+//RS     });
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut first, _) = first_listener.accept().unwrap();
+//RS         let first_request = String::from_utf8_lossy(&request_head(&mut first)).to_ascii_lowercase();
+//RS         for header in ["authorization: bearer secret\r\n", "cookie: session=secret\r\n"] {
+//RS             assert!(
+//RS                 first_request.contains(header),
+//RS                 "initial request omitted `{header}`: {first_request}"
+//RS             );
+//RS         }
+//RS         assert!(
+//RS             !first_request.contains("proxy-authorization:"),
+//RS             "the valid request must not carry raw proxy credentials: {first_request}"
+//RS         );
+//RS         assert!(first_request.starts_with("get /start "));
+//RS         write!(
+//RS             first,
+//RS             "HTTP/1.1 302 Found\r\nLocation: http://{second_addr}/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+//RS         )
+//RS         .unwrap();
+//RS         drop(first);
+//RS 
+//RS         let (mut second, _) = second_listener.accept().unwrap();
+//RS         let second_request = String::from_utf8_lossy(&request_head(&mut second)).to_ascii_lowercase();
+//RS         assert!(second_request.starts_with("get /next "));
+//RS         for header in ["authorization:", "proxy-authorization:", "cookie:"] {
+//RS             assert!(
+//RS                 !second_request.contains(header),
+//RS                 "cross-origin redirect leaked `{header}`: {second_request}"
+//RS             );
+//RS         }
+//RS         second
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+//RS             .unwrap();
+//RS     });
+//RS 
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS fn run() {{
+//RS     client :: http.Client.new()
+//RS         .redirects(.Follow{{ max: 2, same_origin_credentials: true }})
+//RS         .protocols(false, true, false)
+//RS     forbidden :: http.request("GET", "http://{forbidden_addr}/forbidden")
+//RS         .header("Proxy-Authorization", "Basic secret")
+//RS     if client.send(forbidden) == {{
+//RS         .Ok(_) -> print("proxy-auth accepted")
+//RS         .Err(error) -> {{
+//RS             if error == .InvalidFraming -> print("proxy-auth rejected")
+//RS             else -> print("proxy-auth wrong")
+//RS         }}
+//RS         else -> print("proxy-auth unexpected")
+//RS     }}
+//RS     req :: http.request("GET", "http://{first_addr}/start")
+//RS         .header("Authorization", "Bearer secret")
+//RS         .header("Cookie", "session=secret")
+//RS     resp :: client.send(req) ?? panic("send")
+//RS     print(resp.body().text(8) ?? panic("body"))
+//RS     print(resp.redirect_history().len())
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "cross_origin_creds", &src);
+//RS     server.join().unwrap();
+//RS     assert!(!forbidden.join().unwrap(), "raw proxy credentials reached the socket");
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "proxy-auth rejected\nok\n1\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn request_first_byte_timeout_overrides_client_phase_budget() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         let _ = request_head(&mut stream);
+//RS         std::thread::sleep(Duration::from_millis(250));
+//RS         let _ = stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate");
+//RS     });
+//RS     let src = format!(
+//RS         r#"
+//RS use core.http.client as http
+//RS fn run() {{
+//RS     client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+//RS     req :: http.request("GET", "http://{addr}/slow").first_byte_timeout(40)
+//RS     if client.send(req) == {{
+//RS         .Ok(_) -> print("ok")
+//RS         .Err(_) -> print("timeout")
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) =
+//RS         common::build_and_run("jet_http_client_law", "req_first_byte", &src);
+//RS     server.join().unwrap();
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(stdout, "timeout\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
+//RS     /// RST so the next pooled write fails before any request bytes (ECONNRESET),
+//RS     /// not a post-write first-byte EOF that must not reconnect under D-HTTP-CLIENT2.
+//RS     fn rst_before_next_write(stream: TcpStream) {
+//RS         use std::os::fd::AsRawFd;
+//RS         #[repr(C)]
+//RS         struct Linger {
+//RS             l_onoff: i32,
+//RS             l_linger: i32,
+//RS         }
+//RS         // Avoid unstable `TcpStream::set_linger`: SO_LINGER zero → RST on close.
+//RS         extern "C" {
+//RS             fn setsockopt(
+//RS                 sockfd: i32,
+//RS                 level: i32,
+//RS                 optname: i32,
+//RS                 optval: *const core::ffi::c_void,
+//RS                 optlen: u32,
+//RS             ) -> i32;
+//RS         }
+//RS         // Linux socket constants (this law harness runs on Linux).
+//RS         const SOL_SOCKET: i32 = 1;
+//RS         const SO_LINGER: i32 = 13;
+//RS         let linger = Linger {
+//RS             l_onoff: 1,
+//RS             l_linger: 0,
+//RS         };
+//RS         let result = unsafe {
+//RS             setsockopt(
+//RS                 stream.as_raw_fd(),
+//RS                 SOL_SOCKET,
+//RS                 SO_LINGER,
+//RS                 (&linger as *const Linger).cast(),
+//RS                 std::mem::size_of::<Linger>() as u32,
+//RS             )
+//RS         };
+//RS         assert_eq!(
+//RS             result,
+//RS             0,
+//RS             "SO_LINGER setup failed: {}",
+//RS             std::io::Error::last_os_error()
+//RS         );
+//RS         drop(stream);
+//RS     }
+//RS 
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     listener.set_nonblocking(true).unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let url = format!("http://{addr}/");
+//RS     let puts = Arc::new(AtomicUsize::new(0));
+//RS     let puts_observed = puts.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         let accept = || {
+//RS             let deadline = Instant::now() + Duration::from_secs(5);
+//RS             loop {
+//RS                 match listener.accept() {
+//RS                     Ok((stream, _)) => {
+//RS                         stream.set_nonblocking(false).unwrap();
+//RS                         break stream;
+//RS                     }
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                         assert!(
+//RS                             Instant::now() < deadline,
+//RS                             "timed out waiting for retry connection"
+//RS                         );
+//RS                         std::thread::sleep(Duration::from_millis(1));
+//RS                     }
+//RS                     Err(error) => panic!("retry accept failed: {error}"),
+//RS                 }
+//RS             }
+//RS         };
+//RS         // 1) Same TCP proves pool reuse, then RST forces write-path IO reconnect.
+//RS         let mut stream = accept();
+//RS         assert!(request_head(&mut stream).starts_with(b"GET /warm HTTP/1.1\r\n"));
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nw")
+//RS             .unwrap();
+//RS         // Second request on THIS socket — no new accept — proves keepalive reuse.
+//RS         // Vacuous "always dial fresh" clients hang here and fail the harness.
+//RS         assert!(
+//RS             request_head(&mut stream).starts_with(b"GET /reuse HTTP/1.1\r\n"),
+//RS             "expected pooled reuse on the same TCP connection"
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nr")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         let mut stream = accept();
+//RS         assert!(
+//RS             request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"),
+//RS             "Safe must reconnect once after write-before-bytes IO on a reused pool socket"
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         // 2) Safe: warm + POST fails on stale socket without dialing again.
+//RS         let mut stream = accept();
+//RS         assert!(request_head(&mut stream).starts_with(b"GET /warm2 HTTP/1.1\r\n"));
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         // 3) retries(.None): warm + stale GET fails without reconnect.
+//RS         let mut stream = accept();
+//RS         let head = request_head(&mut stream);
+//RS         assert!(
+//RS             head.starts_with(b"GET /warm3 HTTP/1.1\r\n"),
+//RS             "POST must not dial a retry; next live request is warm3, got {}",
+//RS             String::from_utf8_lossy(&head)
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\ny")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         // 4) Safe denies PUT retry (no dial); Idempotent opts in.
+//RS         let mut stream = accept();
+//RS         let head = request_head(&mut stream);
+//RS         assert!(
+//RS             head.starts_with(b"GET /warm4 HTTP/1.1\r\n"),
+//RS             "retries(.None) must not reconnect; next is warm4, got {}",
+//RS             String::from_utf8_lossy(&head)
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nz")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         let mut stream = accept();
+//RS         let head = request_head(&mut stream);
+//RS         assert!(
+//RS             head.starts_with(b"GET /warm5 HTTP/1.1\r\n"),
+//RS             "Safe must not dial PUT retry; next is warm5, got {}",
+//RS             String::from_utf8_lossy(&head)
+//RS         );
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nq")
+//RS             .unwrap();
+//RS         rst_before_next_write(stream);
+//RS 
+//RS         let mut stream = accept();
+//RS         puts_observed.fetch_add(1, Ordering::Relaxed);
+//RS         assert!(request_head(&mut stream).starts_with(b"PUT /allowed HTTP/1.1\r\n"));
+//RS         stream
+//RS             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+//RS             .unwrap();
+//RS     });
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!("jet_http_retry_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source = "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("retry.rs");
+//RS     let bin = dir.join("retry");
+//RS     fs::write(
+//RS         &harness,
+//RS         r#"
+//RS fn send(
+//RS     client: i64,
+//RS     method: &str,
+//RS     url: &String,
+//RS     body: Option<&[u8]>,
+//RS ) -> Result<bridge::JetHTTPResponseParts, bridge::JetHTTPBridgeError> {
+//RS     bridge::jet_http_client_send_with_impl(
+//RS         client,
+//RS         method,
+//RS         url,
+//RS         &[],
+//RS         body,
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         Some(2000),
+//RS         None,
+//RS         None,
+//RS         &[],
+//RS         &[],
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS fn drain(handle: i64) -> Vec<u8> {
+//RS     let mut out = Vec::new();
+//RS     while let Some(chunk) = bridge::jet_http_client_body_read_impl(handle, 64).unwrap() {
+//RS         out.extend_from_slice(&chunk);
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn wait_for_pooled_rst() {
+//RS     #[repr(C)]
+//RS     struct PollFd {
+//RS         fd: i32,
+//RS         events: i16,
+//RS         revents: i16,
+//RS     }
+//RS     extern "C" {
+//RS         fn poll(fds: *mut PollFd, nfds: usize, timeout: i32) -> i32;
+//RS     }
+//RS     const POLLIN: i16 = 0x0001;
+//RS     const POLLERR: i16 = 0x0008;
+//RS     let sockets = std::fs::read_dir("/proc/self/fd")
+//RS         .unwrap()
+//RS         .filter_map(|entry| {
+//RS             let entry = entry.ok()?;
+//RS             std::fs::read_link(entry.path())
+//RS                 .ok()?
+//RS                 .to_string_lossy()
+//RS                 .starts_with("socket:[")
+//RS                 .then(|| entry.file_name().to_string_lossy().parse::<i32>().ok())
+//RS                 .flatten()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert!(
+//RS         !sockets.is_empty(),
+//RS         "expected a pooled TCP socket after warm/reuse"
+//RS     );
+//RS     // Other runtime FDs (netlink, resolver) can also appear as socket:[...].
+//RS     // Wait until the RST is visible on at least one of them.
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS     loop {
+//RS         for &fd in &sockets {
+//RS             let mut socket = PollFd {
+//RS                 fd,
+//RS                 events: POLLIN,
+//RS                 revents: 0,
+//RS             };
+//RS             let ready = unsafe { poll(&mut socket, 1, 0) };
+//RS             if ready == 1 && socket.revents & POLLERR != 0 {
+//RS                 return;
+//RS             }
+//RS         }
+//RS         assert!(
+//RS             std::time::Instant::now() < deadline,
+//RS             "pooled socket reset was not observed before retry; sockets={sockets:?}"
+//RS         );
+//RS         std::thread::sleep(std::time::Duration::from_millis(1));
+//RS     }
+//RS }
+//RS 
+//RS fn main() {
+//RS     let base = std::env::args().nth(1).unwrap();
+//RS     let root = bridge::jet_http_client_new_impl();
+//RS     let safe = bridge::jet_http_client_protocols_impl(root, false, true, false).unwrap();
+//RS     bridge::jet_http_client_drop_impl(root);
+//RS     let safe = bridge::jet_http_client_timeouts_impl(
+//RS         safe, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+//RS     )
+//RS     .unwrap();
+//RS 
+//RS     let warm = format!("{base}warm");
+//RS     let first = send(safe, "GET", &warm, None).unwrap();
+//RS     assert!(!first.context.reused_connection);
+//RS     assert_eq!(drain(first.body_handle), b"w");
+//RS 
+//RS     // Same pool socket as /warm — proves reuse before the write-fail arm.
+//RS     let reuse = format!("{base}reuse");
+//RS     let pooled = send(safe, "GET", &reuse, None).unwrap();
+//RS     assert!(
+//RS         pooled.context.reused_connection,
+//RS         "write-path retry proof requires a reused pooled connection first"
+//RS     );
+//RS     assert_eq!(drain(pooled.body_handle), b"r");
+//RS     wait_for_pooled_rst();
+//RS 
+//RS     let retry = format!("{base}retry");
+//RS     let second = send(safe, "GET", &retry, None).unwrap();
+//RS     assert!(
+//RS         !second.context.reused_connection,
+//RS         "write-before-bytes IO reconnect must dial fresh"
+//RS     );
+//RS     assert_eq!(drain(second.body_handle), b"ok");
+//RS     wait_for_pooled_rst();
+//RS 
+//RS     let warm2 = format!("{base}warm2");
+//RS     let third = send(safe, "GET", &warm2, None).unwrap();
+//RS     assert_eq!(drain(third.body_handle), b"x");
+//RS     wait_for_pooled_rst();
+//RS     let post = format!("{base}unsafe");
+//RS     assert!(send(safe, "POST", &post, Some(b"nope")).is_err());
+//RS 
+//RS     let none_root = bridge::jet_http_client_new_impl();
+//RS     let none = bridge::jet_http_client_protocols_impl(none_root, false, true, false).unwrap();
+//RS     bridge::jet_http_client_drop_impl(none_root);
+//RS     let none = bridge::jet_http_client_retries_impl(none, 0).unwrap();
+//RS     let none = bridge::jet_http_client_timeouts_impl(
+//RS         none, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+//RS     )
+//RS     .unwrap();
+//RS     let warm3 = format!("{base}warm3");
+//RS     let fourth = send(none, "GET", &warm3, None).unwrap();
+//RS     assert_eq!(drain(fourth.body_handle), b"y");
+//RS     wait_for_pooled_rst();
+//RS     let again = format!("{base}again");
+//RS     assert!(send(none, "GET", &again, None).is_err());
+//RS     bridge::jet_http_client_drop_impl(none);
+//RS 
+//RS     let warm4 = format!("{base}warm4");
+//RS     let fifth = send(safe, "GET", &warm4, None).unwrap();
+//RS     assert_eq!(drain(fifth.body_handle), b"z");
+//RS     wait_for_pooled_rst();
+//RS     let denied = format!("{base}denied");
+//RS     assert!(send(safe, "PUT", &denied, None).is_err());
+//RS     bridge::jet_http_client_drop_impl(safe);
+//RS 
+//RS     let id_root = bridge::jet_http_client_new_impl();
+//RS     let idem = bridge::jet_http_client_protocols_impl(id_root, false, true, false).unwrap();
+//RS     bridge::jet_http_client_drop_impl(id_root);
+//RS     let idem = bridge::jet_http_client_retries_impl(idem, 2).unwrap();
+//RS     let idem = bridge::jet_http_client_timeouts_impl(
+//RS         idem, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+//RS     )
+//RS     .unwrap();
+//RS     let warm5 = format!("{base}warm5");
+//RS     let sixth = send(idem, "GET", &warm5, None).unwrap();
+//RS     assert_eq!(drain(sixth.body_handle), b"q");
+//RS     wait_for_pooled_rst();
+//RS     let allowed = format!("{base}allowed");
+//RS     let seventh = send(idem, "PUT", &allowed, None).unwrap();
+//RS     assert_eq!(drain(seventh.body_handle), b"ok");
+//RS     bridge::jet_http_client_drop_impl(idem);
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "retry harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin).arg(&url).output().unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "retry harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     server.join().unwrap();
+//RS     assert_eq!(
+//RS         puts.load(Ordering::Relaxed),
+//RS         1,
+//RS         "only Idempotent PUT should dial"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_client_retries_method_typechecks() {
+//RS     let src = r#"
+//RS use core.http.client as http
+//RS fn run() {
+//RS     _ :: http.Client.new()
+//RS         .retries(.Idempotent)
+//RS         .retries(.Safe)
+//RS         .retries(.None)
+//RS }
+//RS "#;
+//RS     let (code, _stdout, stderr) = common::build_and_run("jet_http_client_law", "retries_type", src);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS }
+//RS 
+//RS #[test]
+//RS fn h2_rejects_idle_stream_flood_before_queue_growth() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let observed = closed.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_secs(5)))
+//RS             .unwrap();
+//RS         stream
+//RS             .set_write_timeout(Some(Duration::from_secs(2)))
+//RS             .unwrap();
+//RS         let mut preface = [0; 24];
+//RS         stream.read_exact(&mut preface).unwrap();
+//RS         assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+//RS         assert_eq!(read_h2_frame(&mut stream).0, 4);
+//RS         write_h2_frame(&mut stream, 4, 0, 0, &[]);
+//RS         let request = loop {
+//RS             let frame = read_h2_frame(&mut stream);
+//RS             if frame.0 == 1 {
+//RS                 break frame;
+//RS             }
+//RS         };
+//RS         assert_eq!(request.2, 1);
+//RS         // Keep the real response body open. The following DATA frame targets
+//RS         // idle stream 3 and must be rejected before entering any queue.
+//RS         write_h2_frame(&mut stream, 1, 4, 1, &[0x88]);
+//RS         let chunk = vec![b'x'; 64 * 1024];
+//RS         let length = (chunk.len() as u32).to_be_bytes();
+//RS         let mut head = [0; 9];
+//RS         head[..3].copy_from_slice(&length[1..]);
+//RS         head[3] = 0;
+//RS         head[4] = 0;
+//RS         head[5..].copy_from_slice(&3u32.to_be_bytes());
+//RS         stream.write_all(&head).unwrap();
+//RS         stream.write_all(&chunk).unwrap();
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_millis(50)))
+//RS             .unwrap();
+//RS         let deadline = Instant::now() + Duration::from_millis(500);
+//RS         let mut byte = [0; 1];
+//RS         loop {
+//RS             match stream.read(&mut byte) {
+//RS                 Ok(0) => {
+//RS                     observed.store(true, Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS                 Ok(_) => {}
+//RS                 Err(error)
+//RS                     if matches!(
+//RS                         error.kind(),
+//RS                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+//RS                     ) => {
+//RS                         if Instant::now() >= deadline {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                 Err(_) => {
+//RS                     observed.store(true, Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_h2_idle_stream_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source =
+//RS         "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("h2_idle_stream.rs");
+//RS     let bin = dir.join("h2_idle_stream");
+//RS     fs::write(
+//RS         &harness,
+//RS         r#"
+//RS fn main() {
+//RS     let url = std::env::args().nth(1).unwrap();
+//RS     let root = bridge::jet_http_client_new_impl();
+//RS     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+//RS     let response = bridge::jet_http_client_send_with_impl(
+//RS         client,
+//RS         "GET",
+//RS         &url,
+//RS         &[],
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         &[],
+//RS         &[],
+//RS         &[],
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(response.status, 200);
+//RS     let error = bridge::jet_http_client_body_read_impl(response.body_handle, 64 * 1024).unwrap_err();
+//RS     assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+//RS     bridge::jet_http_client_body_close_impl(response.body_handle);
+//RS     bridge::jet_http_client_drop_impl(client);
+//RS     bridge::jet_http_client_drop_impl(root);
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "bridge H2 idle-stream harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin)
+//RS         .arg(format!("http://{addr}/h2"))
+//RS         .output()
+//RS         .unwrap();
+//RS     server.join().unwrap();
+//RS     assert!(
+//RS         closed.load(Ordering::Relaxed),
+//RS         "idle-stream peer remained open after invalid frame"
+//RS     );
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bridge H2 idle-stream harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn h2_bounds_queued_frames_for_another_active_stream() {
+//RS     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let observed = closed.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         let (mut stream, _) = listener.accept().unwrap();
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_secs(5)))
+//RS             .unwrap();
+//RS         stream
+//RS             .set_write_timeout(Some(Duration::from_secs(2)))
+//RS             .unwrap();
+//RS         let mut preface = [0; 24];
+//RS         stream.read_exact(&mut preface).unwrap();
+//RS         assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+//RS         assert_eq!(read_h2_frame(&mut stream).0, 4);
+//RS         write_h2_frame(&mut stream, 4, 0, 0, &[]);
+//RS         let first = loop {
+//RS             let frame = read_h2_frame(&mut stream);
+//RS             if frame.0 == 1 {
+//RS                 break frame;
+//RS             }
+//RS         };
+//RS         assert_eq!(first.2, 1);
+//RS         write_h2_frame(&mut stream, 1, 4, 1, &[0x88]);
+//RS         let second = loop {
+//RS             let frame = read_h2_frame(&mut stream);
+//RS             if frame.0 == 1 {
+//RS                 break frame;
+//RS             }
+//RS         };
+//RS         assert_eq!(second.2, 3);
+//RS         write_h2_frame(&mut stream, 1, 4, 3, &[0x88]);
+//RS         let chunk = vec![b'x'; 64 * 1024];
+//RS         let mut send = |payload: &[u8]| -> bool {
+//RS             let length = (payload.len() as u32).to_be_bytes();
+//RS             let mut head = [0; 9];
+//RS             head[..3].copy_from_slice(&length[1..]);
+//RS             head[3] = 0;
+//RS             head[4] = 0;
+//RS             head[5..].copy_from_slice(&3u32.to_be_bytes());
+//RS             stream
+//RS                 .write_all(&head)
+//RS                 .and_then(|_| stream.write_all(payload))
+//RS                 .is_ok()
+//RS         };
+//RS         for _ in 0..1024 {
+//RS             if !send(&chunk) {
+//RS                 break;
+//RS             }
+//RS         }
+//RS         stream
+//RS             .set_read_timeout(Some(Duration::from_millis(50)))
+//RS             .unwrap();
+//RS         let deadline = Instant::now() + Duration::from_millis(500);
+//RS         let mut byte = [0; 1];
+//RS         loop {
+//RS             match stream.read(&mut byte) {
+//RS                 Ok(0) => {
+//RS                     observed.store(true, Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS                 Ok(_) => {}
+//RS                 Err(error)
+//RS                     if matches!(
+//RS                         error.kind(),
+//RS                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+//RS                     ) => {
+//RS                         if Instant::now() >= deadline {
+//RS                             break;
+//RS                         }
+//RS                     }
+//RS                 Err(_) => {
+//RS                     observed.store(true, Ordering::Relaxed);
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             if Instant::now() >= deadline {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     });
+//RS 
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_http_client_h2_active_queue_{}",
+//RS         std::process::id()
+//RS     ));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let shown = dir.join("seed.jet");
+//RS     let source =
+//RS         "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+//RS     fs::write(&shown, source).unwrap();
+//RS     let link = jet::compile_with_path(source, shown.to_str().unwrap())
+//RS         .unwrap()
+//RS         .ffi
+//RS         .expect("HTTP client bridge");
+//RS     let harness = dir.join("h2_active_queue.rs");
+//RS     let bin = dir.join("h2_active_queue");
+//RS     fs::write(
+//RS         &harness,
+//RS         r#"
+//RS fn send(
+//RS     client: i64,
+//RS     url: &String,
+//RS ) -> Result<bridge::JetHTTPResponseParts, bridge::JetHTTPBridgeError> {
+//RS     bridge::jet_http_client_send_with_impl(
+//RS         client,
+//RS         "GET",
+//RS         url,
+//RS         &[],
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         None,
+//RS         &[],
+//RS         &[],
+//RS         &[],
+//RS     )
+//RS }
+//RS 
+//RS fn main() {
+//RS     let url = std::env::args().nth(1).unwrap();
+//RS     let root = bridge::jet_http_client_new_impl();
+//RS     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+//RS     let first = send(client, &url).unwrap();
+//RS     assert_eq!(first.status, 200);
+//RS     let second_url = url.clone();
+//RS     let second = std::thread::spawn(move || send(client, &second_url).unwrap())
+//RS         .join()
+//RS         .unwrap();
+//RS     assert_eq!(second.status, 200);
+//RS     let error = bridge::jet_http_client_body_read_impl(first.body_handle, 64 * 1024).unwrap_err();
+//RS     assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+//RS     bridge::jet_http_client_body_close_impl(first.body_handle);
+//RS     bridge::jet_http_client_body_close_impl(second.body_handle);
+//RS     bridge::jet_http_client_drop_impl(client);
+//RS     bridge::jet_http_client_drop_impl(root);
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         harness.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     rustc
+//RS         .arg("--extern")
+//RS         .arg(format!("bridge={}", link.rlib_path.display()));
+//RS     for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+//RS         rustc
+//RS             .arg("-L")
+//RS             .arg(format!("dependency={}", dependency.display()));
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "bridge H2 active-queue harness compile failed:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let output = Command::new(&bin)
+//RS         .arg(format!("http://{addr}/h2"))
+//RS         .output()
+//RS         .unwrap();
+//RS     server.join().unwrap();
+//RS     assert!(
+//RS         closed.load(Ordering::Relaxed),
+//RS         "active-stream queue flood did not close the peer"
+//RS     );
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bridge H2 active-queue harness failed:\n{}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1070 tests/http_client_law.rs:1803-4053
+

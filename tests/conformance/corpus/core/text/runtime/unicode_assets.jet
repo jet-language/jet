@@ -1,0 +1,231 @@
+// Rust UnicodeTables.rs:1-54 and UnicodeString.rs:1-155 behavior, not include wiring.
+use core.text.runtime.unicode_assets as text_asset
+use core.text.runtime.kernel_unicode_string as text_string
+use core.text.runtime.top_unicode_tables as text_tables
+use core.text.runtime.assets.unicode_simple_fold as text_simple_fold
+use core.text.runtime.assets.unicode_decomp_index as text_decomp
+use core.text.runtime.assets.unicode_decomp_pool as text_pool
+use core.text.runtime.assets.unicode_ccc as text_ccc
+use core.text.runtime.assets.unicode_upper_index as text_upper_index
+use core.text.runtime.assets.unicode_upper_pool as text_upper_pool
+use core.text.runtime.assets.unicode_name_index as text_names
+use core.text.runtime.assets.unicode_grapheme_break as text_grapheme
+use core.text.runtime.assets.unicode_word_break as text_word
+use core.text.runtime.assets.unicode_sentence_break as text_sentence
+use core.text.runtime.assets.unicode_incb as text_incb
+use core.text.runtime.assets.unicode_east_asian_width as text_width
+use core.text.runtime.assets.unicode_composition_exclusions as text_excluded
+
+#Test("Unicode asset schema version extent and fail-closed corrupt headers") {
+    asset :: text_ccc.UNICODE_CCC
+    assert(text_asset.valid(asset, 3, 7))
+    empty_pool :: text_asset.pool(asset, 3, 7)
+    assert_eq(empty_pool.len(), 0)
+    assert(!text_asset.valid(asset, 2, 7))
+    assert(!text_asset.valid(asset, 3, 6))
+    corrupt := ~asset
+    corrupt[4] = U8{2}
+    assert(!text_asset.valid(corrupt, 3, 7))
+    corrupt[4] = U8{1}
+    corrupt[8] = U8{16}
+    assert(!text_asset.valid(corrupt, 3, 7))
+    corrupt[8] = U8{17}
+    corrupt[24] = U8{41}
+    assert(!text_asset.valid(corrupt, 3, 7))
+    corrupt[24] = U8{40}
+    corrupt[28] = U8{0}
+    assert(!text_asset.valid(corrupt, 3, 7))
+    empty :: [U8]{}
+    assert(!text_asset.valid(empty, 3, 7))
+}
+
+#Test("Unicode little-endian decomposition ranges mappings and simple fold") {
+    index_asset :: text_decomp.UNICODE_DECOMP_INDEX
+    pool_asset :: text_pool.UNICODE_DECOMP_POOL
+    index :: text_asset.records(index_asset, 5, 7)
+    pool :: text_asset.records(pool_asset, 1, 3)
+    assert_eq(index.len() /% 7, 5914)
+    assert_eq(pool.len() /% 3, 8740)
+    row :: text_asset.mapping_row(index, 197, 7) ?? panic("missing A ring")
+    offset :: text_asset.uint(index, row + 3, 2)
+    assert_eq(text_asset.uint(index, row + 5, 1), 2)
+    assert_eq(text_asset.uint(index, row + 6, 1), 1)
+    assert_eq(text_asset.scalar(pool, offset), 65)
+    assert_eq(text_asset.scalar(pool, offset + 1), 778)
+    ccc_asset :: text_ccc.UNICODE_CCC
+    ccc :: text_asset.records(ccc_asset, 3, 7)
+    assert_eq(text_asset.tag(ccc, 768, 0), 230)
+    assert_eq(text_asset.tag(ccc, 790, 0), 220)
+    assert_eq(text_asset.tag(ccc, 65, 0), 0)
+    assert_eq(text_asset.tag(ccc, 1114112, 0), 0)
+    assert_eq(text_asset.mapping_row(index, -1, 7), None)
+    upper_index_asset :: text_upper_index.UNICODE_UPPER_INDEX
+    upper_pool_asset :: text_upper_pool.UNICODE_UPPER_POOL
+    upper_index :: text_asset.records(upper_index_asset, 4, 11)
+    upper_pool :: text_asset.records(upper_pool_asset, 1, 3)
+    span :: text_asset.mapping(upper_index, upper_pool, 223) ?? panic("missing sharp s")
+    assert_eq(span.length, 2)
+    assert_eq(text_asset.scalar(upper_pool, span.start), 83)
+    assert_eq(text_asset.scalar(upper_pool, span.start + 1), 83)
+    assert(text_asset.mapping(upper_index, upper_pool, 128512) == None)
+    simple_asset :: text_simple_fold.UNICODE_SIMPLE_FOLD
+    simple :: text_asset.records(simple_asset, 7, 6)
+    assert_eq(text_tables.simple_fold(simple, 8490), 107)
+    assert_eq(text_tables.simple_fold(simple, 7838), 223)
+    assert_eq(text_tables.simple_fold(simple, 128512), 128512)
+}
+
+#Test("Unicode break Indic width and full composition exclusion properties") {
+    grapheme_asset :: text_grapheme.UNICODE_GRAPHEME_BREAK
+    word_asset :: text_word.UNICODE_WORD_BREAK
+    sentence_asset :: text_sentence.UNICODE_SENTENCE_BREAK
+    incb_asset :: text_incb.UNICODE_INCB
+    width_asset :: text_width.UNICODE_EAST_ASIAN_WIDTH
+    excluded_asset :: text_excluded.UNICODE_COMPOSITION_EXCLUSIONS
+    grapheme :: text_asset.records(grapheme_asset, 3, 7)
+    word :: text_asset.records(word_asset, 3, 7)
+    sentence :: text_asset.records(sentence_asset, 3, 7)
+    incb :: text_asset.records(incb_asset, 3, 7)
+    width :: text_asset.records(width_asset, 3, 7)
+    excluded :: text_asset.records(excluded_asset, 2, 6)
+    assert_eq(text_asset.tag(grapheme, 13, 0), 1)
+    assert_eq(text_asset.tag(grapheme, 10, 0), 2)
+    assert_eq(text_asset.tag(grapheme, 8205, 0), 5)
+    assert_eq(text_asset.tag(word, 65, 0), 10)
+    assert_eq(text_asset.tag(sentence, 65, 0), 8)
+    assert_eq(text_asset.tag(incb, 2381, 0), 1)
+    assert_eq(text_asset.tag(incb, 2325, 0), 2)
+    assert_eq(text_asset.tag(width, 30028, 0), 2)
+    assert_eq(text_asset.tag(width, 183, 0), 1)
+    assert(text_asset.contains(excluded, 2392))
+    assert(!text_asset.contains(excluded, 197))
+}
+
+#Test("Unicode full casing expansions pinned 17 and final sigma context") {
+    assert_eq(text_string.lower("ΟΣ"), "ος")
+    assert_eq(text_string.lower("Σ"), "σ")
+    assert_eq(text_string.lower("ΟΣΑ"), "οσα")
+    assert_eq(text_string.lower("ΌΣ́"), "ός́")
+    assert_eq(text_string.lower("ΌΣ́Α"), "όσ́α")
+    assert_eq(text_string.lower("Ο Σ"), "ο σ")
+    assert_eq(text_string.lower("İ"), "i̇")
+    assert_eq(text_string.upper("ßևﬃ"), "SSԵՒFFI")
+    assert_eq(text_string.upper("ẞ"), "ẞ")
+    assert_eq(text_string.lower("꟎"), "꟏")
+    assert_eq(text_string.upper("꟏"), "꟎")
+    assert_eq(text_string.lower("𐐀"), "𐐨")
+    assert_eq(text_string.upper("𐐨"), "𐐀")
+    assert_eq(text_string.casefold("Straßeİς"), "strassei̇σ")
+    assert_eq(text_string.casefold("KÅﬃ"), "kåffi")
+    assert_eq(text_string.lower(""), "")
+    assert_eq(text_string.upper(""), "")
+    assert_eq(text_string.casefold(""), "")
+}
+
+#Test("Unicode pinned whitespace owned trim keeps scalar extents") {
+    source :: " \tjet \n"
+    assert_eq(text_string.trim(source), "jet")
+    assert_eq(text_string.trim_start(source), "jet \n")
+    assert_eq(text_string.trim_end(source), " \tjet")
+    assert_eq(text_string.trim("  "), "")
+    assert_eq(text_string.trim_start("  "), "")
+    assert_eq(text_string.trim_end("  "), "")
+    // Literal U+200B is not White_Space; preserve it at both ends.
+    assert_eq(text_string.trim("​jet​"), "​jet​")
+    assert_eq(text_string.trim(""), "")
+}
+
+// #4392: retain the true borrowed contract while String.slice provenance is fixed.
+#Test("Unicode borrowed trim retains original parameter owner") {
+    source :: " \tjet \n"
+    view :: text_string.trim_view(source)
+    assert_eq(~view, "jet")
+}
+
+#Test("Unicode substring search is scalar indexed nonoverlapping and absent") {
+    assert_eq(text_string.index_of("é界abc界", "abc"), Val(2))
+    assert_eq(text_string.last_index_of("é界abc界", "界"), Val(5))
+    assert_eq(text_string.index_of("é界", ""), Val(0))
+    assert_eq(text_string.last_index_of("é界", ""), Val(2))
+    assert_eq(text_string.index_of("é界", "x"), None)
+    assert_eq(text_string.last_index_of("é界", "x"), None)
+    assert_eq(text_string.count("aaaaa", "aa"), 2)
+    assert_eq(text_string.count("ééé", "éé"), 1)
+    assert_eq(text_string.count("anything", ""), 0)
+    assert_eq(text_string.count("", "x"), 0)
+    assert_eq(text_string.index_of("ababababac", "ababac"), Val(4))
+    assert_eq(text_string.last_index_of("ababababac", "abab"), Val(4))
+    first :: text_string.split_once("é:界:尾", ":") ?? panic("missing separator")
+    assert_eq(first.before, "é")
+    assert_eq(first.after, "界:尾")
+    last :: text_string.cut_last("é:界:尾", ":") ?? panic("missing last separator")
+    assert_eq(last.before, "é:界")
+    assert_eq(last.after, "尾")
+    empty_first :: text_string.split_once("é界", "") ?? panic("empty separator absent")
+    assert_eq(empty_first.before, "")
+    assert_eq(empty_first.after, "é界")
+    empty_last :: text_string.cut_last("é界", "") ?? panic("empty last separator absent")
+    assert_eq(empty_last.before, "é界")
+    assert_eq(empty_last.after, "")
+    assert(text_string.split_once("é界", ":") == None)
+    assert(text_string.cut_last("é界", ":") == None)
+}
+
+fn binary_text(bits: Int, length: Int) -> String Never! {
+    bytes := [U8]{}
+    loop i in 0..<length -> &bytes.push(U8{97 + ((bits >> i) & 1)})
+    String.from_bytes(bytes) ?? panic("ASCII fixture")
+}
+
+// Independent finite oracle, not a runtime substitute: every binary word up to
+// eight bytes against every needle up to five tests periodic/nonperiodic splits.
+fn expected_search(hay: String, needle: String, reverse: Bool) -> Int? {
+    h :: hay.bytes()
+    n :: needle.bytes()
+    if n.len() > h.len() -> return None
+    result := Int?{None}
+    loop at in 0..<(h.len() - n.len() + 1) {
+        matched := true
+        loop i in 0..<n.len() {
+            if h[at + i] != n[i] {
+                matched = false
+                break
+            }
+        }
+        if matched {
+            if !reverse -> return Val(at)
+            result = Val(at)
+        }
+    }
+    result
+}
+
+#Test("Unicode constant-storage search critical factorization exhaustive words") {
+    loop length in 0..<9 {
+        loop bits in 0..<(1 << length) {
+            hay :: binary_text(bits, length)
+            loop size in 0..<6 {
+                loop pattern in 0..<(1 << size) {
+                    needle :: binary_text(pattern, size)
+                    assert_eq(text_string.index_of(hay, needle), expected_search(hay, needle, false))
+                    assert_eq(text_string.last_index_of(hay, needle), expected_search(hay, needle, true))
+                }
+            }
+        }
+    }
+}
+
+#Test("Unicode UTF-8 names borrow pool extents and retain control aliases") {
+    names_asset :: text_names.UNICODE_NAME_INDEX
+    names :: text_asset.records(names_asset, 8, 11)
+    names_pool :: text_asset.pool(names_asset, 8, 11)
+    name :: text_tables.name_span(names, names_pool, 7) ?? panic("missing control name")
+    name_start :: name.start
+    name_length :: name.length
+    assert(name_start + name_length <= names_pool.len())
+    assert_eq(name_length, 4)
+    assert_eq(names_pool[name_start], U8{66})
+    assert_eq(names_pool[name_start + 1], U8{69})
+    assert_eq(names_pool[name_start + 2], U8{76})
+    assert_eq(names_pool[name_start + 3], U8{76})
+}

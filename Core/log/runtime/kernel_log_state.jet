@@ -1,0 +1,17 @@
+// PORT-PENDING 0152 crates-jet-codegen-src-prelude-core-logstate-module-group: crates/jet-codegen/src/Prelude/Core/LogState.rs:1-13
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Shared core.log trace context state.
+//RS //
+//RS // The AOT prelude, resident host, and comptime evaluator include this same
+//RS // kernel so set_trace_id has one state carrier rather than tier-specific
+//RS // copies of the setter semantics.
+//RS thread_local! {
+//RS     pub(crate) static JET_LOG_TRACE_ID: std::cell::RefCell<String> =
+//RS         std::cell::RefCell::new(String::new());
+//RS }
+//RS 
+//RS pub(crate) fn jet_ring_log_set_trace_id(id: &str) {
+//RS     JET_LOG_TRACE_ID.with(|trace| *trace.borrow_mut() = id.to_string());
+//RS }
+// END-PORT-PENDING 0152 crates/jet-codegen/src/Prelude/Core/LogState.rs:1-13
+

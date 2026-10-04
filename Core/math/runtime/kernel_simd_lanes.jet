@@ -1,0 +1,474 @@
+// SimdLanes.rs portable policy. D-FRED1: source i enters accumulator i mod 8;
+// finish is ((a0+a1)+(a2+a3))+((a4+a5)+(a6+a7)). No reassociation.
+// Publication: add `module kernel_simd_lanes` to core.math.runtime. Main owns
+// that assembly and the prelude adapter registration, not this private owner.
+use core.math as simd_math
+use core.prelude.runtime.kernel_fixed_arithmetic as simd_fixed
+
+#Equatable
+pub enum JetSimdBinaryOp { Add, Sub, Mul, Div }
+#Equatable
+pub enum JetSimdReduceOp { Add, Mul, Min, Max, Avg }
+#Equatable
+pub enum JetSimdCompareOp { Eq, Ne, Lt, Gt, Le, Ge }
+pub JET_SIMD_REDUCTION_LANES :: 8
+
+// Rust :37–135. Implementations are scalar leaves, never calls back into the
+// compiler's SIMD adapter. The integer MIN/MAX identities are intentionally
+// the source's MIN/MAX (not the conventional opposite reduction identities).
+pub trait JetSimdScalar {
+    fn simd_zero() -> Self Never!
+    fn simd_one() -> Self Never!
+    fn simd_min_identity() -> Self Never!
+    fn simd_max_identity() -> Self Never!
+    fn simd_from_len(len: Int) -> Self Never!
+    fn simd_add(self, other: Self) -> Self Never!
+    fn simd_sub(self, other: Self) -> Self Never!
+    fn simd_mul(self, other: Self) -> Self Never!
+    fn simd_div(self, other: Self) -> Self Never!
+    fn simd_min(self, other: Self) -> Self Never!
+    fn simd_max(self, other: Self) -> Self Never!
+}
+prep loop T in [F32, Float] {
+    impl T.JetSimdScalar {
+        fn simd_zero() -> Self Never! { T{0.0} }
+        fn simd_one() -> Self Never! { T{1.0} }
+        fn simd_min_identity() -> Self Never! { T.INFINITY }
+        fn simd_max_identity() -> Self Never! { -T.INFINITY }
+        fn simd_from_len(len: Int) -> Self Never! { T{len} }
+        fn simd_add(self, other: Self) -> Self Never! { self + other }
+        fn simd_sub(self, other: Self) -> Self Never! { self - other }
+        fn simd_mul(self, other: Self) -> Self Never! { self * other }
+        fn simd_div(self, other: Self) -> Self Never! { self / other }
+        fn simd_min(self, other: Self) -> Self Never! {
+            if self != self -> return other
+            if other != other || self < other -> return self
+            other
+        }
+        fn simd_max(self, other: Self) -> Self Never! {
+            if self != self -> return other
+            if other != other || self > other -> return self
+            other
+        }
+    }
+}
+prep loop T in [I8, I16, I32, I64] {
+    impl T.JetSimdScalar {
+        fn simd_zero() -> Self Never! { T{0} }
+        fn simd_one() -> Self Never! { T{1} }
+        fn simd_min_identity() -> Self Never! { T.MIN }
+        fn simd_max_identity() -> Self Never! { T.MAX }
+        fn simd_from_len(len: Int) -> Self Never! {
+            // Original usize as scalar: retain the low bits, then sign extend.
+            mask :: (U64{T.MAX} << 1) | U64{1}
+            low :: U64{len} & mask
+            sign :: (mask >> 1) + U64{1}
+            value :: if low < sign -> I64{low} else -> -(I64{mask - low}) - I64{1}
+            T{value}
+        }
+        fn simd_add(self, other: Self) -> Self Never! { self.wrapping_add(other) }
+        fn simd_sub(self, other: Self) -> Self Never! { self.wrapping_sub(other) }
+        fn simd_mul(self, other: Self) -> Self Never! { self.wrapping_mul(other) }
+        fn simd_div(self, other: Self) -> Self Never! { self /% other }
+        fn simd_min(self, other: Self) -> Self Never! { if self < other -> self else -> other }
+        fn simd_max(self, other: Self) -> Self Never! { if self > other -> self else -> other }
+    }
+}
+prep loop T in [U8, U16, U32, U64] {
+    impl T.JetSimdScalar {
+        fn simd_zero() -> Self Never! { T{0} }
+        fn simd_one() -> Self Never! { T{1} }
+        fn simd_min_identity() -> Self Never! { T.MIN }
+        fn simd_max_identity() -> Self Never! { T.MAX }
+        fn simd_from_len(len: Int) -> Self Never! { T{U64{len} & U64{T.MAX}} }
+        fn simd_add(self, other: Self) -> Self Never! { self.wrapping_add(other) }
+        fn simd_sub(self, other: Self) -> Self Never! { self.wrapping_sub(other) }
+        fn simd_mul(self, other: Self) -> Self Never! { self.wrapping_mul(other) }
+        fn simd_div(self, other: Self) -> Self Never! { self /% other }
+        fn simd_min(self, other: Self) -> Self Never! { if self < other -> self else -> other }
+        fn simd_max(self, other: Self) -> Self Never! { if self > other -> self else -> other }
+    }
+}
+// Rust :138,148.
+fn jet_simd_apply<T: JetSimdScalar>(left: T, right: T, op: JetSimdBinaryOp) -> T Never! {
+    if op == {
+        .Add -> left.simd_add(right)
+        .Sub -> left.simd_sub(right)
+        .Mul -> left.simd_mul(right)
+        .Div -> left.simd_div(right)
+    }
+}
+fn jet_simd_reduce_apply<T: JetSimdScalar>(left: T, right: T, op: JetSimdReduceOp) -> T Never! {
+    if op == {
+        .Add | .Avg -> left.simd_add(right)
+        .Mul -> left.simd_mul(right)
+        .Min -> left.simd_min(right)
+        .Max -> left.simd_max(right)
+    }
+}
+// Rust :158–233. A fixed array copy is the returned value, not a heap List.
+pub fn jet_simd_binary_array<T: JetSimdScalar>(left: [T#N], right: [T#N], op: JetSimdBinaryOp) -> [T#N] Never! {
+    out := ~left
+    loop i in 0..<N -> out[i] = jet_simd_apply(left[i], right[i], op)
+    return ^out
+}
+pub fn jet_simd_add_array<T: JetSimdScalar>(left: [T#N], right: [T#N]) -> [T#N] Never! { jet_simd_binary_array(left, right, JetSimdBinaryOp.Add) }
+pub fn jet_simd_sub_array<T: JetSimdScalar>(left: [T#N], right: [T#N]) -> [T#N] Never! { jet_simd_binary_array(left, right, JetSimdBinaryOp.Sub) }
+pub fn jet_simd_mul_array<T: JetSimdScalar>(left: [T#N], right: [T#N]) -> [T#N] Never! { jet_simd_binary_array(left, right, JetSimdBinaryOp.Mul) }
+pub fn jet_simd_div_array<T: JetSimdScalar>(left: [T#N], right: [T#N]) -> [T#N] Never! { jet_simd_binary_array(left, right, JetSimdBinaryOp.Div) }
+pub fn jet_simd_select_array<T>(mask: [Bool#N], when_true: [T#N], when_false: [T#N]) -> [T#N] Never! {
+    out := ~when_false
+    loop i in 0..<N { if mask[i] -> out[i] = when_true[i] }
+    return ^out
+}
+pub fn jet_simd_masked_add_array<T: JetSimdScalar>(accumulator: [T#N], addend: [T#N], mask: [Bool#N]) -> [T#N] Never! {
+    out := ~accumulator
+    loop i in 0..<N { if mask[i] -> out[i] = accumulator[i].simd_add(addend[i]) }
+    return ^out
+}
+// Rust :238–303,764. Validate complete shape BEFORE any writes.
+pub fn jet_simd_masked_add_slice<T: JetSimdScalar>(accumulator: ViewMut<T>, addend: View<T>, mask: View<Bool>) -> Bool Never! {
+    if accumulator.len() != addend.len() || accumulator.len() != mask.len() -> return false
+    loop i in 0..<accumulator.len() { if mask[i] -> accumulator[i] = accumulator[i].simd_add(addend[i]) }
+    true
+}
+pub fn jet_simd_masked_reduce_array<T: JetSimdScalar>(values: [T#N], mask: [Bool#N], seed: T) -> T Never! {
+    accumulators := jet_simd_seed_fixed(seed)
+    seen := false
+    loop i in 0..<N {
+        if mask[i] {
+            lane :: i % 8
+            accumulators[lane] = accumulators[lane].simd_add(values[i])
+            seen = true
+        }
+    }
+    if seen -> jet_simd_finish_fixed(accumulators) else -> seed
+}
+pub fn jet_simd_masked_reduce_slice<T: JetSimdScalar>(values: View<T>, mask: View<Bool>, seed: T) -> T? Never! {
+    if values.len() != mask.len() -> return None
+    accumulators := jet_simd_seed_fixed(seed)
+    seen := false
+    loop i in 0..<values.len() {
+        if mask[i] {
+            lane :: i % 8
+            accumulators[lane] = accumulators[lane].simd_add(values[i])
+            seen = true
+        }
+    }
+    Val(if seen -> jet_simd_finish_fixed(accumulators) else -> seed)
+}
+// Rust :307–341: next pulls BOTH streams, including on the mismatch rail.
+pub fn jet_simd_masked_reduce_fixed_iter<T: JetSimdScalar>(values: &Iter<T>, mask: &Iter<Bool>, seed: T) -> T? Never! {
+    accumulators := jet_simd_seed_fixed(seed)
+    seen := false
+    index := 0
+    loop {
+        value :: (&values.next())
+        selected :: (&mask.next())
+        if value == .None { if selected == .None -> break }
+        if value == .Val(item) {
+            if selected == .Val(accept) {
+                if accept {
+                    lane :: index % 8
+                    accumulators[lane] = accumulators[lane].simd_add(item)
+                    seen = true
+                }
+                index += 1
+                next
+            }
+        }
+        return None
+    }
+    Val(if seen -> jet_simd_finish_fixed(accumulators) else -> seed)
+}
+// Rust :354. IEEE partial comparisons: NaN != is true, ordering is false.
+fn jet_simd_compare<T: Comparable>(left: T, right: T, op: JetSimdCompareOp) -> Bool Never! {
+    if op == {
+        .Eq -> left == right
+        .Ne -> left != right
+        .Lt -> left < right
+        .Gt -> left > right
+        .Le -> left <= right
+        .Ge -> left >= right
+    }
+}
+// Rust :419–428 default first_match_slice. Only scalar-default families :437;
+// i64/F32/Float overrides require packed dispatch and are NOT implemented here.
+pub trait JetSimdComparable {
+    fn first_match_slice(values: View<Self>, needle: Self, op: JetSimdCompareOp) -> Int? Never!
+}
+prep loop T in [Bool, Char, I8, I16, I32, U8, U16, U32, U64] {
+    impl T.JetSimdComparable {
+        fn first_match_slice(values: View<Self>, needle: Self, op: JetSimdCompareOp) -> Int? Never! {
+            loop i in 0..<values.len() { if jet_simd_compare(values[i], needle, op) -> return Val(i) }
+            None
+        }
+    }
+}
+pub fn jet_simd_first_match_slice<T: JetSimdComparable>(values: View<T>, needle: T, op: JetSimdCompareOp) -> Int? Never! {
+    T.first_match_slice(values, needle, op)
+}
+// Rust :689–718,742–795. No dynamic list conversion of the eight accumulators.
+pub fn jet_simd_seed_fixed<T: JetSimdScalar>(seed: T) -> [T#8] Never! {
+    zero :: T.simd_zero()
+    [T#8]{seed, zero, zero, zero, zero, zero, zero, zero}
+}
+pub fn jet_simd_reduce_fixed<T: JetSimdScalar>(values: View<T>, seed: T) -> T Never! {
+    accumulators := jet_simd_seed_fixed(seed)
+    loop i in 0..<values.len() {
+        lane :: i & 7
+        accumulators[lane] = accumulators[lane].simd_add(values[i])
+    }
+    if values.len() == 0 -> seed else -> jet_simd_finish_fixed(accumulators)
+}
+pub fn jet_simd_reduce_fixed_iter<T: JetSimdScalar>(values: &Iter<T>, seed: T) -> T Never! {
+    accumulators := jet_simd_seed_fixed(seed)
+    seen := false
+    index := 0
+    loop {
+        value :: (&values.next()) ?? break
+        lane :: index & 7
+        accumulators[lane] = accumulators[lane].simd_add(value)
+        seen = true
+        index += 1
+    }
+    if seen -> jet_simd_finish_fixed(accumulators) else -> seed
+}
+// Rust :723: LANES is a closed generic module value, not a runtime target fact.
+pub module fixed_lane(lanes: Int) {
+    pub fn jet_simd_fixed_lane_from_int(index: I64, start: I64, subtract: fn(I64, I64) -> I64, to_i64: fn(I64) -> I64?) -> Int Never! {
+        difference :: subtract(index, start)
+        value :: to_i64(difference) ?? return 0
+        remainder := value %% I64{lanes}
+        if remainder < (I64{0}) -> remainder += I64{lanes}
+        Int.from_i64(remainder)
+    }
+}
+pub fn jet_simd_reduce_fixed_array<T: JetSimdScalar>(values: [T#N], seed: T) -> T Never! {
+    accumulators := jet_simd_seed_fixed(seed)
+    loop i in 0..<N {
+        lane :: i & 7
+        accumulators[lane] = accumulators[lane].simd_add(values[i])
+    }
+    if N == 0 -> seed else -> jet_simd_finish_fixed(accumulators)
+}
+pub fn jet_simd_accumulate_fixed<T: JetSimdScalar>(accumulators: &[T#8], values: View<T>, offset: Int) Never! {
+    loop i in 0..<values.len() {
+        lane :: (offset + i) & 7
+        accumulators[lane] = accumulators[lane].simd_add(values[i])
+    }
+}
+pub fn jet_simd_accumulate_masked_fixed<T: JetSimdScalar>(accumulators: &[T#8], values: View<T>, mask: View<Bool>, offset: Int) -> Bool Never! {
+    if values.len() != mask.len() -> return false
+    loop i in 0..<values.len() {
+        if mask[i] {
+            lane :: (offset + i) % 8
+            accumulators[lane] = accumulators[lane].simd_add(values[i])
+        }
+    }
+    true
+}
+pub fn jet_simd_finish_fixed<T: JetSimdScalar>(accumulators: [T#8]) -> T Never! {
+    left :: accumulators[0].simd_add(accumulators[1]).simd_add(accumulators[2].simd_add(accumulators[3]))
+    right :: accumulators[4].simd_add(accumulators[5]).simd_add(accumulators[6].simd_add(accumulators[7]))
+    left.simd_add(right)
+}
+// Rust :1933,1970,2007,2044. These splat bodies themselves have no dispatch.
+pub fn jet_simd_f64x4_splat_array(value: Float) -> [Float#4] Never! { [Float#4]{value, value, value, value} }
+pub fn jet_simd_f32x4_splat_array(value: F32) -> [F32#4] Never! { [F32#4]{value, value, value, value} }
+pub fn jet_simd_f64x2_splat_array(value: Float) -> [Float#2] Never! { [Float#2]{value, value} }
+pub fn jet_simd_f32x8_splat_array(value: F32) -> [F32#8] Never! { [F32#8]{value, value, value, value, value, value, value, value} }
+// Rust :2146–2182. Products stream directly into their source-order lanes.
+pub fn jet_simd_dot_f64_slice(left: View<Float>, right: View<Float>) -> Float? Never! {
+    if left.len() != right.len() -> return None
+    if left.len() == 0 -> return Val(Float{0.0})
+    accumulators := jet_simd_seed_fixed(Float{0.0})
+    loop i in 0..<left.len() {
+        lane :: i & 7
+        accumulators[lane] = accumulators[lane] + left[i] * right[i]
+    }
+    Val(jet_simd_finish_fixed(accumulators))
+}
+pub fn jet_simd_length_f64_slice(lanes: View<Float>) -> Float? Never! {
+    value :: jet_simd_dot_f64_slice(lanes, lanes) ?? return None
+    Val(simd_math.sqrt(value))
+}
+pub fn jet_simd_binary_slice<T: JetSimdScalar>(left: View<T>, right: View<T>, op: JetSimdBinaryOp) -> [T]? Never! {
+    if left.len() != right.len() -> return None
+    out := [T]{}
+    &out.try_reserve(left.len()) ?? panic("memory allocation of {err.requested_bytes} bytes failed")
+    loop i in 0..<left.len() -> &out.push(jet_simd_apply(left[i], right[i], op))
+    Val(^out)
+}
+pub fn jet_simd_splat_slice<T: JetSimdScalar>(value: T, len: Int) -> [T] Never! {
+    out := [T]{}
+    &out.try_reserve(len) ?? panic("memory allocation of {err.requested_bytes} bytes failed")
+    loop i in 0..<len -> &out.push(value)
+    return ^out
+}
+// Rust :2203–2238: empty is absent; only Add/Avg use the fixed tree.
+pub fn jet_simd_reduce_slice<T: JetSimdScalar>(lanes: View<T>, op: JetSimdReduceOp) -> T? Never! {
+    if lanes.len() == 0 -> return None
+    if op == JetSimdReduceOp.Add || op == JetSimdReduceOp.Avg {
+        value :: jet_simd_reduce_fixed(lanes, T.simd_zero())
+        return Val(if op == JetSimdReduceOp.Avg -> value.simd_div(T.simd_from_len(lanes.len())) else -> value)
+    }
+    value := if op == {
+        .Mul -> T.simd_one()
+        .Min -> T.simd_min_identity()
+        .Max -> T.simd_max_identity()
+        .Add | .Avg -> T.simd_zero()
+    }
+    loop i in 0..<lanes.len() -> value = jet_simd_reduce_apply(value, lanes[i], op)
+    Val(value)
+}
+// Rust :2195,2241–2263. Keep fixed storage; bracket projection is a loan.
+pub fn jet_simd_reduce_array<T: JetSimdScalar>(lanes: [T#N], op: JetSimdReduceOp) -> T? Never! {
+    view :: lanes[0..<N]
+    jet_simd_reduce_slice(view, op)
+}
+pub fn jet_simd_sum_array<T: JetSimdScalar>(lanes: [T#N]) -> T Never! { jet_simd_reduce_array(lanes, JetSimdReduceOp.Add) ?? panic("non-empty SIMD lane family") }
+pub fn jet_simd_product_array<T: JetSimdScalar>(lanes: [T#N]) -> T Never! { jet_simd_reduce_array(lanes, JetSimdReduceOp.Mul) ?? panic("non-empty SIMD lane family") }
+pub fn jet_simd_min_array<T: JetSimdScalar>(lanes: [T#N]) -> T Never! { jet_simd_reduce_array(lanes, JetSimdReduceOp.Min) ?? panic("non-empty SIMD lane family") }
+pub fn jet_simd_max_array<T: JetSimdScalar>(lanes: [T#N]) -> T Never! { jet_simd_reduce_array(lanes, JetSimdReduceOp.Max) ?? panic("non-empty SIMD lane family") }
+pub fn jet_simd_avg_array<T: JetSimdScalar>(lanes: [T#N]) -> T Never! { jet_simd_reduce_array(lanes, JetSimdReduceOp.Avg) ?? panic("non-empty SIMD lane family") }
+
+// Rust :2265–2381. Reuse the canonical fixed-width 128-bit carrier/narrower.
+// Boundary bit casts never route full U64 through allocating exact Int.
+fn simd_word_bits(value: I64) -> U64 Never! {
+    if value >= (I64{0}) -> return U64.from_i64(value) ?? panic("nonnegative SIMD word")
+    magnitude :: (U64.from_i64(-(value + I64{1})) ?? panic("negative SIMD word")).wrapping_add(U64{1})
+    U64{0}.wrapping_sub(magnitude)
+}
+fn jet_simd_integer_widen(value: I64, signed: Bool) -> simd_fixed.JetFixedWide Never! {
+    simd_fixed.JetFixedWide{high: if signed && value < (I64{0}) -> I64{-1} else -> I64{0}, low: simd_word_bits(value)}
+}
+fn jet_simd_integer_narrow(value: simd_fixed.JetFixedWide, signed: Bool, bits: Int) -> I64 Never! {
+    simd_fixed.jet_fixed_integer_narrow(value, signed, bits)
+}
+fn simd_low(value: U64, signed: Bool, bits: Int) -> I64 Never! {
+    jet_simd_integer_narrow(simd_fixed.JetFixedWide{high: I64{0}, low: value}, signed, bits)
+}
+fn simd_magnitude(value: I64) -> U64 Never! {
+    bits :: simd_word_bits(value)
+    if value < (I64{0}) -> U64{0}.wrapping_sub(bits) else -> bits
+}
+pub fn jet_simd_integer_binary(left: View<I64>, right: View<I64>, op: JetSimdBinaryOp, signed: Bool, bits: Int) -> [I64]? Never! {
+    if left.len() != right.len() || bits < 1 || bits > 64 -> return None
+    out := [I64]{}
+    &out.try_reserve(left.len()) ?? panic("memory allocation of {err.requested_bytes} bytes failed")
+    loop i in 0..<left.len() {
+        a :: simd_word_bits(left[i])
+        b :: simd_word_bits(right[i])
+        value := U64{0}
+        if op == {
+            .Add -> value = a.wrapping_add(b)
+            .Sub -> value = a.wrapping_sub(b)
+            .Mul -> value = a.wrapping_mul(b)
+            .Div -> {
+                if b == (U64{0}) -> return None
+                if signed {
+                    value = simd_magnitude(left[i]) /% simd_magnitude(right[i])
+                    if (left[i] < I64{0}) != (right[i] < I64{0}) -> value = U64{0}.wrapping_sub(value)
+                } else { value = a /% b }
+            }
+        }
+        &out.push(simd_low(value, signed, bits))
+    }
+    Val(^out)
+}
+// Divide the nonnegative magnitude of a source i128 sum by source usize len.
+// The average lies inside its input range, hence fits in one U64 word. Restoring
+// division uses a 65th remainder bit, so a full64 divisor cannot overflow it.
+// This is a fixed 128-step scan, never a scan of input per output bit.
+fn simd_average_word(sum: simd_fixed.JetFixedWide, len: Int) -> U64 Never! {
+    negative :: sum.high < (I64{0})
+    lo := sum.low
+    hi := simd_word_bits(sum.high)
+    if negative {
+        lo = U64{0}.wrapping_sub(lo)
+        carry :: if lo == (U64{0}) -> U64{1} else -> U64{0}
+        hi = (hi ~| U64{18446744073709551615}).wrapping_add(carry)
+    }
+    divisor :: U64{len}
+    remainder := U64{0}
+    quotient := U64{0}
+    bit := 127
+    loop bit >= 0 {
+        input :: if bit >= 64 -> (hi >> (bit - 64)) & U64{1} else -> (lo >> bit) & U64{1}
+        overflow :: (remainder >> 63) != U64{0}
+        remainder = (remainder << 1) | input
+        if overflow || remainder >= divisor {
+            remainder = remainder.wrapping_sub(divisor)
+            if bit < 64 -> quotient |= U64{1} << bit
+        }
+        bit -= 1
+    }
+    if negative -> U64{0}.wrapping_sub(quotient) else -> quotient
+}
+pub fn jet_simd_integer_reduce(lanes: View<I64>, op: JetSimdReduceOp, signed: Bool, bits: Int) -> I64? Never! {
+    if lanes.len() == 0 || bits < 1 || bits > 64 -> return None
+    value := if op == JetSimdReduceOp.Mul -> U64{1} else -> U64{0}
+    best := I64{0}
+    sum := simd_fixed.JetFixedWide{high: I64{0}, low: U64{0}}
+    loop i in 0..<lanes.len() {
+        lane :: simd_low(simd_word_bits(lanes[i]), signed, bits)
+        word :: simd_word_bits(lane)
+        if op == {
+            .Add -> value = simd_word_bits(simd_low(value.wrapping_add(word), signed, bits))
+            .Mul -> value = simd_word_bits(simd_low(value.wrapping_mul(word), signed, bits))
+            .Min | .Max -> {
+                less :: if signed -> lane < best else -> word < simd_word_bits(best)
+                greater :: if signed -> lane > best else -> word > simd_word_bits(best)
+                if i == 0 || (op == JetSimdReduceOp.Min && less) || (op == JetSimdReduceOp.Max && greater) -> best = lane
+            }
+            .Avg -> {
+                old :: sum.low
+                sum.low = old.wrapping_add(word)
+                carry :: if sum.low < old -> I64{1} else -> I64{0}
+                extension :: if signed && lane < (I64{0}) -> I64{-1} else -> I64{0}
+                sum.high = sum.high + extension + carry
+            }
+        }
+    }
+    if op == JetSimdReduceOp.Min || op == JetSimdReduceOp.Max -> return Val(best)
+    if op == JetSimdReduceOp.Avg -> value = simd_average_word(sum, lanes.len())
+    Val(simd_low(value, signed, bits))
+}
+// Rust :2384–2397; Rust Result<usize,String> -> canonical Err!, exact text.
+pub fn jet_simd_lane_index(index: I64, type_name: String, lane_count: Int) -> Int Err! {
+    if index < (I64{0}) || Int.from_i64(index) >= lane_count -> return Err(Err("lane index {index} out of range for {type_name} ({lane_count} lanes)"))
+    Ok(Int.from_i64(index))
+}
+
+// Capability-dependent anchors deliberately have NO success placeholders:
+// #4494/#4483 :14 jet_scalar_loop_barrier: opaque value barrier + SeqCst
+// compiler fence, noninline and preventing vector packing/loop motion.
+// #4500 :366 jet_simd_compare_array_scalar, :377 jet_simd_compare_int_array,
+// :410 JetSimdComparable.compare_array, :648 jet_simd_compare_array,
+// :660 jet_simd_first_match_array, :2185 jet_simd_splat_array require symbolic
+// fixed-output initialization without List allocation. Int callback comparison
+// must use canonical spilled Int comparison, never compare tagged I64 bits.
+// #4483 :437 isize/usize comparable impls require selected native word types.
+// #4494/#4483 :439–645 i64/F32/Float comparison and first-match overrides;
+// :814–1194 jet_simd_x86::{f32x4,f64x2,f32x8,f64x4}_binary/_neg,
+// {f32x4,f64x2,f32x8,f64x4,i64x2,i64x4}_compare and all _if_available entries:
+// real SSE/SSE2/AVX/SSE4.2/AVX2 vectors, unaligned loads/stores, mask extraction,
+// runtime CPU feature detection and target-feature-safe synchronous loans.
+// #4494/#4483 :1207–1399 jet_simd_f64x4_avx Native/JetF64x4 and from_array,
+// to_array,splat,lane,lane_const,mul_lane_scale,gather_lane,add,sub,mul,div,sqrt,
+// neg,add_array,sub_array,mul_array,div_array,sqrt_array require the actual
+// private register carrier and AVX2 permute / AVX unpack/permute branches.
+// Preserve exact unreachable text: "F64x4 lane index validated before native access".
+// #4494/#4483 :1405–1800 every jet_simd_f64x4_*_native entry and private
+// jet_simd_{f32x4,f64x2,f32x8,f64x4}_{binary,neg}; :1803–1929 array/value
+// binary/sqrt entries; :1938–2065 remaining binary/neg entries; :2073–2140
+// f32/f64 binary_slice chunk dispatch: not replaced by scalar-only wrappers.
+// Their source portable branches remain defined by jet_simd_binary_array and
+// scalar arithmetic, but native dispatch is required before publishing them.
+// Published RETAINED-DESCRIPTOR-ABI / ESCAPE-DEBUG-ABI contain no SIMD native API.
+// #4494: List capacity is reserved once via canonical try_reserve; its failure
+// text retains Rust allocation wording, but native allocator abort/stop parity
+// remains gated (Jet panic is not evidence of Rust handle_alloc_error parity).
+// #4499, #4409: not applicable; this source has no map keys or IO error kinds.
+// No original inline/macro-generated/included tests occur in SimdLanes.rs.

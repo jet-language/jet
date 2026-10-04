@@ -1,0 +1,697 @@
+// PORT-PENDING 0316 crates-jet-codegen-src-prelude-corelib-top-ws-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:1-693
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-WS1=B: native std-only WebSocket (RFC6455) for core.net.ws.
+//RS // Client connect and server upgrade share one frame codec. No external crates.
+//RS 
+//RS const JET_WS_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+//RS const JET_WS_MAX_MESSAGE: usize = 1024 * 1024;
+//RS const JET_WS_MAX_CONTROL: usize = 125;
+//RS const JET_WS_DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS enum JetWsError {
+//RS     InvalidURL,
+//RS     InvalidHandshake,
+//RS     Protocol,
+//RS     MessageTooLarge { limit: i64 },
+//RS     IO { operation: String },
+//RS     Timeout,
+//RS     Closed,
+//RS     Cancelled,
+//RS     UnsupportedTarget,
+//RS }
+//RS 
+//RS impl JetShow for JetWsError {
+//RS     fn jet_show(&self) -> String {
+//RS         match self {
+//RS             Self::InvalidURL => "websocket URL is invalid".to_string(),
+//RS             Self::InvalidHandshake => "websocket handshake failed".to_string(),
+//RS             Self::Protocol => "websocket protocol error".to_string(),
+//RS             Self::MessageTooLarge { limit } => {
+//RS                 format!("websocket message exceeds {limit} bytes")
+//RS             }
+//RS             Self::IO { operation } => format!("websocket I/O failed during {operation}"),
+//RS             Self::Timeout => "websocket timed out".to_string(),
+//RS             Self::Closed => "websocket is closed".to_string(),
+//RS             Self::Cancelled => "websocket cancelled".to_string(),
+//RS             Self::UnsupportedTarget => {
+//RS                 "this build target lacks websocket client connect".to_string()
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetWsError {
+//RS     fn jet_debug(&self) -> String {
+//RS         <Self as JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS // D-FAIL-CONV2=A: one display hook backs both the shipped impl WsError -> Err
+//RS // and user interpolation.
+//RS impl JetDisplay for JetWsError {
+//RS     fn jet_display(&self) -> String {
+//RS         <Self as JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS enum JetWsMessage {
+//RS     Text(String),
+//RS     Binary(Vec<u8>),
+//RS     Close { code: i64, reason: String },
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum JetWsRole {
+//RS     Client,
+//RS     Server,
+//RS }
+//RS 
+//RS struct JetWsConn {
+//RS     stream: std::cell::RefCell<std::net::TcpStream>,
+//RS     live_writer: std::sync::Arc<std::sync::Mutex<std::net::TcpStream>>,
+//RS     live_transport_id: u64,
+//RS     role: JetWsRole,
+//RS     closed: std::cell::Cell<bool>,
+//RS     max_message: usize,
+//RS     pending: std::cell::RefCell<Option<JetWsMessage>>,
+//RS }
+//RS 
+//RS impl JetWsConn {
+//RS     fn from_stream(stream: std::net::TcpStream, role: JetWsRole) -> Result<Self, JetWsError> {
+//RS         stream
+//RS             .set_read_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set read timeout".to_string(),
+//RS             })?;
+//RS         stream
+//RS             .set_write_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set write timeout".to_string(),
+//RS             })?;
+//RS         let live_writer = stream.try_clone().map_err(|_| JetWsError::IO {
+//RS             operation: "clone websocket live writer".to_string(),
+//RS         })?;
+//RS         let mut conn = Self {
+//RS             stream: std::cell::RefCell::new(stream),
+//RS             live_writer: std::sync::Arc::new(std::sync::Mutex::new(live_writer)),
+//RS             live_transport_id: 0,
+//RS             role,
+//RS             closed: std::cell::Cell::new(false),
+//RS             max_message: JET_WS_MAX_MESSAGE,
+//RS             pending: std::cell::RefCell::new(None),
+//RS         };
+//RS         let writer = conn.live_writer.clone();
+//RS         let masked = matches!(conn.role, JetWsRole::Client);
+//RS         conn.live_transport_id = jet_app_ws_register(std::sync::Arc::new(move |payload| {
+//RS             let Ok(mut stream) = writer.lock() else {
+//RS                 return;
+//RS             };
+//RS             let _ = jet_ws_write_frame(&mut stream, 0x1, payload.as_bytes(), masked);
+//RS         }));
+//RS         Ok(conn)
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetWsConn {
+//RS     fn drop(&mut self) {
+//RS         jet_app_ws_unregister(self.live_transport_id);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_sha1(data: &[u8]) -> [u8; 20] {
+//RS     // Minimal SHA-1 for the RFC6455 accept key only.
+//RS     fn rotl(value: u32, bits: u32) -> u32 {
+//RS         value.rotate_left(bits)
+//RS     }
+//RS     let mut h0: u32 = 0x6745_2301;
+//RS     let mut h1: u32 = 0xEFCD_AB89;
+//RS     let mut h2: u32 = 0x98BA_DCFE;
+//RS     let mut h3: u32 = 0x1032_5476;
+//RS     let mut h4: u32 = 0xC3D2_E1F0;
+//RS     let bit_len = (data.len() as u64).saturating_mul(8);
+//RS     let mut msg = data.to_vec();
+//RS     msg.push(0x80);
+//RS     while msg.len() % 64 != 56 {
+//RS         msg.push(0);
+//RS     }
+//RS     msg.extend_from_slice(&bit_len.to_be_bytes());
+//RS     for chunk in msg.chunks_exact(64) {
+//RS         let mut w = [0u32; 80];
+//RS         for (i, word) in chunk.chunks_exact(4).enumerate() {
+//RS             w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+//RS         }
+//RS         for i in 16..80 {
+//RS             w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+//RS         }
+//RS         let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);
+//RS         for i in 0..80 {
+//RS             let (f, k) = match i {
+//RS                 0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
+//RS                 20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
+//RS                 40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
+//RS                 _ => (b ^ c ^ d, 0xCA62_C1D6),
+//RS             };
+//RS             let temp = rotl(a, 5)
+//RS                 .wrapping_add(f)
+//RS                 .wrapping_add(e)
+//RS                 .wrapping_add(k)
+//RS                 .wrapping_add(w[i]);
+//RS             e = d;
+//RS             d = c;
+//RS             c = rotl(b, 30);
+//RS             b = a;
+//RS             a = temp;
+//RS         }
+//RS         h0 = h0.wrapping_add(a);
+//RS         h1 = h1.wrapping_add(b);
+//RS         h2 = h2.wrapping_add(c);
+//RS         h3 = h3.wrapping_add(d);
+//RS         h4 = h4.wrapping_add(e);
+//RS     }
+//RS     let mut out = [0u8; 20];
+//RS     for (index, value) in [h0, h1, h2, h3, h4].into_iter().enumerate() {
+//RS         out[index * 4..(index + 1) * 4].copy_from_slice(&value.to_be_bytes());
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_ws_base64(bytes: &[u8]) -> String {
+//RS     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS     let mut out = String::new();
+//RS     let mut index = 0;
+//RS     while index + 3 <= bytes.len() {
+//RS         let n = ((bytes[index] as u32) << 16)
+//RS             | ((bytes[index + 1] as u32) << 8)
+//RS             | (bytes[index + 2] as u32);
+//RS         out.push(TABLE[((n >> 18) & 63) as usize] as char);
+//RS         out.push(TABLE[((n >> 12) & 63) as usize] as char);
+//RS         out.push(TABLE[((n >> 6) & 63) as usize] as char);
+//RS         out.push(TABLE[(n & 63) as usize] as char);
+//RS         index += 3;
+//RS     }
+//RS     let rest = bytes.len() - index;
+//RS     if rest == 1 {
+//RS         let n = (bytes[index] as u32) << 16;
+//RS         out.push(TABLE[((n >> 18) & 63) as usize] as char);
+//RS         out.push(TABLE[((n >> 12) & 63) as usize] as char);
+//RS         out.push('=');
+//RS         out.push('=');
+//RS     } else if rest == 2 {
+//RS         let n = ((bytes[index] as u32) << 16) | ((bytes[index + 1] as u32) << 8);
+//RS         out.push(TABLE[((n >> 18) & 63) as usize] as char);
+//RS         out.push(TABLE[((n >> 12) & 63) as usize] as char);
+//RS         out.push(TABLE[((n >> 6) & 63) as usize] as char);
+//RS         out.push('=');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_ws_accept_key(sec_websocket_key: &str) -> String {
+//RS     let mut material = Vec::with_capacity(sec_websocket_key.len() + JET_WS_GUID.len());
+//RS     material.extend_from_slice(sec_websocket_key.as_bytes());
+//RS     material.extend_from_slice(JET_WS_GUID);
+//RS     jet_ws_base64(&jet_ws_sha1(&material))
+//RS }
+//RS 
+//RS fn jet_ws_random_key() -> String {
+//RS     let mut bytes = [0u8; 16];
+//RS     let nanos = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|duration| duration.as_nanos())
+//RS         .unwrap_or(0);
+//RS     for (index, slot) in bytes.iter_mut().enumerate() {
+//RS         *slot = ((nanos >> (index * 8)) as u8).wrapping_add(index as u8).wrapping_mul(37);
+//RS     }
+//RS     jet_ws_base64(&bytes)
+//RS }
+//RS 
+//RS fn jet_ws_mask_key() -> [u8; 4] {
+//RS     let nanos = std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .map(|duration| duration.as_nanos())
+//RS         .unwrap_or(0);
+//RS     [
+//RS         (nanos as u8).wrapping_mul(17),
+//RS         ((nanos >> 8) as u8).wrapping_mul(19),
+//RS         ((nanos >> 16) as u8).wrapping_mul(23),
+//RS         ((nanos >> 24) as u8).wrapping_mul(29),
+//RS     ]
+//RS }
+//RS 
+//RS fn jet_ws_apply_mask(payload: &mut [u8], mask: [u8; 4]) {
+//RS     for (index, byte) in payload.iter_mut().enumerate() {
+//RS         *byte ^= mask[index % 4];
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_parse_url(url: &str) -> Result<(String, u16, String), JetWsError> {
+//RS     let rest = url
+//RS         .strip_prefix("ws://")
+//RS         .ok_or(JetWsError::InvalidURL)?;
+//RS     let (authority, path) = match rest.split_once('/') {
+//RS         Some((authority, path)) => (authority, format!("/{path}")),
+//RS         None => (rest, "/".to_string()),
+//RS     };
+//RS     if authority.is_empty() || authority.contains('@') {
+//RS         return Err(JetWsError::InvalidURL);
+//RS     }
+//RS     let (host, port) = if let Some(host) = authority.strip_prefix('[') {
+//RS         let (host, rest) = host.split_once(']').ok_or(JetWsError::InvalidURL)?;
+//RS         let port = if rest.is_empty() {
+//RS             80
+//RS         } else {
+//RS             rest.strip_prefix(':')
+//RS                 .ok_or(JetWsError::InvalidURL)?
+//RS                 .parse::<u16>()
+//RS                 .map_err(|_| JetWsError::InvalidURL)?
+//RS         };
+//RS         (host.to_string(), port)
+//RS     } else if let Some((host, port)) = authority.rsplit_once(':') {
+//RS         if host.contains(':') {
+//RS             return Err(JetWsError::InvalidURL);
+//RS         }
+//RS         (
+//RS             host.to_string(),
+//RS             port.parse::<u16>().map_err(|_| JetWsError::InvalidURL)?,
+//RS         )
+//RS     } else {
+//RS         (authority.to_string(), 80)
+//RS     };
+//RS     if host.is_empty()
+//RS         || !path.starts_with('/')
+//RS         || host
+//RS             .bytes()
+//RS             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+//RS         || path
+//RS             .bytes()
+//RS             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+//RS     {
+//RS         return Err(JetWsError::InvalidURL);
+//RS     }
+//RS     Ok((host, port, path))
+//RS }
+//RS 
+//RS fn jet_ws_write_frame(
+//RS     stream: &mut std::net::TcpStream,
+//RS     opcode: u8,
+//RS     payload: &[u8],
+//RS     masked: bool,
+//RS ) -> Result<(), JetWsError> {
+//RS     use std::io::Write;
+//RS     if payload.len() > JET_WS_MAX_MESSAGE {
+//RS         return Err(JetWsError::MessageTooLarge {
+//RS             limit: JET_WS_MAX_MESSAGE as i64,
+//RS         });
+//RS     }
+//RS     if matches!(opcode, 0x8 | 0x9 | 0xA) && payload.len() > JET_WS_MAX_CONTROL {
+//RS         return Err(JetWsError::Protocol);
+//RS     }
+//RS     let mut header = Vec::with_capacity(14);
+//RS     header.push(0x80 | (opcode & 0x0F));
+//RS     let mask_bit = if masked { 0x80 } else { 0 };
+//RS     if payload.len() < 126 {
+//RS         header.push(mask_bit | payload.len() as u8);
+//RS     } else if payload.len() <= u16::MAX as usize {
+//RS         header.push(mask_bit | 126);
+//RS         header.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+//RS     } else {
+//RS         header.push(mask_bit | 127);
+//RS         header.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+//RS     }
+//RS     let mut body = payload.to_vec();
+//RS     if masked {
+//RS         let mask = jet_ws_mask_key();
+//RS         header.extend_from_slice(&mask);
+//RS         jet_ws_apply_mask(&mut body, mask);
+//RS     }
+//RS     stream.write_all(&header).map_err(|_| JetWsError::IO {
+//RS         operation: "write frame header".to_string(),
+//RS     })?;
+//RS     stream.write_all(&body).map_err(|_| JetWsError::IO {
+//RS         operation: "write frame payload".to_string(),
+//RS     })?;
+//RS     stream.flush().map_err(|_| JetWsError::IO {
+//RS         operation: "flush frame".to_string(),
+//RS     })?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_ws_io_kind(error: &std::io::Error) -> JetWsError {
+//RS     match error.kind() {
+//RS         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => JetWsError::Timeout,
+//RS         std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset => {
+//RS             JetWsError::Closed
+//RS         }
+//RS         _ => JetWsError::IO {
+//RS             operation: "read".to_string(),
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_read_exact(
+//RS     stream: &mut std::net::TcpStream,
+//RS     buf: &mut [u8],
+//RS ) -> Result<(), JetWsError> {
+//RS     use std::io::Read;
+//RS     let mut filled = 0;
+//RS     while filled < buf.len() {
+//RS         match stream.read(&mut buf[filled..]) {
+//RS             Ok(0) => return Err(JetWsError::Closed),
+//RS             Ok(count) => filled += count,
+//RS             Err(error) => return Err(jet_ws_io_kind(&error)),
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_ws_read_frame(
+//RS     stream: &mut std::net::TcpStream,
+//RS     expect_masked: bool,
+//RS     max_message: usize,
+//RS ) -> Result<(u8, bool, Vec<u8>), JetWsError> {
+//RS     let mut header = [0u8; 2];
+//RS     jet_ws_read_exact(stream, &mut header)?;
+//RS     let fin = header[0] & 0x80 != 0;
+//RS     let rsv = header[0] & 0x70;
+//RS     let opcode = header[0] & 0x0F;
+//RS     if rsv != 0 {
+//RS         return Err(JetWsError::Protocol);
+//RS     }
+//RS     let masked = header[1] & 0x80 != 0;
+//RS     if masked != expect_masked {
+//RS         return Err(JetWsError::Protocol);
+//RS     }
+//RS     let mut len = (header[1] & 0x7F) as usize;
+//RS     if len == 126 {
+//RS         let mut ext = [0u8; 2];
+//RS         jet_ws_read_exact(stream, &mut ext)?;
+//RS         len = u16::from_be_bytes(ext) as usize;
+//RS     } else if len == 127 {
+//RS         let mut ext = [0u8; 8];
+//RS         jet_ws_read_exact(stream, &mut ext)?;
+//RS         let value = u64::from_be_bytes(ext);
+//RS         if value > usize::MAX as u64 {
+//RS             return Err(JetWsError::MessageTooLarge {
+//RS                 limit: max_message as i64,
+//RS             });
+//RS         }
+//RS         len = value as usize;
+//RS     }
+//RS     if matches!(opcode, 0x8 | 0x9 | 0xA) {
+//RS         if !fin || len > JET_WS_MAX_CONTROL {
+//RS             return Err(JetWsError::Protocol);
+//RS         }
+//RS     } else if len > max_message {
+//RS         return Err(JetWsError::MessageTooLarge {
+//RS             limit: max_message as i64,
+//RS         });
+//RS     }
+//RS     let mask = if masked {
+//RS         let mut key = [0u8; 4];
+//RS         jet_ws_read_exact(stream, &mut key)?;
+//RS         Some(key)
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let mut payload = vec![0u8; len];
+//RS     if len > 0 {
+//RS         jet_ws_read_exact(stream, &mut payload)?;
+//RS     }
+//RS     if let Some(mask) = mask {
+//RS         jet_ws_apply_mask(&mut payload, mask);
+//RS     }
+//RS     Ok((opcode, fin, payload))
+//RS }
+//RS 
+//RS fn jet_ws_send_message(conn: &JetWsConn, opcode: u8, payload: &[u8]) -> Result<(), JetWsError> {
+//RS     if conn.closed.get() {
+//RS         return Err(JetWsError::Closed);
+//RS     }
+//RS     if let Some(remaining) = jet_deadline_remaining_ms() {
+//RS         if remaining <= 0 {
+//RS             return Err(JetWsError::Cancelled);
+//RS         }
+//RS     }
+//RS     let masked = matches!(conn.role, JetWsRole::Client);
+//RS     let Ok(mut stream) = conn.live_writer.lock() else {
+//RS         return Err(JetWsError::IO {
+//RS             operation: "lock websocket writer".to_string(),
+//RS         });
+//RS     };
+//RS     jet_ws_write_frame(&mut stream, opcode, payload, masked)
+//RS }
+//RS 
+//RS fn jet_ws_send_text(conn: &JetWsConn, text: &String) -> Result<(), JetWsError> {
+//RS     jet_ws_send_message(conn, 0x1, text.as_bytes())
+//RS }
+//RS 
+//RS fn jet_ws_send_binary(conn: &JetWsConn, bytes: &Vec<u8>) -> Result<(), JetWsError> {
+//RS     jet_ws_send_message(conn, 0x2, bytes)
+//RS }
+//RS 
+//RS fn jet_ws_close(conn: &JetWsConn, code: i64, reason: &String) -> Result<(), JetWsError> {
+//RS     if conn.closed.get() {
+//RS         return Ok(());
+//RS     }
+//RS     let code = if (1000..=4999).contains(&code) {
+//RS         code as u16
+//RS     } else {
+//RS         1000
+//RS     };
+//RS     let reason_bytes = reason.as_bytes();
+//RS     let reason_bytes = if reason_bytes.len() > 123 {
+//RS         &reason_bytes[..123]
+//RS     } else {
+//RS         reason_bytes
+//RS     };
+//RS     let mut payload = Vec::with_capacity(2 + reason_bytes.len());
+//RS     payload.extend_from_slice(&code.to_be_bytes());
+//RS     payload.extend_from_slice(reason_bytes);
+//RS     let result = jet_ws_send_message(conn, 0x8, &payload);
+//RS     conn.closed.set(true);
+//RS     let _ = conn.stream.borrow_mut().shutdown(std::net::Shutdown::Both);
+//RS     result
+//RS }
+//RS 
+//RS fn jet_ws_recv(conn: &JetWsConn) -> Result<JetWsMessage, JetWsError> {
+//RS     if let Some(message) = conn.pending.borrow_mut().take() {
+//RS         return Ok(message);
+//RS     }
+//RS     if conn.closed.get() {
+//RS         return Err(JetWsError::Closed);
+//RS     }
+//RS     let expect_masked = matches!(conn.role, JetWsRole::Server);
+//RS     let mut assembled = Vec::new();
+//RS     let mut data_opcode = None;
+//RS     loop {
+//RS         if let Some(remaining) = jet_deadline_remaining_ms() {
+//RS             if remaining <= 0 {
+//RS                 return Err(JetWsError::Cancelled);
+//RS             }
+//RS         }
+//RS         let (opcode, fin, payload) = jet_ws_read_frame(
+//RS             &mut *conn.stream.borrow_mut(),
+//RS             expect_masked,
+//RS             conn.max_message,
+//RS         )?;
+//RS         match opcode {
+//RS             0x0 => {
+//RS                 let Some(kind) = data_opcode else {
+//RS                     return Err(JetWsError::Protocol);
+//RS                 };
+//RS                 if assembled.len().saturating_add(payload.len()) > conn.max_message {
+//RS                     return Err(JetWsError::MessageTooLarge {
+//RS                         limit: conn.max_message as i64,
+//RS                     });
+//RS                 }
+//RS                 assembled.extend_from_slice(&payload);
+//RS                 if fin {
+//RS                     return jet_ws_finish_data(kind, assembled);
+//RS                 }
+//RS             }
+//RS             0x1 | 0x2 => {
+//RS                 if data_opcode.is_some() {
+//RS                     return Err(JetWsError::Protocol);
+//RS                 }
+//RS                 if fin {
+//RS                     return jet_ws_finish_data(opcode, payload);
+//RS                 }
+//RS                 data_opcode = Some(opcode);
+//RS                 assembled = payload;
+//RS             }
+//RS             0x8 => {
+//RS                 let (code, reason) = if payload.len() >= 2 {
+//RS                     let code = u16::from_be_bytes([payload[0], payload[1]]) as i64;
+//RS                     let reason = String::from_utf8_lossy(&payload[2..]).into_owned();
+//RS                     (code, reason)
+//RS                 } else {
+//RS                     (1000, String::new())
+//RS                 };
+//RS                 let _ = jet_ws_send_message(conn, 0x8, &payload);
+//RS                 conn.closed.set(true);
+//RS                 let _ = conn.stream.borrow_mut().shutdown(std::net::Shutdown::Both);
+//RS                 return Ok(JetWsMessage::Close { code, reason });
+//RS             }
+//RS             0x9 => {
+//RS                 jet_ws_send_message(conn, 0xA, &payload)?;
+//RS             }
+//RS             0xA => {}
+//RS             _ => return Err(JetWsError::Protocol),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_finish_data(opcode: u8, payload: Vec<u8>) -> Result<JetWsMessage, JetWsError> {
+//RS     match opcode {
+//RS         0x1 => {
+//RS             let text = String::from_utf8(payload).map_err(|_| JetWsError::Protocol)?;
+//RS             Ok(JetWsMessage::Text(text))
+//RS         }
+//RS         0x2 => Ok(JetWsMessage::Binary(payload)),
+//RS         _ => Err(JetWsError::Protocol),
+//RS     }
+//RS }
+//RS fn jet_ws_connect(url: &String) -> Result<JetWsConn, JetWsError> {
+//RS     #[cfg(not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS         target_os = "windows"
+//RS     )))]
+//RS     {
+//RS         let _ = url;
+//RS         return Err(JetWsError::UnsupportedTarget);
+//RS     }
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS         target_os = "windows"
+//RS     ))]
+//RS     {
+//RS         use std::io::{Read, Write};
+//RS         let (host, port, path) = jet_ws_parse_url(url)?;
+//RS         let addr = format!("{host}:{port}");
+//RS         let mut stream = std::net::TcpStream::connect(addr).map_err(|_| JetWsError::IO {
+//RS             operation: "connect".to_string(),
+//RS         })?;
+//RS         stream
+//RS             .set_read_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set read timeout".to_string(),
+//RS             })?;
+//RS         stream
+//RS             .set_write_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set write timeout".to_string(),
+//RS             })?;
+//RS         let key = jet_ws_random_key();
+//RS         let host_header = if port == 80 {
+//RS             host.clone()
+//RS         } else {
+//RS             format!("{host}:{port}")
+//RS         };
+//RS         let request = format!(
+//RS             "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+//RS         );
+//RS         stream
+//RS             .write_all(request.as_bytes())
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "write handshake".to_string(),
+//RS             })?;
+//RS         stream.flush().map_err(|_| JetWsError::IO {
+//RS             operation: "flush handshake".to_string(),
+//RS         })?;
+//RS         let mut response = Vec::new();
+//RS         let mut chunk = [0u8; 1024];
+//RS         loop {
+//RS             let read = stream.read(&mut chunk).map_err(|error| jet_ws_io_kind(&error))?;
+//RS             if read == 0 {
+//RS                 return Err(JetWsError::InvalidHandshake);
+//RS             }
+//RS             response.extend_from_slice(&chunk[..read]);
+//RS             if response.len() > 16 * 1024 {
+//RS                 return Err(JetWsError::InvalidHandshake);
+//RS             }
+//RS             if let Some(end) = response.windows(4).position(|window| window == b"\r\n\r\n") {
+//RS                 let header = std::str::from_utf8(&response[..end]).map_err(|_| JetWsError::InvalidHandshake)?;
+//RS                 let mut lines = header.split("\r\n");
+//RS                 let status = lines.next().ok_or(JetWsError::InvalidHandshake)?;
+//RS                 if !status.starts_with("HTTP/1.1 101") && !status.starts_with("HTTP/1.0 101") {
+//RS                     return Err(JetWsError::InvalidHandshake);
+//RS                 }
+//RS                 let mut upgrade_ok = false;
+//RS                 let mut connection_ok = false;
+//RS                 let mut accept_ok = false;
+//RS                 let expected = jet_ws_accept_key(&key);
+//RS                 for line in lines {
+//RS                     let Some((name, value)) = line.split_once(':') else {
+//RS                         continue;
+//RS                     };
+//RS                     let value = value.trim();
+//RS                     if name.eq_ignore_ascii_case("upgrade") && value.eq_ignore_ascii_case("websocket")
+//RS                     {
+//RS                         upgrade_ok = true;
+//RS                     } else if name.eq_ignore_ascii_case("connection")
+//RS                         && value
+//RS                             .split(',')
+//RS                             .map(str::trim)
+//RS                             .any(|part| part.eq_ignore_ascii_case("Upgrade"))
+//RS                     {
+//RS                         connection_ok = true;
+//RS                     } else if name.eq_ignore_ascii_case("sec-websocket-accept") && value == expected
+//RS                     {
+//RS                         accept_ok = true;
+//RS                     }
+//RS                 }
+//RS                 if !(upgrade_ok && connection_ok && accept_ok) {
+//RS                     return Err(JetWsError::InvalidHandshake);
+//RS                 }
+//RS                 break;
+//RS             }
+//RS         }
+//RS         JetWsConn::from_stream(stream, JetWsRole::Client)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_message_is_text(message: &JetWsMessage) -> bool {
+//RS     matches!(message, JetWsMessage::Text(_))
+//RS }
+//RS 
+//RS fn jet_ws_message_is_binary(message: &JetWsMessage) -> bool {
+//RS     matches!(message, JetWsMessage::Binary(_))
+//RS }
+//RS 
+//RS fn jet_ws_message_is_close(message: &JetWsMessage) -> bool {
+//RS     matches!(message, JetWsMessage::Close { .. })
+//RS }
+//RS 
+//RS fn jet_ws_message_text(message: &JetWsMessage) -> Result<String, JetWsError> {
+//RS     match message {
+//RS         JetWsMessage::Text(text) => Ok(text.clone()),
+//RS         _ => Err(JetWsError::Protocol),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_message_bytes(message: &JetWsMessage) -> Result<Vec<u8>, JetWsError> {
+//RS     match message {
+//RS         JetWsMessage::Binary(bytes) => Ok(bytes.clone()),
+//RS         _ => Err(JetWsError::Protocol),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ws_accept_key_public(key: &String) -> String {
+//RS     jet_ws_accept_key(key)
+//RS }
+// END-PORT-PENDING 0316 crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:1-693
+

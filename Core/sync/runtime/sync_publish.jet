@@ -1,0 +1,445 @@
+// PORT-PENDING 0172 crates-jet-codegen-src-prelude-corelib-syncpublish: crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:1-441
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetSyncDocument {
+//RS     representation: String,
+//RS }
+//RS 
+//RS fn jet_sync_escape_display(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for ch in value.chars() {
+//RS         if matches!(ch, '\\' | ',' | '=' | '|' | ':' | '/') {
+//RS             escaped.push('\\');
+//RS         }
+//RS         escaped.push(ch);
+//RS     }
+//RS     escaped
+//RS }
+//RS 
+//RS fn jet_sync_unescape_display(value: &str) -> Option<String> {
+//RS     let mut unescaped = String::with_capacity(value.len());
+//RS     let mut escaped = false;
+//RS     for ch in value.chars() {
+//RS         if escaped {
+//RS             if !matches!(ch, '\\' | ',' | '=' | '|' | ':' | '/') {
+//RS                 return None;
+//RS             }
+//RS             unescaped.push(ch);
+//RS             escaped = false;
+//RS         } else if ch == '\\' {
+//RS             escaped = true;
+//RS         } else if matches!(ch, ',' | '=' | '|' | ':' | '/') {
+//RS             return None;
+//RS         } else {
+//RS             unescaped.push(ch);
+//RS         }
+//RS     }
+//RS     (!escaped).then_some(unescaped)
+//RS }
+//RS 
+//RS fn jet_sync_split_display(value: &str, separator: char) -> Option<Vec<String>> {
+//RS     let mut parts = Vec::new();
+//RS     let mut current = String::new();
+//RS     let mut escaped = false;
+//RS     for ch in value.chars() {
+//RS         if escaped {
+//RS             current.push('\\');
+//RS             current.push(ch);
+//RS             escaped = false;
+//RS         } else if ch == '\\' {
+//RS             current.push(ch);
+//RS             escaped = true;
+//RS         } else if ch == separator {
+//RS             parts.push(std::mem::take(&mut current));
+//RS         } else {
+//RS             current.push(ch);
+//RS         }
+//RS     }
+//RS     if escaped {
+//RS         return None;
+//RS     }
+//RS     parts.push(current);
+//RS     Some(parts)
+//RS }
+//RS 
+//RS fn jet_sync_split_display_once(value: &str, separator: char) -> Option<(String, String)> {
+//RS     let mut escaped = false;
+//RS     for (index, ch) in value.char_indices() {
+//RS         if escaped {
+//RS             escaped = false;
+//RS         } else if ch == '\\' {
+//RS             escaped = true;
+//RS         } else if ch == separator {
+//RS             return Some((
+//RS                 value[..index].to_string(),
+//RS                 value[index + ch.len_utf8()..].to_string(),
+//RS             ));
+//RS         }
+//RS     }
+//RS     None
+//RS }
+//RS 
+//RS fn jet_sync_document_body<'a>(representation: &'a str, prefix: &str) -> Option<&'a str> {
+//RS     representation
+//RS         .strip_prefix(prefix)
+//RS         .and_then(|value| value.strip_suffix(')'))
+//RS }
+//RS 
+//RS fn jet_sync_document_key_valid(value: &str, forbidden: &[char]) -> bool {
+//RS     jet_sync_token_is_valid(value) && !value.chars().any(|ch| forbidden.contains(&ch))
+//RS }
+//RS 
+//RS fn jet_sync_document_map_entries(
+//RS     representation: &str,
+//RS ) -> Option<std::collections::BTreeMap<String, String>> {
+//RS     let body = jet_sync_document_body(representation, "SyncMap(")?;
+//RS     let mut entries = std::collections::BTreeMap::new();
+//RS     if body.is_empty() {
+//RS         return Some(entries);
+//RS     }
+//RS     for entry in jet_sync_split_display(body, ',')? {
+//RS         let (raw_key, raw_value) = jet_sync_split_display_once(&entry, '=')?;
+//RS         let key = jet_sync_unescape_display(&raw_key)?;
+//RS         let value = jet_sync_unescape_display(&raw_value)?;
+//RS         if !jet_sync_document_key_valid(&key, &[]) || value.len() > MAX_SYNC_TEXT {
+//RS             return None;
+//RS         }
+//RS         if entries.insert(key, value).is_some() {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     Some(entries)
+//RS }
+//RS 
+//RS fn jet_sync_document_list_items(
+//RS     representation: &str,
+//RS ) -> Option<std::collections::BTreeSet<(String, String)>> {
+//RS     let body = jet_sync_document_body(representation, "SyncList(")?;
+//RS     let mut items = std::collections::BTreeSet::new();
+//RS     if body.is_empty() {
+//RS         return Some(items);
+//RS     }
+//RS     for item in jet_sync_split_display(body, '|')? {
+//RS         let (raw_replica, raw_value) = jet_sync_split_display_once(&item, ':')?;
+//RS         let replica = jet_sync_unescape_display(&raw_replica)?;
+//RS         let value = jet_sync_unescape_display(&raw_value)?;
+//RS         if !jet_sync_document_key_valid(&replica, &[]) || value.len() > MAX_SYNC_TEXT {
+//RS             return None;
+//RS         }
+//RS         if !items.insert((replica, value)) {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     (items.len() <= MAX_SYNC_ENTRIES).then_some(items)
+//RS }
+//RS 
+//RS fn jet_sync_document_counter_entries(
+//RS     representation: &str,
+//RS ) -> Option<std::collections::BTreeMap<String, (u64, u64)>> {
+//RS     let body = jet_sync_document_body(representation, "PNCounter(")?;
+//RS     let mut counts = std::collections::BTreeMap::new();
+//RS     if body.is_empty() {
+//RS         return Some(counts);
+//RS     }
+//RS     for entry in jet_sync_split_display(body, ',')? {
+//RS         let (raw_replica, raw_value) = jet_sync_split_display_once(&entry, '=')?;
+//RS         let replica = jet_sync_unescape_display(&raw_replica)?;
+//RS         let (raw_positive, raw_negative) = jet_sync_split_display_once(&raw_value, '/')?;
+//RS         let positive = jet_sync_unescape_display(&raw_positive)?
+//RS             .strip_prefix('+')?
+//RS             .parse::<u64>()
+//RS             .ok()?;
+//RS         let negative = jet_sync_unescape_display(&raw_negative)?
+//RS             .strip_prefix('-')?
+//RS             .parse::<u64>()
+//RS             .ok()?;
+//RS         if !jet_sync_document_key_valid(&replica, &[])
+//RS             || counts.insert(replica, (positive, negative)).is_some()
+//RS         {
+//RS             return None;
+//RS         }
+//RS     }
+//RS     if counts.len() > MAX_SYNC_REPLICAS {
+//RS         return None;
+//RS     }
+//RS     let total = counts
+//RS         .iter()
+//RS         .map(|(replica, (positive, negative))| (replica.clone(), *positive, *negative))
+//RS         .collect::<Vec<_>>();
+//RS     jet_sync_counter_total(&total)?;
+//RS     Some(counts)
+//RS }
+//RS 
+//RS impl JetSyncDocument {
+//RS     fn parse(value: String) -> Option<Self> {
+//RS         let representation = value.trim().to_string();
+//RS         if representation.is_empty()
+//RS             || representation != value
+//RS             || representation.len() > MAX_SYNC_DOCUMENT
+//RS             || representation.chars().any(char::is_control)
+//RS             || !["SyncText(", "SyncMap(", "SyncList(", "PNCounter("]
+//RS                 .iter()
+//RS                 .any(|prefix| representation.starts_with(prefix))
+//RS         {
+//RS             return None;
+//RS         }
+//RS         if !representation.ends_with(')') {
+//RS             return None;
+//RS         }
+//RS         let canonical = if representation.starts_with("SyncMap(") {
+//RS             let entries = jet_sync_document_map_entries(&representation)?;
+//RS             format!(
+//RS                 "SyncMap({})",
+//RS                 entries
+//RS                     .into_iter()
+//RS                     .map(|(key, value)| {
+//RS                         format!(
+//RS                             "{}={}",
+//RS                             jet_sync_escape_display(&key),
+//RS                             jet_sync_escape_display(&value)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         } else if representation.starts_with("SyncList(") {
+//RS             let items = jet_sync_document_list_items(&representation)?;
+//RS             format!(
+//RS                 "SyncList({})",
+//RS                 items
+//RS                     .into_iter()
+//RS                     .map(|(replica, value)| {
+//RS                         format!(
+//RS                             "{}:{}",
+//RS                             jet_sync_escape_display(&replica),
+//RS                             jet_sync_escape_display(&value)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("|")
+//RS             )
+//RS         } else if representation.starts_with("PNCounter(") {
+//RS             let counts = jet_sync_document_counter_entries(&representation)?;
+//RS             format!(
+//RS                 "PNCounter({})",
+//RS                 counts
+//RS                     .into_iter()
+//RS                     .map(|(replica, (positive, negative))| {
+//RS                         format!(
+//RS                             "{}=+{positive}/-{negative}",
+//RS                             jet_sync_escape_display(&replica)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         } else {
+//RS             representation.clone()
+//RS         };
+//RS         if canonical != representation {
+//RS             return None;
+//RS         }
+//RS         Some(Self { representation })
+//RS     }
+//RS 
+//RS     /// The typed CRDT carriers merge by identity above this String boundary.
+//RS     /// `app.sync` still receives their display, so the boundary may merge only
+//RS     /// facts that survive display serialization: map keys with equal values,
+//RS     /// list members, and counter components. A conflicting map value or an
+//RS     /// opaque text document is denied instead of being silently replaced by a
+//RS     /// lexical winner. Malformed displays are denied as well.
+//RS     fn merge(&self, other: &Self) -> Option<Self> {
+//RS         if self.representation == other.representation {
+//RS             return Some(self.clone());
+//RS         }
+//RS         let merged = if self.representation.starts_with("SyncMap(")
+//RS             && other.representation.starts_with("SyncMap(")
+//RS         {
+//RS             let mut entries = jet_sync_document_map_entries(&self.representation)?;
+//RS             for (key, value) in jet_sync_document_map_entries(&other.representation)? {
+//RS                 match entries.get(&key) {
+//RS                     Some(existing) if existing != &value => return None,
+//RS                     Some(_) => {}
+//RS                     None => {
+//RS                         entries.insert(key, value);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if entries.len() > MAX_SYNC_ENTRIES {
+//RS                 return None;
+//RS             }
+//RS             format!(
+//RS                 "SyncMap({})",
+//RS                 entries
+//RS                     .into_iter()
+//RS                     .map(|(key, value)| {
+//RS                         format!(
+//RS                             "{}={}",
+//RS                             jet_sync_escape_display(&key),
+//RS                             jet_sync_escape_display(&value)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         } else if self.representation.starts_with("SyncList(")
+//RS             && other.representation.starts_with("SyncList(")
+//RS         {
+//RS             let mut items = jet_sync_document_list_items(&self.representation)?;
+//RS             items.extend(jet_sync_document_list_items(&other.representation)?);
+//RS             if items.len() > MAX_SYNC_ENTRIES {
+//RS                 return None;
+//RS             }
+//RS             format!(
+//RS                 "SyncList({})",
+//RS                 items
+//RS                     .into_iter()
+//RS                     .map(|(replica, value)| {
+//RS                         format!(
+//RS                             "{}:{}",
+//RS                             jet_sync_escape_display(&replica),
+//RS                             jet_sync_escape_display(&value)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("|")
+//RS             )
+//RS         } else if self.representation.starts_with("PNCounter(")
+//RS             && other.representation.starts_with("PNCounter(")
+//RS         {
+//RS             let mut counts = jet_sync_document_counter_entries(&self.representation)?;
+//RS             for (replica, (positive, negative)) in
+//RS                 jet_sync_document_counter_entries(&other.representation)?
+//RS             {
+//RS                 let slot = counts.entry(replica).or_default();
+//RS                 slot.0 = slot.0.max(positive);
+//RS                 slot.1 = slot.1.max(negative);
+//RS             }
+//RS             if counts.len() > MAX_SYNC_REPLICAS {
+//RS                 return None;
+//RS             }
+//RS             format!(
+//RS                 "PNCounter({})",
+//RS                 counts
+//RS                     .into_iter()
+//RS                     .map(|(replica, (positive, negative))| {
+//RS                         format!(
+//RS                             "{}=+{positive}/-{negative}",
+//RS                             jet_sync_escape_display(&replica)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         } else {
+//RS             return None;
+//RS         };
+//RS         Self::parse(merged)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct JetSyncReceipt {
+//RS     session_id: String,
+//RS     generation: u64,
+//RS     document: JetSyncDocument,
+//RS }
+//RS 
+//RS impl JetSyncReceipt {
+//RS     fn show(&self) -> String {
+//RS         format!(
+//RS             "SyncOver(session={}, generation={}, doc={})",
+//RS             self.session_id, self.generation, self.document.representation
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct JetSyncSessionState {
+//RS     generation: u64,
+//RS     document: JetSyncDocument,
+//RS }
+//RS 
+//RS static JET_SYNC_SESSIONS: std::sync::OnceLock<
+//RS     std::sync::Mutex<std::collections::BTreeMap<String, JetSyncSessionState>>,
+//RS > = std::sync::OnceLock::new();
+//RS 
+//RS fn jet_sync_sessions(
+//RS ) -> &'static std::sync::Mutex<std::collections::BTreeMap<String, JetSyncSessionState>> {
+//RS     JET_SYNC_SESSIONS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+//RS }
+//RS 
+//RS /// Publish a canonical CRDT document onto the named sync session. The registry
+//RS /// is the shared runtime adapter for AOT and CTFE. Duplicate delivery is
+//RS /// idempotent: it returns the existing receipt instead of advancing the
+//RS /// generation. The String return is only the fixed Core compatibility boundary;
+//RS /// the session state and receipt are typed here.
+//RS fn jet_sync_publish(session_id: String, doc_show: String) -> String {
+//RS     if session_id.trim().is_empty()
+//RS         || session_id.len() > MAX_SYNC_SESSION
+//RS         || session_id.chars().any(char::is_control)
+//RS     {
+//RS         return "SyncError(invalid session)".to_string();
+//RS     }
+//RS     let Some(document) = JetSyncDocument::parse(doc_show) else {
+//RS         return "SyncError(document is not a canonical CRDT value)".to_string();
+//RS     };
+//RS     let mut sessions = match jet_sync_sessions().lock() {
+//RS         Ok(sessions) => sessions,
+//RS         Err(_) => return "SyncError(session registry is unavailable)".to_string(),
+//RS     };
+//RS     if !sessions.contains_key(&session_id) && sessions.len() >= MAX_SYNC_ENTRIES {
+//RS         return "SyncError(session limit exceeded)".to_string();
+//RS     }
+//RS     let state = sessions
+//RS         .entry(session_id.clone())
+//RS         .or_insert_with(|| JetSyncSessionState {
+//RS             generation: 0,
+//RS             document: document.clone(),
+//RS         });
+//RS     let mut changed = false;
+//RS     if state.document != document {
+//RS         let Some(merged) = state.document.merge(&document) else {
+//RS             return "SyncError(document merge denied)".to_string();
+//RS         };
+//RS         if state.document != merged {
+//RS             let Some(generation) = state.generation.checked_add(1) else {
+//RS                 return "SyncError(session generation exhausted)".to_string();
+//RS             };
+//RS             state.generation = generation;
+//RS             state.document = merged;
+//RS             changed = true;
+//RS         }
+//RS     } else if state.generation == 0 {
+//RS         state.generation = 1;
+//RS         changed = true;
+//RS     }
+//RS     let receipt = JetSyncReceipt {
+//RS         session_id,
+//RS         generation: state.generation,
+//RS         document: state.document.clone(),
+//RS     };
+//RS     let shown = receipt.show();
+//RS     let transport = if changed {
+//RS         Some(format!(
+//RS             "sync:{}:{}:{}",
+//RS             receipt.session_id, receipt.generation, receipt.document.representation
+//RS         ))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     drop(sessions);
+//RS     if let Some(transport) = transport {
+//RS         jet_live_publish_transport(format!("sync:{}", receipt.session_id), transport);
+//RS     }
+//RS     shown
+//RS }
+//RS 
+//RS /// D-SYNC1: the ratified surface puts the document first and names the
+//RS /// session with `over:`. The fixed Core boundary carries the canonical display
+//RS /// while the session registry applies the typed merge law before publishing.
+//RS pub(crate) fn jet_app_sync(doc_show: String, session_id: String) -> String {
+//RS     jet_sync_publish(session_id, doc_show)
+//RS }
+// END-PORT-PENDING 0172 crates/jet-codegen/src/Prelude/CoreLib/SyncPublish.rs:1-441
+

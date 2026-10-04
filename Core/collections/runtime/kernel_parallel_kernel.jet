@@ -1,0 +1,139 @@
+// PORT-PENDING 0144 crates-jet-codegen-src-prelude-core-collections-module-group-slice-1797: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:1-135
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-PARCAPTURE1=D: the indexed chunk scheduler is shared by AOT and resident
+//RS // adapters. The AOT wrapper adds its failure rail; adapters only marshal the
+//RS // callback and values into this kernel.
+//RS const JET_PARA_CHUNK_ITEMS: usize = 64;
+//RS 
+//RS #[inline]
+//RS pub(crate) fn jet_list_para_chunks_serial_kernel<R, E, F>(
+//RS     len: usize,
+//RS     mut f: F,
+//RS ) -> Vec<(usize, Result<R, E>)>
+//RS where
+//RS     F: FnMut(std::ops::Range<usize>) -> Result<R, E>,
+//RS {
+//RS     let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
+//RS     (0..chunk_count)
+//RS         .map(|chunk| {
+//RS             let start = chunk * JET_PARA_CHUNK_ITEMS;
+//RS             let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
+//RS             (chunk, f(start..end))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub(crate) fn jet_list_para_merge_tree<T, E, F>(
+//RS     mut partials: Vec<T>,
+//RS     mut merge: F,
+//RS ) -> Result<T, E>
+//RS where
+//RS     F: FnMut(T, T) -> Result<T, E>,
+//RS {
+//RS     if partials.is_empty() {
+//RS         panic!("parallel merge tree requires at least one partial");
+//RS     }
+//RS     while partials.len() > 1 {
+//RS         let mut next = Vec::with_capacity(partials.len().div_ceil(2));
+//RS         let mut iter = partials.into_iter();
+//RS         while let Some(left) = iter.next() {
+//RS             match iter.next() {
+//RS                 Some(right) => next.push(merge(left, right)?),
+//RS                 None => next.push(left),
+//RS             }
+//RS         }
+//RS         partials = next;
+//RS     }
+//RS     Ok(partials.pop().expect("non-empty para-merge lost its result"))
+//RS }
+//RS 
+//RS fn jet_list_para_chunks_kernel<R, E, F>(
+//RS     len: usize,
+//RS     worker_limit: usize,
+//RS     worker_cap: usize,
+//RS     f: F,
+//RS ) -> Vec<(usize, Result<R, E>)>
+//RS where
+//RS     R: Send,
+//RS     E: Send,
+//RS     F: Fn(std::ops::Range<usize>) -> Result<R, E> + Sync,
+//RS {
+//RS     let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
+//RS     if chunk_count == 0 {
+//RS         return Vec::new();
+//RS     }
+//RS     let worker_count = worker_cap.min(worker_limit.max(1)).min(chunk_count);
+//RS     if worker_count == 1 {
+//RS         return jet_list_para_chunks_serial_kernel(len, f);
+//RS     }
+//RS     std::thread::scope(|scope| {
+//RS         let mut handles = Vec::with_capacity(worker_count);
+//RS         let f = &f;
+//RS         for worker in 0..worker_count {
+//RS             handles.push(scope.spawn(move || {
+//RS                 let mut out = Vec::with_capacity(chunk_count.div_ceil(worker_count));
+//RS                 for chunk in (worker..chunk_count).step_by(worker_count) {
+//RS                     let start = chunk * JET_PARA_CHUNK_ITEMS;
+//RS                     let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
+//RS                     out.push((chunk, f(start..end)));
+//RS                 }
+//RS                 out
+//RS             }));
+//RS         }
+//RS         let mut indexed = Vec::with_capacity(chunk_count);
+//RS         for handle in handles.into_iter().rev() {
+//RS             match handle.join() {
+//RS                 Ok(results) => indexed.extend(results),
+//RS                 Err(payload) => std::panic::resume_unwind(payload),
+//RS             }
+//RS         }
+//RS         indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
+//RS         indexed
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS /// D-FRED1=A: para-fold addition keeps the established 64-item stable chunks.
+//RS /// Each partial starts with the checked seed, uses the fixed eight-lane tree,
+//RS /// and final partial merges use the same fixed tree without adding a seed.
+//RS #[inline(always)]
+//RS fn jet_list_para_fold_add_fixed<T>(xs: Vec<T>, seed: T) -> T
+//RS where
+//RS     T: JetSimdScalar + Send + Sync,
+//RS {
+//RS     let worker_cap = std::thread::available_parallelism()
+//RS         .map(|workers| workers.get())
+//RS         .unwrap_or(1);
+//RS     let partials = jet_list_para_chunks_kernel(xs.len(), usize::MAX, worker_cap, |range| {
+//RS         let partial = jet_simd_reduce_fixed_iter(xs[range].iter().copied(), seed);
+//RS         Ok::<_, ()>(partial)
+//RS     });
+//RS     let partials = partials
+//RS         .into_iter()
+//RS         .map(|(_, partial)| partial.expect("fixed para-fold partial cannot fail"))
+//RS         .collect::<Vec<_>>();
+//RS     if partials.is_empty() {
+//RS         return seed;
+//RS     }
+//RS     jet_list_para_merge_tree(partials, |left, right| {
+//RS         let pair = [left, right];
+//RS         Ok::<_, ()>(jet_simd_reduce_fixed_iter(
+//RS             pair.into_iter(),
+//RS             T::simd_zero(),
+//RS         ))
+//RS     })
+//RS     .expect("non-empty fixed para-fold lost its result")
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub(crate) fn jet_list_para_fold_add_fixed_f32(xs: Vec<f32>, seed: f32) -> f32 {
+//RS     jet_list_para_fold_add_fixed(xs, seed)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub(crate) fn jet_list_para_fold_add_fixed_f64(xs: Vec<f64>, seed: f64) -> f64 {
+//RS     jet_list_para_fold_add_fixed(xs, seed)
+//RS }
+// END-PORT-PENDING 0144 crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:1-135
+

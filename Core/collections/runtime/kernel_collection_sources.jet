@@ -1,0 +1,250 @@
+// PORT-PENDING 0182 crates-jet-codegen-src-prelude-memo-module-group: crates/jet-codegen/src/Prelude/Core/CollectionSources.rs:1-246
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Native collection-source adapters shared by generated hosts.
+//RS //
+//RS // Collections.rs owns target-neutral loop state and collection semantics. This
+//RS // fragment is emitted after the scheduler and JetStd runtime carriers, so its
+//RS // implementations can preserve the native stream, channel, and reader paths.
+//RS impl<T: Send + 'static> JetLoopSource for jet_std::JetReceiver<T> {
+//RS     fn jet_loop_source(
+//RS         self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         _by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::ChannelReceiver => {
+//RS                 let receiver = self;
+//RS                 Box::new(std::iter::from_fn(move || match receiver.receive() {
+//RS                     Ok(value) => Some(Box::new(value) as JetLoopAny),
+//RS                     Err(_) => None,
+//RS                 }))
+//RS             }
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::EncodingReader { .. }
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send + 'static> JetLoopSource for &mut jet_std::JetReceiver<T> {
+//RS     fn jet_loop_source(
+//RS         self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         _by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::ChannelReceiver => {
+//RS                 let receiver = (*self).clone();
+//RS                 Box::new(std::iter::from_fn(move || match receiver.receive() {
+//RS                     Ok(value) => Some(Box::new(value) as JetLoopAny),
+//RS                     Err(_) => None,
+//RS                 }))
+//RS             }
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::EncodingReader { .. }
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Send + 'static> JetLoopSource for jet_std::JetStream<T> {
+//RS     fn jet_loop_source(
+//RS         self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::Plain => {
+//RS                 if !by_value {
+//RS                     jet_loop_source_error(source_kind);
+//RS                 }
+//RS                 Box::new(
+//RS                     self.into_iter()
+//RS                         .map(|value| Box::new(value) as JetLoopAny),
+//RS                 )
+//RS             }
+//RS             JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::EncodingReader { .. }
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetLoopSource for jet_std::JSONReader {
+//RS     fn jet_loop_source(
+//RS         mut self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::EncodingReader { reader_type } => match reader_type {
+//RS                 "JSONReader" => {
+//RS                     if !by_value {
+//RS                         jet_loop_source_error(source_kind);
+//RS                     }
+//RS                     Box::new(std::iter::from_fn(move || {
+//RS                         match jet_enc_json_reader_next(&mut self) {
+//RS                             Ok(Ok(value)) => Some(Box::new(value) as JetLoopAny),
+//RS                             Ok(Err(_)) => None,
+//RS                             Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
+//RS                         }
+//RS                     }))
+//RS                 }
+//RS                 _ => jet_loop_source_error(source_kind),
+//RS             },
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetLoopSource for jet_std::JSONLReader {
+//RS     fn jet_loop_source(
+//RS         mut self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::EncodingReader { reader_type } => match reader_type {
+//RS                 "JSONLReader" => {
+//RS                     if !by_value {
+//RS                         jet_loop_source_error(source_kind);
+//RS                     }
+//RS                     Box::new(std::iter::from_fn(move || {
+//RS                         match jet_enc_jsonl_reader_next(&mut self) {
+//RS                             Ok(Ok(value)) => Some(Box::new(value) as JetLoopAny),
+//RS                             Ok(Err(_)) => None,
+//RS                             Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
+//RS                         }
+//RS                     }))
+//RS                 }
+//RS                 _ => jet_loop_source_error(source_kind),
+//RS             },
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetLoopSource for jet_std::CSVReader {
+//RS     fn jet_loop_source(
+//RS         mut self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::EncodingReader { reader_type } => match reader_type {
+//RS                 "CSVReader" => {
+//RS                     if !by_value {
+//RS                         jet_loop_source_error(source_kind);
+//RS                     }
+//RS                     Box::new(std::iter::from_fn(move || {
+//RS                         match jet_enc_csv_reader_next(&mut self) {
+//RS                             Ok(Ok(value)) => Some(Box::new(value) as JetLoopAny),
+//RS                             Ok(Err(_)) => None,
+//RS                             Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
+//RS                         }
+//RS                     }))
+//RS                 }
+//RS                 _ => jet_loop_source_error(source_kind),
+//RS             },
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetLoopSource for jet_std::XMLReader {
+//RS     fn jet_loop_source(
+//RS         mut self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::EncodingReader { reader_type } => match reader_type {
+//RS                 "XMLReader" => {
+//RS                     if !by_value {
+//RS                         jet_loop_source_error(source_kind);
+//RS                     }
+//RS                     Box::new(std::iter::from_fn(move || {
+//RS                         match jet_enc_xml_reader_next(&mut self) {
+//RS                             Ok(Ok(value)) => Some(Box::new(value) as JetLoopAny),
+//RS                             Ok(Err(_)) => None,
+//RS                             Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
+//RS                         }
+//RS                     }))
+//RS                 }
+//RS                 _ => jet_loop_source_error(source_kind),
+//RS             },
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetLoopSource for jet_std::CBORReader {
+//RS     fn jet_loop_source(
+//RS         mut self,
+//RS         source_kind: JetLoopSourceKind,
+//RS         by_value: bool,
+//RS     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+//RS         match source_kind {
+//RS             JetLoopSourceKind::EncodingReader { reader_type } => match reader_type {
+//RS                 "CBORReader" => {
+//RS                     if !by_value {
+//RS                         jet_loop_source_error(source_kind);
+//RS                     }
+//RS                     Box::new(std::iter::from_fn(move || {
+//RS                         match jet_enc_cbor_reader_next(&mut self) {
+//RS                             Ok(Ok(value)) => Some(Box::new(value) as JetLoopAny),
+//RS                             Ok(Err(_)) => None,
+//RS                             Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
+//RS                         }
+//RS                     }))
+//RS                 }
+//RS                 _ => jet_loop_source_error(source_kind),
+//RS             },
+//RS             JetLoopSourceKind::Plain
+//RS             | JetLoopSourceKind::Chars
+//RS             | JetLoopSourceKind::LinesFile
+//RS             | JetLoopSourceKind::LinesStdin
+//RS             | JetLoopSourceKind::LinesProcessStream
+//RS             | JetLoopSourceKind::ChannelReceiver
+//RS             | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0182 crates/jet-codegen/src/Prelude/Core/CollectionSources.rs:1-246
+

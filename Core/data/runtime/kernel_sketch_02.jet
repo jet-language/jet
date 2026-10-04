@@ -1,0 +1,164 @@
+// PORT-PENDING 0214 crates-jet-jit-src-data-module-group-slice-3618: crates/jet-jit/src/Sketch.rs:1-160
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.data.sketch.*` marshalling hosts for the shared Prelude kernel.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::clone_string;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS pub(crate) mod sketch_rt {
+//RS     include!("../../jet-codegen/src/Prelude/Core/Sketch.rs");
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum SketchSlot {
+//RS     Hll(sketch_rt::JetHyperLogLog),
+//RS     TDigest(sketch_rt::JetTDigest),
+//RS     Cms(sketch_rt::JetCountMinSketch),
+//RS     Reservoir(sketch_rt::JetReservoirSampler),
+//RS }
+//RS 
+//RS fn push_sketch(slot: SketchSlot) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.sketches.push(slot);
+//RS         rt.sketches.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn with_sketch_mut<R: Default>(handle: i64, f: impl FnOnce(&mut SketchSlot) -> R) -> R {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let slot = rt
+//RS             .sketches
+//RS             .get_mut(handle.saturating_sub(1) as usize)
+//RS             .expect("jit sketch: bad handle");
+//RS         f(slot)
+//RS     })
+//RS }
+//RS 
+//RS fn list_from_strings(items: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for s in items {
+//RS             let sid = rt.heap.alloc_string(s);
+//RS             rt.heap.list_push_int(list, sid).expect("jit sketch list");
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_hll_new() -> i64 {
+//RS     push_sketch(SketchSlot::Hll(sketch_rt::JetHyperLogLog::new()))
+//RS }
+//RS 
+//RS fn jet_jit_tdigest_new() -> i64 {
+//RS     push_sketch(SketchSlot::TDigest(sketch_rt::JetTDigest::new()))
+//RS }
+//RS 
+//RS fn jet_jit_cms_new() -> i64 {
+//RS     push_sketch(SketchSlot::Cms(sketch_rt::JetCountMinSketch::new()))
+//RS }
+//RS 
+//RS fn jet_jit_reservoir_new(capacity: i64) -> i64 {
+//RS     push_sketch(SketchSlot::Reservoir(sketch_rt::JetReservoirSampler::new(
+//RS         capacity,
+//RS     )))
+//RS }
+//RS 
+//RS /// `kind`: 0=HLL, 1=TDigest (unused here), 2=CMS, 3=Reservoir.
+//RS fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
+//RS     let item = clone_string(s);
+//RS     with_sketch_mut(handle, |slot| match (kind, slot) {
+//RS         (0, SketchSlot::Hll(h)) => h.add(&item),
+//RS         (2, SketchSlot::Cms(c)) => c.add(&item),
+//RS         (3, SketchSlot::Reservoir(r)) => r.add(item),
+//RS         _ => {}
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_sketch_add_f64(handle: i64, v: f64) {
+//RS     with_sketch_mut(handle, |slot| {
+//RS         if let SketchSlot::TDigest(td) = slot {
+//RS             td.add(v);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_sketch_count0(handle: i64) -> i64 {
+//RS     with_sketch_mut(handle, |slot| match slot {
+//RS         SketchSlot::Hll(h) => h.count(),
+//RS         _ => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
+//RS     let k = clone_string(key);
+//RS     with_sketch_mut(handle, |slot| match slot {
+//RS         SketchSlot::Cms(c) => c.count(&k),
+//RS         _ => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sketch_quantile(handle: i64, q: f64) -> f64 {
+//RS     with_sketch_mut(handle, |slot| match slot {
+//RS         SketchSlot::TDigest(td) => td.quantile(q),
+//RS         _ => 0.0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sketch_sample(handle: i64) -> i64 {
+//RS     let items = with_sketch_mut(handle, |slot| -> Option<Vec<String>> {
+//RS         match slot {
+//RS             SketchSlot::Reservoir(r) => Some(r.sample()),
+//RS             _ => None,
+//RS         }
+//RS     });
+//RS     list_from_strings(items.unwrap_or_default())
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct SketchHostFns;
+//RS     register: register_sketch_symbols;
+//RS     declare: declare_sketch_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         unary_void.params.push(AbiParam::new(types::F64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary_void = Signature::new(cc);
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut quant = Signature::new(cc);
+//RS         quant.params.push(AbiParam::new(types::I64));
+//RS         quant.params.push(AbiParam::new(types::F64));
+//RS         quant.returns.push(AbiParam::new(types::F64));
+//RS 
+//RS 
+//RS     }
+//RS     hll_new: "jet_jit_hll_new" => jet_jit_hll_new: nullary;
+//RS     tdigest_new: "jet_jit_tdigest_new" => jet_jit_tdigest_new: nullary;
+//RS     cms_new: "jet_jit_cms_new" => jet_jit_cms_new: nullary;
+//RS     reservoir_new: "jet_jit_reservoir_new" => jet_jit_reservoir_new: unary;
+//RS     add_str: "jet_jit_sketch_add_str" => jet_jit_sketch_add_str: ternary_void;
+//RS     add_f64: "jet_jit_sketch_add_f64" => jet_jit_sketch_add_f64: unary_void;
+//RS     count0: "jet_jit_sketch_count0" => jet_jit_sketch_count0: unary;
+//RS     count1: "jet_jit_sketch_count1" => jet_jit_sketch_count1: binary;
+//RS     quantile: "jet_jit_sketch_quantile" => jet_jit_sketch_quantile: quant;
+//RS     sample: "jet_jit_sketch_sample" => jet_jit_sketch_sample: unary;
+//RS }
+// END-PORT-PENDING 0214 crates/jet-jit/src/Sketch.rs:1-160
+

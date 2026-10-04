@@ -1,0 +1,28 @@
+// Private canonical Linux x86_64 LP64 glibc import assembly. Main owns
+// selected-native activation in Core/sys after stage1. This root never loads
+// kernel32/ntdll or Darwin __error. Darwin LP64 uses darwin_os_imports.jet;
+// Windows uses windows_file.jet and the separately selected ntdll unit.
+//
+// Raw pointer arguments borrow live initialized storage for the synchronous
+// call only. Paths are caller-owned NUL-terminated OS bytes (Unix) or UTF16
+// code units (Windows); never reinterpret a Jet String/list object as C data.
+// Ownership of successful fd/HANDLE results transfers to the consumer, which
+// closes exactly once on normal return and every early-error path. Borrowed
+// calls never close; dup creates an independently closed owner of the same
+// open file description. No #Close on I32: that would consume unrelated ints.
+//
+// Error capture must happen immediately after the failing OS call, before
+// cleanup/formatting/scheduler entry. Raw errno/GetLastError are not a second
+// IOError normalizer. The canonical IOError owner supplies classification/text.
+// EINTR retry, partial IO loops, lock deadlines, secure descent, rewrite and
+// process/namespace/seccomp policies remain the consumers' canonical owners.
+//
+// Native capability gates (reported to RuntimeLead-8 for #4494): C pointer
+// return admission (errno/HANDLE); nested pointer/FixedList C-safe fields;
+// nullable native function pointers + signal-safe callback lowering; native
+// pointer-sized integer/size_t selection; retained contiguous initialized
+// buffer provenance; canonical OS-code -> IOError boundary. #4467 is the
+// independent #Import(c) scalar lowering defect, not a reason to alter libc.
+module unix_fd
+module linux_seccomp_imports
+module process_control

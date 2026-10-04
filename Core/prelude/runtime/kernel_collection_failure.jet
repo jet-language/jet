@@ -1,0 +1,29 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/CollectionFailure.rs:1-25
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FAIL-IMPLICIT: one failure-aware traversal kernel for collection
+//RS // callbacks. Native emit, the interpreter, and the resident JIT host include
+//RS // this source; their adapters only choose the input representation.
+//RS 
+//RS pub(crate) fn jet_collection_try_map<T, U, E, I, F>(items: I, f: F) -> Result<Vec<U>, E>
+//RS where
+//RS     I: IntoIterator<Item = T>,
+//RS     F: FnMut(T) -> Result<U, E>,
+//RS {
+//RS     items.into_iter().map(f).collect()
+//RS }
+//RS 
+//RS pub(crate) fn jet_collection_try_filter<T, E, I, F>(items: I, mut f: F) -> Result<Vec<T>, E>
+//RS where
+//RS     I: IntoIterator<Item = T>,
+//RS     F: FnMut(&T) -> Result<bool, E>,
+//RS {
+//RS     let mut out = Vec::new();
+//RS     for item in items {
+//RS         if f(&item)? {
+//RS             out.push(item);
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/CollectionFailure.rs:1-25
+

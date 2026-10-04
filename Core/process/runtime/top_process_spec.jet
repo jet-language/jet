@@ -1,0 +1,140 @@
+// CoreLib/Top/ProcessSpec.rs:1–103. The one owner of ProcessSpec defaults,
+// builder field writes and the authority binding rule (Main-approved private
+// record, CivilDate pattern). The public `ProcessSpec` stays the compiler's
+// checked opaque handle; no alternate public type, API or ABI is introduced.
+//
+// Native gate (Main post-stage-2): the public-handle adapters
+// (Core.jet process.spec rows, jet-jit ProcessPrelude.rs:483–573) marshal the
+// checked handle to and from this record, field for field. Planning, policy
+// wire interpretation, launch, drains and limits stay in their own owners
+// (ProcessPolicy.rs, Process.rs, ProcessSandbox.rs).
+
+// Rust JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES (:1): 64 * 1024 * 1024 bytes.
+pub JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES :: I64{67108864}
+
+// Rust jet_std::ProcessSpec (CommonTypes.rs:507–539), the exact 16 fields in
+// declaration order. env_set keeps (name, value) pairs in builder order.
+pub struct ProcessSpecState {
+    pub cmd: [String]
+    pub cwd: String?
+    pub env_clear: Bool
+    pub env_set: [(name: String, value: String)]
+    pub env_remove: [String]
+    // None closes the child's stdin: no accidental inheritance.
+    pub stdin: ProcessStreamMode?
+    pub stdout: ProcessStreamMode
+    pub stderr: ProcessStreamMode
+    pub timeout_ms: I64?
+    pub output_limit: I64?
+    pub cpu_time_limit_ms: I64?
+    pub memory_limit_bytes: I64?
+    pub open_file_limit: I64?
+    pub detached: Bool
+    pub terminal: TerminalPolicy?
+    pub policy_wire: String?
+}
+
+// Rust jet_std_process_cmd (:3–5): the AOT Core call borrows its argv list,
+// so the one copy happens here before the shared defaults.
+pub fn jet_std_process_cmd(cmd: [String]) -> ProcessSpecState Never! {
+    jet_std_process_cmd_owned(~cmd)
+}
+
+// Rust jet_std_process_cmd_owned (:12–31): an already-owned argv moves in
+// without a copy. Captured stdout/stderr, closed stdin, inherited environment,
+// no cwd/timeout/resource limits, and the 64 MiB output cap.
+pub fn jet_std_process_cmd_owned(cmd: ^[String]) -> ProcessSpecState Never! {
+    ProcessSpecState{
+        cmd: cmd,
+        cwd: None,
+        env_clear: false,
+        env_set: [(name: String, value: String)]{},
+        env_remove: [String]{},
+        stdin: None,
+        stdout: ProcessStreamMode.Capture,
+        stderr: ProcessStreamMode.Capture,
+        timeout_ms: None,
+        output_limit: Val(JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES),
+        cpu_time_limit_ms: None,
+        memory_limit_bytes: None,
+        open_file_limit: None,
+        detached: false,
+        terminal: None,
+        policy_wire: None,
+    }
+}
+
+// Rust jet_process_spec_under_wire (:38–45), D-AGENT-EXEC1. Binding the one
+// authority carrier also closes ambient environment inheritance; later builders
+// may add explicit values but cannot restore the host snapshot. The launch
+// directory is not inferred: authority-bound execution needs an explicit cwd.
+pub fn jet_process_spec_under_wire(spec: ^ProcessSpecState, authority_facts: String) -> ProcessSpecState Never! {
+    out := ^spec
+    out.policy_wire = Val(~authority_facts)
+    out.env_clear = true
+    out
+}
+
+// Rust jet_process_spec_arg (:47–50).
+pub fn jet_process_spec_arg(spec: ^ProcessSpecState, extra: String) -> ProcessSpecState Never! {
+    out := ^spec
+    &out.cmd.push(~extra)
+    out
+}
+
+// Rust jet_process_spec_args_extend (:52–58): appended in source order.
+pub fn jet_process_spec_args_extend(spec: ^ProcessSpecState, extra: [String]) -> ProcessSpecState Never! {
+    out := ^spec
+    loop item in extra -> &out.cmd.push(~item)
+    out
+}
+
+// Rust jet_process_spec_cwd (:60–63): the last call wins.
+pub fn jet_process_spec_cwd(spec: ^ProcessSpecState, cwd: String) -> ProcessSpecState Never! {
+    out := ^spec
+    out.cwd = Val(~cwd)
+    out
+}
+
+// Rust jet_process_spec_env (:64–71): every call appends; launch applies the
+// pairs in this order.
+pub fn jet_process_spec_env(spec: ^ProcessSpecState, name: String, value: String) -> ProcessSpecState Never! {
+    out := ^spec
+    &out.env_set.push((name: ~name, value: ~value))
+    out
+}
+
+// Rust jet_process_spec_env_remove (:72–78).
+pub fn jet_process_spec_env_remove(spec: ^ProcessSpecState, name: String) -> ProcessSpecState Never! {
+    out := ^spec
+    &out.env_remove.push(~name)
+    out
+}
+
+// Rust jet_process_spec_env_clear (:79–82).
+pub fn jet_process_spec_env_clear(spec: ^ProcessSpecState) -> ProcessSpecState Never! {
+    out := ^spec
+    out.env_clear = true
+    out
+}
+
+// Rust jet_process_spec_stdin (:83–89).
+pub fn jet_process_spec_stdin(spec: ^ProcessSpecState, mode: ProcessStreamMode) -> ProcessSpecState Never! {
+    out := ^spec
+    out.stdin = Val(~mode)
+    out
+}
+
+// Rust jet_process_spec_stdout (:90–96).
+pub fn jet_process_spec_stdout(spec: ^ProcessSpecState, mode: ProcessStreamMode) -> ProcessSpecState Never! {
+    out := ^spec
+    out.stdout = ~mode
+    out
+}
+
+// Rust jet_process_spec_stderr (:97–103).
+pub fn jet_process_spec_stderr(spec: ^ProcessSpecState, mode: ProcessStreamMode) -> ProcessSpecState Never! {
+    out := ^spec
+    out.stderr = ~mode
+    out
+}

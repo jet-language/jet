@@ -1,0 +1,447 @@
+// Portable graph policy extracted from crates/jet-rt/src/__gc_core.rs.
+// Every GCState operation below requires the caller's exclusive native heap
+// lock. The state is the actual collector graph, never a shadow/test graph.
+// O is the native retained object owner with generated layout/type/drop/trace
+// dictionaries, not an engine value or a payload copied into a Jet arena.
+use core.mem.runtime.gc_core as gc_policy
+
+// Typed, allocation-free native query used while the heap lock is held.
+// Rust Arc::strong_count (:285,319). A borrowed O must not acquire a new owner
+// merely to query the count, or safepoint reachability changes.
+pub struct GCPayloadFacts<O> {
+    pub strong_count: fn(O) -> Int Never!
+}
+
+// Rust Entry (:133).
+pub struct GCEntry<O> {
+    pub roots: Int
+    pub pins: Int
+    pub version: U64
+    pub reserved: Bool
+    pub edges: [gc_policy.GCObjectID]
+    pub object: O
+}
+
+// Rust State (:143). count_max is the target usize bound supplied by the
+// native layout provider, not an i64 approximation of a machine word.
+pub struct GCState<O> {
+    pub entries: [U64:GCEntry<O>]
+    pub count_max: Int
+}
+
+// Rust MutationReservation (:750), excluding the native retained heap owner.
+// The owning adapter must rollback on errors, stops, cancellation and unwind;
+// commit disables that cleanup only after the graph and all pins are updated.
+pub struct GCReservation {
+    pub from: gc_policy.GCObjectID
+    pub edges: [gc_policy.GCObjectID]
+    pub pinned: [gc_policy.GCObjectID]
+    pub version: U64
+    pub active: Bool
+}
+
+// Policy-free generated typed storage move, called under the state lock.
+// The moved field becomes empty without allocation/copy or user callbacks.
+pub trait GCReservationMoves {
+    fn take_edges(self, reservation: &GCReservation) -> [gc_policy.GCObjectID] Never!
+}
+
+pub struct GCRemoved<O> {
+    pub id: gc_policy.GCObjectID
+    pub entry: GCEntry<O>
+}
+
+pub struct GCSweep<O> {
+    pub collection: gc_policy.GCCollection
+    pub removed: [GCRemoved<O>]
+}
+
+// Rust Object mutex consumption/finalizer extraction (:910–929).
+// P/F are checked native payload/finalizer owners, never an erased Jet value.
+pub struct GCFinalizeParts<P, F> {
+    pub payload: P
+    pub finalizer: F?
+    pub poisoned: Bool
+}
+
+// Bind the payload/finalizer types using the existing generic-module surface
+// before declaring ordinary native methods. Fn types cannot spell &/^
+// conventions, so these traits preserve the actual borrowed/consumed owners.
+// Native instantiation requires existing generic-module trait export/bound
+// repair #4401; retain this owner contract rather than erasing its &/^ modes.
+module gc_finalize_policy<O, P, F> {
+    pub trait Native {
+        type Object
+        type Payload
+        type Finalizer
+        fn try_take(self, object: ^O) -> GCFinalizeParts<P, F>? Never!
+        fn catch_finalizer(self, finalizer: ^F, payload: &P) -> Bool Never!
+        fn catch_drop(self, payload: ^P) -> Bool Never!
+    }
+
+    // Rust finalize (:908–943). try_take recovers finalizer poison, reports
+    // payload poison, and releases a nonunique object without finalizing it.
+    // Catch methods contain stop/panic; no unwind crosses a C callback.
+    pub fn finalize<N: Native>(removed: ^[GCRemoved<O>], result: &gc_policy.GCCollection, native: N) Never! {
+        loop item in removed {
+            parts := native.try_take(^item.entry.object) ?? {
+                &result.deferred.push(~item.id)
+                next
+            }
+            if parts.poisoned {
+                &result.poisoned_payloads.push(~item.id)
+            } else {
+                if parts.finalizer == {
+                    .Val(finalizer) -> {
+                        if !native.catch_finalizer(^finalizer, &parts.payload) -> &result.finalizer_panics.push(~item.id)
+                    }
+                    .None -> {}
+                }
+            }
+            if !native.catch_drop(^parts.payload) -> &result.drop_panics.push(~item.id)
+            &result.reclaimed.push(~item.id)
+        }
+        gc_sort_ids(&result.reclaimed)
+        gc_sort_ids(&result.deferred)
+    }
+}
+
+module gc_shutdown_policy<O> {
+    pub trait Native {
+        type Object
+        fn take_entries(self, state: &GCState<O>) -> [U64:GCEntry<O>] Never!
+    }
+
+    // Rust Heap::drop (:153–159). The native caller holds exclusive shutdown
+    // access including poison recovery. This move must not clone the graph.
+    pub fn take_shutdown<N: Native>(state: &GCState<O>, native: N) -> [GCRemoved<O>] Never! {
+        removed := [GCRemoved<O>]{}
+        entries :: native.take_entries(&state)
+        loop pair in entries {
+            &removed.push(GCRemoved<O>{id: gc_policy.GCObjectID{value: pair.key}, entry: pair.value})
+        }
+        removed
+    }
+}
+
+// Rust State::default (:142).
+pub fn gc_state<O>(count_max: Int) -> GCState<O> Never! {
+    GCState<O>{entries: [U64:GCEntry<O>]{}, count_max: count_max}
+}
+
+// Rust allocate_erased (:238–256). The caller tests capacity under the heap
+// lock before consuming a native identity or allocating a payload (:239–242).
+pub fn gc_allocation_ready<O>(state: GCState<O>) gc_policy.GCFault! {
+    if state.entries.len() >= gc_policy.GC_MAX_OBJECTS -> return Err(gc_policy.GCFault.ObjectLimit)
+}
+
+pub fn gc_insert_allocated<O>(state: &GCState<O>, id: gc_policy.GCObjectID, object: ^O) Never! {
+    state.entries[id.value] = GCEntry<O>{
+        roots: 1, pins: 0, version: U64{0}, reserved: false,
+        edges: [gc_policy.GCObjectID]{}, object: object,
+    }
+}
+
+// Rust allocate_traced rollback (:207–210); dropping the removed native owner
+// occurs after the state lock is released, so destructors may reenter.
+pub fn gc_remove_failed_promotion<O>(state: &GCState<O>, id: gc_policy.GCObjectID) -> GCEntry<O>? Never! {
+    &state.entries.remove(id.value)
+}
+
+// Rust Collector::live_count (:268).
+pub fn gc_live_count<O>(state: GCState<O>) -> Int Never! { state.entries.len() }
+
+// Rust Root::try_clone (:594–607). Heap ownership is retained by the adapter
+// only after this succeeds; failed clones do not change the root count.
+pub fn gc_root_retain<O>(state: &GCState<O>, id: gc_policy.GCObjectID) gc_policy.GCFault! {
+    if !state.entries.has_key(id.value) -> return Err(gc_policy.GCFault.UnknownObject(id))
+    if state.entries[id.value].roots == state.count_max -> return Err(gc_policy.GCFault.RootCountOverflow(id))
+    state.entries[id.value].roots += 1
+}
+
+// Rust Root::drop (:659–666). Caller recovers a poisoned native state lock.
+// Automatic safepoint and retained heap release occur after unlocking.
+pub fn gc_root_release<O>(state: &GCState<O>, id: gc_policy.GCObjectID) Never! {
+    if state.entries.has_key(id.value) && state.entries[id.value].roots > 0 {
+        state.entries[id.value].roots -= 1
+    }
+}
+
+// Rust normalize_edges (:737–747). The raw count is checked before dedup;
+// 65537 identical edges are still invalid. Exactly one owned list is created.
+pub fn gc_normalize_edges(edges: [gc_policy.GCObjectID]) -> [gc_policy.GCObjectID] gc_policy.GCFault! {
+    if edges.len() > gc_policy.GC_MAX_EDGES_PER_OBJECT {
+        return Err(gc_policy.GCFault.TooManyEdges{count: edges.len(), limit: gc_policy.GC_MAX_EDGES_PER_OBJECT})
+    }
+    normalized := ~edges
+    gc_sort_unique(&normalized)
+    Ok(normalized)
+}
+
+// Rust sort_unstable/dedup (:745–746,832–833). Heap sort is in-place with no
+// auxiliary array; it preserves the allocation bound of Rust's unstable sort.
+fn gc_sort_unique(ids: &[gc_policy.GCObjectID]) Never! {
+    size :: ids.len()
+    gc_sort_ids(&ids)
+    written := 0
+    loop index in 0..<size {
+        if written == 0 || ids[index].value != ids[written - 1].value {
+            if written != index -> ids[written] = ~ids[index]
+            written += 1
+        }
+    }
+    loop ids.len() > written -> _ :: &ids.pop()
+}
+
+fn gc_sort_ids(ids: &[gc_policy.GCObjectID]) Never! {
+    size :: ids.len()
+    parent := size /% 2
+    loop parent > 0 {
+        parent -= 1
+        gc_sift_down(&ids, parent, size)
+    }
+    end := size
+    loop end > 1 {
+        end -= 1
+        first :: ~ids[0]
+        ids[0] = ~ids[end]
+        ids[end] = first
+        gc_sift_down(&ids, 0, end)
+    }
+}
+
+fn gc_sift_down(ids: &[gc_policy.GCObjectID], start: Int, end: Int) Never! {
+    parent := start
+    loop parent < end /% 2 {
+        child := parent * 2 + 1
+        if child + 1 < end && ids[child].value < ids[child + 1].value -> child += 1
+        if ids[parent].value >= ids[child].value -> break
+        saved :: ~ids[parent]
+        ids[parent] = ~ids[child]
+        ids[child] = saved
+        parent = child
+    }
+}
+
+// Rust replace_edges (:712–734). Preserve fault precedence: edge cap, source,
+// reservation, version overflow, then ascending normalized child identities.
+pub fn gc_replace_edges<O>(state: &GCState<O>, from: gc_policy.GCObjectID, edges: [gc_policy.GCObjectID]) gc_policy.GCFault! {
+    normalized :: gc_normalize_edges(edges)
+    if !state.entries.has_key(from.value) -> return Err(gc_policy.GCFault.UnknownObject(from))
+    if state.entries[from.value].reserved -> return Err(gc_policy.GCFault.MutationConflict(from))
+    next_version :: gc_next_version(from, state.entries[from.value].version)
+    loop child in normalized {
+        if !state.entries.has_key(child.value) -> return Err(gc_policy.GCFault.UnknownObject(child))
+    }
+    state.entries[from.value].edges = normalized
+    state.entries[from.value].version = next_version
+}
+
+// Rust checked_add(1) in replace_edges/commit (:719–722,769–772).
+pub fn gc_next_version(id: gc_policy.GCObjectID, version: U64) -> U64 gc_policy.GCFault! {
+    if version == (U64{18446744073709551615}) -> return Err(gc_policy.GCFault.VersionOverflow(id))
+    Ok(version + U64{1})
+}
+
+// Rust reserve_mutation (:817–860). Pins include the source, old edges and new
+// edges; all validation precedes every pin/reservation write. Old payload
+// edges therefore remain usable during concurrent rewriting and rollback.
+pub fn gc_reserve_mutation<O>(state: &GCState<O>, from: gc_policy.GCObjectID, edges: [gc_policy.GCObjectID]) -> GCReservation gc_policy.GCFault! {
+    normalized :: gc_normalize_edges(edges)
+    if !state.entries.has_key(from.value) -> return Err(gc_policy.GCFault.UnknownObject(from))
+    if state.entries[from.value].reserved -> return Err(gc_policy.GCFault.MutationConflict(from))
+    version :: state.entries[from.value].version
+    pinned := ~state.entries[from.value].edges
+    loop child in normalized -> &pinned.push(~child)
+    &pinned.push(~from)
+    gc_sort_unique(&pinned)
+    loop id in pinned {
+        if !state.entries.has_key(id.value) -> return Err(gc_policy.GCFault.UnknownObject(id))
+        if state.entries[id.value].pins == state.count_max -> return Err(gc_policy.GCFault.PinCountOverflow(id))
+    }
+    loop id in pinned -> state.entries[id.value].pins += 1
+    state.entries[from.value].reserved = true
+    Ok(GCReservation{from: from, edges: normalized, pinned: pinned, version: version, active: true})
+}
+
+// Rust MutationReservation::commit (:760–791). The adapter releases its
+// payload lock and retained payload owner before acquiring the state lock.
+pub fn gc_commit_mutation<O, M: GCReservationMoves>(state: &GCState<O>, reservation: &GCReservation, moves: M) gc_policy.GCFault! {
+    from :: ~reservation.from
+    if !state.entries.has_key(from.value) -> return Err(gc_policy.GCFault.UnknownObject(from))
+    if !state.entries[from.value].reserved || state.entries[from.value].version != reservation.version {
+        return Err(gc_policy.GCFault.MutationConflict(from))
+    }
+    next_version :: gc_next_version(from, state.entries[from.value].version)
+    loop child in reservation.edges {
+        if !state.entries.has_key(child.value) -> return Err(gc_policy.GCFault.UnknownObject(child))
+    }
+    // Moving the list, rather than copying, matches Rust mem::take.
+    edges :: moves.take_edges(&reservation)
+    state.entries[from.value].edges = edges
+    state.entries[from.value].version = next_version
+    state.entries[from.value].reserved = false
+    gc_unpin<O>(&state, reservation.pinned)
+    reservation.active = false
+}
+
+// Rust MutationReservation::drop (:796–814); poison recovery is native.
+pub fn gc_rollback_mutation<O>(state: &GCState<O>, reservation: &GCReservation) Never! {
+    if !reservation.active -> return
+    from :: ~reservation.from
+    if state.entries.has_key(from.value) && state.entries[from.value].reserved && state.entries[from.value].version == reservation.version {
+        state.entries[from.value].reserved = false
+    }
+    gc_unpin<O>(&state, reservation.pinned)
+    reservation.active = false
+}
+
+fn gc_unpin<O>(state: &GCState<O>, pinned: [gc_policy.GCObjectID]) Never! {
+    loop id in pinned {
+        if state.entries.has_key(id.value) && state.entries[id.value].pins > 0 -> state.entries[id.value].pins -= 1
+    }
+}
+
+// Rust Collector::safepoint (:278–335), through dropping the state lock (:326).
+// Finalizers/drop and trace publication occur only after unlocking. Traversal
+// starts in descending identity order; each pop visits ascending identity.
+pub fn gc_mark_remove<O>(state: &GCState<O>, payload: GCPayloadFacts<O>) -> GCSweep<O> gc_policy.GCFault! {
+    marked := [U64:Bool]{}
+    stack := [gc_policy.GCObjectID]{}
+    loop pair in state.entries {
+        if pair.value.roots != 0 || pair.value.pins != 0 || payload.strong_count(pair.value.object) != 1 {
+            &stack.push(gc_policy.GCObjectID{value: pair.key})
+        }
+    }
+    &stack.reverse()
+    loop stack.len() > 0 {
+        id :: &stack.pop() ?? panic("collector mark stack invariant")
+        if marked.has_key(id.value) -> next
+        marked[id.value] = true
+        if !state.entries.has_key(id.value) -> return Err(gc_policy.GCFault.UnknownObject(id))
+        edges :: state.entries[id.value].edges
+        index := edges.len()
+        loop index > 0 {
+            index -= 1
+            child :: edges[index]
+            if !state.entries.has_key(child.value) -> return Err(gc_policy.GCFault.DanglingEdge{from: id, to: child})
+            &stack.push(~child)
+        }
+    }
+    candidates := [gc_policy.GCObjectID]{}
+    loop id in state.entries.keys() {
+        if !marked.has_key(id) -> &candidates.push(gc_policy.GCObjectID{value: id})
+    }
+    result := gc_policy.gc_empty_collection()
+    result.reachable = marked.len()
+    removed := [GCRemoved<O>]{}
+    loop id in candidates {
+        if payload.strong_count(state.entries[id.value].object) != 1 {
+            &result.deferred.push(~id)
+        } else {
+            entry :: &state.entries.remove(id.value) ?? panic("collector candidate retained")
+            &removed.push(GCRemoved<O>{id: id, entry: entry})
+        }
+    }
+    Ok(GCSweep<O>{collection: result, removed: removed})
+}
+
+// Rust AutomaticRoot edge slots (:352–582). The caller holds the native slot
+// mutex while building a proposal, flattening it and performing root graph/
+// payload mutation. Publish the proposal only after that operation succeeds.
+// Slot/group indices are checked target-sized usize facts from lowering.
+pub struct GCSlotEdge {
+    pub slot: String
+    pub group: Int
+    pub id: gc_policy.GCObjectID
+}
+
+// Rust AutomaticRoot::replace_edge_slots (:383–407).
+pub fn gc_build_edge_slots(edges: [GCSlotEdge], collection_len: Int?) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := [String:[[gc_policy.GCObjectID]]]{}
+    loop edge in edges {
+        if !proposal.has_key(edge.slot) -> proposal[~edge.slot] = [[gc_policy.GCObjectID]]{}
+        loop proposal[edge.slot].len() <= edge.group -> &proposal[edge.slot].push([gc_policy.GCObjectID]{})
+        &proposal[edge.slot][edge.group].push(~edge.id)
+    }
+    if collection_len == {
+        .Val(length) -> {
+            if !proposal.has_key("collection") -> proposal["collection"] = [[gc_policy.GCObjectID]]{}
+            loop proposal["collection"].len() < length -> &proposal["collection"].push([gc_policy.GCObjectID]{})
+        }
+        .None -> {}
+    }
+    proposal
+}
+
+// Rust replace_edge_slot/edit_edge_slot (:409–440), and
+// edit_replacing_all_edges/edit_clearing_edges (:462–478).
+pub fn gc_edge_slot_replace(slots: [String:[[gc_policy.GCObjectID]]], slot: String, edges: [gc_policy.GCObjectID]) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if edges.len() == 0 {
+        _ :: &proposal.remove(slot)
+    } else {
+        proposal[~slot] = [[gc_policy.GCObjectID]]{~edges}
+    }
+    proposal
+}
+
+// Rust edit_edge_slot_index (:442–460).
+pub fn gc_edge_slot_index(slots: [String:[[gc_policy.GCObjectID]]], slot: String, index: Int, edges: [gc_policy.GCObjectID]) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if !proposal.has_key(slot) -> proposal[~slot] = [[gc_policy.GCObjectID]]{}
+    loop proposal[slot].len() <= index -> &proposal[slot].push([gc_policy.GCObjectID]{})
+    proposal[slot][index] = ~edges
+    proposal
+}
+
+// Rust edit_edge_slot_additive (:480–495).
+pub fn gc_edge_slot_additive(slots: [String:[[gc_policy.GCObjectID]]], slot: String, edges: [gc_policy.GCObjectID]) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if !proposal.has_key(slot) -> proposal[~slot] = [[gc_policy.GCObjectID]]{}
+    &proposal[slot].push(~edges)
+    proposal
+}
+
+// Rust edit_edge_slot_insert/edit_edge_slot_prepend (:497–521).
+pub fn gc_edge_slot_insert(slots: [String:[[gc_policy.GCObjectID]]], slot: String, index: Int, edges: [gc_policy.GCObjectID]) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if !proposal.has_key(slot) -> proposal[~slot] = [[gc_policy.GCObjectID]]{}
+    at :: if index < proposal[slot].len() -> index else -> proposal[slot].len()
+    &proposal[slot].insert(at, ~edges)
+    proposal
+}
+
+// Rust edit_edge_slot_remove (:523–543).
+pub fn gc_edge_slot_remove(slots: [String:[[gc_policy.GCObjectID]]], slot: String, index: Int) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if proposal.has_key(slot) {
+        if index < proposal[slot].len() -> _ :: &proposal[slot].remove(index, .Slot)
+        if proposal[slot].len() == 0 -> _ :: &proposal.remove(slot)
+    }
+    proposal
+}
+
+// Rust edit_edge_slot_pop (:545–562).
+pub fn gc_edge_slot_pop(slots: [String:[[gc_policy.GCObjectID]]], slot: String) -> [String:[[gc_policy.GCObjectID]]] Never! {
+    proposal := ~slots
+    if proposal.has_key(slot) {
+        _ :: &proposal[slot].pop()
+        if proposal[slot].len() == 0 -> _ :: &proposal.remove(slot)
+    }
+    proposal
+}
+
+// Rust flatten_edge_slots (:572–581). Dedup before the root graph's edge-cap
+// check, exactly as Rust's BTreeSet collection does; empty groups remain slots.
+pub fn gc_flatten_edge_slots(slots: [String:[[gc_policy.GCObjectID]]]) -> [gc_policy.GCObjectID] Never! {
+    unique := [U64:Bool]{}
+    loop slot in slots {
+        loop group in slot.value {
+            loop id in group -> unique[id.value] = true
+        }
+    }
+    flattened := [gc_policy.GCObjectID]{}
+    loop value in unique.keys() -> &flattened.push(gc_policy.GCObjectID{value: value})
+    flattened
+}

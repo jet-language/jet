@@ -1,0 +1,218 @@
+use core.game.runtime.kernel_game_overlay as overlay
+use core.game.runtime.kernel_game_frame_profiler as frames
+use core.text.runtime.kernel_unicode_string as text
+
+// GameOverlay.rs:1067, all original substantive assertions.
+#Test("toggle_filter_and_pause_resume_are_deterministic") {
+    state := overlay.JetGameOverlayState.new()
+    assert(state.visibility() == overlay.JetGameOverlayVisibility.hidden())
+    toggled :: &state.toggle()
+    assert(toggled.sequence == (U64{1}))
+    assert(state.visibility() == overlay.JetGameOverlayVisibility.shown())
+    _ :: &state.set_filter(.Category(.Error))
+    assert(state.filter() == overlay.JetGameOverlayFilter.Category(.Error))
+    assert((&state.pause()).after == overlay.JetGameOverlayRunState.Paused)
+    assert((&state.resume()).after == overlay.JetGameOverlayRunState.Running)
+    assert(state.transition_count() == 4)
+}
+// GameOverlay.rs:1083. Also checks source identity, not just trace identity.
+#Test("error_pause_preserves_exact_source_and_trace_identity") {
+    state := overlay.JetGameOverlayState.new()
+    source :: "scene/player.jet:41:9"
+    trace :: "trace/frame/00000042"
+    fact :: &state.error_pause(~source, ~trace) ?? panic("valid identity")
+    assert(fact.kind == overlay.JetGameOverlayTransitionKind.ErrorPaused)
+    assert(fact.after == overlay.JetGameOverlayRunState.ErrorPaused)
+    if fact.error_pause == .Val(identity) {
+        assert(identity.source_id == source)
+        assert(identity.trace_id == trace)
+    } else -> assert(false, "receipt lost provenance")
+    {
+        active :: state.active_error_pause()
+        if active == .Val(identity) {
+            assert(identity.source_id == source)
+            assert(identity.trace_id == trace)
+        } else -> assert(false, "state lost provenance")
+    }
+    assert((&state.resume()).after == overlay.JetGameOverlayRunState.Running)
+    assert(state.active_error_pause() == None)
+}
+// GameOverlay.rs:1097. Uses retained cursor loans, never copied row snapshots.
+#Test("history_is_bounded_and_payload_requires_explicit_publication") {
+    state := overlay.JetGameOverlayState.new()
+    plain :: overlay.JetGameOverlayOutputRow.new(U64{1}, .Info, "ordinary output") ?? panic("valid output")
+    assert(plain.published_text() == None)
+    assert(plain.render_json().contains("\"payload\":null"))
+    _ :: &state.record_output(^plain) ?? panic("record output")
+    _ :: &state.publish_output(U64{2}, .Stat, "fps", "60") ?? panic("publish output")
+    assert(state.history_count() == 2)
+    {
+        rows := state.history()
+        _ :: &rows.next() ?? panic("first row")
+        row := &rows.next() ?? panic("published row")
+        assert(row[0].published_text() != None)
+    }
+    loop index in 0..<(overlay.JET_GAME_OVERLAY_MAX_COMMANDS + 1) {
+        _ :: &state.record_command(U64{index}, "command-{index}") ?? panic("record command")
+    }
+    assert(state.command_count() == overlay.JET_GAME_OVERLAY_MAX_COMMANDS)
+    commands := state.commands()
+    first := &commands.next() ?? panic("oldest command")
+    assert(first[0].text == "command-1")
+}
+
+fn scalar(cp: Int) -> String Never! {
+    out := [U8]{}
+    text.append_cp(&out, cp)
+    String.from_bytes(out) ?? panic("scalar")
+}
+#Test("validation precedence and refusal do not mutate overlay") {
+    state := overlay.JetGameOverlayState.new()
+    if &state.error_pause("", "trace") == .Err(error) {
+        assert(error == overlay.JetGameOverlayError.EmptyIdentity("source_id"))
+        assert(error.message() == "game overlay source_id identity must not be empty")
+    } else -> assert(false)
+    assert(state.run_state() == overlay.JetGameOverlayRunState.Running)
+    assert(state.transition_count() == 0)
+    if &state.error_pause("source", scalar(128)) == .Err(error) {
+        assert(error.message() == "game overlay trace_id identity contains a control character")
+    } else -> assert(false)
+    assert(state.transition_count() == 0)
+    if &state.record_command(U64{0}, "") == .Err(error) {
+        assert(error == overlay.JetGameOverlayError.EmptyText("command"))
+    } else -> assert(false)
+    assert(state.command_count() == 0)
+    row := overlay.JetGameOverlayOutputRow.new(U64{0}, .Error, "") ?? panic("empty message is valid")
+    row.source_id = Val("source")
+    if &state.record_output(^row) == .Err(error) {
+        assert(error.message() == "game overlay source_id/trace_id identity must not be empty")
+    } else -> assert(false)
+    assert(state.history_count() == 0)
+    long := [U8]{}
+    loop i in 0..<(overlay.JET_GAME_OVERLAY_MAX_TEXT_BYTES + 1) -> &long.push(U8{120})
+    too_long :: String.from_bytes(long) ?? panic("long fixture")
+    if overlay.JetGameOverlayOutputRow.new(U64{0}, .Info, ^too_long) == .Err(error) {
+        assert(error == overlay.JetGameOverlayError.TextTooLong("message", 16384, 16385))
+        assert(error.message() == "game overlay message is 16385 bytes; maximum is 16384 bytes")
+    } else -> assert(false)
+}
+#Test("visibility invariant, no-op receipts, and error pause policy are independent") {
+    state := overlay.JetGameOverlayState.default()
+    _ :: &state.set_input_capture(true)
+    assert(!state.captures_input())
+    _ :: &state.toggle()
+    assert(state.is_visible() && state.captures_input())
+    _ :: &state.set_input_capture(false)
+    assert(state.is_visible() && !state.captures_input())
+    _ :: &state.toggle()
+    assert(!state.is_visible() && !state.captures_input())
+    _ :: &state.toggle_filter(.Error)
+    assert(state.filter() == overlay.JetGameOverlayFilter.Category(.Error))
+    _ :: &state.toggle_filter(.Error)
+    assert(state.filter() == overlay.JetGameOverlayFilter.All)
+    enabled :: &state.set_error_pause_enabled(true)
+    assert(enabled.error_pause_enabled)
+    _ :: &state.error_pause("source", "trace") ?? panic("pause")
+    no_op :: &state.pause()
+    assert(no_op.before == overlay.JetGameOverlayRunState.ErrorPaused)
+    assert(no_op.after == overlay.JetGameOverlayRunState.ErrorPaused)
+    _ :: &state.set_error_pause_enabled(false)
+    assert(state.run_state() == overlay.JetGameOverlayRunState.ErrorPaused)
+    _ :: &state.resume()
+    assert(!state.error_pause_enabled())
+}
+#Test("metric order, replacement, and exact capacity") {
+    state := overlay.JetGameOverlayState.new()
+    &state.observe_metric(.Fps, I64{60}, U64{1})
+    &state.observe_metric(.FrameTime, I64{-1}, U64{2})
+    &state.observe_metric(.Fps, I64{61}, U64{3})
+    assert(state.metric_values().len() == 2)
+    assert((state.metric_value(.Fps) ?? panic("fps"))[0].value == (I64{61}))
+    assert(state.metric_value(.Unit) == None)
+    _ :: &state.select_metric(.FrameTime) ?? panic("select")
+    _ :: &state.select_metric(.Fps) ?? panic("select")
+    _ :: &state.select_metric(.Fps) ?? panic("duplicate selection still emits receipt")
+    assert(state.selected_metrics().len() == 2)
+    {
+        values := state.selected_metric_values()
+        assert((&values.next() ?? panic("frame time"))[0].metric == overlay.JetGameOverlayMetric.FrameTime)
+        assert((&values.next() ?? panic("fps"))[0].sampled_at_ns == (U64{3}))
+        assert(&values.next() == None)
+    }
+    _ :: &state.toggle_metric(.Fps) ?? panic("deselect")
+    assert(!state.is_metric_selected(.Fps))
+    loop metric in overlay.JetGameOverlayMetric.all() {
+        if metric == .Unit -> next
+        _ :: &state.select_metric(metric) ?? panic("eight metrics")
+    }
+    before :: state.transition_count()
+    if &state.select_metric(.Unit) == .Err(error) {
+        assert(error == overlay.JetGameOverlayError.MetricCapacity(8))
+        assert(error.message() == "game overlay selected metric limit is 8")
+    } else -> assert(false)
+    assert(state.transition_count() == before)
+}
+#Test("autocomplete sorts deduplicates truncates then validates retained commands") {
+    state :: overlay.JetGameOverlayState.new()
+    fact :: state.autocomplete("s", [String]{"stop", "start", "stop", "other"}) ?? panic("autocomplete")
+    assert(fact.matches == [String]{"start", "stop"})
+    assert(fact.render_json() == "{{\"query\":\"s\",\"matches\":[\"start\",\"stop\"]}")
+    commands := [String]{}
+    loop index in 0..<64 -> &commands.push("a{index}")
+    long := [U8]{U8{122}}
+    loop index in 0..<16384 -> &long.push(U8{120})
+    &commands.push(String.from_bytes(long) ?? panic("discarded command"))
+    truncated :: overlay.JetGameOverlayAutocompleteFact.new("", ^commands) ?? panic("invalid discarded match is not validated")
+    assert(truncated.matches.len() == 64)
+    if overlay.JetGameOverlayAutocompleteFact.new("", [String]{""}) == .Err(error) {
+        assert(error == overlay.JetGameOverlayError.EmptyText("autocomplete command"))
+    } else -> assert(false)
+}
+#Test("all rings preserve chronological iteration and bounded transition receipts") {
+    state := overlay.JetGameOverlayState.new()
+    loop index in 0..<257 {
+        _ :: &state.output(U64{index}, if index % 2 == 0 -> overlay.JetGameOverlayOutputCategory.Info else -> overlay.JetGameOverlayOutputCategory.Error, "row-{index}") ?? panic("output")
+        _ :: &state.set_visible(index % 2 == 0)
+    }
+    assert(state.history_count() == 256)
+    assert(state.transition_count() == 256)
+    {
+        rows := state.history()
+        first := &rows.next() ?? panic("first retained")
+        assert(first[0].id == (U64{2}))
+        assert(first[0].message == "row-1")
+    }
+    {
+        facts := state.transitions()
+        first := &facts.next() ?? panic("first transition")
+        assert(first[0].sequence == (U64{2}))
+    }
+    _ :: &state.set_filter(.Category(.Error))
+    rows := state.visible_history()
+    count := 0
+    loop {
+        row := &rows.next() ?? break
+        assert(row[0].category == overlay.JetGameOverlayOutputCategory.Error)
+        count += 1
+    }
+    assert(count == 128)
+}
+#Test("wire escapes all Rust control scalars and preserves frame identity") {
+    control :: scalar(128)
+    message :: "\"\\\n\t{scalar(13)}{scalar(8)}{scalar(12)}{scalar(0)}{control}😀"
+    row :: overlay.JetGameOverlayOutputRow.new(U64{18446744073709551615}, .Info, ~message) ?? panic("output")
+    expected :: "{{\"id\":0,\"timestamp_ns\":18446744073709551615,\"category\":\"info\",\"message\":\"\\\"\\\\\\n\\t\\r\\b\\f\\u0000\\u0080😀\",\"source_id\":null,\"trace_id\":null,\"payload\":null}"
+    assert(row.render_json() == expected)
+    state := overlay.JetGameOverlayState.new()
+    frame :: frames.JetGameFrameIdentity.new("scene", U64{42}, "build", "revision", "trace") ?? panic("frame")
+    &state.set_frame_identity(^frame)
+    fact :: &state.toggle()
+    if fact.frame == .Val(identity) {
+        assert(identity.scene == "scene")
+        assert(identity.frame_index == (U64{42}))
+        assert(identity.build == "build" && identity.revision == "revision" && identity.trace_id == "trace")
+    } else -> assert(false)
+    assert(fact.render_json().contains("\"frame_index\":42,\"build\":\"build\",\"revision\":\"revision\",\"trace_id\":\"trace\""))
+    empty :: overlay.JetGameOverlayState.new().render_json()
+    assert(empty == "{{\"visible\":false,\"input_capture\":\"none\",\"filter\":\"all\",\"run_state\":\"running\",\"error_pause_enabled\":false,\"error_pause\":null,\"frame\":null,\"selected_metrics\":[],\"metric_values\":[],\"commands\":[],\"history\":[],\"transitions\":[]}")
+}

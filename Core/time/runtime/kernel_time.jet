@@ -1,0 +1,435 @@
+// Prelude/Core/Time.rs:627–1758. Private runtime policy; canonical civil and
+// period payloads remain at their existing owners. No public alternate types.
+// Source handoff: core.time.runtime assembly needs `module kernel_time`.
+// Native clock/world sampling (:288,801,1512), named-zone OS discovery
+// (:1186–1224), retained UTF-8/I64 parsing (:73–149,322–375,898–924,
+// 1535–1570), and padded append formatting (:1760–2004) are
+// explicit #4494/#4483/#4318/#4392 dependencies, NOT callable placeholders.
+// Signed128 total/difference/rounding (:249–273,397–465,575–618,695–714,
+// 873–892,953–975,1031–1055,1094–1129,1589–1597,1619–1644) requires
+// Duration's canonical native signed128 owner (#4262); UInt128Parts is unsigned
+// metadata math and cannot replace it. No exact-Int scratch or Rust bridge.
+// #4500/#4392: borrowed self/list loops and escaping info_at_utc field loans
+// retain the original zone owner; bootstrap copying is not ownership parity.
+// :878 to_unix_seconds is exactly :869 to_timestamp for normalized nanos:
+// floor((secs + leap)*1e9 + nanos)/1e9 = secs + leap, saturated to I64.
+// Integration maps both Rust anchors to the latter canonical body, not an
+// additional wide implementation or compatibility alias.
+use core.time.runtime.kernel_civil as civil
+use core.time.runtime.kernel_period as period
+use core.text.runtime.kernel_unicode_string as time_text
+
+// Rust :627–649. All operands retain the source i64 width.
+pub fn jet_time_instant_add_duration_ns(start_ns: I64, duration_ns: I64) -> I64 Never! { start_ns.saturating_add(duration_ns) }
+pub fn jet_time_instant_sub_duration_ns(start_ns: I64, duration_ns: I64) -> I64 Never! { start_ns.saturating_sub(duration_ns) }
+pub fn jet_time_instant_difference_ns(left_ns: I64, right_ns: I64) -> I64 Never! { left_ns.saturating_sub(right_ns) }
+pub fn jet_time_instant_elapsed_ns(now_ns: I64, start_ns: I64) -> I64 Never! { now_ns.saturating_sub(start_ns) }
+pub fn jet_time_instant_compare(left_ns: I64, right_ns: I64) -> I64 Never! {
+    if left_ns < right_ns -> return I64{-1}
+    if left_ns > right_ns -> return I64{1}
+    I64{0}
+}
+fn time_rem(value: I64, divisor: I64) -> I64 Never! {
+    rem :: value %% divisor
+    if rem < (I64{0}) -> return rem + divisor
+    rem
+}
+// Rust :653–685. Fixed membership avoids allocating the static slice per call.
+pub fn jet_time_is_leap_second_epoch(seconds: I64) -> Bool Never! {
+    seconds == (I64{78796800}) || seconds == (I64{94694400}) ||
+    seconds == (I64{126230400}) || seconds == (I64{157766400}) ||
+    seconds == (I64{189302400}) || seconds == (I64{220924800}) ||
+    seconds == (I64{252460800}) || seconds == (I64{283996800}) ||
+    seconds == (I64{315532800}) || seconds == (I64{362793600}) ||
+    seconds == (I64{394329600}) || seconds == (I64{425865600}) ||
+    seconds == (I64{489024000}) || seconds == (I64{567993600}) ||
+    seconds == (I64{631152000}) || seconds == (I64{662688000}) ||
+    seconds == (I64{709948800}) || seconds == (I64{741484800}) ||
+    seconds == (I64{773020800}) || seconds == (I64{820454400}) ||
+    seconds == (I64{867715200}) || seconds == (I64{915148800}) ||
+    seconds == (I64{1136073600}) || seconds == (I64{1230768000}) ||
+    seconds == (I64{1341100800}) || seconds == (I64{1435708800}) ||
+    seconds == (I64{1483228800})
+}
+// Rust :715–719.
+pub fn jet_time_split_unix_nanoseconds(nanoseconds: I64) -> (seconds: I64, nanos: U32) Never! {
+    (seconds: nanoseconds /% I64{1000000000}, nanos: U32.from_i64(time_rem(nanoseconds, I64{1000000000})) ?? panic("normalized nanoseconds"))
+}
+// Rust :1715–1720. Gregorian day-number owner and saturation order unchanged.
+pub fn jet_time_utc_from_parts(date: civil.CivilDate, time: civil.CivilTime) -> I64 Never! {
+    epoch :: civil.CivilDate.new(I64{1970}, I64{1}, I64{1}).to_day_number()
+    (date.to_day_number() - epoch).saturating_mul(I64{86400}).saturating_add(time.to_seconds())
+}
+// Rust :722–752. Field order MUST be secs, leap_second, nanos for derived
+// ordering; this intentionally differs from Rust's physical field order.
+#Comparable
+pub struct CivilDateTime { pub secs: I64, pub leap_second: Bool, pub nanos: U32 }
+impl CivilDateTime {
+    // Rust :754–770.
+    pub fn from_timestamp(secs: I64) -> CivilDateTime Never! { CivilDateTime.from_timestamp_ns_with_leap(secs, U32{0}, false) }
+    pub fn from_timestamp_ns(secs: I64, nanos: U32) -> CivilDateTime Never! { CivilDateTime.from_timestamp_ns_with_leap(secs, nanos, false) }
+    pub fn from_timestamp_ns_with_leap(secs: I64, nanos: U32, leap_second: Bool) -> CivilDateTime Never! {
+        seconds :: secs.saturating_add(I64.from_u32(nanos /% U32{1000000000}))
+        CivilDateTime{secs: seconds, leap_second: leap_second, nanos: nanos %% U32{1000000000}}
+    }
+    // Rust :687–693.
+    pub fn from_unix_parts(seconds: I64, nanos: U32) -> CivilDateTime Never! {
+        if jet_time_is_leap_second_epoch(seconds) -> return CivilDateTime.from_timestamp_ns_with_leap(seconds.saturating_sub(I64{1}), nanos, true)
+        CivilDateTime.from_timestamp_ns(seconds, nanos)
+    }
+    // Rust :771–782,893–897.
+    pub fn from_unix_seconds(seconds: I64) -> CivilDateTime Never! { CivilDateTime.from_unix_parts(seconds, U32{0}) }
+    pub fn from_unix_microseconds(value: I64) -> CivilDateTime Never! {
+        CivilDateTime.from_unix_parts(value /% I64{1000000}, (U32.from_i64(time_rem(value, I64{1000000})) ?? panic("normalized microseconds")) * U32{1000})
+    }
+    pub fn from_unix_nanoseconds(value: I64) -> CivilDateTime Never! {
+        parts :: jet_time_split_unix_nanoseconds(value)
+        CivilDateTime.from_unix_parts(parts.seconds, parts.nanos)
+    }
+    pub fn from_unix_ms(value: I64) -> CivilDateTime Never! {
+        CivilDateTime.from_unix_parts(value /% I64{1000}, (U32.from_i64(time_rem(value, I64{1000})) ?? panic("normalized milliseconds")) * U32{1000000})
+    }
+    // Rust :783–800. Leap label is tested BEFORE constructor clamping.
+    pub fn from_parts(year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64, nanos: U32) -> CivilDateTime Never! {
+        date :: civil.CivilDate.new(year, month, day)
+        leap :: hour == (I64{23}) && minute == (I64{59}) && second == (I64{60})
+        time :: civil.CivilTime.new(hour, minute, if leap -> I64{59} else -> second)
+        CivilDateTime.from_timestamp_ns_with_leap(jet_time_utc_from_parts(date, time), nanos, leap)
+    }
+    // Pure controlled-world branch of Rust :804–809; actual sampler is gated.
+    pub fn from_world_millis(millis: I64) -> CivilDateTime Never! {
+        CivilDateTime.from_timestamp_ns(millis /% I64{1000}, (U32.from_i64(time_rem(millis, I64{1000})) ?? panic("normalized milliseconds")) * U32{1000000})
+    }
+    // Rust :820–840.
+    pub fn date(self) -> civil.CivilDate Never! {
+        epoch :: civil.CivilDate.new(I64{1970}, I64{1}, I64{1}).to_day_number()
+        civil.CivilDate.from_day_number(epoch + self.secs /% I64{86400})
+    }
+    pub fn time(self) -> civil.CivilTime Never! {
+        second :: time_rem(self.secs, I64{86400})
+        out := civil.CivilTime.with_nanosecond(second / I64{3600}, (second / I64{60}) %% I64{60}, second %% I64{60}, self.nanos)
+        if self.leap_second -> out.second = I64{60}
+        out
+    }
+    pub fn time_for_output(self) -> civil.CivilTime Never! { self.time() }
+    // Rust :841–872.
+    pub fn hour(self) -> I64 Never! { self.time().hour }
+    pub fn minute(self) -> I64 Never! { self.time().minute }
+    pub fn second(self) -> I64 Never! { if self.leap_second -> I64{60} else -> time_rem(self.secs, I64{60}) }
+    pub fn millisecond(self) -> I64 Never! { I64.from_u32(self.nanos /% U32{1000000}) }
+    pub fn microsecond(self) -> I64 Never! { I64.from_u32(self.nanos /% U32{1000}) }
+    pub fn nanosecond(self) -> I64 Never! { I64.from_u32(self.nanos) }
+    pub fn unix_seconds_anchor(self) -> I64 Never! { self.secs }
+    pub fn is_leap_second(self) -> Bool Never! { self.leap_second }
+    pub fn to_timestamp(self) -> I64 Never! { self.secs.saturating_add(if self.leap_second -> I64{1} else -> I64{0}) }
+    // Rust :977–989,993–995.
+    pub fn add_period(self, p: period.CivilPeriod) -> CivilDateTime Never! {
+        date :: self.date().add_period(p.years_value(), p.months_value(), p.days_value())
+        time :: self.time()
+        CivilDateTime.from_parts(date.year, date.month, date.day, time.hour, time.minute, self.second(), time.nanos)
+    }
+    pub fn subtract_period(self, p: period.CivilPeriod) -> CivilDateTime Never! { self.add_period(p.negated()) }
+    // Rust :1056–1093. These coarse operations use the original POSIX anchor,
+    // not the leap-adjusted epoch used by round_with.
+    pub fn truncate(self, unit: String) -> CivilDateTime Never! {
+        if unit == "day" -> return CivilDateTime.from_timestamp(self.secs /% I64{86400} * I64{86400})
+        if unit == "hour" -> return CivilDateTime.from_timestamp(self.secs /% I64{3600} * I64{3600})
+        if unit == "minute" -> return CivilDateTime.from_timestamp(self.secs /% I64{60} * I64{60})
+        if unit == "second" -> return CivilDateTime.from_timestamp_ns_with_leap(self.secs, U32{0}, self.leap_second)
+        if unit == "millisecond" -> return CivilDateTime.from_timestamp_ns_with_leap(self.secs, self.nanos /% U32{1000000} * U32{1000000}, self.leap_second)
+        if unit == "microsecond" -> return CivilDateTime.from_timestamp_ns_with_leap(self.secs, self.nanos /% U32{1000} * U32{1000}, self.leap_second)
+        ~self
+    }
+    pub fn floor(self, unit: String) -> CivilDateTime Never! { self.truncate(unit) }
+    // Rust :1130–1146.
+    pub fn replace(self, year: I64, month: I64, day: I64, hour: I64, minute: I64, second: I64) -> CivilDateTime Never! {
+        CivilDateTime.from_parts(year, month, day, hour, minute, second, self.nanos)
+    }
+    pub fn in_zone(self, zone: CivilZone) -> CivilZonedDateTime Never! { CivilZonedDateTime{instant: ~self, zone: ~zone} }
+}
+// Rust :1159–1170, with original transition index semantics.
+#Equatable
+pub struct CivilTtInfo { pub offset: I64, pub is_dst: Bool }
+#Equatable
+pub struct CivilTransition { pub seconds: I64, pub info_index: Int }
+#Equatable
+pub struct CivilZone { name: String, transitions: [CivilTransition], infos: [CivilTtInfo] }
+
+// Rust parse_tzif nested helpers :1226–1253. Index arithmetic is bounded by
+// the selected usize maximum supplied by Main from core.sys.usize_max()
+// (#4483). This explicit fact argument is NOT inferred from the host or bytes.
+fn tz_size_add(a: U64, b: U64, usize_max: U64) -> U64 Never! {
+    value :: a.checked_add(b) ?? panic("tzif usize addition overflow")
+    if value > usize_max -> panic("tzif usize addition overflow")
+    value
+}
+fn tz_size_mul(a: U64, b: U64, usize_max: U64) -> U64 Never! {
+    value :: a.checked_mul(b) ?? panic("tzif usize multiplication overflow")
+    if value > usize_max -> panic("tzif usize multiplication overflow")
+    value
+}
+fn tz_index(value: U64) -> Int Never! { Int.from_u64(value) }
+fn tz_be_u32(bytes: View<U8>, at: U64, usize_max: U64) -> U32 Err! {
+    end :: tz_size_add(at, U64{4}, usize_max)
+    if tz_index(end) > bytes.len() -> return Err("truncated tzif")
+    i :: tz_index(at)
+    Ok((U32.from_u8(bytes[i]) << 24) | (U32.from_u8(bytes[i + 1]) << 16) | (U32.from_u8(bytes[i + 2]) << 8) | U32.from_u8(bytes[i + 3]))
+}
+fn tz_signed32(word: U32) -> I64 Never! {
+    value :: I64.from_u32(word)
+    if word >= (U32{2147483648}) -> return value - I64{4294967296}
+    value
+}
+fn tz_be_i64(bytes: View<U8>, at: U64, usize_max: U64) -> I64 Err! {
+    end :: tz_size_add(at, U64{8}, usize_max)
+    if tz_index(end) > bytes.len() -> return Err("truncated tzif")
+    high :: tz_be_u32(bytes, at, usize_max) ?? return Err(err)
+    low :: tz_be_u32(bytes, tz_size_add(at, U64{4}, usize_max), usize_max) ?? return Err(err)
+    Ok(tz_signed32(high) * I64{4294967296} + I64.from_u32(low))
+}
+struct TzifHeader { version: U8, gmt: U64, standard: U64, leap: U64, times: U64, types: U64, chars: U64 }
+fn tz_header(bytes: View<U8>, base: U64, usize_max: U64) -> TzifHeader Err! {
+    end :: tz_size_add(base, U64{4}, usize_max)
+    if tz_index(end) > bytes.len() -> return Err("invalid tzif header")
+    i :: tz_index(base)
+    if bytes[i] != (U8{84}) || bytes[i + 1] != (U8{90}) || bytes[i + 2] != (U8{105}) || bytes[i + 3] != (U8{102}) -> return Err("invalid tzif header")
+    version_at :: tz_index(tz_size_add(base, U64{4}, usize_max))
+    version :: if version_at < bytes.len() -> bytes[version_at] else -> U8{0}
+    gmt :: tz_be_u32(bytes, tz_size_add(base, U64{20}, usize_max), usize_max) ?? return Err(err)
+    standard :: tz_be_u32(bytes, tz_size_add(base, U64{24}, usize_max), usize_max) ?? return Err(err)
+    leap :: tz_be_u32(bytes, tz_size_add(base, U64{28}, usize_max), usize_max) ?? return Err(err)
+    times :: tz_be_u32(bytes, tz_size_add(base, U64{32}, usize_max), usize_max) ?? return Err(err)
+    types :: tz_be_u32(bytes, tz_size_add(base, U64{36}, usize_max), usize_max) ?? return Err(err)
+    chars :: tz_be_u32(bytes, tz_size_add(base, U64{40}, usize_max), usize_max) ?? return Err(err)
+    Ok(TzifHeader{version: version, gmt: U64.from_u32(gmt), standard: U64.from_u32(standard), leap: U64.from_u32(leap), times: U64.from_u32(times), types: U64.from_u32(types), chars: U64.from_u32(chars)})
+}
+impl CivilZone {
+    // Rust :1172–1185,1310–1315. Only returned owned names are copied.
+    pub fn to_string_fmt(self) -> String Never! { ~self.name }
+    pub fn name(self) -> String Never! { ~self.name }
+    pub fn utc() -> CivilZone Never! {
+        CivilZone{name: "UTC", transitions: [CivilTransition]{}, infos: [CivilTtInfo]{CivilTtInfo{offset: I64{0}, is_dst: false}}}
+    }
+    // Rust :1225–1309. Exact validation order: first header, block32 math,
+    // second header, timestamps, index span, then ttinfo. Zero typecnt still
+    // reads one ttinfo, and invalid indexes clamp, just as the source does.
+    pub fn parse_tzif(name: ^String, bytes: View<U8>, usize_max: U64) -> CivilZone Err! {
+        first :: tz_header(bytes, U64{0}, usize_max) ?? return Err(err)
+        block := tz_size_mul(first.times, U64{4}, usize_max)
+        block = tz_size_add(block, first.times, usize_max)
+        block = tz_size_add(block, tz_size_mul(first.types, U64{6}, usize_max), usize_max)
+        block = tz_size_add(block, first.chars, usize_max)
+        block = tz_size_add(block, tz_size_mul(first.leap, U64{8}, usize_max), usize_max)
+        block = tz_size_add(block, first.gmt, usize_max)
+        block = tz_size_add(block, first.standard, usize_max)
+        base := U64{44}
+        wide :: first.version == (U8{50}) || first.version == (U8{51}) || first.version == (U8{52})
+        counts := first
+        if wide {
+            base = tz_size_add(U64{44}, block, usize_max)
+            counts = tz_header(bytes, base, usize_max) ?? return Err(err)
+            base = tz_size_add(base, U64{44}, usize_max)
+        }
+        typecnt :: if counts.types < (U64{1}) -> U64{1} else -> counts.types
+        time_size :: if wide -> U64{8} else -> U64{4}
+        pos := base
+        times := [I64]{}
+        loop _ in 0..<tz_index(counts.times) {
+            seconds :: if wide -> tz_be_i64(bytes, pos, usize_max) ?? return Err(err) else -> tz_signed32(tz_be_u32(bytes, pos, usize_max) ?? return Err(err))
+            &times.push(seconds)
+            pos = tz_size_add(pos, time_size, usize_max)
+        }
+        index_start :: pos
+        index_end :: tz_size_add(pos, counts.times, usize_max)
+        if tz_index(index_end) > bytes.len() -> return Err("truncated tzif index")
+        pos = index_end
+        infos := [CivilTtInfo]{}
+        loop _ in 0..<tz_index(typecnt) {
+            offset :: tz_signed32(tz_be_u32(bytes, pos, usize_max) ?? return Err(err))
+            dst_index :: tz_index(tz_size_add(pos, U64{4}, usize_max))
+            dst :: if dst_index < bytes.len() -> bytes[dst_index] != (U8{0}) else -> false
+            &infos.push(CivilTtInfo{offset: offset, is_dst: dst})
+            pos = tz_size_add(pos, U64{6}, usize_max)
+        }
+        transitions := [CivilTransition]{}
+        loop i in 0..<times.len() {
+            raw_index :: Int.from_u8(bytes[tz_index(index_start) + i])
+            index :: if raw_index >= infos.len() -> infos.len() - 1 else -> raw_index
+            &transitions.push(CivilTransition{seconds: times[i], info_index: index})
+        }
+        Ok(CivilZone{name: ^name, transitions: transitions, infos: infos})
+    }
+    // Rust :1316–1336. Return retaining reference into the same zone owner;
+    // escaping field loans still require #4392, never clone the info table.
+    pub fn info_at_utc(self, secs: I64) -> &CivilTtInfo Never! {
+        lo := 0
+        hi := self.transitions.len()
+        loop lo < hi {
+            mid :: lo + (hi - lo) /% 2
+            if self.transitions[mid].seconds <= secs -> lo = mid + 1 else -> hi = mid
+        }
+        index :: if lo == 0 -> 0 else -> self.transitions[lo - 1].info_index
+        &self.infos[index]
+    }
+    pub fn offset_at_utc(self, secs: I64) -> I64 Never! { self.info_at_utc(secs).offset }
+    // Rust :1337–1348.
+    pub fn local_parts(self, secs: I64) -> (date: civil.CivilDate, time: civil.CivilTime, offset: I64) Never! {
+        offset :: self.offset_at_utc(secs)
+        local :: CivilDateTime.from_timestamp(secs.saturating_add(offset))
+        (date: local.date(), time: local.time(), offset: offset)
+    }
+    pub fn local_to_utc(self, date: civil.CivilDate, time: civil.CivilTime) -> I64 Never! {
+        self.local_to_utc_with_disambiguation(date, time, "compatible") ?? {
+            local :: jet_time_utc_from_parts(date, time)
+            local.saturating_sub(self.offset_at_utc(local))
+        }
+    }
+    // Rust :1349–1431. Fixed-width map keys avoid Rust's quadratic offset
+    // dedup. Only the minimum/maximum/distinct count affect any branch, so no
+    // candidate list, sort, or copied zone payload is needed.
+    pub fn local_to_utc_with_disambiguation(self, date: civil.CivilDate, time: civil.CivilTime, disambiguation: String) -> I64 Err! {
+        if disambiguation != "compatible" && disambiguation != "earlier" && disambiguation != "later" && disambiguation != "reject" -> return Err("invalid disambiguation: {disambiguation}")
+        local :: jet_time_utc_from_parts(date, time)
+        offsets := [I64: Bool]{}
+        candidates := [I64: Bool]{}
+        first := I64{0}
+        last := I64{0}
+        count := 0
+        loop info in self.infos {
+            if offsets.get(info.offset) != None -> next
+            offsets[info.offset] = true
+            utc :: local.saturating_sub(info.offset)
+            candidate :: self.local_parts(utc)
+            if candidate.offset != info.offset || candidate.date != date || candidate.time.to_seconds() != time.to_seconds() -> next
+            if candidates.get(utc) != None -> next
+            candidates[utc] = true
+            if count == 0 || utc < first -> first = utc
+            if count == 0 || utc > last -> last = utc
+            count += 1
+        }
+        if count == 1 -> return Ok(first)
+        if count > 1 {
+            if disambiguation == "reject" -> return Err("ambiguous local time in {self.name}")
+            return Ok(if disambiguation == "later" -> last else -> first)
+        }
+        loop i in 0..<self.transitions.len() {
+            transition :: self.transitions[i]
+            before :: if i == 0 -> self.infos[0].offset else -> self.infos[self.transitions[i - 1].info_index].offset
+            after :: self.infos[transition.info_index].offset
+            if after > before {
+                start :: transition.seconds.saturating_add(before)
+                end :: transition.seconds.saturating_add(after)
+                if local >= start && local < end {
+                    if disambiguation == "reject" -> return Err("nonexistent local time in {self.name}")
+                    return Ok(local.saturating_sub(if disambiguation == "earlier" -> after else -> before))
+                }
+            }
+        }
+        if disambiguation == "reject" -> return Err("local time is not valid in {self.name}")
+        Err("could not resolve local time in {self.name}")
+    }
+    // Rust :1432–1471. Strict comparisons for transition neighbors.
+    pub fn local_to_utc_with_offset(self, date: civil.CivilDate, time: civil.CivilTime, offset: I64) -> I64? Never! {
+        utc :: jet_time_utc_from_parts(date, time).saturating_sub(offset)
+        candidate :: self.local_parts(utc)
+        if candidate.offset == offset && candidate.date == date && candidate.time.to_seconds() == time.to_seconds() -> return Val(utc)
+        None
+    }
+    pub fn next_transition(self, utc_seconds: I64) -> I64? Never! {
+        loop transition in self.transitions -> if transition.seconds > utc_seconds -> return Val(transition.seconds)
+        None
+    }
+    pub fn previous_transition(self, utc_seconds: I64) -> I64? Never! {
+        i := self.transitions.len()
+        loop i > 0 {
+            i -= 1
+            if self.transitions[i].seconds < utc_seconds -> return Val(self.transitions[i].seconds)
+        }
+        None
+    }
+    pub fn start_of_day(self, date: civil.CivilDate) -> I64 Never! { self.local_to_utc(date, civil.CivilTime.new(I64{0}, I64{0}, I64{0})) }
+    pub fn start_of_day_zoned(self, date: civil.CivilDate) -> CivilZonedDateTime Never! { CivilZonedDateTime{instant: CivilDateTime.from_timestamp(self.start_of_day(date)), zone: ~self} }
+    pub fn hours_in_day(self, date: civil.CivilDate) -> I64 Never! {
+        start :: self.start_of_day(date)
+        end :: self.start_of_day(date.add_days(I64{1}))
+        end.saturating_sub(start) / I64{3600}
+    }
+}
+// Rust :1474–1498. Equality includes zone NAME, ordering only the instant.
+// They must NOT share a derived Comparable implementation.
+pub struct CivilZonedDateTime { instant: CivilDateTime, zone: CivilZone }
+impl CivilZonedDateTime {
+    pub fn equals(self, other: CivilZonedDateTime) -> Bool Never! { self.instant == other.instant && self.zone.name == other.zone.name }
+    pub fn compare(self, other: CivilZonedDateTime) -> I64 Never! {
+        if self.instant < other.instant -> return I64{-1}
+        if self.instant > other.instant -> return I64{1}
+        I64{0}
+    }
+    // Rust :1501–1510. Non-UTC display intentionally drops instant nanos.
+    fn display_parts(self) -> (date: civil.CivilDate, time: civil.CivilTime, offset: I64) Never! {
+        if self.instant.leap_second && self.zone.name == "UTC" -> return (date: self.instant.date(), time: self.instant.time_for_output(), offset: I64{0})
+        self.zone.local_parts(self.instant.to_timestamp())
+    }
+    // Rust :1515–1534. Compatible failure loses fraction, as in Rust fallback.
+    pub fn from_local(date: civil.CivilDate, time: civil.CivilTime, zone: CivilZone) -> CivilZonedDateTime Never! {
+        CivilZonedDateTime.from_local_with_disambiguation(date, time, zone, "compatible") ?? CivilZonedDateTime{instant: CivilDateTime.from_timestamp(zone.local_to_utc(date, time)), zone: ~zone}
+    }
+    pub fn from_local_with_disambiguation(date: civil.CivilDate, time: civil.CivilTime, zone: CivilZone, disambiguation: String) -> CivilZonedDateTime Err! {
+        seconds :: zone.local_to_utc_with_disambiguation(date, time, disambiguation) ?? return Err(err)
+        Ok(CivilZonedDateTime{instant: CivilDateTime.from_timestamp_ns(seconds, time.nanos), zone: ~zone})
+    }
+    // Rust :1571–1588.
+    pub fn date(self) -> civil.CivilDate Never! { self.display_parts().date }
+    pub fn time(self) -> civil.CivilTime Never! { self.display_parts().time }
+    pub fn offset_seconds(self) -> I64 Never! { self.display_parts().offset }
+    pub fn is_dst(self) -> Bool Never! { self.zone.info_at_utc(self.instant.to_timestamp()).is_dst }
+    pub fn to_datetime(self) -> CivilDateTime Never! { ~self.instant }
+    pub fn zone(self) -> CivilZone Never! { ~self.zone }
+    // Rust :1598–1618.
+    pub fn add_period(self, p: period.CivilPeriod) -> CivilZonedDateTime Never! {
+        date :: self.date().add_period(p.years_value(), p.months_value(), p.days_value())
+        CivilZonedDateTime.from_local(date, self.time(), self.zone)
+    }
+    pub fn subtract_period(self, p: period.CivilPeriod) -> CivilZonedDateTime Never! { self.add_period(p.negated()) }
+    pub fn with_time(self, time: civil.CivilTime, disambiguation: String) -> CivilZonedDateTime Err! { CivilZonedDateTime.from_local_with_disambiguation(self.date(), time, self.zone, disambiguation) }
+    pub fn with_zone(self, zone: CivilZone) -> CivilZonedDateTime Never! { CivilZonedDateTime{instant: ~self.instant, zone: ~zone} }
+    // Rust :1645–1659.
+    pub fn next_transition(self) -> I64? Never! { self.zone.next_transition(self.instant.to_timestamp()) }
+    pub fn previous_transition(self) -> I64? Never! { self.zone.previous_transition(self.instant.to_timestamp()) }
+    pub fn start_of_day(self) -> CivilZonedDateTime Never! { self.zone.start_of_day_zoned(self.date()) }
+    pub fn hours_in_day(self) -> I64 Never! { self.zone.hours_in_day(self.date()) }
+}
+// Rust :1728–1758. After the six-byte shape and ASCII-digit checks, both
+// two-digit parse calls are infallible; decode directly without span copies.
+// The canonical UTF-8 owner still has its documented #4318/#4392 retention
+// gate; this consumer does not add a materializing byte seam.
+pub fn jet_time_parse_offset(value: String) -> I64 Err! {
+    if value == "Z" -> return Ok(I64{0})
+    bytes :: time_text.utf8_bytes(value)
+    if bytes.len() != 6 -> return Err("bad RFC3339 offset: {value}")
+    if bytes[3] != (U8{58}) -> return Err("bad RFC3339 offset: {value}")
+    sign :: if {
+        bytes[0] == (U8{45}) -> I64{-1}
+        bytes[0] == (U8{43}) -> I64{1}
+        else -> return Err("bad RFC3339 offset: {value}")
+    }
+    if bytes[1] < (U8{48}) || bytes[1] > (U8{57}) ||
+       bytes[2] < (U8{48}) || bytes[2] > (U8{57}) ||
+       bytes[4] < (U8{48}) || bytes[4] > (U8{57}) ||
+       bytes[5] < (U8{48}) || bytes[5] > (U8{57}) -> return Err("bad RFC3339 offset: {value}")
+    hours :: I64.from_u8(bytes[1] - U8{48}) * I64{10} + I64.from_u8(bytes[2] - U8{48})
+    minutes :: I64.from_u8(bytes[4] - U8{48}) * I64{10} + I64.from_u8(bytes[5] - U8{48})
+    if hours > (I64{23}) || minutes > (I64{59}) -> return Err("RFC3339 offset out of range: {value}")
+    Ok(sign * (hours * I64{3600} + minutes * I64{60}))
+}
+// Remaining exact Rust anchors are recorded here rather than hidden behind a
+// throwing/successful fake provider. Date :73,124,221,249,264,274,277,280,288;
+// LocalTime :322,329,342,397,400,411,418,433,443,454,457,460,463,466,469,472;
+// Period :575,619; helpers :651,652,695,702,708,712,1722,1760,1768,1873;
+// DateTime :801,873,883,886,889,898,925,947,950,953,962,965,973,990,
+// 996,1031,1046,1094,1109,1112,1121,1124,1127,1147;
+// Zone :1186 (wasm embedded provider + native OSPath/env/read discovery);
+// Zoned :1512,1535,1589,1595,1619,1635,1660,1670,1680,1690;
+// entry callers :2009,2013,2022. No inline or included tests occur in Time.rs.
+// #4499 composite-key and #4409 IO-kind gates are not used by the pure bodies;
+// named-zone discovery consumes canonical native read errors internally only.

@@ -1,0 +1,1358 @@
+// PORT-PENDING 1115 tests-memory-semantics-module-group: tests/memory_semantics.rs:1-610
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS #[path = "tir_support/mod.rs"]
+//RS mod tir_support;
+//RS 
+//RS use std::path::{Path, PathBuf};
+//RS use std::process::{Command, Output};
+//RS 
+//RS const MEMORY_DENIAL_SOURCE: &str = r#"
+//RS fn run() -[!Mem.Alloc]> {
+//RS     print("memory denial")
+//RS }
+//RS "#;
+//RS 
+//RS const MEMORY_COMPTIME_SOURCE: &str = r#"
+//RS ANSWER :: prep { "memory denial" }
+//RS 
+//RS fn run() -[!Mem.Alloc]> {
+//RS     print(ANSWER)
+//RS }
+//RS "#;
+//RS 
+//RS #[test]
+//RS fn memory_denial_parser_keeps_the_canonical_effect_row() {
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex(MEMORY_DENIAL_SOURCE);
+//RS     assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");
+//RS     let program = jet::Parser::parse(&tokens).expect("memory denial source parses");
+//RS     let function = program
+//RS         .items
+//RS         .iter()
+//RS         .find_map(|item| match item {
+//RS             jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+//RS             _ => None,
+//RS         })
+//RS         .expect("run function");
+//RS     let effects = function
+//RS         .declared_effects
+//RS         .as_ref()
+//RS         .expect("declared denial row")
+//RS         .iter()
+//RS         .map(|(name, _)| name.as_str())
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(effects, vec!["!Mem.Alloc"]);
+//RS 
+//RS     let (tokens, lexer_diagnostics) = jet::Lexer::lex("fn run() -[Mem.Alloc(above: 1)]> {}");
+//RS     assert!(
+//RS         lexer_diagnostics.is_empty(),
+//RS         "lex positive row: {lexer_diagnostics:?}"
+//RS     );
+//RS     let diagnostics = jet::Parser::parse(&tokens).expect_err("bounded rights are denial-only");
+//RS     assert!(diagnostics.iter().any(|diagnostic| {
+//RS         diagnostic.code == "E0119" && diagnostic.fix.contains("!Mem.Alloc(above: 1)")
+//RS     }));
+//RS }
+//RS 
+//RS 
+//RS #[test]
+//RS fn parameterized_memory_rights_are_denials_not_positive_effects() {
+//RS     let error = jet::Package::PackageFacts::parse(
+//RS         "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Mem.Alloc(above: 65536)] } }\n",
+//RS         "test",
+//RS     )
+//RS     .expect_err("a bounded memory right must be a denial");
+//RS     assert!(matches!(
+//RS         error,
+//RS         jet::Package::PackageParseError::BadEffectsBlock(detail)
+//RS             if detail.contains("authority.holds.deny")
+//RS     ));
+//RS }
+//RS 
+//RS #[test]
+//RS fn manifest_memory_denial_reaches_the_same_sema_fact_pass() {
+//RS     let root = common::unique_tmp("jet_manifest_memory_denial");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     std::fs::write(
+//RS         root.join("package.jet"),
+//RS         "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [Mem.Alloc] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     std::fs::write(root.join("main.jet"), "fn run() { print(\"frame {1}\") }\n").unwrap();
+//RS     let mut bundle = jet::Loader::load_entry(root.join("main.jet").to_str().unwrap()).unwrap();
+//RS     assert_eq!(bundle.package_guarantees.memory_denials, vec!["Mem.Alloc"]);
+//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS     assert!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .any(|diagnostic| diagnostic.code == "E0921"),
+//RS         "manifest denial did not reach the memory fact pass: {diagnostics:#?}"
+//RS     );
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_matches_aot_jit_and_interpreter() {
+//RS     tir_support::assert_tiers_agree(
+//RS         "memory-denial-parity",
+//RS         MEMORY_DENIAL_SOURCE,
+//RS         "memory denial\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_example_matches_all_hosted_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "memory/effect_denials",
+//RS         include_str!("../Examples/features/expected/memory/effect_denials.out"),
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_matches_the_dev_interpreter_path() {
+//RS     let root = common::unique_tmp("jet_memory_denial_dev");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let entry = root.join("main.jet");
+//RS     std::fs::write(&entry, MEMORY_DENIAL_SOURCE).unwrap();
+//RS     let output = Command::new(jet())
+//RS         .args(["dev", entry.to_str().unwrap(), "--interpret", "--watch=off"])
+//RS         .current_dir(&root)
+//RS         .env("NO_COLOR", "1")
+//RS         .output()
+//RS         .unwrap();
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "dev rejected the memory denial source: {}",
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "memory denial\n");
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_matches_comptime() {
+//RS     let compiled = jet::compile(MEMORY_COMPTIME_SOURCE).expect("comptime source compiles");
+//RS     assert!(compiled.rust.contains("memory denial"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_matches_repl() {
+//RS     let transcript = jet::REPL::run_transcript(
+//RS         &[
+//RS             "fn denied() -[!Mem.Alloc]> { print(\"memory denial\") }",
+//RS             "denied()",
+//RS         ],
+//RS         None,
+//RS     );
+//RS     assert!(
+//RS         transcript.contains("memory denial"),
+//RS         "REPL lost the denial program: {transcript}"
+//RS     );
+//RS     assert!(
+//RS         !transcript.contains("E0921"),
+//RS         "REPL changed a valid denial into a diagnostic: {transcript}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_denial_matches_web_lowering() {
+//RS     let compiled =
+//RS         jet::compile_web_with_path(MEMORY_DENIAL_SOURCE, "tests/fixtures/memory_denial_web.jet")
+//RS             .expect("web accepts the memory denial source");
+//RS     assert!(compiled.web.is_some(), "web lowering produced no artifact");
+//RS }
+//RS 
+//RS fn jet() -> PathBuf {
+//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+//RS }
+//RS 
+//RS fn run(root: &Path, args: &[&str]) -> Output {
+//RS     Command::new(jet())
+//RS         .args(args)
+//RS         .current_dir(root)
+//RS         .env("NO_COLOR", "1")
+//RS         .env(
+//RS             "JET_MEMORY_LEDGER",
+//RS             root.join(".jet/memory/ledger-v1.jsonl"),
+//RS         )
+//RS         .output()
+//RS         .unwrap()
+//RS }
+//RS fn assert_cli_snapshot(name: &str, actual: &[u8]) {
+//RS     let expected = std::fs::read(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("tests/cli")
+//RS             .join(name),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(actual, expected, "CLI snapshot mismatch: {name}");
+//RS }
+//RS 
+//RS fn ledger(root: &Path, rows: &[&str]) {
+//RS     let path = root.join(".jet/memory/ledger-v1.jsonl");
+//RS     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+//RS     std::fs::write(path, rows.join("\n") + "\n").unwrap();
+//RS }
+//RS 
+//RS fn row(kind: &str, code: &str, repairs: &[&str]) -> String {
+//RS     let repairs = repairs
+//RS         .iter()
+//RS         .map(|repair| format!("\"{repair}\""))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!(
+//RS         "{{\"schema\":\"jet.memory.ledger\",\"version\":1,\"kind\":\"{kind}\",\"code\":\"{code}\",\"source\":\"main.jet\",\"span_start\":0,\"span_end\":6,\"byte_spans\":true,\"scope\":\"run\",\"provenance\":\"fixture\",\"detail\":\"observed\",\"expected\":\"borrow\",\"repairs\":[{repairs}]}}"
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "memory/memoize",
+//RS         include_str!("../Examples/features/expected/memory/memoize.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "memory/computed_field",
+//RS         include_str!("../Examples/features/expected/memory/computed_field.out"),
+//RS     );
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "memory/copy_verb",
+//RS         include_str!("../Examples/features/expected/memory/copy_verb.out"),
+//RS     );
+//RS     // D-MEM-COPYSEM1=A criterion 2: the IMPLICIT half of the same rule. Every
+//RS     // line of this golden is a read window entering an owning slot — an
+//RS     // interpolation, an owned `String` parameter, and a returned `String` — so
+//RS     // AOT, default `jet run`, and the forced interpreter must agree byte for
+//RS     // byte, not only on the explicit `~` spelling above.
+//RS     tir_support::assert_example_cli_tiers_agree(
+//RS         "memory/string_view",
+//RS         include_str!("../Examples/features/expected/memory/string_view.out"),
+//RS     );
+//RS }
+//RS 
+//RS /// D-MEM-COPYSEM1=A + I8/I9: the read-view materialization kind has ONE
+//RS /// kernel-name table, `jet_foundation::MIR::MirViewCopyKind::symbol`. The
+//RS /// checked AST/TIR producer and canonical MIR consumers may classify their
+//RS /// own representation, but no tier may duplicate the kind-to-kernel mapping.
+//RS #[test]
+//RS fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
+//RS     use jet::AST::{TagMarker, Type};
+//RS     use jet::Codegen::TIR::{view_copy_kind, view_copy_owned_type};
+//RS     use jet_foundation::MIR::MirViewCopyKind;
+//RS 
+//RS     let view_of = |element: Type| Type::Apply {
+//RS         name: "View".to_string(),
+//RS         args: vec![element],
+//RS     };
+//RS     let str_view = view_of(Type::Named("str".to_string()));
+//RS     let int_view = view_of(Type::Int);
+//RS     let tagged_str_view = Type::Tagged {
+//RS         marker: TagMarker::User("ReadAlias".to_string()),
+//RS         inner: Box::new(str_view.clone()),
+//RS     };
+//RS     let fake_string_view = Type::Apply {
+//RS         name: "foo.View".to_string(),
+//RS         args: vec![Type::Named("str".to_string())],
+//RS     };
+//RS     let fake_list_view = Type::Apply {
+//RS         name: "foo.ViewMut".to_string(),
+//RS         args: vec![Type::Int],
+//RS     };
+//RS     let malformed_view_placeholder = Type::Apply {
+//RS         name: "View<>".to_string(),
+//RS         args: vec![Type::Named("str".to_string())],
+//RS     };
+//RS 
+//RS     assert_eq!(view_copy_kind(&str_view), Some(MirViewCopyKind::String));
+//RS     assert_eq!(
+//RS         view_copy_kind(&str_view).expect("string kind").symbol(),
+//RS         "jet_string_view_copy"
+//RS     );
+//RS     assert_eq!(view_copy_owned_type(&str_view), Some(Type::String));
+//RS     assert_eq!(view_copy_kind(&int_view), Some(MirViewCopyKind::List));
+//RS     assert_eq!(
+//RS         view_copy_kind(&int_view).expect("list kind").symbol(),
+//RS         "jet_view_copy"
+//RS     );
+//RS     assert_eq!(
+//RS         view_copy_owned_type(&int_view),
+//RS         Some(Type::List(Box::new(Type::Int)))
+//RS     );
+//RS     assert_eq!(
+//RS         view_copy_kind(&tagged_str_view),
+//RS         Some(MirViewCopyKind::String)
+//RS     );
+//RS     assert_eq!(
+//RS         view_copy_owned_type(&tagged_str_view),
+//RS         Some(Type::String)
+//RS     );
+//RS     assert_eq!(view_copy_kind(&fake_string_view), None);
+//RS     assert_eq!(view_copy_kind(&fake_list_view), None);
+//RS     assert_eq!(view_copy_kind(&malformed_view_placeholder), None);
+//RS     // A range place keeps `[T]` at the Jet surface; a `string_view` local keeps
+//RS     // `String`. Both still reach the same two kernels.
+//RS     assert_eq!(
+//RS         view_copy_kind(&Type::List(Box::new(Type::Int))),
+//RS         Some(MirViewCopyKind::List)
+//RS     );
+//RS     assert_eq!(
+//RS         view_copy_kind(&Type::String),
+//RS         Some(MirViewCopyKind::String)
+//RS     );
+//RS     // Not a declared window: the caller keeps its own type.
+//RS     assert_eq!(view_copy_owned_type(&Type::String), None);
+//RS 
+//RS     let crate_root =
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src");
+//RS     let rust_kernel = std::fs::read_to_string(crate_root.join("Prelude/Core/ViewCopy.rs")).unwrap();
+//RS     let js_kernel = std::fs::read_to_string(crate_root.join("Prelude/Core/ViewCopy.js")).unwrap();
+//RS     for symbol in ["jet_view_copy", "jet_string_view_copy"] {
+//RS         assert!(
+//RS             rust_kernel.contains(&format!("fn {symbol}")),
+//RS             "Prelude/Core/ViewCopy.rs must declare {symbol}"
+//RS         );
+//RS         assert!(
+//RS             js_kernel.contains(&format!("function {symbol}")),
+//RS             "Prelude/Core/ViewCopy.js must declare {symbol}"
+//RS         );
+//RS     }
+//RS 
+//RS     // The checked producer uses the shared kind table, while every actual
+//RS     // canonical MIR engine consumes the Foundation classifier. The Web symbol
+//RS     // registry may list linkage names, but it must not classify source shapes.
+//RS     let producer = std::fs::read_to_string(crate_root.join("Codegen/TIR/mod.rs")).unwrap();
+//RS     assert!(producer.contains("MirViewCopyKind"));
+//RS     assert!(!producer.contains("\"jet_string_view_copy\""));
+//RS     assert!(!producer.contains("\"jet_view_copy\""));
+//RS     let lambda_producer =
+//RS         std::fs::read_to_string(crate_root.join("Codegen/TIR/lower/lambdas.rs")).unwrap();
+//RS     assert!(lambda_producer.contains("view_copy_kind"));
+//RS     assert!(lambda_producer.contains(".symbol()"));
+//RS     assert!(!lambda_producer.contains("\"jet_string_view_copy\""));
+//RS     assert!(!lambda_producer.contains("\"jet_view_copy\""));
+//RS     for engine in [
+//RS         crate_root.join("Codegen/MIRRust.rs"),
+//RS         crate_root.join("Codegen/MIRWeb.rs"),
+//RS         crate_root.join("Codegen/MIREval.rs"),
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("crates/jet-jit/src/jit/functions_compile.rs"),
+//RS     ] {
+//RS         let text = std::fs::read_to_string(&engine).unwrap();
+//RS         assert!(
+//RS             text.contains("mir_view_copy_kind") || text.contains("MirViewCopyKind"),
+//RS             "{} must consume the canonical MIR view-copy classifier",
+//RS             engine.display()
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn computed_field_nested_value_blocks_use_and_invalidate_sibling_dependencies() {
+//RS     let src = r#"
+//RS struct Score {
+//RS     enabled: Bool
+//RS     base: Int
+//RS     bonus: Int
+//RS     #Memo
+//RS     total: Int -> if enabled -> {
+//RS         subtotal :: base + bonus
+//RS         subtotal
+//RS     } else -> base
+//RS }
+//RS 
+//RS fn run() {
+//RS     score := Score{enabled: true, base: 10, bonus: 2}
+//RS     print(score.total)
+//RS     score.bonus = 7
+//RS     print(score.total)
+//RS }
+//RS "#;
+//RS     tir_support::assert_tiers_agree("computed_field_nested_value", src, "12\n17\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs() {
+//RS     let root = common::unique_tmp("jet_memory_audit");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS 
+//RS     ledger(&root, &[]);
+//RS     let empty = run(&root, &["audit", "memory", "--json"]);
+//RS     assert!(
+//RS         empty.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&empty.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_audit_empty.txt", &empty.stdout);
+//RS     let empty_json = String::from_utf8_lossy(&empty.stdout);
+//RS     assert!(empty_json.contains("\"coverage\":\"exercised runs only\""));
+//RS     assert!(empty_json.contains("\"witnesses\":0"));
+//RS 
+//RS     let gc = row("gc", "gc", &["own the value directly"]);
+//RS     ledger(&root, &[&gc]);
+//RS     let gc_only = run(&root, &["audit", "memory", "--json"]);
+//RS     let gc_json = String::from_utf8_lossy(&gc_only.stdout);
+//RS     assert!(
+//RS         gc_only.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&gc_only.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_audit_gc.txt", &gc_only.stdout);
+//RS     assert!(gc_json.contains("\"kind\":\"gc\""));
+//RS     assert!(gc_json.contains("\"witnesses\":1"));
+//RS 
+//RS     let sentry = row("sentry", "R0802", &["move the raw access"]);
+//RS     ledger(&root, &[&sentry]);
+//RS     let sentry_only = run(&root, &["audit", "memory", "--json"]);
+//RS     let sentry_json = String::from_utf8_lossy(&sentry_only.stdout);
+//RS     assert!(
+//RS         sentry_only.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&sentry_only.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_audit_sentry.txt", &sentry_only.stdout);
+//RS     assert!(sentry_json.contains("\"kind\":\"sentry\""));
+//RS     assert!(sentry_json.contains("\"witnesses\":1"));
+//RS 
+//RS     ledger(&root, &[&gc, &sentry]);
+//RS     let combined = run(&root, &["audit", "memory", "--json"]);
+//RS     let combined_json = String::from_utf8_lossy(&combined.stdout);
+//RS     assert!(
+//RS         combined.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&combined.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_audit_combined.txt", &combined.stdout);
+//RS     assert!(combined_json.contains("\"kind\":\"gc\""));
+//RS     assert!(combined_json.contains("\"kind\":\"sentry\""));
+//RS     assert!(combined_json.contains("\"witnesses\":2"));
+//RS 
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn memory_fix_applies_one_exact_repair_and_names_ambiguous_options() {
+//RS     let root = common::unique_tmp("jet_memory_fix");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     std::fs::write(root.join("main.jet"), "borrow").unwrap();
+//RS 
+//RS     let exact = row("gc", "gc", &["owned"]);
+//RS     ledger(&root, &[&exact]);
+//RS     let fixed = run(&root, &["fix", "memory"]);
+//RS     assert!(
+//RS         fixed.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&fixed.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_fix_exact.txt", &fixed.stdout);
+//RS     assert_eq!(
+//RS         std::fs::read_to_string(root.join("main.jet")).unwrap(),
+//RS         "owned"
+//RS     );
+//RS 
+//RS     std::fs::write(root.join("main.jet"), "borrow").unwrap();
+//RS     let ambiguous = row("gc", "gc", &["owned", "#Policy(gc) borrow"]);
+//RS     ledger(&root, &[&ambiguous]);
+//RS     let unchanged = run(&root, &["fix", "memory"]);
+//RS     assert!(
+//RS         unchanged.status.success(),
+//RS         "{}",
+//RS         String::from_utf8_lossy(&unchanged.stderr)
+//RS     );
+//RS     assert_cli_snapshot("memory_fix_ambiguous.txt", &unchanged.stdout);
+//RS     let stdout = String::from_utf8_lossy(&unchanged.stdout);
+//RS     assert!(stdout.contains("options: main.jet:0..6 observed"));
+//RS     assert!(stdout.contains("  - owned"));
+//RS     assert!(stdout.contains("  - #Policy(gc) borrow"));
+//RS     assert_eq!(
+//RS         std::fs::read_to_string(root.join("main.jet")).unwrap(),
+//RS         "borrow"
+//RS     );
+//RS 
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn missing_memory_ledger_is_stable_e2112() {
+//RS     let root = common::unique_tmp("jet_memory_missing");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let output = run(&root, &["audit", "memory"]);
+//RS     assert_eq!(output.status.code(), Some(1));
+//RS     let actual =
+//RS         String::from_utf8_lossy(&output.stderr).replace(root.to_str().unwrap(), "WORKSPACE");
+//RS     assert_eq!(actual, include_str!("cli/memory_ledger_missing_e2112.txt"));
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
+//RS     let root = common::unique_tmp("jet_memory_gc_feed");
+//RS     std::fs::create_dir_all(&root).unwrap();
+//RS     let source = root.join("gc.jet");
+//RS     std::fs::write(
+//RS         &source,
+//RS         r#"#Policy(gc)
+//RS #[!Equatable, !Comparable]
+//RS enum Link {
+//RS     End(Int)
+//RS     Next(Link)
+//RS }
+//RS 
+//RS fn promoted_cycle() -> Link {
+//RS     first := Link.Next(Link.End(1))
+//RS     second := Link.Next(first)
+//RS     first = Link.Next(second)
+//RS     return first
+//RS }
+//RS 
+//RS fn run() {
+//RS     cycle :: promoted_cycle()
+//RS     print(cycle)
+//RS }
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let source = source.to_str().unwrap();
+//RS 
+//RS     let first = run(&root, &["run", source]);
+//RS     assert!(
+//RS         first.status.success(),
+//RS         "first GC run failed: {}",
+//RS         String::from_utf8_lossy(&first.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&first.stdout),
+//RS         "Next(Next(Next(End(1))))\n"
+//RS     );
+//RS     let ledger_path = root.join(".jet/memory/ledger-v1.jsonl");
+//RS     let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
+//RS     let first_rows = first_ledger.lines().count();
+//RS     assert!(first_rows > 0, "the exercised GC run wrote no witnesses");
+//RS     assert!(first_ledger
+//RS         .lines()
+//RS         .all(|row| { row.contains("\"kind\":\"gc\"") && row.contains("\"provenance\":\"") }));
+//RS 
+//RS     let second = run(&root, &["run", source]);
+//RS     assert!(
+//RS         second.status.success(),
+//RS         "second GC run failed: {}",
+//RS         String::from_utf8_lossy(&second.stderr)
+//RS     );
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&second.stdout),
+//RS         "Next(Next(Next(End(1))))\n"
+//RS     );
+//RS     let persisted = std::fs::read_to_string(&ledger_path).unwrap();
+//RS     assert_eq!(persisted.lines().count(), first_rows * 2);
+//RS 
+//RS     let audit = run(&root, &["audit", "memory", "--json"]);
+//RS     assert!(
+//RS         audit.status.success(),
+//RS         "memory audit failed: {}",
+//RS         String::from_utf8_lossy(&audit.stderr)
+//RS     );
+//RS     let audit = String::from_utf8_lossy(&audit.stdout);
+//RS     assert!(audit.contains("\"coverage\":\"exercised runs only\""));
+//RS     assert!(audit.contains(&format!("\"witnesses\":{}", first_rows * 2)));
+//RS     let _ = std::fs::remove_dir_all(root);
+//RS }
+//RS 
+//RS #[test]
+//RS fn erased_memory_policy_and_bounds_facts_do_not_escape() {
+//RS     let erased_policy = r#"
+//RS fn need(value: String) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     source :: "  hello  "
+//RS     view :: source.trim()
+//RS     #Off {
+//RS         #Policy(copies: .Explicit) {
+//RS             print("erased")
+//RS         }
+//RS     }
+//RS     need(view)
+//RS }
+//RS "#;
+//RS     jet::compile(erased_policy).expect("an erased explicit-copy policy must be restored");
+//RS 
+//RS     let active_policy = r#"
+//RS fn need(value: String) {
+//RS     print(value)
+//RS }
+//RS 
+//RS fn run() {
+//RS     source :: "  hello  "
+//RS     view :: source.trim()
+//RS     #Policy(copies: .Explicit) {
+//RS         need(view)
+//RS     }
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(active_policy).expect_err("active copy policy must remain strict");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E2307"),
+//RS         "active explicit-copy policy lost its refusal: {diagnostics:#?}"
+//RS     );
+//RS 
+//RS     let erased_bounds = r#"
+//RS fn run() {
+//RS     values :: [Int#2]{1, 2}
+//RS     #Off {
+//RS         print(values[0])
+//RS     }
+//RS     print(values[2])
+//RS }
+//RS "#;
+//RS     let diagnostics = jet::compile(erased_bounds).expect_err("out-of-range indexing must remain rejected");
+//RS     assert!(
+//RS         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0965"),
+//RS         "erased bounds facts must not make a later out-of-range read valid: {diagnostics:#?}"
+//RS     );
+//RS }
+// END-PORT-PENDING 1115 tests/memory_semantics.rs:1-610
+
+// PORT-PENDING 1115 tests-memory-semantics-module-group: tests/net_tls.rs:1-121
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS use std::fs;
+//RS use std::net::TcpListener;
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS #[test]
+//RS fn tls_client_diagnostic_snapshot_covers_e42xx_explain_codes() {
+//RS     let rendered = [
+//RS         jet::Diagnostics::Diagnostic::error(
+//RS             "E4201",
+//RS             "TLS handshake with `localhost` failed".to_string(),
+//RS             "`https://localhost/data.txt` reached the server, but the connection did not complete a secure HTTPS handshake".to_string(),
+//RS             "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server".to_string(),
+//RS             None,
+//RS         ),
+//RS         jet::Diagnostics::Diagnostic::error(
+//RS             "E4202",
+//RS             "TLS certificate for `api.example.test` could not be trusted".to_string(),
+//RS             "`https://api.example.test/data` presented a certificate Jet could not verify for that host".to_string(),
+//RS             "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly".to_string(),
+//RS             None,
+//RS         ),
+//RS         jet::Diagnostics::Diagnostic::error(
+//RS             "E4203",
+//RS             "HTTPS could not find system certificate roots".to_string(),
+//RS             "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available".to_string(),
+//RS             "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it".to_string(),
+//RS             None,
+//RS         ),
+//RS     ];
+//RS     let text = jet::render_diagnostics("tests/ui/comptime_net_fetch_tls_roots.jet", "", &rendered);
+//RS 
+//RS     assert_eq!(
+//RS         text,
+//RS         fs::read_to_string("tests/cli/tls_client_diagnostics.txt").unwrap()
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn comptime_fetch_rejects_outside_files_and_private_networks() {
+//RS     let root = common::unique_tmp("comptime_fetch_root");
+//RS     let outside = common::unique_tmp("comptime_fetch_outside");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(&outside, "private fixture").unwrap();
+//RS     let source_path = root.join("main.jet");
+//RS     let file_source = format!(
+//RS         "use core.net as net\nDATA :: prep {{ net.fetch(\"file://{}\", sha256: \"{}\") }}\nfn run() {{}}\n",
+//RS         outside.display(),
+//RS         "0".repeat(64)
+//RS     );
+//RS     fs::write(&source_path, &file_source).unwrap();
+//RS     let file_diags = jet::compile_with_path(&file_source, source_path.to_str().unwrap())
+//RS         .expect_err("comptime fetch must not read outside its source directory");
+//RS     assert!(file_diags.iter().any(|diag| diag.code == "E3414"));
+//RS 
+//RS     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+//RS     listener.set_nonblocking(true).unwrap();
+//RS     let port = listener.local_addr().unwrap().port();
+//RS     let server = std::thread::spawn(move || {
+//RS         let deadline = Instant::now() + Duration::from_secs(1);
+//RS         loop {
+//RS             match listener.accept() {
+//RS                 Ok(_) => return true,
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+//RS                     if Instant::now() >= deadline {
+//RS                         return false;
+//RS                     }
+//RS                     std::thread::yield_now();
+//RS                 }
+//RS                 Err(_) => return false,
+//RS             }
+//RS         }
+//RS     });
+//RS     let network_source = format!(
+//RS         "use core.net as net\nDATA :: prep {{ net.fetch(\"http://127.0.0.1:{port}/secret\", sha256: \"{}\") }}\nfn run() {{}}\n",
+//RS         "0".repeat(64)
+//RS     );
+//RS     fs::write(&source_path, &network_source).unwrap();
+//RS     let network_diags = jet::compile_with_path(&network_source, source_path.to_str().unwrap())
+//RS         .expect_err("comptime fetch must reject loopback destinations");
+//RS     assert!(network_diags.iter().any(|diag| diag.code == "E3414"));
+//RS     assert!(!server.join().unwrap(), "private destination was contacted");
+//RS 
+//RS     let reserved_source = format!(
+//RS         "use core.net as net\nDATA :: prep {{ net.fetch(\"http://192.0.0.1/secret\", sha256: \"{}\") }}\nfn run() {{}}\n",
+//RS         "0".repeat(64)
+//RS     );
+//RS     fs::write(&source_path, &reserved_source).unwrap();
+//RS     let reserved_diags = jet::compile_with_path(&reserved_source, source_path.to_str().unwrap())
+//RS         .expect_err("comptime fetch must reject reserved IPv4 destinations");
+//RS     assert!(reserved_diags.iter().any(|diag| diag.code == "E3414"));
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS     let _ = fs::remove_file(outside);
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[test]
+//RS fn comptime_fetch_rejects_hardlinks_to_outside_files() {
+//RS     let root = common::unique_tmp("comptime_fetch_hardlink_root");
+//RS     let outside = common::unique_tmp("comptime_fetch_hardlink_outside");
+//RS     fs::create_dir_all(&root).unwrap();
+//RS     fs::write(&outside, "private fixture").unwrap();
+//RS     let hardlink = root.join("linked-secret");
+//RS     fs::hard_link(&outside, &hardlink).unwrap();
+//RS     let source_path = root.join("main.jet");
+//RS     let source = format!(
+//RS         "use core.net as net\nDATA :: prep {{ net.fetch(\"file://{}\", sha256: \"{}\") }}\nfn run() {{}}\n",
+//RS         hardlink.display(),
+//RS         "0".repeat(64)
+//RS     );
+//RS     fs::write(&source_path, &source).unwrap();
+//RS 
+//RS     let diagnostics = jet::compile_with_path(&source, source_path.to_str().unwrap())
+//RS         .expect_err("compile-time fetch must reject hardlinks to outside files");
+//RS     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3414"));
+//RS 
+//RS     let _ = fs::remove_dir_all(root);
+//RS     let _ = fs::remove_file(outside);
+//RS }
+// END-PORT-PENDING 1115 tests/net_tls.rs:1-121
+
+// PORT-PENDING 1115 tests-memory-semantics-module-group: tests/network_core_contract.rs:1-16
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #![allow(dead_code, unused_imports)]
+//RS 
+//RS mod common;
+//RS include!("corelib_parts/support.rs");
+//RS 
+//RS #[test]
+//RS fn network_core_contract_example_covers_reserved_cidr_and_mime_boundaries() {
+//RS     let dir = common::unique_tmp("network_core_contract");
+//RS     let source = include_str!("../Examples/features/net/network_core_contract.jet");
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "network_core_contract", source, &[], None);
+//RS     assert_eq!(code, 0, "stderr:\n{stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "reserved-global:false\nnetwork:192.0.2.0/24\nbroadcast:192.0.2.255\nmime:rejected\n"
+//RS     );
+//RS }
+// END-PORT-PENDING 1115 tests/network_core_contract.rs:1-16
+
+// PORT-PENDING 1115 tests-memory-semantics-module-group: tests/numeric_widening.rs:1-595
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS mod tir_support;
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use std::fs;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::Mutex;
+//RS use tir_support::{build_and_run_full, build_and_run_multi, have_rustc};
+//RS 
+//RS static INTERPRETER_SEQ: AtomicU64 = AtomicU64::new(0);
+//RS static JIT_TRACE_LOCK: Mutex<()> = Mutex::new(());
+//RS 
+//RS fn compile_ok(source: &str) -> jet::CompileOutput {
+//RS     jet::compile(source).unwrap_or_else(|diagnostics| {
+//RS         panic!(
+//RS             "numeric widening fixture was rejected:\n{}",
+//RS             jet::render_diagnostics("numeric_widening.jet", source, &diagnostics)
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn compile_error(source: &str) -> String {
+//RS     let diagnostics = jet::compile(source).expect_err("numeric fixture unexpectedly compiled");
+//RS     jet::render_diagnostics("numeric_widening.jet", source, &diagnostics)
+//RS }
+//RS 
+//RS fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+//RS     let sequence = INTERPRETER_SEQ.fetch_add(1, Ordering::Relaxed);
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_numeric_widen_{}_{}_{}",
+//RS         name,
+//RS         std::process::id(),
+//RS         sequence
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     for (relative, source) in files {
+//RS         let path = dir.join(relative);
+//RS         if let Some(parent) = path.parent() {
+//RS             fs::create_dir_all(parent).unwrap();
+//RS         }
+//RS         fs::write(path, source).unwrap();
+//RS     }
+//RS     dir.join("main.jet")
+//RS }
+//RS 
+//RS fn run_in_process(name: &str, files: &[(&str, &str)], force_interpreter: bool) -> RunOutcome {
+//RS     let path = write_program(name, files);
+//RS     dev_iteration(path.to_str().unwrap(), false, force_interpreter)
+//RS }
+//RS 
+//RS fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
+//RS     match run_in_process(name, &[("main.jet", source)], true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => (exit_code, stdout, stderr),
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("forced interpreter rejected numeric widening: {diagnostics:#?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn run_resident(name: &str, files: &[(&str, &str)]) -> RunOutcome {
+//RS     let _trace_guard = JIT_TRACE_LOCK.lock().unwrap();
+//RS     jet_jit::reset_jit_trace_for_test();
+//RS     let outcome = run_in_process(name, files, false);
+//RS     assert!(
+//RS         jet_jit::jit_executed_for_test(),
+//RS         "{name} did not execute resident JIT code"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::fallback_invoked_for_test(),
+//RS         "{name} invoked the fallback tier"
+//RS     );
+//RS     assert!(
+//RS         !jet_jit::deopt_invoked_for_test(),
+//RS         "{name} deoptimized into the interpreter"
+//RS     );
+//RS     outcome
+//RS }
+//RS 
+//RS fn assert_all_tiers(name: &str, source: &str, expected_code: i32, expected_stdout: &str) {
+//RS     if have_rustc() {
+//RS         let (code, stdout, stderr) = build_and_run_full("jet_numeric_widen_aot", name, source);
+//RS         assert_eq!(code, expected_code, "AOT stderr:\n{stderr}");
+//RS         assert_eq!(stdout, expected_stdout, "AOT stderr:\n{stderr}");
+//RS     }
+//RS 
+//RS     match run_resident(name, &[("main.jet", source)]) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, expected_code, "resident-JIT stderr:\n{stderr}");
+//RS             assert_eq!(stdout, expected_stdout, "resident-JIT stderr:\n{stderr}");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("resident JIT rejected numeric widening: {diagnostics:#?}")
+//RS         }
+//RS     }
+//RS 
+//RS     let (code, stdout, stderr) = run_interpreter(name, source);
+//RS     assert_eq!(code, expected_code, "interpreter stderr:\n{stderr}");
+//RS     assert_eq!(stdout, expected_stdout, "interpreter stderr:\n{stderr}");
+//RS }
+//RS 
+//RS fn assert_all_tiers_multi(
+//RS     name: &str,
+//RS     files: &[(&str, &str)],
+//RS     expected_code: i32,
+//RS     expected_stdout: &str,
+//RS ) {
+//RS     if have_rustc() {
+//RS         let (code, stdout) = build_and_run_multi(name, "main.jet", files);
+//RS         assert_eq!(code, expected_code, "multi-file AOT exit drift");
+//RS         assert_eq!(stdout, expected_stdout, "multi-file AOT output drift");
+//RS     }
+//RS 
+//RS     match run_resident(name, files) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, expected_code, "resident-JIT stderr:\n{stderr}");
+//RS             assert_eq!(stdout, expected_stdout, "resident-JIT stderr:\n{stderr}");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("resident JIT rejected imported numeric widening: {diagnostics:#?}")
+//RS         }
+//RS     }
+//RS 
+//RS     match run_in_process(name, files, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, expected_code, "interpreter stderr:\n{stderr}");
+//RS             assert_eq!(stdout, expected_stdout, "interpreter stderr:\n{stderr}");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => {
+//RS             panic!("interpreter rejected imported numeric widening: {diagnostics:#?}")
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn assert_trap_all_tiers(name: &str, source: &str) {
+//RS     const MESSAGE: &str = "whole number cannot cross into the decimal without losing precision";
+//RS 
+//RS     if have_rustc() {
+//RS         let (code, stdout, stderr) = build_and_run_full("jet_numeric_widen_aot", name, source);
+//RS         assert_eq!(code, 70, "AOT stderr:\n{stderr}");
+//RS         assert!(stdout.is_empty(), "AOT stdout:\n{stdout}");
+//RS         assert!(stderr.contains(MESSAGE), "AOT stderr:\n{stderr}");
+//RS         assert!(stderr.contains("[E3010]"), "AOT stderr:\n{stderr}");
+//RS     }
+//RS 
+//RS     match run_resident(name, &[("main.jet", source)]) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 70, "resident-JIT stderr:\n{stderr}");
+//RS             assert!(stdout.is_empty(), "resident-JIT stdout:\n{stdout}");
+//RS             assert!(stderr.contains(MESSAGE), "resident-JIT stderr:\n{stderr}");
+//RS             assert!(stderr.contains("[E3010]"), "resident-JIT stderr:\n{stderr}");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.code == "E0953" && diagnostic.why.contains(MESSAGE)),
+//RS             "resident-JIT diagnostics: {diagnostics:#?}"
+//RS         ),
+//RS     }
+//RS 
+//RS     let sequence = INTERPRETER_SEQ.fetch_add(1, Ordering::Relaxed);
+//RS     let dir = std::env::temp_dir().join(format!(
+//RS         "jet_numeric_widen_interpreter_trap_{}_{}_{}",
+//RS         name,
+//RS         std::process::id(),
+//RS         sequence
+//RS     ));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("main.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     match dev_iteration(path.to_str().unwrap(), false, true) {
+//RS         RunOutcome::Ran {
+//RS             stdout,
+//RS             stderr,
+//RS             exit_code,
+//RS         } => {
+//RS             assert_eq!(exit_code, 70, "interpreter stderr:\n{stderr}");
+//RS             assert!(stdout.is_empty(), "interpreter stdout:\n{stdout}");
+//RS             assert!(stderr.contains(MESSAGE), "interpreter stderr:\n{stderr}");
+//RS             assert!(stderr.contains("[E3010]"), "interpreter stderr:\n{stderr}");
+//RS         }
+//RS         RunOutcome::Problems(diagnostics) => assert!(
+//RS             diagnostics
+//RS                 .iter()
+//RS                 .any(|diagnostic| diagnostic.code == "E0953" && diagnostic.why.contains(MESSAGE)),
+//RS             "interpreter diagnostics: {diagnostics:#?}"
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn exact_widening_is_symmetric_at_operators_and_works_for_arguments() {
+//RS     let output = compile_ok(
+//RS         r#"
+//RS fn take_i16(value: I16) -[]> I16 {
+//RS     return value
+//RS }
+//RS 
+//RS fn return_i16(value: I8) -[]> I16 {
+//RS     return value
+//RS }
+//RS 
+//RS fn increment(value: I32) -[]> I32 {
+//RS     return value + 1
+//RS }
+//RS 
+//RS fn run() {
+//RS     small :: I8{1}
+//RS     wide :: I16{2}
+//RS     _ :: small + wide
+//RS     _ :: 1 + wide
+//RS     _ :: wide + 1
+//RS     _ :: take_i16(small)
+//RS     _ :: return_i16(small)
+//RS     assigned := I16{0}
+//RS     assigned = small
+//RS     narrow_decimal :: F32{1.5}
+//RS     wide_decimal :: Float{2.5}
+//RS     _ :: narrow_decimal + wide_decimal
+//RS }
+//RS "#,
+//RS     );
+//RS 
+//RS     assert!(output.rust.contains("fn __jet_increment"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn checked_and_approximate_crossings_match_aot_jit_and_interpreter() {
+//RS     let success = r#"
+//RS fn take_float(value: Float) -[]> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn return_float(value: Int) -[]> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     exact :: Int{9007199254740992}
+//RS     assigned := Float{0.0}
+//RS     assigned = exact
+//RS     print(take_float(exact) == 9007199254740992.0)
+//RS     print(return_float(exact) == 9007199254740992.0)
+//RS     print(assigned == 9007199254740992.0)
+//RS     print((exact + Float{0.0}) == 9007199254740992.0)
+//RS 
+//RS     lossy :: Int{9007199254740993}
+//RS     print((approx(lossy) + Float{0.0}) == 9007199254740992.0)
+//RS }
+//RS "#;
+//RS     assert_all_tiers(
+//RS         "numeric_widen_success",
+//RS         success,
+//RS         0,
+//RS         "true\ntrue\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS 
+//RS     for (name, target, value) in [
+//RS         ("numeric_widen_float_trap", "Float", "9007199254740993"),
+//RS         ("numeric_widen_f32_trap", "F32", "16777217"),
+//RS     ] {
+//RS         let source = format!(
+//RS             r#"
+//RS fn accept(value: {target}) {{}}
+//RS 
+//RS fn run() {{
+//RS     lossy :: Int{{{value}}}
+//RS     accept(lossy)
+//RS }}
+//RS "#
+//RS         );
+//RS         assert_trap_all_tiers(name, &source);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn parenthesized_approximate_crossings_match_aot_jit_and_interpreter() {
+//RS     let source = r#"
+//RS fn take_float(value: Float) -[]> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn return_float(value: Int) -[]> Float {
+//RS     return ((approx(value)))
+//RS }
+//RS 
+//RS fn run() {
+//RS     lossy :: Int{9007199254740993}
+//RS     expected :: Float{9007199254740992.0}
+//RS 
+//RS     print((((approx(lossy))) + Float{0.0}) == expected)
+//RS     print(take_float(((approx(lossy)))) == expected)
+//RS 
+//RS     assigned := Float{0.0}
+//RS     assigned = ((approx(lossy)))
+//RS     print(assigned == expected)
+//RS 
+//RS     print(return_float(lossy) == expected)
+//RS }
+//RS "#;
+//RS 
+//RS     assert_all_tiers(
+//RS         "numeric_widen_parenthesized_approx",
+//RS         source,
+//RS         0,
+//RS         "true\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_arguments_widen_at_every_user_call_seam() {
+//RS     let source = r#"
+//RS trait NumericSink {
+//RS     fn accept(self, value: Float) -> Float
+//RS }
+//RS 
+//RS struct Holder {
+//RS     seed: Int
+//RS }
+//RS 
+//RS impl Holder.NumericSink {
+//RS     fn accept(self, value: Float) -[]> Float {
+//RS         return value
+//RS     }
+//RS }
+//RS 
+//RS impl Holder {
+//RS     fn instance(self, value: Float) -[]> Float {
+//RS         return value
+//RS     }
+//RS 
+//RS     fn static(value: Float) -[]> Float {
+//RS         return value
+//RS     }
+//RS }
+//RS 
+//RS module numeric_helpers {
+//RS     pub fn accept(value: Float) -[]> Float {
+//RS         return value
+//RS     }
+//RS }
+//RS 
+//RS fn accept_float(value: Float) -[]> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     narrow :: I32{7}
+//RS     holder :: Holder{seed: 0}
+//RS     callback :: accept_float
+//RS 
+//RS     print(holder.instance(narrow) == 7.0)
+//RS     print(Holder.static(narrow) == 7.0)
+//RS     print(callback(narrow) == 7.0)
+//RS     print(&numeric_helpers.accept(narrow) == 7.0)
+//RS     print(&holder.accept(narrow) == 7.0)
+//RS     widened :: [accept_float(narrow)]
+//RS     print(widened[0] == 7.0)
+//RS }
+//RS "#;
+//RS 
+//RS     assert_all_tiers(
+//RS         "numeric_widen_user_call_seams",
+//RS         source,
+//RS         0,
+//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_arguments_widen_across_imported_call_seams() {
+//RS     let files = [
+//RS         (
+//RS             "main.jet",
+//RS             r#"
+//RS use "./helper" as helper
+//RS 
+//RS fn run() {
+//RS     narrow :: I32{7}
+//RS     print(helper.accept(narrow) == 7.0)
+//RS }
+//RS "#,
+//RS         ),
+//RS         (
+//RS             "helper.jet",
+//RS             r#"
+//RS pub fn accept(value: Float) -[]> Float {
+//RS     return value
+//RS }
+//RS "#,
+//RS         ),
+//RS     ];
+//RS     assert_all_tiers_multi("numeric_widen_imported_call", &files, 0, "true\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn numeric_multi_producer_joins_widen_every_producer_across_tiers() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     small :: U8{1}
+//RS     wide :: U16{2}
+//RS     choose_first :: true
+//RS 
+//RS     small_first :: if choose_first -> small else -> wide
+//RS     wide_first :: if choose_first -> wide else -> small
+//RS     print(small_first == U16{1})
+//RS     print(wide_first == U16{2})
+//RS 
+//RS     small_first_list :: [small, wide]
+//RS     wide_first_list :: [wide, small]
+//RS     print(small_first_list[0] == U16{1})
+//RS     print(small_first_list[1] == U16{2})
+//RS     print(wide_first_list[0] == U16{2})
+//RS     print(wide_first_list[1] == U16{1})
+//RS 
+//RS     exact :: Int{9007199254740992}
+//RS     decimal :: Float{1.0}
+//RS     exact_if :: if choose_first -> exact else -> decimal
+//RS     exact_list :: [exact, decimal]
+//RS     print(exact_if == 9007199254740992.0)
+//RS     print(exact_list[0] == 9007199254740992.0)
+//RS 
+//RS     lossy :: Int{9007199254740993}
+//RS     rounded :: Float{9007199254740992.0}
+//RS     approx_if :: if choose_first -> approx(lossy) else -> decimal
+//RS     approx_list :: [approx(lossy), decimal]
+//RS     print(approx_if == rounded)
+//RS     print(approx_list[0] == rounded)
+//RS }
+//RS "#;
+//RS 
+//RS     assert_all_tiers(
+//RS         "numeric_multi_producer_joins",
+//RS         source,
+//RS         0,
+//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn widening_does_not_search_for_a_third_type_or_narrow() {
+//RS     let no_join = compile_error(
+//RS         r#"
+//RS fn run() {
+//RS     unsigned :: U8{1}
+//RS     signed :: I8{1}
+//RS     _ :: unsigned + signed
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         no_join.contains("[E0109]") && no_join.contains("Neither U8 contains every value of I8"),
+//RS         "{no_join}"
+//RS     );
+//RS 
+//RS     let narrowing = compile_error(
+//RS         r#"
+//RS fn take_i8(value: I8) {}
+//RS fn run() {
+//RS     wide :: I16{1}
+//RS     take_i8(wide)
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(narrowing.contains("[E0112]"), "{narrowing}");
+//RS 
+//RS     let spread_widening = compile_error(
+//RS         r#"
+//RS fn run() {
+//RS     small :: [U8{1}]
+//RS     _ :: [...small, U16{2}]
+//RS }
+//RS "#,
+//RS     );
+//RS     assert!(
+//RS         spread_widening.contains("[E0504]") && spread_widening.contains("list resolves to `U16`"),
+//RS         "{spread_widening}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn bare_whole_literals_take_the_minimal_width_before_operator_join() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     byte :: U8{1}
+//RS     signed :: I8{1}
+//RS     left :: byte + 256
+//RS     right :: 256 + byte
+//RS     print(left == U16{257})
+//RS     print(right == U16{257})
+//RS     print((signed + 1) == I8{2})
+//RS     print((1 + signed) == I8{2})
+//RS     print((byte + 1) == U8{2})
+//RS     print((1 + byte) == U8{2})
+//RS     print((I8{0} + 127) == I8{127})
+//RS     print((I16{0} + 128) == I16{128})
+//RS     print((I8{0} + -128) == I8{-128})
+//RS     print((I16{0} + -129) == I16{-129})
+//RS     print((U64{0} + 9223372036854775807) == U64{9223372036854775807})
+//RS }
+//RS 
+//RS "#;
+//RS     assert_all_tiers(
+//RS         "numeric_minimal_literal_join",
+//RS         source,
+//RS         0,
+//RS         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+//RS     );
+//RS 
+//RS     let rendered = compile_error("fn run() { _ :: U8{256} }");
+//RS     assert!(
+//RS         rendered.contains("[E1003]") && rendered.contains("U8") && rendered.contains("255"),
+//RS         "{rendered}"
+//RS     );
+//RS 
+//RS     for value in ["18446744073709551616"] {
+//RS         let rendered = compile_error(&format!("fn run() {{ _ :: U64{{{value}}} }}"));
+//RS         assert!(
+//RS             rendered.contains("[E1003]")
+//RS                 && rendered.contains("A `U64` holds 0..18446744073709551615"),
+//RS             "{rendered}"
+//RS         );
+//RS     }
+//RS     let rendered = compile_error("fn run() { _ :: I64{9223372036854775808} }");
+//RS     assert!(
+//RS         rendered.contains("[E1003]")
+//RS             && rendered.contains("An `I64` holds -9223372036854775808..9223372036854775807"),
+//RS         "{rendered}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn fixed_width_overflow_methods_match_all_execution_tiers() {
+//RS     let source = r#"
+//RS fn run() {
+//RS     a :: U8{200}
+//RS     b :: U8{100}
+//RS     fb :: U8{0}
+//RS     print(a.wrapping_add(b))
+//RS     print(a.saturating_add(b))
+//RS     print(a.checked_add(b) ?? fb)
+//RS     print(a.checked_rem(b) ?? fb)
+//RS }
+//RS "#;
+//RS     assert_all_tiers("numeric_overflow_methods", source, 0, "44\n255\n0\n0\n");
+//RS }
+//RS 
+//RS #[test]
+//RS fn exact_and_approximate_widening_requires_approx_for_narrowing() {
+//RS     let success = r#"
+//RS fn take_float(value: Float) -> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     exact :: Int{9007199254740992}
+//RS     lossy :: Int{9007199254740993}
+//RS     print(take_float(exact) == 9007199254740992.0)
+//RS     print(take_float(approx(lossy)) == 9007199254740992.0)
+//RS }
+//RS "#;
+//RS     assert_all_tiers("exact_approximate_widening", success, 0, "true\ntrue\n");
+//RS 
+//RS     let narrowing = r#"
+//RS fn take_float(value: Float) -> Float {
+//RS     return value
+//RS }
+//RS 
+//RS fn run() {
+//RS     lossy :: Int{9007199254740993}
+//RS     take_float(lossy)
+//RS }
+//RS "#;
+//RS     assert_trap_all_tiers("exact_narrowing_requires_approx", narrowing);
+//RS }
+// END-PORT-PENDING 1115 tests/numeric_widening.rs:1-595
+

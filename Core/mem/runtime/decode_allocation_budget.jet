@@ -1,0 +1,204 @@
+// #4448: portable decode allocation ledger, NOT an allocation-accounting hook.
+// Contract: Docs/spec/encoding-decisions.md max_bytes law. Native allocators in
+// Prelude/ProgramAllocator.rs:160–202,416–485 are substrate/oracles, not this
+// scope policy: their cap=0 means uncapped and their realloc charges both blocks.
+// Decode cap=0 instead means ZERO requested bytes; input is bounded separately.
+// All byte counters/products use the canonical exact Int, never a narrowed word.
+
+pub struct DecodeAllocationLedger {
+    pub limit: Int
+    pub live: Int
+    pub peak: Int
+    pub failed: Bool
+}
+
+// #4448 scope initial facts; caller has validated the codec's option range.
+pub fn decode_budget_new(limit: Int) -> DecodeAllocationLedger Never! {
+    DecodeAllocationLedger{limit: limit, live: 0, peak: 0, failed: false}
+}
+
+// #4448 independent input-length bound; borrowed input is not a live charge.
+pub fn decode_budget_input_allowed(limit: Int, input_bytes: Int) -> Bool Never! {
+    input_bytes <= limit
+}
+
+// #4448 prepare arithmetic only. Native charge provenance guarantees
+// 0 <= old_bytes <= live and new_bytes >= 0. No state mutation, including the
+// failure latch: a native all-active-scope transaction must first check EVERY
+// ledger. Equality is allowed; a failed ledger rejects growth but permits
+// replacement without growth and cleanup. No pending reservation is modeled
+// here, nor does a successful check claim that a real allocation occurred.
+pub fn decode_budget_prospective(state: DecodeAllocationLedger, old_bytes: Int, new_bytes: Int) -> Int? Never! {
+    if state.failed && new_bytes > old_bytes -> return None
+    next :: state.live - old_bytes + new_bytes
+    if next > state.limit -> return None
+    Val(next)
+}
+
+// #4448 success commit ONLY. checked_live is the result of prospective on this
+// exact ledger revision, held exclusively by the native reservation through the
+// successful raw allocation and all-scope commit. A cancel/null result must NOT
+// call this function. Native ownership prevents stale/double commits.
+pub fn decode_budget_commit(state: &DecodeAllocationLedger, checked_live: Int) Never! {
+    state.live = checked_live
+    if checked_live > state.peak -> state.peak = checked_live
+}
+
+// #4448 charge release; native metadata guarantees 0 <= bytes <= live and one
+// release per charge. Peak and the failure latch survive frees, even after the
+// decode boundary closes; provenance/closed-scope lifetime stays native.
+pub fn decode_budget_free(state: &DecodeAllocationLedger, bytes: Int) Never! {
+    state.live -= bytes
+}
+
+// #4448 failure transition, distinct from nonmutating preparation/cancellation.
+// Native caller latches the culpable scope BEFORE BudgetExceeded transport and
+// cleanup, not just at its eventual catch. Preserve live/peak for cleanup.
+pub fn decode_budget_latch_failure(state: &DecodeAllocationLedger) Never! {
+    state.failed = true
+}
+
+// REVIEW INVENTORY — proposed PRIVATE native contracts for #4448, not callable
+// declarations, registered symbols, providers, mocks, or a working scope rail.
+// Acceptance remains BLOCKED until Main extracts/registers the real leaves on
+// O0/O1/O2/Web (and the interpreter during retirement) and the owner confirms
+// the zero-budget error rail. The shared module graph is lane-lead owned.
+// Names below identify proposed leaves, not existing APIs. Types are opaque
+// native handles; no Rust Vec/String/enum or engine value arena crosses an ABI.
+// Native implementations marshal this one Jet ledger policy; no tier-local
+// default, ceiling, accounting rule, or budget-error semantics are permitted.
+//
+// OWNERSHIP / LAYOUT
+// ScopeToken: affine owner of a scope identity and boundary guard. No cloning,
+// equality-by-address, reuse while charges survive, or user exposure. Its ledger
+// starts at {limit,0,0,false}; nesting does not reset/replace any parent ledger.
+// Scope identity remains retained by charge metadata after the token is closed.
+// Reservation: affine owner of exclusively held ledger revisions, prospective
+// results, allocator identity and prepared metadata, resolved exactly once by
+// commit or cancel. Cannot escape its context or survive a suspension/reentrant
+// growth callback. RawBlock owns initialized extent/layout and ChargeMetadata;
+// layout carries checked target size/alignment, not a Rust generic container.
+// ChargeMetadata owns exact requested byte charge and retained scope identities
+// for that block, independent of current context. Metadata is allocator metadata
+// (excluded by the law), never an estimate/surcharge on a logical codec item.
+// Borrowed input storage predating the scope is excluded; its copies are not.
+// Target/provider/layout/version identity is checked before using any handle.
+// Unsupported targets report their genuine capability absence; never silently
+// select input-only accounting or a successful unregistered hook.
+//
+// ENTER / LEAVE / CONTEXT
+// decode_scope_enter(limit: borrowed Int) -> owned ScopeToken | AllocError:
+//   install a fresh ledger in the CURRENT TASK/FIBER context, retaining parent
+//   context; prepare the boundary guard and accounting metadata without needing
+//   a decode allocation, so zero cap is enforceable. Not process-global config.
+//   If native metadata preparation fails, keep context/parent facts unchanged
+//   and return the existing allocation error; no partially installed scope.
+// decode_scope_leave(token: consumed ScopeToken) -> inline ScopeExit:
+//   restore the exact previous context on success/error/stop/cancel/unwind;
+//   report this ledger's failure bit and peak without allocating a String.
+//   Closing does not reset live or detach charges from returned output blocks.
+// decode_context_save() -> owned SavedDecodeContext:
+//   detach/retain active scope chain at suspension or native callback handoff.
+// decode_context_restore(saved: consumed SavedDecodeContext) -> unit:
+//   reinstall once on resume/migration; native guard restores the displaced
+//   context on every exit. No thread-TLS-only attribution on M:N workers, no
+//   leakage into an unrelated task; concurrent owners serialize ledger access.
+//
+// ATOMIC PREPARE / COMMIT / CANCEL
+// decode_prepare_all_active(old: borrowed ChargeMetadata?, requested: borrowed
+//   Int, layout: checked TargetLayout) -> owned Reservation | BudgetExceeded
+//   | AllocError:
+//   requested is exact selected capacity * exact element size, formed BEFORE
+//   narrowing/allocator calls. Lock/retain all active scope ledgers in stable
+//   identity order, check prospective on every one without mutating any ledger.
+//   For each active scope, old_bytes is that block's recorded charge to THAT
+//   scope (0 if uncharged there), not an unconditional global subtraction.
+//   Native reservation serializes other allocations/frees and holds revisions
+//   through the raw call. If one check fails, no scope's live/peak is changed,
+//   no ownership retained into a new block, and no allocator is called. Select
+//   the innermost rejecting scope as the typed failure target. Latch that scope
+//   before transporting its failure; other scope ledgers are not falsely failed.
+//   Prepare all metadata/scratch before the raw call. Metadata OOM cancels with
+//   no ledger mutation and the existing AllocError, not a budget crossing.
+// decode_reservation_commit(reservation: consumed Reservation, replacement:
+//   owned RawBlock) -> owned ChargedBlock:
+//   after actual allocator success, atomically publish every checked live/peak
+//   and replace metadata. Closed old scopes receive only release of their old
+//   charge; they do not charge new growth. Active old scopes get old -> new,
+//   newly active scopes get 0 -> new. No transient old+new double charge even
+//   for physical allocate-copy-free realloc. Internal raw calls must not charge
+//   again. Commit/publish cannot allocate or fail after raw success.
+// decode_reservation_cancel(reservation: consumed Reservation) -> unit:
+//   release prepared metadata/locks only. ALL ledger fields, old block, extent,
+//   contents, and charge metadata remain unchanged on raw allocation failure.
+//   A raw OOM follows its existing AllocError rail, not invented BudgetExceeded.
+//   Its eventual decode failure may latch at the boundary, not during cancel.
+//
+// CHECKED RAW LEAVES / POST-SCOPE FREE
+// decode_raw_alloc(reservation: borrowed Reservation, layout: TargetLayout,
+//   zeroed: Bool) -> owned RawBlock | AllocError:
+//   execute one native request with exact size/alignment; null is failure, never
+//   a committed charge. Zero-sized storage charges 0 (no fictitious max(1));
+//   nonzero successful pointers meet layout alignment/initialized-byte contract.
+// decode_raw_realloc(reservation: borrowed Reservation, old: borrowed
+//   ChargedBlock, new_layout: TargetLayout) -> owned RawBlock | AllocError:
+//   preserve old contents/owner/metadata on failure. Success transfers ownership
+//   of min(old,new) initialized bytes, releases old physical storage once, and
+//   commits the replacement once. No user callback inside the reservation.
+// decode_raw_dealloc(block: consumed ChargedBlock) -> unit:
+//   native metadata subtracts each original charge exactly once, even if a scope
+//   failed/closed or another context frees the block. Retained scope identities
+//   outlive ScopeToken, reclaimed only after all charge/context owners release.
+//   Cleanup never requires fresh budget or builds a diagnostic String. Typed
+//   initialized payload drops run in their existing order on all exit rails;
+//   a destructor's separate growth still passes the fallible scope check.
+// These are above GlobalAlloc, not an unwinding implementation of GlobalAlloc.
+// Raw platform allocation/free, atomics/locks, context switching and exception
+// transport remain native (ProgramAllocator.rs:416–485; PortableAlloc.rs:388–528).
+// Existing program-wide Counting cap/config semantics are not changed here.
+//
+// EVERY GROWTH PATH / NONRECURSIVE ACCOUNTING
+// Container storage: real List/array/map/ordered-map node/bucket/key builders,
+// reserve, push, insert, clone, collect and shrink-to-fit routes must prepare the
+// actual selected capacity/layout, not len or a per-item estimate. Charge map
+// key Strings separately from node/pair storage; do not charge an owner twice.
+// String/bytes: constructor, copy, append, formatting, escape/path/error builders,
+// owned slices and decoder payload growth all route through checked leaves.
+// Decode frames: heap stack capacities * actual typed frame layout, recursive
+// frame storage/retention and all temporary buffers are accounted consistently;
+// never silently replace the required frame charge with an item/depth estimate.
+// Int: canonical exact owner limb allocation/reallocation, parsing, promotion,
+// arithmetic/capacity-product intermediates and decoder counters must be covered,
+// not merely the final DataTree integers. No i64 narrowing or Int-based numeric
+// implementation fork. Accounting itself needs an allocation-free, nonrecursive
+// native scratch/metadata rail for canonical Int comparisons/charge bookkeeping;
+// a decoding Int spill is a real charged growth, not an exemption justified by
+// recursively invoking this Jet ledger from GlobalAlloc. Main/Foundation owns
+// the canonical Int basis and checked scratch/layout ABI, not this module.
+//
+// TYPED UNWIND / ZERO CAP
+// BudgetExceeded is a private allocation-free native transport carrying the
+// target scope identity and scalar failure facts, not a String/compiler error.
+// Checked growth leaves raise it only AFTER returning from raw allocation and
+// after releasing reservations/locks; NEVER unwind from inside GlobalAlloc or
+// through a C callback. Callback adapters catch/translate/rethrow using the
+// native checked boundary while retaining cleanup and scope identity.
+// decode_scope_catch(token: borrowed ScopeToken, operation: checked typed
+//   once-callback) -> typed result | inline ScopeFailure:
+//   catch ONLY BudgetExceeded targeted to this scope, latch it, run real typed
+//   partial-container/frame/owner cleanup and close its guard before reporting.
+//   A failure targeting an ancestor passes through nested boundaries unchanged
+//   after their cleanup; ordinary errors/stops/cancellation are not swallowed.
+//   No partial decoded value escapes a failed scope. Latch blocks new growth;
+//   frees and non-growing replacements remain allowed throughout cleanup.
+// Single codec-owned conversion point (proposed, NOT a native policy leaf):
+// decode_budget_report_after_scope(closed_failure: consumed ScopeFailure)
+//   -> the codec's own typed Limit error.
+// OWNER-PENDING: Main's provisional reading constructs/renders this final Limit
+// only AFTER the failed scope has closed, outside THAT scope's budget. This is
+// NOT ratified. Either owner ruling must change this one point, not scatter
+// exemptions through growth leaves. A still-active enclosing scope continues
+// accounting for the conversion. No other implicit allocation exemption:
+// decoder-created payload/key/error/path Strings remain charged. Retain the
+// deepest known path already built, not a new uncharged copy in the live scope.
+// Owner confirmation and a real zero-budget native proof remain #4448 gates.

@@ -1,0 +1,21 @@
+use std.string as string
+
+// Rust: crates/jet-codegen/src/Prelude/Core/StringBytes.rs:1
+// Strict and explicit-lossy conversion use the same kernel on every tier.
+// Rust: crates/jet-codegen/src/Prelude/Core/StringBytes.rs:2
+pub fn jet_string_decode_utf8(bytes: View<U8>) -> String Err! {
+    // GATE #4409: canonical UTF-8 ingress and native FromUtf8Error wording.
+    // As in Rust, strict conversion owns its bytes before decoding.
+    match string.String.from_utf8(bytes.to_vec()) {
+        Val(text) => text,
+        Err(error) => return Err(error.to_string()),
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/StringBytes.rs:6
+// Lossy conversion is explicit at the API boundary, never a strict fallback.
+// Rust: crates/jet-codegen/src/Prelude/Core/StringBytes.rs:8
+pub fn jet_string_decode_utf8_lossy(bytes: View<U8>) -> String Never! {
+    // GATE #4409: canonical replacement-sequence grouping and owned result.
+    string.String.from_utf8_lossy(bytes).into_owned()
+}

@@ -1,0 +1,384 @@
+// DevtoolsRequestPanel.rs has no inline tests or included test macros.
+// Faithful behavioral controls for its original constructors, wire, validation,
+// correlation, freshness, selection, replacement, dedup and bounded retention.
+// Main runs positive / deliberate failing control / restored positive after
+// runtime.devtools publication and #4392/#4500 ownership capability integration.
+use core.devtools.runtime.kernel_devtools_request_panel as r
+use core.devtools.runtime.devtools as d
+use core.text.runtime.kernel_unicode_string as text
+
+fn frame(id: String, request: String, index: U32) -> r.JetDevtoolsSourceFrame Never! {
+    r.JetDevtoolsSourceFrame.new(id, request, "handle", "Source/App.jet", U32{12}, U32{3}, index)
+}
+fn request(id: String) -> r.JetDevtoolsRequestFact Never! { r.JetDevtoolsRequestFact.new(id, "GET", "/items", U64{4}) }
+fn repeated(cp: Int, count: Int) -> String Never! {
+    bytes := [U8]{}
+    loop i in 0..<count -> text.append_cp(&bytes, cp)
+    String.from_bytes(bytes) ?? panic("test scalar encoding")
+}
+fn expect_request_error(state: &r.JetDevtoolsRequestPanelState, fact: ^r.JetDevtoolsRequestFact, expected: String) Never! {
+    _ :: &state.ingest_request(^fact) ?? { assert_eq(err.message, expected); return }
+    panic("expected request validation failure")
+}
+fn expect_fact_error(state: &r.JetDevtoolsRequestPanelState, fact: ^r.JetDevtoolsRequestPanelFact, expected: String) Never! {
+    _ :: &state.ingest(^fact) ?? { assert_eq(err.message, expected); return }
+    panic("expected fact validation failure")
+}
+
+#Test("request panel defaults redact every value-bearing boundary") {
+    value :: r.JetDevtoolsRequestPanelValue.default()
+    assert(!value.is_published() && value.value() == .None)
+    input :: r.JetDevtoolsRouteInput.new("id")
+    assert(!input.is_published() && input.value() == .None)
+    req :: request("r")
+    res :: r.JetDevtoolsResponseFact.new("r", U16{200}, U64{7}, U64{1})
+    access :: r.JetDevtoolsAccessEvent.new("a", "r", "read", "item", U64{1}, true)
+    query :: r.JetDevtoolsQueryFact.new("q", "r", "find", U64{1}, U64{2}, "App:1")
+    exception :: r.JetDevtoolsExceptionFact.new("e", "r", "IOError", "", U64{2})
+    source :: frame("f", "r", U32{0})
+    assert(!req.payload_is_published() && req.payload() == .None)
+    assert(!res.payload_is_published() && res.payload() == .None)
+    assert(!access.payload_is_published() && access.payload() == .None)
+    assert(!query.payload_is_published() && query.payload() == .None)
+    assert(!exception.payload_is_published() && exception.payload() == .None)
+    assert(!exception.message_is_published() && exception.message() == .None)
+    assert(exception.source_frames().is_empty())
+    assert(!source.source_line_is_published() && source.source_line() == .None)
+    assert(r.JetDevtoolsRequestPanelFreshness.default().is_fresh())
+    assert(!r.JetDevtoolsRequestPanelFreshness.default().is_stale())
+}
+#Test("request explicit publication is separate from metadata and keeps route order") {
+    published :: r.JetDevtoolsRequestPanelValue.published_value(d.JetDevtoolsValue.Text("secret"))
+    assert(published.is_published() && published.value() == .Val(d.JetDevtoolsValue.Text("secret")))
+    req :: request("r").with_route_input(r.JetDevtoolsRouteInput.published_value("z", d.JetDevtoolsValue.Text("secret"))).with_route_input(r.JetDevtoolsRouteInput.new("a")).with_published_value(d.JetDevtoolsValue.Bool(true))
+    assert(req.route_inputs[0].is_published())
+    event :: req.to_protocol_event("host") ?? panic("request event")
+    assert_eq(event.kind, "Request")
+    assert_eq(event.entity, "r")
+    assert_eq(event.timestamp_ms, U64{4})
+    assert_eq(event.fields_json(), "{{\"id\":\"r\",\"method\":\"GET\",\"route\":\"/items\",\"started_at_ms\":4,\"freshness\":\"fresh\",\"route_inputs\":[{{\"name\":\"z\"}},{{\"name\":\"a\"}}]}}")
+    assert_eq(event.payload_json(), Val("{{\"value\":true,\"route_inputs\":[{{\"name\":\"z\",\"value\":\"secret\"}}]}}"))
+    assert(!event.fields_json().contains("secret"))
+    redacted :: request("r").with_route_input(r.JetDevtoolsRouteInput.new("z")).to_protocol_event("host") ?? panic("redacted event")
+    assert(redacted.payload_json() == .None)
+}
+#Test("all fact variants share the canonical event with exact original identity") {
+    facts :: [r.JetDevtoolsRequestPanelFact]{
+        .Request(request("r")),
+        .Response(r.JetDevtoolsResponseFact.new("r", U16{65535}, U64{18446744073709551615}, U64{9}).with_published_value(d.JetDevtoolsValue.Int(I64{-1}))),
+        .Access(r.JetDevtoolsAccessEvent.new("a", "r", "write", "item", U64{2}, false).with_published_value(d.JetDevtoolsValue.Bool(false))),
+        .Query(r.JetDevtoolsQueryFact.new("q", "r", "find", U64{3}, U64{4}, "App:1").with_published_value(d.JetDevtoolsValue.Text("SQL"))),
+        .Exception(r.JetDevtoolsExceptionFact.new("e", "r", "Err", "E1", U64{5}).with_source_frame(frame("f", "r", U32{0})).with_published_message(d.JetDevtoolsValue.Text("message")).with_published_value(d.JetDevtoolsValue.Int(I64{7}))),
+        .SourceFrame(frame("f", "r", U32{0}).with_published_source_line(d.JetDevtoolsValue.Text("source"))),
+        .LogLink(r.JetDevtoolsLogLink.new("l", "r", "log:1", U64{6})),
+        .TraceLink(r.JetDevtoolsTraceLink.new("t", "r", "span", "trace:1", U64{7}, U64{8}))
+    }
+    kinds :: [String]{"Request", "Response", "Access", "Query", "Exception", "Frame", "LogLink", "TraceLink"}
+    entities :: [String]{"r", "r", "a", "q", "e", "f", "l", "t"}
+    times :: [U64]{4, 0, 2, 3, 5, 0, 6, 7}
+    loop i in 0..<facts.len() {
+        assert_eq(facts[i].request_id(), "r")
+        event :: facts[i].to_protocol_event("host") ?? panic("fact event")
+        assert_eq(event.kind, kinds[i])
+        assert_eq(event.entity, entities[i])
+        assert_eq(event.timestamp_ms, times[i])
+        assert_eq(event.source, "host")
+        assert_eq(event.sequence(), U64{0})
+        if i == 0 || i > 5 { assert(event.payload_json() == .None) } else { assert(event.payload_json() != .None) }
+    }
+    response :: facts[1].to_protocol_event("host") ?? panic("response")
+    assert_eq(response.fields_json(), "{{\"request_id\":\"r\",\"status\":65535,\"size_bytes\":18446744073709551615,\"duration_ms\":9,\"freshness\":\"fresh\"}}")
+    access :: facts[2].to_protocol_event("host") ?? panic("access")
+    assert_eq(access.fields_json(), "{{\"id\":\"a\",\"request_id\":\"r\",\"operation\":\"write\",\"target\":\"item\",\"at_ms\":2,\"allowed\":false,\"freshness\":\"fresh\"}}")
+    query :: facts[3].to_protocol_event("host") ?? panic("query")
+    assert_eq(query.fields_json(), "{{\"id\":\"q\",\"request_id\":\"r\",\"name\":\"find\",\"started_at_ms\":3,\"duration_ms\":4,\"source_identity\":\"App:1\",\"freshness\":\"fresh\"}}")
+    exception :: facts[4].to_protocol_event("host") ?? panic("exception")
+    assert_eq(exception.fields_json(), "{{\"id\":\"e\",\"request_id\":\"r\",\"kind\":\"Err\",\"code\":\"E1\",\"at_ms\":5,\"freshness\":\"fresh\",\"source_frames\":[{{\"id\":\"f\",\"request_id\":\"r\",\"function\":\"handle\",\"file\":\"Source/App.jet\",\"line\":12,\"column\":3,\"frame_index\":0,\"freshness\":\"fresh\"}}]}}")
+    assert_eq(exception.payload_json(), Val("{{\"message\":\"message\",\"value\":7}}"))
+    assert(!exception.fields_json().contains("message"))
+    source :: facts[5].to_protocol_event("host") ?? panic("source")
+    assert_eq(source.fields_json(), "{{\"id\":\"f\",\"request_id\":\"r\",\"function\":\"handle\",\"file\":\"Source/App.jet\",\"line\":12,\"column\":3,\"frame_index\":0,\"freshness\":\"fresh\"}}")
+    assert_eq(source.payload_json(), Val("{{\"source_line\":\"source\"}}"))
+    log :: facts[6].to_protocol_event("host") ?? panic("log")
+    assert_eq(log.fields_json(), "{{\"id\":\"l\",\"request_id\":\"r\",\"target\":\"log:1\",\"at_ms\":6,\"freshness\":\"fresh\"}}")
+    trace :: facts[7].to_protocol_event("host") ?? panic("trace")
+    assert_eq(trace.fields_json(), "{{\"id\":\"t\",\"request_id\":\"r\",\"span_id\":\"span\",\"target\":\"trace:1\",\"at_ms\":7,\"duration_ms\":8,\"freshness\":\"fresh\"}}")
+}
+#Test("request panel correlates response before dispatch and sort order is read-only") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    assert(state.is_empty() && state.len() == 0 && state.capacity() == r.JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS)
+    assert(state.project("missing") == .None && state.freshness("missing") == .None)
+    assert(!&state.mark_fresh("missing"))
+    _ :: &state.ingest_response(r.JetDevtoolsResponseFact.new("z", U16{201}, U64{2}, U64{3})) ?? panic("response")
+    before :: state.project("z") ?? panic("inflight row")
+    assert(before.request == .None && before.response != .None)
+    _ :: &state.ingest_request(request("z").with_route_input(r.JetDevtoolsRouteInput.new("z")).with_route_input(r.JetDevtoolsRouteInput.new("a"))) ?? panic("request")
+    _ :: r.jet_devtools_request_panel_ingest(&state, .Request(request("a"))) ?? panic("free ingest")
+    after :: r.jet_devtools_request_panel_project(state, "z") ?? panic("projection")
+    req :: after.request ?? panic("request retained")
+    assert_eq(req.route_inputs[0].name, "a")
+    assert_eq(req.route_inputs[1].name, "z")
+    assert(after.response != .None)
+    assert_eq(state.request_ids(), [String]{"a", "z"})
+    assert_eq(state.rows()[0].request_id, "a")
+    assert_eq(state.project_all()[1].request_id, "z")
+    assert(state.selected_request_id() == .None && state.selected() == .None)
+    assert(r.jet_devtools_request_panel_select(state, "z") != .None)
+    assert(state.selected_request_id() == .None)
+    assert(&state.set_selection(Val("z")))
+    assert(!&state.set_selection(Val("missing")))
+    assert_eq(state.selected_request_id(), Val("z"))
+    assert_eq((state.selected() ?? panic("selected")).request_id, "z")
+    assert(&state.set_selection(None))
+    assert(state.selected() == .None)
+}
+#Test("request panel FIFO eviction is not lexicographic or refreshed by replacement") {
+    state := r.JetDevtoolsRequestPanelState.with_capacity(2)
+    _ :: &state.ingest_request(request("z")) ?? panic("z")
+    _ :: &state.ingest_request(request("a")) ?? panic("a")
+    assert(&state.set_selection(Val("z")))
+    _ :: &state.ingest_request(r.JetDevtoolsRequestFact.new("z", "POST", "/updated", U64{9})) ?? panic("replace")
+    _ :: &state.ingest_request(request("m")) ?? panic("m")
+    assert(state.project("z") == .None && state.selected_request_id() == .None)
+    assert_eq(state.request_ids(), [String]{"a", "m"})
+    events :: state.to_protocol_events("host") ?? panic("events")
+    assert_eq(events[0].entity, "a")
+    assert_eq(events[1].entity, "m")
+    _ :: &state.ingest_request(request("b")) ?? panic("b")
+    again :: state.protocol_events("host") ?? panic("events after wrap")
+    assert_eq(again[0].entity, "m")
+    assert_eq(again[1].entity, "b")
+    assert_eq(state.len(), 2)
+    assert_eq(r.JetDevtoolsRequestPanelState.with_capacity(0).capacity(), 1)
+    assert_eq(r.JetDevtoolsRequestPanelState.with_capacity(9999).capacity(), r.JET_DEVTOOLS_REQUEST_PANEL_MAX_ROWS)
+}
+#Test("request panel preserves validation precedence and never mutates on rejection") {
+    state := r.JetDevtoolsRequestPanelState.with_capacity(1)
+    _ :: &state.ingest_request(request("retained")) ?? panic("retained")
+    assert(&state.set_selection(Val("retained")))
+    expect_request_error(&state, r.JetDevtoolsRequestFact.new("", "", "", U64{0}), "jet.devtools.v1 request panel request id is empty")
+    expect_request_error(&state, r.JetDevtoolsRequestFact.new("new", "", "", U64{0}), "jet.devtools.v1 request panel request method is empty")
+    expect_request_error(&state, r.JetDevtoolsRequestFact.new("new", "GET", "", U64{0}), "jet.devtools.v1 request panel request route is empty")
+    duplicate :: request("new").with_route_input(r.JetDevtoolsRouteInput.new("x")).with_route_input(r.JetDevtoolsRouteInput.new("")).with_route_input(r.JetDevtoolsRouteInput.new("x"))
+    expect_request_error(&state, ^duplicate, "jet.devtools.v1 request panel contains duplicate route input `x`")
+    assert_eq(state.request_ids(), [String]{"retained"})
+    assert_eq(state.selected_request_id(), Val("retained"))
+}
+#Test("request panel exact UTF8 byte bound and Rust control character rejection") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    at_limit :: repeated(128512, d.JET_DEVTOOLS_MAX_TEXT_BYTES / 4)
+    _ :: &state.ingest_request(r.JetDevtoolsRequestFact.new("ok", "GET", at_limit, U64{0})) ?? panic("UTF8 exact bound")
+    over :: "{at_limit}a"
+    expect_request_error(&state, r.JetDevtoolsRequestFact.new("over", "GET", over, U64{0}), "jet.devtools.v1 request panel request route exceeds the Prelude limit")
+    controls :: [Int]{0, 9, 10, 13, 31, 127, 128, 159}
+    loop cp in controls {
+        expect_request_error(&state, r.JetDevtoolsRequestFact.new("bad", "GET", repeated(cp, 1), U64{0}), "jet.devtools.v1 request panel request route contains a control character")
+    }
+    non_controls :: [Int]{32, 160, 173, 769, 8203, 8232, 8233, 128512}
+    loop cp in non_controls -> _ :: &state.ingest_request(r.JetDevtoolsRequestFact.new("good", "GET", repeated(cp, 1), U64{0})) ?? panic("noncontrol")
+    assert(state.project("over") == .None && state.project("bad") == .None)
+}
+#Test("request panel route input and exception frame collection limits are exact") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    req := request("r")
+    loop i in 0..<r.JET_DEVTOOLS_REQUEST_PANEL_MAX_ROUTE_INPUTS -> &req.route_inputs.push(r.JetDevtoolsRouteInput.new("n{i}"))
+    _ :: &state.ingest_request(~req) ?? panic("64 inputs")
+    &req.route_inputs.push(r.JetDevtoolsRouteInput.new(""))
+    expect_request_error(&state, ^req, "jet.devtools.v1 request panel route inputs exceed the Prelude limit")
+    exception := r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0})
+    loop i in 0..<r.JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES -> exception = (^exception).with_source_frame(frame("f{i}", "r", U32{i}))
+    _ :: &state.ingest_exception(~exception) ?? panic("64 frames")
+    exception = (^exception).with_source_frame(frame("bad", "different", U32{0}))
+    expect_fact_error(&state, .Exception(exception), "jet.devtools.v1 request panel exception frames exceed the Prelude limit")
+    mismatch :: r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_source_frame(frame("f", "different", U32{0}))
+    expect_fact_error(&state, .Exception(mismatch), "jet.devtools.v1 request panel exception frame request id does not match")
+}
+#Test("request panel validates every observation metadata field and allows optional empty identities") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    expect_fact_error(&state, .Response(r.JetDevtoolsResponseFact.new("", U16{0}, U64{0}, U64{0})), "jet.devtools.v1 request panel response request id is empty")
+    expect_fact_error(&state, .Access(r.JetDevtoolsAccessEvent.new("", "r", "read", "target", U64{0}, false)), "jet.devtools.v1 request panel access id is empty")
+    expect_fact_error(&state, .Access(r.JetDevtoolsAccessEvent.new("a", "", "read", "target", U64{0}, false)), "jet.devtools.v1 request panel access request id is empty")
+    expect_fact_error(&state, .Access(r.JetDevtoolsAccessEvent.new("a", "r", "", "target", U64{0}, false)), "jet.devtools.v1 request panel access operation is empty")
+    expect_fact_error(&state, .Access(r.JetDevtoolsAccessEvent.new("a", "r", "read", "", U64{0}, false)), "jet.devtools.v1 request panel access target is empty")
+    expect_fact_error(&state, .Query(r.JetDevtoolsQueryFact.new("", "r", "q", U64{0}, U64{0}, "App:1")), "jet.devtools.v1 request panel query id is empty")
+    expect_fact_error(&state, .Query(r.JetDevtoolsQueryFact.new("q", "", "q", U64{0}, U64{0}, "App:1")), "jet.devtools.v1 request panel query request id is empty")
+    expect_fact_error(&state, .Query(r.JetDevtoolsQueryFact.new("q", "r", "", U64{0}, U64{0}, "App:1")), "jet.devtools.v1 request panel query name is empty")
+    expect_fact_error(&state, .Query(r.JetDevtoolsQueryFact.new("q", "r", "q", U64{0}, U64{0}, "")), "jet.devtools.v1 request panel query source identity is empty")
+    expect_fact_error(&state, .Exception(r.JetDevtoolsExceptionFact.new("", "r", "Err", "", U64{0})), "jet.devtools.v1 request panel exception id is empty")
+    expect_fact_error(&state, .Exception(r.JetDevtoolsExceptionFact.new("e", "", "Err", "", U64{0})), "jet.devtools.v1 request panel exception request id is empty")
+    expect_fact_error(&state, .Exception(r.JetDevtoolsExceptionFact.new("e", "r", "", "", U64{0})), "jet.devtools.v1 request panel exception kind is empty")
+    expect_fact_error(&state, .SourceFrame(frame("", "r", U32{0})), "jet.devtools.v1 request panel source frame id is empty")
+    expect_fact_error(&state, .SourceFrame(frame("f", "", U32{0})), "jet.devtools.v1 request panel source frame request id is empty")
+    empty_file :: r.JetDevtoolsSourceFrame.new("f", "r", "", "", U32{0}, U32{0}, U32{0})
+    expect_fact_error(&state, .SourceFrame(empty_file), "jet.devtools.v1 request panel source frame file is empty")
+    expect_fact_error(&state, .LogLink(r.JetDevtoolsLogLink.new("", "r", "target", U64{0})), "jet.devtools.v1 request panel log link id is empty")
+    expect_fact_error(&state, .LogLink(r.JetDevtoolsLogLink.new("l", "", "target", U64{0})), "jet.devtools.v1 request panel log link request id is empty")
+    expect_fact_error(&state, .LogLink(r.JetDevtoolsLogLink.new("l", "r", "", U64{0})), "jet.devtools.v1 request panel log link target is empty")
+    expect_fact_error(&state, .TraceLink(r.JetDevtoolsTraceLink.new("", "r", "s", "target", U64{0}, U64{0})), "jet.devtools.v1 request panel trace link id is empty")
+    expect_fact_error(&state, .TraceLink(r.JetDevtoolsTraceLink.new("t", "", "s", "target", U64{0}, U64{0})), "jet.devtools.v1 request panel trace link request id is empty")
+    expect_fact_error(&state, .TraceLink(r.JetDevtoolsTraceLink.new("t", "r", "", "target", U64{0}, U64{0})), "jet.devtools.v1 request panel trace span id is empty")
+    expect_fact_error(&state, .TraceLink(r.JetDevtoolsTraceLink.new("t", "r", "s", "", U64{0}, U64{0})), "jet.devtools.v1 request panel trace link target is empty")
+    _ :: &state.ingest_source_frame(r.JetDevtoolsSourceFrame.new("f", "r", "", "App.jet", U32{0}, U32{0}, U32{0})) ?? panic("empty optional function")
+    _ :: &state.ingest_exception(r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0})) ?? panic("empty optional code")
+}
+
+#Test("request panel retains newest bounded events with ID tie-break and replaces by ID") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    loop i in 0..<258 {
+        // Reverse insertion, same time: ascending IDs determine retained tail.
+        id :: "{1257 - i}"
+        _ :: &state.ingest_access(r.JetDevtoolsAccessEvent.new(id, "r", "read", "target", U64{1}, true)) ?? panic("access cap")
+        _ :: &state.ingest_query(r.JetDevtoolsQueryFact.new(id, "r", "q", U64{1}, U64{0}, "App:1")) ?? panic("query cap")
+    }
+    loop i in 0..<130 {
+        id :: "{1129 - i}"
+        _ :: &state.ingest_log_link(r.JetDevtoolsLogLink.new(id, "r", "log", U64{1})) ?? panic("log cap")
+        _ :: &state.ingest_trace_link(r.JetDevtoolsTraceLink.new(id, "r", "span", "trace", U64{1}, U64{0})) ?? panic("trace cap")
+    }
+    loop i in 0..<66 {
+        id :: "{1065 - i}"
+        _ :: &state.ingest_exception(r.JetDevtoolsExceptionFact.new(id, "r", "Err", "", U64{1})) ?? panic("exception cap")
+    }
+    row :: state.project("r") ?? panic("bounded row")
+    assert_eq(row.access_events.len(), 256)
+    assert_eq(row.queries.len(), 256)
+    assert_eq(row.log_links.len(), 128)
+    assert_eq(row.trace_links.len(), 128)
+    assert_eq(row.exceptions.len(), 64)
+    assert_eq(row.access_events[0].id, "1002")
+    assert_eq(row.access_events[255].id, "1257")
+    assert_eq(row.queries[0].id, "1002")
+    assert_eq(row.log_links[0].id, "1002")
+    assert_eq(row.trace_links[0].id, "1002")
+    assert_eq(row.exceptions[0].id, "1002")
+    _ :: &state.ingest_access(r.JetDevtoolsAccessEvent.new("1002", "r", "write", "changed", U64{9}, false)) ?? panic("access replace")
+    _ :: &state.ingest_query(r.JetDevtoolsQueryFact.new("1002", "r", "changed", U64{9}, U64{8}, "App:2")) ?? panic("query replace")
+    _ :: &state.ingest_log_link(r.JetDevtoolsLogLink.new("1002", "r", "changed", U64{9})) ?? panic("log replace")
+    _ :: &state.ingest_trace_link(r.JetDevtoolsTraceLink.new("1002", "r", "changed", "trace", U64{9}, U64{8})) ?? panic("trace replace")
+    _ :: &state.ingest_exception(r.JetDevtoolsExceptionFact.new("1002", "r", "Changed", "E", U64{9})) ?? panic("exception replace")
+    replaced :: state.project("r") ?? panic("replaced row")
+    assert_eq(replaced.access_events.len(), 256)
+    assert_eq(replaced.access_events[255].id, "1002")
+    assert_eq(replaced.access_events[255].operation, "write")
+    assert_eq(replaced.queries[255].name, "changed")
+    assert_eq(replaced.log_links[127].target, "changed")
+    assert_eq(replaced.trace_links[127].span_id, "changed")
+    assert_eq(replaced.exceptions[63].kind, "Changed")
+    // Snapshot independence is intentional; no ingestion reads from the copy.
+    assert_eq(row.access_events[0].operation, "read")
+}
+#Test("request panel normalizes frames by index then ID and caps the earliest frames") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    loop i in 0..<66 -> _ :: &state.ingest_source_frame(frame("f{165 - i}", "r", U32{65 - i})) ?? panic("frame cap")
+    row :: state.project("r") ?? panic("frames")
+    assert_eq(row.source_frames.len(), 64)
+    assert_eq(row.source_frames[0].frame_index, U32{0})
+    assert_eq(row.source_frames[63].frame_index, U32{63})
+    // Upsert replaces first matching ID rather than adding another frame.
+    _ :: &state.ingest_source_frame(frame("f100", "r", U32{2})) ?? panic("frame replace")
+    changed :: state.project("r") ?? panic("changed frames")
+    assert_eq(changed.source_frames.len(), 64)
+    assert_eq(changed.source_frames[0].frame_index, U32{1})
+    assert_eq(changed.source_frames[1].id, "f100")
+    assert_eq(changed.source_frames[2].id, "f102")
+}
+#Test("request panel exception frame dedup is adjacent after stable sort not global") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    first :: r.JetDevtoolsSourceFrame.new("same", "r", "first", "App.jet", U32{1}, U32{0}, U32{0})
+    duplicate :: r.JetDevtoolsSourceFrame.new("same", "r", "duplicate", "App.jet", U32{2}, U32{0}, U32{0})
+    separated :: r.JetDevtoolsSourceFrame.new("same", "r", "separated", "App.jet", U32{3}, U32{0}, U32{2})
+    exception :: r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_source_frame(first).with_source_frame(duplicate).with_source_frame(frame("middle", "r", U32{1})).with_source_frame(separated)
+    _ :: &state.ingest_exception(exception) ?? panic("dedup")
+    row :: state.project("r") ?? panic("exception row")
+    attached :: row.exceptions[0].source_frames()
+    assert_eq(attached.len(), 3)
+    assert_eq(attached[0].function, "first")
+    assert_eq(attached[1].id, "middle")
+    assert_eq(attached[2].function, "separated")
+    // Projection merges sequentially by first ID: the later incoming frame
+    // replaces the first, while attached exception frames remain untouched.
+    assert_eq(row.source_frames.len(), 2)
+    assert_eq(row.source_frames[0].id, "middle")
+    assert_eq(row.source_frames[1].function, "separated")
+}
+#Test("request panel projection merges direct and exception frames with later replacement") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    _ :: &state.ingest_source_frame(frame("same", "r", U32{0})) ?? panic("direct")
+    early :: r.JetDevtoolsExceptionFact.new("early", "r", "Err", "", U64{1}).with_source_frame(frame("same", "r", U32{1})).with_source_frame(frame("new", "r", U32{0}))
+    late :: r.JetDevtoolsExceptionFact.new("late", "r", "Err", "", U64{2}).with_source_frame(frame("same", "r", U32{2}))
+    _ :: &state.ingest_exception(late) ?? panic("late")
+    _ :: &state.ingest_exception(early) ?? panic("early")
+    row :: state.project("r") ?? panic("merged")
+    assert_eq(row.source_frames.len(), 2)
+    assert_eq(row.source_frames[0].id, "new")
+    assert_eq(row.source_frames[1].frame_index, U32{2})
+    assert_eq(row.exceptions[0].source_frames()[1].frame_index, U32{1})
+    assert_eq(row.exceptions[1].source_frames()[0].frame_index, U32{2})
+    // Projection neither writes the merged frames back nor emits them twice.
+    events :: state.to_protocol_events("host") ?? panic("merged events")
+    assert_eq(events.len(), 3)
+    assert_eq(events[0].kind, "Exception")
+    assert_eq(events[1].kind, "Exception")
+    assert_eq(events[2].kind, "Frame")
+    assert(events[2].fields_json().contains("\"frame_index\":0"))
+}
+#Test("request panel stale and fresh marks reach optional payloads and nested frames") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    _ :: &state.ingest_request(request("r")) ?? panic("request")
+    _ :: &state.ingest_response(r.JetDevtoolsResponseFact.new("r", U16{200}, U64{0}, U64{0})) ?? panic("response")
+    _ :: &state.ingest_access(r.JetDevtoolsAccessEvent.new("a", "r", "read", "target", U64{0}, true)) ?? panic("access")
+    _ :: &state.ingest_query(r.JetDevtoolsQueryFact.new("q", "r", "q", U64{0}, U64{0}, "App:1")) ?? panic("query")
+    _ :: &state.ingest_exception(r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_source_frame(frame("f", "r", U32{0}))) ?? panic("exception")
+    _ :: &state.ingest_source_frame(frame("direct", "r", U32{1})) ?? panic("source")
+    _ :: &state.ingest_log_link(r.JetDevtoolsLogLink.new("l", "r", "log", U64{0})) ?? panic("log")
+    _ :: &state.ingest_trace_link(r.JetDevtoolsTraceLink.new("t", "r", "span", "trace", U64{0}, U64{0})) ?? panic("trace")
+    _ :: &state.ingest_request(request("other")) ?? panic("other")
+    &state.mark_stale()
+    stale :: state.project("r") ?? panic("stale")
+    assert(stale.freshness.is_stale())
+    assert((stale.request ?? panic("request")).freshness.is_stale())
+    assert((stale.response ?? panic("response")).freshness.is_stale())
+    assert(stale.access_events[0].freshness.is_stale())
+    assert(stale.queries[0].freshness.is_stale())
+    assert(stale.exceptions[0].freshness.is_stale())
+    assert(stale.exceptions[0].source_frames()[0].freshness.is_stale())
+    assert(stale.source_frames[0].freshness.is_stale())
+    assert(stale.log_links[0].freshness.is_stale())
+    assert(stale.trace_links[0].freshness.is_stale())
+    assert(&state.mark_fresh("r"))
+    assert_eq(state.freshness("r"), Val(r.JetDevtoolsRequestPanelFreshness.Fresh))
+    assert_eq(state.freshness("other"), Val(r.JetDevtoolsRequestPanelFreshness.Stale))
+    loop event in state.to_protocol_events("host") ?? panic("marked events") {
+        if event.entity != "other" -> assert(event.fields_json().contains("\"freshness\":\"fresh\""))
+    }
+    fresh :: state.project("r") ?? panic("fresh")
+    assert(fresh.exceptions[0].source_frames()[0].freshness.is_fresh())
+    assert(stale.exceptions[0].source_frames()[0].freshness.is_stale())
+}
+#Test("request panel freshness includes a stale frame inside a fresh exception") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    exception :: r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_source_frame(frame("f", "r", U32{0}).with_freshness(.Stale))
+    _ :: &state.ingest_exception(exception) ?? panic("stale nested frame")
+    assert_eq(state.freshness("r"), Val(r.JetDevtoolsRequestPanelFreshness.Stale))
+    assert(&state.mark_fresh("r"))
+    assert_eq(state.freshness("r"), Val(r.JetDevtoolsRequestPanelFreshness.Fresh))
+}
+#Test("request panel nested payload failures retain exact field context") {
+    state := r.JetDevtoolsRequestPanelState.new()
+    oversized :: d.JetDevtoolsValue.Text(repeated(97, d.JET_DEVTOOLS_MAX_TEXT_BYTES + 1))
+    expect_request_error(&state, request("r").with_route_input(r.JetDevtoolsRouteInput.published_value("x", ~oversized)), "route input 0: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_request_error(&state, request("r").with_published_value(~oversized), "request payload: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .Response(r.JetDevtoolsResponseFact.new("r", U16{0}, U64{0}, U64{0}).with_published_value(~oversized)), "response payload: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .Access(r.JetDevtoolsAccessEvent.new("a", "r", "read", "target", U64{0}, true).with_published_value(~oversized)), "access payload: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .Query(r.JetDevtoolsQueryFact.new("q", "r", "q", U64{0}, U64{0}, "App:1").with_published_value(~oversized)), "query payload: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .Exception(r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_published_message(~oversized)), "exception message: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .Exception(r.JetDevtoolsExceptionFact.new("e", "r", "Err", "", U64{0}).with_published_value(~oversized)), "exception payload: jet.devtools.v1 payload text exceeds the Prelude limit")
+    expect_fact_error(&state, .SourceFrame(frame("f", "r", U32{0}).with_published_source_line(~oversized)), "source frame line: jet.devtools.v1 payload text exceeds the Prelude limit")
+    assert(state.is_empty())
+}
+#Test("request panel metadata rendering escapes quotes and backslashes without publication") {
+    req :: r.JetDevtoolsRequestFact.new("r\"\\", "GET", "/a\"\\", U64{18446744073709551615}).with_freshness(.Stale)
+    event :: req.to_protocol_event("host") ?? panic("escaped event")
+    assert_eq(event.fields_json(), "{{\"id\":\"r\\\"\\\\\",\"method\":\"GET\",\"route\":\"/a\\\"\\\\\",\"started_at_ms\":18446744073709551615,\"freshness\":\"stale\",\"route_inputs\":[]}}")
+    assert(event.payload_json() == .None)
+}

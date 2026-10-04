@@ -1,0 +1,130 @@
+// PORT-PENDING 0141 crates-jet-codegen-src-prelude-core-authority-module-group: crates/jet-codegen/src/Prelude/Core/FSOps.rs:1-126
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Shared filesystem operation kernels used by every native adapter.
+//RS //
+//RS // The surrounding Prelude parts own fault injection and `IOError` projection;
+//RS // this part owns the actual filesystem operation so AOT, JIT, and the
+//RS // interpreter cannot grow separate filesystem algorithms.
+//RS //
+//RS // Plain `//` comments: this file is `include!`d into jet-comptime, where
+//RS // inner `//!` docs are illegal.
+//RS 
+//RS pub fn jet_fs_rename(from: &str, to: &str) -> std::io::Result<()> {
+//RS     std::fs::rename(from, to)
+//RS }
+//RS 
+//RS pub fn jet_fs_open(path: &str) -> std::io::Result<std::fs::File> {
+//RS     std::fs::File::open(path)
+//RS }
+//RS 
+//RS pub fn jet_fs_canonicalize(path: &str) -> std::io::Result<String> {
+//RS     std::fs::canonicalize(path).map(|path| path.to_string_lossy().into_owned())
+//RS }
+//RS 
+//RS /// Resolve one FileScope path to a descriptor-relative, no-follow read.
+//RS ///
+//RS /// Root selection is derived only from the scope's resource-qualified
+//RS /// Authority. The rooted reader opens every directory and the final file
+//RS /// with no-follow flags, so checking a lexical prefix is never the security
+//RS /// boundary.
+//RS pub fn jet_fs_scope_read(
+//RS     scope: &JetFileScope,
+//RS     path: &str,
+//RS ) -> std::io::Result<Vec<u8>> {
+//RS     let requested = std::path::Path::new(path);
+//RS     let mut last_error = None;
+//RS     for root in scope.roots() {
+//RS         let relative = if requested.is_absolute() {
+//RS             if !root.allow_absolute() {
+//RS                 continue;
+//RS             }
+//RS             let Some(relative) = requested.strip_prefix(root.path()).ok() else {
+//RS                 continue;
+//RS             };
+//RS             jet_fs_scope_relative(relative)?
+//RS         } else {
+//RS             jet_fs_scope_relative(requested)?
+//RS         };
+//RS         match jet_foundation::SHA256::read_file_nofollow_at_root(
+//RS             root.path(),
+//RS             &relative,
+//RS             jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+//RS         ) {
+//RS             Ok(bytes) => return Ok(bytes),
+//RS             Err(error) => last_error = Some(error),
+//RS         }
+//RS     }
+//RS     Err(last_error.unwrap_or_else(jet_fs_scope_denied))
+//RS }
+//RS 
+//RS fn jet_fs_scope_relative(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+//RS     let mut relative = std::path::PathBuf::new();
+//RS     let mut has_component = false;
+//RS     for component in path.components() {
+//RS         match component {
+//RS             std::path::Component::Normal(name) => {
+//RS                 relative.push(name);
+//RS                 has_component = true;
+//RS             }
+//RS             std::path::Component::CurDir => {}
+//RS             std::path::Component::ParentDir
+//RS             | std::path::Component::RootDir
+//RS             | std::path::Component::Prefix(_) => return Err(jet_fs_scope_denied()),
+//RS         }
+//RS     }
+//RS     if !has_component {
+//RS         return Err(jet_fs_scope_denied());
+//RS     }
+//RS     Ok(relative)
+//RS }
+//RS 
+//RS fn jet_fs_scope_denied() -> std::io::Error {
+//RS     std::io::Error::new(
+//RS         std::io::ErrorKind::PermissionDenied,
+//RS         "path is outside the granted FS.Read root",
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_fs_glob(pattern: &str) -> std::io::Result<Vec<String>> {
+//RS     let split = pattern.find(['*', '?']).unwrap_or(pattern.len());
+//RS     let base = pattern[..split]
+//RS         .rsplit_once(std::path::MAIN_SEPARATOR)
+//RS         .map(|(dir, _)| if dir.is_empty() { "." } else { dir })
+//RS         .unwrap_or(".");
+//RS     let mut matches = Vec::new();
+//RS     collect_glob_entries(std::path::Path::new(base), &mut matches)?;
+//RS     matches.retain(|path| jet_fs_glob_match(pattern, path));
+//RS     matches.sort();
+//RS     Ok(matches)
+//RS }
+//RS 
+//RS fn collect_glob_entries(root: &std::path::Path, output: &mut Vec<String>) -> std::io::Result<()> {
+//RS     let mut entries = std::fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
+//RS     entries.sort_by_key(|entry| entry.file_name());
+//RS     for entry in entries {
+//RS         let path = entry.path();
+//RS         output.push(path.to_string_lossy().into_owned());
+//RS         if entry.file_type()?.is_dir() {
+//RS             collect_glob_entries(&path, output)?;
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_fs_glob_match(pattern: &str, text: &str) -> bool {
+//RS     fn inner(pattern: &[u8], text: &[u8]) -> bool {
+//RS         if pattern.is_empty() {
+//RS             return text.is_empty();
+//RS         }
+//RS         match pattern[0] {
+//RS             b'*' => inner(&pattern[1..], text) || (!text.is_empty() && inner(pattern, &text[1..])),
+//RS             b'?' => !text.is_empty() && inner(&pattern[1..], &text[1..]),
+//RS             character => {
+//RS                 !text.is_empty() && character == text[0] && inner(&pattern[1..], &text[1..])
+//RS             }
+//RS         }
+//RS     }
+//RS     inner(pattern.as_bytes(), text.as_bytes())
+//RS }
+// END-PORT-PENDING 0141 crates/jet-codegen/src/Prelude/Core/FSOps.rs:1-126
+

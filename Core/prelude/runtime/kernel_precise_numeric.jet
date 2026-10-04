@@ -1,0 +1,96 @@
+// Shared Decimal/Fraction route policy; Foundation owns the precise carriers.
+use jet_foundation.Numeric.[CtBigInt as ExactBigInt, CtDecimal as ExactDecimal, CtFraction as ExactFraction]
+use std.cmp.[Ordering]
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:7
+pub fn decimal_from_str(value: String) -> ExactDecimal ()! { ExactDecimal.from_str(value).map_err(fn(_) { () }) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:11
+pub fn decimal_from_int(value: ExactBigInt) -> ExactDecimal Never! {
+    ExactDecimal.from_str(value.to_string_rep()).expect("exact Int must fit Decimal")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:15
+pub fn decimal_from_float(value: F64) -> ExactDecimal? Never! { ExactDecimal.from_float(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:19
+pub fn decimal_from_fraction(value: ExactFraction) -> ExactDecimal? Never! { ExactDecimal.from_fraction(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:23
+pub fn decimal_add(left: ExactDecimal, right: ExactDecimal) -> ExactDecimal Never! { left.add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:27
+pub fn decimal_sub(left: ExactDecimal, right: ExactDecimal) -> ExactDecimal Never! { left.sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:31
+pub fn decimal_mul(left: ExactDecimal, right: ExactDecimal) -> ExactDecimal Never! { left.mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:35
+pub fn decimal_equal(left: ExactDecimal, right: ExactDecimal) -> Bool Never! { left.equal(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:39
+pub fn decimal_compare(left: ExactDecimal, right: ExactDecimal) -> Ordering Never! { left.cmp(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:46
+pub fn fraction_equal(left: ExactFraction, right: ExactFraction) -> Bool Never! { left == right }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:50
+pub fn fraction_numerator(value: ExactFraction) -> ExactBigInt Never! { value.numerator.clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:54
+pub fn fraction_denominator(value: ExactFraction) -> ExactBigInt Never! { value.denominator.clone() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:58
+pub fn decimal_div(left: ExactDecimal, right: ExactDecimal) -> ExactFraction? Never! { left.div(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:62
+pub fn decimal_round(value: ExactDecimal) -> ExactDecimal Never! { value.round() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:66
+pub fn decimal_floor(value: ExactDecimal) -> ExactDecimal Never! { value.floor() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:70
+pub fn decimal_ceil(value: ExactDecimal) -> ExactDecimal Never! { value.ceil() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:74
+pub fn decimal_to_int(value: ExactDecimal) -> ExactBigInt? Never! { value.to_int_exact() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:78
+pub fn decimal_to_fraction(value: ExactDecimal) -> ExactFraction? Never! { value.to_fraction() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:82
+pub fn decimal_to_string(value: ExactDecimal) -> String Never! { value.to_string_rep() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:86
+pub fn decimal_to_float(value: ExactDecimal) -> F64 Never! { value.to_f64() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:90
+pub fn fraction_to_string(value: ExactFraction) -> String Never! { value.to_string_rep() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:94
+pub fn fraction_to_float(value: ExactFraction) -> F64 Never! { value.to_float() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:98
+pub fn fraction_is_zero(value: ExactFraction) -> Bool Never! { value.is_zero() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:102
+pub fn fraction_new(numerator: ExactBigInt, denominator: ExactBigInt) -> ExactFraction? Never! {
+    ExactFraction.from_bigints(^numerator, ^denominator)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:109
+pub fn fraction_from_int(value: ExactBigInt) -> ExactFraction? Never! { ExactFraction.from_bigint(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:113
+pub fn fraction_from_float(value: F64) -> ExactFraction? Never! { ExactFraction.from_float(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:117
+pub fn fraction_from_decimal(value: ExactDecimal) -> ExactFraction? Never! { ExactFraction.from_decimal(value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:121
+pub fn fraction_add(left: ExactFraction, right: ExactFraction) -> ExactFraction? Never! { left.add(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:125
+pub fn fraction_sub(left: ExactFraction, right: ExactFraction) -> ExactFraction? Never! { left.sub(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:129
+pub fn fraction_mul(left: ExactFraction, right: ExactFraction) -> ExactFraction? Never! { left.mul(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:133
+pub fn fraction_div(left: ExactFraction, right: ExactFraction) -> ExactFraction? Never! { left.div(right) }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:137
+pub fn fraction_to_int(value: ExactFraction) -> ExactBigInt? Never! { value.to_int_exact() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:141
+pub fn fraction_to_decimal(value: ExactFraction) -> ExactDecimal? Never! { value.to_decimal() }
+// Rust: crates/jet-codegen/src/Prelude/Core/PreciseNumeric.rs:145
+pub fn failure_message(type_name: String, function: String) -> String Never! {
+    match (type_name, function) {
+        ("Decimal", "from_str") => "invalid Decimal string"
+        ("Decimal", "from_int") => "invalid exact Int"
+        ("Decimal", "from_float") => "Float is not finite"
+        ("Decimal", "from_fraction") => "Fraction has a repeating expansion"
+        ("Decimal", "div") => "Decimal quotient does not fit Fraction, or divided by zero"
+        ("Decimal", "to_int") => "Decimal is not an integer"
+        ("Decimal", "to_fraction") => "Decimal does not fit Fraction"
+        ("Fraction", "new") | ("Fraction", "from_parts") => "invalid exact quotient"
+        ("Fraction", "from_int") => "exact Int does not fit Fraction"
+        ("Fraction", "from_float") => "Float has no word-sized exact Fraction"
+        ("Fraction", "from_decimal") => "Decimal does not fit Fraction"
+        ("Fraction", "add") => "this sum of ratios overflows the value type"
+        ("Fraction", "sub") => "this difference of ratios overflows the value type"
+        ("Fraction", "mul") => "this product of ratios overflows the value type"
+        ("Fraction", "div") => "divided by zero"
+        ("Fraction", "to_int") => "Fraction is not an integer"
+        ("Fraction", "to_decimal") => "Fraction has a repeating expansion"
+        _ => "precise numeric operation failed"
+    }
+}

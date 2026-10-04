@@ -1,0 +1,301 @@
+// Original DevtoolsDatabasePanel.rs:1263-1409 tests, plus boundary controls.
+// No native provider double: these exercise actual typed fact/projection bodies.
+// Main publishes corpus row after packet0176 + retained storage/loan gates land.
+use core.devtools.runtime.kernel_devtools_database_panel as db
+use core.text.runtime.kernel_unicode_string as db_test_text
+
+// Rust :1267 fixture, all counters preserved.
+fn pool() -> db.JetDevtoolsDatabasePoolStats Never! {
+    db.JetDevtoolsDatabasePoolStats.new("primary", db.JetDevtoolsDatabasePoolLifecycle.Open, U64{4}, U64{0}, U64{4}, U64{0}, U64{2}, U64{1}, U64{8}, U64{4}, U64{0}, U64{0}, U64{0}, U64{0}, U64{100}) ?? panic("pool fixture")
+}
+// Rust :1288 fixture: same opaque identity, source, request, usage, threshold.
+fn query(id: String, observed_at_ms: U64) -> db.JetDevtoolsDatabaseQueryStats Never! {
+    table :: db.JetDevtoolsDatabaseTableUsage.new("orders", U64{3}, U64{0}) ?? panic("table fixture")
+    index :: db.JetDevtoolsDatabaseIndexUsage.new("orders_by_id", true, U64{3}) ?? panic("index fixture")
+    tables := [db.JetDevtoolsDatabaseTableUsage]{table}
+    indexes := [db.JetDevtoolsDatabaseIndexUsage]{index}
+    db.JetDevtoolsDatabaseQueryStats.new(id, "sha256:query", db.JetDevtoolsDatabaseQueryStatus.Succeeded, U64{25}, "src/routes/orders.jet:8", Val("req-7"), ^tables, ^indexes, U64{20}, observed_at_ms) ?? panic("query fixture")
+}
+fn request_fixture(kind: db.JetDevtoolsDatabaseStatementClass, timeout: U64, max_rows: U64) -> db.JetDevtoolsDatabaseExplainFactRequest db.JetDevtoolsDatabaseFactError! {
+    bindings := [db.JetDevtoolsDatabaseRedactedBinding]{}
+    db.JetDevtoolsDatabaseExplainFactRequest.new("q-1", "sha256:query", kind, "source", None, ^bindings, timeout, max_rows)
+}
+fn request() -> db.JetDevtoolsDatabaseExplainFactRequest Never! {
+    request_fixture(db.JetDevtoolsDatabaseStatementClass.ReadOnly, U64{1000}, U64{1}) ?? panic("request fixture")
+}
+fn plan_row(ordinal: U64) -> db.JetDevtoolsDatabasePlanRow Never! {
+    db.JetDevtoolsDatabasePlanRow.new(ordinal, "node-{ordinal}", None, U64{0}, "Index Scan", Val("orders"), Val("orders_by_id"), Val(U64{3}), Val(U64{3})) ?? panic("row fixture")
+}
+fn auth_error(request: db.JetDevtoolsDatabaseExplainFactRequest, grant: db.JetDevtoolsDatabaseCapabilityFact, started: U64, expected: db.JetDevtoolsDatabaseFactError) Never! {
+    _ :: request.authorize(grant, started) ?? {
+        assert(err == expected)
+        return
+    }
+    panic("authorization unexpectedly accepted")
+}
+fn request_error(kind: db.JetDevtoolsDatabaseStatementClass, timeout: U64, rows: U64, expected: db.JetDevtoolsDatabaseFactError) Never! {
+    _ :: request_fixture(kind, timeout, rows) ?? {
+        assert(err == expected)
+        return
+    }
+    panic("request unexpectedly accepted")
+}
+
+// Rust :1305.
+#Test("pressure_and_query_projection_are_deterministic") {
+    stats :: pool()
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Exhausted)
+    assert(stats.utilization_milli() == U64{1000})
+    observed :: query("q-1", U64{20})
+    assert(observed.is_slow())
+    link := observed.request_link() ?? panic("request link") // #4303
+    assert(link == "req-7")
+    json :: observed.render_json()
+    assert(json.contains("\"duration_ms\":25"))
+    assert(json.contains("\"request_id\":\"req-7\""))
+}
+// Rust :1317; first+second are retained FIFO extents, not copied entries.
+#Test("history_is_bounded_and_snapshot_order_is_stable") {
+    history := db.JetDevtoolsDatabaseQueryHistory.new(U64{2})
+    second := query("q-2", U64{20})
+    first := query("q-1", U64{10})
+    third := query("q-3", U64{30})
+    &history.push(^second) ?? panic("push q2")
+    &history.push(^first) ?? panic("push q1")
+    &history.push(^third) ?? panic("push q3")
+    assert(history.len() == 2)
+    entries :: history.entries()
+    loop entry in entries.first -> assert(entry.query_id != "q-2")
+    loop entry in entries.second -> assert(entry.query_id != "q-2")
+    snapshot :: history.snapshot()
+    assert(snapshot.len() == 2)
+    assert(snapshot[0].query_id == "q-1" && snapshot[1].query_id == "q-3")
+}
+// Rust :1333; original exact-grant refusal, redaction and result assertions.
+#Test("explain_requires_exact_grant_and_redacts_bindings") {
+    bindings := [db.JetDevtoolsDatabaseRedactedBinding]{db.JetDevtoolsDatabaseRedactedBinding.new(U64{0}, db.JetDevtoolsDatabaseBindingKind.Text)}
+    request :: db.JetDevtoolsDatabaseExplainFactRequest.new("q-1", "sha256:query", db.JetDevtoolsDatabaseStatementClass.ReadOnly, "src/routes/orders.jet:8", Val("req-7"), ^bindings, U64{1000}, U64{2}) ?? panic("explain request")
+    denied :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-2", true) ?? panic("denied grant")
+    auth_error(request, denied, U64{100}, db.JetDevtoolsDatabaseFactError.MismatchedExplainAuthority)
+    granted :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-1", true) ?? panic("grant")
+    authorized := request.authorize(granted, U64{100}) ?? panic("authorization")
+    json :: request.render_json(U64{100})
+    assert(json.contains("\"redacted\":true"))
+    assert(!json.contains("secret"))
+    rows := [db.JetDevtoolsDatabasePlanRow]{plan_row(U64{0})}
+    result :: ^authorized.finish(U64{150}, ^rows) ?? panic("finish")
+    assert(result.status() == db.JetDevtoolsDatabaseExplainStatus.Complete)
+    assert(result.duration_ms == U64{50})
+}
+// Rust :1376; unsupported class is rejected BEFORE malformed fields/limits.
+#Test("mutation_and_missing_authority_are_rejected_without_sql_payloads") {
+    request_error(db.JetDevtoolsDatabaseStatementClass.Mutation, U64{1000}, U64{1}, db.JetDevtoolsDatabaseFactError.UnsupportedStatement)
+    request :: request()
+    denied :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-1", false) ?? panic("denied grant")
+    auth_error(request, denied, U64{0}, db.JetDevtoolsDatabaseFactError.MissingExplainAuthority)
+    assert(!request.render_json(U64{0}).contains("DROP"))
+}
+
+#Test("database pool pressure preserves lifecycle and saturating U64 arithmetic") {
+    stats := pool()
+    stats.lifecycle = db.JetDevtoolsDatabasePoolLifecycle.Draining
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Draining)
+    stats.lifecycle = db.JetDevtoolsDatabasePoolLifecycle.Drained
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Drained)
+    stats.lifecycle = db.JetDevtoolsDatabasePoolLifecycle.Open
+    stats.waiting_requests = U64{0}
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Saturated)
+    stats.leased_connections = U64{3}
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Elevated)
+    stats.leased_connections = U64{2}
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Normal)
+    stats.leased_connections = U64{0}
+    assert(stats.pressure() == db.JetDevtoolsDatabasePoolPressure.Idle)
+    assert(stats.freshness_ms(U64{50}) == U64{0})
+    assert(stats.freshness_ms(U64{150}) == U64{50})
+    stats.max_connections = U64{18446744073709551615}
+    stats.available_connections = U64{18446744073709551615}
+    stats.leased_connections = U64{1}
+    assert(stats.reserved_connections() == U64{18446744073709551615})
+    assert(stats.available_capacity() == U64{0})
+    // Rust saturates multiplication BEFORE division; do not algebraically
+    // rewrite to a widened product yielding 1000.
+    assert(stats.utilization_milli() == U64{1})
+    stats.max_connections = U64{0}
+    assert(stats.utilization_milli() == U64{1000})
+}
+#Test("database history clamps, keeps latest, rejects duplicates before eviction") {
+    minimum :: db.JetDevtoolsDatabaseQueryHistory.new(U64{0})
+    maximum :: db.JetDevtoolsDatabaseQueryHistory.new(U64{18446744073709551615})
+    assert(minimum.capacity() == 1 && minimum.is_empty())
+    assert(minimum.latest() == None)
+    assert(maximum.capacity() == 256)
+    history := db.JetDevtoolsDatabaseQueryHistory.new(U64{2})
+    first := query("a", U64{20})
+    second := query("b", U64{20})
+    &history.push(^first) ?? panic("history a")
+    &history.push(^second) ?? panic("history b")
+    duplicate := query("a", U64{99})
+    if &history.push(^duplicate) == {
+        .Ok(_) -> panic("duplicate accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.DuplicateIdentity("query_id"))
+    }
+    assert(history.len() == 2)
+    newest :: history.latest() ?? panic("latest")
+    assert(newest[0].query_id == "b")
+    third := query("c", U64{20})
+    &history.push(^third) ?? panic("history c")
+    // Same logical retained entries with a different circular-buffer layout.
+    other := db.JetDevtoolsDatabaseQueryHistory.new(U64{2})
+    b := query("b", U64{20})
+    c := query("c", U64{20})
+    &other.push(^b) ?? panic("other b")
+    &other.push(^c) ?? panic("other c")
+    assert(history.equals(other))
+    snapshot :: history.snapshot()
+    assert(snapshot[0].query_id == "b" && snapshot[1].query_id == "c")
+}
+#Test("database explain limits, status precedence and exact credential separation") {
+    request_error(db.JetDevtoolsDatabaseStatementClass.Unknown, U64{0}, U64{0}, db.JetDevtoolsDatabaseFactError.UnsupportedStatement)
+    request_error(db.JetDevtoolsDatabaseStatementClass.ReadOnly, U64{0}, U64{1}, db.JetDevtoolsDatabaseFactError.InvalidLimit("timeout_ms"))
+    request_error(db.JetDevtoolsDatabaseStatementClass.ReadOnly, U64{30001}, U64{1}, db.JetDevtoolsDatabaseFactError.InvalidLimit("timeout_ms"))
+    request_error(db.JetDevtoolsDatabaseStatementClass.ReadOnly, U64{1000}, U64{0}, db.JetDevtoolsDatabaseFactError.InvalidLimit("max_rows"))
+    request_error(db.JetDevtoolsDatabaseStatementClass.ReadOnly, U64{1000}, U64{257}, db.JetDevtoolsDatabaseFactError.InvalidLimit("max_rows"))
+    req :: request()
+    credential :: db.JetDevtoolsDatabaseCapabilityFact.for_credentials("q-1", true) ?? panic("credential")
+    assert(credential.matches_credentials("q-1"))
+    assert(!credential.matches_credentials("q-2"))
+    assert(!credential.matches_explain("q-1"))
+    auth_error(req, credential, U64{100}, db.JetDevtoolsDatabaseFactError.MismatchedExplainAuthority)
+    grant :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-1", true) ?? panic("grant")
+    assert(grant.matches_explain("q-1") && !grant.matches_credentials("q-1"))
+    authorized := req.authorize(grant, U64{100}) ?? panic("authorize")
+    assert(authorized.deadline_ms() == U64{1100})
+    rows := [db.JetDevtoolsDatabasePlanRow]{plan_row(U64{2}), plan_row(U64{1})}
+    result :: ^authorized.finish_with_status(U64{1101}, ^rows, false, false) ?? panic("finish")
+    assert(result.duration_ms == U64{1001})
+    assert(result.timed_out && result.truncated)
+    assert(result.status() == db.JetDevtoolsDatabaseExplainStatus.TimedOut)
+    assert(result.rows.len() == 1 && result.rows[0].ordinal == U64{1})
+    at_deadline := req.authorize(grant, U64{100}) ?? panic("authorize exact deadline")
+    two := [db.JetDevtoolsDatabasePlanRow]{plan_row(U64{2}), plan_row(U64{1})}
+    exact :: ^at_deadline.finish(U64{1100}, ^two) ?? panic("finish deadline")
+    assert(!exact.timed_out && exact.status() == db.JetDevtoolsDatabaseExplainStatus.RowLimitReached)
+    saturated := req.authorize(grant, U64{18446744073709551610}) ?? panic("authorize saturation")
+    assert(saturated.deadline_ms() == U64{18446744073709551615})
+    empty := [db.JetDevtoolsDatabasePlanRow]{}
+    completed :: ^saturated.finish(U64{18446744073709551615}, ^empty) ?? panic("saturated finish")
+    assert(completed.duration_ms == U64{5} && !completed.timed_out)
+}
+#Test("database explain finish rejects reversed timestamps and duplicate plan ordinals") {
+    req :: request()
+    grant :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-1", true) ?? panic("grant")
+    reversed := req.authorize(grant, U64{100}) ?? panic("authorize reversed")
+    empty := [db.JetDevtoolsDatabasePlanRow]{}
+    if ^reversed.finish(U64{99}, ^empty) == {
+        .Ok(_) -> panic("reversed timestamp accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.InvalidTimestamp)
+    }
+    duplicate := req.authorize(grant, U64{100}) ?? panic("authorize duplicate")
+    rows := [db.JetDevtoolsDatabasePlanRow]{plan_row(U64{0}), plan_row(U64{0})}
+    if ^duplicate.finish(U64{101}, ^rows) == {
+        .Ok(_) -> panic("duplicate plan accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.DuplicateIdentity("plan ordinal"))
+    }
+}
+#Test("database identity validation is UTF8-byte bounded and Unicode aware") {
+    if db.JetDevtoolsDatabaseTableUsage.new("", U64{0}, U64{0}) == {
+        .Ok(_) -> panic("empty table identity accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.EmptyField("table_id"))
+    }
+    if db.JetDevtoolsDatabaseTableUsage.new("a\u{00a0}b", U64{0}, U64{0}) == {
+        .Ok(_) -> panic("Unicode whitespace identity accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.InvalidIdentity("table_id"))
+    }
+    if db.JetDevtoolsDatabaseTableUsage.new("a\u{0085}b", U64{0}, U64{0}) == {
+        .Ok(_) -> panic("Unicode control identity accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.InvalidIdentity("table_id"))
+    }
+    raw := [U8]{}
+    loop i in 0..<4096 -> db_test_text.append_cp(&raw, 128512)
+    identity :: String.from_bytes(^raw) ?? panic("identity UTF8")
+    _ :: db.JetDevtoolsDatabaseTableUsage.new(identity, U64{0}, U64{0}) ?? panic("16384-byte identity rejected")
+    oversized :: "{identity}a"
+    if db.JetDevtoolsDatabaseTableUsage.new(oversized, U64{0}, U64{0}) == {
+        .Ok(_) -> panic("oversized identity accepted")
+        .Err(error) -> assert(error == db.JetDevtoolsDatabaseFactError.OversizedField("table_id"))
+    }
+    // Cf is not Cc/White_Space; neither a letter whitelist nor ASCII-only rules.
+    _ :: db.JetDevtoolsDatabaseTableUsage.new("a\u{200b}b", U64{0}, U64{0}) ?? panic("format scalar rejected")
+}
+#Test("database JSON projection has exact field order, optional nulls and escaping") {
+    observed := query("q-1", U64{20})
+    updated := ^observed.with_runtime_facts(Val((start: U64{8}, end: U64{12})), Val(U64{3}), Val(U64{0})) ?? panic("runtime facts")
+    updated.source = "source \"quote\" \\ path"
+    expected :: "{{\"query_id\":\"q-1\",\"statement_identity\":\"sha256:query\",\"status\":\"succeeded\",\"duration_ms\":25,\"source\":\"source \\\"quote\\\" \\\\ path\",\"source_span\":{{\"start\":8,\"end\":12}},\"request_id\":\"req-7\",\"rows_returned\":3,\"rows_affected\":0,\"table_usage\":[{{\"table_id\":\"orders\",\"rows_read\":3,\"rows_written\":0}}],\"index_usage\":[{{\"index_id\":\"orders_by_id\",\"used\":true,\"rows_examined\":3}}],\"slow_threshold_ms\":20,\"slow\":true,\"observed_at_ms\":20,\"freshness_ms\":5}}"
+    assert(updated.render_json_at(U64{25}) == expected)
+    updated.source = "a\n\r\t\u{0000}\u{0085}b"
+    assert(updated.render_json().contains("\"source\":\"a\\n\\r\\t\\u0000\\u0085b\""))
+    plain :: query("q-2", U64{30})
+    assert(plain.render_json_at(U64{1}).contains("\"source_span\":null"))
+    assert(plain.render_json().contains("\"rows_returned\":null,\"rows_affected\":null"))
+    assert(plain.freshness_ms(U64{1}) == U64{0})
+}
+#Test("database panel snapshot and canonical events retain projection order") {
+    history := db.JetDevtoolsDatabaseQueryHistory.new(U64{2})
+    b := query("q-2", U64{30})
+    a := query("q-1", U64{20})
+    &history.push(^b) ?? panic("push b")
+    &history.push(^a) ?? panic("push a")
+    stats := pool()
+    panel := db.JetDevtoolsDatabasePanelFacts.new(db.JET_DEVTOOLS_DATABASE_PANEL_ID, U64{150}, ^stats, history) ?? panic("panel")
+    assert(panel.pressure() == db.JetDevtoolsDatabasePoolPressure.Exhausted)
+    selected :: panel.query("q-1") ?? panic("panel query")
+    assert(selected[0].observed_at_ms == U64{20})
+    assert(panel.query("absent") == None)
+    req :: request()
+    grant :: db.JetDevtoolsDatabaseCapabilityFact.for_explain("q-1", true) ?? panic("grant")
+    authorized := req.authorize(grant, U64{100}) ?? panic("authorize")
+    rows := [db.JetDevtoolsDatabasePlanRow]{plan_row(U64{0})}
+    result := ^authorized.finish(U64{120}, ^rows) ?? panic("finish")
+    composed :: ^panel.with_latest_explain(^result) ?? panic("attach explain")
+    json :: composed.render_json()
+    assert(json.starts_with("{{\"panel_id\":\"database\",\"captured_at_ms\":150,"))
+    assert(json.contains("\"freshness_ms\":50"))
+    assert(json.contains("\"freshness_ms\":30"))
+    events :: composed.to_protocol_events("test") ?? panic("canonical events")
+    assert(events.len() == 4)
+    assert(events[0].kind == "DatabasePool" && events[0].entity == "primary")
+    assert(events[1].kind == "DatabaseQuery" && events[1].entity == "q-1")
+    assert(events[2].kind == "DatabaseQuery" && events[2].entity == "q-2")
+    assert(events[3].kind == "DatabaseExplainResult" && events[3].timestamp_ms == U64{120})
+    // Event timestamp remains original observation, NOT panel capture timestamp.
+    assert(events[0].timestamp_ms == U64{100} && events[1].timestamp_ms == U64{20})
+}
+#Test("database derived enum ordering uses declaration order and errors remain structural") {
+    assert(db.JetDevtoolsDatabasePoolLifecycle.Open.compare(db.JetDevtoolsDatabasePoolLifecycle.Drained) == Ordering.Less)
+    assert(db.JetDevtoolsDatabasePoolPressure.Idle.compare(db.JetDevtoolsDatabasePoolPressure.Normal) == Ordering.Less)
+    assert(db.JetDevtoolsDatabasePoolPressure.Exhausted.compare(db.JetDevtoolsDatabasePoolPressure.Draining) == Ordering.Less)
+    assert(db.JetDevtoolsDatabaseQueryStatus.Succeeded.compare(db.JetDevtoolsDatabaseQueryStatus.Failed) == Ordering.Less)
+    assert(db.JetDevtoolsDatabaseStatementClass.ReadOnly.compare(db.JetDevtoolsDatabaseStatementClass.Mutation) == Ordering.Less)
+    assert(db.JetDevtoolsDatabaseBindingKind.Text.compare(db.JetDevtoolsDatabaseBindingKind.Bytes) == Ordering.Less)
+    assert(db.JetDevtoolsDatabaseExplainStatus.TimedOut.compare(db.JetDevtoolsDatabaseExplainStatus.RowLimitReached) == Ordering.Less)
+    text :: db.JetDevtoolsDatabaseRedactedBinding.new(U64{0}, db.JetDevtoolsDatabaseBindingKind.Text)
+    bytes :: db.JetDevtoolsDatabaseRedactedBinding.new(U64{0}, db.JetDevtoolsDatabaseBindingKind.Bytes)
+    earlier :: db.JetDevtoolsDatabaseRedactedBinding.new(U64{0}, db.JetDevtoolsDatabaseBindingKind.Other)
+    later :: db.JetDevtoolsDatabaseRedactedBinding.new(U64{1}, db.JetDevtoolsDatabaseBindingKind.Null)
+    assert(text.is_redacted() && bytes.is_redacted())
+    assert(text.compare(bytes) == Ordering.Less && earlier.compare(later) == Ordering.Less)
+    assert(db.JetDevtoolsDatabaseFactError.EmptyField("pool_id").message() == "database pool_id must not be empty")
+    assert(db.JetDevtoolsDatabaseFactError.OversizedField("source").message() == "database source exceeds the Prelude text limit")
+    assert(db.JetDevtoolsDatabaseFactError.InvalidIdentity("query_id").message() == "database query_id must be a stable identity")
+    assert(db.JetDevtoolsDatabaseFactError.InvalidLimit("bindings").message() == "database bindings is outside its limit")
+    assert(db.JetDevtoolsDatabaseFactError.InvalidPoolCounts.message() == "database pool counts exceed the configured maximum")
+    assert(db.JetDevtoolsDatabaseFactError.DuplicateIdentity("plan ordinal").message() == "database plan ordinal identity is duplicated")
+    assert(db.JetDevtoolsDatabaseFactError.UnsupportedStatement.message() == "database EXPLAIN requires a read-only statement")
+    assert(db.JetDevtoolsDatabaseFactError.MissingExplainAuthority.message() == "database EXPLAIN requires an explicit DB.Explain grant")
+    assert(db.JetDevtoolsDatabaseFactError.MismatchedExplainAuthority.message() == "database EXPLAIN grant does not match the requested capability and query identity")
+    assert(db.JetDevtoolsDatabaseFactError.InvalidTimestamp.message() == "database EXPLAIN timestamps must be monotonic")
+    assert(db.JetDevtoolsDatabaseFactError.InvalidPlanRow.message() == "database EXPLAIN plan row is invalid")
+    assert(db.JetDevtoolsDatabaseFactError.Protocol("canonical event error").message() == "canonical event error")
+}

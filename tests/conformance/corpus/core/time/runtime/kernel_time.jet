@@ -1,0 +1,202 @@
+// Time.rs has no inline/macro/included tests. These are source behavioral
+// controls over the real pure runtime bodies; not native clock/TZDB proofs.
+use core.time.runtime.kernel_time as time_kernel
+use core.time.runtime.kernel_civil as civil_kernel
+use core.time.runtime.kernel_period as period_kernel
+
+fn time_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+fn time_max() -> I64 Never! { I64{9223372036854775807} }
+fn date1970() -> civil_kernel.CivilDate Never! { civil_kernel.CivilDate.new(I64{1970}, I64{1}, I64{1}) }
+fn clock(h: I64, m: I64) -> civil_kernel.CivilTime Never! { civil_kernel.CivilTime.new(h, m, I64{0}) }
+// Actual TZif v1 fixture: zero offset -> +3600 at UTC01:00 -> zero at UTC02:00.
+// Byte layout is the original provider format, not a substitute Zone provider.
+fn transition_tzif() -> [U8] Never! {
+    [U8]{
+        84, 90, 105, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0,
+        0, 0, 14, 16, 0, 0, 28, 32, 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 14, 16, 1, 0,
+    }
+}
+fn transition_zone() -> time_kernel.CivilZone Never! {
+    bytes :: transition_tzif()
+    parse_zone("Test/Transitions", bytes, U64{18446744073709551615})
+}
+fn parse_zone(name: String, bytes: [U8], usize_max: U64) -> time_kernel.CivilZone Never! {
+    view :: bytes[0..<bytes.len()]
+    time_kernel.CivilZone.parse_tzif(~name, view, usize_max) ?? panic("valid TZif fixture")
+}
+fn zone_error(bytes: [U8], expected: String) Never! {
+    view :: bytes[0..<bytes.len()]
+    _ :: time_kernel.CivilZone.parse_tzif("x", view, U64{4294967295}) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected TZif error")
+}
+fn local_error(zone: time_kernel.CivilZone, date: civil_kernel.CivilDate, time: civil_kernel.CivilTime, policy: String, expected: String) Never! {
+    _ :: zone.local_to_utc_with_disambiguation(date, time, policy) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected local resolution error")
+}
+fn offset_error(value: String, expected: String) Never! {
+    _ :: time_kernel.jet_time_parse_offset(value) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected RFC3339 offset error")
+}
+#Test("instant arithmetic preserves i64 saturation and three-way comparison") {
+    assert_eq(time_kernel.jet_time_instant_add_duration_ns(time_max(), I64{1}), time_max())
+    assert_eq(time_kernel.jet_time_instant_sub_duration_ns(time_min(), I64{1}), time_min())
+    assert_eq(time_kernel.jet_time_instant_difference_ns(time_min(), time_max()), time_min())
+    assert_eq(time_kernel.jet_time_instant_elapsed_ns(time_max(), time_min()), time_max())
+    assert_eq(time_kernel.jet_time_instant_compare(I64{-1}, I64{0}), I64{-1})
+    assert_eq(time_kernel.jet_time_instant_compare(I64{0}, I64{0}), I64{0})
+    assert_eq(time_kernel.jet_time_instant_compare(I64{1}, I64{0}), I64{1})
+}
+#Test("Unix fractions floor before epoch and timestamp carry saturates") {
+    dt :: time_kernel.CivilDateTime.from_unix_nanoseconds(I64{-1})
+    assert_eq(dt.unix_seconds_anchor(), I64{-1})
+    assert_eq(dt.nanosecond(), I64{999999999})
+    assert_eq(dt.second(), I64{59})
+    assert_eq(time_kernel.CivilDateTime.from_unix_microseconds(I64{-1}).nanosecond(), I64{999999000})
+    assert_eq(time_kernel.CivilDateTime.from_unix_ms(I64{-1}).nanosecond(), I64{999000000})
+    carried :: time_kernel.CivilDateTime.from_timestamp_ns(time_max(), U32{4294967295})
+    assert_eq(carried.unix_seconds_anchor(), time_max())
+    assert_eq(carried.nanosecond(), I64{294967295})
+    assert_eq(time_kernel.CivilDateTime.from_world_millis(I64{-1}).unix_seconds_anchor(), I64{-1})
+}
+#Test("leap labels differ from POSIX anchors and sort before nanosecond fractions") {
+    leap :: time_kernel.CivilDateTime.from_unix_seconds(I64{1483228800})
+    assert(leap.is_leap_second())
+    assert_eq(leap.unix_seconds_anchor(), I64{1483228799})
+    assert_eq(leap.to_timestamp(), I64{1483228800})
+    assert_eq(leap.second(), I64{60})
+    assert_eq(leap.time().second, I64{60})
+    assert_eq(leap.date().year, I64{2016})
+    ordinary :: time_kernel.CivilDateTime.from_timestamp_ns(I64{1483228799}, U32{999999999})
+    assert(ordinary < leap)
+    assert(leap < time_kernel.CivilDateTime.from_timestamp(I64{1483228800}))
+    assert(!time_kernel.jet_time_is_leap_second_epoch(I64{1483228799}))
+    assert(time_kernel.jet_time_is_leap_second_epoch(I64{78796800}))
+    assert(!time_kernel.jet_time_is_leap_second_epoch(I64{0}))
+    label :: time_kernel.CivilDateTime.from_parts(I64{2024}, I64{1}, I64{1}, I64{23}, I64{59}, I64{60}, U32{1})
+    assert(label.is_leap_second()) // Constructor, unlike RFC parse, does not validate the epoch.
+    clamped :: time_kernel.CivilDateTime.from_parts(I64{2024}, I64{1}, I64{1}, I64{24}, I64{59}, I64{60}, U32{0})
+    assert(!clamped.is_leap_second())
+    assert_eq(clamped.second(), I64{59})
+}
+#Test("truncate floors negative POSIX units and preserves leap only at fine units") {
+    dt :: time_kernel.CivilDateTime.from_timestamp_ns(I64{-1}, U32{123456789})
+    assert_eq(dt.truncate("day").to_timestamp(), I64{-86400})
+    assert_eq(dt.floor("hour").to_timestamp(), I64{-3600})
+    assert_eq(dt.truncate("minute").to_timestamp(), I64{-60})
+    assert_eq(dt.truncate("millisecond").nanosecond(), I64{123000000})
+    assert_eq(dt.truncate("microsecond").nanosecond(), I64{123456000})
+    assert(dt.truncate("unknown") == dt)
+    leap :: time_kernel.CivilDateTime.from_unix_seconds(I64{1483228800})
+    assert(leap.truncate("second").is_leap_second())
+    assert(!leap.truncate("minute").is_leap_second())
+    moved :: dt.replace(I64{2024}, I64{2}, I64{29}, I64{12}, I64{30}, I64{0})
+    assert_eq(moved.nanosecond(), I64{123456789})
+    added :: moved.add_period(period_kernel.CivilPeriod.from_years(I64{1}))
+    assert_eq(added.date().year, I64{2025})
+    assert_eq(added.date().day, I64{28})
+}
+#Test("TZif timestamps and indexes precede ttinfo errors; DST byte is optional") {
+    _ :: zone_error([U8]{}, "invalid tzif header")
+    bytes := transition_tzif()
+    bytes[35] = U8{100}
+    _ :: zone_error(bytes, "truncated tzif")
+    bytes = transition_tzif()
+    bytes[35] = U8{5}
+    _ :: zone_error(bytes, "truncated tzif index")
+    bytes = transition_tzif()
+    bytes[39] = U8{3}
+    _ :: zone_error(bytes, "truncated tzif")
+    minimal :: [U8]{
+        84, 90, 105, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        255, 255, 241, 240,
+    }
+    zone :: parse_zone("minimal", minimal, U64{4294967295})
+    assert_eq(zone.offset_at_utc(I64{0}), I64{-3600})
+    assert(!zone.info_at_utc(I64{0}).is_dst)
+}
+#Test("TZif v2 v3 v4 second headers use signed wide timestamps and clamp indexes") {
+    loop version in [U8]{50, 51, 52} {
+        bytes := [U8]{
+            84, 90, 105, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            84, 90, 105, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0,
+            255, 255, 255, 255, 255, 255, 255, 255, 255,
+            0, 0, 0, 0, 0, 0, 0, 0, 14, 16, 1, 0,
+        }
+        bytes[4] = version
+        zone :: parse_zone("wide", bytes, U64{4294967295})
+        assert_eq(zone.offset_at_utc(I64{-2}), I64{0})
+        assert_eq(zone.offset_at_utc(I64{-1}), I64{3600})
+        assert_eq(zone.next_transition(I64{-2}) ?? panic("wide transition"), I64{-1})
+        assert(zone.next_transition(I64{-1}) == None)
+        assert_eq(zone.previous_transition(I64{0}) ?? panic("wide transition"), I64{-1})
+        assert(zone.previous_transition(I64{-1}) == None)
+    }
+}
+#Test("gap fold disambiguation has exact error precedence and fraction-neutral matching") {
+    zone :: transition_zone()
+    date :: date1970()
+    gap :: clock(I64{1}, I64{30})
+    assert_eq(zone.local_to_utc_with_disambiguation(date, gap, "earlier") ?? panic("gap earlier"), I64{1800})
+    assert_eq(zone.local_to_utc_with_disambiguation(date, gap, "later") ?? panic("gap later"), I64{5400})
+    assert_eq(zone.local_to_utc(date, gap), I64{5400})
+    _ :: local_error(zone, date, gap, "reject", "nonexistent local time in Test/Transitions")
+    _ :: local_error(zone, date, gap, "bad", "invalid disambiguation: bad")
+    fold :: civil_kernel.CivilTime.with_nanosecond(I64{2}, I64{30}, I64{0}, U32{123})
+    assert_eq(zone.local_to_utc_with_disambiguation(date, fold, "earlier") ?? panic("fold earlier"), I64{5400})
+    assert_eq(zone.local_to_utc_with_disambiguation(date, fold, "later") ?? panic("fold later"), I64{9000})
+    _ :: local_error(zone, date, fold, "reject", "ambiguous local time in Test/Transitions")
+    assert_eq(zone.local_to_utc_with_offset(date, fold, I64{3600}) ?? panic("matching offset"), I64{5400})
+    assert(zone.local_to_utc_with_offset(date, fold, I64{7200}) == None)
+    zoned :: time_kernel.CivilZonedDateTime.from_local_with_disambiguation(date, fold, zone, "later") ?? panic("zoned fold")
+    assert_eq(zoned.to_datetime().nanosecond(), I64{123})
+    assert_eq(zoned.time().nanosecond(), I64{0}) // Source non-UTC display parts discard the fraction.
+    assert_eq(zone.next_transition(I64{3600}) ?? panic("next transition"), I64{7200})
+    assert_eq(zone.previous_transition(I64{7200}) ?? panic("previous transition"), I64{3600})
+    assert_eq(zone.hours_in_day(date), I64{24})
+}
+#Test("zoned equality includes name but order excludes it; UTC leap display retains nanos") {
+    instant :: time_kernel.CivilDateTime.from_timestamp(I64{0})
+    utc :: time_kernel.CivilZone.utc()
+    fixture :: transition_zone()
+    left :: instant.in_zone(utc)
+    right :: instant.in_zone(fixture)
+    assert(!left.equals(right))
+    assert_eq(left.compare(right), I64{0})
+    assert_eq(left.hours_in_day(), I64{24})
+    assert(left.next_transition() == None)
+    leap :: time_kernel.CivilDateTime.from_unix_parts(I64{1483228800}, U32{123})
+    zoned :: leap.in_zone(utc)
+    assert_eq(zoned.time().second, I64{60})
+    assert_eq(zoned.time().nanosecond(), I64{123})
+    assert_eq(zoned.offset_seconds(), I64{0})
+    assert(!zoned.is_dst())
+}
+
+#Test("RFC3339 offsets enforce exact shape digits and ranges") {
+    assert_eq(time_kernel.jet_time_parse_offset("Z") ?? panic("UTC offset"), I64{0})
+    assert_eq(time_kernel.jet_time_parse_offset("+23:59") ?? panic("positive offset"), I64{86340})
+    assert_eq(time_kernel.jet_time_parse_offset("-05:30") ?? panic("negative offset"), I64{-19800})
+    assert_eq(time_kernel.jet_time_parse_offset("-00:00") ?? panic("negative zero offset"), I64{0})
+    _ :: offset_error("+24:00", "RFC3339 offset out of range: +24:00")
+    _ :: offset_error("+00:60", "RFC3339 offset out of range: +00:60")
+    _ :: offset_error("z", "bad RFC3339 offset: z")
+    _ :: offset_error("+1:00", "bad RFC3339 offset: +1:00")
+    _ :: offset_error("05:30", "bad RFC3339 offset: 05:30")
+    _ :: offset_error("+05x30", "bad RFC3339 offset: +05x30")
+    _ :: offset_error("+0x:30", "bad RFC3339 offset: +0x:30")
+    _ :: offset_error("+é:00", "bad RFC3339 offset: +é:00")
+}

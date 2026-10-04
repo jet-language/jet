@@ -1,0 +1,24 @@
+use jet_foundation.Outcome.[jet_list_bounds_message]
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedList.rs:6
+#Error
+#Derive(Clone, Copy, Debug)
+pub struct JetFixedListIndexError {
+    pub index: I64
+    pub len: USize // GATE #4483: selected native index width.
+}
+impl JetFixedListIndexError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FixedList.rs:12
+    pub fn message(self) -> String Never! { jet_list_bounds_message(self.len, self.index) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FixedList.rs:18
+pub fn jet_fixed_list_index<T>(len: USize, index: I64, get: fn(USize) -> T Never!) -> T JetFixedListIndexError! {
+    raw_index :: index
+    // Convert once at selected usize width; negative/too-wide values fail before bounds.
+    converted :: USize.try_from(raw_index) // GATE #4483
+    native_index :: match converted {
+        Ok(value) => value
+        Err(_) => return Err(JetFixedListIndexError{index: raw_index, len: len})
+    }
+    if native_index >= len -> return Err(JetFixedListIndexError{index: raw_index, len: len})
+    Ok(get(native_index))
+}

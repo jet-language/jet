@@ -1,0 +1,1790 @@
+// PORT-PENDING 1015 tests-corelib-parts-encoding-streams-slice-1: tests/corelib_parts/encoding_streams.rs:1-1786
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[test]
+//RS fn encoding_stream_foundation_types_are_real_jet_values() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("foundation.json");
+//RS     let bad_path = dir.join("bad-limits.json");
+//RS     let path_text = path.to_string_lossy().replace('\\', "\\\\");
+//RS     let bad_text = bad_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.encoding.jsonl as jsonl
+//RS use core.encoding.csv as csv
+//RS use core.encoding.xml as xml
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError {{ return v }}
+//RS fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause {{ return v }}
+//RS fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent {{ return v }}
+//RS fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat {{ return v }}
+//RS fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind {{ return v }}
+//RS fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader {{ return v }}
+//RS fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter {{ return v }}
+//RS fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader {{ return v }}
+//RS fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter {{ return v }}
+//RS fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader {{ return v }}
+//RS fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter {{ return v }}
+//RS fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader {{ return v }}
+//RS fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter {{ return v }}
+//RS fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
+//RS fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
+//RS 
+//RS fn run() {{
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     print("{{limits.buffer_bytes}}:{{limits.max_depth}}:{{limits.max_item_bytes}}:{{limits.max_expansion_depth}}:{{limits.max_expansion_bytes}}")
+//RS     if limits.max_total_bytes == None {{ print(true) }} else {{ print(false) }}
+//RS     print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
+//RS     print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
+//RS 
+//RS     cause := encoding.EncodingCause{{ kind: "io", os_code: None, message: "nope" }}
+//RS     kept_cause := keep_cause(^cause)
+//RS     print(kept_cause.kind)
+//RS     print(kept_cause.message)
+//RS 
+//RS     err := encoding.EncodingError{{
+//RS         format: encoding.EncodingFormat.JSON,
+//RS         kind: encoding.EncodingErrorKind.Limit,
+//RS         byte_offset: 0,
+//RS         line: None,
+//RS         column: None,
+//RS         path: "",
+//RS         reason: "buffer_bytes 1 is outside 4096..16777216",
+//RS         cause: None,
+//RS     }}
+//RS     kept_err := keep_error(^err)
+//RS     print(kept_err.format == encoding.EncodingFormat.JSON)
+//RS     print(kept_err.kind == encoding.EncodingErrorKind.Limit)
+//RS     print(kept_err.byte_offset)
+//RS     if kept_err.cause == None {{ print(true) }} else {{ print(false) }}
+//RS     print("{{kept_err}}")
+//RS 
+//RS     event := encoding.DataEvent.Null
+//RS     kept_event := keep_event(^event)
+//RS     print(true)
+//RS 
+//RS     output :: files.create("{path_text}") ?? panic("create")
+//RS     writer :: json.writer(^output, limits, false) ?? panic("writer")
+//RS     kept_writer := keep_json_writer(^writer)
+//RS     kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
+//RS     kept_writer.finish() ?? panic("finish")
+//RS 
+//RS     bad := encoding.EncodingLimits.safe()
+//RS     bad.buffer_bytes = 1
+//RS     bad_output :: files.create("{bad_text}") ?? panic("bad create")
+//RS     if json.writer(^bad_output, bad, false) == {{
+//RS         .Ok(_) -> {{ print("limits-missed") }}
+//RS         .Err(reject) -> {{
+//RS             print("{{reject}}")
+//RS             print(reject.format == encoding.EncodingFormat.JSON)
+//RS             print(reject.kind == encoding.EncodingErrorKind.Limit)
+//RS             print(reject.reason)
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         concat!(
+//RS             "65536:256:16777216:32:8388608\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "io\n",
+//RS             "nope\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "0\n",
+//RS             "true\n",
+//RS             "JSON Limit at byte 0: buffer_bytes 1 is outside 4096..16777216\n",
+//RS             "true\n",
+//RS             "JSON Limit at byte 0, line 1, column 1: buffer_bytes 1 is outside 4096..16777216\n",
+//RS             "true\n",
+//RS             "true\n",
+//RS             "buffer_bytes 1 is outside 4096..16777216\n",
+//RS         )
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&path).unwrap(), "null");
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_stream_reader_writer_are_real_incremental_handles() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_stream_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("events.json");
+//RS     let path_text = path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     limits :: encoding.EncodingLimits.safe()
+//RS     output :: files.create("{path_text}") ?? panic("create")
+//RS     writer :: json.writer(^output, limits, false) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Key("message")) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Text("hi ☺")) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Key("values")) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Int(7)) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Bool(true)) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.Null) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("write")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("write")
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("finish")
+//RS 
+//RS     input :: files.open("{path_text}") ?? panic("open")
+//RS     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+//RS     count := 0
+//RS     loop count < 11 {{
+//RS         maybe_event :: reader.next() ?? panic("next")
+//RS         if maybe_event == None {{ print("eof") }} else {{ print("event") }}
+//RS         count += 1
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "event\nevent\nevent\nevent\nevent\nevent\nevent\nevent\nevent\nevent\neof\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"message":"hi ☺","values":[7,true,null]}"#);
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_stream_defaults_paths_limits_and_terminal_errors_are_stable() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_stream_hostile_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let input_path = dir.join("hostile.json");
+//RS     let default_path = dir.join("default.json");
+//RS     let limited_path = dir.join("limited.json");
+//RS     fs::write(&input_path, r#"{"o":[0,{"i":"\u263a"}]}"#).unwrap();
+//RS     let input_text = input_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let default_text = default_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let limited_text = limited_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     default_output :: files.create("{default_text}") ?? panic("create")
+//RS     default_writer :: json.writer(^default_output) ?? panic("default writer")
+//RS     default_writer.write(encoding.DataEvent.Null) ?? panic("default write")
+//RS     default_writer.finish() ?? panic("default finish")
+//RS     default_input :: files.open("{default_text}") ?? panic("default open")
+//RS     default_reader :: json.reader(^default_input) ?? panic("default reader")
+//RS     if default_reader.next() == {{
+//RS         .Ok(_) -> {{ print(true) }}
+//RS         .Err(_) -> {{ print(false) }}
+//RS     }}
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.max_item_bytes = 2
+//RS     input :: files.open("{input_text}") ?? panic("open")
+//RS     reader :: json.reader(^input, limits) ?? panic("reader")
+//RS     count := 0
+//RS     loop count < 8 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("reader-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.path)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     finished_output :: files.create("{limited_text}") ?? panic("create")
+//RS     finished_writer :: json.writer(^finished_output) ?? panic("writer")
+//RS     finished_writer.write(encoding.DataEvent.Null) ?? panic("write")
+//RS     finished_writer.finish() ?? panic("finish")
+//RS     after_finish :: finished_writer.write(encoding.DataEvent.Null)
+//RS     if after_finish == {{
+//RS         .Ok(_) -> {{ print("finish-missed") }}
+//RS         .Err(first) -> {{
+//RS             after_flush :: &finished_writer.flush()
+//RS             if after_flush == {{
+//RS                 .Ok(_) -> {{ print("finish-not-latched") }}
+//RS                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     escaped_limits := encoding.EncodingLimits.safe()
+//RS     escaped_limits.max_item_bytes = 1
+//RS     escaped_output :: files.create("{limited_text}") ?? panic("create")
+//RS     escaped_writer :: json.writer(^escaped_output, escaped_limits) ?? panic("writer")
+//RS     escaped_result :: escaped_writer.write(encoding.DataEvent.Text("\n"))
+//RS     if escaped_result == {{
+//RS         .Ok(_) -> {{ print("escape-missed") }}
+//RS         .Err(first) -> {{
+//RS             escaped_again :: escaped_writer.finish()
+//RS             if escaped_again == {{
+//RS                 .Ok(_) -> {{ print("escape-not-latched") }}
+//RS                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_stream_hostile", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout, "true\n$[\"o\"][1][\"i\"]\ntrue\ntrue\ntrue\n");
+//RS     assert_eq!(fs::read_to_string(&default_path).unwrap(), "null");
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_stream_rejects_whole_events_and_records_before_partial_output() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_stream_atomic_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let text_path = dir.join("text.json");
+//RS     let key_path = dir.join("key.json");
+//RS     let depth_path = dir.join("depth.json");
+//RS     let jsonl_path = dir.join("record.jsonl");
+//RS     let nonfinite_path = dir.join("nonfinite.jsonl");
+//RS     let text = text_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let key = key_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let depth = depth_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let jsonl = jsonl_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let nonfinite = nonfinite_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     text_limits := encoding.EncodingLimits.safe()
+//RS     text_limits.max_total_bytes = Val(5)
+//RS     text_output :: files.create("{text}") ?? panic("create text")
+//RS     text_writer :: json.writer(^text_output, text_limits) ?? panic("text writer")
+//RS     text_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     text_error :: text_writer.write(encoding.DataEvent.Text("abcd"))
+//RS     if text_error == {{
+//RS         .Ok(_) -> {{ print("text-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             again :: text_writer.finish()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("text-terminal-missed") }}
+//RS                 .Err(second) -> {{ print(first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     key_limits := encoding.EncodingLimits.safe()
+//RS     key_limits.max_total_bytes = Val(5)
+//RS     key_output :: files.create("{key}") ?? panic("create key")
+//RS     key_writer :: json.writer(^key_output, key_limits) ?? panic("key writer")
+//RS     key_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+//RS     key_result :: key_writer.write(encoding.DataEvent.Key("abc"))
+//RS     if key_result == {{ .Ok(_) -> {{ print("key-limit-missed") }} .Err(_) -> {{ print(true) }} }}
+//RS 
+//RS     depth_limits := encoding.EncodingLimits.safe()
+//RS     depth_limits.max_depth = 1
+//RS     depth_output :: files.create("{depth}") ?? panic("create depth")
+//RS     depth_writer :: json.writer(^depth_output, depth_limits) ?? panic("depth writer")
+//RS     depth_writer.write(encoding.DataEvent.ArrayStart) ?? panic("outer")
+//RS     depth_result :: depth_writer.write(encoding.DataEvent.ArrayStart)
+//RS     if depth_result == {{ .Ok(_) -> {{ print("depth-limit-missed") }} .Err(_) -> {{ print(true) }} }}
+//RS 
+//RS     record_limits := encoding.EncodingLimits.safe()
+//RS     record_limits.max_total_bytes = Val(5)
+//RS     record_output :: files.create("{jsonl}") ?? panic("create record")
+//RS     record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
+//RS     record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
+//RS     if record_result == {{
+//RS         .Ok(_) -> {{ print("record-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             again :: &record_writer.flush()
+//RS             if again == {{ .Ok(_) -> {{ print("record-terminal-missed") }} .Err(second) -> {{ print(first.reason == second.reason) }} }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     nonfinite_output :: files.create("{nonfinite}") ?? panic("create nonfinite")
+//RS     nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
+//RS     nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
+//RS     if nonfinite_result == {{ .Ok(_) -> {{ print("nonfinite-missed") }} .Err(_) -> {{ print(true) }} }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_stream_atomic", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\n");
+//RS     assert_eq!(fs::read_to_string(&text_path).unwrap(), "[");
+//RS     assert_eq!(fs::read_to_string(&key_path).unwrap(), "{");
+//RS     assert_eq!(fs::read_to_string(&depth_path).unwrap(), "[");
+//RS     assert_eq!(fs::read_to_string(&jsonl_path).unwrap(), "");
+//RS     assert_eq!(fs::read_to_string(&nonfinite_path).unwrap(), "");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("json_stream_atomic.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("JSON stream atomic default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&text_path).unwrap(), "[");
+//RS     assert_eq!(fs::read_to_string(&key_path).unwrap(), "{");
+//RS     assert_eq!(fs::read_to_string(&depth_path).unwrap(), "[");
+//RS     assert_eq!(fs::read_to_string(&jsonl_path).unwrap(), "");
+//RS     assert_eq!(fs::read_to_string(&nonfinite_path).unwrap(), "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_canonical_stream_sorts_nested_objects_and_latches_rejections() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_canonical_stream_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let output_path = dir.join("canonical.json");
+//RS     let duplicate_path = dir.join("duplicate.json");
+//RS     let limited_path = dir.join("limited.json");
+//RS     let output = output_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let duplicate = duplicate_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let limited = limited_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output}") ?? panic("create")
+//RS     writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+//RS     writer.write(encoding.DataEvent.Key("z")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("nested object")
+//RS     writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Int(2)) ?? panic("int")
+//RS     writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Text("x")) ?? panic("text")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("nested end")
+//RS     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+//RS     writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("finish twice")
+//RS 
+//RS     data := DataTree.Object([
+//RS         "z": DataTree.Array([DataTree.Int(1), DataTree.Object(["b": DataTree.Int(2), "a": DataTree.Text("x")])]),
+//RS         "a": DataTree.Bool(true),
+//RS     ])
+//RS     print(json.canonical(data) ?? panic("value is not canonical JSON"))
+//RS 
+//RS     duplicate_output :: files.create("{duplicate}") ?? panic("duplicate create")
+//RS     duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+//RS     duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
+//RS     duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
+//RS     duplicate_writer.write(encoding.DataEvent.Int(1)) ?? panic("first value")
+//RS     duplicate_result :: duplicate_writer.write(encoding.DataEvent.Key("same"))
+//RS     if duplicate_result == {{
+//RS         .Ok(_) -> {{ print("duplicate-missed") }}
+//RS         .Err(first) -> {{
+//RS             again :: duplicate_writer.finish()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("terminal-missed") }}
+//RS                 .Err(second) -> {{ print(first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.max_item_bytes = 8
+//RS     limited_output :: files.create("{limited}") ?? panic("limited create")
+//RS     limited_writer :: json.writer(^limited_output, limits, true) ?? panic("limited writer")
+//RS     limited_writer.write(encoding.DataEvent.ObjectStart) ?? panic("limited object")
+//RS     limited_writer.write(encoding.DataEvent.Key("long")) ?? panic("limited key")
+//RS     limited_writer.write(encoding.DataEvent.Text("value")) ?? panic("limited value")
+//RS     limited_result :: limited_writer.write(encoding.DataEvent.ObjectEnd)
+//RS     if limited_result == {{
+//RS         .Ok(_) -> {{ print("limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             again :: &limited_writer.flush()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("limit-terminal-missed") }}
+//RS                 .Err(second) -> {{ print(first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_canonical_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     let expected = r#"{"a":true,"z":[1,{"a":"x","b":2}]}"#;
+//RS     assert_eq!(stdout, format!("{expected}\ntrue\ntrue\n"));
+//RS     assert_eq!(fs::read_to_string(&output_path).unwrap(), expected);
+//RS     assert_eq!(fs::read_to_string(&duplicate_path).unwrap(), "");
+//RS     assert_eq!(fs::read_to_string(&limited_path).unwrap(), "");
+//RS     assert_eq!(stderr, "");
+//RS     // No quick-run (default `jet run`) leg here: `core.files.create` isn't
+//RS     // supported by the shared deopt/interpreter ambient evaluator yet
+//RS     // (E0956, card #1583) — matches the AOT-only pattern already used by
+//RS     // `json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain`
+//RS     // just below, the sibling file-IO-heavy stream test.
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_jcs_stream_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let canonical_path = dir.join("canonical.json");
+//RS     let int_path = dir.join("int.json");
+//RS     let bytes_path = dir.join("bytes.json");
+//RS     let nonfinite_path = dir.join("nonfinite.json");
+//RS     let duplicate_path = dir.join("duplicate.json");
+//RS     let path = |path: &std::path::Path| path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{}") ?? panic("create canonical")
+//RS     writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer canonical")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+//RS     writer.write(encoding.DataEvent.Key("𐀀")) ?? panic("astral key")
+//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("astral value")
+//RS     writer.write(encoding.DataEvent.Key("")) ?? panic("bmp key")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     writer.write(encoding.DataEvent.Float(1e30)) ?? panic("positive exponent")
+//RS     writer.write(encoding.DataEvent.Float(1e20)) ?? panic("decimal cutover")
+//RS     writer.write(encoding.DataEvent.Float(1e-7)) ?? panic("negative exponent")
+//RS     writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero")
+//RS     writer.write(encoding.DataEvent.Int(9007199254740992)) ?? panic("exact Int boundary")
+//RS     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+//RS     writer.finish() ?? panic("finish")
+//RS 
+//RS     int_output :: files.create("{}") ?? panic("create int")
+//RS     int_writer :: json.writer(^int_output, encoding.EncodingLimits.safe(), true) ?? panic("int writer")
+//RS     if int_writer.write(encoding.DataEvent.Int(9007199254740993)) == {{
+//RS         .Ok(_) -> print("int accepted")
+//RS         .Err(error) -> print(error.reason)
+//RS     }}
+//RS 
+//RS     bytes_output :: files.create("{}") ?? panic("create bytes")
+//RS     bytes_writer :: json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
+//RS     bytes :: [U8]{{ U8.from_int(1) ?? panic("byte") }}
+//RS     if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {{
+//RS         .Ok(_) -> print("bytes accepted")
+//RS         .Err(error) -> print(error.reason)
+//RS     }}
+//RS 
+//RS     nonfinite_output :: files.create("{}") ?? panic("create nonfinite")
+//RS     nonfinite_writer :: json.writer(^nonfinite_output, encoding.EncodingLimits.safe(), true) ?? panic("nonfinite writer")
+//RS     if nonfinite_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) == {{
+//RS         .Ok(_) -> print("nonfinite accepted")
+//RS         .Err(error) -> print(error.reason)
+//RS     }}
+//RS 
+//RS     duplicate_output :: files.create("{}") ?? panic("create duplicate")
+//RS     duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+//RS     duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
+//RS     duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
+//RS     duplicate_writer.write(encoding.DataEvent.Null) ?? panic("first value")
+//RS     if duplicate_writer.write(encoding.DataEvent.Key("same")) == {{
+//RS         .Ok(_) -> print("duplicate accepted")
+//RS         .Err(error) -> print(error.reason)
+//RS     }}
+//RS }}
+//RS "#,
+//RS         path(&canonical_path),
+//RS         path(&int_path),
+//RS         path(&bytes_path),
+//RS         path(&nonfinite_path),
+//RS         path(&duplicate_path),
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_jcs_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "RFC 8785 stream test failed: {stderr}");
+//RS     assert_eq!(
+//RS         fs::read_to_string(&canonical_path).unwrap(),
+//RS         "{\"𐀀\":1,\"\":[1e+30,100000000000000000000,1e-7,0,9007199254740992]}"
+//RS     );
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text\nJSON cannot encode Bytes; encode bytes as Text explicitly\nJCS cannot encode a non-finite Float\nJCS requires unique object keys\n"
+//RS     );
+//RS     for rejected in [&int_path, &bytes_path, &nonfinite_path, &duplicate_path] {
+//RS         assert_eq!(fs::read(rejected).unwrap(), b"");
+//RS     }
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rfc8785_corpus_manifest_hashes_and_provenance_are_pinned() {
+//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS         .join("tests/fixtures/encoding/rfc8785");
+//RS     let manifest = fs::read_to_string(root.join("MANIFEST.tsv")).unwrap();
+//RS     let mut count = 0;
+//RS     for line in manifest.lines().filter(|line| !line.starts_with('#') && !line.is_empty()) {
+//RS         let fields = line.split('\t').collect::<Vec<_>>();
+//RS         assert_eq!(fields.len(), 4, "bad corpus manifest row: {line}");
+//RS         let bytes = fs::read(root.join(fields[0])).unwrap();
+//RS         assert_eq!(jet::SHA256::sha256_hex(&bytes), fields[1], "hash drift: {}", fields[0]);
+//RS         assert!(fields[2].starts_with("https://www.rfc-editor.org/rfc/rfc8785.html#"));
+//RS         assert_eq!(fields[3], "IETF-Trust-Legal-Provisions");
+//RS         count += 1;
+//RS     }
+//RS     assert_eq!(count, 2);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_canonical_stream_matches_every_finite_rfc8785_appendix_b_vector() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping RFC 8785 Appendix B stream corpus (need rustc)");
+//RS         return;
+//RS     }
+//RS     let corpus = fs::read_to_string(
+//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+//RS             .join("tests/fixtures/encoding/rfc8785/appendix-b.tsv"),
+//RS     )
+//RS     .unwrap();
+//RS     let cases = corpus
+//RS         .lines()
+//RS         .filter(|line| !line.starts_with('#') && !line.is_empty())
+//RS         .map(|line| {
+//RS             let (bits, expected) = line.split_once('\t').unwrap();
+//RS             (u64::from_str_radix(bits, 16).unwrap() as i64, expected)
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     assert_eq!(cases.len(), 24);
+//RS     let writes = cases
+//RS         .iter()
+//RS         .map(|(bits, _)| {
+//RS             let bits = if *bits == i64::MIN {
+//RS                 "(-9223372036854775807 - 1)".to_string()
+//RS             } else {
+//RS                 bits.to_string()
+//RS             };
+//RS             format!(
+//RS                 "    writer.write(encoding.DataEvent.Float(math.from_bits({bits}))) ?? panic(\"Appendix B value\")"
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join("\n");
+//RS     let expected = format!(
+//RS         "[{}]",
+//RS         cases.iter().map(|(_, expected)| *expected).collect::<Vec<_>>().join(",")
+//RS     );
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_jcs_appendix_b_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let output = dir.join("appendix-b.json");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS use core.math as math
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{}") ?? panic("create")
+//RS     writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS {}
+//RS     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+//RS     writer.finish() ?? panic("finish")
+//RS }}
+//RS "#,
+//RS         output.to_string_lossy().replace('\\', "\\\\"),
+//RS         writes,
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_jcs_appendix_b", &source, &[], None);
+//RS     assert_eq!(code, 0, "RFC 8785 Appendix B corpus failed: {stderr}");
+//RS     assert_eq!(stdout, "");
+//RS     assert_eq!(fs::read_to_string(&output).unwrap(), expected);
+//RS     // No quick-run (default `jet run`) leg here: `core.files.create` isn't
+//RS     // supported by the shared deopt/interpreter ambient evaluator yet
+//RS     // (E0956, card #1583) — matches the AOT-only pattern already used by
+//RS     // `json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain`,
+//RS     // the sibling file-IO-heavy stream test.
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jsonl_stream_records_are_incremental_bounded_and_terminal() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let output_path = dir.join("out.jsonl");
+//RS     let limited_path = dir.join("limited.jsonl");
+//RS     let input_path = dir.join("input.jsonl");
+//RS     let malformed_path = dir.join("malformed.jsonl");
+//RS     fs::write(&input_path, "\r\n  \r\n\"first\"\r\n[2,\"second\"]\n").unwrap();
+//RS     fs::write(&malformed_path, "{\"ok\":1}\n{\"bad\":[2,]}\n").unwrap();
+//RS     let output = output_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let limited = limited_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let input = input_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output}") ?? panic("create")
+//RS     writer :: jsonl.writer(^output) ?? panic("writer")
+//RS     writer.write(DataTree.Text("alpha")) ?? panic("write")
+//RS     writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
+//RS     &writer.flush() ?? panic("flush")
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("finish twice")
+//RS     after_finish :: writer.write(DataTree.Null)
+//RS     if after_finish == {{
+//RS         .Ok(_) -> {{ print("write-after-finish-missed") }}
+//RS         .Err(first) -> {{
+//RS             after_terminal :: &writer.flush()
+//RS             if after_terminal == {{
+//RS                 .Ok(_) -> {{ print("terminal-not-latched") }}
+//RS                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     input :: files.open("{input}") ?? panic("open")
+//RS     reader :: jsonl.reader(^input) ?? panic("reader")
+//RS     first_result :: reader.next() ?? panic("first")
+//RS     if first_result == {{
+//RS         Val(value) -> {{ print(value.text() ?? "bad") }}
+//RS         None -> {{ print("missing-first") }}
+//RS     }}
+//RS     second_result :: reader.next() ?? panic("second")
+//RS     if second_result == {{
+//RS         Val(value) -> {{
+//RS             first :: value.at(0) ?? DataTree.Int(-1)
+//RS             second :: value.at(1) ?? DataTree.Text("bad")
+//RS             print(first.int() ?? -1)
+//RS             print(second.text() ?? "bad")
+//RS         }}
+//RS         None -> {{ print("missing-second") }}
+//RS     }}
+//RS     eof_result :: reader.next() ?? panic("eof")
+//RS     if eof_result == None {{ print("eof") }} else {{ print("bad-eof") }}
+//RS     eof_again :: reader.next() ?? panic("eof again")
+//RS     if eof_again == None {{ print("eof-again") }} else {{ print("bad-eof-again") }}
+//RS 
+//RS     malformed_input :: files.open("{malformed}") ?? panic("open malformed")
+//RS     malformed_reader :: jsonl.reader(^malformed_input) ?? panic("reader malformed")
+//RS     first_malformed :: malformed_reader.next() ?? panic("first malformed record")
+//RS     malformed_result :: malformed_reader.next()
+//RS     if malformed_result == {{
+//RS         .Ok(_) -> {{ print("malformed-missed") }}
+//RS         .Err(first) -> {{
+//RS             malformed_again :: malformed_reader.next()
+//RS             if malformed_again == {{
+//RS                 .Ok(_) -> {{ print("malformed-not-latched") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.line ?? -1)
+//RS                     print(first.path)
+//RS                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.max_item_bytes = 2
+//RS     limited_output :: files.create("{limited}") ?? panic("limited create")
+//RS     limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
+//RS     limited_result :: limited_writer.write(DataTree.Text("three"))
+//RS     if limited_result == {{
+//RS         .Ok(_) -> {{ print("limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             limited_again :: limited_writer.finish()
+//RS             if limited_again == {{
+//RS                 .Ok(_) -> {{ print("limit-not-latched") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\nfirst\n2\nsecond\neof\neof-again\n2\n$[1][\"bad\"][1]\ntrue\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&output_path).unwrap(), "\"alpha\"\n[1,\"beta\"]\n");
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_jsonl_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let array_path = dir.join("array.jsonl");
+//RS     let object_path = dir.join("object.jsonl");
+//RS     let valid_path = dir.join("valid.jsonl");
+//RS     let scalar_path = dir.join("scalar.jsonl");
+//RS     let near_string_path = dir.join("near-string.jsonl");
+//RS     let array = format!("[{}]\n", std::iter::repeat("0").take(256).collect::<Vec<_>>().join(","));
+//RS     let object = format!(
+//RS         "{{{}}}\n",
+//RS         (0..256)
+//RS             .map(|index| format!(r#""key{index:04}":"""#))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",")
+//RS     );
+//RS     fs::write(&array_path, array).unwrap();
+//RS     fs::write(&object_path, object).unwrap();
+//RS     fs::write(&valid_path, format!("[{}]\n", std::iter::repeat("0").take(32).collect::<Vec<_>>().join(","))).unwrap();
+//RS     fs::write(&scalar_path, "1\n").unwrap();
+//RS     fs::write(&near_string_path, format!("{{\"{}\":0}}\n", "k".repeat(100_000))).unwrap();
+//RS     let array_path = array_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let object_path = object_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let valid_path = valid_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let scalar_path = scalar_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let near_string_path = near_string_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     near_limits := encoding.EncodingLimits.safe()
+//RS     near_limits.buffer_bytes = 4096
+//RS     near_limits.max_depth = 1
+//RS     near_limits.max_item_bytes = 100000
+//RS     near_limits.max_expansion_bytes = 0
+//RS     near_input :: files.open("{near_string_path}") ?? panic("near string open")
+//RS     near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
+//RS     near_result :: near_reader.next()
+//RS     if near_result == {{
+//RS         .Ok(_) -> {{ print("near-string-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             near_again :: near_reader.next()
+//RS             if near_again == {{
+//RS                 .Ok(_) -> {{ print("near-string-terminal-missed") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.byte_offset == 100003)
+//RS                     print(first.path)
+//RS                     print(first.reason)
+//RS                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     valid_limits := encoding.EncodingLimits.safe()
+//RS     valid_limits.max_item_bytes = 512
+//RS     valid_input :: files.open("{valid_path}") ?? panic("valid open")
+//RS     valid_reader :: jsonl.reader(^valid_input, valid_limits) ?? panic("valid reader")
+//RS     valid_record :: valid_reader.next() ?? panic("valid next")
+//RS     if valid_record == {{
+//RS         Val(value) -> {{
+//RS             last :: value.at(31) ?? DataTree.Int(-1)
+//RS             print(last.int() ?? -1)
+//RS         }}
+//RS         None -> {{ print("valid-missing") }}
+//RS     }}
+//RS 
+//RS     scalar_limits := encoding.EncodingLimits.safe()
+//RS     scalar_limits.max_item_bytes = 7
+//RS     scalar_input :: files.open("{scalar_path}") ?? panic("scalar open")
+//RS     scalar_reader :: jsonl.reader(^scalar_input, scalar_limits) ?? panic("scalar reader")
+//RS     scalar_result :: scalar_reader.next()
+//RS     if scalar_result == {{
+//RS         .Ok(_) -> {{ print("scalar-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             scalar_again :: scalar_reader.next()
+//RS             if scalar_again == {{
+//RS                 .Ok(_) -> {{ print("scalar-terminal-missed") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.path)
+//RS                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     array_limits := encoding.EncodingLimits.safe()
+//RS     array_limits.max_item_bytes = 512
+//RS     array_input :: files.open("{array_path}") ?? panic("array open")
+//RS     array_reader :: jsonl.reader(^array_input, array_limits) ?? panic("array reader")
+//RS     array_result :: array_reader.next()
+//RS     if array_result == {{
+//RS         .Ok(_) -> {{ print("array-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             array_again :: array_reader.next()
+//RS             if array_again == {{
+//RS                 .Ok(_) -> {{ print("array-terminal-missed") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.byte_offset < 256)
+//RS                     print(first.path)
+//RS                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     object_limits := encoding.EncodingLimits.safe()
+//RS     object_limits.max_item_bytes = 512
+//RS     object_input :: files.open("{object_path}") ?? panic("object open")
+//RS     object_reader :: jsonl.reader(^object_input, object_limits) ?? panic("object reader")
+//RS     object_result :: object_reader.next()
+//RS     if object_result == {{
+//RS         .Ok(_) -> {{ print("object-limit-missed") }}
+//RS         .Err(first) -> {{
+//RS             object_again :: object_reader.next()
+//RS             if object_again == {{
+//RS                 .Ok(_) -> {{ print("object-terminal-missed") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.byte_offset < 2048)
+//RS                     print(first.path)
+//RS                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_stream_drop_and_codec_heap_ceiling_are_enforced() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_stream_drop_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let partial_path = dir.join("partial.json");
+//RS     let heap_path = dir.join("heap.json");
+//RS     let key = "k".repeat(100_000);
+//RS     fs::write(&heap_path, format!("{{\"{key}\":0}}")).unwrap();
+//RS     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn write_unfinished(path: String) {{
+//RS     output :: files.create(path) ?? panic("create partial")
+//RS     writer :: json.writer(^output) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+//RS     &writer.flush() ?? panic("flush")
+//RS     // no finish — Drop must close the handle without claiming success
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_unfinished("{partial}")
+//RS     // Same-path reopen after Drop: unfinished bytes still on this path.
+//RS     leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+//RS     print(leftover == "[7")
+//RS     // Same-path recreate: Drop must have released the unfinished writer handle.
+//RS     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+//RS     reopen_writer :: json.writer(^reopen_out) ?? panic("reopen writer")
+//RS     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+//RS     reopen_writer.finish() ?? panic("reopen finish")
+//RS     finished :: files.read("{partial}") ?? panic("same-path read after finish")
+//RS     print(finished == "null")
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 100000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{heap}") ?? panic("heap open")
+//RS     reader :: json.reader(^input, limits) ?? panic("heap reader")
+//RS     count := 0
+//RS     loop count < 4 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("heap-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.path)
+//RS                         print(first.reason)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "json_stream_drop_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\n100003\n$\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("json_stream_drop_heap.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("JSON stream drop/heap default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn json_stream_number_token_stays_under_counting_allocator_ceiling() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping JSON counting-allocator test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_json_counted_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let input_path = dir.join("number.json");
+//RS     fs::write(&input_path, format!("1{}", "0".repeat(149_999))).unwrap();
+//RS     let input = input_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let malformed_path = dir.join("malformed.json");
+//RS     fs::write(&malformed_path, format!("1{}+", "0".repeat(199_998))).unwrap();
+//RS     let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 150000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{input}") ?? panic("open number")
+//RS     reader :: json.reader(^input, limits) ?? panic("create reader")
+//RS     result :: reader.next()
+//RS     if result == {{
+//RS         .Ok(_) -> {{ panic("oversized number allocation accepted") }}
+//RS         .Err(first) -> {{
+//RS             print(first.reason)
+//RS             again :: reader.next()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ panic("number allocation error not terminal") }}
+//RS                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     malformed_limits := encoding.EncodingLimits.safe()
+//RS     malformed_limits.buffer_bytes = 4096
+//RS     malformed_limits.max_depth = 1
+//RS     malformed_limits.max_item_bytes = 200000
+//RS     malformed_limits.max_expansion_bytes = 0
+//RS     malformed_input :: files.open("{malformed}") ?? panic("open malformed number")
+//RS     malformed_reader :: json.reader(^malformed_input, malformed_limits) ?? panic("create malformed reader")
+//RS     malformed_result :: malformed_reader.next()
+//RS     if malformed_result == {{
+//RS         .Ok(_) -> {{ panic("malformed number accepted") }}
+//RS         .Err(first) -> {{
+//RS             print(first.reason)
+//RS             again :: malformed_reader.next()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ panic("malformed number error not terminal") }}
+//RS                 .Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let path = dir.join("counted.jet");
+//RS     fs::write(&path, &source).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(&source, &shown).unwrap_or_else(|diags| {
+//RS         panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, &source, &diags))
+//RS     });
+//RS     let renamed = out.rust.replacen(
+//RS         "fn jet_enc_json_reader_next(",
+//RS         "fn jet_enc_json_reader_next_inner(",
+//RS         1,
+//RS     );
+//RS     assert_ne!(renamed, out.rust, "generated JSON reader seam changed");
+//RS     let allocator = r#"
+//RS mod jet_json_alloc_probe {
+//RS     use std::alloc::{GlobalAlloc, Layout, System};
+//RS     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//RS     pub struct CountingAlloc;
+//RS     static COUNTING: AtomicBool = AtomicBool::new(false);
+//RS     static LIVE: AtomicUsize = AtomicUsize::new(0);
+//RS     static PEAK: AtomicUsize = AtomicUsize::new(0);
+//RS     fn add(size: usize) {
+//RS         let live = LIVE.fetch_add(size, Ordering::SeqCst) + size;
+//RS         PEAK.fetch_max(live, Ordering::SeqCst);
+//RS     }
+//RS     unsafe impl GlobalAlloc for CountingAlloc {
+//RS         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+//RS             let ptr = System.alloc(layout);
+//RS             if !ptr.is_null() && COUNTING.load(Ordering::SeqCst) { add(layout.size()); }
+//RS             ptr
+//RS         }
+//RS         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+//RS             if COUNTING.load(Ordering::SeqCst) { LIVE.fetch_sub(layout.size(), Ordering::SeqCst); }
+//RS             System.dealloc(ptr, layout);
+//RS         }
+//RS         unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+//RS             let counting = COUNTING.load(Ordering::SeqCst);
+//RS             if counting { LIVE.fetch_sub(old.size(), Ordering::SeqCst); }
+//RS             let next = System.realloc(ptr, old, new_size);
+//RS             if counting { if next.is_null() { add(old.size()); } else { add(new_size); } }
+//RS             next
+//RS         }
+//RS     }
+//RS     pub fn begin() {
+//RS         LIVE.store(0, Ordering::SeqCst);
+//RS         PEAK.store(0, Ordering::SeqCst);
+//RS         COUNTING.store(true, Ordering::SeqCst);
+//RS     }
+//RS     pub fn finish() -> usize {
+//RS         COUNTING.store(false, Ordering::SeqCst);
+//RS         PEAK.load(Ordering::SeqCst)
+//RS     }
+//RS }
+//RS #[global_allocator]
+//RS static JET_JSON_ALLOC: jet_json_alloc_probe::CountingAlloc = jet_json_alloc_probe::CountingAlloc;
+//RS fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> {
+//RS     let ceiling = jet_encoding_codec_heap_ceiling(&reader.limits);
+//RS     jet_json_alloc_probe::begin();
+//RS     let result = jet_enc_json_reader_next_inner(reader);
+//RS     let peak = jet_json_alloc_probe::finish();
+//RS     assert!(peak <= ceiling, "JSON requested allocation peak {peak} exceeded {ceiling}");
+//RS     result
+//RS }
+//RS "#;
+//RS     let rs = dir.join("counted.rs");
+//RS     let bin = dir.join("counted");
+//RS     let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+//RS     assert_ne!(generated, renamed, "generated crate attribute changed");
+//RS     let rust = format!("#![allow(warnings)]\n{allocator}\n{generated}");
+//RS     let mut command = Command::new("rustc");
+//RS     let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+//RS     let rustc = command.arg("-o").arg(&bin).output().unwrap();
+//RS     assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
+//RS     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+//RS     assert!(run.status.success(), "counted JSON program failed:\n{}", String::from_utf8_lossy(&run.stderr));
+//RS     assert_eq!(
+//RS         String::from_utf8_lossy(&run.stdout),
+//RS         "JSON number allocation exceeded the bounded codec heap ceiling\ntrue\ninvalid JSON number\ntrue\n"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn jsonl_stream_drop_and_codec_heap_ceiling_are_enforced() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_drop_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let partial_path = dir.join("partial.jsonl");
+//RS     let heap_path = dir.join("heap.jsonl");
+//RS     let key = "k".repeat(100_000);
+//RS     fs::write(&heap_path, format!("{{\"{key}\":0}}\n")).unwrap();
+//RS     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn write_unfinished(path: String) {{
+//RS     output :: files.create(path) ?? panic("create partial")
+//RS     writer :: jsonl.writer(^output) ?? panic("writer")
+//RS     writer.write(DataTree.Text("alpha")) ?? panic("record")
+//RS     &writer.flush() ?? panic("flush")
+//RS     // no finish — Drop must leave the record LF unwritten (incomplete wire)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_unfinished("{partial}")
+//RS     // Same-path reopen after Drop: incomplete bytes (no record LF) still here.
+//RS     leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+//RS     print(leftover == "\"alpha\"")
+//RS     // Same-path recreate: Drop must have released the unfinished writer handle.
+//RS     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+//RS     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
+//RS     reopen_writer.write(DataTree.Null) ?? panic("reopen write")
+//RS     reopen_writer.finish() ?? panic("reopen finish")
+//RS     finished :: files.read("{partial}") ?? panic("same-path read after finish")
+//RS     print(finished == "null\n")
+//RS     // Honesty: unfinished Drop wire ≠ finished wire for the same value.
+//RS     print(leftover != "\"alpha\"\n")
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 100000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{heap}") ?? panic("heap open")
+//RS     reader :: jsonl.reader(^input, limits) ?? panic("heap reader")
+//RS     count := 0
+//RS     loop count < 4 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("heap-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.path)
+//RS                         print(first.reason)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_stream_drop_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\ntrue\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("jsonl_stream_drop_heap.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("JSONL stream drop/heap default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn csv_stream_drop_and_codec_heap_ceiling_are_enforced() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_csv_stream_drop_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"csv_stream_drop_heap\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let partial_path = dir.join("partial.csv");
+//RS     let heap_path = dir.join("heap.csv");
+//RS     // Capacity doubles to 131072; the next byte charges past the shared codec
+//RS     // heap ceiling while still under max_item_bytes (same counting allocator).
+//RS     let field = "x".repeat(131_072);
+//RS     fs::write(&heap_path, format!("{field}y")).unwrap();
+//RS     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.csv as csv
+//RS use core.files as files
+//RS 
+//RS fn write_unfinished(path: String) {{
+//RS     output :: files.create(path) ?? panic("create partial")
+//RS     writer :: csv.writer(^output) ?? panic("writer")
+//RS     writer.write(["alpha", "beta"]) ?? panic("record")
+//RS     &writer.flush() ?? panic("flush")
+//RS     // no finish — Drop must leave the record CRLF unwritten (incomplete wire)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_unfinished("{partial}")
+//RS     // Same-path reopen after Drop: incomplete bytes (no record CRLF) still here.
+//RS     leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+//RS     print(leftover == "alpha,beta")
+//RS     // Same-path recreate: Drop must have released the unfinished writer handle.
+//RS     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+//RS     reopen_writer :: csv.writer(^reopen_out) ?? panic("reopen writer")
+//RS     reopen_writer.write(["done"]) ?? panic("reopen write")
+//RS     reopen_writer.finish() ?? panic("reopen finish")
+//RS     finished :: files.read("{partial}") ?? panic("same-path read after finish")
+//RS     // finished is "done\\r\\n"; Jet has no \\r escape — prove via length + prefix.
+//RS     print(finished.starts_with("done") && finished.len() == 6)
+//RS     // Honesty: unfinished Drop wire ≠ finished row terminator.
+//RS     print(leftover.len() == 10)
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 150000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{heap}") ?? panic("heap open")
+//RS     reader :: csv.reader(^input, limits) ?? panic("heap reader")
+//RS     count := 0
+//RS     loop count < 4 {{
+//RS         if reader.next() == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 if reader.next() == {{
+//RS                     .Ok(_) -> {{ print("heap-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.path)
+//RS                         print(first.reason)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "csv_stream_drop_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\ntrue\n131073\n$[0][0]\nCSV record heap exceeded the bounded codec heap ceiling\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("csv_stream_drop_heap.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("CSV stream drop/heap default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn xml_stream_drop_and_codec_heap_ceiling_are_enforced() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_xml_stream_drop_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let partial_path = dir.join("partial.xml");
+//RS     let heap_path = dir.join("heap.xml");
+//RS     // Attribute text under max_item_bytes; raw_bytes→Array<Int> DataTree slots
+//RS     // charge past the shared codec heap ceiling (same counting allocator).
+//RS     // Keep modest: ByteLexer retains per-scalar units, so 128KiB hung the suite.
+//RS     let attr = "x".repeat(8_192);
+//RS     fs::write(&heap_path, format!("<r a=\"{attr}\"/>")).unwrap();
+//RS     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.xml as xml
+//RS use core.files as files
+//RS 
+//RS fn xml_name(local: String) -> DataTree {{
+//RS     return DataTree.Object([
+//RS         "raw": DataTree.Text(~local),
+//RS         "prefix": DataTree.Null,
+//RS         "local": DataTree.Text(~local),
+//RS         "namespace_uri": DataTree.Null,
+//RS     ])
+//RS }}
+//RS 
+//RS fn document_start() -> DataTree {{
+//RS     return DataTree.Object([
+//RS         "$xml_event": DataTree.Text("document_start"),
+//RS         "encoding": DataTree.Null,
+//RS         "bom": DataTree.Array([]),
+//RS     ])
+//RS }}
+//RS 
+//RS fn document_end() -> DataTree {{
+//RS     return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+//RS }}
+//RS 
+//RS fn element_start(empty_style: String) -> DataTree {{
+//RS     return DataTree.Object([
+//RS         "$xml_event": DataTree.Text("element_start"),
+//RS         "name": xml_name("r"),
+//RS         "namespaces": DataTree.Array([]),
+//RS         "attributes": DataTree.Array([]),
+//RS         "empty_style": DataTree.Text(~empty_style),
+//RS         "open_lexical": DataTree.Object([
+//RS             "raw_text": DataTree.Null,
+//RS             "raw_bytes": DataTree.Null,
+//RS             "semantic": DataTree.Object([
+//RS                 "name": xml_name("r"),
+//RS                 "namespaces": DataTree.Array([]),
+//RS                 "attributes": DataTree.Array([]),
+//RS                 "empty_style": DataTree.Text(~empty_style),
+//RS             ]),
+//RS         ]),
+//RS     ])
+//RS }}
+//RS 
+//RS fn write_unfinished(path: String) {{
+//RS     output :: files.create(path) ?? panic("create partial")
+//RS     writer :: xml.writer(^output) ?? panic("writer")
+//RS     writer.write(document_start()) ?? panic("document_start")
+//RS     writer.write(element_start("explicit")) ?? panic("open root")
+//RS     &writer.flush() ?? panic("flush")
+//RS     // no element_end / document_end / finish — Drop leaves incomplete open tag
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_unfinished("{partial}")
+//RS     // Same-path reopen after Drop: incomplete open element still here.
+//RS     leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+//RS     print(leftover == "<r>")
+//RS     // Same-path recreate: Drop must have released the unfinished writer handle.
+//RS     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+//RS     reopen_writer :: xml.writer(^reopen_out) ?? panic("reopen writer")
+//RS     reopen_writer.write(document_start()) ?? panic("reopen start")
+//RS     reopen_writer.write(element_start("empty")) ?? panic("reopen empty root")
+//RS     reopen_writer.write(document_end()) ?? panic("reopen end")
+//RS     reopen_writer.finish() ?? panic("reopen finish")
+//RS     finished :: files.read("{partial}") ?? panic("same-path read after finish")
+//RS     print(finished == "<r/>")
+//RS     // Honesty: unfinished Drop wire ≠ finished complete document.
+//RS     print(leftover != finished)
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 150000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{heap}") ?? panic("heap open")
+//RS     reader :: xml.reader(^input, limits) ?? panic("heap reader")
+//RS     count := 0
+//RS     loop count < 8 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("heap-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.path)
+//RS                         print(first.reason)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "xml_stream_drop_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         format!(
+//RS             "true\ntrue\ntrue\n{}\n$\nXML event heap exceeded the bounded codec heap ceiling\ntrue\n",
+//RS             fs::metadata(&heap_path).unwrap().len()
+//RS         )
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("xml_stream_drop_heap.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("XML stream drop/heap default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn cbor_stream_drop_and_codec_heap_ceiling_are_enforced() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_cbor_stream_drop_heap_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let partial_path = dir.join("partial.cbor");
+//RS     let heap_path = dir.join("heap.cbor");
+//RS     // Capacity doubles to 131072; the next byte charges past the shared codec
+//RS     // heap ceiling while still under max_item_bytes (same counting allocator).
+//RS     let text = vec![b'x'; 131_073];
+//RS     let mut heap_bytes = Vec::new();
+//RS     heap_bytes.push(0x7a); // text, 4-byte length
+//RS     heap_bytes.extend_from_slice(&(131_073u32).to_be_bytes());
+//RS     heap_bytes.extend_from_slice(&text);
+//RS     fs::write(&heap_path, &heap_bytes).unwrap();
+//RS     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn write_unfinished(path: String) {{
+//RS     output :: files.create(path) ?? panic("create partial")
+//RS     writer :: cbor.writer(^output) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+//RS     &writer.flush() ?? panic("flush")
+//RS     // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_unfinished("{partial}")
+//RS     // Same-path reopen after Drop: incomplete leftover still here (empty wire).
+//RS     leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
+//RS     empty :: [U8]{{}}
+//RS     print(leftover == empty)
+//RS     // Same-path recreate: Drop must have released the unfinished writer handle.
+//RS     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+//RS     reopen_writer :: cbor.writer(^reopen_out) ?? panic("reopen writer")
+//RS     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+//RS     reopen_writer.finish() ?? panic("reopen finish")
+//RS     finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
+//RS     null_wire :: [U8]{{ 246 }}
+//RS     print(finished == null_wire)
+//RS     // Honesty: unfinished Drop wire ≠ finished complete root.
+//RS     print(leftover != finished)
+//RS 
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.buffer_bytes = 4096
+//RS     limits.max_depth = 1
+//RS     limits.max_item_bytes = 150000
+//RS     limits.max_expansion_bytes = 0
+//RS     input :: files.open("{heap}") ?? panic("heap open")
+//RS     reader :: cbor.reader(^input, limits) ?? panic("heap reader")
+//RS     count := 0
+//RS     loop count < 4 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(_) -> {{ count++ }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("heap-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset)
+//RS                         print(first.path)
+//RS                         print(first.reason)
+//RS                         print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "cbor_stream_drop_heap", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     // Header is 5 bytes (0x7a + u32 length); fail when doubling past 131072 payload bytes.
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\ntrue\ntrue\n131077\n$\nCBOR stream heap exceeded the bounded codec heap ceiling\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("cbor_stream_drop_heap.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("CBOR stream drop/heap default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_csv_whole_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let source = r#"
+//RS use core.encoding.csv as csv
+//RS 
+//RS #Codable
+//RS struct Note { name: String, note: String }
+//RS 
+//RS fn csv_error_contains(input: String, needle: String) -> Bool {
+//RS     _rows :: csv.parse(input) ?? {
+//RS         return err.contains(needle)
+//RS     }
+//RS     return false
+//RS }
+//RS 
+//RS fn run() {
+//RS     raw :: "name,note\nAda,\"line1\nline2\"\nLin,\"said \"\"hi\"\"\"\n"
+//RS     rows :: csv.parse(raw) ?? panic("parse")
+//RS     print(rows.len())
+//RS     print(rows[1][1])
+//RS     print(rows[2][1])
+//RS     print(csv.to_string(rows).replace("\n", "|"))
+//RS 
+//RS     notes :: csv.decode<Note>(raw) ?? panic("decode")
+//RS     print(notes.len())
+//RS     print(notes[0].name)
+//RS     print(notes[0].note)
+//RS 
+//RS     print(csv_error_contains("a,\"unterminated", "quoted field ended before its closing quote"))
+//RS     print(csv_error_contains("a,\"ok\"junk", "may follow a closing quote"))
+//RS }
+//RS "#;
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "csv_whole", source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "3\nline1\nline2\nsaid \"hi\"\nname,note|Ada,\"line1|line2\"|Lin,\"said \"\"hi\"\"\"\n2\nAda\nline1\nline2\ntrue\ntrue\n"
+//RS     );
+//RS     assert_eq!(stderr, "");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
+//RS     let dir = std::env::temp_dir().join(format!("jet_csv_stream_{}", std::process::id()));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     fs::write(
+//RS         dir.join("package.jet"),
+//RS         "name: \"csv_stream\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let input_path = dir.join("input.csv");
+//RS     let output_path = dir.join("output.csv");
+//RS     let malformed_path = dir.join("malformed.csv");
+//RS     let invalid_utf8_path = dir.join("invalid-utf8.csv");
+//RS     let item_limit_path = dir.join("item-limit.csv");
+//RS     let total_limit_path = dir.join("total-limit.csv");
+//RS     let options_path = dir.join("options.tsv");
+//RS     fs::write(&input_path, "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail").unwrap();
+//RS     fs::write(&malformed_path, "\"bad").unwrap();
+//RS     fs::write(&invalid_utf8_path, [b'a', b',', 0xff]).unwrap();
+//RS     fs::write(&item_limit_path, "\"abcd\"\r\n").unwrap();
+//RS     fs::write(&total_limit_path, "a,b\r\n").unwrap();
+//RS     fs::write(&options_path, "name\tnote\r\n\r\nAda\t\"line1\r\nline2\"\r\n").unwrap();
+//RS     let input = input_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let output = output_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let invalid_utf8 = invalid_utf8_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let item_limit = item_limit_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let total_limit = total_limit_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let options = options_path.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.csv as csv
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output}") ?? panic("create")
+//RS     writer :: csv.writer(^output) ?? panic("writer")
+//RS     writer.write(["a", "b,b", "c\"c", "line1\nline2"]) ?? panic("write first")
+//RS     writer.write(["last", "", "tail"]) ?? panic("write second")
+//RS     &writer.flush() ?? panic("flush")
+//RS     writer.finish() ?? panic("finish")
+//RS     writer.finish() ?? panic("finish twice")
+//RS     if writer.write(["late"]) == {{
+//RS         .Ok(_) -> {{ print("write-after-finish-missed") }}
+//RS         .Err(writer_first) -> {{
+//RS             if &writer.flush() == {{
+//RS                 .Ok(_) -> {{ print("writer-terminal-missed") }}
+//RS                 .Err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     input :: files.open("{input}") ?? panic("open")
+//RS     reader :: csv.reader(^input) ?? panic("reader")
+//RS     first :: reader.next()
+//RS     if first == {{
+//RS         .Val(row) -> {{
+//RS             print(row.fields[0])
+//RS             print(row.line)
+//RS             print(row.fields[1])
+//RS             print(row.fields[2])
+//RS             print(row.fields[3])
+//RS         }}
+//RS         .None -> {{ print("first-missing") }}
+//RS     }}
+//RS     second :: reader.next()
+//RS     if second == {{
+//RS         .Val(row) -> {{
+//RS             print(row.fields[0])
+//RS             print(row.line)
+//RS             print(row.fields[1] == "")
+//RS             print(row.fields[2])
+//RS         }}
+//RS         .None -> {{ print("second-missing") }}
+//RS     }}
+//RS     eof :: reader.next()
+//RS     if eof == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
+//RS     eof_again :: reader.next()
+//RS     if eof_again == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
+//RS     options_input :: files.open("{options}") ?? panic("options open")
+//RS     options_reader :: csv.reader(
+//RS         ^options_input, delimiter: "\t", header: true, skip_blank: true
+//RS     ) ?? panic("options reader")
+//RS     options_first :: options_reader.next()
+//RS     crlf :: String.from_bytes([U8]{{"\x0D\x0A"}}) ?? panic("crlf")
+//RS     if options_first == {{
+//RS         .Val(row) -> {{
+//RS             print(row.line)
+//RS             print(row.fields[0])
+//RS             print(&row.fields[1].replace(crlf, "|"))
+//RS         }}
+//RS         .None -> {{ print("options-missing") }}
+//RS     }}
+//RS     options_eof :: options_reader.next()
+//RS     if options_eof == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
+//RS 
+//RS     malformed_input :: files.open("{malformed}") ?? panic("malformed open")
+//RS     malformed_reader :: csv.reader(^malformed_input) ?? panic("malformed reader")
+//RS     if malformed_reader.next() == {{
+//RS         .Ok(_) -> {{ print("malformed-missed") }}
+//RS         .Err(malformed_first) -> {{
+//RS             if malformed_reader.next() == {{
+//RS                 .Ok(_) -> {{ print("malformed-terminal-missed") }}
+//RS                 .Err(malformed_second) -> {{
+//RS                     print(malformed_first.path)
+//RS                     print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     invalid_utf8_input :: files.open("{invalid_utf8}") ?? panic("invalid utf8 open")
+//RS     invalid_utf8_reader :: csv.reader(^invalid_utf8_input) ?? panic("invalid utf8 reader")
+//RS     if invalid_utf8_reader.next() == {{
+//RS         .Ok(_) -> {{ print("invalid-utf8-missed") }}
+//RS         .Err(error) -> {{
+//RS             print(error.byte_offset)
+//RS             print(error.line ?? 0)
+//RS             print(error.column ?? 0)
+//RS             print(error.path)
+//RS         }}
+//RS     }}
+//RS 
+//RS     item_limits := encoding.EncodingLimits.safe()
+//RS     item_limits.max_item_bytes = 3
+//RS     item_input :: files.open("{item_limit}") ?? panic("item open")
+//RS     item_reader :: csv.reader(^item_input, item_limits) ?? panic("item reader")
+//RS     if item_reader.next() == {{
+//RS         .Ok(_) -> {{ print("item-limit-missed") }}
+//RS         .Err(item_first) -> {{
+//RS             if item_reader.next() == {{
+//RS                 .Ok(_) -> {{ print("item-terminal-missed") }}
+//RS                 .Err(item_second) -> {{
+//RS                     print(item_first.path)
+//RS                     print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     total_limits := encoding.EncodingLimits.safe()
+//RS     total_limits.max_total_bytes = Val(3)
+//RS     total_input :: files.open("{total_limit}") ?? panic("total open")
+//RS     total_reader :: csv.reader(^total_input, total_limits) ?? panic("total reader")
+//RS     if total_reader.next() == {{
+//RS         .Ok(_) -> {{ print("total-limit-missed") }}
+//RS         .Err(total_first) -> {{
+//RS             if total_reader.next() == {{
+//RS                 .Ok(_) -> {{ print("total-terminal-missed") }}
+//RS                 .Err(total_second) -> {{
+//RS                     print(total_first.byte_offset)
+//RS                     print(total_first.path)
+//RS                     print(total_first.reason == total_second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS 
+//RS     writer_limits := encoding.EncodingLimits.safe()
+//RS     writer_limits.max_item_bytes = 3
+//RS     limited_output :: files.create("{output}.limited") ?? panic("limited create")
+//RS     limited_writer :: csv.writer(^limited_output, writer_limits) ?? panic("limited writer")
+//RS     if limited_writer.write(["abcd"]) == {{
+//RS         .Ok(_) -> {{ print("writer-limit-missed") }}
+//RS         .Err(limited_first) -> {{
+//RS             _ :: limited_writer.finish() ?? {{
+//RS                 print(limited_first.path)
+//RS                 print(limited_first.reason == err.reason)
+//RS                 return
+//RS             }}
+//RS             print("writer-limit-terminal-missed")
+//RS             return
+//RS             }}
+//RS         }}
+//RS     }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "csv_stream", &source, &[], None);
+//RS     assert_eq!(code, 0, "stderr: {stderr}");
+//RS     assert_eq!(
+//RS         stdout,
+//RS         "true\na\n1\nb,b\nc\"c\nline1\nline2\nlast\n3\ntrue\ntail\ntrue\ntrue\n3\nAda\nline1|line2\ntrue\n$[0][0]\ntrue\n2\n1\n4\n$[0][1]\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
+//RS     );
+//RS     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
+//RS     assert_eq!(stderr, "");
+//RS     let dev_path = dir.join("csv_stream.jet");
+//RS     fs::write(&dev_path, &source).unwrap();
+//RS     match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+//RS         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+//RS             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+//RS         }
+//RS         other => panic!("CSV stream default-dev failed: {other:?}"),
+//RS     }
+//RS     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+// END-PORT-PENDING 1015 tests/corelib_parts/encoding_streams.rs:1-1786
+

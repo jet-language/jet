@@ -1,0 +1,1689 @@
+// PORT-PENDING 0138 crates-jet-codegen-src-prelude-core-slice-1: crates/jet-codegen/src/Prelude/Core.rs:1-1685
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS /// The ordinary library-defined contract for a checked String-backed type.
+//RS /// Sema resolves implementations through the normal trait registry; every
+//RS /// execution tier calls these same pure methods.
+//RS pub trait CheckedText {
+//RS     type Error;
+//RS     fn check(text: &String) -> Result<(), Self::Error>;
+//RS     fn encode_hole<T: JetShow>(value: &T) -> String;
+//RS }
+//RS 
+//RS /// D-PERSIST-DEVSTATE1=A: AOT's persistent slot is an interior-mutable
+//RS /// Prelude cell. The generated module binding stays safe Rust; the execution
+//RS /// engine only reads and writes this one storage abstraction.
+//RS pub struct JetPersistCell<T> {
+//RS     value: std::sync::Mutex<Option<T>>,
+//RS }
+//RS 
+//RS impl<T> JetPersistCell<T> {
+//RS     pub const fn new(value: T) -> Self {
+//RS         Self {
+//RS             value: std::sync::Mutex::new(Some(value)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn guard(&self) -> std::sync::MutexGuard<'_, Option<T>> {
+//RS         self.value
+//RS             .lock()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS     }
+//RS 
+//RS     pub fn get(&self) -> T
+//RS     where
+//RS         T: Clone,
+//RS     {
+//RS         self.guard()
+//RS             .as_ref()
+//RS             .expect("MIR persistent value is uninitialized")
+//RS             .clone()
+//RS     }
+//RS 
+//RS     pub fn take(&self) -> T {
+//RS         self.guard()
+//RS             .take()
+//RS             .expect("MIR persistent value is uninitialized")
+//RS     }
+//RS 
+//RS     pub fn set(&self, value: T) {
+//RS         *self.guard() = Some(value);
+//RS     }
+//RS }
+//RS 
+//RS /// The value slot of a read of a folded aggregate constant: the constant is
+//RS /// one per-thread value built once, so a read borrows it in place and only an
+//RS /// owned use or a write copies it (a uniquely held value is moved, not
+//RS /// copied). The slot keeps the `Option` slot API (`as_ref`, `as_mut`, `take`)
+//RS /// its readers use.
+//RS pub struct JetSharedSlot<T>(Option<std::rc::Rc<T>>);
+//RS 
+//RS impl<T: Clone> JetSharedSlot<T> {
+//RS     pub const fn empty() -> Self {
+//RS         Self(None)
+//RS     }
+//RS 
+//RS     pub fn new(value: std::rc::Rc<T>) -> Self {
+//RS         Self(Some(value))
+//RS     }
+//RS 
+//RS     pub fn as_ref(&self) -> Option<&T> {
+//RS         self.0.as_deref()
+//RS     }
+//RS 
+//RS     pub fn as_mut(&mut self) -> Option<&mut T> {
+//RS         self.0.as_mut().map(std::rc::Rc::make_mut)
+//RS     }
+//RS 
+//RS     pub fn take(&mut self) -> Option<T> {
+//RS         self.0.take().map(std::rc::Rc::unwrap_or_clone)
+//RS     }
+//RS 
+//RS     /// Ends this read without copying the shared rows.
+//RS     pub fn release(&mut self) {
+//RS         self.0 = None;
+//RS     }
+//RS }
+//RS impl JetShow for (String, jet_foundation::Numeric::JetInt) {
+//RS     fn jet_show(&self) -> String {
+//RS         jet_foundation::StructuralDebug::jet_debug_record(
+//RS             "(key,value)",
+//RS             [
+//RS                 ("key".to_string(), self.0.jet_show()),
+//RS                 ("value".to_string(), self.1.jet_show()),
+//RS             ],
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for (String, jet_foundation::Numeric::JetInt) {
+//RS     fn jet_display(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for (String, jet_foundation::Numeric::JetInt) {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.jet_show()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetDate {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetLocalTime {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetPeriod {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetDateTime {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetZone {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetZonedDateTime {
+//RS     fn jet_show(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetDate {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetDate {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetLocalTime {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetLocalTime {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetPeriod {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetPeriod {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetDateTime {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetDateTime {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetZone {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetZone {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetZonedDateTime {
+//RS     fn jet_display(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetZonedDateTime {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.to_string_fmt()
+//RS     }
+//RS }
+//RS 
+//RS // D-TIME-INSTANT-SPLIT1=A: Date/LocalTime/DateTime/ZonedDateTime are fixed
+//RS // runtime carriers. Keep their Jet comparison implementations here with the
+//RS // carriers, so the optional Core crate does not violate Rust's orphan rule.
+//RS fn jet_time_ordering(ordering: std::cmp::Ordering) -> __jet_Ordering {
+//RS     match ordering {
+//RS         std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
+//RS         std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
+//RS         std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for JetDate {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for JetDate {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(rhs))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for JetLocalTime {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for JetLocalTime {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(rhs))
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Equatable for JetDateTime {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for JetDateTime {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.cmp(rhs))
+//RS     }
+//RS }
+//RS 
+//RS // ZonedDateTime `==` is instant plus zone identity. Temporal keeps that
+//RS // value equality distinct from its separate `equals` distinction.
+//RS impl __jet_Equatable for JetZonedDateTime {
+//RS     fn equal(&self, rhs: &Self) -> bool {
+//RS         self == rhs
+//RS     }
+//RS }
+//RS 
+//RS impl __jet_Comparable for JetZonedDateTime {
+//RS     fn compare(&self, rhs: &Self) -> __jet_Ordering {
+//RS         jet_time_ordering(self.instant.cmp(&rhs.instant))
+//RS     }
+//RS }
+//RS // D-PARCAPTURE1=D: one failure-aware wrapper around the shared indexed
+//RS // collection scheduler. Chunk boundaries and result order live in the shared
+//RS // Prelude collection seam; this wrapper only carries the AOT failure rail.
+//RS 
+//RS struct JetParaFailure {
+//RS     index: usize,
+//RS     payload: Box<dyn std::any::Any + Send + 'static>,
+//RS }
+//RS 
+//RS enum JetParaRuntimeFailure {
+//RS     Simple {
+//RS         code: &'static str,
+//RS         file: String,
+//RS         line: u32,
+//RS         fn_name: String,
+//RS         src_line: String,
+//RS         msg: String,
+//RS     },
+//RS     Rich {
+//RS         code: &'static str,
+//RS         file: String,
+//RS         line: u32,
+//RS         fn_name: String,
+//RS         src_line: String,
+//RS         col: u32,
+//RS         caret_len: u32,
+//RS         msg: String,
+//RS         locals: String,
+//RS     },
+//RS     Diagnostic {
+//RS         rendered: String,
+//RS     },
+//RS     Contract {
+//RS         file: String,
+//RS         line: u32,
+//RS         clause_kw: String,
+//RS         msg: String,
+//RS     },
+//RS     SchedulerFatal {
+//RS         msg: String,
+//RS     },
+//RS }
+//RS 
+//RS impl JetParaRuntimeFailure {
+//RS     fn raise(self) -> ! {
+//RS         match self {
+//RS             Self::Simple {
+//RS                 code,
+//RS                 file,
+//RS                 line,
+//RS                 fn_name,
+//RS                 src_line,
+//RS                 msg,
+//RS             } => jet_runtime_stop_with_context(code, &file, line, &fn_name, &src_line, &msg),
+//RS             Self::Rich {
+//RS                 code,
+//RS                 file,
+//RS                 line,
+//RS                 fn_name,
+//RS                 src_line,
+//RS                 col,
+//RS                 caret_len,
+//RS                 msg,
+//RS                 locals,
+//RS             } => jet_panic_rich_code(
+//RS                 code, &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals,
+//RS             ),
+//RS             Self::Diagnostic { rendered } => jet_runtime_diagnostic(rendered),
+//RS             Self::Contract {
+//RS                 file,
+//RS                 line,
+//RS                 clause_kw,
+//RS                 msg,
+//RS             } => jet_contract_fail(&file, line, &clause_kw, &msg),
+//RS             Self::SchedulerFatal { msg } => jet_runtime_stop("E3001", "", 0, &msg),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS thread_local! {
+//RS     pub static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS }
+//RS 
+//RS fn jet_para_call<R, F>(index: usize, f: F) -> Result<R, JetParaFailure>
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     let result = JET_PARA_DEFER_FAILURE.with(|defer| {
+//RS         let previous = defer.replace(true);
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+//RS         defer.set(previous);
+//RS         result
+//RS     });
+//RS     result.map_err(|payload| JetParaFailure { index, payload })
+//RS }
+//RS 
+//RS fn jet_para_raise_failure(failure: JetParaFailure) -> ! {
+//RS     match failure.payload.downcast::<JetParaRuntimeFailure>() {
+//RS         Ok(failure) => (*failure).raise(),
+//RS         Err(payload) => std::panic::resume_unwind(payload),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_list_para_chunks<R, F>(len: usize, worker_limit: usize, f: F) -> Vec<R>
+//RS where
+//RS     R: Send,
+//RS     F: Fn(std::ops::Range<usize>) -> Result<R, JetParaFailure> + Sync,
+//RS {
+//RS     #[cfg(jet_para_test_workers)]
+//RS     let worker_cap = 3;
+//RS     #[cfg(not(jet_para_test_workers))]
+//RS     let worker_cap = std::thread::available_parallelism()
+//RS         .map(|n| n.get())
+//RS         .unwrap_or(1);
+//RS     let (indexed, _) = jet_list_para_chunks_measured(
+//RS         len,
+//RS         worker_limit,
+//RS         worker_cap,
+//RS         true,
+//RS         true,
+//RS         true,
+//RS         JetAccelerationTransform::PooledParallelChunks,
+//RS         false,
+//RS         false,
+//RS         None,
+//RS         f,
+//RS     );
+//RS     let mut results = Vec::with_capacity(indexed.len());
+//RS     let mut first_failure: Option<JetParaFailure> = None;
+//RS     for (_, outcome) in indexed {
+//RS         match outcome {
+//RS             Ok(result) => results.push(result),
+//RS             Err(failure)
+//RS                 if first_failure
+//RS                     .as_ref()
+//RS                     .is_none_or(|first| failure.index < first.index) =>
+//RS             {
+//RS                 first_failure = Some(failure);
+//RS             }
+//RS             Err(_) => {}
+//RS         }
+//RS     }
+//RS     if let Some(failure) = first_failure {
+//RS         jet_para_raise_failure(failure);
+//RS     }
+//RS     results
+//RS }
+//RS 
+//RS fn jet_list_para_map<T, U, F>(
+//RS     xs: Vec<T>,
+//RS     f: F,
+//RS     limit: jet_foundation::Numeric::JetInt,
+//RS ) -> Vec<U>
+//RS where
+//RS     T: Sync,
+//RS     U: Send,
+//RS     F: Fn(&T) -> U + Sync,
+//RS {
+//RS     let worker_limit = jet_std::jet_int_owned_to_i64(&limit)
+//RS         .ok()
+//RS         .and_then(|value| usize::try_from(value).ok())
+//RS         .unwrap_or(usize::MAX)
+//RS         .max(1);
+//RS     jet_list_para_chunks(xs.len(), worker_limit, |range| {
+//RS         let mut out = Vec::with_capacity(range.len());
+//RS         for index in range {
+//RS             out.push(jet_para_call(index, || f(&xs[index]))?);
+//RS         }
+//RS         Ok(out)
+//RS     })
+//RS     .into_iter()
+//RS     .flatten()
+//RS     .collect()
+//RS }
+//RS 
+//RS fn jet_list_para_flags<T, F>(xs: &[T], f: F) -> Vec<bool>
+//RS where
+//RS     T: Sync,
+//RS     F: Fn(&T) -> bool + Sync,
+//RS {
+//RS     jet_list_para_chunks(xs.len(), usize::MAX, |range| {
+//RS         let mut out = Vec::with_capacity(range.len());
+//RS         for index in range {
+//RS             out.push(jet_para_call(index, || f(&xs[index]))?);
+//RS         }
+//RS         Ok(out)
+//RS     })
+//RS     .into_iter()
+//RS     .flatten()
+//RS     .collect()
+//RS }
+//RS 
+//RS fn jet_list_para_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
+//RS where
+//RS     T: Sync,
+//RS     F: Fn(&T) -> bool + Sync,
+//RS {
+//RS     let keep = jet_list_para_flags(&xs, f);
+//RS     xs.into_iter()
+//RS         .zip(keep)
+//RS         .filter_map(|(x, keep)| keep.then_some(x))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_list_para_partition<T, F, R, O>(xs: Vec<T>, f: F, out: O) -> R
+//RS where
+//RS     T: Sync,
+//RS     F: Fn(&T) -> bool + Sync,
+//RS     O: FnOnce(Vec<T>, Vec<T>) -> R,
+//RS {
+//RS     let matches = jet_list_para_flags(&xs, f);
+//RS     let mut false_items = Vec::new();
+//RS     let mut true_items = Vec::new();
+//RS     for (item, matched) in xs.into_iter().zip(matches) {
+//RS         if matched {
+//RS             true_items.push(item);
+//RS         } else {
+//RS             false_items.push(item);
+//RS         }
+//RS     }
+//RS     out(false_items, true_items)
+//RS }
+//RS 
+//RS fn jet_list_para_fold<T, U, S, F, M>(xs: Vec<T>, seed: S, step: F, merge: M) -> U
+//RS where
+//RS     T: Sync,
+//RS     U: Send,
+//RS     S: Fn() -> U + Sync,
+//RS     F: Fn(&U, &T) -> U + Sync,
+//RS     M: Fn(&U, &U) -> U + Sync,
+//RS {
+//RS     let partials = jet_list_para_chunks(xs.len(), usize::MAX, |range| {
+//RS         let start = range.start;
+//RS         let mut acc = jet_para_call(start, &seed)?;
+//RS         for index in range {
+//RS             acc = jet_para_call(index, || step(&acc, &xs[index]))?;
+//RS         }
+//RS         Ok((start, acc))
+//RS     });
+//RS     if partials.is_empty() {
+//RS         return seed();
+//RS     }
+//RS     jet_list_para_merge_tree(partials, |(left_index, left), (_, right)| {
+//RS         jet_para_call(left_index, || merge(&left, &right))
+//RS             .map(|merged| (left_index, merged))
+//RS     })
+//RS     .unwrap_or_else(|failure| jet_para_raise_failure(failure))
+//RS     .1
+//RS }
+//RS 
+//RS 
+//RS /// D-FRED1=A: bridge allocation checks the byte extent before touching the
+//RS /// retained wasm-side buffer. The pointer ABI is 32-bit, so an allocation
+//RS /// larger than the addressable linear-memory offset is rejected explicitly.
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[inline]
+//RS fn jet_web_d_fred_checked_len(len: u32, element_size: usize) -> usize {
+//RS     let len = len as usize;
+//RS     let bytes = len
+//RS         .checked_mul(element_size)
+//RS         .expect("Web D-FRED input byte size overflow");
+//RS     assert!(
+//RS         bytes <= u32::MAX as usize,
+//RS         "Web D-FRED input exceeds wasm32 address space"
+//RS     );
+//RS     len
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS thread_local! {
+//RS     static JET_WEB_D_FRED_F32_INPUT: std::cell::RefCell<Vec<f32>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f32_alloc(len: u32) -> u32 {
+//RS     JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+//RS         let mut values = cell.borrow_mut();
+//RS         let len = jet_web_d_fred_checked_len(len, std::mem::size_of::<f32>());
+//RS         values.resize(len, 0.0);
+//RS         values.as_mut_ptr() as usize as u32
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f32_reduce(ptr: u32, len: u32, seed: f32) -> f32 {
+//RS     JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+//RS         let values = cell.borrow();
+//RS         assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+//RS         assert!(len as usize <= values.len(), "invalid Web D-FRED input length");
+//RS         jet_simd_reduce_fixed(&values[..len as usize], seed)
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f32_free(ptr: u32) {
+//RS     JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+//RS         let mut values = cell.borrow_mut();
+//RS         assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+//RS         values.clear();
+//RS         values.shrink_to_fit();
+//RS     });
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS thread_local! {
+//RS     static JET_WEB_D_FRED_F64_INPUT: std::cell::RefCell<Vec<f64>> =
+//RS         const { std::cell::RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f64_alloc(len: u32) -> u32 {
+//RS     JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+//RS         let mut values = cell.borrow_mut();
+//RS         let len = jet_web_d_fred_checked_len(len, std::mem::size_of::<f64>());
+//RS         values.resize(len, 0.0);
+//RS         values.as_mut_ptr() as usize as u32
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f64_reduce(ptr: u32, len: u32, seed: f64) -> f64 {
+//RS     JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+//RS         let values = cell.borrow();
+//RS         assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+//RS         assert!(len as usize <= values.len(), "invalid Web D-FRED input length");
+//RS         jet_simd_reduce_fixed(&values[..len as usize], seed)
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[no_mangle]
+//RS pub extern "C" fn jet_web_d_fred_f64_free(ptr: u32) {
+//RS     JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+//RS         let mut values = cell.borrow_mut();
+//RS         assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+//RS         values.clear();
+//RS         values.shrink_to_fit();
+//RS     });
+//RS }
+//RS 
+//RS // D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
+//RS const JET_PERF_DEFAULT_FIDELITY_BITS: u32 = 1065353216; // 1.0f32 bits
+//RS static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
+//RS     std::sync::atomic::AtomicU32::new(JET_PERF_DEFAULT_FIDELITY_BITS);
+//RS fn jet_perf_fidelity() -> f64 {
+//RS     let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst);
+//RS     f32::from_bits(bits) as f64
+//RS }
+//RS fn jet_perf_default_fidelity() -> f64 {
+//RS     f32::from_bits(JET_PERF_DEFAULT_FIDELITY_BITS) as f64
+//RS }
+//RS fn jet_perf_store_fidelity(v: f64) {
+//RS     JET_PERF_FIDELITY.store((v as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
+//RS }
+//RS fn jet_perf_override_fidelity(v: f64) -> Result<(), String> {
+//RS     if !v.is_finite() || v < 0.0 || v > 1.0 {
+//RS         return Err(format!(
+//RS             "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
+//RS             v
+//RS         ));
+//RS     }
+//RS     jet_perf_store_fidelity(v);
+//RS     Ok(())
+//RS }
+//RS fn jet_perf_reset_fidelity() {
+//RS     JET_PERF_FIDELITY.store(
+//RS         JET_PERF_DEFAULT_FIDELITY_BITS,
+//RS         std::sync::atomic::Ordering::SeqCst,
+//RS     );
+//RS }
+//RS 
+//RS impl JetShow for JetHyperLogLog {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("HyperLogLog(count={})", self.count())
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetTDigest {
+//RS     fn jet_show(&self) -> String {
+//RS         "TDigest".to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetCountMinSketch {
+//RS     fn jet_show(&self) -> String {
+//RS         "CountMinSketch".to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetReservoirSampler {
+//RS     fn jet_show(&self) -> String {
+//RS         format!("ReservoirSampler(n={})", self.parts().2)
+//RS     }
+//RS }
+//RS 
+//RS struct JetTestExpectFrame {
+//RS     scope: u64,
+//RS     expected: Option<String>,
+//RS     stop: Option<String>,
+//RS }
+//RS 
+//RS struct JetTestingFailure {
+//RS     message: String,
+//RS     detail: String,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+//RS     static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEST_EXPECT_UNMET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     static JET_TEST_TIMEOUTS: std::cell::RefCell<Vec<(u64, std::time::Instant, i64, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+//RS     static JET_TEST_WHOLE_SKIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+//RS     static JET_TESTING_FAILURE: std::cell::RefCell<Option<JetTestingFailure>> = const { std::cell::RefCell::new(None) };
+//RS }
+//RS 
+//RS fn jet_testing_record_failure(message: String, detail: String) {
+//RS     JET_TESTING_FAILURE.with(|slot| {
+//RS         *slot.borrow_mut() = Some(JetTestingFailure { message, detail });
+//RS     });
+//RS }
+//RS 
+//RS fn jet_testing_take_failure() -> Option<JetTestingFailure> {
+//RS     JET_TESTING_FAILURE.with(|slot| slot.borrow_mut().take())
+//RS }
+//RS 
+//RS fn jet_testing_clear_failure() {
+//RS     JET_TESTING_FAILURE.with(|slot| {
+//RS         slot.borrow_mut().take();
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>) {
+//RS     JET_TEST_EXPECT_FAIL.with(|frames| {
+//RS         frames.borrow_mut().push(JetTestExpectFrame {
+//RS             scope,
+//RS             expected: expected.map(str::to_owned),
+//RS             stop: None,
+//RS         });
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
+//RS     if let Some(result) = JET_TEST_EXPECT_COMPLETED.with(|completed| {
+//RS         let mut completed = completed.borrow_mut();
+//RS         completed
+//RS             .iter()
+//RS             .rposition(|(candidate, _)| *candidate == scope)
+//RS             .map(|index| completed.remove(index).1)
+//RS     }) {
+//RS         return Some(result);
+//RS     }
+//RS     JET_TEST_EXPECT_FAIL.with(|frames| {
+//RS         let mut frames = frames.borrow_mut();
+//RS         frames
+//RS             .iter()
+//RS             .rposition(|frame| frame.scope == scope)
+//RS             .and_then(|index| {
+//RS                 if frames[index].stop.is_some() {
+//RS                     frames.remove(index).stop
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS             })
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_test_record_stop(code: &str) {
+//RS     JET_TEST_EXPECT_FAIL.with(|frames| {
+//RS         for frame in frames.borrow_mut().iter_mut() {
+//RS             if frame.stop.is_none() {
+//RS                 frame.stop = Some(code.to_string());
+//RS             }
+//RS         }
+//RS     });
+//RS }
+//RS pub fn jet_test_expect_fail_matching_scope() -> Option<u64> {
+//RS     if JET_TEST_EXPECT_UNMET.with(std::cell::Cell::get) {
+//RS         return None;
+//RS     }
+//RS     JET_TEST_EXPECT_FAIL.with(|frames| {
+//RS         frames.borrow().iter().rev().find_map(|frame| {
+//RS             let code = frame.stop.as_deref()?;
+//RS             (frame.expected.as_deref().is_none_or(|expected| expected == code)).then_some(frame.scope)
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_test_expect_fail_catch_scope() -> Option<u64> {
+//RS     let caught = JET_TEST_EXPECT_FAIL.with(|frames| {
+//RS         let mut frames = frames.borrow_mut();
+//RS         let index = frames.iter().rposition(|frame| {
+//RS             let Some(code) = frame.stop.as_deref() else {
+//RS                 return false;
+//RS             };
+//RS             frame.expected.as_deref().is_none_or(|expected| expected == code)
+//RS         })?;
+//RS         let frame = frames.remove(index);
+//RS         frames.truncate(index);
+//RS         for parent in frames.iter_mut() {
+//RS             parent.stop = None;
+//RS         }
+//RS         Some((frame.scope, frame.stop.unwrap_or_default(), index))
+//RS     });
+//RS     if let Some((scope, code, depth)) = caught {
+//RS         JET_TEST_TIMEOUTS.with(|timeouts| {
+//RS             timeouts.borrow_mut().retain(|(_, _, _, entered_depth)| *entered_depth <= depth);
+//RS         });
+//RS         JET_TEST_EXPECT_COMPLETED.with(|completed| completed.borrow_mut().push((scope, code)));
+//RS         Some(scope)
+//RS     } else {
+//RS         None
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_test_expect_fail_abort() {
+//RS     JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow_mut().clear());
+//RS     JET_TEST_EXPECT_COMPLETED.with(|completed| completed.borrow_mut().clear());
+//RS     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(false));
+//RS }
+//RS 
+//RS pub fn jet_test_expect_fail_unmet(expected: Option<&str>) -> ! {
+//RS     JET_TEST_EXPECT_UNMET.with(|unmet| unmet.set(true));
+//RS     let message = jet_test_expect_fail_message(expected);
+//RS     jet_runtime_stop("E3001", "", 0, &message)
+//RS }
+//RS 
+//RS pub fn jet_test_timeout_enter(scope: u64, limit_ns: i64) {
+//RS     let depth = JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow().len());
+//RS     JET_TEST_TIMEOUTS.with(|timeouts| {
+//RS         timeouts
+//RS             .borrow_mut()
+//RS             .push((scope, std::time::Instant::now(), limit_ns, depth));
+//RS     });
+//RS }
+//RS 
+//RS pub fn jet_test_timeout_leave(scope: u64) -> Option<(i64, i64)> {
+//RS     JET_TEST_TIMEOUTS.with(|timeouts| {
+//RS         let mut timeouts = timeouts.borrow_mut();
+//RS         let index = timeouts.iter().rposition(|(candidate, _, _, _)| *candidate == scope)?;
+//RS         let (_, started, limit_ns, _) = timeouts.remove(index);
+//RS         let elapsed_ns = started.elapsed().as_nanos().min(i64::MAX as u128) as i64;
+//RS         Some((elapsed_ns, limit_ns))
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_test_timeout_abort() {
+//RS     JET_TEST_TIMEOUTS.with(|timeouts| timeouts.borrow_mut().clear());
+//RS }
+//RS 
+//RS pub fn jet_test_timeout_failure(elapsed_ns: i64, limit_ns: i64) -> ! {
+//RS     let message = jet_test_timeout_message(elapsed_ns, limit_ns);
+//RS     jet_runtime_stop("E3001", "", 0, &message)
+//RS }
+//RS 
+//RS pub fn jet_test_skip_scope(whole_test: bool) {
+//RS     if whole_test {
+//RS         JET_TEST_WHOLE_SKIP.with(|skipped| skipped.set(true));
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_test_take_whole_skip() -> bool {
+//RS     JET_TEST_WHOLE_SKIP.with(|skipped| skipped.replace(false))
+//RS }
+//RS 
+//RS pub fn jet_test_skip_abort() {
+//RS     JET_TEST_WHOLE_SKIP.with(|skipped| skipped.set(false));
+//RS }
+//RS 
+//RS /// D-FAIL-BREACH1=A: stop before native recursion can exhaust the process
+//RS /// stack. The frame is a small Prelude-owned depth token; every engine either
+//RS /// emits this call or uses the evaluator's equivalent guard.
+//RS struct JetStackFrame;
+//RS 
+//RS impl Drop for JetStackFrame {
+//RS     fn drop(&mut self) {
+//RS         jet_runtime_stack_leave();
+//RS     }
+//RS }
+//RS 
+//RS fn jet_stack_enter(
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     src_line: &str,
+//RS ) -> JetStackFrame {
+//RS     let overflow = jet_runtime_stack_enter();
+//RS     if overflow {
+//RS         jet_runtime_stop_with_context(
+//RS             "E3012",
+//RS             file,
+//RS             line,
+//RS             fn_name,
+//RS             src_line,
+//RS             &jet_stack_overflow_message(fn_name),
+//RS         );
+//RS     }
+//RS     JetStackFrame
+//RS }
+//RS 
+//RS pub fn jet_scheduler_task_panic_enter() {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.set(true));
+//RS }
+//RS 
+//RS pub fn jet_scheduler_task_panic_leave() {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
+//RS }
+//RS 
+//RS fn jet_scheduler_in_task() -> bool {
+//RS     JET_IN_SCHEDULER_TASK.with(|c| c.get())
+//RS }
+//RS 
+//RS pub fn jet_interrupt_handler_panic_enter() {
+//RS     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_add(1)));
+//RS }
+//RS 
+//RS pub fn jet_interrupt_handler_panic_leave() {
+//RS     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+//RS }
+//RS 
+//RS fn jet_runtime_should_unwind() -> bool {
+//RS     jet_scheduler_in_task()
+//RS         || jet_interrupt_handler_should_unwind()
+//RS         || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
+//RS }
+//RS 
+//RS fn jet_interrupt_handler_should_unwind() -> bool {
+//RS     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.get() != 0)
+//RS }
+//RS 
+//RS fn jet_scheduler_panic_should_unwind() -> bool {
+//RS     jet_runtime_should_unwind()
+//RS }
+//RS 
+//RS struct JetRuntimeExit;
+//RS 
+//RS struct JetRenderedRuntimeStop {
+//RS     rendered: String,
+//RS     exit_code: i32,
+//RS }
+//RS 
+//RS /// Raise a program-side stop through the unwind carrier that THIS frame's
+//RS /// catcher reads (I9; D-CONC-FAIL1=A "a joined child panic becomes
+//RS /// `.Panicked(reason)`").
+//RS ///
+//RS /// A scheduler task frame is caught inside `Prelude/Scheduler.rs` — by
+//RS /// `jet_scheduler_catch_task_unwind` for a spawned body, by
+//RS /// `jet_scheduler_wait_without_unwind` for a native wait boundary — and both
+//RS /// publish the child value out of a `String` payload
+//RS /// (`jet_scheduler_panic_message`, `JetSchedulerWait::Panicked`). So a task
+//RS /// frame carries the stop's own message and nothing else: the `reason` in
+//RS /// `.Panicked(reason)` is a value the PROGRAM computed, and a runtime that put
+//RS /// its own stand-in text there would publish a wrong answer, not a vaguer one.
+//RS /// The other tiers already carry the program's message into that same frame —
+//RS /// the resident JIT re-raises it (`jet-jit/src/Concurrency.rs`
+//RS /// `spawn_with_runtime`, from the `msg` recorded by `jet_jit_rich_panic`), and
+//RS /// the interpreter carries it as the child's E0953 `what`
+//RS /// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
+//RS ///
+//RS /// Every intentional unwinding frame keeps the typed report: an `#Interrupt`
+//RS /// handler and `jet test`'s expect-fail region catch the rendered stop, while
+//RS /// scheduler tasks receive the program's message above. The ordinary process
+//RS /// path may cross a boundary that cannot carry an unwind. This matters for
+//RS /// debug native dispatch: its `extern "C"` trampoline is a non-unwinding ABI,
+//RS /// so resuming a panic there aborts before `jet_runtime_boundary` can observe
+//RS /// the report. End that path at the shared process boundary instead.
+//RS fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+//RS     if jet_scheduler_in_task() {
+//RS         std::panic::resume_unwind(Box::new(message.to_string()));
+//RS     }
+//RS     if !jet_runtime_should_unwind() {
+//RS         jet_runtime_process_exit(exit_code, Some(&rendered));
+//RS     }
+//RS     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+//RS         rendered,
+//RS         exit_code,
+//RS     }))
+//RS }
+//RS 
+//RS /// A user-requested process stop unwinds through the same boundary as a
+//RS /// runtime report. This gives guards and deferred resource closes a chance to
+//RS /// run before the final native exit.
+//RS struct JetExplicitExit {
+//RS     code: i32,
+//RS }
+//RS 
+//RS // Process-edge callbacks live beside the one boundary so a program that does
+//RS // not import core.sys still has a complete entry wrapper. The OS adapter only
+//RS // registers callbacks; it never installs a second native exit path.
+//RS mod jet_runtime_atexit {
+//RS     use std::cell::RefCell;
+//RS 
+//RS     thread_local! {
+//RS         static HANDLERS: RefCell<Vec<Box<dyn Fn() + 'static>>> = const { RefCell::new(Vec::new()) };
+//RS     }
+//RS 
+//RS     pub(super) fn register<F>(handler: F)
+//RS     where
+//RS         F: Fn() + 'static,
+//RS     {
+//RS         HANDLERS.with(|handlers| {
+//RS             let mut handlers = handlers.borrow_mut();
+//RS             super::jet_runtime_register_atexit(&mut handlers, Box::new(handler));
+//RS         });
+//RS     }
+//RS 
+//RS     pub(super) fn run() {
+//RS         HANDLERS.with(|handlers| {
+//RS             let mut handlers = handlers.borrow_mut();
+//RS             super::jet_runtime_drain_atexit(&mut handlers, |handler| handler());
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn jet_std_os_atexit<F>(handler: std::rc::Rc<F>)
+//RS where
+//RS     F: Fn() + 'static,
+//RS {
+//RS     jet_runtime_atexit::register(move || handler());
+//RS }
+//RS 
+//RS fn jet_std_os_run_atexit() {
+//RS     jet_runtime_atexit::run();
+//RS }
+//RS 
+//RS fn jet_runtime_report_parked_tasks() -> Option<i32> {
+//RS     let report = jet_observe_parked_tasks_report()?;
+//RS     eprint!("{}", report.rendered);
+//RS     Some(report.exit_code)
+//RS }
+//RS 
+//RS /// The only native process-exit boundary for generated programs. Lexical
+//RS /// cleanup has already happened while the stop unwound to this point; process
+//RS /// callbacks run here before the final native exit.
+//RS fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
+//RS     jet_std_os_run_atexit();
+//RS     jet_runtime_report_parked_tasks();
+//RS     jet_observe_drain_after_exit();
+//RS     if let Some(report) = report {
+//RS         eprint!("{report}");
+//RS     }
+//RS     let _ = std::io::Write::flush(&mut std::io::stdout());
+//RS     let _ = std::io::Write::flush(&mut std::io::stderr());
+//RS     std::process::exit(code)
+//RS }
+//RS 
+//RS fn jet_runtime_boundary<F, T>(run: F) -> T
+//RS where
+//RS     F: FnOnce() -> T,
+//RS {
+//RS     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+//RS         Ok(value) => {
+//RS             jet_std_os_run_atexit();
+//RS             let parked_exit = jet_runtime_report_parked_tasks();
+//RS             jet_observe_drain_after_exit();
+//RS             if let Some(code) = parked_exit {
+//RS                 std::process::exit(code);
+//RS             }
+//RS             value
+//RS         }
+//RS         Err(payload) => {
+//RS             // Only the private foreign-boundary marker below converts a String
+//RS             // payload into a user stop. A rendered runtime report crosses this
+//RS             // boundary as a typed report or private envelope; arbitrary panic
+//RS             // text remains a host/compiler fault.
+//RS             //
+//RS             // This is the one place the marker is read, and it is the only E3001
+//RS             // renderer a shared Prelude source can reach without naming a
+//RS             // registered-row adapter. Its producers are boundaries whose source
+//RS             // is embedded into crates that carry no such adapter: the generated
+//RS             // bridge crate's `ffi_panic` (jet-pkg-model/src/FFI.rs) and the
+//RS             // fail-closed OS entropy shim (Prelude/CoreLib/Top/CryptoEntropy.rs,
+//RS             // which is also embedded verbatim into that bridge). Those sources
+//RS             // must not build a report themselves: the bridge strips Foundation's
+//RS             // `jet_render_runtime_stop` wrapper and never regenerates it, so a
+//RS             // report built there is a call with no definition (I2 — rustc E0425
+//RS             // inside Jet's own generated crate, reported as E0705 against the
+//RS             // user's `extern rust` line).
+//RS             if let Some(message) = payload
+//RS                 .downcast_ref::<String>()
+//RS                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
+//RS             {
+//RS                 let report = jet_runtime_stop_report(
+//RS                     "E3001", "", 0, "", "", 1, 1, message, "",
+//RS                 );
+//RS                 jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
+//RS             }
+//RS             match payload.downcast::<JetRuntimeDiagnostic>() {
+//RS                 Ok(report) => {
+//RS                     jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
+//RS                 }
+//RS                 Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+//RS                     Ok(report) => {
+//RS                         jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
+//RS                     }
+//RS                     Err(payload) => match payload.downcast::<JetExplicitExit>() {
+//RS                         Ok(exit) => jet_runtime_process_exit(exit.code, None),
+//RS                         Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
+//RS                         Err(payload) => std::panic::resume_unwind(payload),
+//RS                     },
+//RS                 },
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Catch the private marker emitted by a generated foreign bridge while the
+//RS /// caller's Jet frame is still active. This keeps FFI stops on the one report
+//RS /// carrier and preserves the caller's Jet source facts; the process boundary
+//RS /// remains the fallback for bridges that cannot carry a call-site frame.
+//RS fn jet_ffi_runtime_call<F, T>(
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     src_line: &str,
+//RS     run: F,
+//RS ) -> T
+//RS where
+//RS     F: FnOnce() -> T,
+//RS {
+//RS     jet_scheduler_world_reject_uncontrolled("foreign");
+//RS     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+//RS         Ok(value) => value,
+//RS         Err(payload) => {
+//RS             if let Some(message) = payload
+//RS                 .downcast_ref::<String>()
+//RS                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
+//RS             {
+//RS                 let report = jet_runtime_stop_report(
+//RS                     "E3014", file, line, fn_name, src_line, 1, 1, message, "",
+//RS                 );
+//RS                 jet_runtime_stop_unwind(report.rendered, report.exit_code, message);
+//RS             }
+//RS             std::panic::resume_unwind(payload)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS /// The callback edge is below foreign code, so it cannot return a Rust unwind
+//RS /// to the caller. Preserve Jet's typed runtime report when one exists and
+//RS /// convert every other panic to a terminal E3001 report. Returning a default
+//RS /// callback value would fabricate foreign success; aborting this process is
+//RS /// the only fail-closed result for a callback with no error channel.
+//RS fn jet_ffi_callback_boundary<F, T>(run: F) -> T
+//RS where
+//RS     F: FnOnce() -> T,
+//RS {
+//RS     jet_scheduler_world_reject_uncontrolled("foreign");
+//RS     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+//RS         Ok(value) => value,
+//RS         Err(payload) => jet_ffi_callback_panic(payload),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
+//RS     match payload.downcast::<JetRuntimeDiagnostic>() {
+//RS         Ok(report) => jet_runtime_process_exit(report.exit_code, Some(&report.rendered)),
+//RS         Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+//RS             Ok(report) => jet_runtime_process_exit(report.exit_code, Some(&report.rendered)),
+//RS             Err(payload) => match payload.downcast::<JetExplicitExit>() {
+//RS                 Ok(exit) => jet_runtime_process_exit(exit.code, None),
+//RS                 Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_process_exit(70, None),
+//RS                 Err(payload) => {
+//RS                     let message = payload
+//RS                         .downcast_ref::<String>()
+//RS                         .map(String::as_str)
+//RS                         .or_else(|| payload.downcast_ref::<&str>().copied())
+//RS                         .unwrap_or("foreign callback panicked");
+//RS                     let report = jet_runtime_stop_report(
+//RS                         "E3001", "", 0, "", "", 1, 1, message, "",
+//RS                     );
+//RS                     jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
+//RS                 }
+//RS             },
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS /// A cryptographic random draw is intentionally not replayed by a
+//RS /// deterministic world. Route the canonical AOT Core entry through this
+//RS /// boundary so it cannot silently fall back to operating-system entropy.
+//RS /// A missing or rejected provider is `None`; the Jet wrapper in
+//RS /// `Core/crypto/random.jet` reports it as `CryptoError.Unavailable`.
+//RS fn jet_std_crypto_random_bytes_controlled(n: i64) -> Option<Vec<u8>> {
+//RS     jet_scheduler_world_reject_uncontrolled("entropy");
+//RS     jet_crypto_entropy_bytes(n).ok()
+//RS }
+//RS 
+//RS /// The same classification, on the one thread that is NOT the program's entry
+//RS /// boundary: the interrupt dispatcher.
+//RS ///
+//RS /// A Jet interrupt handler runs on the dispatcher thread — the count and the
+//RS /// drain rule belong to `Prelude/CoreLib/Top/Interrupt.rs`, the thread and the
+//RS /// `Arc<dyn Fn>` storage to that file's sibling `jet_os_interrupt` adapter in
+//RS /// `Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` — so every control transfer a
+//RS /// handler raises unwinds into that thread's `catch_unwind` and can never reach
+//RS /// `jet_runtime_boundary` above. Handing those payloads straight to the
+//RS /// scheduler's loose-panic reporter, which knows only deadline unwinds and
+//RS /// panic text, dropped both meanings a handler can carry: `process.exit`
+//RS /// stopped ending the process (a signalled program then ran forever with its
+//RS /// handlers already done) and a handler's stop printed no report at all.
+//RS ///
+//RS /// Two of the terminal rules differ from the entry boundary's, on purpose. An
+//RS /// explicit exit still ends the process: that is what the program asked for,
+//RS /// and which thread asked is not part of the request. A stop only *reports*
+//RS /// here: the drain still owes every later handler its turn in registration
+//RS /// order, so one failing handler must not cancel the ones registered after it.
+//RS ///
+//RS /// `report_other` is the tail of that chain, and it is a parameter for a
+//RS /// structural reason rather than a stylistic one. This file is embedded in
+//RS /// EVERY generated program; the payloads outside the list above belong to parts
+//RS /// that are not. A blown deadline is `Prelude/Scheduler.rs`'s
+//RS /// `JetDeadlineUnwind`, reported by that part's `jet_report_caught_unwind`, and
+//RS /// the scheduler ships only when a program reaches it
+//RS /// (`Codegen/mod.rs::push_core_runtime`) — never for `Codegen/mod.rs::emit`,
+//RS /// `emit_tests`, or the wasm module. So the adapter, the one place that has both
+//RS /// parts in scope, names the tail; this file names nothing it does not own, and
+//RS /// a program with no scheduler cannot inherit a dangling reference to one (I2).
+//RS /// The tail is a required argument, not a leftover payload handed back to a
+//RS /// caller that may drop it: dropping it is exactly how a handler's control
+//RS /// transfer went unfinished before.
+//RS fn jet_interrupt_handler_unwind(
+//RS     payload: Box<dyn std::any::Any + Send>,
+//RS     report_other: impl FnOnce(Box<dyn std::any::Any + Send>),
+//RS ) {
+//RS     let payload = match payload.downcast::<JetExplicitExit>() {
+//RS         Ok(exit) => jet_runtime_process_exit(exit.code, None),
+//RS         Err(payload) => payload,
+//RS     };
+//RS     let payload = match payload.downcast::<JetRuntimeDiagnostic>() {
+//RS         Ok(report) => return jet_runtime_caught_stop(&report.rendered),
+//RS         Err(payload) => payload,
+//RS     };
+//RS     match payload.downcast::<JetRenderedRuntimeStop>() {
+//RS         Ok(report) => jet_runtime_caught_stop(&report.rendered),
+//RS         Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
+//RS         Err(payload) => report_other(payload),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_entry_error_text<E: std::fmt::Display>(error: &E) -> String {
+//RS     error.to_string()
+//RS }
+//RS 
+//RS fn jet_entry_error_text_jet<E: JetDisplay>(error: &E) -> String {
+//RS     error.jet_display()
+//RS }
+//RS 
+//RS fn jet_entry_error_text_show<E: JetShow>(error: &E) -> String {
+//RS     error.jet_show()
+//RS }
+//RS 
+//RS fn jet_entry_report(error: String) -> String {
+//RS     jet_journey_report(&error)
+//RS }
+//RS 
+//RS fn jet_entry_error_exit(error: String) -> ! {
+//RS     let report = jet_entry_report(error);
+//RS     eprint!("{report}");
+//RS     jet_runtime_explicit_exit(1)
+//RS }
+//RS 
+//RS /// The default `Err` reaches the edge as its structured Prelude value. Keep
+//RS /// the report projection intact until this one edge so code, identity, cause,
+//RS /// context, conversions, and the source journey cannot be recovered from
+//RS /// `Display` text after the fact.
+//RS fn jet_entry_error_exit_jet(error: JetErr) -> ! {
+//RS     eprint!("{}", jet_error_report(&error).render());
+//RS     jet_runtime_explicit_exit(1)
+//RS }
+//RS 
+//RS // D-FAIL-EDGE1: a selected Service has one native log record at its edge.
+//RS // The report stays the same Jet text; only the service transport adds a
+//RS // target field and JSON string framing.
+//RS fn jet_service_edge_report(error: String) -> ! {
+//RS     jet_service_edge_report_rendered(jet_entry_report(error))
+//RS }
+//RS 
+//RS fn jet_service_edge_report_jet(error: JetErr) -> ! {
+//RS     jet_service_edge_report_rendered(jet_error_report(&error).render())
+//RS }
+//RS 
+//RS fn jet_service_edge_report_rendered(report: String) -> ! {
+//RS     let mut quoted = String::with_capacity(report.len() + 2);
+//RS     quoted.push('"');
+//RS     for ch in report.chars() {
+//RS         match ch {
+//RS             '\\' => quoted.push_str("\\\\"),
+//RS             '"' => quoted.push_str("\\\""),
+//RS             '\n' => quoted.push_str("\\n"),
+//RS             '\r' => quoted.push_str("\\r"),
+//RS             '\t' => quoted.push_str("\\t"),
+//RS             ch if ch.is_control() => quoted.push_str(&format!("\\u{:04x}", ch as u32)),
+//RS             ch => quoted.push(ch),
+//RS         }
+//RS     }
+//RS     quoted.push('"');
+//RS     eprintln!("{{\"target\":\"service\",\"report\":{quoted}}}");
+//RS     jet_runtime_explicit_exit(1)
+//RS }
+//RS 
+//RS fn jet_runtime_exit() -> ! {
+//RS     std::panic::resume_unwind(Box::new(JetRuntimeExit))
+//RS }
+//RS 
+//RS fn jet_runtime_explicit_exit(code: i64) -> ! {
+//RS     std::panic::resume_unwind(Box::new(JetExplicitExit {
+//RS         code: jet_runtime_exit_code(code),
+//RS     }))
+//RS }
+//RS 
+//RS fn jet_runtime_panic_exit() -> ! {
+//RS     jet_runtime_process_exit(70, None)
+//RS }
+//RS 
+//RS fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
+//RS     if code == JET_C_INT_RANGE_CODE {
+//RS         jet_entry_error_exit(jet_c_int_range_report());
+//RS     }
+//RS     jet_runtime_stop_with_context(code, file, line, "", "", msg)
+//RS }
+//RS 
+//RS fn jet_scheduler_runtime_stop(msg: &str) -> ! {
+//RS     jet_runtime_stop("E3001", "", 0, msg)
+//RS }
+//RS 
+//RS fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
+//RS     jet_test_record_stop("E3001");
+//RS     if jet_runtime_should_unwind() {
+//RS         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+//RS             rendered: report,
+//RS             exit_code: 70,
+//RS         }));
+//RS     }
+//RS     eprint!("{}", report);
+//RS     jet_runtime_exit();
+//RS }
+//RS 
+//RS fn jet_runtime_caught_stop(message: &str) {
+//RS     eprint!("{message}");
+//RS     if !message.ends_with('\n') {
+//RS         eprintln!();
+//RS     }
+//RS }
+//RS 
+//RS fn jet_sentry_runtime_stop(
+//RS     code: &'static str,
+//RS     file: &str,
+//RS     line: u32,
+//RS     gate: &str,
+//RS     operation: &str,
+//RS     obligation: &str,
+//RS     obligation_status: &str,
+//RS     foreign_component: Option<&str>,
+//RS     foreign_fenced: Option<bool>,
+//RS     detail: &str,
+//RS ) -> ! {
+//RS     jet_test_record_stop(code);
+//RS     jet_proof_record(2, 1, code, detail, file, line);
+//RS     let report = jet_render_runtime_sentry_with_context(
+//RS         match code {
+//RS             "R0801" => "R0801",
+//RS             "R0802" => "R0802",
+//RS             "R0803" => "R0803",
+//RS             _ => "R0801",
+//RS         },
+//RS         file,
+//RS         line,
+//RS         gate,
+//RS         operation,
+//RS         obligation,
+//RS         detail,
+//RS         obligation_status,
+//RS         foreign_component,
+//RS         foreign_fenced,
+//RS     );
+//RS     if jet_runtime_should_unwind() {
+//RS         jet_stream_record_failure_report(report.rendered.clone());
+//RS     }
+//RS     jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
+//RS }
+//RS 
+//RS fn jet_runtime_stop_with_context(
+//RS     code: &'static str,
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     src_line: &str,
+//RS     msg: &str,
+//RS ) -> ! {
+//RS     jet_test_record_stop(code);
+//RS     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+//RS         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
+//RS             code,
+//RS             file: file.to_string(),
+//RS             line,
+//RS             fn_name: fn_name.to_string(),
+//RS             src_line: src_line.to_string(),
+//RS             msg: msg.to_string(),
+//RS         }));
+//RS     }
+//RS     jet_proof_record(2, 1, code, msg, file, line);
+//RS     let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
+//RS     let report =
+//RS         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
+//RS     if jet_runtime_should_unwind() {
+//RS         jet_stream_record_failure_report(report.rendered.clone());
+//RS     }
+//RS     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
+//RS }
+//RS 
+//RS fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+//RS     jet_runtime_stop("E3001", file, line, msg)
+//RS }
+//RS 
+//RS fn jet_arithmetic_stop(file: &str, line: u32, msg: &str) -> ! {
+//RS     jet_runtime_stop(JET_ARITHMETIC_CODE, file, line, msg)
+//RS }
+//RS 
+//RS fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {
+//RS     jet_runtime_stop(
+//RS         "E3011",
+//RS         file,
+//RS         line,
+//RS         &jet_todo_message(file, line, expected_type),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_runtime_diagnostic(rendered: String) -> ! {
+//RS     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+//RS         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
+//RS     }
+//RS     if jet_interrupt_handler_should_unwind() {
+//RS         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+//RS             rendered,
+//RS             exit_code: 70,
+//RS         }));
+//RS     }
+//RS     eprintln!("{}", rendered);
+//RS     jet_runtime_exit();
+//RS }
+//RS /// E3005 (D-PREPOST1): a `#Pre`/`#Post` contract clause failed at runtime.
+//RS /// `clause_kw` is `"Pre"`/`"Post"`; `msg` is the clause's own message text
+//RS /// (the second argument to `#Pre(cond, "msg")`/`#Post(cond, "msg")`).
+//RS #[allow(dead_code)] // only called from generated code that has a #Pre/#Post
+//RS fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
+//RS     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+//RS         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Contract {
+//RS             file: file.to_string(),
+//RS             line,
+//RS             clause_kw: clause_kw.to_string(),
+//RS             msg: msg.to_string(),
+//RS         }));
+//RS     }
+//RS     let report = jet_contract_report(clause_kw, msg, file, line);
+//RS     jet_test_record_stop("E3005");
+//RS     jet_proof_record(2, 1, "E3005", &report.what, file, line);
+//RS     std::panic::resume_unwind(Box::new(report))
+//RS }
+//RS 
+//RS /// Private structured producer channel used only when `jet prove` launches a
+//RS /// test harness. Length framing keeps user strings opaque; terminal text is
+//RS /// never parsed as evidence.
+//RS fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, line: u32) {
+//RS     if state == 1 && jet_test_expect_fail_matching_scope().is_some() {
+//RS         jet_evidence_with_expectation(true, || {
+//RS             jet_evidence_record_write(kind, state, name, message, file, line);
+//RS         });
+//RS     } else {
+//RS         jet_evidence_record_write(kind, state, name, message, file, line);
+//RS     }
+//RS }
+//RS // D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
+//RS // overflow (safe by default) — a silent corruption becomes a caught bug. The
+//RS // operation table itself lives in `Core/FixedArithmetic.rs`; this file only
+//RS // supplies the typed method adapter used by generated Rust. Exact default
+//RS // `Int` uses packed Prelude helpers. Floats and `#Numeric` distinct types keep
+//RS // plain Rust operators.
+//RS impl JetFixedArithmeticError {
+//RS     fn message(self) -> String {
+//RS         match self {
+//RS             Self::AddOverflow => {
+//RS                 "This addition overflows the value's type (the result is outside its range)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::SubOverflow => {
+//RS                 "This subtraction overflows the value's type (the result is outside its range)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::MulOverflow => {
+//RS                 "This multiplication overflows the value's type (the result is outside its range)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::DivideZero => "divided by zero".to_string(),
+//RS             Self::DivisionOverflow => {
+//RS                 "This division overflows the value's type (the result is outside its range)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::RemainderOverflow => "Attempt to calculate the remainder with overflow".to_string(),
+//RS             Self::PowerNegative => {
+//RS                 "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::PowerOverflow => {
+//RS                 "This power overflows the value's type (the result is outside its range)"
+//RS                     .to_string()
+//RS             }
+//RS             Self::RotateNegative => "A rotation count cannot be negative".to_string(),
+//RS             Self::ShiftOutOfRange {
+//RS                 direction,
+//RS                 count,
+//RS                 bits,
+//RS             } => format!(
+//RS                 "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+//RS             ),
+//RS             Self::UnknownOperation => "This fixed-width arithmetic operation is unsupported".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS fn jet_fixed_error_stop(
+//RS     error: JetFixedArithmeticError,
+//RS     file: &str,
+//RS     line: u32,
+//RS ) -> ! {
+//RS     let message = error.to_string();
+//RS     jet_arithmetic_stop(file, line, &message)
+//RS }
+//RS 
+//RS /// D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
+//RS trait JetArith: Copy {
+//RS     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_wrapping_add(self, rhs: Self) -> Self;
+//RS     fn jet_wrapping_sub(self, rhs: Self) -> Self;
+//RS     fn jet_wrapping_mul(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_add(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_sub(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_mul(self, rhs: Self) -> Self;
+//RS     fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     // D-NUMOPS1: a shift by a bit-count `>=` the value's width is undefined in C
+//RS     // and a panic in Rust — Jet traps it cleanly instead. The count comes in as
+//RS     // an `i128` so any integer width (signed or unsigned) reaches here losslessly.
+//RS     fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self;
+//RS }
+//RS 
+//RS /// D-NUMOPS1: a shift count may be any integer width, including exact `Int`.
+//RS /// Each widens losslessly to the kernel's `i128`; an exact count outside `i64`
+//RS /// is past every fixed width and keeps its sign, so the kernel still traps.
+//RS trait JetShiftCount {
+//RS     fn jet_shift_count(self) -> i128;
+//RS }
+//RS macro_rules! jet_shift_count_impl {
+//RS     ($($t:ty),*) => { $(
+//RS         impl JetShiftCount for $t {
+//RS             #[inline(always)]
+//RS             fn jet_shift_count(self) -> i128 {
+//RS                 i128::from(self)
+//RS             }
+//RS         }
+//RS     )* };
+//RS }
+//RS jet_shift_count_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
+//RS impl JetShiftCount for jet_foundation::Numeric::JetInt {
+//RS     fn jet_shift_count(self) -> i128 {
+//RS         match self.to_i64() {
+//RS             Some(count) => i128::from(count),
+//RS             None if self.compare(&jet_foundation::Numeric::JetInt::from_i64(0)).is_lt() => {
+//RS                 i128::MIN
+//RS             }
+//RS             None => i128::MAX,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
+//RS     match result {
+//RS         JetFixedArithmeticResult::Value(value) => value,
+//RS         JetFixedArithmeticResult::Absent => jet_arithmetic_stop(
+//RS             file,
+//RS             line,
+//RS             "This checked fixed-width operation has no result",
+//RS         ),
+//RS         JetFixedArithmeticResult::Trap(error) => {
+//RS             let message = error.to_string();
+//RS             jet_arithmetic_stop(file, line, &message)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS macro_rules! jet_arith_impl {
+//RS     ($(($t:ty, $signed:expr)),*) => { $(
+//RS         impl JetArith for $t {
+//RS             #[inline(always)]
+//RS             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 match self.checked_add(rhs) {
+//RS                     Some(value) => value,
+//RS                     None => jet_arithmetic_stop(
+//RS                         file,
+//RS                         line,
+//RS                         "This addition overflows the value's type (the result is outside its range)",
+//RS                     ),
+//RS                 }
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 match self.checked_sub(rhs) {
+//RS                     Some(value) => value,
+//RS                     None => jet_arithmetic_stop(
+//RS                         file,
+//RS                         line,
+//RS                         "This subtraction overflows the value's type (the result is outside its range)",
+//RS                     ),
+//RS                 }
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 match self.checked_mul(rhs) {
+//RS                     Some(value) => value,
+//RS                     None => jet_arithmetic_stop(
+//RS                         file,
+//RS                         line,
+//RS                         "This multiplication overflows the value's type (the result is outside its range)",
+//RS                     ),
+//RS                 }
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_wrapping_add(self, rhs: Self) -> Self {
+//RS                 self.wrapping_add(rhs)
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_wrapping_sub(self, rhs: Self) -> Self {
+//RS                 self.wrapping_sub(rhs)
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_wrapping_mul(self, rhs: Self) -> Self {
+//RS                 self.wrapping_mul(rhs)
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_saturating_add(self, rhs: Self) -> Self {
+//RS                 self.saturating_add(rhs)
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_saturating_sub(self, rhs: Self) -> Self {
+//RS                 self.saturating_sub(rhs)
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_saturating_mul(self, rhs: Self) -> Self {
+//RS                 self.saturating_mul(rhs)
+//RS             }
+//RS             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, rhs as i128, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, $signed,
+//RS                 ), file, line) as $t
+//RS             }
+//RS             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, rhs as i128, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, $signed,
+//RS                 ), file, line) as $t
+//RS             }
+//RS             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, true,
+//RS                 ), file, line) as $t
+//RS             }
+//RS             fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, true,
+//RS                 ), file, line) as $t
+//RS             }
+//RS             fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, true,
+//RS                 ), file, line) as $t
+//RS             }
+//RS             fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(
+//RS                     self as i64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP,
+//RS                     $signed, <$t>::BITS as u8, true,
+//RS                 ), file, line) as $t
+//RS             }
+//RS         }
+//RS     )* };
+//RS }
+//RS jet_arith_impl!(
+//RS     (i8, true), (i16, true), (i32, true), (i64, true),
+//RS     (u8, false), (u16, false), (u32, false), (u64, false)
+//RS );
+//RS #[inline(always)]
+// END-PORT-PENDING 0138 crates/jet-codegen/src/Prelude/Core.rs:1-1685
+

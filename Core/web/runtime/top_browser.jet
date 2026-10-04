@@ -1,0 +1,2199 @@
+// PORT-PENDING 0251 crates-jet-codegen-src-prelude-corelib-top-browser: crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1-2195
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-BROWSER-AUTO1=A: native std-only WebDriver BiDi protocol core.
+//RS //
+//RS // Profiles pin the wire contract. Contexts are isolated BiDi user contexts.
+//RS // Traces keep method/sequence facts only: endpoints, parameters, results, event
+//RS // payloads, and page data never enter the trace.
+//RS // #1192: CDP is a capability-checked expert supplement via protocol("cdp") only.
+//RS // #1193: cleanup, profile isolation, privacy facts, and redacted receipts.
+//RS 
+//RS const JET_BROWSER_TRACE_LIMIT_BYTES: usize = 8 * 1024;
+//RS const JET_BROWSER_EVENT_LIMIT: usize = 256;
+//RS const JET_BROWSER_ACTION_LIMIT: usize = 2_048;
+//RS const JET_BROWSER_ACTION_LIMIT_BYTES: usize = 16 * 1024;
+//RS 
+//RS type JetBrowserTestActionSink = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+//RS 
+//RS fn jet_browser_test_attach_actions(
+//RS     browser: &JetBrowser,
+//RS     actions: Option<JetBrowserTestActionSink>,
+//RS ) {
+//RS     browser.state.borrow_mut().test_actions = actions;
+//RS }
+//RS 
+//RS fn jet_browser_test_actions(browser: &JetBrowser) -> Vec<String> {
+//RS     browser
+//RS         .state
+//RS         .borrow()
+//RS         .test_actions
+//RS         .as_ref()
+//RS         .map_or_else(Vec::new, |actions| actions.borrow().clone())
+//RS }
+//RS 
+//RS fn jet_browser_record_action(browser: &JetBrowser, entry: String) {
+//RS     if entry.is_empty() || entry.len() > JET_BROWSER_ACTION_LIMIT_BYTES {
+//RS         return;
+//RS     }
+//RS     let actions = browser.state.borrow().test_actions.clone();
+//RS     let Some(actions) = actions else {
+//RS         return;
+//RS     };
+//RS     let mut actions = actions.borrow_mut();
+//RS     if actions.len() == JET_BROWSER_ACTION_LIMIT {
+//RS         actions.remove(0);
+//RS     }
+//RS     actions.push(entry);
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetBrowserError {
+//RS     kind: &'static str,
+//RS }
+//RS 
+//RS impl JetBrowserError {
+//RS     fn new(kind: &'static str) -> Self {
+//RS         Self { kind }
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetBrowserError {
+//RS     fn jet_show(&self) -> String {
+//RS         match self.kind {
+//RS             "invalid profile" => "browser profile is not supported",
+//RS             "invalid timeout" => "browser timeout must be between 1 and 600000 milliseconds",
+//RS             "unsupported protocol" => "browser protocol is not available in this session",
+//RS             "timeout" => "browser operation timed out",
+//RS             "closed" => "browser session is closed",
+//RS             "transport" => "browser transport failed",
+//RS             "missing lock" => "no locked browser for this engine in .jet/lock",
+//RS             "unknown engine" => "browser engine is not supported",
+//RS             "missing binary" => "locked browser binary was not found",
+//RS             "size mismatch" => "locked browser binary size drifted",
+//RS             "invalid lock" => "browser lock entry is incomplete",
+//RS             _ => "browser protocol failed",
+//RS         }
+//RS         .to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetBrowserError {
+//RS     fn jet_debug(&self) -> String {
+//RS         <Self as JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS // D-FAIL-CONV2=A: one display hook backs both the shipped impl BrowserError -> Err
+//RS // and user interpolation.
+//RS impl JetDisplay for JetBrowserError {
+//RS     fn jet_display(&self) -> String {
+//RS         <Self as JetShow>::jet_show(self)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserProfile {
+//RS     name: String,
+//RS     version: String,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1187): project-locked browser binary for later launch.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserLocked {
+//RS     engine: String,
+//RS     version: String,
+//RS     binary: String,
+//RS     protocol: String,
+//RS     size: i64,
+//RS     output_hash: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS struct JetBrowserTimeout {
+//RS     milliseconds: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserAbilities {
+//RS     bidi: bool,
+//RS     cdp: bool,
+//RS     profile: String,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1190/#1191): BiDi event with redacted network/download facts.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserEvent {
+//RS     method: String,
+//RS     request_id: String,
+//RS     request_method: String,
+//RS     url_hash: String,
+//RS     is_blocked: bool,
+//RS     status_code: i64,
+//RS     download_id: String,
+//RS     suggested_filename_hash: String,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1190): network intercept handle (explicit remove).
+//RS #[derive(Clone)]
+//RS struct JetBrowserIntercept {
+//RS     state: std::rc::Rc<JetBrowserInterceptState>,
+//RS }
+//RS 
+//RS struct JetBrowserInterceptState {
+//RS     browser: JetBrowser,
+//RS     id: String,
+//RS     removed: std::cell::Cell<bool>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserTrace {
+//RS     entries: Vec<String>,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): session privacy defaults — isolated profiles and
+//RS /// redacted receipts are always on; shared profiles are always denied.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserPrivacy {
+//RS     isolated_profiles: bool,
+//RS     redact_receipts: bool,
+//RS     shared_profiles: bool,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): normal audit receipt. Entries mirror the redacted
+//RS /// trace; secrets, endpoints, and page data never appear.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS struct JetBrowserReceipt {
+//RS     entries: Vec<String>,
+//RS     isolated: bool,
+//RS     cleaned: bool,
+//RS }
+//RS 
+//RS struct JetBrowserState {
+//RS     conn: JetWsConn,
+//RS     next_id: i64,
+//RS     closed: bool,
+//RS     session_started: bool,
+//RS     timeout_ms: i64,
+//RS     profile: String,
+//RS     cdp: bool,
+//RS     trace: Vec<String>,
+//RS     trace_bytes: usize,
+//RS     events: std::collections::VecDeque<JetBrowserEvent>,
+//RS     test_actions: Option<JetBrowserTestActionSink>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetBrowser {
+//RS     state: std::rc::Rc<std::cell::RefCell<JetBrowserState>>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetBrowserContext {
+//RS     state: std::rc::Rc<JetBrowserContextState>,
+//RS }
+//RS 
+//RS struct JetBrowserContextState {
+//RS     browser: JetBrowser,
+//RS     id: String,
+//RS     closed: std::cell::Cell<bool>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetBrowserPage {
+//RS     state: std::rc::Rc<JetBrowserPageState>,
+//RS }
+//RS 
+//RS struct JetBrowserPageState {
+//RS     browser: JetBrowser,
+//RS     context: std::rc::Rc<JetBrowserContextState>,
+//RS     id: String,
+//RS     closed: std::cell::Cell<bool>,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1188): browsing-context frame handle (main or child).
+//RS /// Explicit close only — listing frames must not close children on drop.
+//RS #[derive(Clone)]
+//RS struct JetBrowserFrame {
+//RS     state: std::rc::Rc<JetBrowserFrameState>,
+//RS }
+//RS 
+//RS struct JetBrowserFrameState {
+//RS     browser: JetBrowser,
+//RS     page: std::rc::Rc<JetBrowserPageState>,
+//RS     id: String,
+//RS     closed: std::cell::Cell<bool>,
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1189): semantic BiDi locator (accessibility / css / innerText).
+//RS #[derive(Clone)]
+//RS struct JetBrowserLocator {
+//RS     page: std::rc::Rc<JetBrowserPageState>,
+//RS     /// `accessibility`, `css`, or `innerText`.
+//RS     locator_type: String,
+//RS     role: String,
+//RS     name: String,
+//RS     value: String,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetBrowserProtocol {
+//RS     browser: JetBrowser,
+//RS     kind: String,
+//RS }
+//RS 
+//RS fn jet_browser_trace_push(state: &mut JetBrowserState, entry: String) {
+//RS     if entry.len() > JET_BROWSER_TRACE_LIMIT_BYTES {
+//RS         return;
+//RS     }
+//RS     while state.trace_bytes.saturating_add(entry.len()) > JET_BROWSER_TRACE_LIMIT_BYTES {
+//RS         if state.trace.is_empty() {
+//RS             break;
+//RS         }
+//RS         state.trace_bytes = state.trace_bytes.saturating_sub(state.trace.remove(0).len());
+//RS     }
+//RS     state.trace_bytes += entry.len();
+//RS     state.trace.push(entry);
+//RS }
+//RS 
+//RS fn jet_browser_fact_hash(value: &str) -> String {
+//RS     let mut hash = 0xcbf2_9ce4_8422_2325u64;
+//RS     for byte in value.as_bytes() {
+//RS         hash ^= u64::from(*byte);
+//RS         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+//RS     }
+//RS     format!("{hash:016x}")
+//RS }
+//RS 
+//RS fn jet_browser_object(entries: Vec<(&str, jet_std::DataTree)>) -> jet_std::DataTree {
+//RS     jet_std::DataTree::Object(
+//RS         entries
+//RS             .into_iter()
+//RS             .map(|(key, value)| (key.to_string(), value))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_text(value: &str) -> jet_std::DataTree {
+//RS     jet_std::DataTree::Text(value.to_string())
+//RS }
+//RS 
+//RS fn jet_browser_get<'a>(
+//RS     value: &'a jet_std::DataTree,
+//RS     key: &str,
+//RS ) -> Option<&'a jet_std::DataTree> {
+//RS     match value {
+//RS         jet_std::DataTree::Object(fields) => fields
+//RS             .iter()
+//RS             .find_map(|(name, value)| (name == key).then_some(value)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_string(
+//RS     value: &jet_std::DataTree,
+//RS     key: &str,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     match jet_browser_get(value, key) {
+//RS         Some(jet_std::DataTree::Text(text) | jet_std::DataTree::TypedText(text)) => {
+//RS             Ok(text.clone())
+//RS         }
+//RS         _ => Err(JetBrowserError::new("protocol")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_id(value: &jet_std::DataTree) -> Option<i64> {
+//RS     match jet_browser_get(value, "id") {
+//RS         Some(jet_std::DataTree::Int(value)) if *value >= 0 => Some(*value),
+//RS         Some(jet_std::DataTree::Float(value))
+//RS             if value.is_finite()
+//RS                 && value.fract() == 0.0
+//RS                 && *value >= 0.0
+//RS                 && *value <= i64::MAX as f64 =>
+//RS         {
+//RS             Some(*value as i64)
+//RS         }
+//RS         Some(jet_std::DataTree::Number(value)) => value.parse::<i64>().ok().filter(|value| *value >= 0),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_ws_error(error: JetWsError) -> JetBrowserError {
+//RS     match error {
+//RS         JetWsError::Timeout => JetBrowserError::new("timeout"),
+//RS         JetWsError::Closed => JetBrowserError::new("closed"),
+//RS         _ => JetBrowserError::new("transport"),
+//RS     }
+//RS }
+//RS 
+//RS impl JetWsConn {
+//RS     fn set_timeout(&self, milliseconds: i64) -> Result<(), JetWsError> {
+//RS         let duration = std::time::Duration::from_millis(
+//RS             u64::try_from(milliseconds).map_err(|_| JetWsError::IO {
+//RS                 operation: "set websocket timeout".to_string(),
+//RS             })?,
+//RS         );
+//RS         self.stream
+//RS             .borrow()
+//RS             .set_read_timeout(Some(duration))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set websocket read timeout".to_string(),
+//RS             })?;
+//RS         self.stream
+//RS             .borrow()
+//RS             .set_write_timeout(Some(duration))
+//RS             .map_err(|_| JetWsError::IO {
+//RS                 operation: "set websocket write timeout".to_string(),
+//RS             })?;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS fn jet_browser_parse_message(text: &str) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     let value =
+//RS         jet_std::parse_json_strict(text).map_err(|_| JetBrowserError::new("protocol"))?;
+//RS     if matches!(value, jet_std::DataTree::Object(_)) {
+//RS         Ok(value)
+//RS     } else {
+//RS         Err(JetBrowserError::new("protocol"))
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_remaining_ms(deadline: std::time::Instant) -> Result<i64, JetBrowserError> {
+//RS     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+//RS     if remaining.is_zero() {
+//RS         return Err(JetBrowserError::new("timeout"));
+//RS     }
+//RS     Ok(i64::try_from(remaining.as_millis().max(1)).unwrap_or(i64::MAX))
+//RS }
+//RS 
+//RS fn jet_browser_recv_json(
+//RS     state: &mut JetBrowserState,
+//RS     deadline: std::time::Instant,
+//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     state
+//RS         .conn
+//RS         .set_timeout(jet_browser_remaining_ms(deadline)?)
+//RS         .map_err(jet_browser_ws_error)?;
+//RS     let message = jet_ws_recv(&state.conn).map_err(jet_browser_ws_error)?;
+//RS     let text = jet_ws_message_text(&message).map_err(jet_browser_ws_error)?;
+//RS     jet_browser_parse_message(&text)
+//RS }
+//RS 
+//RS fn jet_browser_event_network_facts(
+//RS     value: &jet_std::DataTree,
+//RS ) -> (String, String, String, bool, i64) {
+//RS     let Some(params) = jet_browser_get(value, "params") else {
+//RS         return (String::new(), String::new(), String::new(), false, 0);
+//RS     };
+//RS     let is_blocked = matches!(
+//RS         jet_browser_get(params, "isBlocked"),
+//RS         Some(jet_std::DataTree::Bool(true))
+//RS     );
+//RS     let request = jet_browser_get(params, "request");
+//RS     let request_id = request
+//RS         .and_then(|request| jet_browser_string(request, "request").ok())
+//RS         .unwrap_or_default();
+//RS     let request_method = request
+//RS         .and_then(|request| jet_browser_string(request, "method").ok())
+//RS         .unwrap_or_default();
+//RS     let url_hash = request
+//RS         .and_then(|request| jet_browser_string(request, "url").ok())
+//RS         .or_else(|| jet_browser_string(params, "url").ok())
+//RS         .map(|url| jet_browser_fact_hash(&url))
+//RS         .unwrap_or_default();
+//RS     let status_code = jet_browser_get(params, "response")
+//RS         .and_then(|response| match jet_browser_get(response, "status") {
+//RS             Some(jet_std::DataTree::Int(value)) if (0..=599).contains(value) => Some(*value),
+//RS             Some(jet_std::DataTree::Float(value))
+//RS                 if value.is_finite() && value.fract() == 0.0 && (0.0..=599.0).contains(value) =>
+//RS             {
+//RS                 Some(*value as i64)
+//RS             }
+//RS             Some(jet_std::DataTree::Number(value)) => value
+//RS                 .parse::<i64>()
+//RS                 .ok()
+//RS                 .filter(|value| (0..=599).contains(value)),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or(0);
+//RS     (request_id, request_method, url_hash, is_blocked, status_code)
+//RS }
+//RS 
+//RS fn jet_browser_event_download_facts(value: &jet_std::DataTree) -> (String, String) {
+//RS     let Some(params) = jet_browser_get(value, "params") else {
+//RS         return (String::new(), String::new());
+//RS     };
+//RS     let download_id = jet_browser_string(params, "download").unwrap_or_default();
+//RS     let suggested_filename_hash = jet_browser_string(params, "suggestedFilename")
+//RS         .map(|name| jet_browser_fact_hash(&name))
+//RS         .unwrap_or_default();
+//RS     (download_id, suggested_filename_hash)
+//RS }
+//RS 
+//RS fn jet_browser_capture_event(
+//RS     state: &mut JetBrowserState,
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<bool, JetBrowserError> {
+//RS     let Some(jet_std::DataTree::Text(kind) | jet_std::DataTree::TypedText(kind)) =
+//RS         jet_browser_get(value, "type")
+//RS     else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     if kind != "event" {
+//RS         return Ok(false);
+//RS     }
+//RS     let method = jet_browser_string(value, "method")?;
+//RS     let (request_id, request_method, url_hash, is_blocked, status_code) =
+//RS         jet_browser_event_network_facts(value);
+//RS     let (download_id, suggested_filename_hash) = jet_browser_event_download_facts(value);
+//RS     jet_browser_trace_push(state, format!("event:{}", jet_browser_fact_hash(&method)));
+//RS     if state.events.len() == JET_BROWSER_EVENT_LIMIT {
+//RS         state.events.pop_front();
+//RS     }
+//RS     state.events.push_back(JetBrowserEvent {
+//RS         method,
+//RS         request_id,
+//RS         request_method,
+//RS         url_hash,
+//RS         is_blocked,
+//RS         status_code,
+//RS         download_id,
+//RS         suggested_filename_hash,
+//RS     });
+//RS     Ok(true)
+//RS }
+//RS 
+//RS fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
+//RS     const BIDI_2024_11: &[&str] = &[
+//RS         "session.status",
+//RS         "session.new",
+//RS         "session.end",
+//RS         "session.subscribe",
+//RS         "browser.createUserContext",
+//RS         "browser.removeUserContext",
+//RS         "browser.setDownloadBehavior",
+//RS         "browsingContext.create",
+//RS         "browsingContext.close",
+//RS         "browsingContext.getTree",
+//RS         "browsingContext.navigate",
+//RS         "browsingContext.reload",
+//RS         "browsingContext.locateNodes",
+//RS         "browsingContext.captureScreenshot",
+//RS         "browsingContext.print",
+//RS         "input.performActions",
+//RS         "input.releaseActions",
+//RS         "input.setFiles",
+//RS         "network.addIntercept",
+//RS         "network.continueRequest",
+//RS         "network.failRequest",
+//RS         "network.provideResponse",
+//RS         "network.removeIntercept",
+//RS         "storage.getCookies",
+//RS         "storage.setCookie",
+//RS         "storage.deleteCookies",
+//RS         "script.callFunction",
+//RS         "script.disown",
+//RS         "script.evaluate",
+//RS         "script.getRealms",
+//RS         "goog:cdp.sendCommand",
+//RS     ];
+//RS     match profile {
+//RS         "bidi-2024.11" => BIDI_2024_11.contains(&method),
+//RS         "bidi-2025.5" => {
+//RS             BIDI_2024_11.contains(&method)
+//RS                 || matches!(
+//RS                     method,
+//RS                     "permissions.setPermission"
+//RS                         | "webExtension.install"
+//RS                         | "webExtension.uninstall"
+//RS                 )
+//RS         }
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_command_with_timeout(
+//RS     browser: &JetBrowser,
+//RS     method: &str,
+//RS     params: jet_std::DataTree,
+//RS     timeout_ms: i64,
+//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     let mut state = browser.state.borrow_mut();
+//RS     if state.closed {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     if !jet_browser_profile_allows(&state.profile, method) {
+//RS         return Err(JetBrowserError::new("unsupported protocol"));
+//RS     }
+//RS     if method == "goog:cdp.sendCommand" && !state.cdp {
+//RS         return Err(JetBrowserError::new("unsupported protocol"));
+//RS     }
+//RS     let deadline =
+//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
+//RS     state
+//RS         .conn
+//RS         .set_timeout(jet_browser_remaining_ms(deadline)?)
+//RS         .map_err(jet_browser_ws_error)?;
+//RS     let id = state.next_id;
+//RS     state.next_id += 1;
+//RS     let request = jet_browser_object(vec![
+//RS         ("id", jet_std::DataTree::Int(id)),
+//RS         ("method", jet_browser_text(method)),
+//RS         ("params", params),
+//RS     ]);
+//RS     let text = jet_std::render_json(&request, false, 0);
+//RS     let method_hash = jet_browser_fact_hash(method);
+//RS     jet_browser_trace_push(&mut state, format!("send:{id}:{method_hash}"));
+//RS     jet_ws_send_text(&state.conn, &text).map_err(jet_browser_ws_error)?;
+//RS     loop {
+//RS         let response = jet_browser_recv_json(&mut state, deadline)?;
+//RS         if jet_browser_capture_event(&mut state, &response)? {
+//RS             continue;
+//RS         }
+//RS         if jet_browser_id(&response) != Some(id) {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         let response_type = jet_browser_string(&response, "type")?;
+//RS         if response_type == "error" || jet_browser_get(&response, "error").is_some() {
+//RS             jet_browser_trace_push(&mut state, format!("error:{id}:{method_hash}"));
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         if response_type != "success" {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         let Some(result) = jet_browser_get(&response, "result").cloned() else {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         };
+//RS         jet_browser_trace_push(&mut state, format!("recv:{id}:{method_hash}"));
+//RS         return Ok(result);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_command(
+//RS     browser: &JetBrowser,
+//RS     method: &str,
+//RS     params: jet_std::DataTree,
+//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     let timeout_ms = browser.state.borrow().timeout_ms;
+//RS     jet_browser_command_with_timeout(browser, method, params, timeout_ms)
+//RS }
+//RS 
+//RS fn jet_browser_profile(name: &String) -> Result<JetBrowserProfile, JetBrowserError> {
+//RS     let version = match name.as_str() {
+//RS         "bidi-2025.5" => "2025.5",
+//RS         "bidi-2024.11" => "2024.11",
+//RS         _ => return Err(JetBrowserError::new("invalid profile")),
+//RS     };
+//RS     Ok(JetBrowserProfile {
+//RS         name: name.clone(),
+//RS         version: version.to_string(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_timeout(milliseconds: i64) -> Result<JetBrowserTimeout, JetBrowserError> {
+//RS     if !(1..=600_000).contains(&milliseconds) {
+//RS         return Err(JetBrowserError::new("invalid timeout"));
+//RS     }
+//RS     Ok(JetBrowserTimeout { milliseconds })
+//RS }
+//RS 
+//RS fn jet_browser_project_root() -> String {
+//RS     std::env::var("JET_PROJECT_ROOT").unwrap_or_else(|_| ".".to_string())
+//RS }
+//RS 
+//RS fn jet_browser_parse_locked(raw: &str, engine: &str) -> Result<JetBrowserLocked, JetBrowserError> {
+//RS     let mut current: Option<JetBrowserLocked> = None;
+//RS     let mut in_browser = false;
+//RS     let mut found: Option<JetBrowserLocked> = None;
+//RS     for line in raw.lines() {
+//RS         let line = line.trim();
+//RS         if line.is_empty() || line.starts_with('#') {
+//RS             continue;
+//RS         }
+//RS         if line.starts_with('[') {
+//RS             if in_browser {
+//RS                 if let Some(entry) = current.take() {
+//RS                     if entry.engine == engine {
+//RS                         found = Some(entry);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             in_browser = line == "[[browser]]";
+//RS             if in_browser {
+//RS                 current = Some(JetBrowserLocked {
+//RS                     engine: String::new(),
+//RS                     version: String::new(),
+//RS                     binary: String::new(),
+//RS                     protocol: String::new(),
+//RS                     size: 0,
+//RS                     output_hash: String::new(),
+//RS                 });
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if !in_browser {
+//RS             continue;
+//RS         }
+//RS         let Some(entry) = current.as_mut() else {
+//RS             continue;
+//RS         };
+//RS         let Some((key, val)) = line.split_once('=') else {
+//RS             continue;
+//RS         };
+//RS         let key = key.trim();
+//RS         let val = val.trim().trim_matches('"');
+//RS         match key {
+//RS             "engine" => entry.engine = val.to_string(),
+//RS             "version" => entry.version = val.to_string(),
+//RS             "binary" => entry.binary = val.to_string(),
+//RS             "protocol" => entry.protocol = val.to_string(),
+//RS             "size" => {
+//RS                 entry.size = val.parse().map_err(|_| JetBrowserError::new("invalid lock"))?;
+//RS             }
+//RS             "output-hash" => entry.output_hash = val.to_string(),
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if in_browser {
+//RS         if let Some(entry) = current.take() {
+//RS             if entry.engine == engine {
+//RS                 found = Some(entry);
+//RS             }
+//RS         }
+//RS     }
+//RS     let locked = found.ok_or_else(|| JetBrowserError::new("missing lock"))?;
+//RS     if locked.engine.is_empty()
+//RS         || locked.binary.is_empty()
+//RS         || locked.protocol.is_empty()
+//RS         || locked.output_hash.is_empty()
+//RS     {
+//RS         return Err(JetBrowserError::new("invalid lock"));
+//RS     }
+//RS     Ok(locked)
+//RS }
+//RS 
+//RS fn jet_browser_locked(engine: &String) -> Result<JetBrowserLocked, JetBrowserError> {
+//RS     let engine_name = match engine.as_str() {
+//RS         "chromium" | "firefox" | "webkit" => engine.as_str(),
+//RS         _ => return Err(JetBrowserError::new("unknown engine")),
+//RS     };
+//RS     let root = jet_browser_project_root();
+//RS     let lock_path = std::path::Path::new(&root).join(".jet/lock");
+//RS     let raw = std::fs::read_to_string(&lock_path).map_err(|_| JetBrowserError::new("missing lock"))?;
+//RS     let locked = jet_browser_parse_locked(&raw, engine_name)?;
+//RS     let path = std::path::Path::new(&locked.binary);
+//RS     if !path.is_file() {
+//RS         return Err(JetBrowserError::new("missing binary"));
+//RS     }
+//RS     let size = std::fs::metadata(path)
+//RS         .map_err(|_| JetBrowserError::new("missing binary"))?
+//RS         .len() as i64;
+//RS     if size != locked.size {
+//RS         return Err(JetBrowserError::new("size mismatch"));
+//RS     }
+//RS     Ok(locked)
+//RS }
+//RS 
+//RS fn jet_browser_locked_engine(locked: &JetBrowserLocked) -> String {
+//RS     locked.engine.clone()
+//RS }
+//RS 
+//RS fn jet_browser_locked_version(locked: &JetBrowserLocked) -> String {
+//RS     locked.version.clone()
+//RS }
+//RS 
+//RS fn jet_browser_locked_binary(locked: &JetBrowserLocked) -> String {
+//RS     locked.binary.clone()
+//RS }
+//RS 
+//RS fn jet_browser_locked_protocol(locked: &JetBrowserLocked) -> String {
+//RS     locked.protocol.clone()
+//RS }
+//RS 
+//RS fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Result<(), JetBrowserError> {
+//RS     let path = std::path::Path::new(&locked.binary);
+//RS     if !path.is_file() {
+//RS         return Err(JetBrowserError::new("missing binary"));
+//RS     }
+//RS     let size = std::fs::metadata(path)
+//RS         .map_err(|_| JetBrowserError::new("missing binary"))?
+//RS         .len() as i64;
+//RS     if size != locked.size {
+//RS         return Err(JetBrowserError::new("size mismatch"));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_browser_connect(endpoint: &String) -> Result<JetBrowser, JetBrowserError> {
+//RS     let profile = jet_browser_profile(&"bidi-2025.5".to_string())?;
+//RS     let timeout = JetBrowserTimeout {
+//RS         milliseconds: 30_000,
+//RS     };
+//RS     jet_browser_connect_profile(endpoint, &profile, timeout)
+//RS }
+//RS 
+//RS fn jet_browser_connect_profile(
+//RS     endpoint: &String,
+//RS     profile: &JetBrowserProfile,
+//RS     timeout: JetBrowserTimeout,
+//RS ) -> Result<JetBrowser, JetBrowserError> {
+//RS     let conn = jet_ws_connect(endpoint).map_err(jet_browser_ws_error)?;
+//RS     conn.set_timeout(timeout.milliseconds)
+//RS         .map_err(jet_browser_ws_error)?;
+//RS     let browser = JetBrowser {
+//RS         state: std::rc::Rc::new(std::cell::RefCell::new(JetBrowserState {
+//RS             conn,
+//RS             next_id: 1,
+//RS             closed: false,
+//RS             session_started: false,
+//RS             timeout_ms: timeout.milliseconds,
+//RS             profile: profile.name.clone(),
+//RS             cdp: false,
+//RS             trace: vec!["connect".to_string()],
+//RS             trace_bytes: "connect".len(),
+//RS             events: std::collections::VecDeque::new(),
+//RS             test_actions: None,
+//RS         })),
+//RS     };
+//RS     let status = jet_browser_command(
+//RS         &browser,
+//RS         "session.status",
+//RS         jet_browser_object(Vec::new()),
+//RS     )?;
+//RS     if !matches!(
+//RS         jet_browser_get(&status, "ready"),
+//RS         Some(jet_std::DataTree::Bool(true))
+//RS     )
+//RS         || !matches!(
+//RS             jet_browser_get(&status, "message"),
+//RS             Some(jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_))
+//RS         )
+//RS     {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let new_session = jet_browser_command(
+//RS         &browser,
+//RS         "session.new",
+//RS         jet_browser_object(vec![(
+//RS             "capabilities",
+//RS             jet_browser_object(vec![("alwaysMatch", jet_browser_object(Vec::new()))]),
+//RS         )]),
+//RS     )?;
+//RS     browser.state.borrow_mut().session_started = true;
+//RS     let _session_id = jet_browser_string(&new_session, "sessionId")?;
+//RS     let capabilities = jet_browser_get(&new_session, "capabilities")
+//RS         .filter(|value| matches!(value, jet_std::DataTree::Object(_)))
+//RS         .ok_or_else(|| JetBrowserError::new("protocol"))?;
+//RS     let cdp = jet_browser_get(capabilities, "goog:cdp")
+//RS         .is_some_and(|value| matches!(value, jet_std::DataTree::Bool(true)));
+//RS     browser.state.borrow_mut().cdp = cdp;
+//RS     Ok(browser)
+//RS }
+//RS 
+//RS fn jet_browser_abilities(browser: &JetBrowser) -> JetBrowserAbilities {
+//RS     let state = browser.state.borrow();
+//RS     JetBrowserAbilities {
+//RS         bidi: true,
+//RS         cdp: state.cdp,
+//RS         profile: state.profile.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_context(browser: &JetBrowser) -> Result<JetBrowserContext, JetBrowserError> {
+//RS     let result = jet_browser_command(
+//RS         browser,
+//RS         "browser.createUserContext",
+//RS         jet_browser_object(Vec::new()),
+//RS     )?;
+//RS     Ok(JetBrowserContext {
+//RS         state: std::rc::Rc::new(JetBrowserContextState {
+//RS             browser: browser.clone(),
+//RS             id: jet_browser_string(&result, "userContext")?,
+//RS             closed: std::cell::Cell::new(false),
+//RS         }),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_subscribe(
+//RS     browser: &JetBrowser,
+//RS     event: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     let events = jet_std::DataTree::Array(vec![jet_browser_text(event)]);
+//RS     jet_browser_command(
+//RS         browser,
+//RS         "session.subscribe",
+//RS         jet_browser_object(vec![("events", events)]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_next_event(
+//RS     browser: &JetBrowser,
+//RS     timeout: JetBrowserTimeout,
+//RS ) -> Result<JetBrowserEvent, JetBrowserError> {
+//RS     let mut state = browser.state.borrow_mut();
+//RS     if state.closed {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     if let Some(event) = state.events.pop_front() {
+//RS         return Ok(event);
+//RS     }
+//RS     let deadline = std::time::Instant::now()
+//RS         + std::time::Duration::from_millis(timeout.milliseconds as u64);
+//RS     loop {
+//RS         let value = jet_browser_recv_json(&mut state, deadline)?;
+//RS         if jet_browser_capture_event(&mut state, &value)? {
+//RS             return state
+//RS                 .events
+//RS                 .pop_front()
+//RS                 .ok_or_else(|| JetBrowserError::new("protocol"));
+//RS         }
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_phase_ok(phase: &str) -> bool {
+//RS     matches!(
+//RS         phase,
+//RS         "beforeRequestSent" | "responseStarted" | "authRequired"
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_add_intercept(
+//RS     browser: &JetBrowser,
+//RS     phase: &String,
+//RS ) -> Result<JetBrowserIntercept, JetBrowserError> {
+//RS     if !jet_browser_phase_ok(phase) {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         browser,
+//RS         "network.addIntercept",
+//RS         jet_browser_object(vec![(
+//RS             "phases",
+//RS             jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
+//RS         )]),
+//RS     )?;
+//RS     Ok(JetBrowserIntercept {
+//RS         state: std::rc::Rc::new(JetBrowserInterceptState {
+//RS             browser: browser.clone(),
+//RS             id: jet_browser_string(&result, "intercept")?,
+//RS             removed: std::cell::Cell::new(false),
+//RS         }),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_add_intercept_url(
+//RS     browser: &JetBrowser,
+//RS     phase: &String,
+//RS     url_pattern: &String,
+//RS ) -> Result<JetBrowserIntercept, JetBrowserError> {
+//RS     if !jet_browser_phase_ok(phase) || url_pattern.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let pattern = jet_browser_object(vec![
+//RS         ("type", jet_browser_text("string")),
+//RS         ("pattern", jet_browser_text(url_pattern)),
+//RS     ]);
+//RS     let result = jet_browser_command(
+//RS         browser,
+//RS         "network.addIntercept",
+//RS         jet_browser_object(vec![
+//RS             (
+//RS                 "phases",
+//RS                 jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
+//RS             ),
+//RS             ("urlPatterns", jet_std::DataTree::Array(vec![pattern])),
+//RS         ]),
+//RS     )?;
+//RS     Ok(JetBrowserIntercept {
+//RS         state: std::rc::Rc::new(JetBrowserInterceptState {
+//RS             browser: browser.clone(),
+//RS             id: jet_browser_string(&result, "intercept")?,
+//RS             removed: std::cell::Cell::new(false),
+//RS         }),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_intercept_remove(intercept: &JetBrowserIntercept) -> Result<(), JetBrowserError> {
+//RS     if intercept.state.removed.get() {
+//RS         return Ok(());
+//RS     }
+//RS     jet_browser_command(
+//RS         &intercept.state.browser,
+//RS         "network.removeIntercept",
+//RS         jet_browser_object(vec![("intercept", jet_browser_text(&intercept.state.id))]),
+//RS     )?;
+//RS     intercept.state.removed.set(true);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_browser_continue_request(
+//RS     browser: &JetBrowser,
+//RS     request_id: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if request_id.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     jet_browser_command(
+//RS         browser,
+//RS         "network.continueRequest",
+//RS         jet_browser_object(vec![("request", jet_browser_text(request_id))]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_fail_request(
+//RS     browser: &JetBrowser,
+//RS     request_id: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if request_id.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     jet_browser_command(
+//RS         browser,
+//RS         "network.failRequest",
+//RS         jet_browser_object(vec![
+//RS             ("request", jet_browser_text(request_id)),
+//RS             ("errorReason", jet_browser_text("Failed")),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_fulfill_request(
+//RS     browser: &JetBrowser,
+//RS     request_id: &String,
+//RS     status: i64,
+//RS     body: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if request_id.is_empty() || !(100..=599).contains(&status) {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let body_value = jet_browser_object(vec![
+//RS         ("type", jet_browser_text("string")),
+//RS         ("value", jet_browser_text(body)),
+//RS     ]);
+//RS     jet_browser_command(
+//RS         browser,
+//RS         "network.provideResponse",
+//RS         jet_browser_object(vec![
+//RS             ("request", jet_browser_text(request_id)),
+//RS             ("statusCode", jet_std::DataTree::Int(status)),
+//RS             ("body", body_value),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): allow downloads into an absolute destination folder.
+//RS fn jet_browser_allow_downloads(
+//RS     browser: &JetBrowser,
+//RS     folder: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if folder.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     jet_browser_command(
+//RS         browser,
+//RS         "browser.setDownloadBehavior",
+//RS         jet_browser_object(vec![(
+//RS             "downloadBehavior",
+//RS             jet_browser_object(vec![
+//RS                 ("type", jet_browser_text("allowed")),
+//RS                 ("destinationFolder", jet_browser_text(folder)),
+//RS             ]),
+//RS         )]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_protocol(
+//RS     browser: &JetBrowser,
+//RS     kind: &String,
+//RS ) -> Result<JetBrowserProtocol, JetBrowserError> {
+//RS     let state = browser.state.borrow();
+//RS     if state.closed {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let supported = match kind.as_str() {
+//RS         "bidi" => true,
+//RS         "cdp" => state.cdp,
+//RS         _ => false,
+//RS     };
+//RS     if !supported {
+//RS         return Err(JetBrowserError::new("unsupported protocol"));
+//RS     }
+//RS     Ok(JetBrowserProtocol {
+//RS         browser: browser.clone(),
+//RS         kind: kind.clone(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_trace(browser: &JetBrowser) -> JetBrowserTrace {
+//RS     JetBrowserTrace {
+//RS         entries: browser.state.borrow().trace.clone(),
+//RS     }
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): privacy defaults for the connected session.
+//RS fn jet_browser_privacy(_browser: &JetBrowser) -> JetBrowserPrivacy {
+//RS     JetBrowserPrivacy {
+//RS         isolated_profiles: true,
+//RS         redact_receipts: true,
+//RS         shared_profiles: false,
+//RS     }
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): normal receipt — redacted facts only.
+//RS fn jet_browser_receipt(browser: &JetBrowser) -> JetBrowserReceipt {
+//RS     let state = browser.state.borrow();
+//RS     JetBrowserReceipt {
+//RS         entries: state.trace.clone(),
+//RS         isolated: true,
+//RS         cleaned: state.closed,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_close(browser: &JetBrowser) -> Result<(), JetBrowserError> {
+//RS     let state = browser.state.borrow();
+//RS     if state.closed {
+//RS         return Ok(());
+//RS     }
+//RS     if !state.session_started {
+//RS         drop(state);
+//RS         browser.state.borrow_mut().closed = true;
+//RS         return Ok(());
+//RS     }
+//RS     drop(state);
+//RS     jet_browser_command(browser, "session.end", jet_browser_object(Vec::new()))?;
+//RS     browser.state.borrow_mut().closed = true;
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl Drop for JetBrowser {
+//RS     fn drop(&mut self) {
+//RS         if std::rc::Rc::strong_count(&self.state) == 1 {
+//RS             let _ = jet_browser_close(self);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_context_create_tab(
+//RS     context: &JetBrowserContext,
+//RS ) -> Result<JetBrowserPage, JetBrowserError> {
+//RS     if context.state.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &context.state.browser,
+//RS         "browsingContext.create",
+//RS         jet_browser_object(vec![
+//RS             ("type", jet_browser_text("tab")),
+//RS             ("userContext", jet_browser_text(&context.state.id)),
+//RS         ]),
+//RS     )?;
+//RS     Ok(JetBrowserPage {
+//RS         state: std::rc::Rc::new(JetBrowserPageState {
+//RS             browser: context.state.browser.clone(),
+//RS             context: context.state.clone(),
+//RS             id: jet_browser_string(&result, "context")?,
+//RS             closed: std::cell::Cell::new(false),
+//RS         }),
+//RS     })
+//RS }
+//RS 
+//RS /// Beginner page handle — one BiDi tab under the isolated user context.
+//RS fn jet_browser_context_page(
+//RS     context: &JetBrowserContext,
+//RS ) -> Result<JetBrowserPage, JetBrowserError> {
+//RS     jet_browser_context_create_tab(context)
+//RS }
+//RS 
+//RS /// Explicit tab create — same BiDi browsing context as `page()`.
+//RS fn jet_browser_context_tab(
+//RS     context: &JetBrowserContext,
+//RS ) -> Result<JetBrowserPage, JetBrowserError> {
+//RS     jet_browser_context_create_tab(context)
+//RS }
+//RS 
+//RS fn jet_browser_context_close(context: &JetBrowserContext) -> Result<(), JetBrowserError> {
+//RS     jet_browser_context_state_close(&context.state)
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): contexts are always isolated BiDi user contexts.
+//RS fn jet_browser_context_isolated(_context: &JetBrowserContext) -> bool {
+//RS     true
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1193): hashed user-context id for receipts (never raw).
+//RS fn jet_browser_context_user_hash(context: &JetBrowserContext) -> String {
+//RS     jet_browser_fact_hash(&context.state.id)
+//RS }
+//RS 
+//RS fn jet_browser_context_state_close(
+//RS     context: &JetBrowserContextState,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if context.closed.get() {
+//RS         return Ok(());
+//RS     }
+//RS     if context.browser.state.borrow().closed {
+//RS         context.closed.set(true);
+//RS         return Ok(());
+//RS     }
+//RS     jet_browser_command(
+//RS         &context.browser,
+//RS         "browser.removeUserContext",
+//RS         jet_browser_object(vec![("userContext", jet_browser_text(&context.id))]),
+//RS     )?;
+//RS     context.closed.set(true);
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl Drop for JetBrowserContextState {
+//RS     fn drop(&mut self) {
+//RS         let _ = jet_browser_context_state_close(self);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_navigation_url(url: &String) -> String {
+//RS     if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
+//RS         return url.clone();
+//RS     }
+//RS     let base = std::env::var("JET_TEST_WEB_SERVER_URL")
+//RS         .or_else(|_| std::env::var("JET_BROWSER_TEST_SERVER_URL"))
+//RS         .unwrap_or_default();
+//RS     if base.is_empty() {
+//RS         return url.clone();
+//RS     }
+//RS     format!(
+//RS         "{}/{}",
+//RS         base.trim_end_matches('/'),
+//RS         url.trim_start_matches('/')
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_page_goto(
+//RS     page: &JetBrowserPage,
+//RS     url: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let target_url = jet_browser_navigation_url(url);
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("goto:{}", jet_browser_fact_hash(url)),
+//RS     );
+//RS     jet_browser_command(
+//RS         &page.state.browser,
+//RS         "browsingContext.navigate",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&page.state.id)),
+//RS             ("url", jet_browser_text(&target_url)),
+//RS             ("wait", jet_browser_text("complete")),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_page_partition(page: &JetBrowserPage) -> jet_std::DataTree {
+//RS     jet_browser_object(vec![
+//RS         ("type", jet_browser_text("context")),
+//RS         ("context", jet_browser_text(&page.state.id)),
+//RS     ])
+//RS }
+//RS 
+//RS fn jet_browser_bytes_value(text: &str) -> jet_std::DataTree {
+//RS     jet_browser_object(vec![
+//RS         ("type", jet_browser_text("string")),
+//RS         ("value", jet_browser_text(text)),
+//RS     ])
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): viewport PNG screenshot as base64 (never traced).
+//RS fn jet_browser_page_screenshot(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &page.state.browser,
+//RS         "browsingContext.captureScreenshot",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&page.state.id)),
+//RS             (
+//RS                 "format",
+//RS                 jet_browser_object(vec![("type", jet_browser_text("image/png"))]),
+//RS             ),
+//RS         ]),
+//RS     )?;
+//RS     jet_browser_string(&result, "data")
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): print-to-PDF as base64 (never traced).
+//RS fn jet_browser_page_pdf(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &page.state.browser,
+//RS         "browsingContext.print",
+//RS         jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+//RS     )?;
+//RS     jet_browser_string(&result, "data")
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): set a cookie in the page's storage partition.
+//RS fn jet_browser_page_set_cookie(
+//RS     page: &JetBrowserPage,
+//RS     name: &String,
+//RS     value: &String,
+//RS     domain: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     if name.is_empty() || domain.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     jet_browser_command(
+//RS         &page.state.browser,
+//RS         "storage.setCookie",
+//RS         jet_browser_object(vec![
+//RS             (
+//RS                 "cookie",
+//RS                 jet_browser_object(vec![
+//RS                     ("name", jet_browser_text(name)),
+//RS                     ("value", jet_browser_bytes_value(value)),
+//RS                     ("domain", jet_browser_text(domain)),
+//RS                 ]),
+//RS             ),
+//RS             ("partition", jet_browser_page_partition(page)),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_cookie_string_value(
+//RS     cookie: &jet_std::DataTree,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     let Some(value) = jet_browser_get(cookie, "value") else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     match jet_browser_get(value, "type") {
+//RS         Some(jet_std::DataTree::Text(kind)) if kind == "string" || kind == "base64" => {
+//RS             jet_browser_string(value, "value")
+//RS         }
+//RS         _ => Err(JetBrowserError::new("protocol")),
+//RS     }
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): read one cookie value by name (caller-owned; not traced).
+//RS fn jet_browser_page_cookie(
+//RS     page: &JetBrowserPage,
+//RS     name: &String,
+//RS ) -> Result<Option<String>, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     if name.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &page.state.browser,
+//RS         "storage.getCookies",
+//RS         jet_browser_object(vec![
+//RS             (
+//RS                 "filter",
+//RS                 jet_browser_object(vec![("name", jet_browser_text(name))]),
+//RS             ),
+//RS             ("partition", jet_browser_page_partition(page)),
+//RS         ]),
+//RS     )?;
+//RS     let Some(jet_std::DataTree::Array(cookies)) = jet_browser_get(&result, "cookies") else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     match cookies.first() {
+//RS         None => Ok(None),
+//RS         Some(cookie) => Ok(Some(jet_browser_cookie_string_value(cookie)?)),
+//RS     }
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): delete cookies in the page partition.
+//RS fn jet_browser_page_clear_cookies(page: &JetBrowserPage) -> Result<(), JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     jet_browser_command(
+//RS         &page.state.browser,
+//RS         "storage.deleteCookies",
+//RS         jet_browser_object(vec![("partition", jet_browser_page_partition(page))]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_storage_kind_ok(kind: &str) -> bool {
+//RS     matches!(kind, "local" | "session")
+//RS }
+//RS 
+//RS fn jet_browser_page_storage_call(
+//RS     page: &JetBrowserPage,
+//RS     function: &str,
+//RS     args: Vec<jet_std::DataTree>,
+//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     jet_browser_command(
+//RS         &page.state.browser,
+//RS         "script.callFunction",
+//RS         jet_browser_object(vec![
+//RS             ("functionDeclaration", jet_browser_text(function)),
+//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
+//RS             (
+//RS                 "target",
+//RS                 jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+//RS             ),
+//RS             ("arguments", jet_std::DataTree::Array(args)),
+//RS         ]),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_remote_string(
+//RS     result: &jet_std::DataTree,
+//RS ) -> Result<Option<String>, JetBrowserError> {
+//RS     let Some(value) = jet_browser_get(result, "result") else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     match jet_browser_get(value, "type") {
+//RS         Some(jet_std::DataTree::Text(kind)) if kind == "null" || kind == "undefined" => Ok(None),
+//RS         Some(jet_std::DataTree::Text(kind)) if kind == "string" => {
+//RS             Ok(Some(jet_browser_string(value, "value")?))
+//RS         }
+//RS         _ => Err(JetBrowserError::new("protocol")),
+//RS     }
+//RS }
+//RS 
+//RS /// Browser-test facts use the ordinary BiDi script route. The expression is
+//RS /// fixed by the caller and its result is kept out of the protocol trace.
+//RS fn jet_browser_page_evaluate_text(
+//RS     page: &JetBrowserPage,
+//RS     expression: &str,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &page.state.browser,
+//RS         "script.evaluate",
+//RS         jet_browser_object(vec![
+//RS             ("expression", jet_browser_text(expression)),
+//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
+//RS             ("resultOwnership", jet_browser_text("none")),
+//RS             (
+//RS                 "target",
+//RS                 jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+//RS             ),
+//RS         ]),
+//RS     )?;
+//RS     jet_browser_remote_string(&result)?.ok_or_else(|| JetBrowserError::new("protocol"))
+//RS }
+//RS 
+//RS fn jet_browser_page_url(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     jet_browser_page_evaluate_text(page, "String(location.href)")
+//RS }
+//RS 
+//RS fn jet_browser_page_title(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     jet_browser_page_evaluate_text(page, "String(document.title || '')")
+//RS }
+//RS 
+//RS fn jet_browser_page_text(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     jet_browser_page_evaluate_text(
+//RS         page,
+//RS         "document.body ? String(document.body.innerText || '') : ''",
+//RS     )
+//RS }
+//RS 
+//RS fn jet_browser_page_dom(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+//RS     jet_browser_page_evaluate_text(
+//RS         page,
+//RS         "document.documentElement ? document.documentElement.outerHTML : ''",
+//RS     )
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): read local/session storage (kind: "local"|"session").
+//RS fn jet_browser_page_storage_get(
+//RS     page: &JetBrowserPage,
+//RS     kind: &String,
+//RS     key: &String,
+//RS ) -> Result<Option<String>, JetBrowserError> {
+//RS     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let store = if kind == "local" {
+//RS         "localStorage"
+//RS     } else {
+//RS         "sessionStorage"
+//RS     };
+//RS     let function = format!("function(key) {{ return {store}.getItem(key); }}");
+//RS     let result = jet_browser_page_storage_call(
+//RS         page,
+//RS         &function,
+//RS         vec![jet_browser_object(vec![
+//RS             ("type", jet_browser_text("string")),
+//RS             ("value", jet_browser_text(key)),
+//RS         ])],
+//RS     )?;
+//RS     jet_browser_remote_string(&result)
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): write local/session storage.
+//RS fn jet_browser_page_storage_set(
+//RS     page: &JetBrowserPage,
+//RS     kind: &String,
+//RS     key: &String,
+//RS     value: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let store = if kind == "local" {
+//RS         "localStorage"
+//RS     } else {
+//RS         "sessionStorage"
+//RS     };
+//RS     let function = format!("function(key, value) {{ {store}.setItem(key, value); }}");
+//RS     jet_browser_page_storage_call(
+//RS         page,
+//RS         &function,
+//RS         vec![
+//RS             jet_browser_object(vec![
+//RS                 ("type", jet_browser_text("string")),
+//RS                 ("value", jet_browser_text(key)),
+//RS             ]),
+//RS             jet_browser_object(vec![
+//RS                 ("type", jet_browser_text("string")),
+//RS                 ("value", jet_browser_text(value)),
+//RS             ]),
+//RS         ],
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): clear local/session storage.
+//RS fn jet_browser_page_storage_clear(
+//RS     page: &JetBrowserPage,
+//RS     kind: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if !jet_browser_storage_kind_ok(kind) {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let store = if kind == "local" {
+//RS         "localStorage"
+//RS     } else {
+//RS         "sessionStorage"
+//RS     };
+//RS     let function = format!("function() {{ {store}.clear(); }}");
+//RS     jet_browser_page_storage_call(page, &function, Vec::new()).map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_css_attr_equals(attr: &str, value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for ch in value.chars() {
+//RS         match ch {
+//RS             '\\' | '"' => {
+//RS                 escaped.push('\\');
+//RS                 escaped.push(ch);
+//RS             }
+//RS             _ => escaped.push(ch),
+//RS         }
+//RS     }
+//RS     format!("[{attr}=\"{escaped}\"]")
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_role(
+//RS     page: &JetBrowserPage,
+//RS     role: &String,
+//RS     name: &String,
+//RS ) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!(
+//RS             "locator:role:{}:{}",
+//RS             jet_browser_fact_hash(role),
+//RS             jet_browser_fact_hash(name)
+//RS         ),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "accessibility".to_string(),
+//RS         role: role.clone(),
+//RS         name: name.clone(),
+//RS         value: String::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("locator:text:{}", jet_browser_fact_hash(text)),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "innerText".to_string(),
+//RS         role: String::new(),
+//RS         name: String::new(),
+//RS         value: text.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("locator:label:{}", jet_browser_fact_hash(name)),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "accessibility".to_string(),
+//RS         role: String::new(),
+//RS         name: name.clone(),
+//RS         value: String::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_placeholder(
+//RS     page: &JetBrowserPage,
+//RS     text: &String,
+//RS ) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("locator:placeholder:{}", jet_browser_fact_hash(text)),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "css".to_string(),
+//RS         role: String::new(),
+//RS         name: String::new(),
+//RS         value: jet_browser_css_attr_equals("placeholder", text),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("locator:test-id:{}", jet_browser_fact_hash(id)),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "css".to_string(),
+//RS         role: String::new(),
+//RS         name: String::new(),
+//RS         value: jet_browser_css_attr_equals("data-testid", id),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
+//RS     jet_browser_record_action(
+//RS         &page.state.browser,
+//RS         format!("locator:css:{}", jet_browser_fact_hash(selector)),
+//RS     );
+//RS     JetBrowserLocator {
+//RS         page: page.state.clone(),
+//RS         locator_type: "css".to_string(),
+//RS         role: String::new(),
+//RS         name: String::new(),
+//RS         value: selector.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_locator_wire(
+//RS     locator: &JetBrowserLocator,
+//RS ) -> Result<jet_std::DataTree, JetBrowserError> {
+//RS     match locator.locator_type.as_str() {
+//RS         "accessibility" => {
+//RS             let mut value = Vec::new();
+//RS             if !locator.role.is_empty() {
+//RS                 value.push(("role", jet_browser_text(&locator.role)));
+//RS             }
+//RS             if !locator.name.is_empty() {
+//RS                 value.push(("name", jet_browser_text(&locator.name)));
+//RS             }
+//RS             if value.is_empty() {
+//RS                 return Err(JetBrowserError::new("protocol"));
+//RS             }
+//RS             Ok(jet_browser_object(vec![
+//RS                 ("type", jet_browser_text("accessibility")),
+//RS                 ("value", jet_browser_object(value)),
+//RS             ]))
+//RS         }
+//RS         "css" | "innerText" => Ok(jet_browser_object(vec![
+//RS             ("type", jet_browser_text(&locator.locator_type)),
+//RS             ("value", jet_browser_text(&locator.value)),
+//RS         ])),
+//RS         _ => Err(JetBrowserError::new("protocol")),
+//RS     }
+//RS }
+//RS fn jet_browser_locator_fingerprint(locator: &JetBrowserLocator) -> String {
+//RS     let mut identity = locator.locator_type.clone();
+//RS     identity.push(':');
+//RS     identity.push_str(&locator.role);
+//RS     identity.push(':');
+//RS     identity.push_str(&locator.name);
+//RS     identity.push(':');
+//RS     identity.push_str(&locator.value);
+//RS     jet_browser_fact_hash(&identity)
+//RS }
+//RS 
+//RS fn jet_browser_record_locator_action(locator: &JetBrowserLocator, action: &str) {
+//RS     jet_browser_record_action(
+//RS         &locator.page.browser,
+//RS         format!(
+//RS             "locator-action:{}:{}",
+//RS             action,
+//RS             jet_browser_locator_fingerprint(locator)
+//RS         ),
+//RS     );
+//RS }
+//RS 
+//RS fn jet_browser_frame_from_page(
+//RS     page: &JetBrowserPage,
+//RS     id: String,
+//RS ) -> JetBrowserFrame {
+//RS     JetBrowserFrame {
+//RS         state: std::rc::Rc::new(JetBrowserFrameState {
+//RS             browser: page.state.browser.clone(),
+//RS             page: page.state.clone(),
+//RS             id,
+//RS             closed: std::cell::Cell::new(false),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_main_frame(
+//RS     page: &JetBrowserPage,
+//RS ) -> Result<JetBrowserFrame, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     Ok(jet_browser_frame_from_page(page, page.state.id.clone()))
+//RS }
+//RS 
+//RS fn jet_browser_collect_frame_ids(
+//RS     node: &jet_std::DataTree,
+//RS     out: &mut Vec<String>,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     out.push(jet_browser_string(node, "context")?);
+//RS     match jet_browser_get(node, "children") {
+//RS         None => Ok(()),
+//RS         Some(jet_std::DataTree::Array(children)) => {
+//RS             for child in children {
+//RS                 jet_browser_collect_frame_ids(child, out)?;
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS         Some(_) => Err(JetBrowserError::new("protocol")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_page_frames(
+//RS     page: &JetBrowserPage,
+//RS ) -> Result<Vec<JetBrowserFrame>, JetBrowserError> {
+//RS     if page.state.closed.get() || page.state.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command(
+//RS         &page.state.browser,
+//RS         "browsingContext.getTree",
+//RS         jet_browser_object(vec![("root", jet_browser_text(&page.state.id))]),
+//RS     )?;
+//RS     let Some(jet_std::DataTree::Array(contexts)) = jet_browser_get(&result, "contexts") else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     let mut ids = Vec::new();
+//RS     for node in contexts {
+//RS         jet_browser_collect_frame_ids(node, &mut ids)?;
+//RS     }
+//RS     Ok(ids
+//RS         .into_iter()
+//RS         .map(|id| jet_browser_frame_from_page(page, id))
+//RS         .collect())
+//RS }
+//RS 
+//RS fn jet_browser_frame_close(frame: &JetBrowserFrame) -> Result<(), JetBrowserError> {
+//RS     if frame.state.closed.get() {
+//RS         return Ok(());
+//RS     }
+//RS     if frame.state.page.closed.get()
+//RS         || frame.state.page.context.closed.get()
+//RS         || frame.state.browser.state.borrow().closed
+//RS     {
+//RS         frame.state.closed.set(true);
+//RS         return Ok(());
+//RS     }
+//RS     jet_browser_command(
+//RS         &frame.state.browser,
+//RS         "browsingContext.close",
+//RS         jet_browser_object(vec![("context", jet_browser_text(&frame.state.id))]),
+//RS     )?;
+//RS     frame.state.closed.set(true);
+//RS     if frame.state.id == frame.state.page.id {
+//RS         frame.state.page.closed.set(true);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_browser_page_close(page: &JetBrowserPage) -> Result<(), JetBrowserError> {
+//RS     jet_browser_page_state_close(&page.state)
+//RS }
+//RS 
+//RS fn jet_browser_page_state_close(page: &JetBrowserPageState) -> Result<(), JetBrowserError> {
+//RS     if page.closed.get() {
+//RS         return Ok(());
+//RS     }
+//RS     if page.context.closed.get() || page.browser.state.borrow().closed {
+//RS         page.closed.set(true);
+//RS         return Ok(());
+//RS     }
+//RS     jet_browser_command(
+//RS         &page.browser,
+//RS         "browsingContext.close",
+//RS         jet_browser_object(vec![("context", jet_browser_text(&page.id))]),
+//RS     )?;
+//RS     page.closed.set(true);
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl Drop for JetBrowserPageState {
+//RS     fn drop(&mut self) {
+//RS         let _ = jet_browser_page_state_close(self);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_locator_query(
+//RS     locator: &JetBrowserLocator,
+//RS ) -> Result<Option<String>, JetBrowserError> {
+//RS     let timeout_ms = locator.page.browser.state.borrow().timeout_ms;
+//RS     jet_browser_locator_query_with_timeout(locator, timeout_ms)
+//RS }
+//RS 
+//RS fn jet_browser_locator_query_with_timeout(
+//RS     locator: &JetBrowserLocator,
+//RS     timeout_ms: i64,
+//RS ) -> Result<Option<String>, JetBrowserError> {
+//RS     if locator.page.closed.get() || locator.page.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     let result = jet_browser_command_with_timeout(
+//RS         &locator.page.browser,
+//RS         "browsingContext.locateNodes",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&locator.page.id)),
+//RS             ("locator", jet_browser_locator_wire(locator)?),
+//RS             ("maxNodeCount", jet_std::DataTree::Float(1.0)),
+//RS         ]),
+//RS         timeout_ms,
+//RS     )?;
+//RS     let Some(jet_std::DataTree::Array(nodes)) = jet_browser_get(&result, "nodes") else {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     };
+//RS     match nodes.first() {
+//RS         None => Ok(None),
+//RS         Some(node) => Ok(Some(jet_browser_string(node, "sharedId")?)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_locator_wait(
+//RS     locator: &JetBrowserLocator,
+//RS     timeout: JetBrowserTimeout,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(locator, "wait");
+//RS     let deadline =
+//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
+//RS     loop {
+//RS         let remaining = jet_browser_remaining_ms(deadline)?;
+//RS         if jet_browser_locator_query_with_timeout(locator, remaining)?.is_some() {
+//RS             return Ok(());
+//RS         }
+//RS         std::thread::sleep(std::time::Duration::from_millis(10));
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_locator_wait_gone(
+//RS     locator: &JetBrowserLocator,
+//RS     timeout: JetBrowserTimeout,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(locator, "wait-gone");
+//RS     let deadline =
+//RS         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
+//RS     loop {
+//RS         let remaining = jet_browser_remaining_ms(deadline)?;
+//RS         if jet_browser_locator_query_with_timeout(locator, remaining)?.is_none() {
+//RS             return Ok(());
+//RS         }
+//RS         std::thread::sleep(std::time::Duration::from_millis(10));
+//RS     }
+//RS }
+//RS 
+//RS fn jet_browser_locator_resolve(
+//RS     locator: &JetBrowserLocator,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     if locator.page.closed.get() || locator.page.context.closed.get() {
+//RS         return Err(JetBrowserError::new("closed"));
+//RS     }
+//RS     jet_browser_locator_query(locator)?.ok_or_else(|| JetBrowserError::new("timeout"))
+//RS }
+//RS 
+//RS fn jet_browser_locator_pointer(
+//RS     locator: &JetBrowserLocator,
+//RS     shared_id: &str,
+//RS     down_up: bool,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     let origin = jet_browser_object(vec![
+//RS         ("type", jet_browser_text("element")),
+//RS         (
+//RS             "element",
+//RS             jet_browser_object(vec![("sharedId", jet_browser_text(shared_id))]),
+//RS         ),
+//RS     ]);
+//RS     let mut actions = vec![jet_browser_object(vec![
+//RS         ("type", jet_browser_text("pointerMove")),
+//RS         ("x", jet_std::DataTree::Float(0.0)),
+//RS         ("y", jet_std::DataTree::Float(0.0)),
+//RS         ("origin", origin),
+//RS     ])];
+//RS     if down_up {
+//RS         actions.push(jet_browser_object(vec![
+//RS             ("type", jet_browser_text("pointerDown")),
+//RS             ("button", jet_std::DataTree::Float(0.0)),
+//RS         ]));
+//RS         actions.push(jet_browser_object(vec![
+//RS             ("type", jet_browser_text("pointerUp")),
+//RS             ("button", jet_std::DataTree::Float(0.0)),
+//RS         ]));
+//RS     }
+//RS     let source = jet_browser_object(vec![
+//RS         ("type", jet_browser_text("pointer")),
+//RS         ("id", jet_browser_text("mouse")),
+//RS         (
+//RS             "parameters",
+//RS             jet_browser_object(vec![("pointerType", jet_browser_text("mouse"))]),
+//RS         ),
+//RS         ("actions", jet_std::DataTree::Array(actions)),
+//RS     ]);
+//RS     jet_browser_command(
+//RS         &locator.page.browser,
+//RS         "input.performActions",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&locator.page.id)),
+//RS             ("actions", jet_std::DataTree::Array(vec![source])),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(locator, "click");
+//RS     let shared_id = jet_browser_locator_resolve(locator)?;
+//RS     jet_browser_locator_pointer(locator, &shared_id, true)
+//RS }
+//RS 
+//RS fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(locator, "hover");
+//RS     let shared_id = jet_browser_locator_resolve(locator)?;
+//RS     jet_browser_locator_pointer(locator, &shared_id, false)
+//RS }
+//RS 
+//RS fn jet_browser_locator_fill(
+//RS     locator: &JetBrowserLocator,
+//RS     text: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(
+//RS         locator,
+//RS         &format!("fill:{}", jet_browser_fact_hash(text)),
+//RS     );
+//RS     let shared_id = jet_browser_locator_resolve(locator)?;
+//RS     // Clear then assign through the DOM value path — no page data enters the trace.
+//RS     let function = "function(el, value) {\
+//RS         el.focus();\
+//RS         if ('value' in el) { el.value = ''; el.value = value; }\
+//RS         else if (el.isContentEditable) { el.textContent = value; }\
+//RS         el.dispatchEvent(new Event('input', { bubbles: true }));\
+//RS         el.dispatchEvent(new Event('change', { bubbles: true }));\
+//RS     }"
+//RS     .to_string();
+//RS     jet_browser_command(
+//RS         &locator.page.browser,
+//RS         "script.callFunction",
+//RS         jet_browser_object(vec![
+//RS             ("functionDeclaration", jet_browser_text(&function)),
+//RS             ("awaitPromise", jet_std::DataTree::Bool(false)),
+//RS             (
+//RS                 "target",
+//RS                 jet_browser_object(vec![("context", jet_browser_text(&locator.page.id))]),
+//RS             ),
+//RS             (
+//RS                 "arguments",
+//RS                 jet_std::DataTree::Array(vec![
+//RS                     jet_browser_object(vec![
+//RS                         ("type", jet_browser_text("node")),
+//RS                         ("sharedId", jet_browser_text(&shared_id)),
+//RS                     ]),
+//RS                     jet_browser_object(vec![
+//RS                         ("type", jet_browser_text("string")),
+//RS                         ("value", jet_browser_text(text)),
+//RS                     ]),
+//RS                 ]),
+//RS             ),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_locator_press(
+//RS     locator: &JetBrowserLocator,
+//RS     key: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     jet_browser_record_locator_action(
+//RS         locator,
+//RS         &format!("press:{}", jet_browser_fact_hash(key)),
+//RS     );
+//RS     let shared_id = jet_browser_locator_resolve(locator)?;
+//RS     jet_browser_locator_pointer(locator, &shared_id, true)?;
+//RS     let actions = jet_std::DataTree::Array(vec![
+//RS         jet_browser_object(vec![
+//RS             ("type", jet_browser_text("keyDown")),
+//RS             ("value", jet_browser_text(key)),
+//RS         ]),
+//RS         jet_browser_object(vec![
+//RS             ("type", jet_browser_text("keyUp")),
+//RS             ("value", jet_browser_text(key)),
+//RS         ]),
+//RS     ]);
+//RS     let source = jet_browser_object(vec![
+//RS         ("type", jet_browser_text("key")),
+//RS         ("id", jet_browser_text("keyboard")),
+//RS         ("actions", actions),
+//RS     ]);
+//RS     jet_browser_command(
+//RS         &locator.page.browser,
+//RS         "input.performActions",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&locator.page.id)),
+//RS             ("actions", jet_std::DataTree::Array(vec![source])),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1191): set file input paths via BiDi input.setFiles.
+//RS fn jet_browser_locator_set_files(
+//RS     locator: &JetBrowserLocator,
+//RS     path: &String,
+//RS ) -> Result<(), JetBrowserError> {
+//RS     if path.is_empty() {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     jet_browser_record_locator_action(
+//RS         locator,
+//RS         &format!("set-files:{}", jet_browser_fact_hash(path)),
+//RS     );
+//RS     let shared_id = jet_browser_locator_resolve(locator)?;
+//RS     jet_browser_command(
+//RS         &locator.page.browser,
+//RS         "input.setFiles",
+//RS         jet_browser_object(vec![
+//RS             ("context", jet_browser_text(&locator.page.id)),
+//RS             (
+//RS                 "element",
+//RS                 jet_browser_object(vec![("sharedId", jet_browser_text(&shared_id))]),
+//RS             ),
+//RS             (
+//RS                 "files",
+//RS                 jet_std::DataTree::Array(vec![jet_browser_text(path)]),
+//RS             ),
+//RS         ]),
+//RS     )
+//RS     .map(|_| ())
+//RS }
+//RS 
+//RS fn jet_browser_event_kind(event: &JetBrowserEvent) -> String {
+//RS     event.method.clone()
+//RS }
+//RS 
+//RS fn jet_browser_event_request_id(event: &JetBrowserEvent) -> String {
+//RS     event.request_id.clone()
+//RS }
+//RS 
+//RS fn jet_browser_event_request_method(event: &JetBrowserEvent) -> String {
+//RS     event.request_method.clone()
+//RS }
+//RS 
+//RS fn jet_browser_event_url_hash(event: &JetBrowserEvent) -> String {
+//RS     event.url_hash.clone()
+//RS }
+//RS 
+//RS fn jet_browser_event_is_blocked(event: &JetBrowserEvent) -> bool {
+//RS     event.is_blocked
+//RS }
+//RS 
+//RS fn jet_browser_event_status_code(event: &JetBrowserEvent) -> i64 {
+//RS     event.status_code
+//RS }
+//RS 
+//RS fn jet_browser_event_download_id(event: &JetBrowserEvent) -> String {
+//RS     event.download_id.clone()
+//RS }
+//RS 
+//RS fn jet_browser_event_suggested_filename_hash(event: &JetBrowserEvent) -> String {
+//RS     event.suggested_filename_hash.clone()
+//RS }
+//RS 
+//RS /// CDP methods are `Domain.command` (PascalCase domain). BiDi module paths
+//RS /// stay lowercase (`session.status`); this check keeps CDP from becoming a
+//RS /// silent second spelling for portable BiDi commands.
+//RS fn jet_browser_cdp_method_ok(method: &str) -> bool {
+//RS     let Some((domain, command)) = method.split_once('.') else {
+//RS         return false;
+//RS     };
+//RS     if method.bytes().filter(|b| *b == b'.').count() != 1
+//RS         || domain.is_empty()
+//RS         || command.is_empty()
+//RS         || method.contains(':')
+//RS     {
+//RS         return false;
+//RS     }
+//RS     let mut domain_chars = domain.chars();
+//RS     let Some(first) = domain_chars.next() else {
+//RS         return false;
+//RS     };
+//RS     first.is_ascii_uppercase()
+//RS         && domain_chars.all(|c| c.is_ascii_alphanumeric())
+//RS         && command
+//RS             .chars()
+//RS             .next()
+//RS             .is_some_and(|c| c.is_ascii_alphabetic())
+//RS         && command.chars().all(|c| c.is_ascii_alphanumeric())
+//RS }
+//RS 
+//RS /// D-BROWSER-AUTO1=A (#1192): checked expert CDP / raw BiDi protocol send.
+//RS /// CDP is capability-gated via `protocol("cdp")` only — BiDi cannot smuggle
+//RS /// `goog:cdp.*`, and CDP methods must match audited `Domain.command` shape.
+//RS fn jet_browser_protocol_send(
+//RS     protocol: &JetBrowserProtocol,
+//RS     method: &String,
+//RS     params_json: &String,
+//RS ) -> Result<String, JetBrowserError> {
+//RS     let params =
+//RS         jet_std::parse_json_strict(params_json).map_err(|_| JetBrowserError::new("protocol"))?;
+//RS     if !matches!(params, jet_std::DataTree::Object(_)) {
+//RS         return Err(JetBrowserError::new("protocol"));
+//RS     }
+//RS     let result = if protocol.kind == "bidi" {
+//RS         if method.starts_with("goog:cdp.") {
+//RS             return Err(JetBrowserError::new("unsupported protocol"));
+//RS         }
+//RS         jet_browser_command(&protocol.browser, method, params)?
+//RS     } else if protocol.kind == "cdp" {
+//RS         if !protocol.browser.state.borrow().cdp {
+//RS             return Err(JetBrowserError::new("unsupported protocol"));
+//RS         }
+//RS         if !jet_browser_cdp_method_ok(method) {
+//RS             return Err(JetBrowserError::new("protocol"));
+//RS         }
+//RS         jet_browser_command(
+//RS             &protocol.browser,
+//RS             "goog:cdp.sendCommand",
+//RS             jet_browser_object(vec![
+//RS                 ("method", jet_browser_text(method)),
+//RS                 ("params", params),
+//RS             ]),
+//RS         )?
+//RS     } else {
+//RS         return Err(JetBrowserError::new("unsupported protocol"));
+//RS     };
+//RS     Ok(jet_std::render_json(&result, false, 0))
+//RS }
+//RS 
+//RS fn jet_browser_abilities_bidi(caps: &JetBrowserAbilities) -> bool {
+//RS     caps.bidi
+//RS }
+//RS 
+//RS fn jet_browser_abilities_cdp(caps: &JetBrowserAbilities) -> bool {
+//RS     caps.cdp
+//RS }
+//RS 
+//RS fn jet_browser_abilities_profile(caps: &JetBrowserAbilities) -> String {
+//RS     caps.profile.clone()
+//RS }
+//RS 
+//RS fn jet_browser_trace_entry_count(trace: &JetBrowserTrace) -> i64 {
+//RS     trace.entries.len() as i64
+//RS }
+//RS 
+//RS fn jet_browser_trace_redacted(trace: &JetBrowserTrace) -> bool {
+//RS     let total: usize = trace.entries.iter().map(String::len).sum();
+//RS     total <= JET_BROWSER_TRACE_LIMIT_BYTES
+//RS         && trace.entries.iter().all(|entry| {
+//RS             if entry == "connect" {
+//RS                 return true;
+//RS             }
+//RS             let mut parts = entry.split(':');
+//RS             let Some(kind) = parts.next() else {
+//RS                 return false;
+//RS             };
+//RS             match kind {
+//RS                 "event" => parts.next().is_some_and(|hash| {
+//RS                     hash.len() == 16
+//RS                         && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+//RS                         && parts.next().is_none()
+//RS                 }),
+//RS                 "send" | "recv" | "error" => {
+//RS                     parts.next().is_some_and(|id| {
+//RS                         !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())
+//RS                     }) && parts.next().is_some_and(|hash| {
+//RS                         hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+//RS                     }) && parts.next().is_none()
+//RS                 }
+//RS                 _ => false,
+//RS             }
+//RS         })
+//RS }
+//RS 
+//RS fn jet_browser_trace_summary(trace: &JetBrowserTrace) -> String {
+//RS     trace.entries.join(",")
+//RS }
+//RS 
+//RS fn jet_browser_privacy_isolated_profiles(privacy: &JetBrowserPrivacy) -> bool {
+//RS     privacy.isolated_profiles
+//RS }
+//RS 
+//RS fn jet_browser_privacy_redact_receipts(privacy: &JetBrowserPrivacy) -> bool {
+//RS     privacy.redact_receipts
+//RS }
+//RS 
+//RS fn jet_browser_privacy_shared_profiles(privacy: &JetBrowserPrivacy) -> bool {
+//RS     privacy.shared_profiles
+//RS }
+//RS 
+//RS fn jet_browser_receipt_entry_count(receipt: &JetBrowserReceipt) -> i64 {
+//RS     receipt.entries.len() as i64
+//RS }
+//RS 
+//RS fn jet_browser_receipt_redacted(receipt: &JetBrowserReceipt) -> bool {
+//RS     jet_browser_trace_redacted(&JetBrowserTrace {
+//RS         entries: receipt.entries.clone(),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_browser_receipt_isolated(receipt: &JetBrowserReceipt) -> bool {
+//RS     receipt.isolated
+//RS }
+//RS 
+//RS fn jet_browser_receipt_cleaned(receipt: &JetBrowserReceipt) -> bool {
+//RS     receipt.cleaned
+//RS }
+//RS 
+//RS fn jet_browser_receipt_summary(receipt: &JetBrowserReceipt) -> String {
+//RS     receipt.entries.join(",")
+//RS }
+// END-PORT-PENDING 0251 crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs:1-2195
+

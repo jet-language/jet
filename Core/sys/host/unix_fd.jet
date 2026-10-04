@@ -1,0 +1,156 @@
+// HistoryPlatform.rs:290–489, canonical raw fd leaves; libc <fcntl.h>,
+// <unistd.h>, <sys/stat.h>, <sys/file.h>, <time.h>, <errno.h>.
+// Linux x86_64 LP64 glibc ONLY for read/write/stat/time signatures below.
+// Header oracle: glibc 2.42 bits/{struct_stat,typesizes}.h and
+// bits/types/struct_timespec.h. These layouts are not x32/musl/Darwin/BSD.
+// This is a Linux/glibc-selected unit; Darwin raw sysconf/__error/error text
+// live solely in darwin_os_imports.jet. No universal stat/errno ABI is assumed.
+// Target flags/secure descent/retries/deadlines belong to Tools history.
+use core.mem as unix_mem
+use c.c as unix_os
+
+#Layout(c)
+pub struct LinuxX8664Timespec {
+    pub tv_sec: I64
+    pub tv_nsec: I64
+}
+
+#Layout(c)
+pub struct LinuxX8664Stat {
+    pub st_dev: U64
+    pub st_ino: U64
+    pub st_nlink: U64
+    pub st_mode: U32
+    pub st_uid: U32
+    pub st_gid: U32
+    pub __pad0: I32
+    pub st_rdev: U64
+    pub st_size: I64
+    pub st_blksize: I64
+    pub st_blocks: I64
+    pub st_atim: LinuxX8664Timespec
+    pub st_mtim: LinuxX8664Timespec
+    pub st_ctim: LinuxX8664Timespec
+    // glibc __syscall_slong_t __glibc_reserved[3], flattened WITHOUT changing
+    // its layout: three consecutive I64 words; no growable or exact-Int field.
+    pub __reserved0: I64
+    pub __reserved1: I64
+    pub __reserved2: I64
+}
+
+// glibc Linux LP64 bits/dirent.h22–34. d_name is native inline byte
+// storage, NOT String; returned records borrow DIR's buffer until next read.
+#Layout(c)
+pub struct LinuxX8664Dirent {
+    pub d_ino: U64
+    pub d_off: I64
+    pub d_reclen: U16
+    pub d_type: U8
+    pub d_name: [I8#256]
+}
+
+// Pinned std available_parallelism leaf: glibc bits/cpu-set.h27–42,
+// cpu_set_t __bits[1024 / 64]. Flattened exactly, no allocation or CPU policy.
+#Layout(c)
+pub struct LinuxX8664CpuSet {
+    pub bits0: U64
+    pub bits1: U64
+    pub bits2: U64
+    pub bits3: U64
+    pub bits4: U64
+    pub bits5: U64
+    pub bits6: U64
+    pub bits7: U64
+    pub bits8: U64
+    pub bits9: U64
+    pub bits10: U64
+    pub bits11: U64
+    pub bits12: U64
+    pub bits13: U64
+    pub bits14: U64
+    pub bits15: U64
+}
+
+#Import module c.c {
+    // open/openat are C variadics. This overlay always supplies the promoted
+    // mode_t word, including zero when flags do not require it; the exact
+    // requested four-argument openat contract matches HistoryPlatform.rs291.
+    fn open(path: *I8, flags: I32, mode: U32) -> I32 = "open"
+    fn openat(dirfd: I32, path: *I8, flags: I32, mode: U32) -> I32 = "openat"
+    fn mkdirat(dirfd: I32, path: *I8, mode: U32) -> I32 = "mkdirat"
+    fn renameat(old_dirfd: I32, old_path: *I8, new_dirfd: I32, new_path: *I8) -> I32 = "renameat"
+    fn unlinkat(dirfd: I32, path: *I8, flags: I32) -> I32 = "unlinkat"
+    fn fsync(fd: I32) -> I32 = "fsync"
+    fn flock(fd: I32, operation: I32) -> I32 = "flock"
+    fn close(fd: I32) -> I32 = "close"
+    fn dup(fd: I32) -> I32 = "dup"
+    fn fchmod(fd: I32, mode: U32) -> I32 = "fchmod"
+    // On this selected LP64 target size_t=U64, ssize_t=I64. Buffer points to
+    // payload bytes, not to the Jet list/array owner representation.
+    fn read(fd: I32, buffer: *U8, count: U64) -> I64 = "read"
+    fn write(fd: I32, buffer: *U8, count: U64) -> I64 = "write"
+    fn fstat(fd: I32, out: *LinuxX8664Stat) -> I32 = "fstat"
+    fn fstatat(dirfd: I32, path: *I8, out: *LinuxX8664Stat, flags: I32) -> I32 = "fstatat"
+    fn clock_gettime(clock_id: I32, out: *LinuxX8664Timespec) -> I32 = "clock_gettime"
+    // On EINTR only, remaining is initialized; on success it is unspecified.
+    fn nanosleep(request: *LinuxX8664Timespec, remaining: *LinuxX8664Timespec) -> I32 = "nanosleep"
+    // Used by the native no-follow acceptance case, not path-scanning policy.
+    fn symlinkat(target: *I8, dirfd: I32, path: *I8) -> I32 = "symlinkat"
+    fn errno_location() -> *I32 = "__errno_location"
+    fn sched_getaffinity(pid: I32, size: U64, mask: *LinuxX8664CpuSet) -> I32 = "sched_getaffinity"
+    fn sysconf(selector: I32) -> I64 = "sysconf"
+    // getenv borrows environment-owned nullable NUL bytes. Canonical
+    // os_path_ingress MUST hold real environment synchronization through the
+    // copy into OSPath; never free this pointer or return a borrowed view after
+    // unlocking. Not a C String return: nonUTF8 bytes must survive unchanged.
+    fn getenv(name: *I8) -> *I8 = "getenv"
+    // Pinned std error_string uses the XSI int/status-out ABI, NOT glibc's
+    // GNU strerror_r pointer-return ABI (string.h431–445). Native byte text
+    // decode/trim/classification belongs to the canonical IOError owner.
+    fn xsi_strerror_r(error_number: I32, buffer: *I8, size: U64) -> I32 = "__xpg_strerror_r"
+    fn getcwd(buffer: *I8, size: U64) -> *I8 = "getcwd"
+    // fdopendir consumes the owned fd ONLY after success; closedir then
+    // releases stream+fd. Failure leaves the fd owned by the caller.
+    fn fdopendir(fd: I32) -> *U8 = "fdopendir"
+    fn closedir(stream: *U8) -> I32 = "closedir"
+    // Caller clears actual TLS errno before read; null+errno0 is EOF, not
+    // failure. Record/name loan ends at the next read or stream close.
+    fn readdir(stream: *U8) -> *LinuxX8664Dirent = "readdir"
+    // Raw C variadic; selected F_DUPFD_CLOEXEC/retry policies stay native
+    // descriptor owner. Do not replace std try_clone with plain dup.
+    fn fcntl(fd: I32, command: I32, args: ...I32) -> I32 = "fcntl"
+}
+
+// errno_location is the actual errno.h37 pointer-return signature, retained
+// above even though Sema/FFI.rs535–538 currently rejects it E3202 (#4494).
+// It is NOT replaced by a String/Int return or a helper provider.
+// #4494 must admit a borrowed, non-null per-thread TLS pointer under #Unsafe;
+// dereference immediately after a failing libc call, before any other call.
+// Native EINTR=4 on the selected Linux target; do not export it as Unix-wide.
+// Other targets need their real accessor (__error on Darwin) and real layouts.
+
+pub LINUX_X86_64_SC_NPROCESSORS_ONLN :: I32{84}
+
+pub fn linux_x86_64_timespec_slot() -> LinuxX8664Timespec Never! {
+    LinuxX8664Timespec{tv_sec: I64{0}, tv_nsec: I64{0}}
+}
+
+pub fn linux_x86_64_stat_slot() -> LinuxX8664Stat Never! {
+    zero :: linux_x86_64_timespec_slot()
+    LinuxX8664Stat{
+        st_dev: U64{0}, st_ino: U64{0}, st_nlink: U64{0}, st_mode: U32{0},
+        st_uid: U32{0}, st_gid: U32{0}, __pad0: I32{0}, st_rdev: U64{0},
+        st_size: I64{0}, st_blksize: I64{0}, st_blocks: I64{0},
+        st_atim: zero, st_mtim: zero, st_ctim: zero,
+        __reserved0: I64{0}, __reserved1: I64{0}, __reserved2: I64{0}
+    }
+}
+
+pub fn linux_x86_64_cpu_set_slot() -> LinuxX8664CpuSet Never! {
+    LinuxX8664CpuSet{
+        bits0: U64{0}, bits1: U64{0}, bits2: U64{0}, bits3: U64{0},
+        bits4: U64{0}, bits5: U64{0}, bits6: U64{0}, bits7: U64{0},
+        bits8: U64{0}, bits9: U64{0}, bits10: U64{0}, bits11: U64{0},
+        bits12: U64{0}, bits13: U64{0}, bits14: U64{0}, bits15: U64{0}
+    }
+}

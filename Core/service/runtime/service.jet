@@ -1,0 +1,140 @@
+// PORT-PENDING 0187 crates-jet-codegen-src-prelude-service-module-group: crates/jet-codegen/src/Prelude/Service.rs:1-136
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-SERVICE-JIT1 / I9: the resident adapter enters the same CtValue bridges
+//RS // that the TIR evaluator uses. These functions marshal at the tier boundary;
+//RS // service and sync policy remains in the canonical Prelude implementations.
+//RS 
+//RS use jet_foundation::AST::CtValue;
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS pub(crate) type JetServiceEndpoint =
+//RS     jet_codegen::Comptime::ServicesLite::JetServiceEndpoint;
+//RS 
+//RS fn workflow_wait(nanos: i64) -> jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait<()> {
+//RS     match jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+//RS         jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos)
+//RS     }) {
+//RS         jet_codegen::scheduler::JetSchedulerWait::Ready(()) => {
+//RS             jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Ready(())
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Cancelled => {
+//RS             jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Cancelled
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Deadline(reason) => {
+//RS             jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Deadline(reason)
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Panicked(reason) => {
+//RS             jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Panicked(reason)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn service_runtime(store: String, retention_ms: i64) -> CtValue {
+//RS     let runtime = jet_codegen::Comptime::ServicesLite::jet_services_runtime(store, retention_ms);
+//RS     CtValue::Struct {
+//RS         type_name: "ServiceRuntime".to_string(),
+//RS         fields: vec![
+//RS             ("store".to_string(), CtValue::Str(runtime.store)),
+//RS             ("retention_ms".to_string(), CtValue::Int(runtime.retention_ms)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn service_show(value: &CtValue) -> Option<String> {
+//RS     jet_codegen::Comptime::ServicesLite::service_show_value(value)
+//RS         .or_else(|| jet_codegen::Comptime::SyncLite::sync_show_value(value))
+//RS }
+//RS 
+//RS use jet_foundation::MIR::MirRuntimeValue;
+//RS 
+//RS pub(crate) fn services_apply_runtime(
+//RS     method: &str,
+//RS     args: &[MirRuntimeValue],
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     jet_codegen::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
+//RS         jet_codegen::Comptime::ServicesLite::apply_runtime(method, args, span)
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn services_start_runtime<F>(
+//RS     receiver: &MirRuntimeValue,
+//RS     span: Span,
+//RS     dispatch: F,
+//RS ) -> Result<MirRuntimeValue, Diagnostic>
+//RS where
+//RS     F: FnMut(
+//RS         &str,
+//RS         &JetServiceEndpoint,
+//RS     ) -> Result<(), jet_codegen::Comptime::ServicesLite::JetServiceError>,
+//RS {
+//RS     jet_codegen::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
+//RS         jet_codegen::Comptime::ServicesLite::apply_runtime_start_with_dispatcher(
+//RS             receiver, span, dispatch,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn services_runtime_apply_runtime(
+//RS     receiver: &MirRuntimeValue,
+//RS     method: &str,
+//RS     args: &[MirRuntimeValue],
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     jet_codegen::Comptime::ServicesLite::apply_runtime_method_mir(receiver, method, args, span)
+//RS }
+//RS 
+//RS pub(crate) fn services_take_mut_runtime(
+//RS     value: MirRuntimeValue,
+//RS ) -> Result<(MirRuntimeValue, MirRuntimeValue), MirRuntimeValue> {
+//RS     jet_codegen::Comptime::ServicesLite::take_mut_runtime(value)
+//RS }
+//RS 
+//RS pub(crate) fn service_runtime_runtime(store: String, retention_ms: i64) -> MirRuntimeValue {
+//RS     jet_codegen::Comptime::ServicesLite::service_runtime_value(store, retention_ms)
+//RS }
+//RS 
+//RS pub(crate) fn sync_apply_runtime(
+//RS     method: &str,
+//RS     args: &[MirRuntimeValue],
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     let args = args
+//RS         .iter()
+//RS         .map(jet_codegen::Comptime::ServicesLite::runtime_to_ct_value)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     jet_codegen::Comptime::SyncLite::apply(method, &args, span)
+//RS         .and_then(|value| jet_codegen::Comptime::ServicesLite::ct_to_runtime_value(&value))
+//RS }
+//RS 
+//RS pub(crate) fn service_endpoint_runtime(
+//RS     value: &MirRuntimeValue,
+//RS ) -> Option<jet_codegen::Comptime::ServicesLite::JetServiceEndpoint> {
+//RS     jet_codegen::Comptime::ServicesLite::service_endpoint_runtime(value)
+//RS }
+//RS 
+//RS pub(crate) fn jet_services_execution_scope(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<
+//RS     jet_codegen::Comptime::ServicesLite::JetServiceExecutionScope,
+//RS     jet_codegen::Comptime::ServicesLite::JetServiceError,
+//RS > {
+//RS     jet_codegen::Comptime::ServicesLite::jet_services_execution_scope(endpoint)
+//RS }
+//RS 
+//RS pub(crate) fn service_display_runtime(value: &MirRuntimeValue) -> Option<String> {
+//RS     if let Some(rendered) =
+//RS         jet_codegen::Comptime::ServicesLite::service_display_value_runtime(value)
+//RS     {
+//RS         return Some(rendered);
+//RS     }
+//RS     if let Some(rendered) =
+//RS         jet_codegen::Comptime::ServicesLite::service_show_value_runtime(value)
+//RS     {
+//RS         return Some(rendered);
+//RS     }
+//RS     let value = jet_codegen::Comptime::ServicesLite::runtime_to_ct_value(value).ok()?;
+//RS     jet_codegen::Comptime::SyncLite::sync_show_value(&value)
+//RS         .or_else(|| jet_codegen::Comptime::display_core_pure_value(&value))
+//RS }
+// END-PORT-PENDING 0187 crates/jet-codegen/src/Prelude/Service.rs:1-136
+

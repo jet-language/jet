@@ -1,0 +1,21 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/ColumnListCodec.rs:1-17
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── D-SOA2D: serialization transparency for a columnar list ───────────────────
+//RS // `json.to_string` of a `[S]` stored columnar is byte-identical to the
+//RS // array-of-structs form, because both encode the same gathered records through
+//RS // the one DataTree model. These impls live beside the codec traits (they name
+//RS // them) and are Prelude source, so transparency is proven once for every
+//RS // columnar struct instead of being re-emitted per struct.
+//RS impl<S: JetRow + __jet_Encode> __jet_Encode for JetColumnList<S> {
+//RS     fn jet_encode(&self) -> jet_std::DataTree {
+//RS         self.to_aos().jet_encode()
+//RS     }
+//RS }
+//RS 
+//RS impl<S: JetRow + __jet_Decode> __jet_Decode for JetColumnList<S> {
+//RS     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+//RS         Ok(Self::from_aos(<Vec<S> as __jet_Decode>::jet_decode(tree)?))
+//RS     }
+//RS }
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/ColumnListCodec.rs:1-17
+

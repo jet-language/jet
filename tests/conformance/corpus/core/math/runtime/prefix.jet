@@ -1,0 +1,161 @@
+// MathLibPure.rs:85–153: canonical Core owner plus native scalar leaves.
+// These are scalar/native-leaf assertions, not shared ABI or O0/O1/O2/Web proof.
+// Fixed jet_std_math_abs_i64 is held (#4422): source-owned abs returns exact Int
+// for I64 instead of a fixed result, notably at i64::MIN. Keep the fixed repro
+// until the inward primitive/overflow rail is registered.
+use core.math as prefix_math
+use core.math as prefix_native
+
+fn prefix_close(actual: Float, expected: Float) -> Bool Never! {
+    prefix_math.abs_float(actual - expected) <= Float{1.0e-14}
+}
+
+#Test("prefix constants and exact Int do not narrow to fixed I64") {
+    assert_eq(prefix_math.pi(), Float{3.141592653589793})
+    assert_eq(prefix_math.e(), Float{2.718281828459045})
+    assert_eq(prefix_math.tau(), Float{6.283185307179586})
+    assert_eq(prefix_math.abs(-9223372036854775808), 9223372036854775808)
+    assert_eq(prefix_math.abs(-9223372036854775807), 9223372036854775807)
+    assert_eq(prefix_math.abs(9223372036854775807), 9223372036854775807)
+    assert_eq(prefix_math.abs(0), 0)
+}
+
+#Test("prefix IEEE predicates distinguish NaN infinity finite and signed zero") {
+    positive_inf :: prefix_math.infinity()
+    negative_inf :: -positive_inf
+    not_number :: prefix_math.nan()
+    finite_values :: [Float]{0.0, -0.0, 1.0, -1.0, 4.9406564584124654e-324, 1.7976931348623157e308}
+    loop value in finite_values {
+        assert(prefix_math.is_finite(value))
+        assert(!prefix_math.is_inf(value))
+        assert(!prefix_math.is_nan(value))
+    }
+    assert(prefix_math.is_inf(positive_inf))
+    assert(prefix_math.is_inf(negative_inf))
+    assert(!prefix_math.is_finite(positive_inf))
+    assert(!prefix_math.is_finite(negative_inf))
+    assert(!prefix_math.is_nan(positive_inf))
+    assert(prefix_math.is_nan(not_number))
+    assert(!prefix_math.is_inf(not_number))
+    assert(!prefix_math.is_finite(not_number))
+    assert(prefix_native.sign_bit(-Float{0.0}))
+    assert(!prefix_native.sign_bit(prefix_math.abs_float(-Float{0.0})))
+    assert(!prefix_native.sign_bit(prefix_math.fabs(-Float{0.0})))
+    assert_eq(prefix_math.abs_float(negative_inf), positive_inf)
+    assert_eq(prefix_math.fabs(-Float{4.9406564584124654e-324}), Float{4.9406564584124654e-324})
+    assert_eq(prefix_math.abs_float(-Float{1.7976931348623157e308}), Float{1.7976931348623157e308})
+    assert(prefix_math.is_nan(prefix_math.abs_float(not_number)))
+    negative_nan :: prefix_native.copysign(not_number, -Float{1.0})
+    assert(!prefix_native.sign_bit(prefix_math.fabs(negative_nan)))
+    // #4422: native fabs sign clearing does not prove the held evaluator route.
+}
+
+#Test("prefix native inverse hyperbolic and cube-root finite signed-zero cases") {
+    assert(prefix_close(prefix_math.asinh(Float{1.0}), Float{0.881373587019543}))
+    assert(prefix_close(prefix_math.asinh(-Float{1.0}), -Float{0.881373587019543}))
+    assert(prefix_close(prefix_math.acosh(Float{2.0}), Float{1.3169578969248166}))
+    assert_eq(prefix_math.acosh(Float{1.0}), Float{0.0})
+    assert(prefix_close(prefix_math.atanh(Float{0.5}), Float{0.5493061443340548}))
+    assert(prefix_close(prefix_math.atanh(-Float{0.5}), -Float{0.5493061443340548}))
+    assert(prefix_close(prefix_math.cbrt(Float{8.0}), Float{2.0}))
+    assert(prefix_close(prefix_math.cbrt(-Float{8.0}), -Float{2.0}))
+    assert(prefix_native.sign_bit(prefix_math.asinh(-Float{0.0})))
+    assert(prefix_native.sign_bit(prefix_math.atanh(-Float{0.0})))
+    assert(prefix_native.sign_bit(prefix_math.cbrt(-Float{0.0})))
+}
+
+#Test("prefix native domains return IEEE NaN and poles return signed infinity") {
+    infinity :: prefix_math.infinity()
+    not_number :: prefix_math.nan()
+    assert(prefix_math.is_nan(prefix_math.acosh(Float{0.5})))
+    assert(prefix_math.is_nan(prefix_math.acosh(-infinity)))
+    assert(prefix_math.is_nan(prefix_math.atanh(Float{2.0})))
+    assert(prefix_math.is_nan(prefix_math.atanh(-Float{2.0})))
+    assert(prefix_math.is_nan(prefix_math.atanh(infinity)))
+    assert_eq(prefix_math.atanh(Float{1.0}), infinity)
+    assert_eq(prefix_math.atanh(-Float{1.0}), -infinity)
+    assert_eq(prefix_math.asinh(infinity), infinity)
+    assert_eq(prefix_math.asinh(-infinity), -infinity)
+    assert_eq(prefix_math.acosh(infinity), infinity)
+    assert_eq(prefix_math.cbrt(infinity), infinity)
+    assert_eq(prefix_math.cbrt(-infinity), -infinity)
+    assert(prefix_math.is_nan(prefix_math.asinh(not_number)))
+    assert(prefix_math.is_nan(prefix_math.acosh(not_number)))
+    assert(prefix_math.is_nan(prefix_math.atanh(not_number)))
+    assert(prefix_math.is_nan(prefix_math.cbrt(not_number)))
+}
+
+#Test("prefix native exponentials preserve zero overflow underflow and NaN") {
+    infinity :: prefix_math.infinity()
+    not_number :: prefix_math.nan()
+    assert_eq(prefix_math.exp(Float{0.0}), Float{1.0})
+    assert(prefix_close(prefix_math.exp(Float{1.0}), prefix_math.e()))
+    assert_eq(prefix_math.exp2(Float{3.0}), Float{8.0})
+    assert_eq(prefix_math.exp2(-Float{3.0}), Float{0.125})
+    assert_eq(prefix_math.exp_m1(Float{0.0}), Float{0.0})
+    assert(prefix_native.sign_bit(prefix_math.exp_m1(-Float{0.0})))
+    assert(prefix_close(prefix_math.exp_m1(Float{1.0}), Float{1.718281828459045}))
+    // Cancellation-sensitive: exp(x)-1 would lose this small nonzero value.
+    assert_eq(prefix_math.exp_m1(Float{1.0e-20}), Float{1.0e-20})
+    assert_eq(prefix_math.exp(infinity), infinity)
+    assert_eq(prefix_math.exp(-infinity), Float{0.0})
+    assert_eq(prefix_math.exp2(infinity), infinity)
+    assert_eq(prefix_math.exp2(-infinity), Float{0.0})
+    assert_eq(prefix_math.exp_m1(infinity), infinity)
+    assert_eq(prefix_math.exp_m1(-infinity), -Float{1.0})
+    assert_eq(prefix_math.exp(Float{1000.0}), infinity)
+    assert_eq(prefix_math.exp(-Float{1000.0}), Float{0.0})
+    assert_eq(prefix_math.exp2(Float{1024.0}), infinity)
+    assert_eq(prefix_math.exp2(-Float{1074.0}), Float{4.9406564584124654e-324})
+    assert_eq(prefix_math.exp2(-Float{1075.0}), Float{0.0})
+    assert(prefix_math.is_nan(prefix_math.exp(not_number)))
+    assert(prefix_math.is_nan(prefix_math.exp2(not_number)))
+    assert(prefix_math.is_nan(prefix_math.exp_m1(not_number)))
+}
+
+// #4422: source-owned Int abs masks the compiler's existing typed F32 route.
+// Retain this whole test; widening to Float abs would not prove f32 behavior.
+#Test("prefix typed native F32 abs keeps width boundaries and clears sign") {
+    assert_eq(prefix_native.abs(F32{-1.5}), F32{1.5})
+    assert_eq(prefix_native.abs(F32{-16777216.0}), F32{16777216.0})
+    assert_eq(prefix_native.abs(F32{-1.401298464324817e-45}), F32{1.401298464324817e-45})
+    assert_eq(prefix_native.abs(F32{-3.4028234663852886e38}), F32{3.4028234663852886e38})
+    assert(!prefix_native.sign_bit(Float{prefix_native.abs(-F32{0.0})}))
+    infinity :: F32{1.0} / F32{0.0}
+    not_number :: F32{0.0} / F32{0.0}
+    assert_eq(prefix_native.abs(-infinity), infinity)
+    assert(prefix_math.is_nan(Float{prefix_native.abs(not_number)}))
+    negative_nan :: F32{prefix_native.copysign(Float{not_number}, -Float{1.0})}
+    assert(prefix_native.sign_bit(Float{negative_nan}))
+    assert(!prefix_native.sign_bit(Float{prefix_native.abs(negative_nan)}))
+}
+
+#Test("prefix fsum preserves compensated recurrence and cancellation order") {
+    empty :: [Float]{}
+    assert_eq(prefix_math.fsum(empty), Float{0.0})
+    assert(!prefix_native.sign_bit(prefix_math.fsum(empty)))
+    assert_eq(prefix_math.fsum([Float]{-0.0}), Float{0.0})
+    assert(!prefix_native.sign_bit(prefix_math.fsum([Float]{-0.0})))
+    assert_eq(prefix_math.fsum([Float]{1.0, 2.0, 3.0}), Float{6.0})
+    assert_eq(prefix_math.fsum([Float]{1.0e16, 1.0, 1.0, -1.0e16}), Float{2.0})
+    // Rust uses Kahan, not Python's partials: the lost unit stays lost here.
+    assert_eq(prefix_math.fsum([Float]{1.0e16, 1.0, -1.0e16}), Float{0.0})
+    assert_eq(prefix_math.fsum([Float]{1.0e16, -1.0e16, 1.0}), Float{1.0})
+    assert_eq(prefix_math.fsum([Float]{1.0, 1.1102230246251565e-16, 1.1102230246251565e-16}), Float{1.0000000000000002})
+    assert_eq(prefix_math.fsum([Float]{4.9406564584124654e-324, 4.9406564584124654e-324}), Float{9.881312916824931e-324})
+}
+
+#Test("prefix fsum preserves NaN and infinity compensation without repairs") {
+    infinity :: prefix_math.infinity()
+    not_number :: prefix_math.nan()
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{not_number})))
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{1.0, not_number, 2.0})))
+    assert_eq(prefix_math.fsum([Float]{infinity}), infinity)
+    assert_eq(prefix_math.fsum([Float]{-infinity}), -infinity)
+    assert_eq(prefix_math.fsum([Float]{1.0, infinity}), infinity)
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{infinity, 1.0})))
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{infinity, infinity})))
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{infinity, -infinity})))
+    assert_eq(prefix_math.fsum([Float]{1.7976931348623157e308, 1.7976931348623157e308}), infinity)
+    assert(prefix_math.is_nan(prefix_math.fsum([Float]{1.7976931348623157e308, 1.7976931348623157e308, 1.0})))
+}

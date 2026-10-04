@@ -1,0 +1,40 @@
+use kernel_storage_leaves as storage_wire_leaf
+
+// Rust CoreLib/JetStd/WireOrder.rs:4–24, jet_wire_order_merge.
+// Tuple-list inputs are borrowed, not ordered maps: duplicate keys are legal.
+// First known match wins at EACH original position. Emitted keys are tracked
+// only for original replacements, so duplicate new known keys ALL append.
+// Capacity and Clone/drop stay in the checked typed storage leaf; no infallible
+// allocation is silently converted into a fallible public collection operation.
+pub fn jet_wire_order_merge<T: Clone>(known: [(key: String, value: T)], original: [(key: String, value: T)]) -> [(key: String, value: T)] Never! {
+    capacity := known.len()
+    if original.len() > capacity -> capacity = original.len()
+    out := storage_wire_leaf.jet_storage_list_with_capacity<(key: String, value: T)>(capacity)
+    emitted := [String]{}
+    loop i in 0..<original.len() {
+        replacement := -1
+        loop k in 0..<known.len() {
+            if known[k].key == original[i].key {
+                replacement = k
+                break
+            }
+        }
+        if replacement >= 0 {
+            &out.push((key: ~original[i].key, value: ~known[replacement].value))
+            &emitted.push(~original[i].key)
+        } else {
+            &out.push((key: ~original[i].key, value: ~original[i].value))
+        }
+    }
+    loop k in 0..<known.len() {
+        was_emitted := false
+        loop e in 0..<emitted.len() {
+            if emitted[e] == known[k].key {
+                was_emitted = true
+                break
+            }
+        }
+        if !was_emitted -> &out.push((key: ~known[k].key, value: ~known[k].value))
+    }
+    out
+}

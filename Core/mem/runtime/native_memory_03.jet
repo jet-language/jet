@@ -1,0 +1,1157 @@
+// PORT-PENDING 0226 crates-jet-jit-src-memory-slice-3591: crates/jet-jit/src/Memory.rs:3591-4743
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_shared_guard_read(handle: i64) -> i64 {
+//RS     jet_jit_shared_guard_begin(handle, 0)
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_edit(handle: i64) -> i64 {
+//RS     jet_jit_shared_guard_begin(handle, 1)
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if guard_shared_handle(rt, guard).is_none() {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         }
+//RS         let Some(state) = guard_state(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         match shared_protocol::jet_shared_guard_map(&state, field, editable != 0) {
+//RS             Ok(mapped_state) => {
+//RS                 let shared_handle = guard_shared_handle(rt, guard)
+//RS                     .expect("validated SharedGuard carrier lost its shared handle");
+//RS                 let Some(value) = rt.heap.record_get_int(guard, GUARD_VALUE) else {
+//RS                     rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                     return 0;
+//RS                 };
+//RS                 let native_entry = rt.native_shared_guards.get(&guard).map(|entry| {
+//RS                     let permit = Arc::clone(&entry.permit);
+//RS                     entry
+//RS                         .view
+//RS                         .entry_view()
+//RS                         .and_then(|view| view.map_path(&[field], editable != 0))
+//RS                         .map(|view| crate::runtime_host::NativeSharedGuardEntry { permit, view })
+//RS                 });
+//RS                 let native_entry = match native_entry {
+//RS                     Some(Ok(native_entry)) => Some(native_entry),
+//RS                     Some(Err(error)) => {
+//RS                         rt.set_trap(&error);
+//RS                         return 0;
+//RS                     }
+//RS                     None => None,
+//RS                 };
+//RS                 let _ = rt.native_shared_guards.remove(&guard);
+//RS                 // Mapping consumes the source guard. Keep the source carrier
+//RS                 // as an inert move marker and give the mapped projection its
+//RS                 // own identity; both records retain the same physical source
+//RS                 // guard lease until the final alias closes.
+//RS                 rt.shared_guard_states.remove(&guard);
+//RS                 let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
+//RS                 let mapped = pack_shared_guard(rt, shared_handle, value, mapped_state);
+//RS                 if let Some(native_entry) = native_entry {
+//RS                     rt.native_shared_guards.insert(mapped, native_entry);
+//RS                 }
+//RS                 mapped
+//RS             }
+//RS             Err(message) => {
+//RS                 rt.set_trap(message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_split(guard: i64, first: i64, second: i64, editable: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if guard_shared_handle(rt, guard).is_none() {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         }
+//RS         let Some(state) = guard_state(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         match shared_protocol::jet_shared_guard_split(&state, first, second, editable != 0) {
+//RS             Ok((first_state, second_state)) => {
+//RS                 let shared_handle = guard_shared_handle(rt, guard)
+//RS                     .expect("validated SharedGuard carrier lost its shared handle");
+//RS                 let Some(value) = rt.heap.record_get_int(guard, GUARD_VALUE) else {
+//RS                     rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                     return 0;
+//RS                 };
+//RS                 let native_entry = rt.native_shared_guards.get(&guard).map(|entry| {
+//RS                     let permit = Arc::clone(&entry.permit);
+//RS                     entry
+//RS                         .view
+//RS                         .entry_view()
+//RS                         .and_then(|view| {
+//RS                             view.split_path(&[first], &[second], editable != 0)
+//RS                         })
+//RS                         .map(|(first_view, second_view)| {
+//RS                             (permit, first_view, second_view)
+//RS                         })
+//RS                 });
+//RS                 let native_entry = match native_entry {
+//RS                     Some(Ok(native_entry)) => Some(native_entry),
+//RS                     Some(Err(error)) => {
+//RS                         rt.set_trap(&error);
+//RS                         return 0;
+//RS                     }
+//RS                     None => None,
+//RS                 };
+//RS                 let _ = rt.native_shared_guards.remove(&guard);
+//RS                 rt.shared_guard_states.remove(&guard);
+//RS                 let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
+//RS                 let first = pack_shared_guard(rt, shared_handle, value, first_state);
+//RS                 let second = pack_shared_guard(rt, shared_handle, value, second_state);
+//RS                 if let Some((permit, first_view, second_view)) = native_entry {
+//RS                     rt.native_shared_guards.insert(
+//RS                         first,
+//RS                         crate::runtime_host::NativeSharedGuardEntry {
+//RS                             permit: Arc::clone(&permit),
+//RS                             view: first_view,
+//RS                         },
+//RS                     );
+//RS                     rt.native_shared_guards.insert(
+//RS                         second,
+//RS                         crate::runtime_host::NativeSharedGuardEntry {
+//RS                             permit,
+//RS                             view: second_view,
+//RS                         },
+//RS                     );
+//RS                 }
+//RS                 let pair = rt.heap.alloc_record(2);
+//RS                 let _ = rt.heap.record_set_int(pair, 0, first);
+//RS                 let _ = rt.heap.record_set_int(pair, 1, second);
+//RS                 pair
+//RS             }
+//RS             Err(message) => {
+//RS                 rt.set_trap(message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
+//RS     let Some((shared, value, state)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let shared = guard_shared_handle(rt, guard)?;
+//RS         let value = rt.heap.record_get_int(guard, GUARD_VALUE)?;
+//RS         let state = rt.shared_guard_states.get(&guard)?.clone();
+//RS         Some((shared, value, state))
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let state = match shared_protocol::jet_shared_guard_clone(&state, editable != 0) {
+//RS         Ok(state) => state,
+//RS         Err(message) => {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_trap(message);
+//RS                 0
+//RS             });
+//RS         }
+//RS     };
+//RS     let native_entry = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.native_shared_guards.get(&guard).map(|entry| {
+//RS             let permit = Arc::clone(&entry.permit);
+//RS             entry
+//RS                 .view
+//RS                 .clone_guard(editable != 0)
+//RS                 .map(|view| crate::runtime_host::NativeSharedGuardEntry { permit, view })
+//RS         })
+//RS     });
+//RS     let native_entry = match native_entry {
+//RS         Some(Ok(native_entry)) => Some(native_entry),
+//RS         Some(Err(message)) => {
+//RS             return Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_trap(&message);
+//RS                 0
+//RS             });
+//RS         }
+//RS         None => None,
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let cloned = pack_shared_guard(rt, shared, value, state);
+//RS         if let Some(native_entry) = native_entry {
+//RS             rt.native_shared_guards.insert(cloned, native_entry);
+//RS         }
+//RS         cloned
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_value(guard: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field)) = readable_guard_slot(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         let Some(value) = rt.heap.record_get_int(record, field) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS             return 0;
+//RS         };
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_value_f64(guard: i64) -> f64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field)) = readable_guard_slot(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0.0;
+//RS         };
+//RS         if field == GUARD_VALUE && record == guard {
+//RS             let Some(value) = rt.heap.record_get_int(record, field) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return 0.0;
+//RS             };
+//RS             return f64::from_bits(value as u64);
+//RS         }
+//RS         let Some(value) = rt.heap.record_get_float(record, field) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS             return 0.0;
+//RS         };
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_value_bool(guard: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field)) = readable_guard_slot(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         if field == GUARD_VALUE && record == guard {
+//RS             let Some(value) = rt.heap.record_get_int(record, field) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return 0;
+//RS             };
+//RS             return i8::from(value != 0);
+//RS         }
+//RS         let Some(value) = rt.heap.record_get_bool(record, field) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS             return 0;
+//RS         };
+//RS         i8::from(value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_value_char(guard: i64) -> i32 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field)) = readable_guard_slot(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         let value = if field == GUARD_VALUE && record == guard {
+//RS             let Some(value) = rt.heap.record_get_int(record, field) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return 0;
+//RS             };
+//RS             value as i32
+//RS         } else {
+//RS             let Some(value) = rt.heap.record_get_char(record, field) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return 0;
+//RS             };
+//RS             value as i32
+//RS         };
+//RS         if shared_protocol::jet_shared_guard_validate_char(value).is_err() {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED);
+//RS             return 0;
+//RS         }
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_value_string(guard: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field)) = readable_guard_slot(rt, guard) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+//RS             return 0;
+//RS         };
+//RS         if field == GUARD_VALUE && record == guard {
+//RS             let Some(value) = rt.heap.record_get_int(record, field) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return 0;
+//RS             };
+//RS             return value;
+//RS         }
+//RS         let Some(value) = rt.heap.record_get_string(record, field) else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS             return 0;
+//RS         };
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn readable_guard_slot(rt: &crate::JitRuntime, guard: i64) -> Option<(i64, i64)> {
+//RS     guard_shared_handle(rt, guard)?;
+//RS     let state = guard_state(rt, guard)?;
+//RS     if !state.held() {
+//RS         return None;
+//RS     }
+//RS     guard_projection_slot(rt, guard, state.path())
+//RS }
+//RS 
+//RS fn editable_guard_slot(
+//RS     rt: &crate::JitRuntime,
+//RS     guard: i64,
+//RS ) -> Result<(i64, i64, bool), &'static str> {
+//RS     guard_shared_handle(rt, guard).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+//RS     let state = guard_state(rt, guard).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+//RS     shared_protocol::jet_shared_guard_require_edit(&state)?;
+//RS     let (record, field) = guard_projection_slot(rt, guard, state.path())
+//RS         .ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+//RS     Ok((record, field, state.path().is_empty()))
+//RS }
+//RS 
+//RS fn editable_guard_slot_or_trap(rt: &mut crate::JitRuntime, guard: i64) -> Option<(i64, i64, bool)> {
+//RS     match editable_guard_slot(rt, guard) {
+//RS         Ok(slot) => Some(slot),
+//RS         Err(message) => {
+//RS             rt.set_trap(message);
+//RS             None
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn store_root_guard_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     guard: i64,
+//RS     value: i64,
+//RS ) -> Result<(), &'static str> {
+//RS     let shared_handle =
+//RS         guard_shared_handle(rt, guard).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+//RS     let shared = shared(rt, shared_handle).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+//RS     if let Some(value_slot) = shared.value.as_ref() {
+//RS         value_slot.store(value, Ordering::Release);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field, _root)) = editable_guard_slot_or_trap(rt, guard) else {
+//RS             return;
+//RS         };
+//RS         if rt.heap.record_set_int(record, field, value).is_none() {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS         } else {
+//RS             mark_shared_guard_dirty(rt, guard);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_set_value_f64(guard: i64, value: f64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+//RS             return;
+//RS         };
+//RS         let stored = if root {
+//RS             rt.heap
+//RS                 .record_set_int(record, field, value.to_bits() as i64)
+//RS                 .is_some()
+//RS         } else {
+//RS             rt.heap.record_set_float(record, field, value).is_some()
+//RS         };
+//RS         if stored {
+//RS             mark_shared_guard_dirty(rt, guard);
+//RS         } else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_set_value_bool(guard: i64, value: i8) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+//RS             return;
+//RS         };
+//RS         let value = value != 0;
+//RS         let stored = if root {
+//RS             rt.heap
+//RS                 .record_set_int(record, field, i64::from(value))
+//RS                 .is_some()
+//RS         } else {
+//RS             rt.heap.record_set_bool(record, field, value).is_some()
+//RS         };
+//RS         if stored {
+//RS             mark_shared_guard_dirty(rt, guard);
+//RS         } else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+//RS             return;
+//RS         };
+//RS         let value = match shared_protocol::jet_shared_guard_validate_char(value) {
+//RS             Ok(value) => value,
+//RS             Err(message) => {
+//RS                 rt.set_trap(message);
+//RS                 return;
+//RS             }
+//RS         };
+//RS         let stored = if root {
+//RS             rt.heap
+//RS                 .record_set_int(record, field, i64::from(value as u32))
+//RS                 .is_some()
+//RS         } else {
+//RS             rt.heap.record_set_char(record, field, value).is_some()
+//RS         };
+//RS         if stored {
+//RS             mark_shared_guard_dirty(rt, guard);
+//RS         } else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+//RS             return;
+//RS         };
+//RS         let stored = if root {
+//RS             rt.heap.record_set_int(record, field, value).is_some()
+//RS         } else {
+//RS             rt.heap.record_set_string(record, field, value).is_some()
+//RS         };
+//RS         if stored {
+//RS             mark_shared_guard_dirty(rt, guard);
+//RS         } else {
+//RS             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_end(guard: i64) {
+//RS     let Some((shared_handle, shared, value, editable, dirty, root, state)) =
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let Some(shared_handle) = guard_shared_handle(rt, guard) else {
+//RS                 return None;
+//RS             };
+//RS             let state = rt.shared_guard_states.remove(&guard)?;
+//RS             let root = state.path().is_empty();
+//RS             let Some(value) = rt.heap.record_get_int(guard, GUARD_VALUE) else {
+//RS                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                 return None;
+//RS             };
+//RS             let dirty = rt.heap.record_get_int(guard, GUARD_DIRTY)? != 0;
+//RS             let editable = state.editable();
+//RS             let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
+//RS             Some((
+//RS                 shared_handle,
+//RS                 shared(rt, shared_handle),
+//RS                 value,
+//RS                 editable,
+//RS                 dirty,
+//RS                 root,
+//RS                 state,
+//RS             ))
+//RS         })
+//RS     else {
+//RS         crate::runtime_host::native_shared_guard_abort(guard);
+//RS         return;
+//RS     };
+//RS     let mut state = Some(state);
+//RS     let state_held = state.as_ref().map(|state| state.held()).unwrap_or(false);
+//RS     let native_prebound = crate::runtime_host::native_shared_guard_is_bound(guard)
+//RS         .unwrap_or(false);
+//RS     if native_prebound {
+//RS         drop(state.take());
+//RS     }
+//RS     let native_result =
+//RS         crate::runtime_host::native_shared_guard_end(guard, shared_handle, value, editable);
+//RS     let native_bound = native_result.is_some();
+//RS     if let Some(Err(error)) = native_result {
+//RS         shared_callback_fault(&error);
+//RS         drop(state);
+//RS         return;
+//RS     }
+//RS     if let Some(shared) = shared {
+//RS         if editable && dirty {
+//RS             if native_bound {
+//RS                 if let Some(value_slot) = shared.value.as_ref() {
+//RS                     value_slot.store(value, Ordering::Release);
+//RS                 }
+//RS             } else if root && state_held {
+//RS                 if let Err(error) = shared_state_commit(&shared, value) {
+//RS                     shared_commit_fault(&error);
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     drop(state);
+//RS }
+//RS 
+//RS fn shared_guard_result(rt: &mut crate::JitRuntime, ok: bool, message: Option<&str>) -> i64 {
+//RS     let bits = message
+//RS         .map(|message| rt.heap.alloc_string(message.to_string()) as u64)
+//RS         .unwrap_or(0);
+//RS     crate::runtime_host::alloc_jit_result(rt, ok, bits)
+//RS }
+//RS 
+//RS struct JitSourceGuardWaitHandoff {
+//RS     guard: i64,
+//RS     shared: i64,
+//RS     raw: i64,
+//RS     resumed: Option<i64>,
+//RS     error: Option<String>,
+//RS     source_active: bool,
+//RS     local_state: Option<Arc<SharedState>>,
+//RS }
+//RS 
+//RS impl JitSourceGuardWaitHandoff {
+//RS     fn new(
+//RS         guard: i64,
+//RS         shared: i64,
+//RS         raw: i64,
+//RS         local_state: Option<Arc<SharedState>>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             guard,
+//RS             shared,
+//RS             raw,
+//RS             resumed: None,
+//RS             error: None,
+//RS             source_active: false,
+//RS             local_state,
+//RS         }
+//RS     }
+//RS 
+//RS     fn take_error(&mut self) -> Option<String> {
+//RS         self.error.take()
+//RS     }
+//RS 
+//RS     fn record_error(&mut self, error: String) {
+//RS         if self.error.is_none() {
+//RS             self.error = Some(error);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl shared_protocol::JetSharedWaitHandoff for JitSourceGuardWaitHandoff {
+//RS     fn suspend(&mut self) -> Result<(), ()> {
+//RS         if let Some(state) = &self.local_state {
+//RS             let dirty = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.heap.record_get_int(self.guard, GUARD_DIRTY)
+//RS             });
+//RS             let Some(dirty) = dirty else {
+//RS                 self.record_error(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED.to_string());
+//RS                 return Err(());
+//RS             };
+//RS             if dirty != 0 {
+//RS                 if let Err(error) = shared_state_commit(state, self.raw) {
+//RS                     self.record_error(error);
+//RS                     return Err(());
+//RS                 }
+//RS             }
+//RS             let reset = Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.heap.record_set_int(self.guard, GUARD_DIRTY, 0).is_some()
+//RS             });
+//RS             if !reset {
+//RS                 self.record_error(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED.to_string());
+//RS                 return Err(());
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         match crate::runtime_host::native_shared_guard_wait_suspend(
+//RS             self.guard,
+//RS             self.shared,
+//RS             self.raw,
+//RS         ) {
+//RS             Some(Ok(())) => {
+//RS                 self.source_active = true;
+//RS                 Ok(())
+//RS             }
+//RS             Some(Err(error)) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS             None => {
+//RS                 self.record_error("Source Shared guard lease disappeared before wait".to_string());
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn resume(&mut self, cancelled: bool) -> Result<bool, ()> {
+//RS         if self.local_state.is_some() {
+//RS             return Ok(true);
+//RS         }
+//RS         match crate::runtime_host::native_shared_guard_wait_resume(
+//RS             self.guard,
+//RS             self.shared,
+//RS             cancelled,
+//RS         ) {
+//RS             Some(Ok(Some(raw))) => {
+//RS                 self.source_active = true;
+//RS                 self.resumed = Some(raw);
+//RS                 Ok(true)
+//RS             }
+//RS             Some(Ok(None)) => {
+//RS                 self.source_active = false;
+//RS                 Ok(false)
+//RS             }
+//RS             Some(Err(error)) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS             None => {
+//RS                 self.record_error("Source Shared guard lease disappeared after wait".to_string());
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn abort(&mut self) -> Result<(), ()> {
+//RS         if self.local_state.is_some() {
+//RS             return Ok(());
+//RS         }
+//RS         match crate::runtime_host::native_shared_guard_wait_abort(self.guard) {
+//RS             Some(Ok(())) => {
+//RS                 self.source_active = false;
+//RS                 Ok(())
+//RS             }
+//RS             Some(Err(error)) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS             None => {
+//RS                 self.record_error("Source Shared guard lease disappeared while aborting wait".to_string());
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JitSourceGuardWaitHandoff {
+//RS     fn drop(&mut self) {
+//RS         if self.source_active {
+//RS             let _ = crate::runtime_host::native_shared_guard_wait_abort(self.guard);
+//RS             self.source_active = false;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
+//RS     let Some((shared_handle, state, condition, raw)) = Concurrency::with_runtime_mut(|rt| {
+//RS         let shared_handle = guard_shared_handle(rt, guard)?;
+//RS         let state = guard_state(rt, guard)?;
+//RS         let condition = condition(rt, condition_handle)?;
+//RS         let raw = rt.heap.record_get_int(guard, GUARD_VALUE)?;
+//RS         Some((shared_handle, state, condition, raw))
+//RS     }) else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap(shared_protocol::JetSharedGuardWaitError::Invalid.message());
+//RS             shared_guard_result(
+//RS                 rt,
+//RS                 false,
+//RS                 Some(shared_protocol::JetSharedGuardWaitError::Invalid.message()),
+//RS             )
+//RS         });
+//RS     };
+//RS     if let Err(error) = shared_protocol::jet_shared_guard_require_edit(&state) {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             if error == shared_protocol::JET_SHARED_GUARD_INVALID {
+//RS                 rt.set_trap(error);
+//RS             }
+//RS             shared_guard_result(rt, false, Some(error))
+//RS         });
+//RS     }
+//RS     let source_bound =
+//RS         crate::runtime_host::native_shared_guard_is_bound(guard).unwrap_or(false);
+//RS     let local_state = if !source_bound && state.path().is_empty() {
+//RS         Concurrency::with_runtime_mut(|rt| shared(rt, shared_handle))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     let has_handoff = source_bound || local_state.is_some();
+//RS     let mut handoff = JitSourceGuardWaitHandoff::new(guard, shared_handle, raw, local_state);
+//RS     let waiter = Arc::new(JitConditionWaiter::new());
+//RS     let waited = jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+//RS         shared_protocol::jet_shared_guard_wait_once_with_handoff(
+//RS             Some(state.as_ref()),
+//RS             Some(&condition.protocol),
+//RS             waiter,
+//RS             if has_handoff {
+//RS                 Some(&mut handoff as &mut dyn shared_protocol::JetSharedWaitHandoff)
+//RS             } else {
+//RS                 None
+//RS             },
+//RS         )
+//RS     });
+//RS     if source_bound
+//RS         && matches!(
+//RS             &waited,
+//RS             jet_codegen::scheduler::JetSchedulerWait::Panicked(_)
+//RS         )
+//RS     {
+//RS         let _ = shared_protocol::JetSharedWaitHandoff::abort(&mut handoff);
+//RS     }
+//RS     if let Some(error) = handoff.take_error() {
+//RS         return shared_callback_fault(&error);
+//RS     }
+//RS     handoff.source_active = false;
+//RS     let resumed = handoff.resumed.take();
+//RS     match waited {
+//RS         jet_codegen::scheduler::JetSchedulerWait::Ready(Ok(())) => {
+//RS             let Some(fresh) = resumed.or_else(|| {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     Some(shared(rt, shared_handle)?.value.as_ref()?.load(Ordering::Acquire))
+//RS                 })
+//RS             }) else {
+//RS                 return Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.set_trap(shared_protocol::JetSharedGuardWaitError::Invalid.message());
+//RS                     shared_guard_result(
+//RS                         rt,
+//RS                         false,
+//RS                         Some(shared_protocol::JetSharedGuardWaitError::Invalid.message()),
+//RS                     )
+//RS                 });
+//RS             };
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 if rt.heap.record_set_int(guard, GUARD_VALUE, fresh).is_none()
+//RS                     || rt.heap.record_set_int(guard, GUARD_DIRTY, 0).is_none()
+//RS                 {
+//RS                     rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+//RS                     return shared_guard_result(
+//RS                         rt,
+//RS                         false,
+//RS                         Some(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED),
+//RS                     );
+//RS                 }
+//RS                 shared_guard_result(rt, true, None)
+//RS             })
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Ready(Err(error)) => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 if error.traps() {
+//RS                     rt.set_trap(error.message());
+//RS                 }
+//RS                 shared_guard_result(rt, false, Some(error.message()))
+//RS             })
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Cancelled => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 shared_guard_result(
+//RS                     rt,
+//RS                     false,
+//RS                     Some(shared_protocol::JetSharedGuardWaitError::Cancelled.message()),
+//RS                 )
+//RS             })
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Deadline(rendered) => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_deadline(rendered);
+//RS                 shared_guard_result(
+//RS                     rt,
+//RS                     false,
+//RS                     Some(shared_protocol::JetSharedGuardWaitError::Cancelled.message()),
+//RS                 )
+//RS             })
+//RS         }
+//RS         jet_codegen::scheduler::JetSchedulerWait::Panicked(message) => {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_trap(&message);
+//RS                 shared_guard_result(rt, false, Some(message.as_str()))
+//RS             })
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_txn_begin() {
+//RS     SHARED_TRANSACTIONS.with(|transactions| {
+//RS         transactions.borrow_mut().push(SharedTransaction {
+//RS             transaction: shared_protocol::jet_shared_transaction_begin(),
+//RS         });
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_shared_txn_touch(handle: i64) {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return;
+//RS     };
+//RS     if let Err(error) = shared_transaction_touch(&shared, handle) {
+//RS         shared_callback_fault(&error);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_txn_record(handle: i64, callback_ptr: i64, environment: i64, record: i64) -> i64 {
+//RS     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+//RS         return 0;
+//RS     };
+//RS     if callback_ptr == 0 {
+//RS         return 0;
+//RS     }
+//RS     // The callback address is produced by Cranelift `func_addr` for the fixed
+//RS     // `(environment, current) -> updated` ABI above. Run it once against the
+//RS     // transaction-local value; commit only publishes that value.
+//RS     let callback: SharedTransactionCallback = unsafe { std::mem::transmute(callback_ptr as usize) };
+//RS     let staged = match shared_transaction_stage_for_write(&shared, handle) {
+//RS         Ok(Some(staged)) => staged,
+//RS         Ok(None) => return 0,
+//RS         Err(error) => return shared_callback_fault(&error),
+//RS     };
+//RS     let current = *staged.borrow();
+//RS     let updated = unsafe { callback(environment, current) };
+//RS     if record != 0 {
+//RS         let delta = Box::new(move || {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 if rt.heap.record_assign_from(current, updated).is_none() {
+//RS                     rt.set_trap(shared_protocol::JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED);
+//RS                 }
+//RS             });
+//RS         });
+//RS         let owner = match shared_transaction_owner(&shared, handle) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return shared_callback_fault(&error),
+//RS         };
+//RS         SHARED_TRANSACTIONS.with(|transactions| {
+//RS             let mut transactions = transactions.borrow_mut();
+//RS             if let Some(transaction) = transactions.last_mut() {
+//RS                 transaction.transaction.record_edit(owner, delta);
+//RS             }
+//RS         });
+//RS     }
+//RS     *staged.borrow_mut() = updated;
+//RS     1
+//RS }
+//RS 
+//RS fn jet_jit_shared_txn_commit() {
+//RS     let Some(transaction) =
+//RS         SHARED_TRANSACTIONS.with(|transactions| transactions.borrow_mut().pop())
+//RS     else {
+//RS         return;
+//RS     };
+//RS     if let Err(error) = transaction.transaction.try_commit_with(|| ()) {
+//RS         Concurrency::with_runtime_mut(|rt| rt.set_host_fault(&error));
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_shared_txn_abort() {
+//RS     SHARED_TRANSACTIONS.with(|transactions| {
+//RS         transactions.borrow_mut().pop();
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i64 {
+//RS     let secret = secret != 0;
+//RS     if secret && expiring_secret_bytes(value).is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("secret key handle is invalid or already moved");
+//RS         });
+//RS         return 0;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let now = rt.clock_now(clock);
+//RS         // `Duration` is nanoseconds; resident clocks report milliseconds.
+//RS         // Preserve a positive sub-millisecond duration instead of silently
+//RS         // turning it into an already-expired entry.
+//RS         let duration_ms = duration
+//RS             .max(0)
+//RS             .saturating_add(999_999)
+//RS             .checked_div(1_000_000)
+//RS             .unwrap_or(i64::MAX);
+//RS         rt.expirings.push(ExpiringState {
+//RS             value,
+//RS             expires_at: now.saturating_add(duration_ms),
+//RS             clock,
+//RS             secret,
+//RS         });
+//RS         rt.expirings.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
+//RS     let (value, expired, wipe) = Concurrency::with_runtime_mut(|rt| {
+//RS         let stored_clock = rt
+//RS             .expirings
+//RS             .get((handle as usize).wrapping_sub(1))
+//RS             .map(|state| state.clock)
+//RS             .unwrap_or(0);
+//RS         let clock = if clock == 0 { stored_clock } else { clock };
+//RS         let now = rt.clock_now(clock);
+//RS         let Some(state) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
+//RS             return (0_i64, true, None);
+//RS         };
+//RS         if now > state.expires_at {
+//RS             let expired = std::mem::take(&mut state.value);
+//RS             return (0, true, (state.secret && expired != 0).then_some(expired));
+//RS         }
+//RS         (state.value, false, None)
+//RS     });
+//RS     if let Some(record) = wipe {
+//RS         wipe_expired_secret(record);
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(rt, !expired, value as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
+//RS     let result = jet_jit_expiring_get(handle, clock);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         i8::from(crate::runtime_host::jit_result_is_ok(rt, result).unwrap_or(false))
+//RS     })
+//RS }
+//RS fn jet_jit_expiring_secret_with(handle: i64, callback: i64) -> i64 {
+//RS     let (value, expired, wipe) = Concurrency::with_runtime_mut(|rt| {
+//RS         let index = (handle as usize).wrapping_sub(1);
+//RS         let stored_clock = rt.expirings.get(index).map(|state| state.clock).unwrap_or(0);
+//RS         let now = rt.clock_now(stored_clock);
+//RS         let Some(state) = rt.expirings.get_mut(index) else {
+//RS             return (0, true, None);
+//RS         };
+//RS         if state.value == 0 || now > state.expires_at {
+//RS             let expired = std::mem::take(&mut state.value);
+//RS             return (0, true, (state.secret && expired != 0).then_some(expired));
+//RS         }
+//RS         (state.value, false, None)
+//RS     });
+//RS     if let Some(record) = wipe {
+//RS         wipe_expired_secret(record);
+//RS     }
+//RS     if expired {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     }
+//RS     let Some(slot) = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback)
+//RS     }) else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("ExpiringSecret.with callback is invalid");
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     };
+//RS     let Some(result) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("ExpiringSecret.with callback has no unary thunk");
+//RS             crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS         });
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(rt, true, result as u64)
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_volatile_read(address: i64) -> i64 {
+//RS     let allowed = Concurrency::with_runtime_mut(|rt| {
+//RS         jet_jit_sentry_check_fixed(rt, address, "volatile_read")
+//RS     });
+//RS     if !allowed {
+//RS         return 0;
+//RS     }
+//RS     // SAFETY: the sentry check above owns validity of the typed pointer.
+//RS     unsafe { std::ptr::read_volatile(address as *const i64) }
+//RS }
+//RS 
+//RS fn jet_jit_volatile_write(address: i64, value: i64) {
+//RS     let allowed = Concurrency::with_runtime_mut(|rt| {
+//RS         jet_jit_sentry_check_fixed(rt, address, "volatile_write")
+//RS     });
+//RS     if !allowed {
+//RS         return;
+//RS     }
+//RS     // SAFETY: the sentry check above owns validity of the typed pointer.
+//RS     unsafe { std::ptr::write_volatile(address as *mut i64, value) };
+//RS }
+//RS 
+//RS fn jet_jit_shared_edit_txn(handle: i64, _stm: i64, callback: i64) -> i64 {
+//RS     jet_jit_shared_edit(handle, callback)
+//RS }
+//RS 
+//RS fn jet_jit_shared_read_txn(handle: i64, _stm: i64, callback: i64) -> i64 {
+//RS     jet_jit_shared_read(handle, callback)
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct MemoryHostFns;
+//RS     register: register_memory_symbols;
+//RS     declare: declare_memory_host_fns(module) {
+//RS         use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut noarg_i64 = Signature::new(cc);
+//RS         noarg_i64.returns.push(AbiParam::new(types::I64));
+//RS         let noarg_void = Signature::new(cc);
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_f64 = Signature::new(cc);
+//RS         unary_f64.params.push(AbiParam::new(types::I64));
+//RS         unary_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut unary_i32 = Signature::new(cc);
+//RS         unary_i32.params.push(AbiParam::new(types::I64));
+//RS         unary_i32.returns.push(AbiParam::new(types::I32));
+//RS         let mut binary = unary.clone();
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         let mut ternary = binary.clone();
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary_void = unary_void.clone();
+//RS         binary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut ternary_void = binary_void.clone();
+//RS         ternary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary_f64_void = Signature::new(cc);
+//RS         let mut sig_index_pool_get = Signature::new(cc);
+//RS         sig_index_pool_get
+//RS             .params
+//RS             .extend([AbiParam::new(types::I64); 6]);
+//RS         sig_index_pool_get
+//RS             .returns
+//RS             .push(AbiParam::new(types::I64));
+//RS         let mut sig_index_pool_set = Signature::new(cc);
+//RS         sig_index_pool_set
+//RS             .params
+//RS             .extend([AbiParam::new(types::I64); 7]);
+//RS 
+//RS         binary_f64_void.params.push(AbiParam::new(types::I64));
+//RS         binary_f64_void.params.push(AbiParam::new(types::F64));
+//RS         let mut binary_i8_void = Signature::new(cc);
+//RS         binary_i8_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary_i32_void = Signature::new(cc);
+//RS         binary_i32_void.params.push(AbiParam::new(types::I64));
+//RS         binary_i32_void.params.push(AbiParam::new(types::I32));
+//RS         let mut quaternary = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             quaternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         quaternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut quinary_void = Signature::new(cc);
+//RS         for _ in 0..5 {
+//RS             quinary_void.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         let mut binary_i8 = Signature::new(cc);
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.returns.push(AbiParam::new(types::I8));
+//RS 
+//RS 
+//RS     }
+//RS     allocator_new: "jet_jit_allocator_new" => jet_jit_allocator_new: noarg_i64;
+//RS     allocator_new_named: "jet_jit_allocator_new_named" => jet_jit_allocator_new_named: unary;
+//RS     allocator_new_capacity: "jet_jit_allocator_new_capacity" => jet_jit_allocator_new_capacity: binary;
+//RS     allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: ternary;
+//RS     allocator_view_read: "jet_jit_allocator_view_read" => jet_jit_allocator_view_read: unary;
+//RS     sentry_check: "jet_jit_sentry_check" => jet_jit_sentry_check: quinary_void;
+//RS     sentry_scope_enter: "jet_jit_sentry_scope_enter" => jet_jit_sentry_scope_enter: quinary_void;
+//RS     sentry_scope_exit: "jet_jit_sentry_scope_exit" => jet_jit_sentry_scope_exit: noarg_void;
+//RS     sentry_function_mark: "jet_jit_sentry_function_mark" => jet_jit_sentry_function_mark: noarg_void;
+//RS     sentry_function_exit: "jet_jit_sentry_function_exit" => jet_jit_sentry_function_exit: noarg_void;
+//RS     sentry_frame_enter: "jet_jit_sentry_frame_enter" => jet_jit_sentry_frame_enter: noarg_void;
+//RS     sentry_frame_exit: "jet_jit_sentry_frame_exit" => jet_jit_sentry_frame_exit: noarg_void;
+//RS     sentry_register_stack: "jet_jit_sentry_register_stack" => jet_jit_sentry_register_stack: binary_void;
+//RS     view_string: "jet_jit_view_string" => jet_jit_view_string: unary;
+//RS     index_pool_get: "jet_std::jet_pool_get" => jet_jit_pool_get_checked: sig_index_pool_get;
+//RS     index_pool_get_mut: "jet_std::jet_pool_get_mut" => jet_jit_pool_get_checked: sig_index_pool_get;
+//RS     index_pool_set: "jet_std::jet_pool_set" => jet_jit_index_pool_set: sig_index_pool_set;
+//RS 
+//RS     allocator_view_write: "jet_jit_allocator_view_write" => jet_jit_allocator_view_write: binary_void;
+//RS     allocator_try_alloc: "jet_jit_allocator_try_alloc" => jet_jit_allocator_try_alloc: ternary;
+//RS     allocator_reset: "jet_jit_allocator_reset" => jet_jit_allocator_reset: unary_void;
+//RS     allocator_close: "jet_jit_allocator_close" => jet_jit_allocator_close: unary_void;
+//RS     gc_read: "jet_jit_gc_read" => jet_jit_gc_read: unary;
+//RS     gc_edit: "jet_jit_gc_edit" => jet_jit_gc_edit: binary_void;
+//RS     gc_clear_edges: "jet_jit_gc_clear_edges" => jet_jit_gc_clear_edges: unary_void;
+//RS     gc_add_edge: "jet_jit_gc_add_edge" => jet_jit_gc_add_edge: ternary_void;
+//RS     gc_read_canonical: "jet_gc_read" => jet_jit_gc_read: unary;
+//RS     gc_edit_clear: "jet_gc_edit_clear" => jet_jit_gc_edit_clear: binary;
+//RS     gc_edit_pop: "jet_gc_edit_pop" => jet_jit_gc_edit_pop: binary;
+//RS     gc_edit_remove_index: "jet_gc_edit_remove_index" => jet_jit_gc_edit_remove_index: ternary;
+//RS     gc_edit_insert_index: "jet_gc_edit_insert_index" => jet_jit_gc_edit_insert_index: quaternary;
+//RS     gc_edit_prepend: "jet_gc_edit_prepend" => jet_jit_gc_edit_prepend: ternary;
+//RS     gc_edit_additive: "jet_gc_edit_additive" => jet_jit_gc_edit_additive: ternary;
+//RS     gc_edit_plain: "jet_gc_edit_plain" => jet_jit_gc_edit_plain: binary;
+//RS     gc_edit_edge_slot: "jet_gc_edit_edge_slot" => jet_jit_gc_edit_edge_slot: quaternary;
+//RS     expiring_secret_with: "jet_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
+//RS     expiring_secret_with_jit: "jet_jit_expiring_secret_with" => jet_jit_expiring_secret_with: binary;
+//RS     pool_new: "jet_std::JetPool::new" => jet_jit_pool_new: noarg_i64;
+//RS     pool_add: "jet_std::JetPool::add" => jet_jit_pool_add: binary;
+//RS     pool_get: "jet_jit_pool_get" => jet_jit_pool_get: quaternary;
+//RS 
+//RS     shared_new_static: "jet_std::JetShared::new" => jet_jit_shared_new: binary;
+//RS     shared_new_rooted: "::jet_std::JetShared::new" => jet_jit_shared_new: binary;
+//RS     shared_get: "jet_shared_get" => jet_jit_shared_get: unary;
+//RS     shared_set: "jet_shared_set" => jet_jit_shared_set: binary_void;
+//RS     shared_replace: "jet_shared_replace" => jet_jit_shared_replace: binary;
+//RS     shared_read: "jet_shared_read" => jet_jit_shared_read: binary;
+//RS     shared_edit: "jet_shared_edit" => jet_jit_shared_edit: binary;
+//RS     shared_edit_txn: "jet_shared_edit_txn" => jet_jit_shared_edit_txn: ternary;
+//RS     shared_read_txn: "jet_shared_read_txn" => jet_jit_shared_read_txn: ternary;
+//RS     shared_capture: "jet_shared_capture" => jet_jit_shared_capture: binary;
+//RS     shared_capture_with: "jet_shared_capture_with" => jet_jit_shared_capture_with: ternary;
+//RS     shared_capture_txn_plain: "jet_shared_capture_txn_plain" => jet_jit_shared_capture_txn_plain: ternary;
+//RS     shared_capture_txn: "jet_shared_capture_txn" => jet_jit_shared_capture_txn: quaternary;
+//RS     shared_try_replace: "jet_shared_try_replace" => jet_jit_shared_try_replace: quaternary;
+//RS     shared_snapshot_value: "jet_shared_snapshot_value" => jet_jit_shared_snapshot_value: binary;
+//RS     shared_snapshot_clone: "jet_jit_shared_snapshot_clone" => jet_jit_shared_snapshot_clone: binary;
+//RS     shared_snapshot_release: "jet_jit_shared_snapshot_release" => jet_jit_shared_snapshot_release: binary_void;
+//RS     pool_set: "jet_jit_pool_set" => jet_jit_pool_set: quinary_void;
+//RS     pool_remove: "jet_std::JetPool::remove" => jet_jit_pool_remove: binary;
+//RS     pool_ids: "jet_std::JetPool::ids" => jet_jit_pool_ids: unary;
+//RS     shared_new: "jet_jit_shared_new" => jet_jit_shared_new: binary;
+//RS     shared_retain: "jet_jit_shared_retain" => jet_jit_shared_retain: binary;
+//RS     shared_release: "jet_jit_shared_release" => jet_jit_shared_release: binary_void;
+//RS     shared_begin: "jet_jit_shared_begin" => jet_jit_shared_begin: binary;
+//RS     shared_end_read: "jet_jit_shared_end_read" => jet_jit_shared_end_read: unary_void;
+//RS     shared_end_write: "jet_jit_shared_end_write" => jet_jit_shared_end_write: binary_void;
+//RS     shared_downgrade: "jet_jit_shared_downgrade" => jet_jit_shared_downgrade: binary;
+//RS     shared_strong_count: "jet_jit_shared_strong_count" => jet_jit_shared_strong_count: binary;
+//RS     shared_same: "jet_jit_shared_same" => jet_jit_shared_same: ternary;
+//RS     shared_weak_clone: "jet_jit_shared_weak_clone" => jet_jit_shared_weak_clone: binary;
+//RS     shared_weak_upgrade: "jet_jit_shared_weak_upgrade" => jet_jit_shared_weak_upgrade: binary;
+//RS     shared_weak_release: "jet_jit_shared_weak_release" => jet_jit_shared_weak_release: binary_void;
+//RS     condition_new: "jet_jit_condition_new" => jet_jit_condition_new: noarg_i64;
+//RS     condition_new_prelude: "jet_std::JetCondition::new" => jet_jit_condition_new: noarg_i64;
+//RS     condition_notify_one: "jet_jit_condition_notify_one" => jet_jit_condition_notify_one: unary_void;
+//RS     condition_notify_all: "jet_jit_condition_notify_all" => jet_jit_condition_notify_all: unary_void;
+//RS     shared_guard_read: "jet_shared_guard_read" => jet_jit_shared_guard_read: unary;
+//RS     shared_guard_edit: "jet_shared_guard_edit" => jet_jit_shared_guard_edit: unary;
+//RS     shared_guard_map: "jet_shared_guard_map" => jet_jit_shared_guard_map: ternary;
+//RS     shared_guard_split: "jet_shared_guard_split" => jet_jit_shared_guard_split: quaternary;
+//RS     shared_guard_clone: "jet_jit_shared_guard_clone" => jet_jit_shared_guard_clone: binary;
+//RS     shared_guard_value: "jet_jit_shared_guard_value" => jet_jit_shared_guard_value: unary;
+//RS     shared_guard_value_f64: "jet_jit_shared_guard_value_f64" => jet_jit_shared_guard_value_f64: unary_f64;
+//RS     shared_guard_value_bool: "jet_jit_shared_guard_value_bool" => jet_jit_shared_guard_value_bool: unary_i8;
+//RS     shared_guard_value_char: "jet_jit_shared_guard_value_char" => jet_jit_shared_guard_value_char: unary_i32;
+//RS     shared_guard_value_string: "jet_jit_shared_guard_value_string" => jet_jit_shared_guard_value_string: unary;
+//RS     shared_guard_set_value: "jet_jit_shared_guard_set_value" => jet_jit_shared_guard_set_value: binary_void;
+//RS     shared_guard_set_value_f64: "jet_jit_shared_guard_set_value_f64" => jet_jit_shared_guard_set_value_f64: binary_f64_void;
+//RS     shared_guard_set_value_bool: "jet_jit_shared_guard_set_value_bool" => jet_jit_shared_guard_set_value_bool: binary_i8_void;
+//RS     shared_guard_set_value_char: "jet_jit_shared_guard_set_value_char" => jet_jit_shared_guard_set_value_char: binary_i32_void;
+//RS     shared_guard_set_value_string: "jet_jit_shared_guard_set_value_string" => jet_jit_shared_guard_set_value_string: binary_void;
+//RS     shared_guard_end: "jet_jit_shared_guard_end" => jet_jit_shared_guard_end: unary_void;
+//RS     shared_guard_wait_once: "jet_jit_shared_guard_wait_once" => jet_jit_shared_guard_wait_once: binary;
+//RS     shared_txn_begin: "jet_jit_shared_txn_begin" => jet_jit_shared_txn_begin: Signature::new(cc);
+//RS     shared_txn_touch: "jet_jit_shared_txn_touch" => jet_jit_shared_txn_touch: unary_void;
+//RS     shared_txn_record: "jet_jit_shared_txn_record" => jet_jit_shared_txn_record: quaternary;
+//RS     shared_txn_commit: "jet_jit_shared_txn_commit" => jet_jit_shared_txn_commit: Signature::new(cc);
+//RS     shared_txn_abort: "jet_jit_shared_txn_abort" => jet_jit_shared_txn_abort: Signature::new(cc);
+//RS     expiring_new: "jet_jit_expiring_new" => jet_jit_expiring_new: quaternary;
+//RS     expiring_secret_new: "jet_jit_expiring_secret_new" => jet_jit_expiring_new: quaternary;
+//RS     expiring_get: "jet_jit_expiring_get" => jet_jit_expiring_get: binary;
+//RS     expiring_is_valid: "jet_jit_expiring_is_valid" => jet_jit_expiring_is_valid: binary_i8;
+//RS     expiring_new_prelude: "jet_expiring_new" => jet_jit_expiring_new: quaternary;
+//RS     expiring_secret_new_prelude: "jet_expiring_secret_new" => jet_jit_expiring_new: quaternary;
+//RS     expiring_get_prelude: "jet_expiring_get" => jet_jit_expiring_get: binary;
+//RS     volatile_read: "std::ptr::read_volatile" => jet_jit_volatile_read: unary;
+//RS     volatile_write: "std::ptr::write_volatile" => jet_jit_volatile_write: binary_void;
+//RS }
+// END-PORT-PENDING 0226 crates/jet-jit/src/Memory.rs:3591-4743
+

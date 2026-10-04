@@ -1,0 +1,388 @@
+// PORT-PENDING 2153 crates-jet-codegen-src-prelude-core-cabi: crates/jet-codegen/src/Prelude/Core/CAbi.rs:1-384
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-EXEC1: the C-ABI export surface of the one compiled runtime.
+//RS //
+//RS // The Jet-native backend (Compiler/JetBackend, contract in
+//RS // Docs/research/jet-backend-design-2026-10-01.md, "Calls into the compiled
+//RS // runtime") calls the runtime by symbol with the System V convention. Every
+//RS // export below is a carrier adapter over the Prelude function AOT already
+//RS // calls: no export decides meaning of its own (I9).
+//RS //
+//RS // Carrier rules, one machine word each:
+//RS // - `Int` is the exact-Int carrier word (inline, or a tagged big-integer
+//RS //   owner). Kernels that take native `i64` are adapted the way generated
+//RS //   Rust adapts them (`native_int_input` / `native_int_result`).
+//RS // - `String` is an owned `Box<String>` handle. `jet_rt_string_drop` and
+//RS //   `jet_rt_string_builder_finish` consume their argument; every other
+//RS //   String parameter is borrowed and stays owned by the caller.
+//RS // - `Bool` parameters are a word holding 0 or 1; `Bool` results are returned
+//RS //   in the low byte.
+//RS // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
+//RS //
+//RS // Generated code has no unwind tables, so no unwind may leave an export. A
+//RS // stop renders and exits the process exactly as the AOT entry boundary does.
+//RS #[cfg(not(target_arch = "wasm32"))]
+//RS mod jet_c_abi {
+//RS     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+//RS 
+//RS     type JetCString = *mut String;
+//RS 
+//RS     /// Run one export body; a caught unwind ends the process through the AOT
+//RS     /// entry boundary's report carriers instead of entering generated frames.
+//RS     #[inline(always)]
+//RS     fn guard<T>(run: impl FnOnce() -> T) -> T {
+//RS         match catch_unwind(AssertUnwindSafe(run)) {
+//RS             Ok(value) => value,
+//RS             Err(payload) => stop(payload),
+//RS         }
+//RS     }
+//RS 
+//RS     #[cold]
+//RS     fn stop(payload: Box<dyn std::any::Any + Send>) -> ! {
+//RS         // The boundary renders a runtime report and exits; any other payload
+//RS         // is a host fault, which ends like a panic leaving an AOT `main` (the
+//RS         // panic hook has already printed it).
+//RS         let _ = catch_unwind(AssertUnwindSafe(move || {
+//RS             super::jet_runtime_boundary(move || -> () { resume_unwind(payload) })
+//RS         }));
+//RS         std::process::exit(101)
+//RS     }
+//RS 
+//RS     fn bytes<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+//RS         if len == 0 {
+//RS             return &[];
+//RS         }
+//RS         // SAFETY: the caller passes `len` initialized bytes at `ptr` (static
+//RS         // data emitted by the backend) that outlive this call.
+//RS         unsafe { std::slice::from_raw_parts(ptr, len) }
+//RS     }
+//RS 
+//RS     fn text(ptr: *const u8, len: usize) -> std::borrow::Cow<'static, str> {
+//RS         String::from_utf8_lossy(bytes(ptr, len))
+//RS     }
+//RS 
+//RS     fn handle(value: String) -> JetCString {
+//RS         Box::into_raw(Box::new(value))
+//RS     }
+//RS 
+//RS     fn view<'a>(value: JetCString) -> &'a str {
+//RS         // SAFETY: `value` is a live handle from `handle` that the caller owns
+//RS         // for the duration of this call.
+//RS         unsafe { (*value).as_str() }
+//RS     }
+//RS 
+//RS     fn builder<'a>(value: JetCString) -> &'a mut String {
+//RS         // SAFETY: `value` is a live builder from `jet_rt_string_builder_new`;
+//RS         // the caller owns it exclusively for the duration of this call.
+//RS         unsafe { &mut *value }
+//RS     }
+//RS 
+//RS     fn take(value: JetCString) -> String {
+//RS         // SAFETY: the caller transfers its owned handle from `handle`.
+//RS         *unsafe { Box::from_raw(value) }
+//RS     }
+//RS 
+//RS     fn line_of(line: i64) -> u32 {
+//RS         u32::try_from(line).unwrap_or(0)
+//RS     }
+//RS 
+//RS     /// `native_int_input`: an exact Int a native kernel receives as `i64`.
+//RS     fn native(value: i64) -> i64 {
+//RS         crate::jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
+//RS             super::jet_arithmetic_stop("<core.prelude>", 0, "native Int argument exceeds host range")
+//RS         })
+//RS     }
+//RS 
+//RS     // Process entry.
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_main(entry: extern "C" fn()) -> i32 {
+//RS         guard(|| {
+//RS             super::jet_std_env_init();
+//RS             super::jet_runtime_boundary(|| entry());
+//RS             0
+//RS         })
+//RS     }
+//RS 
+//RS     // Memory for boxes owned by generated code.
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
+//RS         guard(|| {
+//RS             let layout = std::alloc::Layout::from_size_align(size.max(1), align)
+//RS                 .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
+//RS             // SAFETY: the layout has a non-zero size.
+//RS             let ptr = unsafe { std::alloc::alloc(layout) };
+//RS             if ptr.is_null() {
+//RS                 std::alloc::handle_alloc_error(layout);
+//RS             }
+//RS             ptr
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_free(ptr: *mut u8, size: usize, align: usize) {
+//RS         guard(|| {
+//RS             if ptr.is_null() {
+//RS                 return;
+//RS             }
+//RS             let layout = std::alloc::Layout::from_size_align(size.max(1), align)
+//RS                 .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
+//RS             // SAFETY: `ptr` came from `jet_rt_alloc` with this size and align.
+//RS             unsafe { std::alloc::dealloc(ptr, layout) }
+//RS         })
+//RS     }
+//RS 
+//RS     // Strings.
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
+//RS         guard(|| handle(text(ptr, len).into_owned()))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
+//RS         guard(|| handle(view(value).to_owned()))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_drop(value: JetCString) {
+//RS         guard(|| {
+//RS             if !value.is_null() {
+//RS                 drop(take(value));
+//RS             }
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_eq(left: JetCString, right: JetCString) -> bool {
+//RS         guard(|| view(left) == view(right))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_compare(left: JetCString, right: JetCString) -> i64 {
+//RS         guard(|| match view(left).as_bytes().cmp(view(right).as_bytes()) {
+//RS             std::cmp::Ordering::Less => -1,
+//RS             std::cmp::Ordering::Equal => 0,
+//RS             std::cmp::Ordering::Greater => 1,
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
+//RS         guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(unsafe { &*value })))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
+//RS         guard(|| super::jet_string_is_empty(unsafe { &*value }))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_string_contains(value: JetCString, needle: JetCString) -> bool {
+//RS         guard(|| super::jet_string_contains(view(value), view(needle)))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
+//RS         guard(|| super::jet_string_starts_with(unsafe { &*value }, unsafe { &*needle }))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
+//RS         guard(|| super::jet_string_ends_with(unsafe { &*value }, unsafe { &*needle }))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
+//RS         guard(|| handle(String::new()))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_builder_push_static(target: JetCString, ptr: *const u8, len: usize) {
+//RS         guard(|| builder(target).push_str(&text(ptr, len)))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_builder_push(target: JetCString, value: JetCString) {
+//RS         guard(|| builder(target).push_str(view(value)))
+//RS     }
+//RS 
+//RS     /// The builder box becomes the String handle; no bytes are copied.
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_string_builder_finish(target: JetCString) -> JetCString {
+//RS         target
+//RS     }
+//RS 
+//RS     // Display text, as generated Rust renders `print` and interpolation.
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_int_to_string(value: i64) -> JetCString {
+//RS         guard(|| handle(crate::jet_std::jet_int_to_string(value)))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_i64_to_string(value: i64) -> JetCString {
+//RS         guard(|| handle(value.to_string()))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
+//RS         guard(|| handle(value.to_string()))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_char_to_string(value: i64) -> JetCString {
+//RS         guard(|| {
+//RS             let scalar = u32::try_from(value).ok().and_then(char::from_u32);
+//RS             handle(scalar.unwrap_or(char::REPLACEMENT_CHARACTER).to_string())
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_bool_to_string(value: u8) -> JetCString {
+//RS         guard(|| handle((value != 0).to_string()))
+//RS     }
+//RS 
+//RS     /// A Float arrives in xmm0 as the double itself.
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_float_to_string(value: f64) -> JetCString {
+//RS         guard(|| handle(super::jet_fmt_display(&value)))
+//RS     }
+//RS 
+//RS     // Stops raised by generated code itself.
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_panic_overflow() {
+//RS         guard(|| {
+//RS             super::jet_arithmetic_stop(
+//RS                 "<core.prelude>",
+//RS                 0,
+//RS                 "This arithmetic overflows the value's type (the result is outside its range)",
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_panic_division_by_zero() {
+//RS         guard(|| super::jet_fixed_error_stop(super::JetFixedArithmeticError::DivideZero, "<core.prelude>", 0))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_panic_list_bounds(len: i64, index: i64) {
+//RS         guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_unreachable(ptr: *const u8, len: usize) {
+//RS         let reason = text(ptr, len).into_owned();
+//RS         // Generated Rust spells MIR `Never` as `unreachable!(reason)`.
+//RS         guard(move || -> () { unreachable!("{}", reason) })
+//RS     }
+//RS 
+//RS     /// A Prelude `jet_panic("<core.prelude>", 0, message)` stop that generated
+//RS     /// code checks inline (e.g. an iterator loop stride, Collections.rs:1518).
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_rt_panic_message(ptr: *const u8, len: usize) {
+//RS         let message = text(ptr, len).into_owned();
+//RS         guard(move || -> () { super::jet_panic("<core.prelude>", 0, &message) })
+//RS     }
+//RS 
+//RS     // Prelude routes: the C name is the last `::` segment of the MIR symbol.
+//RS 
+//RS     macro_rules! exact_int_binary {
+//RS         ($($name:ident),* $(,)?) => {$(
+//RS             #[no_mangle]
+//RS             pub extern "C" fn $name(left: i64, right: i64) -> i64 {
+//RS                 guard(|| crate::jet_std::$name(left, right))
+//RS             }
+//RS         )*};
+//RS     }
+//RS 
+//RS     macro_rules! exact_int_located {
+//RS         ($($name:ident),* $(,)?) => {$(
+//RS             #[no_mangle]
+//RS             pub extern "C" fn $name(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+//RS                 guard(|| crate::jet_std::$name(left, right, &text(file_ptr, file_len), line_of(line)))
+//RS             }
+//RS         )*};
+//RS     }
+//RS 
+//RS     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
+//RS     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr);
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
+//RS         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_int_owned_to_i64(value: i64) -> i64 {
+//RS         guard(|| native(value))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_int_owned_to_f64(value: i64) -> f64 {
+//RS         guard(|| crate::jet_std::jet_int_to_f64(value))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_term_write_stdout_line(value: JetCString, flush: u8) {
+//RS         // Generated Rust ignores the stream result of `print` the same way.
+//RS         guard(|| {
+//RS             let _ = super::jet_term_write_stdout_line(view(value), flush != 0);
+//RS         })
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_loop_range_init(
+//RS         start: i64,
+//RS         end: i64,
+//RS         step: i64,
+//RS         has_step: u8,
+//RS         exclusive: u8,
+//RS     ) -> *mut super::JetLoopRangeCursor {
+//RS         guard(|| {
+//RS             let step = if has_step != 0 { native(step) } else { 1 };
+//RS             Box::into_raw(Box::new(super::jet_loop_range_init(
+//RS                 native(start),
+//RS                 native(end),
+//RS                 step,
+//RS                 has_step != 0,
+//RS                 exclusive != 0,
+//RS             )))
+//RS         })
+//RS     }
+//RS 
+//RS     fn cursor<'a>(value: *mut super::JetLoopRangeCursor) -> &'a mut super::JetLoopRangeCursor {
+//RS         // SAFETY: `value` is a live cursor from `jet_loop_range_init` that the
+//RS         // caller owns for the duration of this call.
+//RS         unsafe { &mut *value }
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_loop_range_has_next(value: *mut super::JetLoopRangeCursor) -> bool {
+//RS         guard(|| super::jet_loop_range_has_next(cursor(value)))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_loop_range_value(value: *mut super::JetLoopRangeCursor) -> i64 {
+//RS         guard(|| crate::jet_std::jet_int_from_i64(super::jet_loop_range_value(cursor(value))))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_loop_range_advance(value: *mut super::JetLoopRangeCursor) {
+//RS         guard(|| super::jet_loop_range_advance(cursor(value)))
+//RS     }
+//RS 
+//RS     #[no_mangle]
+//RS     pub extern "C" fn jet_loop_cursor_drop(value: *mut super::JetLoopRangeCursor) {
+//RS         if !value.is_null() {
+//RS             // SAFETY: the caller transfers its owned cursor.
+//RS             drop(unsafe { Box::from_raw(value) });
+//RS         }
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2153 crates/jet-codegen/src/Prelude/Core/CAbi.rs:1-384
+

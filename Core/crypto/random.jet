@@ -1,6 +1,7 @@
 use core as core
 use core.crypto.[CryptoError]
 use core.crypto as crypto
+use core.encoding as random_encoding
 
 // core.crypto.random - fail-closed CSPRNG.
 //
@@ -68,16 +69,11 @@ fn random_word64() -[Rand]> Int CryptoError! {
     n
 }
 
+// Lowercase hex through the canonical core.encoding law over the drawn bytes.
 pub fn token_hex(n: Int) -[Rand]> String CryptoError! {
     b :: bytes(n)
-    s := ""
-    loop x in b {
-        d :: Int.from_u8(x)
-        hi :: d /% 16
-        lo :: d %% 16
-        s = "{s}{hex_nibble(hi)}{hex_nibble(lo)}"
-    }
-    Ok(s)
+    view :: b[0..<b.len()]
+    Ok(random_encoding.bytes_to_hex(view))
 }
 
 pub fn token_urlsafe(n: Int) -[Rand]> String CryptoError! {
@@ -108,28 +104,6 @@ pub fn token_urlsafe(n: Int) -[Rand]> String CryptoError! {
     }
     text :: String.from_bytes(out) ?? panic("invalid URL-safe token encoding")
     Ok(text)
-}
-
-fn hex_nibble(n: Int) -> String Never! {
-    if n == {
-        0 -> "0"
-        1 -> "1"
-        2 -> "2"
-        3 -> "3"
-        4 -> "4"
-        5 -> "5"
-        6 -> "6"
-        7 -> "7"
-        8 -> "8"
-        9 -> "9"
-        10 -> "a"
-        11 -> "b"
-        12 -> "c"
-        13 -> "d"
-        14 -> "e"
-        15 -> "f"
-        else -> panic("invalid hexadecimal nibble")
-    }
 }
 
 pub fn choice(items: [String]) -[Rand]> String CryptoError! {

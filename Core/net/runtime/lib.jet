@@ -1,0 +1,421 @@
+use jetpack.foundation.net.fetch_error as policy
+use jetpack.foundation.net.fetch_error.[FoundationFetchError, FoundationFetchErrorKind]
+use core.files.[OSPath]
+use core.sys.target as target
+use std.fs.[File, Metadata, OpenOptions]
+use std.fs as fs
+use std.io.[Read, IOError, ErrorKind]
+use std.net.[IpAddr, SocketAddr, ToSocketAddrs]
+use std.time.[Duration]
+use std.sync.[LazyLock]
+use std.ffi.[CString]
+use core.http.runtime.transport as transport
+use core.sys.host.windows_file
+use core.sys.host.unix_fd
+use c.c as unix_native
+use c.kernel32 as win32
+use core.sys.host.retained_buffers as buffers
+use core.mem as mem
+
+// Rust: crates/jet-net/src/lib.rs:1
+// Blocking HTTP/file fetch. Native FS/DNS/HTTP/TLS/once leaves are GATE #4494;
+// all authority, address, redirect, framing and size policy lives below.
+// Rust: crates/jet-net/src/lib.rs:23
+HTTP_AGENT :: LazyLock.new(fn() { transport.AgentBuilder.new().redirects(0).build() })
+// Rust: crates/jet-net/src/lib.rs:25
+COMPTIME_HTTP_AGENT :: LazyLock.new(fn() {
+    transport.AgentBuilder.new().redirects(0).resolver(restricted_resolver).build()
+})
+// Rust: crates/jet-net/src/lib.rs:32
+pub MAX_FETCH_BYTES :: 64 * 1024 * 1024
+
+// Rust: crates/jet-net/src/lib.rs:34
+pub struct StreamResponse {
+    pub status_value: U16
+    pub content_length_value: U64?
+    pub location_value: String?
+    pub reader: Box<Read + Send>
+}
+impl StreamResponse {
+    // Rust: crates/jet-net/src/lib.rs:42
+    pub fn status(self) -> U16 Never! { self.status_value }
+    // Rust: crates/jet-net/src/lib.rs:46
+    pub fn content_length(self) -> U64? Never! { self.content_length_value }
+    // Rust: crates/jet-net/src/lib.rs:51
+    pub fn location(self) -> String? Never! { self.location_value }
+}
+impl StreamResponse.Read {
+    // Rust: crates/jet-net/src/lib.rs:57
+    pub fn read(self: &StreamResponse, buffer: &View<U8>) -> Int IOError! { self.reader.read(&buffer) }
+}
+// Rust: crates/jet-net/src/lib.rs:63,73,81,99,118,140,158,167
+// FetchError/FetchErrorKind, every diagnostic method, http and Display are
+// canonical FoundationFetchError/Kind and foundation_fetch_http_error at
+// Jetpack/Foundation/Source/Net/FetchError.jet:3-69 (exact body mapping).
+
+// Rust: crates/jet-net/src/lib.rs:195
+pub fn fetch(url: String) -> [U8] FoundationFetchError! { fetch_in_root(url, OSPath.from_text(".")) }
+// Rust: crates/jet-net/src/lib.rs:201
+pub fn fetch_in_root(url: String, base_dir: OSPath) -> [U8] FoundationFetchError! {
+    fetch_with_root_timeout(url, Duration.from_secs(U64{30}), base_dir)
+}
+// Rust: crates/jet-net/src/lib.rs:205
+pub fn fetch_with_root_timeout(url: String, timeout: Duration, base_dir: OSPath) -> [U8] FoundationFetchError! {
+    fetch_with_root_timeout_and_http(url, timeout, base_dir, comptime_http_stream)
+}
+// Rust: crates/jet-net/src/lib.rs:213
+pub fn fetch_with_root_timeout_and_http(url: String, timeout: Duration, base_dir: OSPath,
+    http_stream: fn(String, Duration) -> StreamResponse FoundationFetchError!) -> [U8] FoundationFetchError! {
+    if url.strip_prefix("file://") == .Val(path) {
+        file :: open_scoped_file(path, base_dir)?
+        if read_limited(^file, MAX_FETCH_BYTES) == {
+            .Ok(bytes) -> return Ok(^bytes)
+            .Err(error) -> return Err(FoundationFetchError.IO(error.to_string()))
+        }
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        response :: http_stream(url, timeout)?
+        if response.content_length() == .Val(length) {
+            if length > U64{MAX_FETCH_BYTES} -> return Err(policy.foundation_fetch_http_error(url, "response exceeds its size bound"))
+        }
+        if read_limited(^response, MAX_FETCH_BYTES) == {
+            .Ok(bytes) -> return Ok(^bytes)
+            .Err(error) -> return Err(policy.foundation_fetch_http_error(url, error.to_string()))
+        }
+    }
+    Err(policy.foundation_fetch_scheme_error(url))
+}
+
+// Rust: crates/jet-net/src/lib.rs:243
+fn open_scoped_file(raw_path: String, base_dir: OSPath) -> File FoundationFetchError! {
+    // GATE #4483: source cfg arms use selected target, not host facts.
+    os :: target.selected_os()
+    if os == .Linux || os == .Android || os == .MacOS || os == .IOS {
+        operation :: fn() -> File IOError! {
+            if raw_path == "/dev/null" -> return unix_open_no_follow(OSPath.from_text(raw_path))
+            before :: fs.symlink_metadata(base_dir)?
+            if before.file_type().is_symlink() || !before.is_dir() -> return Err(IOError.new(ErrorKind.Other, "compile-time source directory must be a real directory"))
+            root :: fs.canonicalize(base_dir)?
+            after :: fs.symlink_metadata(base_dir)?
+            if after.file_type().is_symlink() || !after.is_dir() || !same_directory(before,after) {
+                return Err(IOError.new(ErrorKind.Other, "compile-time source directory changed during resolution"))
+            }
+            root_handle :: unix_open_root(root)?
+            opened_root :: root_handle.metadata()?
+            if !same_directory(after,opened_root) -> return Err(IOError.new(ErrorKind.Other,"compile-time source directory changed during resolution"))
+            requested := OSPath.from_text(raw_path)
+            if !requested.is_absolute() -> requested = root.join(requested)
+            canonical :: fs.canonicalize(requested)?
+            if !canonical.starts_with(root) -> return Err(IOError.new(ErrorKind.Other,"file URL resolves outside the compile-time source directory"))
+            relative :: canonical.strip_prefix(root).map_err(fn(_) { IOError.new(ErrorKind.Other,"file URL resolves outside the compile-time source directory") })?
+            file :: unix_open_relative(root_handle,relative)?
+            metadata :: file.metadata()?
+            if !metadata.is_file() || !unix_is_single_link_file(file)? {
+                return Err(IOError.new(ErrorKind.Other,"file URL must name a regular, unshared file"))
+            }
+            Ok(^file)
+        }()
+        if operation == { .Ok(file) -> return Ok(^file); .Err(error) -> return Err(FoundationFetchError.IO(error.to_string())) }
+    }
+    if target.selected_family() == .Windows {
+        operation :: fn() -> File IOError! {
+            root :: fs.canonicalize(base_dir)?
+            requested := OSPath.from_text(raw_path)
+            if !requested.is_absolute() -> requested = root.join(requested)
+            windows_open_file(root, requested)
+        }()
+        if operation == { .Ok(file) -> return Ok(^file); .Err(error) -> return Err(FoundationFetchError.IO(error.to_string())) }
+    }
+    Err(FoundationFetchError.IO("descriptor-relative no-follow file access is unavailable on this platform"))
+}
+
+// Rust: crates/jet-net/src/lib.rs:364-373
+fn O_CLOEXEC() -> I32 Never! {
+    if target.selected_os() == .Linux || target.selected_os() == .Android -> return I32{0o2000000}
+    I32{0x01000000}
+}
+fn O_DIRECTORY() -> I32 Never! {
+    if target.selected_os() == .Linux || target.selected_os() == .Android -> return I32{0o200000}
+    I32{0x00100000}
+}
+fn O_NOFOLLOW() -> I32 Never! {
+    if target.selected_os() == .Linux || target.selected_os() == .Android -> return I32{0o400000}
+    I32{0x0100}
+}
+// Rust: crates/jet-net/src/lib.rs:376
+// GATE #4494: native libc openat, actual retained descriptor ownership.
+// Canonical openat declaration: Core/sys/host/unix_fd.jet:79.
+// Rust: crates/jet-net/src/lib.rs:379
+fn same_directory(left: Metadata, right: Metadata) -> Bool Never! {
+    left.is_dir() && right.is_dir() && left.dev() == right.dev() && left.ino() == right.ino()
+}
+// Rust: crates/jet-net/src/lib.rs:383
+fn unix_open_no_follow(path: OSPath) -> File IOError! {
+    OpenOptions.new().read(true).custom_flags(O_NOFOLLOW() | O_CLOEXEC()).open(path)
+}
+// Rust: crates/jet-net/src/lib.rs:390
+fn unix_open_root(path: OSPath) -> File IOError! {
+    OpenOptions.new().read(true).custom_flags(O_DIRECTORY() | O_NOFOLLOW() | O_CLOEXEC()).open(path)
+}
+// Rust: crates/jet-net/src/lib.rs:397
+fn unix_open_relative(root: File, relative: OSPath) -> File IOError! {
+    components :: relative.components().collect()
+    if components.is_empty() -> return root.try_clone()
+    current := root.try_clone()?
+    loop index in 0..<components.len() {
+        if components[index] == .Normal(name) {
+            // GATE #4494: CString owns native component bytes; NUL is rejected.
+            name :: CString.new(name.as_bytes()).map_err(fn(_) { IOError.new(ErrorKind.InvalidInput,"file authority path contains NUL") })?
+            last :: index + 1 == components.len()
+            flags := O_NOFOLLOW() | O_CLOEXEC()
+            if !last -> flags = flags | O_DIRECTORY()
+            fd :: #Unsafe("openat borrows held directory and NUL-terminated component") { unix_native.openat(current.as_raw_fd(),name.as_ptr(),flags,U32{0}) }
+            if fd < I32{0} -> return Err(IOError.last_os_error())
+            opened :: #Unsafe("successful openat transfers one owned native descriptor") { File.from_raw_fd(fd) }
+            if last -> return Ok(^opened)
+            current = ^opened
+        } else {
+            return Err(IOError.new(ErrorKind.InvalidInput,"file authority path has unsupported components"))
+        }
+    }
+    Err(IOError.new(ErrorKind.InvalidInput,"file authority path is empty"))
+}
+// Rust: crates/jet-net/src/lib.rs:440
+fn unix_is_single_link_file(file: File) -> Bool IOError! { Ok(file.metadata()?.nlink() == U64{1}) }
+
+// Rust: crates/jet-net/src/lib.rs:453
+// Rust Handle maps to the canonical *U8 native Windows handle, never Int.
+// Rust: crates/jet-net/src/lib.rs:455-460
+GENERIC_READ :: U32{0x80000000}
+FILE_SHARE_READ :: U32{1}
+FILE_SHARE_WRITE :: U32{2}
+FILE_FLAG_BACKUP_SEMANTICS :: U32{0x02000000}
+FILE_FLAG_OPEN_REPARSE_POINT :: U32{0x00200000}
+FILE_ATTRIBUTE_REPARSE_POINT :: U32{0x400}
+// Rust: crates/jet-net/src/lib.rs:463
+#Layout(c)
+struct FileStandardInfo {
+    allocation_size: I64
+    end_of_file: I64
+    number_of_links: U32
+    delete_pending: U8
+    directory: U8
+}
+// Rust: crates/jet-net/src/lib.rs:472-484
+// GetFileAttributesW/GetFinalPathNameByHandleW/GetFileInformationByHandleEx
+// are canonical Win32 foreign declarations at core.sys.host.windows_file.
+// Rust: crates/jet-net/src/lib.rs:487
+fn wide_path(path: OSPath) -> [U16] Never! { wide := path.as_os_str().encode_wide().collect(); wide.push(U16{0}); ^wide }
+// Rust: crates/jet-net/src/lib.rs:491
+fn is_reparse(path: OSPath) -> Bool IOError! {
+    wide :: wide_path(path)
+    attributes :: #Unsafe("retained NUL-terminated native path is borrowed by Win32") { win32.get_file_attributes_w(buffers.wide_ptr(wide,0)) }
+    if attributes == U32.MAX -> return Err(IOError.last_os_error())
+    Ok((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != U32{0})
+}
+// Rust: crates/jet-net/src/lib.rs:500
+fn final_path(file: File) -> String IOError! {
+    needed :: #Unsafe("Win32 size query writes no buffer") { win32.get_final_path_name_by_handle_w(file.as_raw_handle(),mem.null_mut(),U32{0},U32{0}) }
+    if needed == U32{0} -> return Err(IOError.last_os_error())
+    buffer := [U16].filled(Int.from_u32(needed) + 1,U16{0})
+    written :: #Unsafe("Win32 writes at most the retained wide buffer capacity") {
+        win32.get_final_path_name_by_handle_w(file.as_raw_handle(),buffers.wide_mut_ptr(&buffer,0),buffer.len() as U32,U32{0})
+    }
+    if written == U32{0} || Int.from_u32(written) >= buffer.len() -> return Err(IOError.last_os_error())
+    buffer.truncate(Int.from_u32(written))
+    Ok(String.from_utf16_lossy(buffer))
+}
+// Rust: crates/jet-net/src/lib.rs:523
+fn windows_is_single_link_file(file: File) -> Bool IOError! {
+    information := mem.MaybeUninit<FileStandardInfo>.zeroed()
+    result :: #Unsafe("Win32 fills a C-layout FileStandardInfo before successful assume_init") {
+        win32.get_file_information_by_handle_ex(file.as_raw_handle(),I32{1},information.as_mut_ptr().cast(),mem.size_of<FileStandardInfo>() as U32)
+    }
+    if result == I32{0} -> return Err(IOError.last_os_error())
+    info :: #Unsafe("successful metadata call initialized the whole C-layout buffer") { information.assume_init() }
+    Ok(info.number_of_links == U32{1})
+}
+// Rust: crates/jet-net/src/lib.rs:539
+fn normalized_final_path(path: String) -> String Never! {
+    native := path.replace("/","\\")
+    native = native.trim_start_matches("\\\\?\\").to_string() // #4303
+    native = native.trim_end_matches([Char]{'\\','/'}).to_string() // #4303
+    native.to_ascii_lowercase()
+}
+// Rust: crates/jet-net/src/lib.rs:546
+fn is_beneath(root: String,candidate: String) -> Bool Never! {
+    if candidate == root -> return true
+    if candidate.strip_prefix(root) == .Val(tail) -> return tail.starts_with("\\")
+    false
+}
+// Rust: crates/jet-net/src/lib.rs:553
+fn windows_open_file(root: OSPath, requested: OSPath) -> File IOError! {
+    root_handle :: windows_open_root(root)?
+    root_final :: normalized_final_path(final_path(root_handle)?)
+    expected_root :: normalized_final_path(root.to_string_lossy().into_owned())
+    if root_final != expected_root -> return Err(IOError.new(ErrorKind.PermissionDenied,"compile-time source directory changed during resolution"))
+    file :: OpenOptions.new().read(true).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(requested)?
+    if !file.metadata()?.is_file() || is_reparse(requested)? || !windows_is_single_link_file(file)? {
+        return Err(IOError.new(ErrorKind.PermissionDenied,"opened object is not a regular, unshared non-reparse file"))
+    }
+    file_final :: normalized_final_path(final_path(file)?)
+    if !is_beneath(root_final,file_final) -> return Err(IOError.new(ErrorKind.PermissionDenied,"opened file escapes the compile-time source directory"))
+    Ok(^file)
+}
+// Rust: crates/jet-net/src/lib.rs:586
+fn windows_open_root(path: OSPath) -> File IOError! {
+    if is_reparse(path)? -> return Err(IOError.new(ErrorKind.PermissionDenied,"compile-time source directory is a reparse point"))
+    root :: OpenOptions.new().read(true).access_mode(GENERIC_READ).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).open(path)?
+    if is_reparse(path)? || !root.metadata()?.is_dir() -> return Err(IOError.new(ErrorKind.PermissionDenied,"compile-time source directory is not a real directory"))
+    Ok(^root)
+}
+
+// Rust: crates/jet-net/src/lib.rs:609
+fn comptime_http_stream(url: String,timeout: Duration) -> StreamResponse FoundationFetchError! {
+    // Shared parser is exact; this entry does not add a scheme precheck.
+    response :: if COMPTIME_HTTP_AGENT.get(url).timeout(timeout).set("Accept-Encoding","identity").call() == {
+        .Ok(value) -> ^value
+        .Err(.Status(_,value)) -> ^value
+        .Err(error) -> return Err(policy.foundation_fetch_http_error(url,error.to_string()))
+    }
+    status :: response.status()
+    content_length := None
+    if response.header("Content-Length") == .Val(value) {
+        if U64.from_str(value) == {
+            .Ok(length) -> content_length = Val(length)
+            .Err(_) -> return Err(policy.foundation_fetch_http_error(url,"invalid Content-Length"))
+        }
+    }
+    location :: response.header("Location").map(fn(value) { value.to_string() })
+    Ok(StreamResponse{status_value:status,content_length_value:content_length,location_value:^location,reader:Box.new(response.into_reader())})
+}
+// Rust: crates/jet-net/src/lib.rs:640
+fn restricted_resolver(netloc: String) -> [SocketAddr] IOError! {
+    addresses :: netloc.to_socket_addrs()?.collect()
+    if !addresses_are_public(addresses) -> return Err(IOError.new(ErrorKind.PermissionDenied,"compile-time network destination is not public"))
+    Ok(^addresses)
+}
+// Rust: crates/jet-net/src/lib.rs:654
+pub fn resolve_public_addresses(host: String,port: U16) -> [SocketAddr] Err! {
+    host := host
+    if host.strip_prefix("[") == .Val(rest) {
+        if rest.strip_suffix("]") == .Val(unbracketed) -> host = unbracketed.to_string()
+    }
+    endpoint := "{host}:{port}"
+    if host.contains(":") -> endpoint = "[{host}]:{port}"
+    addresses :: endpoint.to_socket_addrs().map_err(fn(error) { "could not resolve provider destination: {error}" })?.collect()
+    if !addresses_are_public(addresses) -> return Err("provider destination resolves to a non-public address")
+    Ok(^addresses)
+}
+// Rust: crates/jet-net/src/lib.rs:674
+pub fn addresses_are_public(addresses: [SocketAddr]) -> Bool Never! {
+    if addresses.is_empty() -> return false
+    loop address in addresses { if !is_public_ip(address.ip()) -> return false }
+    true
+}
+// Rust: crates/jet-net/src/lib.rs:681
+pub fn is_public_ip(ip: IpAddr) -> Bool Never! {
+    if ip == {
+        .V4(value) -> {
+            octets :: value.octets()
+            a :: Int.from_u8(octets[0]); b :: Int.from_u8(octets[1]); c :: Int.from_u8(octets[2])
+            !(a == 0 || a == 10 || (a == 100 && (b & 192) == 64) || a == 127
+                || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31)
+                || (a == 192 && b == 0 && c == 0) || (a == 192 && b == 0 && c == 2)
+                || (a == 192 && b == 168) || (a == 198 && b >= 18 && b <= 19)
+                || (a == 198 && b == 51 && c == 100) || (a == 203 && b == 0 && c == 113) || a >= 224)
+        }
+        .V6(value) -> {
+            if value.to_ipv4_mapped() == .Val(v4) -> return is_public_ip(IpAddr.V4(v4))
+            segments :: value.segments()
+            first :: Int.from_u16(segments[0]); second :: Int.from_u16(segments[1])
+            (first & 0xe000) == 0x2000 && !value.is_unspecified() && !value.is_loopback() && !value.is_multicast()
+                && (first & 0xfe00) != 0xfc00 && (first & 0xffc0) != 0xfe80 && !(first == 0x2001 && second == 0x0db8)
+        }
+    }
+}
+// Rust: crates/jet-net/src/lib.rs:715
+pub fn read_limited<R: Read>(reader: ^R,limit: Int) -> [U8] IOError! {
+    bytes := [U8]{}
+    // GATE #4483: saturating usize limit+1; take actually bounds native reads.
+    count :: (limit + 1).min(Int.from_u64(target.usize_max())) as U64
+    reader.by_ref().take(count).read_to_end(&bytes)?
+    if bytes.len() > limit -> return Err(IOError.new(ErrorKind.InvalidData,"fetch response exceeds {limit} bytes")) // GATE #4409
+    Ok(^bytes)
+}
+// Rust: crates/jet-net/src/lib.rs:730
+pub fn get_stream(url: String,timeout: Duration) -> StreamResponse FoundationFetchError! { get_stream_with_timeout(url,timeout) }
+// Rust: crates/jet-net/src/lib.rs:738
+pub fn get_stream_pinned(url: String,addresses: [SocketAddr],timeout: Duration) -> StreamResponse FoundationFetchError! {
+    if addresses.is_empty() -> return Err(FoundationFetchError.IO("pinned network transport has no resolved addresses"))
+    pinned :: addresses.clone()
+    agent :: transport.AgentBuilder.new().redirects(0).resolver(fn(_) { Ok(pinned.clone()) }).build()
+    get_stream_with_agent(url,timeout,^agent)
+}
+// Rust: crates/jet-net/src/lib.rs:757
+pub fn get_stream_with_timeout(url: String,timeout: Duration) -> StreamResponse FoundationFetchError! {
+    get_stream_with_agent(url,timeout,HTTP_AGENT.clone())
+}
+// Rust: crates/jet-net/src/lib.rs:761
+fn get_stream_with_agent(url: String,timeout: Duration,agent: ^transport.Agent) -> StreamResponse FoundationFetchError! {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        scheme :: url.split_once("://").map(fn(parts) { parts.before }).unwrap_or(url)
+        return Err(FoundationFetchError.Scheme("unsupported URL scheme `{scheme}`; expected `http://` or `https://`"))
+    }
+    response :: if agent.get(url).timeout(timeout).set("Accept-Encoding","identity").call() == {
+        .Ok(value) -> ^value
+        .Err(.Status(_,value)) -> ^value
+        .Err(error) -> return Err(policy.foundation_fetch_http_error(url,error.to_string()))
+    }
+    status :: response.status()
+    content_length := None
+    if response.header("Content-Length") == .Val(value) {
+        if U64.from_str(value) == {
+            .Ok(length) -> content_length = Val(length)
+            .Err(_) -> return Err(policy.foundation_fetch_http_error(url,"invalid Content-Length"))
+        }
+    }
+    location :: response.header("Location").map(fn(value) { value.to_string() })
+    Ok(StreamResponse{status_value:status,content_length_value:content_length,location_value:^location,reader:Box.new(response.into_reader())})
+}
+// Rust: crates/jet-net/src/lib.rs:802
+pub fn get_stream_follow_redirects(url: String,timeout: Duration,max_redirects: Int) -> StreamResponse FoundationFetchError! {
+    get_stream_follow_redirects_with(url,timeout,max_redirects,fn(current,location) {
+        policy.foundation_fetch_resolve_redirect(current,location).map_err(fn(error) { error.to_string() })
+    })
+}
+// Rust: crates/jet-net/src/lib.rs:818
+pub fn get_stream_follow_redirects_with(url: String,timeout: Duration,max_redirects: Int,
+    redirect: fn(String,String) -> String Err!) -> StreamResponse FoundationFetchError! {
+    current := url.clone()
+    loop hop in 0..=max_redirects {
+        response :: get_stream_with_timeout(current,timeout)?
+        if response.status() < U16{300} || response.status() >= U16{400} -> return Ok(^response)
+        location :: response.location().ok_or_else(fn() { policy.foundation_fetch_http_error(current,"redirect response has no Location header") })?
+        next :: redirect(current,location).map_err(fn(detail) { policy.foundation_fetch_http_error(current,^detail) })?
+        current = ^next
+    }
+    Err(policy.foundation_fetch_http_error(url,"too many redirects (limit {max_redirects})"))
+}
+// Rust: crates/jet-net/src/lib.rs:854
+pub fn fetch_bounded_with_redirect_policy(url: String,timeout: Duration,max_redirects: Int,limit: U64,
+    redirect: fn(String,String) -> String Err!) -> [U8] FoundationFetchError! {
+    response :: get_stream_follow_redirects_with(url,timeout,max_redirects,redirect)?
+    if response.status() < U16{200} || response.status() >= U16{300} -> return Err(policy.foundation_fetch_http_error(url,"URL returned HTTP {response.status()}"))
+    content_length :: response.content_length()
+    if content_length == .Val(length) {
+        if length > limit -> return Err(policy.foundation_fetch_http_error(url,"response exceeds its size bound"))
+    }
+    body := [U8]{}
+    response.take(limit.saturating_add(U64{1})).read_to_end(&body)
+        .map_err(fn(error) { policy.foundation_fetch_http_error(url,"could not read response: {error}") })?
+    if (body.len() as U64) > limit -> return Err(policy.foundation_fetch_http_error(url,"response exceeds its size bound"))
+    if content_length == .Val(length) {
+        if length != (body.len() as U64) -> return Err(policy.foundation_fetch_http_error(url,"response Content-Length disagrees"))
+    }
+    Ok(^body)
+}
+// Rust: crates/jet-net/src/lib.rs:892,914,945
+// resolve_redirect/classify_http_error/host_from_url map 1:1 to
+// policy.foundation_fetch_resolve_redirect/foundation_fetch_classify_http_error/
+// foundation_fetch_host_from_url at FetchError.jet:78-126. No second policy.

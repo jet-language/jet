@@ -1,0 +1,154 @@
+// PORT-PENDING 0288 crates-jet-codegen-src-prelude-corelib-top-mathlibpure-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/SharedRoutes.rs:1-150
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Checked Shared host adapters. JetShared owns the lock protocol.
+//RS #[inline]
+//RS pub fn jet_shared_get<T: Clone + 'static>(shared: &jet_std::JetShared<T>) -> T {
+//RS     shared.get()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_set<T: 'static>(shared: &jet_std::JetShared<T>, value: T) {
+//RS     shared.set(value);
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_replace<T: 'static>(shared: &jet_std::JetShared<T>, value: T) -> T {
+//RS     shared.replace(value)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_read<T: 'static, F, R>(shared: &jet_std::JetShared<T>, callback: F) -> R
+//RS where
+//RS     F: FnOnce(&T) -> R,
+//RS {
+//RS     shared.read(callback)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_edit<T: 'static, F, R>(shared: &jet_std::JetShared<T>, callback: F) -> R
+//RS where
+//RS     F: FnOnce(&mut T) -> R,
+//RS {
+//RS     shared.edit(callback)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_read_txn<T: 'static, F, R>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     stm: &mut crate::JetSharedTransaction,
+//RS     callback: F,
+//RS ) -> R
+//RS where
+//RS     F: FnOnce(&T) -> R,
+//RS {
+//RS     shared.read_txn(stm, callback)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_edit_txn<T: Clone + 'static, F>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     stm: &mut crate::JetSharedTransaction,
+//RS     callback: F,
+//RS )
+//RS where
+//RS     F: FnOnce(&mut T) + 'static,
+//RS {
+//RS     shared.edit_txn(stm, callback)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_capture<T: Clone + 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS ) -> jet_std::JetSharedSnapshot<T, T> {
+//RS     shared.capture()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_capture_with<T: 'static, U, F>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     project: F,
+//RS ) -> jet_std::JetSharedSnapshot<T, U>
+//RS where
+//RS     F: FnOnce(&T) -> U,
+//RS {
+//RS     shared.capture_with(project)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_capture_txn_plain<T: Clone + 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     stm: &mut crate::JetSharedTransaction,
+//RS ) -> jet_std::JetSharedSnapshot<T, T> {
+//RS     shared.capture_txn(stm, Clone::clone)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_capture_txn<T: 'static, U, F>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     stm: &mut crate::JetSharedTransaction,
+//RS     project: F,
+//RS ) -> jet_std::JetSharedSnapshot<T, U>
+//RS where
+//RS     F: FnOnce(&T) -> U,
+//RS {
+//RS     shared.capture_txn(stm, project)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_try_replace<T: 'static, U>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     snapshot: jet_std::JetSharedSnapshot<T, U>,
+//RS     value: T,
+//RS ) -> Result<bool, jet_std::JetSharedRevisionError> {
+//RS     shared.try_replace(snapshot, value)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_snapshot_value<T: 'static, U: Clone>(
+//RS     snapshot: &jet_std::JetSharedSnapshot<T, U>,
+//RS ) -> U {
+//RS     snapshot.value()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_guard_read<T: 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS ) -> jet_std::JetSharedGuard<T> {
+//RS     shared.guard_read()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_guard_edit<T: 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS ) -> jet_std::JetSharedGuard<T> {
+//RS     shared.guard_edit()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_downgrade<T: 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS ) -> jet_std::JetSharedWeak<T> {
+//RS     shared.downgrade()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_strong_count<T: 'static>(shared: &jet_std::JetShared<T>) -> i64 {
+//RS     shared.strong_count()
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_same<T: 'static>(
+//RS     shared: &jet_std::JetShared<T>,
+//RS     other: &jet_std::JetShared<T>,
+//RS ) -> bool {
+//RS     shared.same(other)
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_shared_weak_upgrade<T: 'static>(
+//RS     weak: &jet_std::JetSharedWeak<T>,
+//RS ) -> crate::JetOutcome<jet_std::JetShared<T>, crate::JetAbsent> {
+//RS     weak.upgrade()
+//RS }
+// END-PORT-PENDING 0288 crates/jet-codegen/src/Prelude/CoreLib/Top/SharedRoutes.rs:1-150
+

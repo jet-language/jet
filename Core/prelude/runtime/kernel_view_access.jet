@@ -1,0 +1,57 @@
+use kernel_storage_leaves as storage_access_leaf
+use jet_foundation.[jet_list_bounds_message]
+use core.math as storage_access_math
+// Rust Result<_, String> uses canonical Err!/Err("text"); no String exception.
+
+// Rust Core/ViewAccess.rs:5–11, jet_view_address. Native usize lengths arrive
+// as exact nonnegative Ints; Rust saturates them at i64::MAX BEFORE comparison.
+// Wording belongs to the shared Foundation Outcome owner, not this adapter.
+pub fn jet_view_address(length: Int, index: I64) -> Int Err! {
+    bounded_length := length
+    if bounded_length > 9223372036854775807 -> bounded_length = 9223372036854775807
+    address :: Int.from_i64(index)
+    if address < 0 || address >= bounded_length -> return Err(jet_list_bounds_message("{bounded_length}", index))
+    address
+}
+
+// Rust Core/ViewAccess.rs:13–18, jet_view_get_checked. Clone only the element;
+// the native read borrows the unchanged owner and checks physical availability.
+pub fn jet_view_get_checked<T: Clone>(view: View<T>, index: I64) -> T Err! {
+    address :: jet_view_address(view.len(), index) ?? return Err(err)
+    storage_access_leaf.jet_storage_view_read<T>(view, address) ?? return Err("view index is outside storage")
+}
+
+// Rust Core/ViewAccess.rs:20–27, jet_view_set_checked. Move the incoming value;
+// replacement drops the old element on the same native stop/unwind rail.
+pub fn jet_view_set_checked<T>(view: &ViewMut<T>, index: I64, value: ^T) Err! {
+    address :: jet_view_address(view.len(), index) ?? return Err(err)
+    if !storage_access_leaf.jet_storage_view_write<T>(&view, address, ^value) -> return Err("view index is outside storage")
+}
+
+// Rust Core/ViewAccess.rs:29–34, jet_view_set_f64_checked. Finite validation
+// precedes bounds validation, including for a nonfinite out-of-bounds write.
+pub fn jet_view_set_f64_checked(view: &ViewMut<Float>, index: I64, value: Float) Err! {
+    if !storage_access_math.is_finite(value) -> return Err("Tensor values must be finite")
+    jet_view_set_checked<Float>(&view, index, ^value) ?? return Err(err)
+}
+
+// Rust Core/ViewAccess.rs:40–48, JetComputeSetTarget. Tensor supplies its own
+// checked implementation; ordinary float storage needs no compute import.
+pub trait JetComputeSetTarget {
+    type Error
+    fn jet_compute_set_target(&self, indices: [I64], value: Float) Error!
+}
+
+// Rust Core/ViewAccess.rs:50–63, JetComputeSetTarget for [f64].
+impl ViewMut<Float>.JetComputeSetTarget {
+    type Error = Err
+    fn jet_compute_set_target(&self, indices: [I64], value: Float) Err! {
+        if indices.len() != 1 -> return Err("a float view set expects one index")
+        jet_view_set_f64_checked(&self, indices[0], value) ?? return Err(err)
+    }
+}
+
+// Rust Core/ViewAccess.rs:65–71, jet_compute_set. Keep the target's error type.
+pub fn jet_compute_set<T: JetComputeSetTarget>(target: &T, indices: [I64], value: Float) T.Error! {
+    &target.jet_compute_set_target(indices, value) ?? return Err(err)
+}

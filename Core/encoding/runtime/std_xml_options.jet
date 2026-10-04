@@ -1,0 +1,83 @@
+// PORT-PENDING 0162 crates-jet-codegen-src-prelude-corelib-jetstd-json-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:1-79
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-ENC-XML-SURFACE1=A: checked XML stream policy and limits are shared by
+//RS // the AOT Prelude and the resident JIT stream host.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct XMLLimits {
+//RS     pub max_depth: i64,
+//RS     pub max_nodes: i64,
+//RS     pub max_attributes_per_element: i64,
+//RS     pub max_name_bytes: i64,
+//RS     pub max_text_bytes: i64,
+//RS     pub max_entity_declarations: i64,
+//RS     pub max_entity_depth: i64,
+//RS     pub max_entity_replacement_bytes: i64,
+//RS }
+//RS 
+//RS impl XMLLimits {
+//RS     pub fn safe() -> Self {
+//RS         Self {
+//RS             max_depth: 256,
+//RS             max_nodes: 1_000_000,
+//RS             max_attributes_per_element: 1024,
+//RS             max_name_bytes: 4096,
+//RS             max_text_bytes: 16_777_216,
+//RS             max_entity_declarations: 1024,
+//RS             max_entity_depth: 32,
+//RS             max_entity_replacement_bytes: 8_388_608,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum XMLEntityPolicy {
+//RS     Preserve,
+//RS     Reject,
+//RS     Resolve(std::collections::BTreeMap<String, String>),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct XMLParseOptions {
+//RS     pub entities: XMLEntityPolicy,
+//RS     pub limits: XMLLimits,
+//RS }
+//RS 
+//RS impl XMLParseOptions {
+//RS     pub fn safe() -> Self {
+//RS         Self {
+//RS             entities: XMLEntityPolicy::Preserve,
+//RS             limits: XMLLimits::safe(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum XMLEncoding {
+//RS     UTF8,
+//RS     UTF8BOM,
+//RS     UTF16LE,
+//RS     UTF16BE,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum XMLLexicalPolicy {
+//RS     PreserveValid,
+//RS     Deterministic,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct XMLRenderOptions {
+//RS     pub encoding: XMLEncoding,
+//RS     pub lexical: XMLLexicalPolicy,
+//RS }
+//RS 
+//RS impl XMLRenderOptions {
+//RS     pub fn safe() -> Self {
+//RS         Self {
+//RS             encoding: XMLEncoding::UTF8,
+//RS             lexical: XMLLexicalPolicy::PreserveValid,
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 0162 crates/jet-codegen/src/Prelude/CoreLib/JetStd/XmlOptions.rs:1-79
+

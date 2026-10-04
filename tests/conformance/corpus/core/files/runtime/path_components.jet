@@ -1,0 +1,538 @@
+// Rust std 1.90.0 library/std/tests/path.rs: test_decompositions_unix/windows,
+// test_push, test_pop, test_compare (component equality/prefix/suffix portion),
+// test_only_separators/non_ascii_unicode/embedded_newline, test_stem_ext,
+// test_set_extension/with_extension; pure platform state. Ordering/hash,
+// allocator, OS absolute resolution and Cygwin are outside this packet.
+use core.files.runtime.kernel_path_components as path_kernel
+
+fn path_test(platform: path_kernel.PathPlatform, text: String) -> path_kernel.OSPath Never! {
+    path_kernel.from_text(text, platform)
+}
+fn path_optional(path: path_kernel.OSPath, extent: path_kernel.PathSpan?) -> String? Never! {
+    span :: extent ?? return None
+    Val(path_kernel.display_span(path, span))
+}
+fn decomposition(platform: path_kernel.PathPlatform, text: String, expected: [String], rooted: Bool, absolute: Bool, parent: String?, name: String?) Never! {
+    path :: path_test(platform, text)
+    assert_eq(path_kernel.has_root(path), rooted)
+    assert_eq(path_kernel.is_absolute(path), absolute)
+    assert_eq(path_kernel.is_relative(path), !absolute)
+    forward := path_kernel.components(path)
+    loop word in expected {
+        value :: path_kernel.next(path, &forward) ?? panic("missing forward component")
+        assert_eq(path_kernel.component_display(path, value), word)
+    }
+    assert(path_kernel.next(path, &forward) == None)
+    assert(path_kernel.next_back(path, &forward) == None)
+    reverse := path_kernel.components(path)
+    at := expected.len()
+    loop at > 0 {
+        at = at - 1
+        value :: path_kernel.next_back(path, &reverse) ?? panic("missing reverse component")
+        assert_eq(path_kernel.component_display(path, value), expected[at])
+    }
+    assert(path_kernel.next_back(path, &reverse) == None)
+    assert(path_kernel.next(path, &reverse) == None)
+    // Every front/back meet point: roots/prefixes must not be emitted twice.
+    loop split in 0..expected.len() {
+        mixed := path_kernel.components(path)
+        loop i in 0..<split {
+            value :: path_kernel.next(path, &mixed) ?? panic("mixed forward")
+            assert_eq(path_kernel.component_display(path, value), expected[i])
+        }
+        i := expected.len()
+        loop i > split {
+            i = i - 1
+            value :: path_kernel.next_back(path, &mixed) ?? panic("mixed back")
+            assert_eq(path_kernel.component_display(path, value), expected[i])
+        }
+        assert(path_kernel.next(path, &mixed) == None)
+        assert(path_kernel.next_back(path, &mixed) == None)
+    }
+    assert_eq(path_optional(path, path_kernel.parent_span(path)), parent)
+    assert_eq(path_optional(path, path_kernel.file_name_span(path)), name)
+}
+fn unix_decomposition(text: String, expected: [String], rooted: Bool, parent: String?, name: String?) Never! {
+    decomposition(path_kernel.PathPlatform.Unix, text, expected, rooted, rooted, parent, name)
+}
+fn windows_decomposition(text: String, expected: [String], rooted: Bool, absolute: Bool, parent: String?, name: String?) Never! {
+    decomposition(path_kernel.PathPlatform.Windows, text, expected, rooted, absolute, parent, name)
+}
+
+#Test("std 1.90 Unix decompositions: all 30 original component/root/parent/name rows") {
+    unix_decomposition("", [String]{}, false, None, None)
+    unix_decomposition("foo", [String]{"foo"}, false, Val(""), Val("foo"))
+    unix_decomposition("/", [String]{"/"}, true, None, None)
+    unix_decomposition("/foo", [String]{"/", "foo"}, true, Val("/"), Val("foo"))
+    unix_decomposition("foo/", [String]{"foo"}, false, Val(""), Val("foo"))
+    unix_decomposition("/foo/", [String]{"/", "foo"}, true, Val("/"), Val("foo"))
+    unix_decomposition("foo/bar", [String]{"foo", "bar"}, false, Val("foo"), Val("bar"))
+    unix_decomposition("/foo/bar", [String]{"/", "foo", "bar"}, true, Val("/foo"), Val("bar"))
+    unix_decomposition("///foo///", [String]{"/", "foo"}, true, Val("/"), Val("foo"))
+    unix_decomposition("///foo///bar", [String]{"/", "foo", "bar"}, true, Val("///foo"), Val("bar"))
+    unix_decomposition("./.", [String]{"."}, false, Val(""), None)
+    unix_decomposition("/..", [String]{"/", ".."}, true, Val("/"), None)
+    unix_decomposition("../", [String]{".."}, false, Val(""), None)
+    unix_decomposition("foo/.", [String]{"foo"}, false, Val(""), Val("foo"))
+    unix_decomposition("foo/..", [String]{"foo", ".."}, false, Val("foo"), None)
+    unix_decomposition("foo/./", [String]{"foo"}, false, Val(""), Val("foo"))
+    unix_decomposition("foo/./bar", [String]{"foo", "bar"}, false, Val("foo"), Val("bar"))
+    unix_decomposition("foo/../", [String]{"foo", ".."}, false, Val("foo"), None)
+    unix_decomposition("foo/../bar", [String]{"foo", "..", "bar"}, false, Val("foo/.."), Val("bar"))
+    unix_decomposition("./a", [String]{".", "a"}, false, Val("."), Val("a"))
+    unix_decomposition(".", [String]{"."}, false, Val(""), None)
+    unix_decomposition("./", [String]{"."}, false, Val(""), None)
+    unix_decomposition("a/b", [String]{"a", "b"}, false, Val("a"), Val("b"))
+    unix_decomposition("a//b", [String]{"a", "b"}, false, Val("a"), Val("b"))
+    unix_decomposition("a/./b", [String]{"a", "b"}, false, Val("a"), Val("b"))
+    unix_decomposition("a/b/c", [String]{"a", "b", "c"}, false, Val("a/b"), Val("c"))
+    unix_decomposition(".foo", [String]{".foo"}, false, Val(""), Val(".foo"))
+    unix_decomposition("a/.foo", [String]{"a", ".foo"}, false, Val("a"), Val(".foo"))
+    unix_decomposition("a/.rustfmt.toml", [String]{"a", ".rustfmt.toml"}, false, Val("a"), Val(".rustfmt.toml"))
+    unix_decomposition("a/.x.y.z", [String]{"a", ".x.y.z"}, false, Val("a"), Val(".x.y.z"))
+}
+
+#Test("std 1.90 Windows decompositions: all 57 original component/root/parent/name rows") {
+    windows_decomposition("", [String]{}, false, false, None, None)
+    windows_decomposition("foo", [String]{"foo"}, false, false, Val(""), Val("foo"))
+    windows_decomposition("/", [String]{"\\"}, true, false, None, None)
+    windows_decomposition("\\", [String]{"\\"}, true, false, None, None)
+    windows_decomposition("c:", [String]{"c:"}, false, false, None, None)
+    windows_decomposition("c:\\", [String]{"c:", "\\"}, true, true, None, None)
+    windows_decomposition("c:/", [String]{"c:", "\\"}, true, true, None, None)
+    windows_decomposition("/foo", [String]{"\\", "foo"}, true, false, Val("/"), Val("foo"))
+    windows_decomposition("foo/", [String]{"foo"}, false, false, Val(""), Val("foo"))
+    windows_decomposition("/foo/", [String]{"\\", "foo"}, true, false, Val("/"), Val("foo"))
+    windows_decomposition("foo/bar", [String]{"foo", "bar"}, false, false, Val("foo"), Val("bar"))
+    windows_decomposition("/foo/bar", [String]{"\\", "foo", "bar"}, true, false, Val("/foo"), Val("bar"))
+    windows_decomposition("///foo///", [String]{"\\", "foo"}, true, false, Val("/"), Val("foo"))
+    windows_decomposition("///foo///bar", [String]{"\\", "foo", "bar"}, true, false, Val("///foo"), Val("bar"))
+    windows_decomposition("./.", [String]{"."}, false, false, Val(""), None)
+    windows_decomposition("/..", [String]{"\\", ".."}, true, false, Val("/"), None)
+    windows_decomposition("../", [String]{".."}, false, false, Val(""), None)
+    windows_decomposition("foo/.", [String]{"foo"}, false, false, Val(""), Val("foo"))
+    windows_decomposition("foo/..", [String]{"foo", ".."}, false, false, Val("foo"), None)
+    windows_decomposition("foo/./", [String]{"foo"}, false, false, Val(""), Val("foo"))
+    windows_decomposition("foo/./bar", [String]{"foo", "bar"}, false, false, Val("foo"), Val("bar"))
+    windows_decomposition("foo/../", [String]{"foo", ".."}, false, false, Val("foo"), None)
+    windows_decomposition("foo/../bar", [String]{"foo", "..", "bar"}, false, false, Val("foo/.."), Val("bar"))
+    windows_decomposition("./a", [String]{".", "a"}, false, false, Val("."), Val("a"))
+    windows_decomposition(".", [String]{"."}, false, false, Val(""), None)
+    windows_decomposition("./", [String]{"."}, false, false, Val(""), None)
+    windows_decomposition("a/b", [String]{"a", "b"}, false, false, Val("a"), Val("b"))
+    windows_decomposition("a//b", [String]{"a", "b"}, false, false, Val("a"), Val("b"))
+    windows_decomposition("a/./b", [String]{"a", "b"}, false, false, Val("a"), Val("b"))
+    windows_decomposition("a/b/c", [String]{"a", "b", "c"}, false, false, Val("a/b"), Val("c"))
+    windows_decomposition("a\\b\\c", [String]{"a", "b", "c"}, false, false, Val("a\\b"), Val("c"))
+    windows_decomposition("\\a", [String]{"\\", "a"}, true, false, Val("\\"), Val("a"))
+    windows_decomposition("c:\\foo.txt", [String]{"c:", "\\", "foo.txt"}, true, true, Val("c:\\"), Val("foo.txt"))
+    windows_decomposition("\\\\server\\share\\foo.txt", [String]{"\\\\server\\share", "\\", "foo.txt"}, true, true, Val("\\\\server\\share\\"), Val("foo.txt"))
+    windows_decomposition("\\\\server\\share", [String]{"\\\\server\\share", "\\"}, true, true, None, None)
+    windows_decomposition("\\\\server", [String]{"\\", "server"}, true, false, Val("\\"), Val("server"))
+    windows_decomposition("\\\\?\\bar\\foo.txt", [String]{"\\\\?\\bar", "\\", "foo.txt"}, true, true, Val("\\\\?\\bar\\"), Val("foo.txt"))
+    windows_decomposition("\\\\?\\bar", [String]{"\\\\?\\bar"}, true, true, None, None)
+    windows_decomposition("\\\\?\\", [String]{"\\\\?\\"}, true, true, None, None)
+    windows_decomposition("\\\\?\\UNC\\server\\share\\foo.txt", [String]{"\\\\?\\UNC\\server\\share", "\\", "foo.txt"}, true, true, Val("\\\\?\\UNC\\server\\share\\"), Val("foo.txt"))
+    windows_decomposition("\\\\?\\UNC\\server", [String]{"\\\\?\\UNC\\server"}, true, true, None, None)
+    windows_decomposition("\\\\?\\UNC\\", [String]{"\\\\?\\UNC\\"}, true, true, None, None)
+    windows_decomposition("\\\\?\\C:\\foo.txt", [String]{"\\\\?\\C:", "\\", "foo.txt"}, true, true, Val("\\\\?\\C:\\"), Val("foo.txt"))
+    windows_decomposition("\\\\?\\C:\\", [String]{"\\\\?\\C:", "\\"}, true, true, None, None)
+    windows_decomposition("\\\\?\\C:", [String]{"\\\\?\\C:"}, true, true, None, None)
+    windows_decomposition("\\\\?\\foo/bar", [String]{"\\\\?\\foo/bar"}, true, true, None, None)
+    windows_decomposition("\\\\?\\C:/foo/bar", [String]{"\\\\?\\C:", "\\", "foo/bar"}, true, true, Val("\\\\?\\C:/"), Val("foo/bar"))
+    windows_decomposition("\\\\.\\foo\\bar", [String]{"\\\\.\\foo", "\\", "bar"}, true, true, Val("\\\\.\\foo\\"), Val("bar"))
+    windows_decomposition("\\\\.\\foo", [String]{"\\\\.\\foo", "\\"}, true, true, None, None)
+    windows_decomposition("\\\\.\\foo/bar", [String]{"\\\\.\\foo", "\\", "bar"}, true, true, Val("\\\\.\\foo/"), Val("bar"))
+    windows_decomposition("\\\\.\\foo\\bar/baz", [String]{"\\\\.\\foo", "\\", "bar", "baz"}, true, true, Val("\\\\.\\foo\\bar"), Val("baz"))
+    windows_decomposition("\\\\.\\", [String]{"\\\\.\\", "\\"}, true, true, None, None)
+    windows_decomposition("\\\\?\\a\\b\\", [String]{"\\\\?\\a", "\\", "b"}, true, true, Val("\\\\?\\a\\"), Val("b"))
+    windows_decomposition("\\\\?\\C:\\foo.txt.zip", [String]{"\\\\?\\C:", "\\", "foo.txt.zip"}, true, true, Val("\\\\?\\C:\\"), Val("foo.txt.zip"))
+    windows_decomposition("\\\\?\\C:\\.foo.txt.zip", [String]{"\\\\?\\C:", "\\", ".foo.txt.zip"}, true, true, Val("\\\\?\\C:\\"), Val(".foo.txt.zip"))
+    windows_decomposition("\\\\?\\C:\\.foo", [String]{"\\\\?\\C:", "\\", ".foo"}, true, true, Val("\\\\?\\C:\\"), Val(".foo"))
+    windows_decomposition("a/.x.y.z", [String]{"a", ".x.y.z"}, false, false, Val("a"), Val(".x.y.z"))
+}
+
+fn push_case(platform: path_kernel.PathPlatform, original: String, added: String, expected: String) Never! {
+    path := path_test(platform, original)
+    source :: path_test(platform, added)
+    path_kernel.push(&path, source)
+    assert_eq(path_kernel.display(path), expected)
+    // The borrowed span entry is the same actual push law, not another parser.
+    second := path_test(platform, original)
+    path_kernel.push_span(&second, source, path_kernel.PathSpan{start: 0, end: source.encoded.len()})
+    assert_eq(second.encoded, path.encoded)
+}
+fn unix_push(original: String, added: String, expected: String) Never! { _ :: push_case(path_kernel.PathPlatform.Unix, original, added, expected) }
+fn windows_push(original: String, added: String, expected: String) Never! { _ :: push_case(path_kernel.PathPlatform.Windows, original, added, expected) }
+
+#Test("std 1.90 PathBuf push Unix: all 13 original rows") {
+    _ :: unix_push("", "foo", "foo")
+    _ :: unix_push("foo", "bar", "foo/bar")
+    _ :: unix_push("foo/", "bar", "foo/bar")
+    _ :: unix_push("foo//", "bar", "foo//bar")
+    _ :: unix_push("foo/.", "bar", "foo/./bar")
+    _ :: unix_push("foo./.", "bar", "foo././bar")
+    _ :: unix_push("foo", "", "foo/")
+    _ :: unix_push("foo", ".", "foo/.")
+    _ :: unix_push("foo", "..", "foo/..")
+    _ :: unix_push("foo", "/", "/")
+    _ :: unix_push("/foo/bar", "/", "/")
+    _ :: unix_push("/foo/bar", "/baz", "/baz")
+    unix_push("/foo/bar", "./baz", "/foo/bar/./baz")
+}
+
+#Test("std 1.90 PathBuf push Windows: all 60 original rows") {
+    _ :: windows_push("", "foo", "foo")
+    _ :: windows_push("foo", "bar", "foo\\bar")
+    _ :: windows_push("foo/", "bar", "foo/bar")
+    _ :: windows_push("foo\\", "bar", "foo\\bar")
+    _ :: windows_push("foo//", "bar", "foo//bar")
+    _ :: windows_push("foo\\\\", "bar", "foo\\\\bar")
+    _ :: windows_push("foo/.", "bar", "foo/.\\bar")
+    _ :: windows_push("foo./.", "bar", "foo./.\\bar")
+    _ :: windows_push("foo\\.", "bar", "foo\\.\\bar")
+    _ :: windows_push("foo.\\.", "bar", "foo.\\.\\bar")
+    _ :: windows_push("foo", "", "foo\\")
+    _ :: windows_push("foo", ".", "foo\\.")
+    _ :: windows_push("foo", "..", "foo\\..")
+    _ :: windows_push("foo", "/", "/")
+    _ :: windows_push("foo", "\\", "\\")
+    _ :: windows_push("/foo/bar", "/", "/")
+    _ :: windows_push("\\foo\\bar", "\\", "\\")
+    _ :: windows_push("/foo/bar", "/baz", "/baz")
+    _ :: windows_push("/foo/bar", "\\baz", "\\baz")
+    _ :: windows_push("/foo/bar", "./baz", "/foo/bar\\./baz")
+    _ :: windows_push("/foo/bar", ".\\baz", "/foo/bar\\.\\baz")
+    _ :: windows_push("c:\\", "windows", "c:\\windows")
+    _ :: windows_push("c:", "windows", "c:windows")
+    _ :: windows_push("a\\b\\c", "d", "a\\b\\c\\d")
+    _ :: windows_push("\\a\\b\\c", "d", "\\a\\b\\c\\d")
+    _ :: windows_push("a\\b", "c\\d", "a\\b\\c\\d")
+    _ :: windows_push("a\\b", "\\c\\d", "\\c\\d")
+    _ :: windows_push("a\\b", ".", "a\\b\\.")
+    _ :: windows_push("a\\b", "..\\c", "a\\b\\..\\c")
+    _ :: windows_push("a\\b", "C:a.txt", "C:a.txt")
+    _ :: windows_push("a\\b", "C:\\a.txt", "C:\\a.txt")
+    _ :: windows_push("C:\\a", "C:\\b.txt", "C:\\b.txt")
+    _ :: windows_push("C:\\a\\b\\c", "C:d", "C:d")
+    _ :: windows_push("C:a\\b\\c", "C:d", "C:d")
+    _ :: windows_push("C:", "a\\b\\c", "C:a\\b\\c")
+    _ :: windows_push("C:", "..\\a", "C:..\\a")
+    _ :: windows_push("\\\\server\\share\\foo", "bar", "\\\\server\\share\\foo\\bar")
+    _ :: windows_push("\\\\server\\share\\foo", "C:baz", "C:baz")
+    _ :: windows_push("\\\\?\\C:\\a\\b", "C:c\\d", "C:c\\d")
+    _ :: windows_push("\\\\?\\C:a\\b", "C:c\\d", "C:c\\d")
+    _ :: windows_push("\\\\?\\C:\\a\\b", "C:\\c\\d", "C:\\c\\d")
+    _ :: windows_push("\\\\?\\foo\\bar", "baz", "\\\\?\\foo\\bar\\baz")
+    _ :: windows_push("\\\\?\\UNC\\server\\share\\foo", "bar", "\\\\?\\UNC\\server\\share\\foo\\bar")
+    _ :: windows_push("\\\\?\\UNC\\server\\share", "C:\\a", "C:\\a")
+    _ :: windows_push("\\\\?\\UNC\\server\\share", "C:a", "C:a")
+    _ :: windows_push("\\\\?\\UNC\\server", "foo", "\\\\?\\UNC\\server\\foo")
+    _ :: windows_push("C:\\a", "\\\\?\\UNC\\server\\share", "\\\\?\\UNC\\server\\share")
+    _ :: windows_push("\\\\.\\foo\\bar", "baz", "\\\\.\\foo\\bar\\baz")
+    _ :: windows_push("\\\\.\\foo\\bar", "C:a", "C:a")
+    _ :: windows_push("\\\\.\\foo", "..\\bar", "\\\\.\\foo\\..\\bar")
+    _ :: windows_push("\\\\?\\C:", "foo", "\\\\?\\C:\\foo")
+    _ :: windows_push("\\\\?\\C:\\bar", "../foo", "\\\\?\\C:\\foo")
+    _ :: windows_push("\\\\?\\C:\\bar", "../../foo", "\\\\?\\C:\\foo")
+    _ :: windows_push("\\\\?\\C:\\", "../foo", "\\\\?\\C:\\foo")
+    _ :: windows_push("\\\\?\\C:", "D:\\foo/./", "D:\\foo/./")
+    _ :: windows_push("\\\\?\\C:", "\\\\?\\D:\\foo\\.\\", "\\\\?\\D:\\foo\\.\\")
+    _ :: windows_push("\\\\?\\A:\\x\\y", "/foo", "\\\\?\\A:\\foo")
+    _ :: windows_push("\\\\?\\A:", "..\\foo\\.", "\\\\?\\A:\\foo")
+    _ :: windows_push("\\\\?\\A:\\x\\y", ".\\foo\\.", "\\\\?\\A:\\x\\y\\foo")
+    windows_push("\\\\?\\A:\\x\\y", "", "\\\\?\\A:\\x\\y\\")
+}
+
+fn pop_case(platform: path_kernel.PathPlatform, original: String, expected: String, changed: Bool) Never! {
+    path := path_test(platform, original)
+    assert_eq(path_kernel.pop(&path), changed)
+    assert_eq(path_kernel.display(path), expected)
+}
+fn windows_pop(original: String, expected: String, changed: Bool) Never! { _ :: pop_case(path_kernel.PathPlatform.Windows, original, expected, changed) }
+
+#Test("std 1.90 pop: 9 shared rows on both platforms and 25 Windows rows") {
+    platforms :: [path_kernel.PathPlatform]{path_kernel.PathPlatform.Unix, path_kernel.PathPlatform.Windows}
+    loop platform in platforms {
+        _ :: pop_case(platform, "", "", false)
+        _ :: pop_case(platform, "/", "/", false)
+        _ :: pop_case(platform, "foo", "", true)
+        _ :: pop_case(platform, ".", "", true)
+        _ :: pop_case(platform, "/foo", "/", true)
+        _ :: pop_case(platform, "/foo/bar", "/foo", true)
+        _ :: pop_case(platform, "foo/bar", "foo", true)
+        _ :: pop_case(platform, "foo/.", "", true)
+        _ :: pop_case(platform, "foo//bar", "foo", true)
+    }
+    _ :: windows_pop("a\\b\\c", "a\\b", true)
+    _ :: windows_pop("\\a", "\\", true)
+    _ :: windows_pop("\\", "\\", false)
+    _ :: windows_pop("C:\\a\\b", "C:\\a", true)
+    _ :: windows_pop("C:\\a", "C:\\", true)
+    _ :: windows_pop("C:\\", "C:\\", false)
+    _ :: windows_pop("C:a\\b", "C:a", true)
+    _ :: windows_pop("C:a", "C:", true)
+    _ :: windows_pop("C:", "C:", false)
+    _ :: windows_pop("\\\\server\\share\\a\\b", "\\\\server\\share\\a", true)
+    _ :: windows_pop("\\\\server\\share\\a", "\\\\server\\share\\", true)
+    _ :: windows_pop("\\\\server\\share", "\\\\server\\share", false)
+    _ :: windows_pop("\\\\?\\a\\b\\c", "\\\\?\\a\\b", true)
+    _ :: windows_pop("\\\\?\\a\\b", "\\\\?\\a\\", true)
+    _ :: windows_pop("\\\\?\\a", "\\\\?\\a", false)
+    _ :: windows_pop("\\\\?\\C:\\a\\b", "\\\\?\\C:\\a", true)
+    _ :: windows_pop("\\\\?\\C:\\a", "\\\\?\\C:\\", true)
+    _ :: windows_pop("\\\\?\\C:\\", "\\\\?\\C:\\", false)
+    _ :: windows_pop("\\\\?\\UNC\\server\\share\\a\\b", "\\\\?\\UNC\\server\\share\\a", true)
+    _ :: windows_pop("\\\\?\\UNC\\server\\share\\a", "\\\\?\\UNC\\server\\share\\", true)
+    _ :: windows_pop("\\\\?\\UNC\\server\\share", "\\\\?\\UNC\\server\\share", false)
+    _ :: windows_pop("\\\\.\\a\\b\\c", "\\\\.\\a\\b", true)
+    _ :: windows_pop("\\\\.\\a\\b", "\\\\.\\a\\", true)
+    _ :: windows_pop("\\\\.\\a", "\\\\.\\a", false)
+    windows_pop("\\\\?\\a\\b\\", "\\\\?\\a\\", true)
+}
+
+fn optional_owned_display(path: path_kernel.OSPath?) -> String? Never! {
+    value :: path ?? return None
+    Val(path_kernel.display(value))
+}
+fn strip_case(platform: path_kernel.PathPlatform, text: String, base: String, expected: String?) Never! {
+    path :: path_test(platform, text)
+    root :: path_test(platform, base)
+    assert_eq(path_optional(path, path_kernel.strip_prefix_span(path, root)), expected)
+    assert_eq(optional_owned_display(path_kernel.strip_prefix(path, root)), expected)
+    assert_eq(path_kernel.starts_with(path, root), expected != None)
+    // Compare optional values; bare Val(...) after == is a binding pattern.
+    assert_eq(path_kernel.equals(path, root), expected == (Val("")))
+    assert_eq(path_kernel.ends_with(path, root), expected == (Val("")) || base == "")
+}
+#Test("std 1.90 compare: every original strip_prefix row on actual platform state") {
+    platforms :: [path_kernel.PathPlatform]{path_kernel.PathPlatform.Unix, path_kernel.PathPlatform.Windows}
+    loop platform in platforms {
+        _ :: strip_case(platform, "", "", Val(""))
+        _ :: strip_case(platform, "foo", "", Val("foo"))
+        _ :: strip_case(platform, "", "foo", None)
+        _ :: strip_case(platform, "foo", "foo", Val(""))
+        _ :: strip_case(platform, "foo/", "foo", Val(""))
+        _ :: strip_case(platform, "foo//", "foo", Val(""))
+        _ :: strip_case(platform, "foo///", "foo", Val(""))
+        _ :: strip_case(platform, "foo/.", "foo", Val(""))
+        _ :: strip_case(platform, "foo/./bar", "foo/bar", Val(""))
+        _ :: strip_case(platform, "foo/.//bar", "foo/bar", Val(""))
+        _ :: strip_case(platform, "foo//./bar", "foo/bar", Val(""))
+        _ :: strip_case(platform, "foo/bar", "foo", Val("bar"))
+        _ :: strip_case(platform, "foo/bar", "foobar", None)
+        _ :: strip_case(platform, "foo/bar/baz", "foo/bar", Val("baz"))
+        _ :: strip_case(platform, "foo/bar", "foo/bar/baz", None)
+        _ :: strip_case(platform, "./foo/bar/", ".", Val("foo/bar"))
+    }
+    windows :: path_kernel.PathPlatform.Windows
+    _ :: strip_case(windows, "C:\\src\\rust\\cargo-test\\test\\Cargo.toml", "c:\\src\\rust\\cargo-test\\test", Val("Cargo.toml"))
+    _ :: strip_case(windows, "c:\\foo", "C:\\foo", Val(""))
+    _ :: strip_case(windows, "C:\\foo\\.\\bar.txt", "C:\\foo\\bar.txt", Val(""))
+    _ :: strip_case(windows, "C:\\foo\\.", "C:\\foo", Val(""))
+    _ :: strip_case(windows, "\\\\?\\C:\\foo\\.\\bar.txt", "\\\\?\\C:\\foo\\bar.txt", None)
+    _ :: strip_case(windows, "//server/share/pkg/a", "\\\\server\\share\\pkg", Val("a"))
+    _ :: strip_case(windows, "C:\\pkg2\\a", "C:\\pkg", None)
+    unix :: path_kernel.PathPlatform.Unix
+    _ :: strip_case(unix, "/pkg2/a", "/pkg", None)
+    _ :: strip_case(unix, "/pkg//a/./b///", "/pkg", Val("a/./b"))
+    strip_case(unix, "/pkg/a", "/pkg//./", Val("a"))
+}
+
+#Test("std Windows prefix witnesses: exact drives, slash namespace and broken UNC") {
+    windows :: path_kernel.PathPlatform.Windows
+    assert_eq(path_kernel.parse_prefix(path_test(windows, "\\\\?\\C:/windows/system32/notepad.exe")).kind, path_kernel.PrefixKind.VerbatimDisk)
+    assert_eq(path_kernel.parse_prefix(path_test(windows, "\\\\?\\C:\\windows\\system32\\notepad.exe")).kind, path_kernel.PrefixKind.VerbatimDisk)
+    spellings :: [String]{"//?/C:/windows/system32/notepad.exe", "//?/C:\\windows\\system32\\notepad.exe", "/\\?\\C:\\windows\\system32\\notepad.exe", "\\\\?/C:\\windows\\system32\\notepad.exe"}
+    loop spelling in spellings {
+        path :: path_test(windows, spelling)
+        prefix :: path_kernel.parse_prefix(path)
+        assert_eq(prefix.kind, path_kernel.PrefixKind.UNC)
+        assert_eq(path_kernel.display_span(path, prefix.first), "?")
+        assert_eq(path_kernel.display_span(path, prefix.second), "C:")
+    }
+    windows_decomposition("\\\\foo\\\\bar\\\\", [String]{"\\", "foo", "bar"}, true, false, Val("\\\\foo"), Val("bar"))
+    windows_decomposition("//foo//bar//", [String]{"\\", "foo", "bar"}, true, false, Val("//foo"), Val("bar"))
+    path :: path_test(windows, "c:")
+    cursor := path_kernel.components(path)
+    value :: path_kernel.next(path, &cursor) ?? panic("drive")
+    assert_eq(path_kernel.component_display(path, value), "c:")
+    assert_eq(cursor.prefix.drive, U8{67})
+    assert_eq(path_kernel.display_span(path, path_kernel.remaining_span(path, cursor)), "")
+    assert_eq(path_kernel.parse_prefix(path_test(windows, "\\\\?\\C:foo")).kind, path_kernel.PrefixKind.Verbatim)
+    assert_eq(path_kernel.parse_prefix(path_test(windows, "1:foo")).kind, path_kernel.PrefixKind.Absent)
+}
+
+#Test("std separators, Unicode, embedded newline and Unix drive/backslash traps") {
+    unix_decomposition("/////", [String]{"/"}, true, None, None)
+    windows_decomposition("/////", [String]{"\\"}, true, false, None, None)
+    unix_decomposition("/tmp/❤/🚀/file.txt", [String]{"/", "tmp", "❤", "🚀", "file.txt"}, true, Val("/tmp/❤/🚀"), Val("file.txt"))
+    unix_decomposition("foo\nbar", [String]{"foo\nbar"}, false, Val(""), Val("foo\nbar"))
+    unix_decomposition("c:foo\\bar", [String]{"c:foo\\bar"}, false, Val(""), Val("c:foo\\bar"))
+    unix_decomposition("\\\\server\\share", [String]{"\\\\server\\share"}, false, Val(""), Val("\\\\server\\share"))
+    windows_decomposition("\\\\?\\C:\\a\\.\\..\\b", [String]{"\\\\?\\C:", "\\", "a", ".", "..", "b"}, true, true, Val("\\\\?\\C:\\a\\.\\.."), Val("b"))
+}
+
+fn identity_case(platform: path_kernel.PathPlatform, text: String, expected: String) Never! {
+    path :: path_test(platform, text)
+    assert_eq(path_kernel.display(path_kernel.normalize_identity(path)), expected)
+    // Independent composition over the same real component owner: preserve the
+    // compiler's pop-unconditionally/push-component rule for exceptional normals.
+    reference := path_test(platform, "")
+    cursor := path_kernel.components(path)
+    loop {
+        value :: path_kernel.next(path, &cursor) ?? break
+        if value.kind == path_kernel.ComponentKind.ParentDir {
+            _ :: path_kernel.pop(&reference)
+        } else {
+            if value.kind != path_kernel.ComponentKind.CurDir -> path_kernel.push_component(&reference, path, value)
+        }
+    }
+    assert_eq(path_kernel.normalize_identity(path).encoded, reference.encoded)
+}
+#Test("PackageIdentity normalization is component-pop, not user collapse") {
+    unix :: path_kernel.PathPlatform.Unix
+    identity_case(unix, "../../a", "a")
+    identity_case(unix, "a/../../b", "b")
+    identity_case(unix, "./a//b/../c/.", "a/c")
+    identity_case(unix, "/../../a", "/a")
+    identity_case(unix, "", "")
+    identity_case(unix, "..", "")
+    identity_case(unix, ".", "")
+    identity_case(unix, "C:a\\..\\b", "C:a\\..\\b")
+    windows :: path_kernel.PathPlatform.Windows
+    identity_case(windows, "c:..\\..\\a", "c:a")
+    identity_case(windows, "C:\\..\\a", "C:\\a")
+    identity_case(windows, "\\\\server\\share\\..\\a", "\\\\server\\share\\a")
+    identity_case(windows, "\\\\?\\C:\\a\\.\\..\\b", "\\\\?\\C:\\b")
+    identity_case(windows, "\\\\?\\C:\\foo/bar", "\\\\?\\C:\\foo\\bar")
+    identity_case(windows, "\\\\?\\C:\\foo/../bar", "\\\\?\\C:\\bar")
+    identity_case(windows, "C:\\a\\D:foo\\..\\bar", "D:bar")
+    identity_case(windows, "\\\\?\\C:\\a\\D:foo/..\\bar", "D:foo/..\\bar")
+    identity_case(windows, "\\\\?\\C:\\a\\/foo\\..\\bar", "\\\\?\\C:\\bar")
+    identity_case(windows, "\\\\?\\C:\\a\\D:foo/./\\bar\\..", "D:foo")
+    assert_eq(path_kernel.slash(path_test(unix, "a\\b")), "a/b")
+    assert_eq(path_kernel.slash(path_test(unix, "")), ".")
+}
+
+#Test("OS bytes preserve invalid Unix identity and unpaired Windows UTF16 until display") {
+    bytes :: [U8]{47, 112, 107, 103, 47, 255, 47, 97}
+    path :: path_kernel.from_encoded(~bytes, path_kernel.PathPlatform.Unix)
+    assert_eq(path.encoded, bytes)
+    assert(path_kernel.to_str(path) == None)
+    assert_eq(path_kernel.display(path), "/pkg/�/a")
+    normalized :: path_kernel.normalize_identity(path)
+    assert_eq(normalized.encoded, bytes)
+    root :: path_test(path_kernel.PathPlatform.Unix, "/pkg")
+    rest :: path_kernel.strip_prefix(path, root) ?? panic("invalid-byte strip")
+    assert_eq(rest.encoded, [U8]{255, 47, 97})
+    wide :: [U16]{67, 58, 92, 55296, 92, 56320, 92, 55357, 56960}
+    windows :: path_kernel.from_windows_wide(wide)
+    assert_eq(path_kernel.to_windows_wide(windows), wide)
+    assert_eq(windows.encoded, [U8]{67, 58, 92, 237, 160, 128, 92, 237, 176, 128, 92, 240, 159, 154, 128})
+    assert(path_kernel.to_str(windows) == None)
+    assert_eq(path_kernel.display(windows), "C:\\�\\�\\🚀")
+    assert_eq(path_kernel.slash(windows), "C:/�/�/🚀")
+    assert_eq(path_kernel.normalize_identity(windows).encoded, windows.encoded)
+    cursor := path_kernel.components(windows)
+    _ :: path_kernel.next(windows, &cursor)
+    _ :: path_kernel.next(windows, &cursor)
+    surrogate :: path_kernel.next(windows, &cursor) ?? panic("surrogate component")
+    assert_eq(surrogate.span.start, 3)
+    assert_eq(surrogate.span.end, 6)
+    assert_eq(path_kernel.component_display(windows, surrogate), "�")
+}
+
+#Test("borrowed path extents preserve retained spelling and never scan adjacent fields") {
+    source :: path_test(path_kernel.PathPlatform.Unix, "x/pkg//a/./b///y")
+    root :: path_test(path_kernel.PathPlatform.Unix, "z/pkgq")
+    remainder :: path_kernel.strip_prefix_spans(source, path_kernel.PathSpan{start: 1, end: 14}, root, path_kernel.PathSpan{start: 1, end: 5}) ?? panic("span strip")
+    assert_eq(path_kernel.display_span(source, remainder), "a/./b")
+    source_windows :: path_test(path_kernel.PathPlatform.Windows, "xc:\\pkg\\aq")
+    root_windows :: path_test(path_kernel.PathPlatform.Windows, "yC:\\pkgz")
+    suffix :: path_kernel.strip_prefix_spans(source_windows, path_kernel.PathSpan{start: 1, end: 9}, root_windows, path_kernel.PathSpan{start: 1, end: 7}) ?? panic("drive span strip")
+    assert_eq(path_kernel.display_span(source_windows, suffix), "a")
+}
+
+fn prefix_next_case(text: String, verbatim: Bool, component: String, rest: String) Never! {
+    path :: path_test(path_kernel.PathPlatform.Windows, text)
+    split :: path_kernel.prefix_next_component(path, path_kernel.PathSpan{start: 0, end: path.encoded.len()}, verbatim)
+    assert_eq(path_kernel.display_span(path, split.component), component)
+    assert_eq(path_kernel.display_span(path, split.rest), rest)
+}
+#Test("std Windows parse_next_component: all six original bounded byte parser rows") {
+    _ :: prefix_next_case("server\\share", true, "server", "share")
+    _ :: prefix_next_case("server/share", true, "server/share", "")
+    _ :: prefix_next_case("server/share", false, "server", "share")
+    _ :: prefix_next_case("server\\", false, "server", "")
+    _ :: prefix_next_case("\\server\\", false, "", "server\\")
+    prefix_next_case("servershare", false, "servershare", "")
+}
+
+fn file_parts_case(platform: path_kernel.PathPlatform, text: String, stem: String?, extension: String?) Never! {
+    path :: path_test(platform, text)
+    assert_eq(path_optional(path, path_kernel.file_stem_span(path)), stem)
+    assert_eq(path_optional(path, path_kernel.extension_span(path)), extension)
+}
+#Test("std 1.90 stem and extension: all 11 original rows on both platforms") {
+    platforms :: [path_kernel.PathPlatform]{path_kernel.PathPlatform.Unix, path_kernel.PathPlatform.Windows}
+    loop platform in platforms {
+        _ :: file_parts_case(platform, "foo", Val("foo"), None)
+        _ :: file_parts_case(platform, "foo.", Val("foo"), Val(""))
+        _ :: file_parts_case(platform, ".foo", Val(".foo"), None)
+        _ :: file_parts_case(platform, "foo.txt", Val("foo"), Val("txt"))
+        _ :: file_parts_case(platform, "foo.bar.txt", Val("foo.bar"), Val("txt"))
+        _ :: file_parts_case(platform, "foo.bar.", Val("foo.bar"), Val(""))
+        _ :: file_parts_case(platform, ".", None, None)
+        _ :: file_parts_case(platform, "..", None, None)
+        _ :: file_parts_case(platform, ".x.y.z", Val(".x.y"), Val("z"))
+        _ :: file_parts_case(platform, "..x.y.z", Val("..x.y"), Val("z"))
+        _ :: file_parts_case(platform, "", None, None)
+        _ :: file_parts_case(platform, "a/.rustfmt.toml", Val(".rustfmt"), Val("toml"))
+        _ :: file_parts_case(platform, "a/.x.y.z", Val(".x.y"), Val("z"))
+    }
+    windows :: path_kernel.PathPlatform.Windows
+    spellings :: [String]{"c:\\foo.txt", "\\\\server\\share\\foo.txt", "\\\\?\\bar\\foo.txt", "\\\\?\\UNC\\server\\share\\foo.txt", "\\\\?\\C:\\foo.txt"}
+    loop spelling in spellings -> _ :: file_parts_case(windows, spelling, Val("foo"), Val("txt"))
+    _ :: file_parts_case(windows, "\\\\?\\C:\\foo.txt.zip", Val("foo.txt"), Val("zip"))
+    _ :: file_parts_case(windows, "\\\\?\\C:\\.foo.txt.zip", Val(".foo.txt"), Val("zip"))
+    file_parts_case(windows, "\\\\?\\C:\\.foo", Val(".foo"), None)
+}
+fn extension_case(platform: path_kernel.PathPlatform, original: String, extension: String, expected: String, changed: Bool) Never! {
+    path := path_test(platform, original)
+    source :: path_test(platform, original)
+    assert_eq(path_kernel.set_extension(&path, extension), changed)
+    assert_eq(path_kernel.display(path), expected)
+    assert_eq(path_kernel.display(path_kernel.with_extension(source, extension)), expected)
+}
+#Test("std 1.90 set_extension 13 and with_extension 17 original rows on both platforms") {
+    platforms :: [path_kernel.PathPlatform]{path_kernel.PathPlatform.Unix, path_kernel.PathPlatform.Windows}
+    loop platform in platforms {
+        extension_case(platform, "foo", "txt", "foo.txt", true)
+        extension_case(platform, "foo.bar", "txt", "foo.txt", true)
+        extension_case(platform, "foo.bar.baz", "txt", "foo.bar.txt", true)
+        extension_case(platform, ".test", "txt", ".test.txt", true)
+        extension_case(platform, "foo.txt", "", "foo", true)
+        extension_case(platform, "foo", "", "foo", true)
+        extension_case(platform, "", "foo", "", false)
+        extension_case(platform, ".", "foo", ".", false)
+        extension_case(platform, "foo/", "bar", "foo.bar", true)
+        extension_case(platform, "foo/.", "bar", "foo.bar", true)
+        extension_case(platform, "..", "foo", "..", false)
+        extension_case(platform, "foo/..", "bar", "foo/..", false)
+        extension_case(platform, "/", "foo", "/", false)
+        extension_case(platform, "aaa_aaa_aaa", "bbb_bbb", "aaa_aaa_aaa.bbb_bbb", true)
+        extension_case(platform, "bbb_bbb", "aaa_aaa_aaa", "bbb_bbb.aaa_aaa_aaa", true)
+        extension_case(platform, "ccc.aaa_aaa_aaa", "bbb_bbb", "ccc.bbb_bbb", true)
+        extension_case(platform, "ccc.bbb_bbb", "aaa_aaa_aaa", "ccc.aaa_aaa_aaa", true)
+    }
+    unix :: path_kernel.PathPlatform.Unix
+    extension_case(unix, "path/to/file", "d\\test", "path/to/file.d\\test", true)
+    bytes :: [U8]{255, 46, 111, 108, 100}
+    opaque := path_kernel.from_encoded(~bytes, unix)
+    assert(path_kernel.set_extension(&opaque, "jet"))
+    assert_eq(opaque.encoded, [U8]{255, 46, 106, 101, 116})
+    windows := path_kernel.from_windows_wide([U16]{67, 58, 92, 55296, 46, 111, 108, 100})
+    assert(path_kernel.set_extension(&windows, "jet"))
+    assert_eq(path_kernel.to_windows_wide(windows), [U16]{67, 58, 92, 55296, 46, 106, 101, 116})
+}

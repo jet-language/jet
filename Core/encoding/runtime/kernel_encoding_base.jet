@@ -1,0 +1,524 @@
+// PORT-PENDING 0124 crates-jet-codegen-src-prelude-core-encodingbase-module-group: crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:1-520
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-UUIDENC1=A / D-BYTESDECODE1=A: exact encoding and byte-decoding kernels.
+//RS 
+//RS const JET_B64_CHARS: &[u8; 64] =
+//RS     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+//RS 
+//RS /// `core.encoding.hex.decode`: mixed-case digits, whole bytes only, no
+//RS /// whitespace. The length check runs before the digit scan.
+//RS pub(crate) fn jet_std_hex_decode(text: &String) -> Result<Vec<u8>, String> {
+//RS     if text.len() % 2 != 0 {
+//RS         return Err(
+//RS             "odd-length hex string; hex text encodes whole bytes, so the length must be even"
+//RS                 .to_string(),
+//RS         );
+//RS     }
+//RS     let mut out = Vec::with_capacity(text.len() / 2);
+//RS     for pair in text.as_bytes().chunks_exact(2) {
+//RS         let (Some(high), Some(low)) = (hex_nibble(pair[0]), hex_nibble(pair[1])) else {
+//RS             return Err("invalid hex digit; expected 0-9, a-f, or A-F".to_string());
+//RS         };
+//RS         out.push((high << 4) | low);
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS fn hex_nibble(byte: u8) -> Option<u8> {
+//RS     match byte {
+//RS         b'0'..=b'9' => Some(byte - b'0'),
+//RS         b'a'..=b'f' => Some(byte - b'a' + 10),
+//RS         b'A'..=b'F' => Some(byte - b'A' + 10),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn hex_with_digits(bytes: &[u8], digits: &[u8; 16]) -> String {
+//RS     let mut out = String::with_capacity(bytes.len() * 2);
+//RS     for &byte in bytes {
+//RS         out.push(digits[usize::from(byte >> 4)] as char);
+//RS         out.push(digits[usize::from(byte & 0x0f)] as char);
+//RS     }
+//RS     out
+//RS }
+//RS pub(crate) fn jet_std_hex_encode(bytes: &Vec<u8>) -> String {
+//RS     hex_with_digits(bytes, b"0123456789abcdef")
+//RS }
+//RS pub(crate) fn jet_std_hex_encode_upper(bytes: &Vec<u8>) -> String {
+//RS     hex_with_digits(bytes, b"0123456789ABCDEF")
+//RS }
+//RS pub(crate) fn jet_std_hex_encode_sep(bytes: &Vec<u8>, separator: &String) -> String {
+//RS     bytes
+//RS         .iter()
+//RS         .map(|byte| format!("{byte:02x}"))
+//RS         .collect::<Vec<_>>()
+//RS         .join(separator)
+//RS }
+//RS pub(crate) fn jet_std_hex_is_hex(text: &String) -> bool {
+//RS     !text.is_empty() && text.len().is_multiple_of(2) && text.bytes().all(|byte| hex_nibble(byte).is_some())
+//RS }
+//RS pub(crate) fn jet_std_hex_dump(bytes: &Vec<u8>) -> String {
+//RS     let mut out = String::new();
+//RS     for (row, chunk) in bytes.chunks(16).enumerate() {
+//RS         let offset = row * 16;
+//RS         let mut hex = String::new();
+//RS         for index in 0..16 {
+//RS             if index > 0 {
+//RS                 hex.push(' ');
+//RS             }
+//RS             if let Some(byte) = chunk.get(index) {
+//RS                 hex.push_str(&format!("{byte:02x}"));
+//RS             } else {
+//RS                 hex.push_str("  ");
+//RS             }
+//RS         }
+//RS         let ascii: String = chunk
+//RS             .iter()
+//RS             .map(|byte| {
+//RS                 if (32..=126).contains(byte) {
+//RS                     *byte as char
+//RS                 } else {
+//RS                     '.'
+//RS                 }
+//RS             })
+//RS             .collect();
+//RS         out.push_str(&format!("{offset:08x}  {hex}  {ascii}\n"));
+//RS     }
+//RS     out
+//RS }
+//RS pub(crate) fn jet_std_crc_hqx(bytes: &Vec<u8>, value: i64) -> i64 {
+//RS     let mut crc = (value & 0xffff) as u16;
+//RS     for &byte in bytes {
+//RS         crc ^= (byte as u16) << 8;
+//RS         for _ in 0..8 {
+//RS             crc = if crc & 0x8000 != 0 {
+//RS                 (crc << 1) ^ 0x1021
+//RS             } else {
+//RS                 crc << 1
+//RS             };
+//RS         }
+//RS     }
+//RS     i64::from(crc)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_crc32(bytes: &Vec<u8>) -> i64 {
+//RS     let mut crc = 0xffff_ffffu32;
+//RS     for &byte in bytes {
+//RS         crc ^= u32::from(byte);
+//RS         for _ in 0..8 {
+//RS             crc = if crc & 1 != 0 {
+//RS                 (crc >> 1) ^ 0xedb8_8320
+//RS             } else {
+//RS                 crc >> 1
+//RS             };
+//RS         }
+//RS     }
+//RS     i64::from((!crc) as i32) & 0xffff_ffff
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
+//RS     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+//RS     for chunk in bytes.chunks(3) {
+//RS         let b0 = chunk[0] as u32;
+//RS         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+//RS         let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+//RS         let n = (b0 << 16) | (b1 << 8) | b2;
+//RS         out.push(JET_B64_CHARS[(n >> 18) as usize] as char);
+//RS         out.push(JET_B64_CHARS[((n >> 12) & 0x3f) as usize] as char);
+//RS         out.push(if chunk.len() > 1 {
+//RS             JET_B64_CHARS[((n >> 6) & 0x3f) as usize] as char
+//RS         } else {
+//RS             '='
+//RS         });
+//RS         out.push(if chunk.len() > 2 {
+//RS             JET_B64_CHARS[(n & 0x3f) as usize] as char
+//RS         } else {
+//RS             '='
+//RS         });
+//RS     }
+//RS     out
+//RS }
+//RS /// Python `base64.encodebytes`: standard Base64 in 76-character lines, each
+//RS /// ending in `\n`.
+//RS pub(crate) fn jet_std_b64_encodebytes(bytes: &Vec<u8>) -> String {
+//RS     let encoded = jet_std_b64_encode(bytes);
+//RS     let mut out = String::with_capacity(encoded.len() + encoded.len() / 76 + 1);
+//RS     for line in encoded.as_bytes().chunks(76) {
+//RS         out.extend(line.iter().map(|&byte| char::from(byte)));
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS /// Encode a packed integer list without materializing an intermediate byte
+//RS /// vector. JIT `[U8]` literals use the dense `i64` carrier.
+//RS pub(crate) fn jet_std_b64_encode_ints(values: &[i64]) -> String {
+//RS     let mut out = String::with_capacity((values.len() + 2) / 3 * 4);
+//RS     for chunk in values.chunks(3) {
+//RS         let b0 = chunk[0] as u32;
+//RS         let b1 = if chunk.len() > 1 {
+//RS             chunk[1] as u32
+//RS         } else {
+//RS             0
+//RS         };
+//RS         let b2 = if chunk.len() > 2 {
+//RS             chunk[2] as u32
+//RS         } else {
+//RS             0
+//RS         };
+//RS         let n = (b0 << 16) | (b1 << 8) | b2;
+//RS         out.push(JET_B64_CHARS[(n >> 18) as usize] as char);
+//RS         out.push(JET_B64_CHARS[((n >> 12) & 0x3f) as usize] as char);
+//RS         out.push(if chunk.len() > 1 {
+//RS             JET_B64_CHARS[((n >> 6) & 0x3f) as usize] as char
+//RS         } else {
+//RS             '='
+//RS         });
+//RS         out.push(if chunk.len() > 2 {
+//RS             JET_B64_CHARS[(n & 0x3f) as usize] as char
+//RS         } else {
+//RS             '='
+//RS         });
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
+//RS     jet_std_b64_encode(bytes)
+//RS         .trim_end_matches('=')
+//RS         .replace('+', "-")
+//RS         .replace('/', "_")
+//RS }
+//RS pub(crate) fn jet_std_b64url_encode_padded(bytes: &Vec<u8>) -> String {
+//RS     jet_std_b64_encode(bytes)
+//RS         .replace('+', "-")
+//RS         .replace('/', "_")
+//RS }
+//RS pub(crate) fn jet_std_b64_pad(text: &String) -> String {
+//RS     let remainder = text.len() % 4;
+//RS     if remainder == 0 {
+//RS         return text.clone();
+//RS     }
+//RS     format!("{text}{}", "=".repeat(4 - remainder))
+//RS }
+//RS pub(crate) fn jet_std_b64_unpad(text: &String) -> String {
+//RS     text.trim_end_matches('=').to_string()
+//RS }
+//RS 
+//RS const JET_BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+//RS const JET_BASE32HEX_CHARS: &[u8; 32] = b"0123456789ABCDEFGHIJKLMNOPQRSTUV";
+//RS 
+//RS fn base32_encode_with_alphabet(bytes: &Vec<u8>, alphabet: &[u8; 32]) -> String {
+//RS     let mut out = String::new();
+//RS     let mut buffer: u32 = 0;
+//RS     let mut bits = 0u8;
+//RS     for &byte in bytes {
+//RS         buffer = (buffer << 8) | byte as u32;
+//RS         bits += 8;
+//RS         while bits >= 5 {
+//RS             let index = ((buffer >> (bits - 5)) & 31) as usize;
+//RS             out.push(alphabet[index] as char);
+//RS             bits -= 5;
+//RS         }
+//RS     }
+//RS     if bits > 0 {
+//RS         let index = ((buffer << (5 - bits)) & 31) as usize;
+//RS         out.push(alphabet[index] as char);
+//RS     }
+//RS     while out.len() % 8 != 0 {
+//RS         out.push('=');
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_base32_encode(bytes: &Vec<u8>) -> String {
+//RS     base32_encode_with_alphabet(bytes, JET_BASE32_CHARS)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_base32hex_encode(bytes: &Vec<u8>) -> String {
+//RS     base32_encode_with_alphabet(bytes, JET_BASE32HEX_CHARS)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u8(value: i64) -> Vec<u8> {
+//RS     vec![value as u8]
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_i8(value: i64) -> Vec<u8> {
+//RS     jet_std_binary_pack_u8(value)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u16le(value: i64) -> Vec<u8> {
+//RS     (value as u16).to_le_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u16be(value: i64) -> Vec<u8> {
+//RS     (value as u16).to_be_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u32le(value: i64) -> Vec<u8> {
+//RS     (value as u32).to_le_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u32be(value: i64) -> Vec<u8> {
+//RS     (value as u32).to_be_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u64le(value: i64) -> Vec<u8> {
+//RS     (value as u64).to_le_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_u64be(value: i64) -> Vec<u8> {
+//RS     (value as u64).to_be_bytes().to_vec()
+//RS }
+//RS 
+//RS fn jet_std_binary_slice<const N: usize>(
+//RS     data: &Vec<u8>,
+//RS     offset: i64,
+//RS ) -> Option<[u8; N]> {
+//RS     let start = usize::try_from(offset).ok()?;
+//RS     let end = start.checked_add(N)?;
+//RS     data.get(start..end)?.try_into().ok()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u8(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     let [value] = jet_std_binary_slice::<1>(data, offset)?;
+//RS     Some(i64::from(value))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u16le(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from(u16::from_le_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u16be(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from(u16::from_be_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u32le(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from(u32::from_le_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u32be(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from(u32::from_be_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u64le(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from_ne_bytes(
+//RS         u64::from_le_bytes(jet_std_binary_slice(data, offset)?).to_ne_bytes(),
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_u64be(data: &Vec<u8>, offset: i64) -> Option<i64> {
+//RS     Some(i64::from_ne_bytes(
+//RS         u64::from_be_bytes(jet_std_binary_slice(data, offset)?).to_ne_bytes(),
+//RS     ))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_sign_extend(value: i64, bits: i64) -> i64 {
+//RS     if !(1..=64).contains(&bits) {
+//RS         return value;
+//RS     }
+//RS     let shift = 64 - bits as u32;
+//RS     (value << shift) >> shift
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_f64le(value: f64) -> Vec<u8> {
+//RS     value.to_bits().to_le_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack_f64be(value: f64) -> Vec<u8> {
+//RS     value.to_bits().to_be_bytes().to_vec()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_f64le(data: &Vec<u8>, offset: i64) -> Option<f64> {
+//RS     Some(f64::from_bits(u64::from_le_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack_f64be(data: &Vec<u8>, offset: i64) -> Option<f64> {
+//RS     Some(f64::from_bits(u64::from_be_bytes(jet_std_binary_slice(data, offset)?)))
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum JetStdBinaryEndian {
+//RS     Little,
+//RS     Big,
+//RS }
+//RS 
+//RS fn jet_std_binary_format(
+//RS     format: &str,
+//RS ) -> Result<(JetStdBinaryEndian, Vec<(u8, usize, usize)>), String> {
+//RS     let bytes = format.as_bytes();
+//RS     let (endian, mut cursor) = match bytes.first().copied() {
+//RS         Some(b'<') | Some(b'=') | Some(b'@') => (JetStdBinaryEndian::Little, 1),
+//RS         Some(b'>') | Some(b'!') => (JetStdBinaryEndian::Big, 1),
+//RS         _ => (JetStdBinaryEndian::Little, 0),
+//RS     };
+//RS     let mut ops = Vec::new();
+//RS     while cursor < bytes.len() {
+//RS         let mut repeat = 0usize;
+//RS         while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+//RS             repeat = repeat
+//RS                 .checked_mul(10)
+//RS                 .and_then(|value| value.checked_add((bytes[cursor] - b'0') as usize))
+//RS                 .ok_or_else(|| "binary format repeat count overflowed".to_string())?;
+//RS             cursor += 1;
+//RS         }
+//RS         if repeat == 0 {
+//RS             repeat = 1;
+//RS         }
+//RS         let code = *bytes
+//RS             .get(cursor)
+//RS             .ok_or_else(|| "binary format repeat count is missing a type".to_string())?;
+//RS         cursor += 1;
+//RS         let unit_width = match code {
+//RS             b'x' | b'c' | b'b' | b'B' => 1,
+//RS             b'h' | b'H' => 2,
+//RS             b'i' | b'I' | b'l' | b'L' => 4,
+//RS             b'q' | b'Q' => 8,
+//RS             _ => return Err(format!("unknown binary format character `{}`", code as char)),
+//RS         };
+//RS         let width = repeat
+//RS             .checked_mul(unit_width)
+//RS             .ok_or_else(|| "binary format size overflowed".to_string())?;
+//RS         ops.push((code, repeat, width));
+//RS     }
+//RS     Ok((endian, ops))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_calcsize(format: &String) -> Result<i64, String> {
+//RS     let (_, ops) = jet_std_binary_format(format)?;
+//RS     Ok(ops.iter().map(|(_, _, width)| *width as i64).sum())
+//RS }
+//RS 
+//RS fn jet_std_binary_pack_one(code: u8, endian: JetStdBinaryEndian, value: i64) -> Vec<u8> {
+//RS     match (code, endian) {
+//RS         (b'x', _) => vec![0],
+//RS         (b'c' | b'b' | b'B', _) => vec![value as u8],
+//RS         (b'h' | b'H', JetStdBinaryEndian::Little) => (value as u16).to_le_bytes().to_vec(),
+//RS         (b'h' | b'H', JetStdBinaryEndian::Big) => (value as u16).to_be_bytes().to_vec(),
+//RS         (b'i' | b'I' | b'l' | b'L', JetStdBinaryEndian::Little) => {
+//RS             (value as u32).to_le_bytes().to_vec()
+//RS         }
+//RS         (b'i' | b'I' | b'l' | b'L', JetStdBinaryEndian::Big) => {
+//RS             (value as u32).to_be_bytes().to_vec()
+//RS         }
+//RS         (b'q' | b'Q', JetStdBinaryEndian::Little) => (value as u64).to_le_bytes().to_vec(),
+//RS         (b'q' | b'Q', JetStdBinaryEndian::Big) => (value as u64).to_be_bytes().to_vec(),
+//RS         _ => Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_std_binary_unpack_one(
+//RS     code: u8,
+//RS     endian: JetStdBinaryEndian,
+//RS     data: &Vec<u8>,
+//RS     offset: usize,
+//RS ) -> Option<i64> {
+//RS     let width = match code {
+//RS         b'x' | b'c' | b'b' | b'B' => 1,
+//RS         b'h' | b'H' => 2,
+//RS         b'i' | b'I' | b'l' | b'L' => 4,
+//RS         b'q' | b'Q' => 8,
+//RS         _ => return None,
+//RS     };
+//RS     let raw = data.get(offset..offset.checked_add(width)?)?;
+//RS     Some(match (code, endian) {
+//RS         (b'x', _) => 0,
+//RS         (b'c' | b'b' | b'B', _) => i64::from(raw[0]),
+//RS         (b'h' | b'H', JetStdBinaryEndian::Little) => {
+//RS             i64::from(u16::from_le_bytes(raw.try_into().ok()?))
+//RS         }
+//RS         (b'h' | b'H', JetStdBinaryEndian::Big) => {
+//RS             i64::from(u16::from_be_bytes(raw.try_into().ok()?))
+//RS         }
+//RS         (b'i' | b'I' | b'l' | b'L', JetStdBinaryEndian::Little) => {
+//RS             i64::from(u32::from_le_bytes(raw.try_into().ok()?))
+//RS         }
+//RS         (b'i' | b'I' | b'l' | b'L', JetStdBinaryEndian::Big) => {
+//RS             i64::from(u32::from_be_bytes(raw.try_into().ok()?))
+//RS         }
+//RS         (b'q' | b'Q', JetStdBinaryEndian::Little) => {
+//RS             i64::from_ne_bytes(u64::from_le_bytes(raw.try_into().ok()?).to_ne_bytes())
+//RS         }
+//RS         (b'q' | b'Q', JetStdBinaryEndian::Big) => {
+//RS             i64::from_ne_bytes(u64::from_be_bytes(raw.try_into().ok()?).to_ne_bytes())
+//RS         }
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_pack(
+//RS     format: &String,
+//RS     values: &Vec<i64>,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     let (endian, ops) = jet_std_binary_format(format)?;
+//RS     let expected = ops
+//RS         .iter()
+//RS         .map(|(code, repeat, _)| if *code == b'x' { 0 } else { *repeat })
+//RS         .sum::<usize>();
+//RS     if values.len() != expected {
+//RS         return Err(format!(
+//RS             "binary pack expected {expected} values, got {}",
+//RS             values.len()
+//RS         ));
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     let mut value_index = 0usize;
+//RS     for (code, repeat, _) in ops {
+//RS         for _ in 0..repeat {
+//RS             let value = if code == b'x' {
+//RS                 0
+//RS             } else {
+//RS                 let value = values[value_index];
+//RS                 value_index += 1;
+//RS                 value
+//RS             };
+//RS             out.extend(jet_std_binary_pack_one(code, endian, value));
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_binary_unpack(
+//RS     format: &String,
+//RS     data: &Vec<u8>,
+//RS ) -> Result<Vec<i64>, String> {
+//RS     let (endian, ops) = jet_std_binary_format(format)?;
+//RS     let size: usize = ops.iter().map(|(_, _, width)| *width).sum();
+//RS     if data.len() < size {
+//RS         return Err(format!(
+//RS             "binary unpack needs {size} bytes, got {}",
+//RS             data.len()
+//RS         ));
+//RS     }
+//RS     let mut out = Vec::new();
+//RS     let mut offset = 0usize;
+//RS     for (code, repeat, width) in ops {
+//RS         let unit_width = width / repeat;
+//RS         for _ in 0..repeat {
+//RS             if code != b'x' {
+//RS                 let value = jet_std_binary_unpack_one(code, endian, data, offset)
+//RS                     .ok_or_else(|| "binary unpack ran out of bytes".to_string())?;
+//RS                 out.push(value);
+//RS             }
+//RS             offset += unit_width;
+//RS         }
+//RS     }
+//RS     Ok(out)
+//RS }
+//RS pub(crate) fn jet_std_binary_iter_unpack(
+//RS     format: &String,
+//RS     data: &Vec<u8>,
+//RS ) -> Result<Vec<Vec<i64>>, String> {
+//RS     let size = usize::try_from(jet_std_binary_calcsize(format)?)
+//RS         .map_err(|_| "binary iter_unpack format size is invalid".to_string())?;
+//RS     if size == 0 {
+//RS         return Err("binary iter_unpack needs a positive format size".to_string());
+//RS     }
+//RS     if data.len() % size != 0 {
+//RS         return Err("binary iter_unpack buffer length is not a multiple of the format size".to_string());
+//RS     }
+//RS     data.chunks_exact(size)
+//RS         .map(|chunk| jet_std_binary_unpack(format, &chunk.to_vec()))
+//RS         .collect()
+//RS }
+// END-PORT-PENDING 0124 crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:1-520
+

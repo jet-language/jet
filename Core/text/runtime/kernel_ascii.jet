@@ -1,0 +1,26 @@
+// PORT-PENDING 2177 crates-jet-codegen-src-prelude-core-ascii: crates/jet-codegen/src/Prelude/Core/Ascii.rs:1-22
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ASCII case conversion is deliberately narrower than Unicode case mapping.
+//RS // Only the 26 ASCII letters change; every other UTF-8 byte sequence is copied
+//RS // unchanged.  This is the one semantic kernel used by AOT, JIT, and TIR eval.
+//RS 
+//RS pub(crate) fn jet_text_ascii_lower(s: &String) -> String {
+//RS     s.chars()
+//RS         .map(|character| match character {
+//RS             'A'..='Z' => ((character as u8) + (b'a' - b'A')) as char,
+//RS             other => other,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(crate) fn jet_text_ascii_upper(s: &String) -> String {
+//RS     s.chars()
+//RS         .map(|character| match character {
+//RS             'a'..='z' => ((character as u8) - (b'a' - b'A')) as char,
+//RS             other => other,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+// END-PORT-PENDING 2177 crates/jet-codegen/src/Prelude/Core/Ascii.rs:1-22
+

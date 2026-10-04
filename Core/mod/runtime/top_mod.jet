@@ -1,0 +1,52 @@
+// Top/Mod.rs:5–91,109–433. Canonical Foundation owns tags, header,
+// digest, symbols and metadata. Native read/grant/map/call/unload remain stage2.
+use jet_foundation.[JetLibArtifact, JetLibIdentity, JetLibStamp, JetLibMetadataKind, pkg_jetlib_validate_load_metadata]
+use core.mod.[ModError]
+use core.text.parse as mod_wire_parse
+
+// Rust JetModFailure::tag/from_io:73–91. Only native io kind classification
+// crosses the boundary; no IO operation or fake loader lives in this module.
+pub enum ModFailure { Denied NotFound Invalid Unsupported }
+pub fn failure_tag(failure: ModFailure, reason: String) -> String Never! {
+    case :: if failure == {
+        .Denied -> "Denied"
+        .NotFound -> "NotFound"
+        .Invalid -> "Invalid"
+        .Unsupported -> "Unsupported"
+    }
+    "{case}: {reason}"
+}
+pub fn failure_from_io(not_found: Bool) -> ModFailure Never! {
+    if not_found -> ModFailure.NotFound else -> ModFailure.Invalid
+}
+// Existing public ModError mapping, D-MOD-ERR1=A.
+pub fn mod_error(reason: String) -> ModError Never! {
+    if reason.starts_with("Denied: ") -> return ModError.Denied(mod_wire_parse.strip_prefix(reason, "Denied: "))
+    if reason.starts_with("NotFound: ") -> return ModError.NotFound(mod_wire_parse.strip_prefix(reason, "NotFound: "))
+    if reason.starts_with("Invalid: ") -> return ModError.Invalid(mod_wire_parse.strip_prefix(reason, "Invalid: "))
+    if reason.starts_with("Unsupported: ") -> return ModError.Unsupported(mod_wire_parse.strip_prefix(reason, "Unsupported: "))
+    ModError.Invalid(reason)
+}
+// Rust jetlib_header:176–282 delegates the sole decoder, retaining wire effects
+// in source order and the actual input payload view. No copies/projection here.
+pub fn header(bytes: View<U8>, identity: JetLibIdentity) -> JetLibArtifact Err! {
+    JetLibArtifact.decode_bytes(bytes, identity.host_max, true)
+}
+// Rust check_before_map:326–433. Identity wins before metadata/effect claims.
+pub fn check_before_map(stamp: JetLibStamp, identity: JetLibIdentity) -> String? Never! {
+    if stamp.compiler_version != identity.compiler_version -> return Val(failure_tag(ModFailure.Unsupported, "E1338: library `{stamp.library_name}` was built by Jet `{stamp.compiler_version}`, but the loader uses Jet `{identity.compiler_version}`"))
+    if pkg_jetlib_validate_load_metadata(stamp, identity.target, true) == .Val(problem) {
+        kind :: if problem.kind == JetLibMetadataKind.Unsupported -> ModFailure.Unsupported else -> ModFailure.Invalid
+        return Val(failure_tag(kind, problem.reason))
+    }
+    loop effect_name in stamp.declared_effects {
+        if effect_name != "FS" && !effect_name.starts_with("FS.") -> return Val(failure_tag(ModFailure.Denied, "E1339: library `{stamp.library_name}` declares `{effect_name}`, which this load site does not grant"))
+    }
+    None
+}
+// Held native provider boundaries (original Top/Mod.rs): JetModGrant57–60,
+// JetMod93–107/drop; call_int_pointer + jet_mod_call_int + on_tick435–505;
+// Unix loader/staging/symbol/unload507–692, Windows equivalents694–855,
+// unsupported provider857–870; real reparse/identity/grant FS gates872–973,
+// jet_mod_load975–977. Retained descriptor/executable lifetime, checked ABI,
+// stop/error/drop cleanup and real authority remain required, never mocked.

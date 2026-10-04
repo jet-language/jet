@@ -1,0 +1,102 @@
+// PORT-PENDING 0273 crates-jet-codegen-src-prelude-corelib-top-gameassetsimport-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsRuntime.rs:1-98
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // core.game asset runtime state is the shared checked replacement store.
+//RS //
+//RS // This adapter owns no cache map, lock, revision counter, validation, or
+//RS // rollback policy. It only presents the CoreLib boundary while the canonical
+//RS // Prelude store owns atomic publication and receipts.
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub(crate) struct GameAssetRuntimeAdapter {
+//RS     store: JetGameAssetStore,
+//RS }
+//RS 
+//RS impl GameAssetRuntimeAdapter {
+//RS     pub(crate) fn new() -> Self {
+//RS         Self {
+//RS             store: JetGameAssetStore::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn with_roots(
+//RS         roots: JetGameAssetRootSet,
+//RS     ) -> Result<Self, JetGameAssetPipelineError> {
+//RS         Ok(Self {
+//RS             store: JetGameAssetStore::with_roots(roots)?,
+//RS         })
+//RS     }
+//RS 
+//RS     pub(crate) fn revision(&self) -> u64 {
+//RS         self.store.revision()
+//RS     }
+//RS 
+//RS     pub(crate) fn ready(
+//RS         &self,
+//RS         source: &JetGameAssetSourceIdentity,
+//RS     ) -> Option<JetGameAssetArtifactIdentity> {
+//RS         self.store.ready(source)
+//RS     }
+//RS 
+//RS     pub(crate) fn ready_for_node(
+//RS         &self,
+//RS         node: &JetGameAssetNodeIdentity,
+//RS     ) -> Option<JetGameAssetArtifactIdentity> {
+//RS         self.store.ready_for_node(node)
+//RS     }
+//RS 
+//RS     pub(crate) fn ready_assets(&self) -> Vec<JetGameAssetArtifactIdentity> {
+//RS         self.store.ready_assets()
+//RS     }
+//RS 
+//RS     pub(crate) fn latest(
+//RS         &self,
+//RS         source: &JetGameAssetSourceIdentity,
+//RS     ) -> Option<JetGameAssetReloadReceipt> {
+//RS         self.store.latest(source)
+//RS     }
+//RS 
+//RS     pub(crate) fn begin_transaction(&self) -> JetGameAssetReloadTransaction {
+//RS         self.store.begin_transaction()
+//RS     }
+//RS 
+//RS     pub(crate) fn begin_at(&self, revision: u64) -> JetGameAssetReloadTransaction {
+//RS         self.store.begin_at(revision)
+//RS     }
+//RS 
+//RS     pub(crate) fn apply(
+//RS         &self,
+//RS         plan: JetGameAssetImportPlan,
+//RS         outcome: JetGameAssetImportOutcome,
+//RS     ) -> JetGameAssetTransactionReceipt {
+//RS         self.store.apply(plan, outcome)
+//RS     }
+//RS 
+//RS     pub(crate) fn apply_at(
+//RS         &self,
+//RS         revision: u64,
+//RS         plan: JetGameAssetImportPlan,
+//RS         outcome: JetGameAssetImportOutcome,
+//RS     ) -> JetGameAssetTransactionReceipt {
+//RS         self.store.apply_at(revision, plan, outcome)
+//RS     }
+//RS     pub(crate) fn apply_transaction(
+//RS         &self,
+//RS         entries: Vec<(JetGameAssetImportPlan, JetGameAssetImportOutcome)>,
+//RS     ) -> Result<JetGameAssetTransactionReceipt, String> {
+//RS         let mut transaction = self.store.begin_transaction();
+//RS         for (plan, outcome) in entries {
+//RS             if let Err(error) = transaction.stage(plan, outcome) {
+//RS                 let _ = transaction.rollback();
+//RS                 return Err(error.to_string());
+//RS             }
+//RS         }
+//RS         Ok(transaction.commit())
+//RS     }
+//RS 
+//RS 
+//RS     pub(crate) fn store(&self) -> &JetGameAssetStore {
+//RS         &self.store
+//RS     }
+//RS }
+// END-PORT-PENDING 0273 crates/jet-codegen/src/Prelude/CoreLib/Top/GameAssetsRuntime.rs:1-98
+

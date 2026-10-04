@@ -1,0 +1,1492 @@
+// PORT-PENDING 0311 crates-jet-codegen-src-prelude-corelib-top-webrouter: crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1-1488
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-SUITE1=C: first-party Router state on the shared reactive primitive.
+//RS //
+//RS // This file owns route matching, typed path/search decoding, preloading, and
+//RS // navigation boundaries. A host only renders the resulting state; it does not
+//RS // parse URLs or maintain a second router.
+//RS 
+//RS use std::collections::BTreeMap;
+//RS use std::sync::atomic::{AtomicBool, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS const JET_WEB_ROUTER_MAX_URL: usize = 16 * 1024;
+//RS const JET_WEB_ROUTER_MAX_ROUTES: usize = 1024;
+//RS const JET_WEB_ROUTER_MAX_PARAMS: usize = 128;
+//RS const JET_WEB_ROUTER_MAX_PRELOADED: usize = 256;
+//RS const JET_WEB_ROUTER_MAX_DATA: usize = 4 * 1024 * 1024;
+//RS 
+//RS fn jet_web_router_bound_data(value: String, fallback: &str) -> String {
+//RS     if value.len() <= JET_WEB_ROUTER_MAX_DATA {
+//RS         value
+//RS     } else {
+//RS         fallback.to_string()
+//RS     }
+//RS }
+//RS fn jet_web_router_identity(pattern: &str) -> String {
+//RS     let mut hash = 0xcbf29ce484222325u64;
+//RS     for byte in pattern.as_bytes() {
+//RS         hash ^= u64::from(*byte);
+//RS         hash = hash.wrapping_mul(0x100000001b3);
+//RS     }
+//RS     format!("route-{hash:016x}")
+//RS }
+//RS fn jet_web_router_cache_key(route: &JetWebRoute, navigation: &JetWebNavigation) -> String {
+//RS     let mut key = route.identity.clone();
+//RS     key.push_str("|p");
+//RS     for (name, value) in &navigation.params {
+//RS         key.push('|');
+//RS         key.push_str(&name.len().to_string());
+//RS         key.push(':');
+//RS         key.push_str(name);
+//RS         key.push('=');
+//RS         key.push_str(&value.len().to_string());
+//RS         key.push(':');
+//RS         key.push_str(value);
+//RS     }
+//RS     key.push_str("|s");
+//RS     for (name, value) in &navigation.search {
+//RS         key.push('|');
+//RS         key.push_str(&name.len().to_string());
+//RS         key.push(':');
+//RS         key.push_str(name);
+//RS         key.push('=');
+//RS         key.push_str(&value.len().to_string());
+//RS         key.push(':');
+//RS         key.push_str(value);
+//RS     }
+//RS     key
+//RS }
+//RS fn jet_web_router_json_string(value: &str) -> String {
+//RS     format!("{value:?}")
+//RS }
+//RS 
+//RS fn jet_web_router_json_array(values: &[String]) -> String {
+//RS     let encoded = values
+//RS         .iter()
+//RS         .map(|value| jet_web_router_json_string(value))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{encoded}]")
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebRouterValueType {
+//RS     String,
+//RS     Int,
+//RS     Bool,
+//RS     Float,
+//RS     Json,
+//RS }
+//RS 
+//RS impl JetWebRouterValueType {
+//RS     fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::String => "String",
+//RS             Self::Int => "Int",
+//RS             Self::Bool => "Bool",
+//RS             Self::Float => "Float",
+//RS             Self::Json => "JSON",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebRouterField {
+//RS     pub name: String,
+//RS     pub value_type: JetWebRouterValueType,
+//RS     pub required: bool,
+//RS     pub default: Option<String>,
+//RS }
+//RS 
+//RS impl JetWebRouterField {
+//RS     pub fn new(name: String, value_type: JetWebRouterValueType) -> Self {
+//RS         Self {
+//RS             name,
+//RS             value_type,
+//RS             required: true,
+//RS             default: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn optional(mut self, default: Option<String>) -> Self {
+//RS         self.required = false;
+//RS         self.default = default;
+//RS         self
+//RS     }
+//RS }
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebRouterSearchCodec {
+//RS     Query,
+//RS     Json,
+//RS }
+//RS 
+//RS impl JetWebRouterSearchCodec {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Query => "query",
+//RS             Self::Json => "json",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebRouterCacheStatus {
+//RS     Fresh,
+//RS     Stale,
+//RS     Invalidated,
+//RS     Collected,
+//RS }
+//RS 
+//RS impl JetWebRouterCacheStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Fresh => "fresh",
+//RS             Self::Stale => "stale",
+//RS             Self::Invalidated => "invalidated",
+//RS             Self::Collected => "collected",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebRouterCacheState {
+//RS     pub identity: String,
+//RS     pub status: JetWebRouterCacheStatus,
+//RS     pub data: String,
+//RS     pub dependencies: Vec<String>,
+//RS     pub generation: u64,
+//RS }
+//RS 
+//RS 
+//RS 
+//RS 
+//RS fn jet_web_router_decode(value: &str, plus_as_space: bool) -> Result<String, String> {
+//RS     let normalized = if plus_as_space && value.as_bytes().contains(&b'+') {
+//RS         std::borrow::Cow::Owned(value.replace('+', " "))
+//RS     } else {
+//RS         std::borrow::Cow::Borrowed(value)
+//RS     };
+//RS     let decoded = jet_std::jet_url_percent_decode_str(normalized.as_ref())?;
+//RS     if decoded.chars().any(|character| character.is_control()) {
+//RS         return Err("URL component contains a control character".to_string());
+//RS     }
+//RS     Ok(decoded)
+//RS }
+//RS 
+//RS 
+//RS fn jet_web_router_parse_pattern(path: &str) -> Result<JetHTTPRoutePattern, String> {
+//RS     if path.len() > JET_WEB_ROUTER_MAX_URL {
+//RS         return Err(format!(
+//RS             "E2805: invalid web route `{path}`: route exceeds the {}-byte limit",
+//RS             JET_WEB_ROUTER_MAX_URL
+//RS         ));
+//RS     }
+//RS     jet_http_route_parse(path)
+//RS }
+//RS 
+//RS 
+//RS fn jet_web_router_split_url(url: &str) -> Result<(&str, &str), String> {
+//RS     if url.is_empty() || url.len() > JET_WEB_ROUTER_MAX_URL || !url.starts_with('/') {
+//RS         return Err("navigation URL must be an absolute path beginning with `/`".to_string());
+//RS     }
+//RS     let (path, query) = url.split_once('?').unwrap_or((url, ""));
+//RS     if path.contains('#') || query.contains('#') {
+//RS         return Err("URL fragments are not accepted by the server navigation contract".to_string());
+//RS     }
+//RS     Ok((path, query))
+//RS }
+//RS 
+//RS fn jet_web_router_match(
+//RS     pattern: &JetHTTPRoutePattern,
+//RS     path: &str,
+//RS ) -> Result<Option<BTreeMap<String, String>>, String> {
+//RS     let values = jet_http_route_path(path)?;
+//RS     Ok(jet_http_route_match(pattern, &values))
+//RS }
+//RS fn jet_web_router_parse_search(
+//RS     query: &str,
+//RS     codec: JetWebRouterSearchCodec,
+//RS ) -> Result<BTreeMap<String, String>, String> {
+//RS     match codec {
+//RS         JetWebRouterSearchCodec::Query => jet_web_router_parse_query(query),
+//RS         JetWebRouterSearchCodec::Json => jet_web_router_parse_json_search(query),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_router_parse_json_search(
+//RS     query: &str,
+//RS ) -> Result<BTreeMap<String, String>, String> {
+//RS     if query.is_empty() {
+//RS         return Ok(BTreeMap::new());
+//RS     }
+//RS     let mut encoded = None;
+//RS     for pair in query.split('&') {
+//RS         if pair.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS         let key = jet_web_router_decode(raw_key, true)?;
+//RS         if key != "search" {
+//RS             return Err(format!(
+//RS                 "JSON search codec accepts only the `search` query parameter, got `{key}`"
+//RS             ));
+//RS         }
+//RS         if encoded.replace(jet_web_router_decode(raw_value, true)?).is_some() {
+//RS             return Err("JSON search parameter `search` is repeated".to_string());
+//RS         }
+//RS     }
+//RS     let Some(encoded) = encoded else {
+//RS         return Ok(BTreeMap::new());
+//RS     };
+//RS     let value = jet_std::parse_json_strict(&encoded)
+//RS         .map_err(|error| format!("invalid JSON search value: {}", error.reason))?;
+//RS     let jet_std::DataTree::Object(entries) = value else {
+//RS         return Err("JSON search value must be an object".to_string());
+//RS     };
+//RS     if entries.len() > JET_WEB_ROUTER_MAX_PARAMS {
+//RS         return Err("navigation has too many search parameters".to_string());
+//RS     }
+//RS     entries
+//RS         .into_iter()
+//RS         .map(|(key, value)| {
+//RS             if !jet_http_route_name(&key) {
+//RS                 return Err(format!("search parameter `{key}` has an invalid name"));
+//RS             }
+//RS             Ok((key, jet_web_router_json_value_text(&value)?))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_web_router_json_value_text(value: &jet_std::DataTree) -> Result<String, String> {
+//RS     match value {
+//RS         jet_std::DataTree::Text(text) | jet_std::DataTree::TypedText(text) => Ok(text.clone()),
+//RS         jet_std::DataTree::Bool(value) => Ok(value.to_string()),
+//RS         jet_std::DataTree::Int(value) => Ok(value.to_string()),
+//RS         jet_std::DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
+//RS         jet_std::DataTree::Float(_) => Err("JSON search number must be finite".to_string()),
+//RS         jet_std::DataTree::Number(value) => Ok(value.clone()),
+//RS         jet_std::DataTree::Null
+//RS         | jet_std::DataTree::Array(_)
+//RS         | jet_std::DataTree::Object(_)
+//RS         | jet_std::DataTree::Bytes(_) => Ok(jet_std::render_json(value, false, 0)),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_web_router_parse_query(query: &str) -> Result<BTreeMap<String, String>, String> {
+//RS     let mut values = BTreeMap::new();
+//RS     if query.is_empty() {
+//RS         return Ok(values);
+//RS     }
+//RS     for pair in query.split('&') {
+//RS         if pair.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS         let key = jet_web_router_decode(raw_key, true)?;
+//RS         if !jet_http_route_name(&key) {
+//RS             return Err(format!("search parameter `{key}` has an invalid name"));
+//RS         }
+//RS         if values.contains_key(&key) {
+//RS             return Err(format!("search parameter `{key}` is repeated"));
+//RS         }
+//RS         let value = jet_web_router_decode(raw_value, true)?;
+//RS         values.insert(key, value);
+//RS         if values.len() > JET_WEB_ROUTER_MAX_PARAMS {
+//RS             return Err("navigation has too many search parameters".to_string());
+//RS         }
+//RS     }
+//RS     Ok(values)
+//RS }
+//RS 
+//RS fn jet_web_router_parse_value(
+//RS     field: &JetWebRouterField,
+//RS     raw: Option<&String>,
+//RS ) -> Result<Option<String>, String> {
+//RS     let Some(raw) = raw.or(field.default.as_ref()) else {
+//RS         if field.required {
+//RS             return Err(format!("missing required parameter `{}`", field.name));
+//RS         }
+//RS         return Ok(None);
+//RS     };
+//RS     let normalized = match field.value_type {
+//RS         JetWebRouterValueType::String => raw.clone(),
+//RS         JetWebRouterValueType::Int => raw
+//RS             .parse::<i64>()
+//RS             .map(|value| value.to_string())
+//RS             .map_err(|_| format!("parameter `{}` expects Int, got `{raw}`", field.name))?,
+//RS         JetWebRouterValueType::Bool => match raw.as_str() {
+//RS             "true" | "1" => "true".to_string(),
+//RS             "false" | "0" => "false".to_string(),
+//RS             _ => {
+//RS                 return Err(format!(
+//RS                     "parameter `{}` expects Bool, got `{raw}`",
+//RS                     field.name
+//RS                 ));
+//RS             }
+//RS         },
+//RS         JetWebRouterValueType::Float => {
+//RS             let value = raw
+//RS                 .parse::<f64>()
+//RS                 .map_err(|_| format!("parameter `{}` expects Float, got {raw}", field.name))?;
+//RS             if !value.is_finite() {
+//RS                 return Err(format!("parameter `{}` expects a finite Float", field.name));
+//RS             }
+//RS             value.to_string()
+//RS         }
+//RS         JetWebRouterValueType::Json => {
+//RS             jet_std::parse_json_strict(raw)
+//RS                 .map_err(|error| format!("parameter `{}` expects JSON: {}", field.name, error.reason))?;
+//RS             raw.clone()
+//RS         }
+//RS     };
+//RS     Ok(Some(normalized))
+//RS }
+//RS fn jet_web_router_json_value_for_field(
+//RS     field: &JetWebRouterField,
+//RS     raw: &str,
+//RS ) -> Result<jet_std::DataTree, String> {
+//RS     match field.value_type {
+//RS         JetWebRouterValueType::String => Ok(jet_std::DataTree::Text(raw.to_string())),
+//RS         JetWebRouterValueType::Int => raw
+//RS             .parse::<i64>()
+//RS             .map(jet_std::DataTree::Int)
+//RS             .map_err(|_| format!("parameter `{}` expects Int, got {raw}", field.name)),
+//RS         JetWebRouterValueType::Bool => match raw {
+//RS             "true" => Ok(jet_std::DataTree::Bool(true)),
+//RS             "false" => Ok(jet_std::DataTree::Bool(false)),
+//RS             _ => Err(format!("parameter `{}` expects Bool, got {raw}", field.name)),
+//RS         },
+//RS         JetWebRouterValueType::Float => raw
+//RS             .parse::<f64>()
+//RS             .ok()
+//RS             .filter(|value| value.is_finite())
+//RS             .map(jet_std::DataTree::Float)
+//RS             .ok_or_else(|| format!("parameter `{}` expects Float, got {raw}", field.name)),
+//RS         JetWebRouterValueType::Json => jet_std::parse_json_strict(raw)
+//RS             .map_err(|error| format!("parameter `{}` expects JSON: {}", field.name, error.reason)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_router_typed_values(
+//RS     fields: &[JetWebRouterField],
+//RS     values: &BTreeMap<String, String>,
+//RS ) -> Result<BTreeMap<String, String>, String> {
+//RS     let mut typed = BTreeMap::new();
+//RS     for field in fields {
+//RS         let value = jet_web_router_parse_value(field, values.get(&field.name))?;
+//RS         if let Some(value) = value {
+//RS             typed.insert(field.name.clone(), value);
+//RS         }
+//RS     }
+//RS     Ok(typed)
+//RS }
+//RS  
+//RS fn jet_web_router_validate_search(
+//RS     fields: &[JetWebRouterField],
+//RS     values: &BTreeMap<String, String>,
+//RS ) -> Result<(), String> {
+//RS     for key in values.keys() {
+//RS         if !fields.iter().any(|field| field.name == *key) {
+//RS             return Err(format!("search parameter `{key}` is not declared for this route"));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebNavigationStatus {
+//RS     Idle,
+//RS     Preloading,
+//RS     Pending,
+//RS     Ready,
+//RS     Error,
+//RS 
+//RS     Aborted,
+//RS }
+//RS 
+//RS fn jet_web_router_validate_fields(
+//RS     pattern: &JetHTTPRoutePattern,
+//RS     params: &[JetWebRouterField],
+//RS     search: &[JetWebRouterField],
+//RS ) -> Result<(), String> {
+//RS     let mut path_names = std::collections::BTreeSet::new();
+//RS     for segment in &pattern.segments {
+//RS         match segment {
+//RS             JetHTTPRouteSegment::Param(name) | JetHTTPRouteSegment::CatchAll(name) => {
+//RS                 path_names.insert(name.clone());
+//RS             }
+//RS             JetHTTPRouteSegment::Static(_) => {}
+//RS         }
+//RS     }
+//RS     let mut declared = std::collections::BTreeSet::new();
+//RS     for field in params {
+//RS         if !jet_http_route_name(&field.name) {
+//RS             return Err(format!("route parameter `{}` has an invalid name", field.name));
+//RS         }
+//RS         if !path_names.contains(&field.name) {
+//RS             return Err(format!(
+//RS                 "route parameter `{}` is not present in the route pattern",
+//RS                 field.name
+//RS             ));
+//RS         }
+//RS         if field.required && field.default.is_some() {
+//RS             return Err(format!(
+//RS                 "required route parameter `{}` cannot have a default",
+//RS                 field.name
+//RS             ));
+//RS         }
+//RS         if let Some(default) = field.default.as_ref() {
+//RS             jet_web_router_parse_value(field, Some(default))?;
+//RS         }
+//RS         if !declared.insert(field.name.clone()) {
+//RS             return Err(format!("route parameter `{}` is declared more than once", field.name));
+//RS         }
+//RS     }
+//RS     for name in &path_names {
+//RS         if !declared.contains(name) {
+//RS             return Err(format!("route pattern parameter `{name}` has no typed declaration"));
+//RS         }
+//RS     }
+//RS     for field in search {
+//RS         if !jet_http_route_name(&field.name) {
+//RS             return Err(format!("search parameter `{}` has an invalid name", field.name));
+//RS         }
+//RS         if field.required && field.default.is_some() {
+//RS             return Err(format!(
+//RS                 "required search parameter `{}` cannot have a default",
+//RS                 field.name
+//RS             ));
+//RS         }
+//RS         if let Some(default) = field.default.as_ref() {
+//RS             jet_web_router_parse_value(field, Some(default))?;
+//RS         }
+//RS         if !declared.insert(field.name.clone()) {
+//RS             return Err(format!("parameter `{}` is declared more than once", field.name));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl JetWebNavigationStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Idle => "idle",
+//RS             Self::Preloading => "preloading",
+//RS             Self::Pending => "pending",
+//RS             Self::Ready => "ready",
+//RS             Self::Error => "error",
+//RS             Self::Aborted => "aborted",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebRouteBoundaries {
+//RS     pub pending: Option<JetWebBoundaryId>,
+//RS     pub error: Option<JetWebBoundaryId>,
+//RS     pub identity: Option<JetWebIslandIdentity>,
+//RS     pub hydration_trigger: Option<JetWebHydrationTrigger>,
+//RS }
+//RS 
+//RS impl Default for JetWebRouteBoundaries {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             pending: None,
+//RS             error: None,
+//RS             identity: None,
+//RS             hydration_trigger: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetWebRouteBoundaries {
+//RS     /// Validate and retain compiler-derived boundary identities.  A route
+//RS     /// cannot attach a boundary ID without the exact source/build identity
+//RS     /// that the shared WebPending kernel uses for stream and hydration checks.
+//RS     pub fn new(
+//RS         pending_boundary_id: Option<String>,
+//RS         error_boundary_id: Option<String>,
+//RS         identity: Option<JetWebIslandIdentity>,
+//RS         hydration_trigger: Option<JetWebHydrationTrigger>,
+//RS     ) -> Result<Self, String> {
+//RS         let pending = pending_boundary_id
+//RS             .map(JetWebBoundaryId::new)
+//RS             .transpose()
+//RS             .map_err(|error| error.to_string())?;
+//RS         let error = error_boundary_id
+//RS             .map(JetWebBoundaryId::new)
+//RS             .transpose()
+//RS             .map_err(|error| error.to_string())?;
+//RS         if (pending.is_some() || error.is_some() || hydration_trigger.is_some())
+//RS             && identity.is_none()
+//RS         {
+//RS             return Err("web route boundary IDs and hydration require an island identity".to_string());
+//RS         }
+//RS         if let Some(identity) = identity.as_ref() {
+//RS             identity.validate().map_err(|error| error.to_string())?;
+//RS         }
+//RS         Ok(Self {
+//RS             pending,
+//RS             error,
+//RS             identity,
+//RS             hydration_trigger,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn pending(
+//RS         boundary_id: String,
+//RS         identity: JetWebIslandIdentity,
+//RS         hydration_trigger: JetWebHydrationTrigger,
+//RS     ) -> Result<Self, String> {
+//RS         Self::new(
+//RS             Some(boundary_id.clone()),
+//RS             Some(boundary_id),
+//RS             Some(identity),
+//RS             Some(hydration_trigger),
+//RS         )
+//RS     }
+//RS }
+//RS struct JetWebRoute {
+//RS     pattern_text: String,
+//RS     pattern: JetHTTPRoutePattern,
+//RS     identity: String,
+//RS     params: Vec<JetWebRouterField>,
+//RS     search: Vec<JetWebRouterField>,
+//RS     search_codec: JetWebRouterSearchCodec,
+//RS     loader: JetWebRouteLoader,
+//RS     pending: Option<JetWebPendingBoundary>,
+//RS     error: Option<JetWebErrorBoundary>,
+//RS     boundaries: JetWebRouteBoundaries,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetWebNavigation {
+//RS     pub url: String,
+//RS     pub route: String,
+//RS     pub params: BTreeMap<String, String>,
+//RS     pub search: BTreeMap<String, String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetWebNavigationState {
+//RS     pub status: JetWebNavigationStatus,
+//RS     pub current: Option<JetWebNavigation>,
+//RS     pub data: String,
+//RS     pub error: String,
+//RS     pub pending_boundary_id: Option<JetWebBoundaryId>,
+//RS     pub error_boundary_id: Option<JetWebBoundaryId>,
+//RS     pub island_identity: Option<JetWebIslandIdentity>,
+//RS     pub hydration_trigger: Option<JetWebHydrationTrigger>,
+//RS }
+//RS 
+//RS impl Default for JetWebNavigationState {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             status: JetWebNavigationStatus::Idle,
+//RS             current: None,
+//RS             data: String::new(),
+//RS             error: String::new(),
+//RS             pending_boundary_id: None,
+//RS             error_boundary_id: None,
+//RS             island_identity: None,
+//RS             hydration_trigger: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS type JetWebRouteLoader = Arc<dyn Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync>;
+//RS type JetWebPendingBoundary = Arc<dyn Fn(&JetWebNavigation) -> String + Send + Sync>;
+//RS type JetWebErrorBoundary = Arc<dyn Fn(&JetWebNavigation, &str) -> String + Send + Sync>;
+//RS type JetWebNotFoundBoundary = Arc<dyn Fn(&str) -> String + Send + Sync>;
+//RS 
+//RS fn jet_web_router_navigation_state(
+//RS     status: JetWebNavigationStatus,
+//RS     current: Option<JetWebNavigation>,
+//RS     data: String,
+//RS     error: String,
+//RS     boundaries: &JetWebRouteBoundaries,
+//RS ) -> JetWebNavigationState {
+//RS     JetWebNavigationState {
+//RS         status,
+//RS         current,
+//RS         data,
+//RS         error,
+//RS         pending_boundary_id: boundaries.pending.clone(),
+//RS         error_boundary_id: boundaries.error.clone(),
+//RS         island_identity: boundaries.identity.clone(),
+//RS         hydration_trigger: boundaries.hydration_trigger,
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetWebRouterInner {
+//RS     routes: Vec<JetWebRoute>,
+//RS     cache: BTreeMap<String, JetWebRouterCacheState>,
+//RS     cache_generation: u64,
+//RS     not_found: Option<JetWebNotFoundBoundary>,
+//RS     state: jet_std::JetSignal<JetWebNavigationState>,
+//RS     next_navigation_id: u64,
+//RS     active_navigation: Option<(u64, Arc<AtomicBool>)>,
+//RS }
+//RS 
+//RS impl Clone for JetWebRoute {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             pattern_text: self.pattern_text.clone(),
+//RS             pattern: self.pattern.clone(),
+//RS             identity: self.identity.clone(),
+//RS             params: self.params.clone(),
+//RS             search: self.search.clone(),
+//RS             search_codec: self.search_codec,
+//RS             loader: self.loader.clone(),
+//RS             pending: self.pending.clone(),
+//RS             error: self.error.clone(),
+//RS             boundaries: self.boundaries.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebRouter {
+//RS     inner: Arc<Mutex<JetWebRouterInner>>,
+//RS }
+//RS 
+//RS impl JetWebRouter {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             inner: Arc::new(Mutex::new(JetWebRouterInner {
+//RS                 routes: Vec::new(),
+//RS                 cache: BTreeMap::new(),
+//RS                 cache_generation: 0,
+//RS                 not_found: None,
+//RS                 state: jet_std::JetSignal::new(JetWebNavigationState::default()),
+//RS                 next_navigation_id: 0,
+//RS                 active_navigation: None,
+//RS             })),
+//RS         }
+//RS     }
+//RS     fn start_navigation(
+//RS         &self,
+//RS     ) -> Result<
+//RS         (
+//RS             u64,
+//RS             Arc<AtomicBool>,
+//RS             jet_std::JetSignal<JetWebNavigationState>,
+//RS             JetWebNavigationState,
+//RS         ),
+//RS         String,
+//RS     > {
+//RS         let mut state = self.inner.lock().map_err(|_| "router is unavailable".to_string())?;
+//RS         if let Some((_, previous)) = state.active_navigation.take() {
+//RS             previous.store(true, Ordering::Release);
+//RS             let mut superseded = state.state.get();
+//RS             superseded.status = JetWebNavigationStatus::Aborted;
+//RS             superseded.error = "navigation superseded".to_string();
+//RS             state.state.set(superseded);
+//RS         }
+//RS         state.next_navigation_id = state
+//RS             .next_navigation_id
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "router navigation id space exhausted".to_string())?;
+//RS         let id = state.next_navigation_id;
+//RS         let token = Arc::new(AtomicBool::new(false));
+//RS         let signal = state.state.clone();
+//RS         let previous = state.state.get();
+//RS         state.active_navigation = Some((id, token.clone()));
+//RS         Ok((id, token, signal, previous))
+//RS     }
+//RS 
+//RS     fn navigation_active(&self, id: u64, token: &Arc<AtomicBool>) -> bool {
+//RS         if token.load(Ordering::Acquire) {
+//RS             return false;
+//RS         }
+//RS         self.inner
+//RS             .lock()
+//RS             .map(|state| {
+//RS                 state
+//RS                     .active_navigation
+//RS                     .as_ref()
+//RS                     .is_some_and(|(active_id, active_token)| {
+//RS                         *active_id == id && Arc::ptr_eq(active_token, token)
+//RS                     })
+//RS             })
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     fn finish_navigation(&self, id: u64, token: &Arc<AtomicBool>) {
+//RS         if let Ok(mut state) = self.inner.lock() {
+//RS             if state
+//RS                 .active_navigation
+//RS                 .as_ref()
+//RS                 .is_some_and(|(active_id, active_token)| {
+//RS                     *active_id == id && Arc::ptr_eq(active_token, token)
+//RS                 })
+//RS             {
+//RS                 state.active_navigation = None;
+//RS             }
+//RS         }
+//RS     }
+//RS     fn set_resolution_error(&self, error: &str) {
+//RS         if let Ok(state) = self.inner.lock() {
+//RS             let mut current = state.state.get();
+//RS             let rendered = state
+//RS                 .not_found
+//RS                 .as_ref()
+//RS                 .map(|boundary| boundary(error))
+//RS                 .unwrap_or_else(|| error.to_string());
+//RS             current.status = JetWebNavigationStatus::Error;
+//RS             current.data = jet_web_router_bound_data(rendered, error);
+//RS             current.error = error.to_string();
+//RS             state.state.set(current);
+//RS         }
+//RS     }
+//RS 
+//RS     fn cache_value(&self, key: &str) -> Option<String> {
+//RS         self.inner
+//RS             .lock()
+//RS             .ok()
+//RS             .and_then(|state| state.cache.get(key).cloned())
+//RS             .filter(|entry| entry.status == JetWebRouterCacheStatus::Fresh)
+//RS             .map(|entry| entry.data)
+//RS     }
+//RS 
+//RS     fn cache_store(
+//RS         &self,
+//RS         key: String,
+//RS         identity: String,
+//RS         status: JetWebRouterCacheStatus,
+//RS         data: String,
+//RS         dependencies: Vec<String>,
+//RS     ) -> Result<(), String> {
+//RS         let mut state = self.inner.lock().map_err(|_| "router is unavailable".to_string())?;
+//RS         state.cache_generation = state
+//RS             .cache_generation
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "router cache generation exhausted".to_string())?;
+//RS         let generation = state.cache_generation;
+//RS         if state.cache.len() >= JET_WEB_ROUTER_MAX_PRELOADED && !state.cache.contains_key(&key) {
+//RS             if let Some(oldest) = state.cache.keys().next().cloned() {
+//RS                 state.cache.remove(&oldest);
+//RS             }
+//RS         }
+//RS         state.cache.insert(
+//RS             key,
+//RS             JetWebRouterCacheState {
+//RS                 identity,
+//RS                 status,
+//RS                 data,
+//RS                 dependencies,
+//RS                 generation,
+//RS             },
+//RS         );
+//RS         Ok(())
+//RS     }
+//RS 
+//RS 
+//RS     /// Abort the currently running preload or loader.  Synchronous loaders
+//RS     /// observe this before publication; a concurrent loader cannot overwrite a
+//RS     /// newer navigation.
+//RS     pub fn abort(&self) -> bool {
+//RS         let Some((_, token, signal, mut current)) = self.start_navigation_abort() else {
+//RS             return false;
+//RS         };
+//RS         token.store(true, Ordering::Release);
+//RS         current.status = JetWebNavigationStatus::Aborted;
+//RS         current.error = "navigation aborted".to_string();
+//RS         signal.set(current);
+//RS         true
+//RS     }
+//RS 
+//RS     fn start_navigation_abort(
+//RS         &self,
+//RS     ) -> Option<(u64, Arc<AtomicBool>, jet_std::JetSignal<JetWebNavigationState>, JetWebNavigationState)> {
+//RS         let mut state = self.inner.lock().ok()?;
+//RS         let (id, token) = state.active_navigation.take()?;
+//RS         let signal = state.state.clone();
+//RS         let current = state.state.get();
+//RS         Some((id, token, signal, current))
+//RS     }
+//RS 
+//RS 
+//RS     pub fn route<F>(
+//RS         &self,
+//RS         pattern: String,
+//RS         params: Vec<JetWebRouterField>,
+//RS         search: Vec<JetWebRouterField>,
+//RS         loader: F,
+//RS     ) -> Result<Self, String>
+//RS     where
+//RS         F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS     {
+//RS         self.route_with_boundaries(
+//RS             pattern, params, search, loader,
+//RS             None::<fn(&JetWebNavigation) -> String>,
+//RS             None::<fn(&JetWebNavigation, &str) -> String>,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn route_with_search_codec<F>(
+//RS         &self,
+//RS         pattern: String,
+//RS         params: Vec<JetWebRouterField>,
+//RS         search: Vec<JetWebRouterField>,
+//RS         search_codec: JetWebRouterSearchCodec,
+//RS         loader: F,
+//RS     ) -> Result<Self, String>
+//RS     where
+//RS         F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS     {
+//RS         self.route_with_facts_codec(
+//RS             pattern,
+//RS             params,
+//RS             search,
+//RS             search_codec,
+//RS             loader,
+//RS             None::<fn(&JetWebNavigation) -> String>,
+//RS             None::<fn(&JetWebNavigation, &str) -> String>,
+//RS             JetWebRouteBoundaries::default(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn route_with_boundaries<F, P, E>(
+//RS         &self,
+//RS         pattern: String,
+//RS         params: Vec<JetWebRouterField>,
+//RS         search: Vec<JetWebRouterField>,
+//RS         loader: F,
+//RS         pending: Option<P>,
+//RS         error: Option<E>,
+//RS     ) -> Result<Self, String>
+//RS     where
+//RS         F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS         P: Fn(&JetWebNavigation) -> String + Send + Sync + 'static,
+//RS         E: Fn(&JetWebNavigation, &str) -> String + Send + Sync + 'static,
+//RS     {
+//RS         self.route_with_facts_codec(
+//RS             pattern,
+//RS             params,
+//RS             search,
+//RS             JetWebRouterSearchCodec::Query,
+//RS             loader,
+//RS             pending,
+//RS             error,
+//RS             JetWebRouteBoundaries::default(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn route_with_facts_codec<F, P, E>(
+//RS         &self,
+//RS         pattern: String,
+//RS         params: Vec<JetWebRouterField>,
+//RS         search: Vec<JetWebRouterField>,
+//RS         search_codec: JetWebRouterSearchCodec,
+//RS         loader: F,
+//RS         pending: Option<P>,
+//RS         error: Option<E>,
+//RS         boundaries: JetWebRouteBoundaries,
+//RS     ) -> Result<Self, String>
+//RS     where
+//RS         F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS         P: Fn(&JetWebNavigation) -> String + Send + Sync + 'static,
+//RS         E: Fn(&JetWebNavigation, &str) -> String + Send + Sync + 'static,
+//RS     {
+//RS         if params.len() + search.len() > JET_WEB_ROUTER_MAX_PARAMS {
+//RS             return Err("route declares too many typed parameters".to_string());
+//RS         }
+//RS         let parsed = jet_web_router_parse_pattern(&pattern)?;
+//RS         jet_web_router_validate_fields(&parsed, &params, &search)?;
+//RS         let mut state = self.inner.lock().map_err(|_| "router is unavailable".to_string())?;
+//RS         if state.routes.len() >= JET_WEB_ROUTER_MAX_ROUTES {
+//RS             return Err("router route table is full".to_string());
+//RS         }
+//RS         if state.routes.iter().any(|route| route.pattern_text == pattern) {
+//RS             return Err(format!("duplicate route `{pattern}`"));
+//RS         }
+//RS         if let Some(identity) = boundaries.identity.as_ref() {
+//RS             if let Some(boundary_id) = boundaries.pending.as_ref() {
+//RS                 jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone())
+//RS                     .map_err(|error| error.to_string())?;
+//RS             }
+//RS             if boundaries.error.as_ref() != boundaries.pending.as_ref() {
+//RS                 if let Some(boundary_id) = boundaries.error.as_ref() {
+//RS                     jet_web_stream_register(boundary_id.as_str().to_string(), identity.clone())
+//RS                         .map_err(|error| error.to_string())?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let identity = jet_web_router_identity(&pattern);
+//RS         state.routes.push(JetWebRoute {
+//RS             pattern_text: pattern,
+//RS             pattern: parsed,
+//RS             identity,
+//RS             params,
+//RS             search,
+//RS             search_codec,
+//RS             loader: Arc::new(loader),
+//RS             pending: pending.map(|handler| Arc::new(handler) as JetWebPendingBoundary),
+//RS             error: error.map(|handler| Arc::new(handler) as JetWebErrorBoundary),
+//RS             boundaries,
+//RS         });
+//RS         Ok(self.clone())
+//RS     }
+//RS 
+//RS     pub fn not_found<F>(&self, handler: F) -> Result<Self, String>
+//RS     where
+//RS         F: Fn(&str) -> String + Send + Sync + 'static,
+//RS     {
+//RS         self.inner
+//RS             .lock()
+//RS             .map_err(|_| "router is unavailable".to_string())?
+//RS             .not_found = Some(Arc::new(handler));
+//RS         Ok(self.clone())
+//RS     }
+//RS     fn resolve(&self, url: &str) -> Result<(JetWebRoute, JetWebNavigation), String> {
+//RS         let (path, query) = jet_web_router_split_url(url)?;
+//RS         let state = self.inner.lock().map_err(|_| "router is unavailable".to_string())?;
+//RS         let mut selected: Option<(usize, JetWebRoute, JetWebNavigation)> = None;
+//RS         for (index, route) in state.routes.iter().enumerate() {
+//RS             let Some(raw_params) = jet_web_router_match(&route.pattern, path)? else {
+//RS                 continue;
+//RS             };
+//RS             let raw_search = jet_web_router_parse_search(query, route.search_codec)?;
+//RS             let params = jet_web_router_typed_values(&route.params, &raw_params)?;
+//RS             jet_web_router_validate_search(&route.search, &raw_search)?;
+//RS             let search = jet_web_router_typed_values(&route.search, &raw_search)?;
+//RS             let candidate = (
+//RS                 index,
+//RS                 route.clone(),
+//RS                 JetWebNavigation {
+//RS                     url: url.to_string(),
+//RS                     route: route.pattern_text.clone(),
+//RS                     params,
+//RS                     search,
+//RS                 },
+//RS             );
+//RS             if selected
+//RS                 .as_ref()
+//RS                 .map(|current| {
+//RS                     jet_http_route_selection_cmp(
+//RS                         &candidate.1.pattern,
+//RS                         candidate.0,
+//RS                         &current.1.pattern,
+//RS                         current.0,
+//RS                     ) == std::cmp::Ordering::Greater
+//RS                 })
+//RS                 .unwrap_or(true)
+//RS             {
+//RS                 selected = Some(candidate);
+//RS             }
+//RS         }
+//RS         selected
+//RS             .map(|(_, route, navigation)| (route, navigation))
+//RS             .ok_or_else(|| format!("no web route matches `{url}`"))
+//RS     }
+//RS 
+//RS     pub fn preload(&self, url: String) -> Result<JetWebNavigation, String> {
+//RS         let (route, navigation) = match self.resolve(&url) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 self.set_resolution_error(&error);
+//RS                 return Err(error);
+//RS             }
+//RS         };
+//RS         let cache_key = jet_web_router_cache_key(&route, &navigation);
+//RS         if self.cache_value(&cache_key).is_some() {
+//RS             return Ok(navigation);
+//RS         }
+//RS         let (id, token, signal, previous) = self.start_navigation()?;
+//RS         signal.set(jet_web_router_navigation_state(
+//RS             JetWebNavigationStatus::Preloading,
+//RS             previous.current.clone(),
+//RS             previous.data.clone(),
+//RS             String::new(),
+//RS             &route.boundaries,
+//RS         ));
+//RS         let loaded = (route.loader)(&navigation);
+//RS         if !self.navigation_active(id, &token) {
+//RS             return Err(if token.load(Ordering::Acquire) {
+//RS                 "navigation aborted".to_string()
+//RS             } else {
+//RS                 "navigation superseded".to_string()
+//RS             });
+//RS         }
+//RS         let loaded = match loaded {
+//RS             Ok(data) if data.len() <= JET_WEB_ROUTER_MAX_DATA => Ok(data),
+//RS             Ok(_) => Err("preloaded route data is too large".to_string()),
+//RS             Err(error) => Err(error),
+//RS         };
+//RS         match loaded {
+//RS             Ok(data) => {
+//RS                 let _ = self.cache_store(
+//RS                     cache_key,
+//RS                     route.identity.clone(),
+//RS                     JetWebRouterCacheStatus::Fresh,
+//RS                     data,
+//RS                     vec![route.identity.clone()],
+//RS                 );
+//RS                 signal.set(jet_web_router_navigation_state(
+//RS                     if previous.current.is_some() {
+//RS                         JetWebNavigationStatus::Ready
+//RS                     } else {
+//RS                         JetWebNavigationStatus::Idle
+//RS                     },
+//RS                     previous.current,
+//RS                     previous.data,
+//RS                     String::new(),
+//RS                     &route.boundaries,
+//RS                 ));
+//RS                 self.finish_navigation(id, &token);
+//RS                 Ok(navigation)
+//RS             }
+//RS             Err(error) => {
+//RS                 let _ = self.cache_store(
+//RS                     cache_key,
+//RS                     route.identity,
+//RS                     JetWebRouterCacheStatus::Invalidated,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                 );
+//RS                 signal.set(jet_web_router_navigation_state(
+//RS                     if previous.current.is_some() {
+//RS                         JetWebNavigationStatus::Ready
+//RS                     } else {
+//RS                         JetWebNavigationStatus::Idle
+//RS                     },
+//RS                     previous.current,
+//RS                     previous.data,
+//RS                     error.clone(),
+//RS                     &route.boundaries,
+//RS                 ));
+//RS                 self.finish_navigation(id, &token);
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn navigate(&self, url: String) -> Result<JetWebNavigation, String> {
+//RS         let (route, navigation) = match self.resolve(&url) {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 self.set_resolution_error(&error);
+//RS                 return Err(error);
+//RS             }
+//RS         };
+//RS         let cache_key = jet_web_router_cache_key(&route, &navigation);
+//RS         let (id, token, signal, _) = self.start_navigation()?;
+//RS         let cached = self.cache_value(&cache_key);
+//RS         let from_cache = cached.is_some();
+//RS         let pending_data = route
+//RS             .pending
+//RS             .as_ref()
+//RS             .map(|pending| pending(&navigation))
+//RS             .unwrap_or_default();
+//RS         signal.set(jet_web_router_navigation_state(
+//RS             JetWebNavigationStatus::Pending,
+//RS             Some(navigation.clone()),
+//RS             pending_data,
+//RS             String::new(),
+//RS             &route.boundaries,
+//RS         ));
+//RS         let loaded = cached.map(Ok).unwrap_or_else(|| (route.loader)(&navigation));
+//RS         if !self.navigation_active(id, &token) {
+//RS             return Err(if token.load(Ordering::Acquire) {
+//RS                 "navigation aborted".to_string()
+//RS             } else {
+//RS                 "navigation superseded".to_string()
+//RS             });
+//RS         }
+//RS         let loaded = match loaded {
+//RS             Ok(data) if data.len() <= JET_WEB_ROUTER_MAX_DATA => Ok(data),
+//RS             Ok(_) => Err("route loader data is too large".to_string()),
+//RS             Err(error) => Err(error),
+//RS         };
+//RS         match loaded {
+//RS             Ok(data) => {
+//RS                 if !from_cache {
+//RS                     let _ = self.cache_store(
+//RS                         cache_key,
+//RS                         route.identity.clone(),
+//RS                         JetWebRouterCacheStatus::Fresh,
+//RS                         data.clone(),
+//RS                         vec![route.identity.clone()],
+//RS                     );
+//RS                 }
+//RS                 signal.set(jet_web_router_navigation_state(
+//RS                     JetWebNavigationStatus::Ready,
+//RS                     Some(navigation.clone()),
+//RS                     data,
+//RS                     String::new(),
+//RS                     &route.boundaries,
+//RS                 ));
+//RS                 self.finish_navigation(id, &token);
+//RS                 Ok(navigation)
+//RS             }
+//RS             Err(error) => {
+//RS                 let rendered = jet_web_router_bound_data(
+//RS                     route
+//RS                         .error
+//RS                         .as_ref()
+//RS                         .map(|boundary| boundary(&navigation, &error))
+//RS                         .unwrap_or_else(|| error.clone()),
+//RS                     &error,
+//RS                 );
+//RS                 let _ = self.cache_store(
+//RS                     cache_key,
+//RS                     route.identity,
+//RS                     JetWebRouterCacheStatus::Invalidated,
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                 );
+//RS                 signal.set(jet_web_router_navigation_state(
+//RS                     JetWebNavigationStatus::Error,
+//RS                     Some(navigation.clone()),
+//RS                     rendered,
+//RS                     error.clone(),
+//RS                     &route.boundaries,
+//RS                 ));
+//RS                 self.finish_navigation(id, &token);
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS     pub fn stale(&self, identity: String) -> i64 {
+//RS         self.update_cache_status(&identity, JetWebRouterCacheStatus::Stale)
+//RS     }
+//RS 
+//RS     pub fn invalidate(&self, identity: String) -> i64 {
+//RS         self.update_cache_status(&identity, JetWebRouterCacheStatus::Invalidated)
+//RS     }
+//RS 
+//RS     fn update_cache_status(&self, identity: &str, status: JetWebRouterCacheStatus) -> i64 {
+//RS         let Ok(mut state) = self.inner.lock() else {
+//RS             return 0;
+//RS         };
+//RS         let mut updated = 0;
+//RS         for entry in state.cache.values_mut() {
+//RS             if entry.identity == identity {
+//RS                 entry.status = status;
+//RS                 updated += 1;
+//RS             }
+//RS         }
+//RS         updated
+//RS     }
+//RS 
+//RS     pub fn collect(&self, identity: String) -> i64 {
+//RS         let Ok(mut state) = self.inner.lock() else {
+//RS             return 0;
+//RS         };
+//RS         let keys = state
+//RS             .cache
+//RS             .iter()
+//RS             .filter(|(_, entry)| entry.identity == identity)
+//RS             .map(|(key, _)| key.clone())
+//RS             .collect::<Vec<_>>();
+//RS         let count = keys.len() as i64;
+//RS         for key in keys {
+//RS             state.cache.remove(&key);
+//RS         }
+//RS         count
+//RS     }
+//RS 
+//RS     pub fn cache_state(&self, identity: String) -> JetWebRouterCacheState {
+//RS         self.inner
+//RS             .lock()
+//RS             .ok()
+//RS             .and_then(|state| {
+//RS                 state
+//RS                     .cache
+//RS                     .values()
+//RS                     .find(|entry| entry.identity == identity)
+//RS                     .cloned()
+//RS                     .or_else(|| state.cache.get(&identity).cloned())
+//RS             })
+//RS             .unwrap_or(JetWebRouterCacheState {
+//RS                 identity,
+//RS                 status: JetWebRouterCacheStatus::Collected,
+//RS                 data: String::new(),
+//RS                 dependencies: Vec::new(),
+//RS                 generation: 0,
+//RS             })
+//RS     }
+//RS 
+//RS     pub fn cache_show(&self) -> String {
+//RS         let Ok(state) = self.inner.lock() else {
+//RS             return "RouterCache(unavailable)".to_string();
+//RS         };
+//RS         let entries = state
+//RS             .cache
+//RS             .iter()
+//RS             .map(|(key, entry)| {
+//RS                 format!(
+//RS                     "{{\"key\":{},\"identity\":{},\"status\":{},\"generation\":{},\"dependencies\":{},\"data_bytes\":{}}}",
+//RS                     jet_web_router_json_string(key),
+//RS                     jet_web_router_json_string(&entry.identity),
+//RS                     jet_web_router_json_string(entry.status.name()),
+//RS                     entry.generation,
+//RS                     jet_web_router_json_array(&entry.dependencies),
+//RS                     entry.data.len(),
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!("{{\"generation\":{},\"entries\":[{}]}}", state.cache_generation, entries)
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     pub fn current(&self) -> JetWebNavigationState {
+//RS         self.inner
+//RS             .lock()
+//RS             .map(|state| state.state.get())
+//RS             .unwrap_or_else(|_| JetWebNavigationState {
+//RS                 status: JetWebNavigationStatus::Error,
+//RS                 current: None,
+//RS                 data: String::new(),
+//RS                 error: "router is unavailable".to_string(),
+//RS                 pending_boundary_id: None,
+//RS                 error_boundary_id: None,
+//RS                 island_identity: None,
+//RS                 hydration_trigger: None,
+//RS             })
+//RS     }
+//RS 
+//RS     pub fn state_signal(&self) -> jet_std::JetSignal<JetWebNavigationState> {
+//RS         self.inner
+//RS             .lock()
+//RS             .map(|state| state.state.clone())
+//RS             .unwrap_or_else(|_| jet_std::JetSignal::new(JetWebNavigationState {
+//RS                 status: JetWebNavigationStatus::Error,
+//RS                 current: None,
+//RS                 data: String::new(),
+//RS                 error: "router is unavailable".to_string(),
+//RS                 pending_boundary_id: None,
+//RS                 error_boundary_id: None,
+//RS                 island_identity: None,
+//RS                 hydration_trigger: None,
+//RS             }))
+//RS     }
+//RS 
+//RS     pub fn show(&self) -> String {
+//RS         let state = self.current();
+//RS         let route = state
+//RS             .current
+//RS             .as_ref()
+//RS             .map(|current| current.route.as_str())
+//RS             .unwrap_or("-");
+//RS         let pending = state
+//RS             .pending_boundary_id
+//RS             .as_ref()
+//RS             .map(|boundary| boundary.as_str())
+//RS             .unwrap_or("-");
+//RS         let error_boundary = state
+//RS             .error_boundary_id
+//RS             .as_ref()
+//RS             .map(|boundary| boundary.as_str())
+//RS             .unwrap_or("-");
+//RS         let hydration = state
+//RS             .hydration_trigger
+//RS             .map(JetWebHydrationTrigger::as_str)
+//RS             .unwrap_or("-");
+//RS         format!(
+//RS             "Router(status={},route={},url={},params={},search={},pending_boundary={},error_boundary={},hydration={},error={})",
+//RS             state.status.name(),
+//RS             route,
+//RS             state.current.as_ref().map(|current| current.url.as_str()).unwrap_or("-"),
+//RS             state.current.as_ref().map(|current| current.params.len()).unwrap_or(0),
+//RS             state.current.as_ref().map(|current| current.search.len()).unwrap_or(0),
+//RS             pending,
+//RS             error_boundary,
+//RS             hydration,
+//RS             state.error
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn link(
+//RS         &self,
+//RS         pattern: String,
+//RS         params: BTreeMap<String, String>,
+//RS         search: BTreeMap<String, String>,
+//RS     ) -> Result<String, String> {
+//RS         let state = self.inner.lock().map_err(|_| "router is unavailable".to_string())?;
+//RS         let route = state
+//RS             .routes
+//RS             .iter()
+//RS             .find(|route| route.pattern_text == pattern)
+//RS             .ok_or_else(|| format!("no web route named `{pattern}`"))?;
+//RS         let typed_params = jet_web_router_typed_values(&route.params, &params)?;
+//RS         let typed_search = jet_web_router_typed_values(&route.search, &search)?;
+//RS         let mut path = String::new();
+//RS         path.push('/');
+//RS         for (index, segment) in route.pattern.segments.iter().enumerate() {
+//RS             if index > 0 {
+//RS                 path.push('/');
+//RS             }
+//RS             match segment {
+//RS                 JetHTTPRouteSegment::Static(value) => {
+//RS                     path.push_str(&jet_http_route_encode_segment(value, false));
+//RS                 }
+//RS                 JetHTTPRouteSegment::Param(name) => path.push_str(&jet_http_route_encode_segment(
+//RS                     typed_params.get(name).ok_or_else(|| format!("missing `{name}`"))?,
+//RS                     false,
+//RS                 )),
+//RS                 JetHTTPRouteSegment::CatchAll(name) => path.push_str(&jet_http_route_encode_segment(
+//RS                     typed_params.get(name).ok_or_else(|| format!("missing `{name}`"))?,
+//RS                     true,
+//RS                 )),
+//RS             }
+//RS         }
+//RS         if path.is_empty() {
+//RS             path.push('/');
+//RS         }
+//RS         if !typed_search.is_empty() {
+//RS             path.push('?');
+//RS             match route.search_codec {
+//RS                 JetWebRouterSearchCodec::Query => {
+//RS                     for (index, (key, value)) in typed_search.iter().enumerate() {
+//RS                         if index > 0 {
+//RS                             path.push('&');
+//RS                         }
+//RS                         path.push_str(&jet_http_route_encode_component(key, true, false));
+//RS                         path.push('=');
+//RS                         path.push_str(&jet_http_route_encode_component(value, true, false));
+//RS                     }
+//RS                 }
+//RS                 JetWebRouterSearchCodec::Json => {
+//RS                     let entries = typed_search
+//RS                         .iter()
+//RS                         .map(|(key, value)| {
+//RS                             let field = route
+//RS                                 .search
+//RS                                 .iter()
+//RS                                 .find(|field| field.name == *key)
+//RS                                 .ok_or_else(|| format!("search parameter `{key}` is not declared"))?;
+//RS                             Ok((key.clone(), jet_web_router_json_value_for_field(field, value)?))
+//RS                         })
+//RS                         .collect::<Result<Vec<_>, String>>()?;
+//RS                     let encoded = jet_std::render_json(
+//RS                         &jet_std::DataTree::Object(entries),
+//RS                         false,
+//RS                         0,
+//RS                     );
+//RS                     path.push_str("search=");
+//RS                     path.push_str(&jet_http_route_encode_component(&encoded, true, false));
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(path)
+//RS     }
+//RS }
+//RS /// Register one checked route in the canonical visual-router graph.  The
+//RS /// compiler supplies typed fields and the loader callback; this adapter only
+//RS /// forwards to the existing route registration seam.
+//RS pub fn jet_web_router_route<F>(
+//RS     router: &JetWebRouter,
+//RS     pattern: String,
+//RS     params: Vec<JetWebRouterField>,
+//RS     search: Vec<JetWebRouterField>,
+//RS     loader: F,
+//RS ) -> Result<JetWebRouter, String>
+//RS where
+//RS     F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS {
+//RS     router.route(pattern, params, search, loader)
+//RS }
+//RS 
+//RS /// Register a route whose typed search state uses the explicit JSON-first or
+//RS /// query-string codec selected by the checked route facts.
+//RS pub fn jet_web_router_route_with_search_codec<F>(
+//RS     router: &JetWebRouter,
+//RS     pattern: String,
+//RS     params: Vec<JetWebRouterField>,
+//RS     search: Vec<JetWebRouterField>,
+//RS     search_codec: JetWebRouterSearchCodec,
+//RS     loader: F,
+//RS ) -> Result<JetWebRouter, String>
+//RS where
+//RS     F: Fn(&JetWebNavigation) -> Result<String, String> + Send + Sync + 'static,
+//RS {
+//RS     router.route_with_search_codec(pattern, params, search, search_codec, loader)
+//RS }
+//RS 
+//RS /// Install the one not-found projection used by all visual-router hosts.
+//RS pub fn jet_web_router_not_found<F>(
+//RS     router: &JetWebRouter,
+//RS     handler: F,
+//RS ) -> Result<JetWebRouter, String>
+//RS where
+//RS     F: Fn(&str) -> String + Send + Sync + 'static,
+//RS {
+//RS     router.not_found(handler)
+//RS }
+//RS 
+//RS pub fn jet_web_router_stale(router: &JetWebRouter, identity: String) -> i64 {
+//RS     router.stale(identity)
+//RS }
+//RS 
+//RS pub fn jet_web_router_invalidate(router: &JetWebRouter, identity: String) -> i64 {
+//RS     router.invalidate(identity)
+//RS }
+//RS 
+//RS pub fn jet_web_router_collect(router: &JetWebRouter, identity: String) -> i64 {
+//RS     router.collect(identity)
+//RS }
+//RS 
+//RS pub fn jet_web_router_cache_state(
+//RS     router: &JetWebRouter,
+//RS     identity: String,
+//RS ) -> JetWebRouterCacheState {
+//RS     router.cache_state(identity)
+//RS }
+//RS 
+//RS pub fn jet_web_router_cache_show(router: &JetWebRouter) -> String {
+//RS     router.cache_show()
+//RS }
+//RS 
+//RS impl Default for JetWebRouter {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_web_router_new() -> JetWebRouter {
+//RS     JetWebRouter::new()
+//RS }
+//RS 
+//RS pub fn jet_web_router_navigate(
+//RS     router: &JetWebRouter,
+//RS     url: String,
+//RS ) -> Result<JetWebNavigation, String> {
+//RS     router.navigate(url)
+//RS }
+//RS 
+//RS pub fn jet_web_router_preload(
+//RS     router: &JetWebRouter,
+//RS     url: String,
+//RS ) -> Result<JetWebNavigation, String> {
+//RS     router.preload(url)
+//RS }
+//RS 
+//RS pub fn jet_web_router_current(router: &JetWebRouter) -> JetWebNavigationState {
+//RS     router.current()
+//RS }
+//RS 
+//RS pub fn jet_web_router_show(router: &JetWebRouter) -> String {
+//RS     router.show()
+//RS }
+//RS 
+//RS pub fn jet_web_router_abort(router: &JetWebRouter) -> bool {
+//RS     router.abort()
+//RS }
+//RS 
+//RS pub fn jet_web_router_link(
+//RS     router: &JetWebRouter,
+//RS     pattern: String,
+//RS     params: BTreeMap<String, String>,
+//RS     search: BTreeMap<String, String>,
+//RS ) -> Result<String, String> {
+//RS     router.link(pattern, params, search)
+//RS }
+// END-PORT-PENDING 0311 crates/jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs:1-1488
+

@@ -1,0 +1,231 @@
+// PORT-PENDING 0151 crates-jet-codegen-src-prelude-core-lazytableplan-module-group-slice-1805: crates/jet-codegen/src/Prelude/Core/Sketch.rs:1-227
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-APPROX1=A: one sketch kernel for every execution tier.
+//RS 
+//RS fn fnv1a(data: &[u8]) -> u64 {
+//RS     let mut hash = 14695981039346656037u64;
+//RS     for &byte in data {
+//RS         hash ^= byte as u64;
+//RS         hash = hash.wrapping_mul(1099511628211);
+//RS     }
+//RS     hash
+//RS }
+//RS 
+//RS fn fnv1a_h2(data: &[u8]) -> u64 {
+//RS     let mut hash = 0xcbf29ce484222325u64.wrapping_add(0xdeadbeef);
+//RS     for &byte in data {
+//RS         hash ^= byte as u64;
+//RS         hash = hash.wrapping_mul(1099511628211);
+//RS     }
+//RS     hash
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct JetHyperLogLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+//RS 
+//RS impl JetHyperLogLog {
+//RS     pub(crate) fn new() -> Self {
+//RS         Self::from_registers(vec![0; 256])
+//RS     }
+//RS 
+//RS     pub(crate) fn from_registers(registers: Vec<u8>) -> Self {
+//RS         Self(std::sync::Arc::new(std::sync::Mutex::new(registers)))
+//RS     }
+//RS 
+//RS     pub(crate) fn registers(&self) -> Vec<u8> {
+//RS         self.0.lock().unwrap().clone()
+//RS     }
+//RS 
+//RS     pub(crate) fn add(&self, item: &str) {
+//RS         let hash = fnv1a(item.as_bytes());
+//RS         let index = (hash & 0xff) as usize;
+//RS         let rest = hash >> 8;
+//RS         let zeros = if rest == 0 { 57 } else { rest.leading_zeros() as u8 + 1 };
+//RS         let mut registers = self.0.lock().unwrap();
+//RS         if zeros > registers[index] {
+//RS             registers[index] = zeros;
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn count(&self) -> i64 {
+//RS         let registers = self.0.lock().unwrap();
+//RS         let width = registers.len() as f64;
+//RS         let empty = registers.iter().filter(|&&value| value == 0).count();
+//RS         if empty > 0 {
+//RS             return (width * (width / empty as f64).ln()).round() as i64;
+//RS         }
+//RS         let sum: f64 = registers.iter().map(|&value| 2f64.powi(-(value as i32))).sum();
+//RS         let alpha = 0.7213 / (1.0 + 1.079 / width);
+//RS         (alpha * width * width / sum).round() as i64
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct JetTDigest(std::sync::Arc<std::sync::Mutex<Vec<(f64, f64)>>>);
+//RS 
+//RS impl JetTDigest {
+//RS     const DELTA: f64 = 100.0;
+//RS 
+//RS     pub(crate) fn new() -> Self {
+//RS         Self::from_centroids(Vec::new())
+//RS     }
+//RS 
+//RS     pub(crate) fn from_centroids(centroids: Vec<(f64, f64)>) -> Self {
+//RS         Self(std::sync::Arc::new(std::sync::Mutex::new(centroids)))
+//RS     }
+//RS 
+//RS     pub(crate) fn centroids(&self) -> Vec<(f64, f64)> {
+//RS         self.0.lock().unwrap().clone()
+//RS     }
+//RS 
+//RS     pub(crate) fn add(&self, value: f64) {
+//RS         let mut centroids = self.0.lock().unwrap();
+//RS         let index = centroids.partition_point(|&(mean, _)| mean < value);
+//RS         centroids.insert(index, (value, 1.0));
+//RS         let total: f64 = centroids.iter().map(|(_, weight)| weight).sum();
+//RS         let mut merged: Vec<(f64, f64)> = Vec::with_capacity(centroids.len());
+//RS         let mut cumulative = 0.0;
+//RS         for &(mean, weight) in centroids.iter() {
+//RS             if merged.is_empty() {
+//RS                 merged.push((mean, weight));
+//RS                 cumulative += weight;
+//RS                 continue;
+//RS             }
+//RS             let last = merged.last_mut().unwrap();
+//RS             let quantile = cumulative / total;
+//RS             let limit = 4.0 * total * quantile * (1.0 - quantile) / Self::DELTA;
+//RS             if last.1 + weight <= limit.max(1.0) {
+//RS                 let new_weight = last.1 + weight;
+//RS                 last.0 = (last.0 * last.1 + mean * weight) / new_weight;
+//RS                 last.1 = new_weight;
+//RS             } else {
+//RS                 merged.push((mean, weight));
+//RS                 cumulative += weight;
+//RS             }
+//RS         }
+//RS         *centroids = merged;
+//RS     }
+//RS 
+//RS     pub(crate) fn quantile(&self, quantile: f64) -> f64 {
+//RS         let centroids = self.0.lock().unwrap();
+//RS         if centroids.is_empty() {
+//RS             return 0.0;
+//RS         }
+//RS         let total: f64 = centroids.iter().map(|(_, weight)| weight).sum();
+//RS         let target = quantile * total;
+//RS         let mut cumulative = 0.0;
+//RS         for &(mean, weight) in centroids.iter() {
+//RS             cumulative += weight;
+//RS             if cumulative >= target {
+//RS                 return mean;
+//RS             }
+//RS         }
+//RS         centroids.last().unwrap().0
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) const JET_CMS_COLS: usize = 256;
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct JetCountMinSketch(
+//RS     std::sync::Arc<std::sync::Mutex<[[u32; JET_CMS_COLS]; 4]>>,
+//RS );
+//RS 
+//RS impl JetCountMinSketch {
+//RS     pub(crate) fn new() -> Self {
+//RS         Self::from_rows([[0; JET_CMS_COLS]; 4])
+//RS     }
+//RS 
+//RS     pub(crate) fn from_rows(rows: [[u32; JET_CMS_COLS]; 4]) -> Self {
+//RS         Self(std::sync::Arc::new(std::sync::Mutex::new(rows)))
+//RS     }
+//RS 
+//RS     pub(crate) fn rows(&self) -> [[u32; JET_CMS_COLS]; 4] {
+//RS         *self.0.lock().unwrap()
+//RS     }
+//RS 
+//RS     pub(crate) fn add(&self, key: &str) {
+//RS         let bytes = key.as_bytes();
+//RS         let first = fnv1a(bytes);
+//RS         let second = fnv1a_h2(bytes);
+//RS         let mut rows = self.0.lock().unwrap();
+//RS         for row in 0..4 {
+//RS             let column = ((first.wrapping_add(second.wrapping_mul(row as u64 + 1))) & 0xff) as usize;
+//RS             rows[row][column] = rows[row][column].saturating_add(1);
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn count(&self, key: &str) -> i64 {
+//RS         let bytes = key.as_bytes();
+//RS         let first = fnv1a(bytes);
+//RS         let second = fnv1a_h2(bytes);
+//RS         let rows = self.0.lock().unwrap();
+//RS         (0..4)
+//RS             .map(|row| {
+//RS                 let column = ((first.wrapping_add(second.wrapping_mul(row as u64 + 1))) & 0xff) as usize;
+//RS                 rows[row][column]
+//RS             })
+//RS             .min()
+//RS             .unwrap() as i64
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) struct JetReservoirSampler(std::sync::Arc<std::sync::Mutex<JetReservoirInner>>);
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetReservoirInner {
+//RS     capacity: usize,
+//RS     reservoir: Vec<String>,
+//RS     count: u64,
+//RS     rng: u64,
+//RS }
+//RS 
+//RS impl JetReservoirSampler {
+//RS     pub(crate) fn new(capacity: i64) -> Self {
+//RS         Self::from_parts(capacity.max(1) as usize, Vec::new(), 0, 0xdeadbeef_cafebabe)
+//RS     }
+//RS 
+//RS     pub(crate) fn from_parts(
+//RS         capacity: usize,
+//RS         reservoir: Vec<String>,
+//RS         count: u64,
+//RS         rng: u64,
+//RS     ) -> Self {
+//RS         Self(std::sync::Arc::new(std::sync::Mutex::new(JetReservoirInner {
+//RS             capacity,
+//RS             reservoir,
+//RS             count,
+//RS             rng,
+//RS         })))
+//RS     }
+//RS 
+//RS     pub(crate) fn parts(&self) -> (usize, Vec<String>, u64, u64) {
+//RS         let inner = self.0.lock().unwrap();
+//RS         (inner.capacity, inner.reservoir.clone(), inner.count, inner.rng)
+//RS     }
+//RS 
+//RS     pub(crate) fn add(&self, item: String) {
+//RS         let mut inner = self.0.lock().unwrap();
+//RS         inner.count += 1;
+//RS         if inner.reservoir.len() < inner.capacity {
+//RS             inner.reservoir.push(item);
+//RS             return;
+//RS         }
+//RS         let mut state = inner.rng;
+//RS         state ^= state << 13;
+//RS         state ^= state >> 7;
+//RS         state ^= state << 17;
+//RS         inner.rng = state;
+//RS         let index = (state % inner.count) as usize;
+//RS         if index < inner.capacity {
+//RS             inner.reservoir[index] = item;
+//RS         }
+//RS     }
+//RS 
+//RS     pub(crate) fn sample(&self) -> Vec<String> {
+//RS         self.0.lock().unwrap().reservoir.clone()
+//RS     }
+//RS }
+// END-PORT-PENDING 0151 crates/jet-codegen/src/Prelude/Core/Sketch.rs:1-227
+

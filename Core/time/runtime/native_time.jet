@@ -1,0 +1,1656 @@
+// PORT-PENDING 0234 crates-jet-jit-src-time: crates/jet-jit/src/Time.rs:1-1652
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.time` / civil-time marshalling hosts for the shared Prelude kernel.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{alloc_string, clone_string, result_ok};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS pub(crate) mod time_rt {
+//RS     // `TimeInstant.rs` names the shared sleep seam unqualified; the resident
+//RS     // adapter below routes it to the ambient scheduler.
+//RS     use super::jet_std_time_sleep_duration_ns;
+//RS     fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
+//RS         jet_codegen::scheduler::jet_scheduler_world_monotonic_now_ns()
+//RS     }
+//RS     fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
+//RS         jet_codegen::scheduler::jet_scheduler_world_reject_uncontrolled(effect);
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Duration.rs");
+//RS     fn jet_scheduler_world_now_ms() -> Option<i64> {
+//RS         jet_codegen::scheduler::jet_scheduler_world_now_ms()
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/TimeInstant.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Realtime.rs");
+//RS }
+//RS /// The JIT adapter keeps the canonical nanosecond sleep contract while
+//RS /// delegating parking and cancellation to the shared scheduler host.
+//RS pub(crate) fn jet_std_time_sleep_duration_ns(nanos: i64) {
+//RS     Concurrency::ambient_time_sleep(nanos);
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum TimeValue {
+//RS     Date(time_rt::JetDate),
+//RS     DateTime(time_rt::JetDateTime),
+//RS     Period(time_rt::JetPeriod),
+//RS     Instant(time_rt::JetInstant),
+//RS     Zone(time_rt::JetZone),
+//RS     Zoned(time_rt::JetZonedDateTime),
+//RS     LocalTime(time_rt::JetLocalTime),
+//RS }
+//RS 
+//RS pub(crate) fn ambient_monotonic_now_ms() -> i64 {
+//RS     jet_codegen::scheduler::jet_scheduler_world_monotonic_now_ns()
+//RS         .unwrap_or_else(jet_foundation::Monotonic::jet_time_monotonic_now_ns)
+//RS         / 1_000_000
+//RS }
+//RS /// Canonical deterministic/system Clock adapters.  The resident JIT runtime
+//RS /// owns the manual/system timeline carrier; this module only erases the
+//RS /// checked Prelude ABI to a handle for Cranelift.
+//RS fn jet_std_clock_new(seed: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_new_manual(seed))
+//RS }
+//RS 
+//RS fn jet_std_clock_system() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_new_system())
+//RS }
+//RS 
+//RS fn jet_clock_now(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_now(handle))
+//RS }
+//RS 
+//RS fn jet_clock_tick(handle: i64, delta_ms: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_tick(handle, delta_ms))
+//RS }
+//RS 
+//RS fn jet_clock_advance(handle: i64, to_ms: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_advance(handle, to_ms))
+//RS }
+//RS 
+//RS fn jet_clock_wait(handle: i64, duration: i64) -> i64 {
+//RS     let delta_ms = jet_codegen::scheduler::jet_std_time_duration_to_millis(duration);
+//RS     Concurrency::with_runtime_mut(|rt| rt.clock_wait(handle, delta_ms))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_time_start() -> i64 {
+//RS     ambient_monotonic_now_ms()
+//RS }
+//RS 
+//RS fn jet_jit_time_sleep_duration_ns(nanos: i64) {
+//RS     jet_std_time_sleep_duration_ns(nanos);
+//RS }
+//RS 
+//RS fn jet_jit_time_sleep_until(deadline: i64) {
+//RS     let instant = with_time(deadline, |value| match value {
+//RS         TimeValue::Instant(value) => Some(value.clone()),
+//RS         _ => None,
+//RS     });
+//RS     if let Some(instant) = instant {
+//RS         time_rt::jet_time_sleep_until(&instant);
+//RS     }
+//RS }
+//RS 
+//RS fn invoke_realtime_callback(
+//RS     slot: Option<crate::runtime_host::JitCallableSlot>,
+//RS     list: i64,
+//RS     buffer: &Vec<f64>,
+//RS     callback_skipped: &std::sync::atomic::AtomicBool,
+//RS ) {
+//RS     let Some(slot) = slot else {
+//RS         let _ = Concurrency::try_with_http_jet_runtime(|| {
+//RS             if let Some(ptr) = Concurrency::active_runtime_ptr() {
+//RS                 // SAFETY: the nonblocking runtime guard pins this published
+//RS                 // resident until the closure returns.
+//RS                 unsafe {
+//RS                     (*ptr).set_host_fault("MIR realtime callback has an invalid callable handle");
+//RS                 }
+//RS             }
+//RS         });
+//RS         callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+//RS         return;
+//RS     };
+//RS 
+//RS     let Some(invoked) = Concurrency::try_with_http_jet_runtime(|| {
+//RS         let Some(ptr) = Concurrency::active_runtime_ptr() else {
+//RS             return false;
+//RS         };
+//RS         let updated = {
+//RS             // SAFETY: the nonblocking runtime guard pins this published
+//RS             // resident until the callback returns.
+//RS             let rt = unsafe { &mut *ptr };
+//RS             let mut updated = true;
+//RS             for (index, &value) in buffer.iter().enumerate() {
+//RS                 if rt.heap.list_set_float(list, index as i64, value).is_none() {
+//RS                     rt.set_host_fault("MIR realtime callback buffer carrier was modified");
+//RS                     updated = false;
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             updated
+//RS         };
+//RS         if !updated {
+//RS             return false;
+//RS         }
+//RS         // The mutable runtime borrow ended before entering generated user
+//RS         // code; nested host calls may therefore borrow the same TLS runtime.
+//RS         unsafe {
+//RS             if slot.has_env {
+//RS                 let callback: unsafe extern "C" fn(i64, i64) =
+//RS                     std::mem::transmute(slot.fn_ptr as usize);
+//RS                 callback(slot.env, list);
+//RS             } else {
+//RS                 let callback: unsafe extern "C" fn(i64) = std::mem::transmute(slot.fn_ptr as usize);
+//RS                 callback(list);
+//RS             }
+//RS         }
+//RS         true
+//RS     }) else {
+//RS         callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+//RS         return;
+//RS     };
+//RS     if !invoked {
+//RS         callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_realtime_callback(rate_hz: i64, frames_per_buffer: i64, callback: i64) -> i64 {
+//RS     assert!(rate_hz > 0, "real-time callback rate must be positive");
+//RS     assert!(frames_per_buffer > 0, "real-time callback frame count must be positive");
+//RS     let frame_count = usize::try_from(frames_per_buffer)
+//RS         .expect("real-time callback frame count is outside the platform range");
+//RS     let list = Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for _ in 0..frame_count {
+//RS             rt.heap
+//RS                 .list_push_float(list, 0.0)
+//RS                 .expect("MIR realtime callback buffer carrier allocation failed");
+//RS         }
+//RS         list
+//RS     });
+//RS     let slot = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::jit_callable_parts(rt, callback)
+//RS     });
+//RS     let callback_skipped =
+//RS         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let callback_skipped_for_callback = callback_skipped.clone();
+//RS     let stream = time_rt::jet_rt_callback_with_skip(
+//RS         rate_hz,
+//RS         frames_per_buffer,
+//RS         move |buffer| {
+//RS             invoke_realtime_callback(slot, list, buffer, &callback_skipped_for_callback);
+//RS         },
+//RS         callback_skipped,
+//RS     );
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.realtime_values.push(Some(stream));
+//RS         rt.realtime_values.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn realtime_stream(handle: i64) -> Option<time_rt::JetRealtimeStream> {
+//RS     let index = usize::try_from(handle).ok()?.checked_sub(1)?;
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.realtime_values
+//RS             .get(index)
+//RS             .and_then(Option::as_ref)
+//RS             .cloned()
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_realtime_next_deadline(handle: i64) -> i64 {
+//RS     realtime_stream(handle)
+//RS         .map(|stream| push(TimeValue::Instant(stream.next_deadline())))
+//RS         .unwrap_or_else(|| {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_host_fault("MIR realtime next_deadline received an invalid stream handle");
+//RS             });
+//RS             0
+//RS         })
+//RS }
+//RS 
+//RS fn jet_jit_realtime_receipt(handle: i64) -> i64 {
+//RS     let Some(receipt) = realtime_stream(handle).map(|stream| stream.receipt()) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("MIR realtime receipt received an invalid stream handle");
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(8);
+//RS         let values = [
+//RS             receipt.requested_rate_hz,
+//RS             receipt.requested_frames,
+//RS             receipt.completed_callbacks,
+//RS             receipt.completed_frames,
+//RS             receipt.missed,
+//RS             receipt.max_lateness_ns,
+//RS             receipt.start_identity,
+//RS             receipt.end_identity,
+//RS         ];
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             let _ = rt.heap.record_set_int(record, index as i64, value);
+//RS         }
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_realtime_cancel(handle: i64) {
+//RS     let Some(index) = usize::try_from(handle).ok().and_then(|value| value.checked_sub(1)) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("MIR realtime cancel received an invalid stream handle");
+//RS         });
+//RS         return;
+//RS     };
+//RS     let stream = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.realtime_values
+//RS             .get_mut(index)
+//RS             .and_then(Option::take)
+//RS     });
+//RS     let Some(mut stream) = stream else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("MIR realtime cancel received an invalid stream handle");
+//RS         });
+//RS         return;
+//RS     };
+//RS     stream.cancel();
+//RS }
+//RS 
+//RS fn jet_jit_realtime_is_cancelled(handle: i64) -> i8 {
+//RS     realtime_stream(handle)
+//RS         .map(|stream| i8::from(stream.is_cancelled()))
+//RS         .unwrap_or_else(|| {
+//RS             Concurrency::with_runtime_mut(|rt| {
+//RS                 rt.set_host_fault("MIR realtime is_cancelled received an invalid stream handle");
+//RS             });
+//RS             0
+//RS         })
+//RS }
+//RS 
+//RS pub(crate) fn push(value: TimeValue) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.time_values.push(Some(value));
+//RS         rt.time_values.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         match rt.time_values.get(idx).and_then(|s| s.as_ref()) {
+//RS             Some(v) => f(v),
+//RS             None => R::default(),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
+//RS     let index = handle.saturating_sub(1) as usize;
+//RS     match rt.time_values.get(index).and_then(|slot| slot.as_ref()) {
+//RS         Some(TimeValue::Date(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::DateTime(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::Period(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::Instant(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::Zone(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::Zoned(value)) => value.to_string_fmt(),
+//RS         Some(TimeValue::LocalTime(value)) => value.to_string_fmt(),
+//RS         None => String::new(),
+//RS     }
+//RS }
+//RS fn jet_jit_time_display(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let rendered = show_value(rt, handle);
+//RS         rt.heap.alloc_string(rendered)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_duration_display(nanos: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .alloc_string(time_rt::jet_duration_kernel_show(nanos))
+//RS     })
+//RS }
+//RS 
+//RS fn result_err(message: String) -> i64 {
+//RS     result_err_record(message)
+//RS }
+//RS 
+//RS fn result_err_record(message: String) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let error = rt.heap.alloc_record(1);
+//RS         let message = rt.heap.alloc_string(message);
+//RS         let _ = rt.heap.record_set_string(error, 0, message);
+//RS         crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn civil_int(raw: i64, context: &'static str) -> Option<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt.heap.int_to_i64(raw);
+//RS         if value.is_none() {
+//RS             rt.set_host_fault(context);
+//RS         }
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
+//RS     let (Some(y), Some(m), Some(d)) = (
+//RS         civil_int(y, "Date year is outside the shared time kernel's i64 range"),
+//RS         civil_int(m, "Date month is outside the shared time kernel's i64 range"),
+//RS         civil_int(d, "Date day is outside the shared time kernel's i64 range"),
+//RS     ) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::Date(time_rt::JetDate::new(y, m, d)))
+//RS }
+//RS 
+//RS fn jet_jit_date_today() -> i64 {
+//RS     push(TimeValue::Date(time_rt::JetDate::today_utc()))
+//RS }
+//RS 
+//RS fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = left
+//RS             .checked_sub(1)
+//RS             .and_then(|index| rt.time_values.get(index as usize))
+//RS             .and_then(Option::as_ref);
+//RS         let right = right
+//RS             .checked_sub(1)
+//RS             .and_then(|index| rt.time_values.get(index as usize))
+//RS             .and_then(Option::as_ref);
+//RS         match (left, right) {
+//RS             (Some(TimeValue::Date(left)), Some(TimeValue::Date(right))) => i8::from(left == right),
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS fn jet_jit_date_compare(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = left
+//RS             .checked_sub(1)
+//RS             .and_then(|index| rt.time_values.get(index as usize))
+//RS             .and_then(Option::as_ref);
+//RS         let right = right
+//RS             .checked_sub(1)
+//RS             .and_then(|index| rt.time_values.get(index as usize))
+//RS             .and_then(Option::as_ref);
+//RS         match (left, right) {
+//RS             (Some(TimeValue::Date(left)), Some(TimeValue::Date(right))) => match left.cmp(right) {
+//RS                 std::cmp::Ordering::Less => -1,
+//RS                 std::cmp::Ordering::Equal => 0,
+//RS                 std::cmp::Ordering::Greater => 1,
+//RS             },
+//RS             _ => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_date_parse(s: i64) -> i64 {
+//RS     match time_rt::JetDate::parse(&clone_string(s)) {
+//RS         Ok(d) => result_ok(push(TimeValue::Date(d)) as u64),
+//RS         Err(e) => result_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn unix_timestamp(raw: i64) -> Option<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = rt.heap.int_to_i64(raw);
+//RS         if value.is_none() {
+//RS             rt.set_host_fault("Unix timestamp is outside the shared time kernel's i64 range");
+//RS         }
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_datetime_from_timestamp(ts: i64) -> i64 {
+//RS     let Some(ts) = unix_timestamp(ts) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::DateTime(time_rt::JetDateTime::from_timestamp(
+//RS         ts,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_datetime_now() -> i64 {
+//RS     push(TimeValue::DateTime(time_rt::JetDateTime::now()))
+//RS }
+//RS 
+//RS fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
+//RS     let text = clone_string(s);
+//RS     match time_rt::jet_time_parse_rfc3339(&text) {
+//RS         Ok(dt) => result_ok(push(TimeValue::DateTime(dt)) as u64),
+//RS         Err(e) => result_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_from_unix_ms(ms: i64) -> i64 {
+//RS     let Some(ms) = unix_timestamp(ms) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::DateTime(time_rt::JetDateTime::from_unix_ms(ms)))
+//RS }
+//RS 
+//RS fn jet_jit_time_from_unix_seconds(seconds: i64) -> i64 {
+//RS     let Some(seconds) = unix_timestamp(seconds) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::DateTime(
+//RS         time_rt::JetDateTime::from_unix_seconds(seconds),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_time_from_unix_microseconds(microseconds: i64) -> i64 {
+//RS     let Some(microseconds) = unix_timestamp(microseconds) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::DateTime(
+//RS         time_rt::JetDateTime::from_unix_microseconds(microseconds),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_time_from_unix_nanoseconds(nanoseconds: i64) -> i64 {
+//RS     let Some(nanoseconds) = unix_timestamp(nanoseconds) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::DateTime(
+//RS         time_rt::JetDateTime::from_unix_nanoseconds(nanoseconds),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_time_parse_iso_week_date(value: i64) -> i64 {
+//RS     match time_rt::JetDate::parse_iso_week_date(&clone_string(value)) {
+//RS         Ok(date) => result_ok(push(TimeValue::Date(date)) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_from_iso_week(year: i64, week: i64, weekday: i64) -> i64 {
+//RS     match time_rt::jet_time_from_iso_week(year, week, weekday) {
+//RS         Ok(date) => result_ok(push(TimeValue::Date(date)) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_parse_zoned(value: i64) -> i64 {
+//RS     match time_rt::jet_time_parse_zoned(&clone_string(value)) {
+//RS         Ok(zoned) => result_ok(push(TimeValue::Zoned(zoned)) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_utc() -> i64 {
+//RS     push(TimeValue::Zone(time_rt::JetZone::utc()))
+//RS }
+//RS 
+//RS fn jet_jit_time_period_months(months: i64) -> i64 {
+//RS     push(TimeValue::Period(time_rt::JetPeriod::months(months)))
+//RS }
+//RS 
+//RS fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
+//RS     push(TimeValue::Period(time_rt::JetPeriod::new(
+//RS         years, months, days,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_time_period_days(days: i64) -> i64 {
+//RS     push(TimeValue::Period(time_rt::JetPeriod::days(days)))
+//RS }
+//RS 
+//RS fn jet_jit_time_period_years(years: i64) -> i64 {
+//RS     push(TimeValue::Period(time_rt::JetPeriod::years(years)))
+//RS }
+//RS 
+//RS fn jet_jit_time_zone(name: i64) -> i64 {
+//RS     match time_rt::JetZone::named(&clone_string(name)) {
+//RS         Ok(zone) => result_ok(push(TimeValue::Zone(zone)) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64, disambiguation: i64) -> i64 {
+//RS     let date = with_time(date, |value| match value {
+//RS         TimeValue::Date(date) => Some(date.clone()),
+//RS         _ => None,
+//RS     });
+//RS     let time = with_time(time, |value| match value {
+//RS         TimeValue::LocalTime(time) => Some(time.clone()),
+//RS         _ => None,
+//RS     });
+//RS     let zone = with_time(zone, |value| match value {
+//RS         TimeValue::Zone(zone) => Some(zone.clone()),
+//RS         _ => None,
+//RS     });
+//RS     let disambiguation = clone_string(disambiguation);
+//RS     match (date, time, zone) {
+//RS         (Some(date), Some(time), Some(zone)) => {
+//RS             match time_rt::JetZonedDateTime::from_local_with_disambiguation(
+//RS                 &date,
+//RS                 &time,
+//RS                 &zone,
+//RS                 &disambiguation,
+//RS             ) {
+//RS                 Ok(zoned) => result_ok(push(TimeValue::Zoned(zoned)) as u64),
+//RS                 Err(error) => result_err(error),
+//RS             }
+//RS         }
+//RS         _ => result_err("invalid zoned_local arguments".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_parse_time(value: i64) -> i64 {
+//RS     fn parse_local_time(value: &str) -> Result<time_rt::JetLocalTime, String> {
+//RS         time_rt::JetLocalTime::parse(value)
+//RS     }
+//RS 
+//RS     match parse_local_time(&clone_string(value)) {
+//RS         Ok(time) => result_ok(push(TimeValue::LocalTime(time)) as u64),
+//RS         Err(error) => result_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_instant() -> i64 {
+//RS     push(TimeValue::Instant(time_rt::JetInstant::now()))
+//RS }
+//RS 
+//RS fn jet_jit_instant_add_duration(instant: i64, duration_ns: i64) -> i64 {
+//RS     let instant = with_time(instant, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     instant
+//RS         .map(|value| push(TimeValue::Instant(value.plus_duration_ns(duration_ns))))
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_instant_sub_duration(instant: i64, duration_ns: i64) -> i64 {
+//RS     let instant = with_time(instant, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     instant
+//RS         .map(|value| push(TimeValue::Instant(value.minus_duration_ns(duration_ns))))
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_instant_difference(left: i64, right: i64) -> i64 {
+//RS     let left = with_time(left, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     let right = with_time(right, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     match (left, right) {
+//RS         (Some(left), Some(right)) => left.difference_ns(&right),
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_instant_compare(left: i64, right: i64) -> i64 {
+//RS     let left = with_time(left, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     let right = with_time(right, |value| match value {
+//RS         TimeValue::Instant(value) => Some(*value),
+//RS         _ => None,
+//RS     });
+//RS     match (left, right) {
+//RS         (Some(left), Some(right)) => left.compare_to(&right),
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
+//RS     let datetime = with_time(dt, |v| match v {
+//RS         TimeValue::DateTime(d) => Some(d.clone()),
+//RS         _ => None,
+//RS     });
+//RS     let z = with_time(zone, |v| match v {
+//RS         TimeValue::Zone(z) => Some(z.clone()),
+//RS         _ => None,
+//RS     });
+//RS     match (datetime, z) {
+//RS         (Some(dt), Some(zone)) => push(TimeValue::Zoned(dt.in_zone(&zone))),
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_time_days_in_month(year: i64, month: i64) -> i64 {
+//RS     time_rt::JetDate::days_in_month_of(year, month.clamp(1, 12))
+//RS }
+//RS 
+//RS fn jet_jit_time_is_leap_year(year: i64) -> i8 {
+//RS     i8::from(time_rt::JetDate::is_leap(year))
+//RS }
+//RS fn jet_jit_calendar_isleap(year: i64) -> i8 {
+//RS     i8::from(time_rt::JetDate::is_leap(year))
+//RS }
+//RS fn jet_jit_calendar_leapdays(first: i64, second: i64) -> i64 {
+//RS     let (start, end) = if first <= second {
+//RS         (first, second)
+//RS     } else {
+//RS         (second, first)
+//RS     };
+//RS     (start..end)
+//RS         .filter(|year| time_rt::JetDate::is_leap(*year))
+//RS         .count() as i64
+//RS }
+//RS fn jet_jit_calendar_weekday(year: i64, month: i64, day: i64) -> i64 {
+//RS     let mut adjusted_year = year;
+//RS     if month < 3 {
+//RS         adjusted_year -= 1;
+//RS     }
+//RS     let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+//RS     let month_index = month.saturating_sub(1).clamp(0, 11) as usize;
+//RS     let sunday_zero = (adjusted_year
+//RS         + adjusted_year.div_euclid(4)
+//RS         - adjusted_year.div_euclid(100)
+//RS         + adjusted_year.div_euclid(400)
+//RS         + offsets[month_index]
+//RS         + day)
+//RS         .rem_euclid(7);
+//RS     (sunday_zero + 6).rem_euclid(7)
+//RS }
+//RS fn jet_jit_calendar_monthrange(year: i64, month: i64) -> i64 {
+//RS     let days = jet_jit_time_days_in_month(year, month);
+//RS     let weekday = jet_jit_calendar_weekday(year, month, 1);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         rt.heap.record_set_int(record, 0, days);
+//RS         rt.heap.record_set_int(record, 1, weekday);
+//RS         record
+//RS     })
+//RS }
+//RS fn calendar_day_abbr_text(weekday: i64) -> &'static str {
+//RS     ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+//RS         .get(weekday.clamp(0, 6) as usize)
+//RS         .copied()
+//RS         .unwrap_or("Sun")
+//RS }
+//RS fn calendar_month_name_text(month: i64) -> &'static str {
+//RS     [
+//RS         "January",
+//RS         "February",
+//RS         "March",
+//RS         "April",
+//RS         "May",
+//RS         "June",
+//RS         "July",
+//RS         "August",
+//RS         "September",
+//RS         "October",
+//RS         "November",
+//RS         "December",
+//RS     ]
+//RS     .get(month.saturating_sub(1).clamp(0, 11) as usize)
+//RS     .copied()
+//RS     .unwrap_or("December")
+//RS }
+//RS fn calendar_weekheader_text(width: i64, firstweekday: i64) -> Vec<String> {
+//RS     let width = width.max(1) as usize;
+//RS     (0..7)
+//RS         .map(|index| {
+//RS             let text = calendar_day_abbr_text((index + firstweekday).rem_euclid(7));
+//RS             if text.len() >= width {
+//RS                 text[..width].to_string()
+//RS             } else {
+//RS                 format!("{text}{}", " ".repeat(width - text.len()))
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS fn calendar_month_values(year: i64, month: i64, firstweekday: i64) -> Vec<Vec<i64>> {
+//RS     let days = jet_jit_time_days_in_month(year, month);
+//RS     let start = (jet_jit_calendar_weekday(year, month, 1) - firstweekday).rem_euclid(7);
+//RS     let mut weeks = Vec::new();
+//RS     let mut week = vec![0; start as usize];
+//RS     for day in 1..=days {
+//RS         week.push(day);
+//RS         if week.len() == 7 {
+//RS             weeks.push(week);
+//RS             week = Vec::new();
+//RS         }
+//RS     }
+//RS     if !week.is_empty() {
+//RS         week.resize(7, 0);
+//RS         weeks.push(week);
+//RS     }
+//RS     weeks
+//RS }
+//RS fn calendar_formatmonth_text(year: i64, month: i64, width: i64) -> String {
+//RS     let width = width.max(2) as usize;
+//RS     let title = format!("{} {year}", calendar_month_name_text(month));
+//RS     let title_width = width * 7 + 6;
+//RS     let title = if title.len() >= title_width {
+//RS         title[..title_width].to_string()
+//RS     } else {
+//RS         let left = (title_width - title.len()) / 2;
+//RS         format!("{}{}{}", " ".repeat(left), title, " ".repeat(title_width - title.len() - left))
+//RS     };
+//RS     let mut out = format!(
+//RS         "{title}\n{}\n",
+//RS         calendar_weekheader_text(width as i64, 0).join(" ")
+//RS     );
+//RS     for week in calendar_month_values(year, month, 0) {
+//RS         let row = week
+//RS             .into_iter()
+//RS             .map(|day| {
+//RS                 let text = if day == 0 { String::new() } else { day.to_string() };
+//RS                 if text.len() >= width {
+//RS                     text[..width].to_string()
+//RS                 } else {
+//RS                     format!("{}{}", " ".repeat(width - text.len()), text)
+//RS                 }
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(" ");
+//RS         out.push_str(&row);
+//RS         out.push('\n');
+//RS     }
+//RS     out
+//RS }
+//RS fn jet_jit_calendar_monthcalendar(year: i64, month: i64) -> i64 {
+//RS     jet_jit_calendar_monthcalendar_start(year, month, 0)
+//RS }
+//RS fn jet_jit_calendar_monthcalendar_start(year: i64, month: i64, firstweekday: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let weeks = calendar_month_values(year, month, firstweekday);
+//RS         let handles = weeks
+//RS             .into_iter()
+//RS             .map(|week| rt.heap.alloc_int_list(week))
+//RS             .collect();
+//RS         rt.heap.alloc_int_list(handles)
+//RS     })
+//RS }
+//RS fn jet_jit_calendar_yearcalendar(year: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let months = (1..=12)
+//RS             .map(|month| {
+//RS                 let weeks = calendar_month_values(year, month, 0)
+//RS                     .into_iter()
+//RS                     .map(|week| rt.heap.alloc_int_list(week))
+//RS                     .collect();
+//RS                 rt.heap.alloc_int_list(weeks)
+//RS             })
+//RS             .collect();
+//RS         rt.heap.alloc_int_list(months)
+//RS     })
+//RS }
+//RS fn jet_jit_calendar_weekheader(width: i64, firstweekday: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = calendar_weekheader_text(width, firstweekday)
+//RS             .into_iter()
+//RS             .map(|text| rt.heap.alloc_string(text))
+//RS             .collect();
+//RS         rt.heap.alloc_int_list(values)
+//RS     })
+//RS }
+//RS fn jet_jit_calendar_formatmonth(year: i64, month: i64, width: i64) -> i64 {
+//RS     alloc_string(calendar_formatmonth_text(year, month, width))
+//RS }
+//RS fn jet_jit_calendar_formatyear(year: i64) -> i64 {
+//RS     let mut out = String::new();
+//RS     for month in 1..=12 {
+//RS         out.push_str(&calendar_formatmonth_text(year, month, 3));
+//RS         out.push('\n');
+//RS     }
+//RS     alloc_string(out)
+//RS }
+//RS fn jet_jit_calendar_day_name(weekday: i64) -> i64 {
+//RS     alloc_string(
+//RS         [
+//RS             "Monday",
+//RS             "Tuesday",
+//RS             "Wednesday",
+//RS             "Thursday",
+//RS             "Friday",
+//RS             "Saturday",
+//RS             "Sunday",
+//RS         ]
+//RS         .get(weekday.clamp(0, 6) as usize)
+//RS         .unwrap_or(&"Sunday")
+//RS         .to_string(),
+//RS     )
+//RS }
+//RS fn jet_jit_calendar_day_abbr(weekday: i64) -> i64 {
+//RS     alloc_string(
+//RS         ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+//RS             .get(weekday.clamp(0, 6) as usize)
+//RS             .unwrap_or(&"Sun")
+//RS             .to_string(),
+//RS     )
+//RS }
+//RS fn jet_jit_calendar_month_name(month: i64) -> i64 {
+//RS     alloc_string(
+//RS         [
+//RS             "January",
+//RS             "February",
+//RS             "March",
+//RS             "April",
+//RS             "May",
+//RS             "June",
+//RS             "July",
+//RS             "August",
+//RS             "September",
+//RS             "October",
+//RS             "November",
+//RS             "December",
+//RS         ]
+//RS         .get(month.saturating_sub(1).clamp(0, 11) as usize)
+//RS         .unwrap_or(&"December")
+//RS         .to_string(),
+//RS     )
+//RS }
+//RS fn jet_jit_calendar_month_abbr(month: i64) -> i64 {
+//RS     alloc_string(
+//RS         [
+//RS             "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+//RS             "Dec",
+//RS         ]
+//RS         .get(month.saturating_sub(1).clamp(0, 11) as usize)
+//RS         .unwrap_or(&"Dec")
+//RS         .to_string(),
+//RS     )
+//RS }
+//RS fn jet_jit_calendar_timegm(
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS     hour: i64,
+//RS     minute: i64,
+//RS     second: i64,
+//RS ) -> i64 {
+//RS     // The kernel returns an owned exact `Int` (row not raw-word), so the host
+//RS     // answers the carrier, never a bare machine word.
+//RS     let seconds =
+//RS         time_rt::JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds();
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(seconds))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_time_datetime(
+//RS     year: i64,
+//RS     month: i64,
+//RS     day: i64,
+//RS     hour: i64,
+//RS     minute: i64,
+//RS     second: i64,
+//RS ) -> i64 {
+//RS     push(TimeValue::DateTime(time_rt::JetDateTime::from_parts(
+//RS         year, month, day, hour, minute, second, 0,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
+//RS     let (Some(hour), Some(minute), Some(second)) = (
+//RS         civil_int(hour, "Local time hour is outside the shared time kernel's i64 range"),
+//RS         civil_int(minute, "Local time minute is outside the shared time kernel's i64 range"),
+//RS         civil_int(second, "Local time second is outside the shared time kernel's i64 range"),
+//RS     ) else {
+//RS         return 0;
+//RS     };
+//RS     push(TimeValue::LocalTime(time_rt::JetLocalTime::new(
+//RS         hour, minute, second,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_period_total_in(period: i64, unit: i64, anchor: i64) -> f64 {
+//RS     let period = with_time(period, |value| match value {
+//RS         TimeValue::Period(period) => Some(*period),
+//RS         _ => None,
+//RS     });
+//RS     let unit = clone_string(unit);
+//RS     match period {
+//RS         Some(period) => with_time(anchor, |value| match value {
+//RS             TimeValue::Date(date) => period.total_in_date(&unit, date),
+//RS             TimeValue::DateTime(datetime) => period.total_in_datetime(&unit, datetime),
+//RS             _ => 0.0,
+//RS         }),
+//RS         None => 0.0,
+//RS     }
+//RS }
+//RS 
+//RS /// The receiver kind a civil-time handle carries, for defect reports.
+//RS fn time_value_kind(value: &TimeValue) -> &'static str {
+//RS     match value {
+//RS         TimeValue::Date(_) => "Date",
+//RS         TimeValue::DateTime(_) => "DateTime",
+//RS         TimeValue::Period(_) => "Period",
+//RS         TimeValue::Instant(_) => "Instant",
+//RS         TimeValue::Zone(_) => "Zone",
+//RS         TimeValue::Zoned(_) => "ZonedDateTime",
+//RS         TimeValue::LocalTime(_) => "LocalTime",
+//RS     }
+//RS }
+//RS 
+//RS /// A civil-time method the resident JIT admitted but this host cannot marshal is
+//RS /// Jet's own defect, never the running program's fault. Returning `0` handed the
+//RS /// program a null carrier handle that a later read resolved against an unrelated
+//RS /// heap slot, so `ZonedDateTime.add_duration` printed the source file path and
+//RS /// answered `offset_seconds() == 0` (#2030). `set_host_fault` is the branded ICE
+//RS /// rail for a broken compiler invariant (`jit/runtime_host.rs`); `set_trap`
+//RS /// would render `Stop [E3001]` and blame the running program instead.
+//RS fn civil_method_defect(recv: &TimeValue, method: &str, detail: &str) -> i64 {
+//RS     let kind = time_value_kind(recv);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.set_host_fault(&format!(
+//RS             "jit civil-time host: {detail} for `{kind}.{method}`"
+//RS         ));
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn time_bool_tag(value: bool) -> i64 {
+//RS     if value {
+//RS         1
+//RS     } else {
+//RS         0
+//RS     }
+//RS }
+//RS 
+//RS fn time_ordering_tag(value: std::cmp::Ordering) -> i64 {
+//RS     let variant = match value {
+//RS         std::cmp::Ordering::Less => "Less",
+//RS         std::cmp::Ordering::Equal => "Equal",
+//RS         std::cmp::Ordering::Greater => "Greater",
+//RS     };
+//RS     crate::types_meta::prelude_enum_variant_index(
+//RS         jet_foundation::Syntax::TYPE_ORDERING,
+//RS         variant,
+//RS     )
+//RS     .expect("Prelude Ordering variants must be registered")
+//RS }
+//RS 
+//RS fn time_optional_string(handle: i64, default: &str) -> String {
+//RS     if handle == 0 {
+//RS         default.to_string()
+//RS     } else {
+//RS         clone_string(handle)
+//RS     }
+//RS }
+//RS 
+//RS fn time_optional_increment(value: i64) -> i64 {
+//RS     if value == 0 {
+//RS         1
+//RS     } else {
+//RS         value
+//RS     }
+//RS }
+//RS 
+//RS fn time_option_int(value: Option<i64>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
+//RS     })
+//RS }
+//RS 
+//RS /// Civil-time method dispatch. `recv` is a `TimeValue` handle whose variant IS
+//RS /// the receiver kind; `method` is a string handle; `arg0..arg5` are the args
+//RS /// (unused slots are 0). Every `(receiver, method)` pair the residency gate
+//RS /// admits — `TIR::is_civil_time_method_name`, asked from `jit/safety.rs` — must
+//RS /// have an arm here. A pair with no arm reaches `civil_method_defect`.
+//RS fn jet_jit_civil_time_method(
+//RS     recv: i64,
+//RS     method: i64,
+//RS     arg0: i64,
+//RS     arg1: i64,
+//RS     arg2: i64,
+//RS     arg3: i64,
+//RS     arg4: i64,
+//RS     arg5: i64,
+//RS     arg6: i64,
+//RS ) -> i64 {
+//RS     let _ = arg6;
+//RS     let method = clone_string(method);
+//RS     with_time(recv, |v| match (v, method.as_str()) {
+//RS         (TimeValue::Date(d), "year") => d.year(),
+//RS         (TimeValue::Date(d), "month") => d.month(),
+//RS         (TimeValue::Date(d), "day") => d.day(),
+//RS         (TimeValue::Date(d), "to_string") => alloc_string(d.to_string_fmt()),
+//RS         (TimeValue::Date(d), "equal") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_bool_tag(*d == other),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "compare") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_ordering_tag(d.cmp(&other)),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "add_days") => push(TimeValue::Date(d.add_days(arg0))),
+//RS         (TimeValue::Date(d), "add_months") => push(TimeValue::Date(d.add_months(arg0))),
+//RS         (TimeValue::Date(d), "diff_days") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(od) => Some(od.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(o) => d.diff_days(&o),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "weekday") => d.weekday(),
+//RS         (TimeValue::Date(d), "day_of_year") => d.day_of_year(),
+//RS         (TimeValue::Date(d), "iso_weekday") => d.iso_weekday(),
+//RS         (TimeValue::Date(d), "iso_week") => d.iso_week(),
+//RS         (TimeValue::Date(d), "quarter_of_year") => d.quarter_of_year(),
+//RS         (TimeValue::Date(d), "days_in_month") => d.days_in_month(),
+//RS         (TimeValue::Date(d), "is_leap_year") => {
+//RS             if d.is_leap_year() {
+//RS                 1
+//RS             } else {
+//RS                 0
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "replace") => push(TimeValue::Date(d.replace(arg0, arg1, arg2))),
+//RS         (TimeValue::Date(d), "add_period") => {
+//RS             let period = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(p) => Some(p.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match period {
+//RS                 Some(p) => push(TimeValue::Date(d.add_period(&p))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "subtract_period") => {
+//RS             let period = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(p) => Some(p.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match period {
+//RS                 Some(p) => push(TimeValue::Date(d.subtract_period(&p))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "truncate") => push(TimeValue::Date(d.truncate(&clone_string(arg0)))),
+//RS         (TimeValue::Date(d), "format") => alloc_string(d.format_pattern(&clone_string(arg0))),
+//RS         (TimeValue::Date(d), "format_checked") => match d.format_checked(&clone_string(arg0)) {
+//RS             Ok(value) => result_ok(alloc_string(value) as u64),
+//RS             Err(error) => result_err_record(error),
+//RS         },
+//RS         (TimeValue::Date(d), "iso_week_year") => d.iso_week_year(),
+//RS         (TimeValue::Date(d), "until" | "since") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             let largest = time_optional_string(arg1, "day");
+//RS             let smallest = time_optional_string(arg2, "day");
+//RS             let mode = time_optional_string(arg3, "trunc");
+//RS             let increment = time_optional_increment(arg4);
+//RS             match other {
+//RS                 Some(other) if method == "until" => {
+//RS                     d.until_ns(&other, &largest, &smallest, &mode, increment)
+//RS                 }
+//RS                 Some(other) => d.since_ns(&other, &largest, &smallest, &mode, increment),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Date(d), "with") => {
+//RS             let overflow = time_optional_string(arg3, "constrain");
+//RS             match d.with_overflow(arg0, arg1, arg2, &overflow) {
+//RS                 Ok(value) => result_ok(push(TimeValue::Date(value)) as u64),
+//RS                 Err(error) => result_err(error),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "to_timestamp") => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_timestamp()))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
+//RS         (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time_for_output())),
+//RS         (TimeValue::DateTime(dt), "equal") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::DateTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_bool_tag(*dt == other),
+//RS                 None => civil_method_defect(v, &method, "argument is not a DateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "compare") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::DateTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_ordering_tag(dt.cmp(&other)),
+//RS                 None => civil_method_defect(v, &method, "argument is not a DateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "hour") => dt.hour(),
+//RS         (TimeValue::DateTime(dt), "minute") => dt.minute(),
+//RS         (TimeValue::DateTime(dt), "second") => dt.second(),
+//RS         (TimeValue::DateTime(dt), "millisecond") => dt.millisecond(),
+//RS         (TimeValue::DateTime(dt), "microsecond") => dt.microsecond(),
+//RS         (TimeValue::DateTime(dt), "nanosecond") => dt.nanosecond(),
+//RS         (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
+//RS         (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
+//RS         (TimeValue::DateTime(dt), "to_unix_ms") => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_unix_ms()))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "to_unix_s") => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_unix_seconds()))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "to_unix_us") => match dt.to_unix_microseconds() {
+//RS             Ok(value) => result_ok(
+//RS                 Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)) as u64,
+//RS             ),
+//RS             Err(error) => result_err_record(error),
+//RS         },
+//RS         (TimeValue::DateTime(dt), "to_unix_ns") => match dt.to_unix_nanoseconds() {
+//RS             Ok(value) => result_ok(
+//RS                 Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)) as u64,
+//RS             ),
+//RS             Err(error) => result_err_record(error),
+//RS         },
+//RS         (TimeValue::DateTime(dt), "format") => alloc_string(dt.format_pattern(&clone_string(arg0))),
+//RS         (TimeValue::DateTime(dt), "truncate" | "floor" | "ceil") => {
+//RS             let unit = clone_string(arg0);
+//RS             let increment = time_optional_increment(arg1);
+//RS             let value = match method.as_str() {
+//RS                 "truncate" => dt.truncate_with(&unit, increment),
+//RS                 "floor" => dt.floor_with(&unit, increment),
+//RS                 _ => dt.ceil_with(&unit, increment),
+//RS             };
+//RS             push(TimeValue::DateTime(value))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "round") => push(TimeValue::DateTime(dt.round_with(
+//RS             &clone_string(arg0),
+//RS             time_optional_increment(arg1),
+//RS             &time_optional_string(arg2, "half_expand"),
+//RS         ))),
+//RS         (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(
+//RS             dt.replace(arg0, arg1, arg2, arg3, arg4, arg5),
+//RS         )),
+//RS         (TimeValue::DateTime(dt), "in_zone") => {
+//RS             let zone = with_time(arg0, |o| match o {
+//RS                 TimeValue::Zone(z) => Some(z.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match zone {
+//RS                 Some(z) => push(TimeValue::Zoned(dt.in_zone(&z))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Zone"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "plus_duration") => {
+//RS             // Duration is raw ns i64 after Result unwrap (I9 Duration ABI).
+//RS             push(TimeValue::DateTime(dt.plus_duration_ns(arg0)))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "add_nanoseconds") => {
+//RS             // The checked Duration ABI is the same raw nanosecond carrier.
+//RS             push(TimeValue::DateTime(dt.add_nanoseconds(arg0)))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "subtract_duration") => {
+//RS             push(TimeValue::DateTime(dt.subtract_duration_ns(arg0)))
+//RS         }
+//RS         (TimeValue::DateTime(dt), "add_period" | "subtract_period") => {
+//RS             let period = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(p) => Some(p.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match period {
+//RS                 Some(period) if method == "add_period" => {
+//RS                     push(TimeValue::DateTime(dt.add_period(&period)))
+//RS                 }
+//RS                 Some(period) => push(TimeValue::DateTime(dt.subtract_period(&period))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "difference") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::DateTime(od) => Some(od.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(o) => dt.difference_ns(&o),
+//RS                 None => civil_method_defect(v, &method, "argument is not a DateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "until" | "since") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::DateTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             let largest = time_optional_string(arg1, "second");
+//RS             let smallest = time_optional_string(arg2, "nanosecond");
+//RS             let mode = time_optional_string(arg3, "trunc");
+//RS             let increment = time_optional_increment(arg4);
+//RS             match other {
+//RS                 Some(other) if method == "until" => {
+//RS                     dt.until_ns(&other, &largest, &smallest, &mode, increment)
+//RS                 }
+//RS                 Some(other) => dt.since_ns(&other, &largest, &smallest, &mode, increment),
+//RS                 None => civil_method_defect(v, &method, "argument is not a DateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "with") => {
+//RS             let overflow = time_optional_string(arg6, "constrain");
+//RS             match dt.with_overflow(arg0, arg1, arg2, arg3, arg4, arg5, &overflow) {
+//RS                 Ok(value) => result_ok(push(TimeValue::DateTime(value)) as u64),
+//RS                 Err(error) => result_err(error),
+//RS             }
+//RS         }
+//RS         (TimeValue::DateTime(dt), "format_checked") => {
+//RS             match dt.format_checked(&clone_string(arg0)) {
+//RS                 Ok(value) => result_ok(alloc_string(value) as u64),
+//RS                 Err(error) => result_err_record(error),
+//RS             }
+//RS         }
+//RS         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
+//RS         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
+//RS         (TimeValue::Instant(i), "equal") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Instant(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_bool_tag(*i == other),
+//RS                 None => civil_method_defect(v, &method, "argument is not an Instant"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Instant(i), "compare") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Instant(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_ordering_tag(i.cmp(&other)),
+//RS                 None => civil_method_defect(v, &method, "argument is not an Instant"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Period(period), "years") => period.years_value(),
+//RS         (TimeValue::Period(period), "months") => period.months_value(),
+//RS         (TimeValue::Period(period), "days") => period.days_value(),
+//RS         (TimeValue::Period(period), "sign") => period.sign(),
+//RS         (TimeValue::Period(period), "is_zero") => time_bool_tag(period.is_zero()),
+//RS         (TimeValue::Period(period), "abs" | "negated") => {
+//RS             let value = if method == "abs" {
+//RS                 period.abs()
+//RS             } else {
+//RS                 period.negated()
+//RS             };
+//RS             push(TimeValue::Period(value))
+//RS         }
+//RS         (TimeValue::Period(period), "add" | "sub") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(other) => Some(*other),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) if method == "add" => push(TimeValue::Period(period.add(&other))),
+//RS                 Some(other) => push(TimeValue::Period(period.sub(&other))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
+//RS         (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
+//RS         (TimeValue::LocalTime(t), "hour") => t.hour(),
+//RS         (TimeValue::LocalTime(t), "minute") => t.minute(),
+//RS         (TimeValue::LocalTime(t), "second") => t.second(),
+//RS         (TimeValue::LocalTime(t), "millisecond") => t.millisecond(),
+//RS         (TimeValue::LocalTime(t), "microsecond") => t.microsecond(),
+//RS         (TimeValue::LocalTime(t), "nanosecond") => t.nanosecond(),
+//RS         (TimeValue::LocalTime(t), "add_duration") => {
+//RS             push(TimeValue::LocalTime(t.add_duration_ns(arg0)))
+//RS         }
+//RS         (TimeValue::LocalTime(t), "subtract_duration") => {
+//RS             push(TimeValue::LocalTime(t.subtract_duration_ns(arg0)))
+//RS         }
+//RS         (TimeValue::LocalTime(t), "round") => push(TimeValue::LocalTime(t.round_with(
+//RS             &clone_string(arg0),
+//RS             time_optional_increment(arg1),
+//RS             &time_optional_string(arg2, "half_expand"),
+//RS         ))),
+//RS         (TimeValue::LocalTime(t), "truncate" | "floor" | "ceil") => {
+//RS             let unit = clone_string(arg0);
+//RS             let increment = time_optional_increment(arg1);
+//RS             let value = match method.as_str() {
+//RS                 "truncate" => t.truncate_with(&unit, increment),
+//RS                 "floor" => t.floor_with(&unit, increment),
+//RS                 _ => t.ceil_with(&unit, increment),
+//RS             };
+//RS             push(TimeValue::LocalTime(value))
+//RS         }
+//RS         (TimeValue::LocalTime(t), "until" | "since") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::LocalTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             let largest = time_optional_string(arg1, "second");
+//RS             let smallest = time_optional_string(arg2, "nanosecond");
+//RS             let mode = time_optional_string(arg3, "trunc");
+//RS             let increment = time_optional_increment(arg4);
+//RS             match other {
+//RS                 Some(other) if method == "until" => {
+//RS                     t.until_ns(&other, &largest, &smallest, &mode, increment)
+//RS                 }
+//RS                 Some(other) => t.since_ns(&other, &largest, &smallest, &mode, increment),
+//RS                 None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::LocalTime(t), "format") => alloc_string(t.format_pattern(&clone_string(arg0))),
+//RS         (TimeValue::LocalTime(t), "format_checked") => {
+//RS             match t.format_checked(&clone_string(arg0)) {
+//RS                 Ok(value) => result_ok(alloc_string(value) as u64),
+//RS                 Err(error) => result_err_record(error),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
+//RS         (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
+//RS         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
+//RS         (TimeValue::LocalTime(t), "equal") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::LocalTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_bool_tag(*t == other),
+//RS                 None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::LocalTime(t), "compare") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::LocalTime(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_ordering_tag(t.cmp(&other)),
+//RS                 None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "equal") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Zoned(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_bool_tag(*z == other),
+//RS                 None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "compare") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Zoned(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match other {
+//RS                 Some(other) => time_ordering_tag(z.cmp(&other)),
+//RS                 None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "format") => alloc_string(z.format_pattern(&clone_string(arg0))),
+//RS         (TimeValue::Zoned(z), "format_checked") => match z.format_checked(&clone_string(arg0)) {
+//RS             Ok(value) => result_ok(alloc_string(value) as u64),
+//RS             Err(error) => result_err_record(error),
+//RS         },
+//RS         (TimeValue::Zoned(z), "format_rfc9557") => alloc_string(z.format_rfc9557()),
+//RS         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
+//RS         (TimeValue::Zoned(z), "is_dst") => {
+//RS             if z.is_dst() {
+//RS                 1
+//RS             } else {
+//RS                 0
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "date") => push(TimeValue::Date(z.date())),
+//RS         (TimeValue::Zoned(z), "time") => push(TimeValue::LocalTime(z.time())),
+//RS         (TimeValue::Zoned(z), "zone") => push(TimeValue::Zone(z.zone())),
+//RS         (TimeValue::Zoned(z), "to_datetime") => push(TimeValue::DateTime(z.to_datetime())),
+//RS         // Duration is raw ns i64 after Result unwrap (I9 Duration ABI), the same
+//RS         // shape `DateTime.plus_duration` above marshals. The absolute-vs-civil
+//RS         // choice stays in the Prelude kernel: `add_duration_ns` moves the instant
+//RS         // and keeps the zone, `add_period` re-resolves the local wall clock, so a
+//RS         // DST transition lands correctly without any offset policy living here.
+//RS         (TimeValue::Zoned(z), "add_duration") => push(TimeValue::Zoned(z.add_duration_ns(arg0))),
+//RS         (TimeValue::Zoned(z), "subtract_duration") => {
+//RS             push(TimeValue::Zoned(z.subtract_duration_ns(arg0)))
+//RS         }
+//RS         (TimeValue::Zoned(z), "add_period") => {
+//RS             let period = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(p) => Some(p.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match period {
+//RS                 Some(p) => push(TimeValue::Zoned(z.add_period(&p))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "subtract_period") => {
+//RS             let period = with_time(arg0, |o| match o {
+//RS                 TimeValue::Period(p) => Some(p.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match period {
+//RS                 Some(p) => push(TimeValue::Zoned(z.subtract_period(&p))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Period"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "with_time") => {
+//RS             let time = with_time(arg0, |o| match o {
+//RS                 TimeValue::LocalTime(time) => Some(time.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             let disambiguation = time_optional_string(arg1, "compatible");
+//RS             match time {
+//RS                 Some(time) => match z.with_time(&time, &disambiguation) {
+//RS                     Ok(value) => result_ok(push(TimeValue::Zoned(value)) as u64),
+//RS                     Err(error) => result_err(error),
+//RS                 },
+//RS                 None => result_err("argument is not a LocalTime".to_string()),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "with_zone") => {
+//RS             let zone = with_time(arg0, |o| match o {
+//RS                 TimeValue::Zone(zone) => Some(zone.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match zone {
+//RS                 Some(zone) => push(TimeValue::Zoned(z.with_zone(&zone))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Zone"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "until" | "since") => {
+//RS             let other = with_time(arg0, |o| match o {
+//RS                 TimeValue::Zoned(other) => Some(other.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             let largest = time_optional_string(arg1, "second");
+//RS             let smallest = time_optional_string(arg2, "nanosecond");
+//RS             let mode = time_optional_string(arg3, "trunc");
+//RS             let increment = time_optional_increment(arg4);
+//RS             match other {
+//RS                 Some(other) if method == "until" => {
+//RS                     z.until_ns(&other, &largest, &smallest, &mode, increment)
+//RS                 }
+//RS                 Some(other) => z.since_ns(&other, &largest, &smallest, &mode, increment),
+//RS                 None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zoned(z), "next_transition" | "previous_transition") => {
+//RS             time_option_int(if method == "next_transition" {
+//RS                 z.next_transition()
+//RS             } else {
+//RS                 z.previous_transition()
+//RS             })
+//RS         }
+//RS         (TimeValue::Zoned(z), "start_of_day") => push(TimeValue::Zoned(z.start_of_day())),
+//RS         (TimeValue::Zoned(z), "hours_in_day") => z.hours_in_day(),
+//RS         (TimeValue::Zone(zone), "name") => alloc_string(zone.name()),
+//RS         (TimeValue::Zone(zone), "next_transition" | "previous_transition") => {
+//RS             time_option_int(if method == "next_transition" {
+//RS                 zone.next_transition(arg0)
+//RS             } else {
+//RS                 zone.previous_transition(arg0)
+//RS             })
+//RS         }
+//RS         (TimeValue::Zone(zone), "start_of_day") => {
+//RS             let date = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(date) => Some(date.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match date {
+//RS                 Some(date) => push(TimeValue::Zoned(zone.start_of_day_zoned(&date))),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         (TimeValue::Zone(zone), "hours_in_day") => {
+//RS             let date = with_time(arg0, |o| match o {
+//RS                 TimeValue::Date(date) => Some(date.clone()),
+//RS                 _ => None,
+//RS             });
+//RS             match date {
+//RS                 Some(date) => zone.hours_in_day(&date),
+//RS                 None => civil_method_defect(v, &method, "argument is not a Date"),
+//RS             }
+//RS         }
+//RS         _ => civil_method_defect(v, &method, "no marshalling arm"),
+//RS     })
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct TimeHostFns;
+//RS     register: register_time_symbols;
+//RS     declare: declare_time_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_void = Signature::new(cc);
+//RS         unary_void.params.push(AbiParam::new(types::I64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_i8 = Signature::new(cc);
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut ternary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut quaternary = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             quaternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         quaternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut hexary = Signature::new(cc);
+//RS         for _ in 0..6 {
+//RS             hexary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         hexary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut nonary = Signature::new(cc);
+//RS         for _ in 0..9 {
+//RS             nonary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         nonary.returns.push(AbiParam::new(types::I64));
+//RS         let mut period_total_in = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             period_total_in.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         period_total_in.returns.push(AbiParam::new(types::F64));
+//RS 
+//RS 
+//RS     }
+//RS     clock_new: "jet_std_clock_new" => jet_std_clock_new: unary;
+//RS     clock_system: "jet_std_clock_system" => jet_std_clock_system: nullary;
+//RS     clock_now: "jet_clock_now" => jet_clock_now: unary;
+//RS     clock_tick: "jet_clock_tick" => jet_clock_tick: binary;
+//RS     clock_advance: "jet_clock_advance" => jet_clock_advance: binary;
+//RS     clock_wait: "jet_clock_wait" => jet_clock_wait: binary;
+//RS     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
+//RS     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+//RS     date_today_prelude: "jet_time_today" => jet_jit_date_today: nullary;
+//RS     date_equal: "jet_jit_date_equal" => jet_jit_date_equal: binary_i8;
+//RS     date_compare: "jet_jit_date_compare" => jet_jit_date_compare: binary;
+//RS     display: "jet_jit_time_display" => jet_jit_time_display: unary;
+//RS     duration_display: "jet_jit_duration_display" => jet_jit_duration_display: unary;
+//RS     start: "jet_jit_time_start" => jet_jit_time_start: nullary;
+//RS     start_canonical: "jet_std_time_start" => jet_jit_time_start: nullary;
+//RS     sleep_duration: "jet_std_time_sleep_duration" => jet_jit_time_sleep_duration_ns: unary_void;
+//RS     sleep_until: "jet_time_sleep_until" => jet_jit_time_sleep_until: unary_void;
+//RS     realtime_callback: "jet_rt_callback" => jet_jit_realtime_callback: ternary;
+//RS     realtime_next_deadline: "jet_rt_next_deadline" => jet_jit_realtime_next_deadline: unary;
+//RS     realtime_receipt: "jet_rt_receipt" => jet_jit_realtime_receipt: unary;
+//RS     realtime_cancel: "jet_rt_cancel" => jet_jit_realtime_cancel: unary_void;
+//RS     realtime_is_cancelled: "jet_rt_is_cancelled" => jet_jit_realtime_is_cancelled: unary_i8;
+//RS     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
+//RS     datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
+//RS     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
+//RS     datetime_now_canonical: "jet_time_now_utc" => jet_jit_datetime_now: nullary;
+//RS     parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
+//RS     from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
+//RS     calendar_isleap: "jet_calendar_isleap" => jet_jit_calendar_isleap: unary_i8;
+//RS     calendar_leapdays: "jet_calendar_leapdays" => jet_jit_calendar_leapdays: binary;
+//RS     calendar_weekday: "jet_calendar_weekday" => jet_jit_calendar_weekday: ternary;
+//RS     calendar_monthrange: "jet_calendar_monthrange" => jet_jit_calendar_monthrange: binary;
+//RS     calendar_monthcalendar: "jet_calendar_monthcalendar" => jet_jit_calendar_monthcalendar: binary;
+//RS     calendar_monthcalendar_start: "jet_calendar_monthcalendar_start" => jet_jit_calendar_monthcalendar_start: ternary;
+//RS     calendar_yearcalendar: "jet_calendar_yearcalendar" => jet_jit_calendar_yearcalendar: unary;
+//RS     calendar_weekheader: "jet_calendar_weekheader" => jet_jit_calendar_weekheader: binary;
+//RS     calendar_formatmonth: "jet_calendar_formatmonth" => jet_jit_calendar_formatmonth: ternary;
+//RS     calendar_formatyear: "jet_calendar_formatyear" => jet_jit_calendar_formatyear: unary;
+//RS     calendar_day_name: "jet_calendar_day_name" => jet_jit_calendar_day_name: unary;
+//RS     calendar_day_abbr: "jet_calendar_day_abbr" => jet_jit_calendar_day_abbr: unary;
+//RS     calendar_month_name: "jet_calendar_month_name" => jet_jit_calendar_month_name: unary;
+//RS     calendar_month_abbr: "jet_calendar_month_abbr" => jet_jit_calendar_month_abbr: unary;
+//RS     calendar_timegm: "jet_calendar_timegm" => jet_jit_calendar_timegm: hexary;
+//RS     from_unix_seconds: "jet_jit_time_from_unix_seconds" => jet_jit_time_from_unix_seconds: unary;
+//RS     from_unix_microseconds: "jet_jit_time_from_unix_microseconds" => jet_jit_time_from_unix_microseconds: unary;
+//RS     from_unix_nanoseconds: "jet_jit_time_from_unix_nanoseconds" => jet_jit_time_from_unix_nanoseconds: unary;
+//RS     parse_iso_week_date: "jet_jit_time_parse_iso_week_date" => jet_jit_time_parse_iso_week_date: unary;
+//RS     from_iso_week: "jet_jit_time_from_iso_week" => jet_jit_time_from_iso_week: ternary;
+//RS     parse_zoned: "jet_jit_time_parse_zoned" => jet_jit_time_parse_zoned: unary;
+//RS     utc: "jet_jit_time_utc" => jet_jit_time_utc: nullary;
+//RS     period: "jet_jit_time_period" => jet_jit_time_period: ternary;
+//RS     period_days: "jet_jit_time_period_days" => jet_jit_time_period_days: unary;
+//RS     period_months: "jet_jit_time_period_months" => jet_jit_time_period_months: unary;
+//RS     period_years: "jet_jit_time_period_years" => jet_jit_time_period_years: unary;
+//RS     zone: "jet_jit_time_zone" => jet_jit_time_zone: unary;
+//RS     zoned_local: "jet_jit_time_zoned_local" => jet_jit_time_zoned_local: quaternary;
+//RS     parse_time: "jet_jit_time_parse_time" => jet_jit_time_parse_time: unary;
+//RS     instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
+//RS     instant_canonical: "jet_time_instant_now" => jet_jit_time_instant: nullary;
+//RS     instant_add_duration: "jet_jit_instant_add_duration" => jet_jit_instant_add_duration: binary;
+//RS     instant_sub_duration: "jet_jit_instant_sub_duration" => jet_jit_instant_sub_duration: binary;
+//RS     instant_difference: "jet_jit_instant_difference" => jet_jit_instant_difference: binary;
+//RS     instant_compare: "jet_jit_instant_compare" => jet_jit_instant_compare: binary;
+//RS     zoned: "jet_jit_time_zoned" => jet_jit_time_zoned: binary;
+//RS     days_in_month: "jet_jit_time_days_in_month" => jet_jit_time_days_in_month: binary;
+//RS     is_leap_year: "jet_jit_time_is_leap_year" => jet_jit_time_is_leap_year: unary_i8;
+//RS     datetime: "jet_jit_time_datetime" => jet_jit_time_datetime: hexary;
+//RS     local_time: "jet_jit_time_local_time" => jet_jit_time_local_time: ternary;
+//RS     period_total_in: "jet_jit_period_total_in" => jet_jit_period_total_in: period_total_in;
+//RS     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: nonary;
+//RS }
+// END-PORT-PENDING 0234 crates/jet-jit/src/Time.rs:1-1652
+

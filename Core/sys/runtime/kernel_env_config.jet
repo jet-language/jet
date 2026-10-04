@@ -1,0 +1,314 @@
+// EnvConfig.rs:1–144. D-CONFIG-ENV1 / I9: the source-order, prefix, allowlist,
+// dotenv and error-framing rules shared by every execution tier. Each engine
+// supplies its logical environment snapshot (env_init.jet) and marshals the
+// returned entries into its existing DataTree carrier for the one canonical
+// Decode. No DataTree, decoder, codec or second parser lives here.
+//
+// Native gate (Main stage-2 extraction): the decode adapters
+// (FSIoEnvOsTesting.rs:580–675, jet-jit Encoding.rs:660–745) keep the
+// Dotenv.file read (NotFound is None; any other io::Error is framed by the
+// adapter), the OsString→String snapshot filter, DataTree insertion and the
+// Decode call. EnvConfig.rs:13–19 jet_env_config_file_is_project_relative
+// (file: &str) -> bool stays a PRIVATE native path-classification leaf: it
+// borrows UTF-8 input, has no IO/failure, and consumes the target std::path
+// absolute/prefix/verbatim/rootless/component facts without normalizing paths.
+// Core/files' platform-neutral is_abs lacks these exact facts. Do not recreate
+// a Windows prefix parser here or infer target path behavior from sys.name().
+//
+// Offsets are UTF-8 byte offsets, exactly as in Rust. Every cut is at an ASCII
+// byte or a scalar boundary found by the sole scalar decoder, so each kept span
+// is whole UTF-8. Trimming is Rust char::is_whitespace through the pinned
+// Unicode 17.0.0 White_Space asset. #4318/#4392: utf8_bytes still materializes
+// a Vec and kept spans are copied into owned Strings; no borrowed-&str
+// allocation parity is claimed until the retained UTF-8 view leaf lands.
+use core.text.runtime.kernel_unicode_string as env_config_text
+use core.text.runtime.unicode_assets as env_config_asset
+use core.text.runtime.assets.unicode_white_space as env_config_white_space
+
+// Rust JetEnvConfigEntry (:6–11).
+pub struct JetEnvConfigEntry {
+    pub name: String
+    pub value: String
+    pub segments: [String]
+}
+
+// Rust `(String, String)` process snapshot item (:32) and BTreeMap value (:40):
+// the source spelling of the name and its value.
+pub struct JetEnvConfigVar {
+    pub name: String
+    pub value: String
+}
+
+// Rust `origins: &[(String, String)]` item (:103): the source environment
+// variable name and the decode path it was mapped to.
+pub struct JetEnvConfigOrigin {
+    pub name: String
+    pub path: String
+}
+
+// A half-open byte extent of a caller-owned UTF-8 buffer.
+struct EnvConfigSpan {
+    start: Int
+    end: Int
+}
+
+
+// Rust jet_env_config_entries (:28–93). Dotenv lines first, then the process
+// snapshot, in one BTreeMap keyed by the ASCII-uppercased name: a later source
+// replaces an earlier one and keeps its own spelling. Entries come out in key
+// order; segments are folded to ASCII lowercase for the decoder.
+pub fn jet_env_config_entries(prefix: String, dotenv: String?, allow: [String], process: ^[JetEnvConfigVar]) -> [JetEnvConfigEntry] Err! {
+    white_space :: env_config_white_space.UNICODE_WHITE_SPACE
+    values := [String: JetEnvConfigVar]{}
+    if dotenv == .Val(text) {
+        raw :: env_config_text.utf8_bytes(text)
+        // str::lines: split at `\n`; no empty line after a final newline. The
+        // trailing `\r` it strips is White_Space, removed by the trim below.
+        line_index := 0
+        line_start := 0
+        loop line_start < raw.len() {
+            line_end := line_start
+            loop line_end < raw.len() && raw[line_end] != (U8{10}) -> line_end = line_end + 1
+            line_number :: line_index + 1
+            line :: env_config_trim(raw, line_start, line_end, white_space)
+            line_index = line_index + 1
+            line_start = line_end + 1
+            if line.end == line.start || raw[line.start] == (U8{35}) -> next
+            body_start := line.start
+            if env_config_starts_with_export(raw, line.start, line.end) -> body_start = line.start + 7
+            equals := body_start
+            loop equals < line.end && raw[equals] != (U8{61}) -> equals = equals + 1
+            if equals == line.end -> return Err("invalid .env line {line_number}")
+            name_span :: env_config_trim(raw, body_start, equals, white_space)
+            name := env_config_span_text(raw, name_span.start, name_span.end)
+            if !jet_env_config_name_is_valid(name) || !env_config_allowed(allow, name) -> next
+            value_span :: env_config_trim(raw, equals + 1, line.end, white_space)
+            value := jet_env_config_dotenv_value(raw, value_span.start, value_span.end, white_space)
+            values[jet_env_config_ascii_upper(name)] = JetEnvConfigVar{name: name, value: value}
+        }
+    }
+    loop item in ^process {
+        if jet_env_config_name_is_valid(item.name) && env_config_allowed(allow, item.name) {
+            values[jet_env_config_ascii_upper(item.name)] = item
+        }
+    }
+
+    prefix_raw :: env_config_text.utf8_bytes(prefix)
+    entries := [JetEnvConfigEntry]{}
+    // The map is consumed in key order, as Rust's `for (_, (name, value)) in
+    // values` moves each source into its entry.
+    loop pair in ^values {
+        source := pair.value
+        raw :: env_config_text.utf8_bytes(source.name)
+        cut :: prefix_raw.len()
+        if !env_config_cut_is_boundary(raw, cut) -> next
+        if !env_config_eq_ignore_ascii_case_bytes(raw, 0, cut, prefix_raw, 0, cut) -> next
+        if cut == raw.len() -> next
+        // rest.split("__"): non-overlapping left-to-right cuts; empties dropped.
+        segments := [String]{}
+        part := cut
+        at := cut
+        loop at < raw.len() {
+            if raw[at] == (U8{95}) && at + 1 < raw.len() && raw[at + 1] == (U8{95}) {
+                if at > part -> &segments.push(env_config_lower_span(raw, part, at))
+                at = at + 2
+                part = at
+                next
+            }
+            at = at + 1
+        }
+        if raw.len() > part -> &segments.push(env_config_lower_span(raw, part, raw.len()))
+        if segments.len() == 0 -> next
+        &entries.push(JetEnvConfigEntry{name: source.name, value: source.value, segments: segments})
+    }
+    entries
+}
+
+// Rust jet_env_config_error_reason (:100–118). The decoder stays the sole
+// validator; this only applies secret redaction and the first origin whose
+// mapped path equals `path` ignoring ASCII case.
+pub fn jet_env_config_error_reason(path: String, reason: String, origins: [JetEnvConfigOrigin]) -> String Never! {
+    shown :: if jet_env_config_secret_path(path) -> "secret value rejected" else -> reason
+    path_raw :: env_config_text.utf8_bytes(path)
+    loop origin in origins {
+        mapped :: env_config_text.utf8_bytes(origin.path)
+        if mapped.len() == path_raw.len() && env_config_eq_ignore_ascii_case_bytes(mapped, 0, mapped.len(), path_raw, 0, path_raw.len()) {
+            return "E2416: env var {origin.name} -> {path}: {shown}"
+        }
+    }
+    "E2416: config field {path}: {shown}"
+}
+
+// Rust jet_env_config_secret_path (:120–127): any `.`/`[`/`]` segment that is
+// secret, password, token or key in any ASCII case.
+fn jet_env_config_secret_path(path: String) -> Bool Never! {
+    raw :: env_config_text.utf8_bytes(path)
+    part := 0
+    at := 0
+    loop at <= raw.len() {
+        if at == raw.len() || raw[at] == (U8{46}) || raw[at] == (U8{91}) || raw[at] == (U8{93}) {
+            if env_config_secret_word(raw, part, at) -> return true
+            part = at + 1
+        }
+        at = at + 1
+    }
+    false
+}
+
+// One `to_ascii_lowercase()` match arm of :123–124; only a segment of a
+// candidate word's width reads that word's bytes.
+fn env_config_secret_word(raw: [U8], start: Int, end: Int) -> Bool Never! {
+    width :: end - start
+    if width != 3 && width != 5 && width != 6 && width != 8 -> return false
+    word :: if {
+        width == 3 -> "key"
+        width == 5 -> "token"
+        width == 6 -> "secret"
+        else -> "password"
+    }
+    expected :: env_config_text.utf8_bytes(word)
+    env_config_eq_ignore_ascii_case_bytes(raw, start, end, expected, 0, expected.len())
+}
+
+// Rust jet_env_config_name_is_valid (:129–131).
+fn jet_env_config_name_is_valid(name: String) -> Bool Never! {
+    raw :: env_config_text.utf8_bytes(name)
+    if raw.len() == 0 -> return false
+    loop byte in raw {
+        if byte == (U8{61}) || byte == (U8{0}) -> return false
+    }
+    true
+}
+
+// Rust jet_env_config_dotenv_value (:133–144) over raw[start..<end]: one
+// matching pair of outer quotes is removed verbatim; otherwise the first ` #`
+// starts a comment and the kept text is trimmed at its end.
+fn jet_env_config_dotenv_value(raw: [U8], start: Int, end: Int, white_space: [U8]) -> String Never! {
+    value :: env_config_trim(raw, start, end, white_space)
+    if value.end - value.start >= 2 {
+        first :: raw[value.start]
+        last :: raw[value.end - 1]
+        if (first == (U8{34}) && last == (U8{34})) || (first == (U8{39}) && last == (U8{39})) {
+            return env_config_span_text(raw, value.start + 1, value.end - 1)
+        }
+    }
+    at := value.start
+    loop at + 1 < value.end {
+        if raw[at] == (U8{32}) && raw[at + 1] == (U8{35}) {
+            kept :: env_config_trim_end(raw, value.start, at, white_space)
+            return env_config_span_text(raw, value.start, kept)
+        }
+        at = at + 1
+    }
+    env_config_span_text(raw, value.start, value.end)
+}
+
+// Rust `allow.is_empty() || allow.iter().any(eq_ignore_ascii_case)` (:34–39).
+fn env_config_allowed(allow: [String], name: String) -> Bool Never! {
+    if allow.len() == 0 -> return true
+    loop candidate in allow {
+        if jet_env_config_eq_ignore_ascii_case(candidate, name) -> return true
+    }
+    false
+}
+
+// Rust str::eq_ignore_ascii_case: equal byte length and ASCII-folded bytes.
+pub fn jet_env_config_eq_ignore_ascii_case(left: String, right: String) -> Bool Never! {
+    left_raw :: env_config_text.utf8_bytes(left)
+    right_raw :: env_config_text.utf8_bytes(right)
+    left_raw.len() == right_raw.len() && env_config_eq_ignore_ascii_case_bytes(left_raw, 0, left_raw.len(), right_raw, 0, right_raw.len())
+}
+
+// Equal-width spans compared with ASCII folding; non-ASCII bytes must match.
+fn env_config_eq_ignore_ascii_case_bytes(left: [U8], left_start: Int, left_end: Int, right: [U8], right_start: Int, right_end: Int) -> Bool Never! {
+    if left_end - left_start != right_end - right_start -> return false
+    loop i in 0..<(left_end - left_start) {
+        if env_config_ascii_lower_byte(left[left_start + i]) != env_config_ascii_lower_byte(right[right_start + i]) -> return false
+    }
+    true
+}
+
+fn env_config_ascii_lower_byte(byte: U8) -> U8 Never! {
+    if byte >= (U8{65}) && byte <= (U8{90}) -> return byte + U8{32}
+    byte
+}
+
+fn env_config_ascii_upper_byte(byte: U8) -> U8 Never! {
+    if byte >= (U8{97}) && byte <= (U8{122}) -> return byte - U8{32}
+    byte
+}
+
+// Rust str::to_ascii_uppercase: only ASCII letters change.
+pub fn jet_env_config_ascii_upper(text: String) -> String Never! {
+    raw :: env_config_text.utf8_bytes(text)
+    out := [U8]{}
+    loop byte in raw -> &out.push(env_config_ascii_upper_byte(byte))
+    String.from_bytes(out) ?? panic("ASCII case fold produced invalid UTF-8")
+}
+
+// Rust `name.get(prefix.len()..)` (:69–70; EnvProjection.rs:34): the byte cut
+// exists only up to the end and on a scalar boundary.
+fn env_config_cut_is_boundary(raw: [U8], cut: Int) -> Bool Never! {
+    if cut > raw.len() -> return false
+    cut == raw.len() || raw[cut] < (U8{128}) || raw[cut] >= (U8{192})
+}
+
+// Rust EnvProjection.rs:32–35:
+// `name.get(prefix.len()..).is_some_and(|suffix| suffix.eq_ignore_ascii_case(wanted))`.
+pub fn jet_env_config_suffix_eq_ignore_ascii_case(name: String, prefix: String, wanted: String) -> Bool Never! {
+    raw :: env_config_text.utf8_bytes(name)
+    cut :: env_config_text.utf8_bytes(prefix).len()
+    if !env_config_cut_is_boundary(raw, cut) -> return false
+    expected :: env_config_text.utf8_bytes(wanted)
+    env_config_eq_ignore_ascii_case_bytes(raw, cut, raw.len(), expected, 0, expected.len())
+}
+
+// Rust str::to_ascii_lowercase of raw[start..<end].
+fn env_config_lower_span(raw: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(env_config_ascii_lower_byte(raw[at]))
+    String.from_bytes(out) ?? panic("environment segment split a UTF-8 scalar")
+}
+
+// Owned String for raw[start..<end]; callers cut only at scalar boundaries.
+fn env_config_span_text(raw: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(raw[at])
+    String.from_bytes(out) ?? panic("environment span split a UTF-8 scalar")
+}
+
+// Rust line.strip_prefix("export ") (:47) on raw[start..<end].
+fn env_config_starts_with_export(raw: [U8], start: Int, end: Int) -> Bool Never! {
+    end - start >= 7 && raw[start] == (U8{101}) && raw[start + 1] == (U8{120}) && raw[start + 2] == (U8{112}) &&
+        raw[start + 3] == (U8{111}) && raw[start + 4] == (U8{114}) && raw[start + 5] == (U8{116}) && raw[start + 6] == (U8{32})
+}
+
+// Rust str::trim over raw[start..<end]: White_Space scalars from both ends.
+fn env_config_trim(raw: [U8], start: Int, end: Int, white_space: [U8]) -> EnvConfigSpan Never! {
+    first := start
+    loop first < end && env_config_asset.asset_contains(white_space, env_config_text.scalar_at(raw, first)) {
+        first = first + env_config_text.utf8_width_at(raw, first)
+    }
+    EnvConfigSpan{start: first, end: env_config_trim_end(raw, first, end, white_space)}
+}
+
+// Rust str::trim_end over raw[start..<end]: the end of the last non-White_Space
+// scalar, found by a forward scan through the sole decoder.
+fn env_config_trim_end(raw: [U8], start: Int, end: Int, white_space: [U8]) -> Int Never! {
+    kept := start
+    at := start
+    loop at < end {
+        width :: env_config_text.utf8_width_at(raw, at)
+        if !env_config_asset.asset_contains(white_space, env_config_text.scalar_at(raw, at)) -> kept = at + width
+        at = at + width
+    }
+    kept
+}
+
+// Rust `s.trim().is_empty()`: every scalar is White_Space.
+pub fn jet_env_config_is_blank(text: String) -> Bool Never! {
+    white_space :: env_config_white_space.UNICODE_WHITE_SPACE
+    raw :: env_config_text.utf8_bytes(text)
+    span :: env_config_trim(raw, 0, raw.len(), white_space)
+    span.end == span.start
+}

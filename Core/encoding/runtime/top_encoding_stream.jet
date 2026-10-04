@@ -1,0 +1,1744 @@
+// PORT-PENDING 0130 crates-jet-codegen-src-prelude-corelib-top-encodingstream-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1-1740
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-ENCSTREAM-SURFACE1=A: bounded pull JSON over owned file handles.
+//RS // Reader consumes at most one scalar/container boundary per `next`; no read-to-end
+//RS // or delimiter transcript sits behind this API.
+//RS 
+//RS // D-ENCSTREAM-SURFACE1=A: every codec reader uses the ordinary bounded pull
+//RS // adapter. One call advances one item; EOF and errors are terminal at the
+//RS // ordinary loop boundary, matching the prior explicit break/panic path.
+//RS fn jet_encoding_reader_iter<T, F>(
+//RS     mut next: F,
+//RS ) -> impl Iterator<Item = Result<T, jet_std::EncodingError>>
+//RS where
+//RS     F: FnMut() -> Result<JetOutcome<T, JetAbsent>, jet_std::EncodingError>,
+//RS {
+//RS     let mut finished = false;
+//RS     std::iter::from_fn(move || {
+//RS         if finished {
+//RS             return None;
+//RS         }
+//RS         match next() {
+//RS             Ok(Ok(item)) => Some(Ok(item)),
+//RS             Ok(Err(JetAbsent)) => {
+//RS                 finished = true;
+//RS                 None
+//RS             }
+//RS             Err(error) => {
+//RS                 finished = true;
+//RS                 Some(Err(error))
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS // D-ENCSTREAM-SURFACE1=A: every adapter has one terminal transition. The
+//RS // first error wins; all later calls receive an equal snapshot.
+//RS fn jet_encoding_fail<T>(
+//RS     terminal: &mut Option<jet_std::EncodingError>,
+//RS     error: jet_std::EncodingError,
+//RS ) -> Result<T, jet_std::EncodingError> {
+//RS     if let Some(first) = terminal.as_ref() {
+//RS         return Err(first.clone());
+//RS     }
+//RS     *terminal = Some(error.clone());
+//RS     Err(error)
+//RS }
+//RS 
+//RS enum JetJSONReadFrame {
+//RS     ArrayValueOrEnd { first: bool, index: usize },
+//RS     ArrayCommaOrEnd { index: usize },
+//RS     ObjectKeyOrEnd { first: bool },
+//RS     ObjectColonValue { key: String, key_heap: usize },
+//RS     ObjectCommaOrEnd { key: String, key_heap: usize },
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum JetJSONReadState {
+//RS     ArrayValueOrEnd { first: bool, index: usize },
+//RS     ArrayCommaOrEnd { index: usize },
+//RS     ObjectKeyOrEnd { first: bool },
+//RS     ObjectColonValue,
+//RS     ObjectCommaOrEnd,
+//RS }
+//RS 
+//RS /// Codec heap budget shared by a reader/writer and its clones. The counter is
+//RS /// atomic so Source-owned encoding streams can move between scheduler threads.
+//RS #[derive(Clone)]
+//RS struct JetEncodingAllocationBudget {
+//RS     inner: std::sync::Arc<JetEncodingAllocationState>,
+//RS }
+//RS 
+//RS struct JetEncodingAllocationState {
+//RS     used: std::sync::atomic::AtomicUsize,
+//RS     limit: usize,
+//RS }
+//RS 
+//RS impl JetEncodingAllocationBudget {
+//RS     fn new(limit: usize) -> Self {
+//RS         Self {
+//RS             inner: std::sync::Arc::new(JetEncodingAllocationState {
+//RS                 used: std::sync::atomic::AtomicUsize::new(0),
+//RS                 limit,
+//RS             }),
+//RS         }
+//RS     }
+//RS 
+//RS     fn charge(&self, bytes: usize) -> bool {
+//RS         let limit = self.inner.limit;
+//RS         self.inner
+//RS             .used
+//RS             .fetch_update(
+//RS                 std::sync::atomic::Ordering::AcqRel,
+//RS                 std::sync::atomic::Ordering::Acquire,
+//RS                 |used| used.checked_add(bytes).filter(|next| *next <= limit),
+//RS             )
+//RS             .is_ok()
+//RS     }
+//RS 
+//RS     fn release(&self, bytes: usize) {
+//RS         let _ = self.inner.used.fetch_update(
+//RS             std::sync::atomic::Ordering::AcqRel,
+//RS             std::sync::atomic::Ordering::Acquire,
+//RS             |used| Some(used.saturating_sub(bytes)),
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum JetJSONWriteFrame {
+//RS     Array { first: bool },
+//RS     ObjectKey { first: bool },
+//RS     ObjectValue,
+//RS }
+//RS 
+//RS enum JetJSONCanonicalFrame {
+//RS     Array { first: bool },
+//RS     Object {
+//RS         entries: Vec<(String, Vec<u8>)>,
+//RS         key: Option<String>,
+//RS         value: Vec<u8>,
+//RS         retained: usize,
+//RS     },
+//RS }
+//RS 
+//RS fn jet_json_big_pow(mut base: jet_std::JetBigInt, mut exponent: usize) -> jet_std::JetBigInt {
+//RS     let mut out = jet_std::JetBigInt::from_int(1);
+//RS     while exponent > 0 {
+//RS         if exponent & 1 == 1 {
+//RS             out = out.mul(&base);
+//RS         }
+//RS         exponent >>= 1;
+//RS         if exponent > 0 {
+//RS             base = base.mul(&base);
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_json_decimal_ratio(text: &str) -> (jet_std::JetBigInt, jet_std::JetBigInt) {
+//RS     let (mantissa, exponent) = text
+//RS         .split_once('e')
+//RS         .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+//RS         .unwrap_or((text, 0));
+//RS     let fraction = mantissa.split_once('.').map_or(0, |(_, fraction)| fraction.len()) as i32;
+//RS     let digits = mantissa.replace('.', "");
+//RS     let mut numerator = jet_std::JetBigInt::from_str(&digits).expect("Rust float digits");
+//RS     let mut denominator = jet_std::JetBigInt::from_int(1);
+//RS     let decimal_exponent = exponent - fraction;
+//RS     if decimal_exponent >= 0 {
+//RS         numerator = numerator.mul(&jet_json_big_pow(jet_std::JetBigInt::from_int(10), decimal_exponent as usize));
+//RS     } else {
+//RS         denominator = jet_json_big_pow(jet_std::JetBigInt::from_int(10), (-decimal_exponent) as usize);
+//RS     }
+//RS     (numerator, denominator)
+//RS }
+//RS 
+//RS fn jet_json_float_ratio(value: f64) -> (jet_std::JetBigInt, jet_std::JetBigInt) {
+//RS     let bits = value.to_bits();
+//RS     let biased = ((bits >> 52) & 0x7ff) as i32;
+//RS     let fraction = bits & ((1u64 << 52) - 1);
+//RS     let (significand, exponent) = if biased == 0 {
+//RS         (fraction, -1074)
+//RS     } else {
+//RS         ((1u64 << 52) | fraction, biased - 1023 - 52)
+//RS     };
+//RS     let mut numerator = jet_std::JetBigInt::from_int(significand as i64);
+//RS     let mut denominator = jet_std::JetBigInt::from_int(1);
+//RS     if exponent >= 0 {
+//RS         numerator = numerator.mul(&jet_json_big_pow(jet_std::JetBigInt::from_int(2), exponent as usize));
+//RS     } else {
+//RS         denominator = jet_json_big_pow(jet_std::JetBigInt::from_int(2), (-exponent) as usize);
+//RS     }
+//RS     (numerator, denominator)
+//RS }
+//RS 
+//RS fn jet_json_decimal_distance(text: &str, exact: &(jet_std::JetBigInt, jet_std::JetBigInt)) -> jet_std::JetBigInt {
+//RS     let candidate = jet_json_decimal_ratio(text);
+//RS     let distance = candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1));
+//RS     let rendered = distance.to_string_rep();
+//RS     jet_std::JetBigInt::from_str(rendered.strip_prefix('-').unwrap_or(&rendered)).expect("absolute decimal distance")
+//RS }
+//RS 
+//RS fn jet_json_positive_big_cmp(left: &jet_std::JetBigInt, right: &jet_std::JetBigInt) -> std::cmp::Ordering {
+//RS     let left = left.to_string_rep();
+//RS     let right = right.to_string_rep();
+//RS     left.len().cmp(&right.len()).then_with(|| left.cmp(&right))
+//RS }
+//RS 
+//RS fn jet_json_jcs_shortest(value: f64) -> String {
+//RS     let shortest = format!("{:?}", value);
+//RS     let mantissa_end = shortest.find('e').unwrap_or(shortest.len());
+//RS     let Some(index) = shortest[..mantissa_end].rfind(|ch: char| ch.is_ascii_digit()) else { return shortest };
+//RS     let digit = shortest.as_bytes()[index] - b'0';
+//RS     let mut candidates = vec![(shortest.clone(), digit)];
+//RS     for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(|next| *next < 10)].into_iter().flatten() {
+//RS         let mut candidate = shortest.clone().into_bytes();
+//RS         candidate[index] = b'0' + replacement;
+//RS         let candidate = String::from_utf8(candidate).expect("ASCII digit replacement");
+//RS         if candidate.parse::<f64>().is_ok_and(|parsed| parsed.to_bits() == value.to_bits()) {
+//RS             candidates.push((candidate, replacement));
+//RS         }
+//RS     }
+//RS     if candidates.len() == 1 {
+//RS         return shortest;
+//RS     }
+//RS     let exact = jet_json_float_ratio(value);
+//RS     candidates
+//RS         .into_iter()
+//RS         .map(|(candidate, last)| {
+//RS             let distance = jet_json_decimal_distance(&candidate, &exact);
+//RS             (candidate, last, distance)
+//RS         })
+//RS         .min_by(|left, right| {
+//RS             jet_json_positive_big_cmp(&left.2, &right.2)
+//RS                 .then_with(|| (left.1 & 1).cmp(&(right.1 & 1)))
+//RS         })
+//RS         .map(|(candidate, _, _)| candidate)
+//RS         .expect("at least one shortest float")
+//RS }
+//RS 
+//RS fn jet_json_jcs_number(value: f64) -> String {
+//RS     if value == 0.0 {
+//RS         return "0".to_string();
+//RS     }
+//RS     let negative = value.is_sign_negative();
+//RS     let shortest = jet_json_jcs_shortest(value.abs());
+//RS     let (mantissa, exponent) = shortest
+//RS         .split_once('e')
+//RS         .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+//RS         .unwrap_or((&shortest, 0));
+//RS     let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
+//RS     let mut digits = mantissa.bytes().filter(|byte| *byte != b'.').collect::<Vec<_>>();
+//RS     let leading = digits.iter().take_while(|byte| **byte == b'0').count();
+//RS     digits.drain(..leading);
+//RS     while digits.len() > 1 && digits.last() == Some(&b'0') {
+//RS         digits.pop();
+//RS     }
+//RS     let n = decimal + exponent - leading as i32;
+//RS     let mut out = String::new();
+//RS     if negative {
+//RS         out.push('-');
+//RS     }
+//RS     if n > 0 && n <= 21 {
+//RS         if digits.len() <= n as usize {
+//RS             out.extend(digits.iter().map(|byte| *byte as char));
+//RS             out.extend(std::iter::repeat_n('0', n as usize - digits.len()));
+//RS         } else {
+//RS             let split = n as usize;
+//RS             out.extend(digits[..split].iter().map(|byte| *byte as char));
+//RS             out.push('.');
+//RS             out.extend(digits[split..].iter().map(|byte| *byte as char));
+//RS         }
+//RS     } else if n > -6 && n <= 0 {
+//RS         out.push_str("0.");
+//RS         out.extend(std::iter::repeat_n('0', (-n) as usize));
+//RS         out.extend(digits.iter().map(|byte| *byte as char));
+//RS     } else {
+//RS         out.push(digits[0] as char);
+//RS         if digits.len() > 1 {
+//RS             out.push('.');
+//RS             out.extend(digits[1..].iter().map(|byte| *byte as char));
+//RS         }
+//RS         out.push('e');
+//RS         let exponent = n - 1;
+//RS         if exponent >= 0 {
+//RS             out.push('+');
+//RS         }
+//RS         out.push_str(&exponent.to_string());
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_json_jcs_key_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+//RS     left.encode_utf16().cmp(right.encode_utf16())
+//RS }
+//RS 
+//RS fn jet_encoding_error(
+//RS     kind: jet_std::EncodingErrorKind,
+//RS     offset: i64,
+//RS     line: i64,
+//RS     column: i64,
+//RS     reason: impl Into<String>,
+//RS ) -> jet_std::EncodingError {
+//RS     jet_std::EncodingError {
+//RS         format: jet_std::EncodingFormat::JSON,
+//RS         kind,
+//RS         byte_offset: offset,
+//RS         line: Ok(line),
+//RS         column: Ok(column),
+//RS         path: String::new(),
+//RS         reason: reason.into(),
+//RS         cause: Err(JetAbsent),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_encoding_io_error(
+//RS     offset: i64,
+//RS     line: i64,
+//RS     column: i64,
+//RS     error: std::io::Error,
+//RS ) -> jet_std::EncodingError {
+//RS     jet_std::EncodingError {
+//RS         format: jet_std::EncodingFormat::JSON,
+//RS         kind: jet_std::EncodingErrorKind::IO,
+//RS         byte_offset: offset,
+//RS         line: Ok(line),
+//RS         column: Ok(column),
+//RS         path: String::new(),
+//RS         reason: "file IO failed".to_string(),
+//RS         cause: Ok(jet_std::EncodingCause {
+//RS             kind: format!("{:?}", error.kind()),
+//RS             os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
+//RS             message: error.to_string(),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_encoding_validate_limits(
+//RS     limits: &jet_std::EncodingLimits,
+//RS ) -> Result<(), jet_std::EncodingError> {
+//RS     let invalid = if !(4096..=16777216).contains(&limits.buffer_bytes) {
+//RS         Some(format!("buffer_bytes {} is outside 4096..16777216", limits.buffer_bytes))
+//RS     } else if !(1..=4096).contains(&limits.max_depth) {
+//RS         Some(format!("max_depth {} is outside 1..4096", limits.max_depth))
+//RS     } else if !(1..=1073741824).contains(&limits.max_item_bytes) {
+//RS         Some(format!("max_item_bytes {} is outside 1..1073741824", limits.max_item_bytes))
+//RS     } else if let Ok(value) = limits.max_total_bytes {
+//RS         (value < 0).then(|| format!("max_total_bytes {value} is outside 0..Int.max"))
+//RS     } else if !(0..=256).contains(&limits.max_expansion_depth) {
+//RS         Some(format!("max_expansion_depth {} is outside 0..256", limits.max_expansion_depth))
+//RS     } else if !(0..=1073741824).contains(&limits.max_expansion_bytes) {
+//RS         Some(format!("max_expansion_bytes {} is outside 0..1073741824", limits.max_expansion_bytes))
+//RS     } else {
+//RS         None
+//RS     };
+//RS     match invalid {
+//RS         Some(reason) => Err(jet_std::EncodingError {
+//RS             format: jet_std::EncodingFormat::JSON,
+//RS             kind: jet_std::EncodingErrorKind::Limit,
+//RS             byte_offset: 0,
+//RS             line: Ok(1),
+//RS             column: Ok(1),
+//RS             path: String::new(),
+//RS             reason,
+//RS             cause: Err(JetAbsent),
+//RS         }),
+//RS         None => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS // D-ENCSTREAM-SURFACE1=A codec-owned live heap ceiling.
+//RS fn jet_encoding_codec_heap_ceiling(limits: &jet_std::EncodingLimits) -> usize {
+//RS     (limits.buffer_bytes as usize)
+//RS         .saturating_add(limits.max_item_bytes as usize)
+//RS         .saturating_add(limits.max_expansion_bytes as usize)
+//RS         .saturating_add((limits.max_depth as usize).saturating_mul(256))
+//RS         .saturating_add(65_536)
+//RS }
+//RS 
+//RS // Reserve one owned backing allocation before it grows.  The allocator may
+//RS // choose a capacity larger than the requested target, so reconcile the
+//RS // charge with the capacity actually observed.  Every caller treats `false`
+//RS // as terminal: after a post-charge failure this helper drops the value and
+//RS // releases its old/current capacity, leaving no live allocation behind and
+//RS // no phantom budget debit.
+//RS fn jet_encoding_reserve_vec<T>(
+//RS     budget: Option<&JetEncodingAllocationBudget>,
+//RS     values: &mut Vec<T>,
+//RS     additional: usize,
+//RS ) -> bool {
+//RS     if additional == 0 {
+//RS         return true;
+//RS     }
+//RS     if values
+//RS         .len()
+//RS         .checked_add(additional)
+//RS         .is_some_and(|needed| needed <= values.capacity())
+//RS     {
+//RS         return true;
+//RS     }
+//RS     let slot = std::mem::size_of::<T>();
+//RS     let old_bytes = match values.capacity().checked_mul(slot) {
+//RS         Some(bytes) => bytes,
+//RS         None => {
+//RS             let values = std::mem::take(values);
+//RS             drop(values);
+//RS             return false;
+//RS         }
+//RS     };
+//RS     let requested_capacity = match values.len().checked_add(additional) {
+//RS         Some(capacity) => capacity,
+//RS         None => {
+//RS             let values = std::mem::take(values);
+//RS             drop(values);
+//RS             if let Some(budget) = budget {
+//RS                 budget.release(old_bytes);
+//RS             }
+//RS             return false;
+//RS         }
+//RS     };
+//RS     let requested_bytes = match requested_capacity.checked_mul(slot) {
+//RS         Some(bytes) => bytes,
+//RS         None => {
+//RS             let values = std::mem::take(values);
+//RS             drop(values);
+//RS             if let Some(budget) = budget {
+//RS                 budget.release(old_bytes);
+//RS             }
+//RS             return false;
+//RS         }
+//RS     };
+//RS     let requested_growth = requested_bytes.saturating_sub(old_bytes);
+//RS     if let Some(budget) = budget {
+//RS         if !budget.charge(requested_growth) {
+//RS             let values = std::mem::take(values);
+//RS             drop(values);
+//RS             budget.release(old_bytes);
+//RS             return false;
+//RS         }
+//RS     }
+//RS     if values.try_reserve_exact(additional).is_err() {
+//RS         if let Some(budget) = budget {
+//RS             budget.release(requested_growth);
+//RS         }
+//RS         let values = std::mem::take(values);
+//RS         let actual_bytes = values.capacity().saturating_mul(slot);
+//RS         drop(values);
+//RS         if let Some(budget) = budget {
+//RS             budget.release(actual_bytes);
+//RS         }
+//RS         return false;
+//RS     }
+//RS     let actual_bytes = match values.capacity().checked_mul(slot) {
+//RS         Some(bytes) => bytes,
+//RS         None => {
+//RS             if let Some(budget) = budget {
+//RS                 budget.release(requested_bytes);
+//RS             }
+//RS             let values = std::mem::take(values);
+//RS             drop(values);
+//RS             return false;
+//RS         }
+//RS     };
+//RS     if actual_bytes < old_bytes {
+//RS         if let Some(budget) = budget {
+//RS             budget.release(requested_bytes);
+//RS         }
+//RS         let values = std::mem::take(values);
+//RS         drop(values);
+//RS         return false;
+//RS     }
+//RS     if let Some(budget) = budget {
+//RS         if actual_bytes > requested_bytes {
+//RS             if !budget.charge(actual_bytes - requested_bytes) {
+//RS                 let values = std::mem::take(values);
+//RS                 drop(values);
+//RS                 budget.release(requested_bytes);
+//RS                 return false;
+//RS             }
+//RS         } else {
+//RS             budget.release(requested_bytes - actual_bytes);
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn jet_encoding_reserve_string(
+//RS     budget: Option<&JetEncodingAllocationBudget>,
+//RS     value: &mut String,
+//RS     additional: usize,
+//RS ) -> bool {
+//RS     if additional == 0 {
+//RS         return true;
+//RS     }
+//RS     if value
+//RS         .len()
+//RS         .checked_add(additional)
+//RS         .is_some_and(|needed| needed <= value.capacity())
+//RS     {
+//RS         return true;
+//RS     }
+//RS     let old_bytes = value.capacity();
+//RS     let requested_bytes = match value.len().checked_add(additional) {
+//RS         Some(bytes) => bytes,
+//RS         None => {
+//RS             let value = std::mem::take(value);
+//RS             drop(value);
+//RS             if let Some(budget) = budget {
+//RS                 budget.release(old_bytes);
+//RS             }
+//RS             return false;
+//RS         }
+//RS     };
+//RS     let requested_growth = requested_bytes.saturating_sub(old_bytes);
+//RS     if let Some(budget) = budget {
+//RS         if !budget.charge(requested_growth) {
+//RS             let value = std::mem::take(value);
+//RS             drop(value);
+//RS             budget.release(old_bytes);
+//RS             return false;
+//RS         }
+//RS     }
+//RS     if value.try_reserve_exact(additional).is_err() {
+//RS         if let Some(budget) = budget {
+//RS             budget.release(requested_growth);
+//RS         }
+//RS         let value = std::mem::take(value);
+//RS         drop(value);
+//RS         if let Some(budget) = budget {
+//RS             budget.release(old_bytes);
+//RS         }
+//RS         return false;
+//RS     }
+//RS     let actual_bytes = value.capacity();
+//RS     if let Some(budget) = budget {
+//RS         if actual_bytes < old_bytes {
+//RS             budget.release(requested_bytes);
+//RS             let value = std::mem::take(value);
+//RS             drop(value);
+//RS             return false;
+//RS         }
+//RS         if actual_bytes > requested_bytes {
+//RS             if !budget.charge(actual_bytes - requested_bytes) {
+//RS                 let value = std::mem::take(value);
+//RS                 drop(value);
+//RS                 budget.release(requested_bytes);
+//RS                 return false;
+//RS             }
+//RS         } else {
+//RS             budget.release(requested_bytes - actual_bytes);
+//RS         }
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS fn jet_enc_json_reader(
+//RS     input: JetFileReader,
+//RS     limits: jet_std::EncodingLimits,
+//RS ) -> Result<jet_std::JSONReader, jet_std::EncodingError> {
+//RS     jet_encoding_validate_limits(&limits)?;
+//RS     let allocation_budget = Some(JetEncodingAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits)));
+//RS     Ok(jet_std::JSONReader {
+//RS         input,
+//RS         limits,
+//RS         total: 0,
+//RS         offset: 0,
+//RS         line: 1,
+//RS         column: 1,
+//RS         lookahead: None,
+//RS         frames: Vec::new(),
+//RS         root_started: false,
+//RS         root_done: false,
+//RS         terminal: None,
+//RS         eof: false,
+//RS         record_mode: false,
+//RS         typed_numbers: false,
+//RS         allocation_budget,
+//RS         output_heap: 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_enc_json_writer(
+//RS     output: JetFileWriter,
+//RS     limits: jet_std::EncodingLimits,
+//RS     canonical: bool,
+//RS ) -> Result<jet_std::JSONWriter, jet_std::EncodingError> {
+//RS     jet_encoding_validate_limits(&limits)?;
+//RS     Ok(jet_std::JSONWriter {
+//RS         output,
+//RS         limits,
+//RS         frames: Vec::new(),
+//RS         root_written: false,
+//RS         finished: false,
+//RS         terminal: None,
+//RS         total: 0,
+//RS         canonical,
+//RS         canonical_frames: Vec::new(),
+//RS         canonical_retained: 0,
+//RS     })
+//RS }
+//RS 
+//RS impl jet_std::JSONReader {
+//RS     fn path(&self) -> String {
+//RS         let mut path = "$".to_string();
+//RS         for frame in &self.frames {
+//RS             match frame {
+//RS                 JetJSONReadFrame::ArrayValueOrEnd { index, .. }
+//RS                 | JetJSONReadFrame::ArrayCommaOrEnd { index } => {
+//RS                     path.push('[');
+//RS                     path.push_str(&index.to_string());
+//RS                     path.push(']');
+//RS                 }
+//RS                 JetJSONReadFrame::ObjectColonValue { key, .. }
+//RS                 | JetJSONReadFrame::ObjectCommaOrEnd { key, .. } => {
+//RS                     path.push('[');
+//RS                     path.push_str(&format!("{:?}", key));
+//RS                     path.push(']');
+//RS                 }
+//RS                 JetJSONReadFrame::ObjectKeyOrEnd { .. } => {}
+//RS             }
+//RS         }
+//RS         path
+//RS     }
+//RS 
+//RS     fn discard_codec_state(&mut self) {
+//RS         let frames = std::mem::take(&mut self.frames);
+//RS         let frame_bytes = frames
+//RS             .capacity()
+//RS             .saturating_mul(std::mem::size_of::<JetJSONReadFrame>());
+//RS         let key_bytes = frames.iter().fold(0usize, |total, frame| {
+//RS             total.saturating_add(match frame {
+//RS                 JetJSONReadFrame::ObjectColonValue { key_heap, .. }
+//RS                 | JetJSONReadFrame::ObjectCommaOrEnd { key_heap, .. } => *key_heap,
+//RS                 _ => 0,
+//RS             })
+//RS         });
+//RS         drop(frames);
+//RS         self.release_item_heap(key_bytes.saturating_add(frame_bytes));
+//RS         let output_heap = std::mem::take(&mut self.output_heap);
+//RS         self.release_item_heap(output_heap);
+//RS     }
+//RS 
+//RS     fn fail<T>(&mut self, mut error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
+//RS         if let Some(first) = &self.terminal { return Err(first.clone()); }
+//RS         if error.path.is_empty() { error.path = self.path(); }
+//RS         self.discard_codec_state();
+//RS         jet_encoding_fail(&mut self.terminal, error)
+//RS     }
+//RS 
+//RS     fn append_item_bytes(&self, bytes: &mut Vec<u8>, append: &[u8], item: &str) -> Result<(), jet_std::EncodingError> {
+//RS         let limit = self.limits.max_item_bytes as usize;
+//RS         let Some(new_len) = bytes.len().checked_add(append.len()) else {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset, self.line, self.column, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
+//RS         };
+//RS         if new_len > limit {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset, self.line, self.column, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
+//RS         }
+//RS         if new_len > bytes.capacity() {
+//RS             let next_capacity = bytes.capacity().max(1).saturating_mul(2).max(new_len);
+//RS             let additional = next_capacity.saturating_sub(bytes.len());
+//RS             if !jet_encoding_reserve_vec(
+//RS                 self.allocation_budget.as_ref(),
+//RS                 bytes,
+//RS                 additional,
+//RS             ) {
+//RS                 return Err(self.item_allocation_error(item));
+//RS             }
+//RS         }
+//RS         bytes.extend_from_slice(append);
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn item_allocation_error(&self, item: &str) -> jet_std::EncodingError {
+//RS         jet_encoding_error(
+//RS             jet_std::EncodingErrorKind::Limit,
+//RS             self.offset,
+//RS             self.line,
+//RS             self.column,
+//RS             format!("JSON {item} allocation exceeded the bounded codec heap ceiling"),
+//RS         )
+//RS     }
+//RS 
+//RS     fn clone_key_for_frame(&self, key: &str) -> Result<(String, usize), jet_std::EncodingError> {
+//RS         let Some(budget) = &self.allocation_budget else { return Ok((key.to_string(), 0)) };
+//RS         let mut cloned = String::new();
+//RS         if !jet_encoding_reserve_string(Some(budget), &mut cloned, key.len()) {
+//RS             return Err(self.item_allocation_error("string"));
+//RS         }
+//RS         let capacity = cloned.capacity();
+//RS         cloned.push_str(key);
+//RS         Ok((cloned, capacity))
+//RS     }
+//RS 
+//RS     fn release_item_heap(&self, bytes: usize) {
+//RS         if let Some(budget) = &self.allocation_budget { budget.release(bytes); }
+//RS     }
+//RS 
+//RS     fn frame_allocation_error(&self) -> jet_std::EncodingError {
+//RS         jet_encoding_error(
+//RS             jet_std::EncodingErrorKind::Limit,
+//RS             self.offset,
+//RS             self.line,
+//RS             self.column,
+//RS             "JSON reader frame allocation exceeded the bounded codec heap ceiling",
+//RS         )
+//RS     }
+//RS 
+//RS     fn reserve_read_frame(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         if self.frames.len() < self.frames.capacity() {
+//RS             return Ok(());
+//RS         }
+//RS         let old = self.frames.capacity();
+//RS         let next = if old == 0 { 1 } else { old.saturating_mul(2).max(self.frames.len().saturating_add(1)) };
+//RS         let additional = next.saturating_sub(self.frames.len());
+//RS         if !jet_encoding_reserve_vec(
+//RS             self.allocation_budget.as_ref(),
+//RS             &mut self.frames,
+//RS             additional,
+//RS         ) {
+//RS             return Err(self.frame_allocation_error());
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn fill(&mut self) -> Result<Option<u8>, jet_std::EncodingError> {
+//RS         if let Some(byte) = self.lookahead {
+//RS             return Ok(Some(byte));
+//RS         }
+//RS         let mut byte = [0u8; 1];
+//RS         match jet_encoding_file_read(&mut self.input, &mut byte) {
+//RS             Ok(0) => Ok(None),
+//RS             Ok(_) => {
+//RS                 self.lookahead = Some(byte[0]);
+//RS                 Ok(Some(byte[0]))
+//RS             }
+//RS             Err(error) => Err(jet_encoding_io_error(self.offset, self.line, self.column, error)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn take(&mut self) -> Result<Option<u8>, jet_std::EncodingError> {
+//RS         let Some(byte) = self.fill()? else { return Ok(None) };
+//RS         if self.limits.max_total_bytes.is_ok_and(|max| self.total >= max) {
+//RS             return Err(jet_encoding_error(
+//RS                 jet_std::EncodingErrorKind::Limit,
+//RS                 self.offset,
+//RS                 self.line,
+//RS                 self.column,
+//RS                 format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0)),
+//RS             ));
+//RS         }
+//RS         self.lookahead = None;
+//RS         self.total += 1;
+//RS         self.offset += 1;
+//RS         if byte == b'\n' {
+//RS             self.line += 1;
+//RS             self.column = 1;
+//RS         } else {
+//RS             self.column += 1;
+//RS         }
+//RS         Ok(Some(byte))
+//RS     }
+//RS 
+//RS     fn skip_ws(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         while if self.record_mode {
+//RS             matches!(self.fill()?, Some(b' ' | b'\t'))
+//RS         } else {
+//RS             matches!(self.fill()?, Some(b' ' | b'\n' | b'\r' | b'\t'))
+//RS         } {
+//RS             self.take()?;
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn expect_byte(&mut self, want: u8, context: &str) -> Result<(), jet_std::EncodingError> {
+//RS         match self.take()? {
+//RS             Some(got) if got == want => Ok(()),
+//RS             Some(got) => Err(jet_encoding_error(
+//RS                 jet_std::EncodingErrorKind::Syntax,
+//RS                 self.offset - 1,
+//RS                 self.line,
+//RS                 self.column.saturating_sub(1),
+//RS                 format!("expected {} but found {:?}", context, got as char),
+//RS             )),
+//RS             None => Err(jet_encoding_error(
+//RS                 jet_std::EncodingErrorKind::Truncated,
+//RS                 self.offset,
+//RS                 self.line,
+//RS                 self.column,
+//RS                 format!("expected {} before end of input", context),
+//RS             )),
+//RS         }
+//RS     }
+//RS 
+//RS     fn read_hex4(&mut self) -> Result<u16, jet_std::EncodingError> {
+//RS         let mut value = 0u16;
+//RS         for _ in 0..4 {
+//RS             let Some(byte) = self.take()? else {
+//RS                 return Err(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "incomplete Unicode escape"));
+//RS             };
+//RS             let digit = match byte {
+//RS                 b'0'..=b'9' => byte - b'0',
+//RS                 b'a'..=b'f' => byte - b'a' + 10,
+//RS                 b'A'..=b'F' => byte - b'A' + 10,
+//RS                 _ => return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "Unicode escape contains a non-hex digit")),
+//RS             };
+//RS             value = value * 16 + u16::from(digit);
+//RS         }
+//RS         Ok(value)
+//RS     }
+//RS 
+//RS     fn read_string(&mut self) -> Result<String, jet_std::EncodingError> {
+//RS         self.expect_byte(b'"', "a string")?;
+//RS         let mut bytes = Vec::new();
+//RS         let result = (|| -> Result<(), jet_std::EncodingError> {
+//RS             loop {
+//RS                 let Some(byte) = self.take()? else {
+//RS                     return Err(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON string"));
+//RS                 };
+//RS                 match byte {
+//RS                     b'"' => break,
+//RS                     0..=0x1f => return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "unescaped control byte in JSON string")),
+//RS                     b'\\' => {
+//RS                         let Some(escaped) = self.take()? else {
+//RS                             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "incomplete JSON escape"));
+//RS                         };
+//RS                         match escaped {
+//RS                             b'"' | b'\\' | b'/' => self.append_item_bytes(&mut bytes, &[escaped], "string")?,
+//RS                             b'b' => self.append_item_bytes(&mut bytes, &[8], "string")?,
+//RS                             b'f' => self.append_item_bytes(&mut bytes, &[12], "string")?,
+//RS                             b'n' => self.append_item_bytes(&mut bytes, b"\n", "string")?,
+//RS                             b'r' => self.append_item_bytes(&mut bytes, b"\r", "string")?,
+//RS                             b't' => self.append_item_bytes(&mut bytes, b"\t", "string")?,
+//RS                             b'u' => {
+//RS                                 let first = self.read_hex4()?;
+//RS                                 let scalar = if (0xd800..=0xdbff).contains(&first) {
+//RS                                     self.expect_byte(b'\\', "a low-surrogate escape")?;
+//RS                                     self.expect_byte(b'u', "a low-surrogate escape")?;
+//RS                                     let low = self.read_hex4()?;
+//RS                                     if !(0xdc00..=0xdfff).contains(&low) {
+//RS                                         return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 4, self.line, self.column.saturating_sub(4), "high surrogate is not followed by a low surrogate"));
+//RS                                     }
+//RS                                     0x10000 + ((u32::from(first) - 0xd800) << 10) + (u32::from(low) - 0xdc00)
+//RS                                 } else if (0xdc00..=0xdfff).contains(&first) {
+//RS                                     return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 4, self.line, self.column.saturating_sub(4), "unpaired low surrogate"));
+//RS                                 } else {
+//RS                                     u32::from(first)
+//RS                                 };
+//RS                                 let ch = char::from_u32(scalar).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "invalid Unicode scalar"))?;
+//RS                                 let mut buf = [0u8; 4];
+//RS                                 self.append_item_bytes(&mut bytes, ch.encode_utf8(&mut buf).as_bytes(), "string")?;
+//RS                             }
+//RS                             _ => return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "unknown JSON escape")),
+//RS                         }
+//RS                     }
+//RS                     _ => self.append_item_bytes(&mut bytes, &[byte], "string")?,
+//RS                 }
+//RS             }
+//RS             Ok(())
+//RS         })();
+//RS         if let Err(error) = result {
+//RS             self.release_item_heap(bytes.capacity());
+//RS             return Err(error);
+//RS         }
+//RS         let capacity = bytes.capacity();
+//RS         match String::from_utf8(bytes) {
+//RS             Ok(text) => {
+//RS                 self.output_heap = if self.allocation_budget.is_some() { capacity } else { 0 };
+//RS                 Ok(text)
+//RS             }
+//RS             Err(error) => {
+//RS                 let bytes = error.into_bytes();
+//RS                 self.release_item_heap(bytes.capacity());
+//RS                 Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "JSON string is not valid UTF-8"))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn read_literal(&mut self, tail: &[u8], event: jet_std::DataEvent) -> Result<jet_std::DataEvent, jet_std::EncodingError> {
+//RS         for byte in tail {
+//RS             self.expect_byte(*byte, "JSON literal")?;
+//RS         }
+//RS         Ok(event)
+//RS     }
+//RS 
+//RS     fn read_number(&mut self, first: u8) -> Result<jet_std::DataEvent, jet_std::EncodingError> {
+//RS         let mut bytes = Vec::new();
+//RS         let result = (|| -> Result<(), jet_std::EncodingError> {
+//RS             self.append_item_bytes(&mut bytes, &[first], "number")?;
+//RS             while let Some(byte @ (b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')) = self.fill()? {
+//RS                 self.append_item_bytes(&mut bytes, &[byte], "number")?;
+//RS                 self.take()?;
+//RS             }
+//RS             Ok(())
+//RS         })();
+//RS         if let Err(error) = result {
+//RS             self.release_item_heap(bytes.capacity());
+//RS             return Err(error);
+//RS         }
+//RS         let start = self.offset - bytes.len() as i64;
+//RS         let text = match std::str::from_utf8(&bytes) {
+//RS             Ok(text) => text,
+//RS             Err(_) => {
+//RS                 self.release_item_heap(bytes.capacity());
+//RS                 drop(bytes);
+//RS                 return Err(jet_encoding_error(
+//RS                     jet_std::EncodingErrorKind::Syntax,
+//RS                     start,
+//RS                     self.line,
+//RS                     self.column,
+//RS                     "JSON number is not valid UTF-8",
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let valid = {
+//RS             let b = text.as_bytes();
+//RS             let mut i = usize::from(b.first() == Some(&b'-'));
+//RS             let int_ok = if b.get(i) == Some(&b'0') { i += 1; true } else if matches!(b.get(i), Some(b'1'..=b'9')) { i += 1; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } true } else { false };
+//RS             if int_ok && b.get(i) == Some(&b'.') { i += 1; let start = i; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } if i == start { i = usize::MAX; } }
+//RS             if i != usize::MAX && matches!(b.get(i), Some(b'e' | b'E')) { i += 1; if matches!(b.get(i), Some(b'+' | b'-')) { i += 1; } let start = i; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } if i == start { i = usize::MAX; } }
+//RS             i == b.len()
+//RS         };
+//RS         if !valid {
+//RS             self.release_item_heap(bytes.capacity());
+//RS             drop(bytes);
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, start, self.line, self.column, "invalid JSON number"));
+//RS         }
+//RS         if self.typed_numbers {
+//RS             if let Err(message) = jet_std::validate_json_number(text) {
+//RS                 self.release_item_heap(bytes.capacity());
+//RS                 drop(bytes);
+//RS                 return Err(jet_encoding_error(
+//RS                     jet_std::EncodingErrorKind::Limit,
+//RS                     start,
+//RS                     self.line,
+//RS                     self.column,
+//RS                     message,
+//RS                 ));
+//RS             }
+//RS             let number = text.to_string();
+//RS             self.release_item_heap(bytes.capacity());
+//RS             drop(bytes);
+//RS             return Ok(jet_std::DataEvent::Number(number));
+//RS         }
+//RS         if !text.contains(['.', 'e', 'E']) {
+//RS             if let Ok(value) = text.parse::<i64>() {
+//RS                 self.release_item_heap(bytes.capacity());
+//RS                 drop(bytes);
+//RS                 return Ok(jet_std::DataEvent::Int(value));
+//RS             }
+//RS         }
+//RS         let value = text.parse::<f64>();
+//RS         self.release_item_heap(bytes.capacity());
+//RS         drop(bytes);
+//RS         match value {
+//RS             Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
+//RS             _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range")),
+//RS         }
+//RS     }
+//RS 
+//RS     fn parse_value(&mut self) -> Result<jet_std::DataEvent, jet_std::EncodingError> {
+//RS         self.skip_ws()?;
+//RS         let Some(first) = self.take()? else {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "expected a JSON value"));
+//RS         };
+//RS         match first {
+//RS             b'n' => self.read_literal(b"ull", jet_std::DataEvent::Null),
+//RS             b't' => self.read_literal(b"rue", jet_std::DataEvent::Bool(true)),
+//RS             b'f' => self.read_literal(b"alse", jet_std::DataEvent::Bool(false)),
+//RS             b'"' => {
+//RS                 self.lookahead = Some(b'"');
+//RS                 self.offset -= 1;
+//RS                 self.total -= 1;
+//RS                 self.column -= 1;
+//RS                 Ok(jet_std::DataEvent::Text(self.read_string()?))
+//RS             }
+//RS             b'[' => {
+//RS                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
+//RS                 self.reserve_read_frame()?;
+//RS                 self.frames.push(JetJSONReadFrame::ArrayValueOrEnd { first: true, index: 0 });
+//RS                 Ok(jet_std::DataEvent::ArrayStart)
+//RS             }
+//RS             b'{' => {
+//RS                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
+//RS                 self.reserve_read_frame()?;
+//RS                 self.frames.push(JetJSONReadFrame::ObjectKeyOrEnd { first: true });
+//RS                 Ok(jet_std::DataEvent::ObjectStart)
+//RS             }
+//RS             b'-' | b'0'..=b'9' => self.read_number(first),
+//RS             _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), format!("unexpected byte {:?} while reading a JSON value", first as char))),
+//RS         }
+//RS     }
+//RS 
+//RS     fn next_event(&mut self) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+//RS         if let Some(error) = &self.terminal { return Err(error.clone()); }
+//RS         match self.next_event_inner() {
+//RS             Ok(event) => {
+//RS                 let output_heap = std::mem::take(&mut self.output_heap);
+//RS                 self.release_item_heap(output_heap);
+//RS                 if event.is_none() && self.eof {
+//RS                     self.discard_codec_state();
+//RS                 }
+//RS                 Ok(event)
+//RS             }
+//RS             Err(error) => {
+//RS                 let output_heap = std::mem::take(&mut self.output_heap);
+//RS                 self.release_item_heap(output_heap);
+//RS                 self.fail(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn next_event_inner(&mut self) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+//RS         if self.eof { return Ok(None); }
+//RS         loop {
+//RS             self.skip_ws()?;
+//RS             let state = self.frames.last().map(|frame| match frame {
+//RS                 JetJSONReadFrame::ArrayValueOrEnd { first, index } => JetJSONReadState::ArrayValueOrEnd { first: *first, index: *index },
+//RS                 JetJSONReadFrame::ArrayCommaOrEnd { index } => JetJSONReadState::ArrayCommaOrEnd { index: *index },
+//RS                 JetJSONReadFrame::ObjectKeyOrEnd { first } => JetJSONReadState::ObjectKeyOrEnd { first: *first },
+//RS                 JetJSONReadFrame::ObjectColonValue { .. } => JetJSONReadState::ObjectColonValue,
+//RS                 JetJSONReadFrame::ObjectCommaOrEnd { .. } => JetJSONReadState::ObjectCommaOrEnd,
+//RS             });
+//RS             match state {
+//RS                 Some(JetJSONReadState::ArrayValueOrEnd { first, index }) => {
+//RS                     if self.fill()? == Some(b']') {
+//RS                         if !first { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected a JSON value after `,`")); }
+//RS                         self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ArrayEnd));
+//RS                     }
+//RS                     if !first && self.fill()?.is_none() { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON array")); }
+//RS                     *self.frames.last_mut().unwrap() = JetJSONReadFrame::ArrayCommaOrEnd { index };
+//RS                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
+//RS                 }
+//RS                 Some(JetJSONReadState::ArrayCommaOrEnd { index }) => match self.fill()? {
+//RS                     Some(b',') => { self.take()?; *self.frames.last_mut().unwrap() = JetJSONReadFrame::ArrayValueOrEnd { first: false, index: index + 1 }; }
+//RS                     Some(b']') => { self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ArrayEnd)); }
+//RS                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected `,` or `]` after array value")),
+//RS                     None => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON array")),
+//RS                 },
+//RS                 Some(JetJSONReadState::ObjectKeyOrEnd { first }) => {
+//RS                     if self.fill()? == Some(b'}') {
+//RS                         if !first { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected an object key after `,`")); }
+//RS                         self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ObjectEnd));
+//RS                     }
+//RS                     if !first && self.fill()?.is_none() { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON object")); }
+//RS                     if self.fill()? != Some(b'"') { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected a quoted object key")); }
+//RS                     let key = match self.read_string() { Ok(v) => v, Err(e) => return self.fail(e) };
+//RS                     let (frame_key, key_heap) = match self.clone_key_for_frame(&key) { Ok(value) => value, Err(error) => return self.fail(error) };
+//RS                     *self.frames.last_mut().unwrap() = JetJSONReadFrame::ObjectColonValue { key: frame_key, key_heap };
+//RS                     return Ok(Some(jet_std::DataEvent::Key(key)));
+//RS                 }
+//RS                 Some(JetJSONReadState::ObjectColonValue) => {
+//RS                     if let Err(e) = self.expect_byte(b':', "`:` after object key") { return self.fail(e); }
+//RS                     let frame = self.frames.last_mut().unwrap();
+//RS                     let previous = std::mem::replace(frame, JetJSONReadFrame::ObjectKeyOrEnd { first: false });
+//RS                     let JetJSONReadFrame::ObjectColonValue { key, key_heap } = previous else { unreachable!() };
+//RS                     *frame = JetJSONReadFrame::ObjectCommaOrEnd { key, key_heap };
+//RS                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
+//RS                 }
+//RS                 Some(JetJSONReadState::ObjectCommaOrEnd) => match self.fill()? {
+//RS                     Some(b',') => {
+//RS                         self.take()?;
+//RS                         let previous = std::mem::replace(self.frames.last_mut().unwrap(), JetJSONReadFrame::ObjectKeyOrEnd { first: false });
+//RS                         let JetJSONReadFrame::ObjectCommaOrEnd { key_heap, .. } = previous else { unreachable!() };
+//RS                         self.release_item_heap(key_heap);
+//RS                     }
+//RS                     Some(b'}') => {
+//RS                         self.take()?;
+//RS                         let Some(JetJSONReadFrame::ObjectCommaOrEnd { key_heap, .. }) = self.frames.pop() else { unreachable!() };
+//RS                         self.release_item_heap(key_heap);
+//RS                         return Ok(Some(jet_std::DataEvent::ObjectEnd));
+//RS                     }
+//RS                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected `,` or `}` after object value")),
+//RS                     None => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON object")),
+//RS                 },
+//RS                 None if !self.root_started => {
+//RS                     self.root_started = true;
+//RS                     self.root_done = true;
+//RS                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
+//RS                 }
+//RS                 None if self.record_mode => match self.fill()? {
+//RS                     Some(b'\n') => {
+//RS                         self.take()?;
+//RS                         self.root_started = false;
+//RS                         self.root_done = false;
+//RS                         return Ok(None);
+//RS                     }
+//RS                     Some(b'\r') => {
+//RS                         self.take()?;
+//RS                         if self.fill()? != Some(b'\n') {
+//RS                             return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"));
+//RS                         }
+//RS                         self.take()?;
+//RS                         self.root_started = false;
+//RS                         self.root_done = false;
+//RS                         return Ok(None);
+//RS                     }
+//RS                     None => { self.eof = true; return Ok(None); }
+//RS                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "trailing input after JSONL record value")),
+//RS                 },
+//RS                 None => match self.fill()? {
+//RS                     None => { self.eof = true; return Ok(None); }
+//RS                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "trailing input after JSON root")),
+//RS                 },
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // D-FAIL-CARRIER1=A: the reader answers `?Event !EncodingError` — the stream
+//RS // ends with a clean absence, and a broken stream with a report.
+//RS fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> {
+//RS     reader.next_event().map(jet_outcome_of)
+//RS }
+//RS 
+//RS impl jet_std::JSONWriter {
+//RS     fn discard_codec_state(&mut self) {
+//RS         self.frames = Vec::new();
+//RS         self.canonical_frames = Vec::new();
+//RS         self.canonical_retained = 0;
+//RS     }
+//RS 
+//RS     fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
+//RS         if let Some(first) = &self.terminal { return Err(first.clone()); }
+//RS         self.discard_codec_state();
+//RS         jet_encoding_fail(&mut self.terminal, error)
+//RS     }
+//RS     fn state_error(&self, reason: &str) -> jet_std::EncodingError { jet_encoding_error(jet_std::EncodingErrorKind::State, self.total, 1, self.total + 1, reason) }
+//RS     fn ensure_total(&self, additional: usize) -> Result<(), jet_std::EncodingError> {
+//RS         let additional = i64::try_from(additional).unwrap_or(i64::MAX);
+//RS         if self.limits.max_total_bytes.is_ok_and(|max| self.total.saturating_add(additional) > max) {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0))));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
+//RS         self.ensure_total(bytes.len())?;
+//RS         jet_encoding_file_write_all(&mut self.output, bytes)
+//RS             .map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e))?;
+//RS         self.total += bytes.len() as i64;
+//RS         Ok(())
+//RS     }
+//RS     fn quoted_len(&self, text: &str) -> Result<usize, jet_std::EncodingError> {
+//RS         let mut len = 0usize;
+//RS         for ch in text.chars() {
+//RS             let add = match ch { '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2, c if c <= '\u{1f}' => 6, c => c.len_utf8() };
+//RS             len = len.checked_add(add).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)))?;
+//RS         }
+//RS         if len > self.limits.max_item_bytes as usize {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
+//RS         }
+//RS         Ok(len)
+//RS     }
+//RS     fn write_quoted(&mut self, text: &str) -> Result<(), jet_std::EncodingError> {
+//RS         self.quoted_len(text)?;
+//RS         self.write_bytes(b"\"")?;
+//RS         for ch in text.chars() {
+//RS             match ch {
+//RS                 '"' => self.write_bytes(b"\\\"")?,
+//RS                 '\\' => self.write_bytes(b"\\\\")?,
+//RS                 '\n' => self.write_bytes(b"\\n")?,
+//RS                 '\r' => self.write_bytes(b"\\r")?,
+//RS                 '\t' => self.write_bytes(b"\\t")?,
+//RS                 '\u{08}' => self.write_bytes(b"\\b")?,
+//RS                 '\u{0c}' => self.write_bytes(b"\\f")?,
+//RS                 c if c <= '\u{1f}' => {
+//RS                     const HEX: &[u8; 16] = b"0123456789abcdef";
+//RS                     let value = c as usize;
+//RS                     let escaped = [b'\\', b'u', HEX[(value >> 12) & 15], HEX[(value >> 8) & 15], HEX[(value >> 4) & 15], HEX[value & 15]];
+//RS                     self.write_bytes(&escaped)?;
+//RS                 }
+//RS                 c => {
+//RS                     let mut buf = [0u8; 4];
+//RS                     self.write_bytes(c.encode_utf8(&mut buf).as_bytes())?;
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.write_bytes(b"\"")
+//RS     }
+//RS     fn before_value(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         match self.frames.last().copied() {
+//RS             Some(JetJSONWriteFrame::Array { first }) => {
+//RS                 if !first { self.write_bytes(b",")?; }
+//RS                 *self.frames.last_mut().unwrap() = JetJSONWriteFrame::Array { first: false };
+//RS             }
+//RS             Some(JetJSONWriteFrame::ObjectValue) => { let len = self.frames.len(); self.frames[len - 1] = JetJSONWriteFrame::ObjectKey { first: false }; }
+//RS             Some(JetJSONWriteFrame::ObjectKey { .. }) => return Err(self.state_error("JSON object expects Key before a value")),
+//RS             None if self.root_written => return Err(self.state_error("JSON writer accepts exactly one root")),
+//RS             None => self.root_written = true,
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS     fn value_prefix_len(&self) -> Result<usize, jet_std::EncodingError> {
+//RS         match self.frames.last().copied() {
+//RS             Some(JetJSONWriteFrame::Array { first }) => Ok(usize::from(!first)),
+//RS             Some(JetJSONWriteFrame::ObjectValue) => Ok(0),
+//RS             Some(JetJSONWriteFrame::ObjectKey { .. }) => Err(self.state_error("JSON object expects Key before a value")),
+//RS             None if self.root_written => Err(self.state_error("JSON writer accepts exactly one root")),
+//RS             None => Ok(0),
+//RS         }
+//RS     }
+//RS     fn write_event(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
+//RS         if let Some(error) = &self.terminal { return Err(error.clone()); }
+//RS         let result = if self.canonical {
+//RS             self.write_canonical_event_inner(event)
+//RS         } else {
+//RS             self.write_event_inner(event)
+//RS         };
+//RS         match result {
+//RS             Ok(()) => Ok(()),
+//RS             Err(error) => self.fail(error),
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_workspace_limit(&self) -> usize {
+//RS         (self.limits.max_item_bytes as usize)
+//RS             .saturating_mul(2)
+//RS             .saturating_add(self.limits.buffer_bytes as usize)
+//RS             .saturating_add((self.limits.max_depth as usize).saturating_mul(128))
+//RS     }
+//RS 
+//RS     fn canonical_charge(&mut self, frame: usize, bytes: usize) -> Result<(), jet_std::EncodingError> {
+//RS         let Some(next) = self.canonical_retained.checked_add(bytes) else {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON workspace size overflow"));
+//RS         };
+//RS         if next > self.canonical_workspace_limit() {
+//RS             return Err(jet_encoding_error(
+//RS                 jet_std::EncodingErrorKind::Limit,
+//RS                 self.total,
+//RS                 1,
+//RS                 self.total + 1,
+//RS                 format!("canonical JSON workspace exceeded bounded max_item_bytes {}", self.limits.max_item_bytes),
+//RS             ));
+//RS         }
+//RS         let JetJSONCanonicalFrame::Object { retained, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+//RS         *retained = retained.saturating_add(bytes);
+//RS         self.canonical_retained = next;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_object_sink(&self) -> Option<usize> {
+//RS         self.canonical_frames.iter().rposition(|frame| matches!(frame, JetJSONCanonicalFrame::Object { .. }))
+//RS     }
+//RS 
+//RS     fn canonical_emit(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
+//RS         if let Some(frame) = self.canonical_object_sink() {
+//RS             let current_len = match &self.canonical_frames[frame] {
+//RS                 JetJSONCanonicalFrame::Object { value, .. } => value.len(),
+//RS                 _ => unreachable!(),
+//RS             };
+//RS             let Some(next_len) = current_len.checked_add(bytes.len()) else {
+//RS                 return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object size overflow"));
+//RS             };
+//RS             if next_len > self.limits.max_item_bytes as usize {
+//RS                 return Err(jet_encoding_error(
+//RS                     jet_std::EncodingErrorKind::Limit,
+//RS                     self.total,
+//RS                     1,
+//RS                     self.total + 1,
+//RS                     format!("max_item_bytes {} exceeded by canonical object", self.limits.max_item_bytes),
+//RS                 ));
+//RS             }
+//RS             let growth = match &self.canonical_frames[frame] {
+//RS                 JetJSONCanonicalFrame::Object { value, .. } if next_len > value.capacity() => next_len - value.capacity(),
+//RS                 _ => 0,
+//RS             };
+//RS             self.canonical_charge(frame, growth)?;
+//RS             let JetJSONCanonicalFrame::Object { value, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+//RS             if growth > 0 && value.try_reserve_exact(growth).is_err() {
+//RS                 return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object allocation failed within configured bounds"));
+//RS             }
+//RS             value.extend_from_slice(bytes);
+//RS             Ok(())
+//RS         } else {
+//RS             self.write_bytes(bytes)
+//RS         }
+//RS     }
+//RS 
+//RS     fn canonical_quote(&self, text: &str) -> Result<Vec<u8>, jet_std::EncodingError> {
+//RS         let inner = self.quoted_len(text)?;
+//RS         let total = inner.checked_add(2).ok_or_else(|| jet_encoding_error(
+//RS             jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1,
+//RS             format!("max_item_bytes {} exceeded", self.limits.max_item_bytes),
+//RS         ))?;
+//RS         let mut out = Vec::new();
+//RS         if out.try_reserve_exact(total).is_err() {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON string allocation failed within configured bounds"));
+//RS         }
+//RS         out.push(b'"');
+//RS         const HEX: &[u8; 16] = b"0123456789abcdef";
+//RS         for ch in text.chars() {
+//RS             match ch {
+//RS                 '"' => out.extend_from_slice(b"\\\""),
+//RS                 '\\' => out.extend_from_slice(b"\\\\"),
+//RS                 '\n' => out.extend_from_slice(b"\\n"),
+//RS                 '\r' => out.extend_from_slice(b"\\r"),
+//RS                 '\t' => out.extend_from_slice(b"\\t"),
+//RS                 '\u{08}' => out.extend_from_slice(b"\\b"),
+//RS                 '\u{0c}' => out.extend_from_slice(b"\\f"),
+//RS                 c if c <= '\u{1f}' => {
+//RS                     let value = c as usize;
+//RS                     out.extend_from_slice(&[b'\\', b'u', HEX[(value >> 12) & 15], HEX[(value >> 8) & 15], HEX[(value >> 4) & 15], HEX[value & 15]]);
+//RS                 }
+//RS                 c => {
+//RS                     let mut encoded = [0u8; 4];
+//RS                     out.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
+//RS                 }
+//RS             }
+//RS         }
+//RS         out.push(b'"');
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     fn canonical_before_value(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         match self.canonical_frames.last() {
+//RS             Some(JetJSONCanonicalFrame::Array { first }) => {
+//RS                 let first = *first;
+//RS                 if !first { self.canonical_emit(b",")?; }
+//RS                 let Some(JetJSONCanonicalFrame::Array { first }) = self.canonical_frames.last_mut() else { unreachable!() };
+//RS                 *first = false;
+//RS             }
+//RS             Some(JetJSONCanonicalFrame::Object { key: Some(_), value, .. }) if value.is_empty() => {}
+//RS             Some(JetJSONCanonicalFrame::Object { key: None, .. }) => return Err(self.state_error("canonical JSON object expects Key before a value")),
+//RS             Some(JetJSONCanonicalFrame::Object { .. }) => return Err(self.state_error("canonical JSON object value is already active")),
+//RS             None if self.root_written => return Err(self.state_error("JSON writer accepts exactly one root")),
+//RS             None => self.root_written = true,
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_complete_value(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         let Some(frame) = self.canonical_frames.len().checked_sub(1) else { return Ok(()) };
+//RS         let (key, value) = match &mut self.canonical_frames[frame] {
+//RS             JetJSONCanonicalFrame::Object { key, value, .. } => {
+//RS                 let Some(key) = key.take() else { return Ok(()) };
+//RS                 (key, std::mem::take(value))
+//RS             }
+//RS             JetJSONCanonicalFrame::Array { .. } => return Ok(()),
+//RS         };
+//RS         let old_capacity = value.capacity();
+//RS         let entry_size = std::mem::size_of::<(String, Vec<u8>)>();
+//RS         let growth = match &self.canonical_frames[frame] {
+//RS             JetJSONCanonicalFrame::Object { entries, .. } if entries.len() == entries.capacity() => {
+//RS                 entries.capacity().max(1).saturating_mul(2).saturating_sub(entries.capacity()).saturating_mul(entry_size)
+//RS             }
+//RS             _ => 0,
+//RS         };
+//RS         self.canonical_charge(frame, growth)?;
+//RS         let JetJSONCanonicalFrame::Object { entries, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+//RS         if growth > 0 && entries.try_reserve_exact(growth / entry_size).is_err() {
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON entry allocation failed within configured bounds"));
+//RS         }
+//RS         entries.push((key, value));
+//RS         debug_assert!(old_capacity > 0 || entries.last().is_some_and(|(_, value)| value.is_empty()));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn canonical_render_object(&mut self) -> Result<Vec<u8>, jet_std::EncodingError> {
+//RS         let Some(JetJSONCanonicalFrame::Object { mut entries, key: None, value, retained }) = self.canonical_frames.pop() else {
+//RS             return Err(self.state_error("ObjectEnd does not match a complete canonical object"));
+//RS         };
+//RS         if !value.is_empty() {
+//RS             return Err(self.state_error("canonical JSON object value was not completed"));
+//RS         }
+//RS         entries.sort_by(|left, right| jet_json_jcs_key_cmp(&left.0, &right.0));
+//RS         for pair in entries.windows(2) {
+//RS             if pair[0].0 == pair[1].0 {
+//RS                 self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+//RS                 return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.total, 1, self.total + 1, "JCS requires unique object keys"));
+//RS             }
+//RS         }
+//RS         let mut total = 2usize;
+//RS         let mut quoted = Vec::with_capacity(entries.len());
+//RS         for (index, (key, value)) in entries.iter().enumerate() {
+//RS             let key = self.canonical_quote(key)?;
+//RS             total = total.checked_add(usize::from(index > 0)).and_then(|n| n.checked_add(key.len())).and_then(|n| n.checked_add(1)).and_then(|n| n.checked_add(value.len()))
+//RS                 .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object size overflow"))?;
+//RS             quoted.push(key);
+//RS         }
+//RS         if total > self.limits.max_item_bytes as usize {
+//RS             self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded by canonical object", self.limits.max_item_bytes)));
+//RS         }
+//RS         let mut out = Vec::new();
+//RS         if out.try_reserve_exact(total).is_err() {
+//RS             self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+//RS             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "canonical JSON object allocation failed within configured bounds"));
+//RS         }
+//RS         out.push(b'{');
+//RS         for (index, ((_, value), key)) in entries.into_iter().zip(quoted).enumerate() {
+//RS             if index > 0 { out.push(b','); }
+//RS             out.extend_from_slice(&key);
+//RS             out.push(b':');
+//RS             out.extend_from_slice(&value);
+//RS         }
+//RS         out.push(b'}');
+//RS         self.canonical_retained = self.canonical_retained.saturating_sub(retained);
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     fn write_canonical_event_inner(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
+//RS         if self.finished { return Err(self.state_error("write called after finish")); }
+//RS         match event {
+//RS             jet_std::DataEvent::Key(key) => {
+//RS                 let Some(JetJSONCanonicalFrame::Object { entries, key: current, .. }) = self.canonical_frames.last() else {
+//RS                     return Err(self.state_error("Key is only valid while an object expects a key"));
+//RS                 };
+//RS                 if current.is_some() { return Err(self.state_error("canonical JSON object key has no value")); }
+//RS                 if entries.iter().any(|(old, _)| old == &key) {
+//RS                     return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.total, 1, self.total + 1, "JCS requires unique object keys"));
+//RS                 }
+//RS                 let frame = self.canonical_frames.len() - 1;
+//RS                 self.canonical_charge(frame, key.capacity())?;
+//RS                 let JetJSONCanonicalFrame::Object { key: current, .. } = &mut self.canonical_frames[frame] else { unreachable!() };
+//RS                 *current = Some(key);
+//RS                 Ok(())
+//RS             }
+//RS             jet_std::DataEvent::ArrayEnd => {
+//RS                 if !matches!(self.canonical_frames.last(), Some(JetJSONCanonicalFrame::Array { .. })) {
+//RS                     return Err(self.state_error("ArrayEnd does not match an open array"));
+//RS                 }
+//RS                 self.canonical_emit(b"]")?;
+//RS                 self.canonical_frames.pop();
+//RS                 self.canonical_complete_value()
+//RS             }
+//RS             jet_std::DataEvent::ObjectEnd => {
+//RS                 if matches!(self.canonical_frames.last(), Some(JetJSONCanonicalFrame::Object { key: Some(_), .. })) {
+//RS                     return Err(self.state_error("object key has no value"));
+//RS                 }
+//RS                 if !matches!(self.canonical_frames.last(), Some(JetJSONCanonicalFrame::Object { .. })) {
+//RS                     return Err(self.state_error("ObjectEnd does not match an open object"));
+//RS                 }
+//RS                 let object = self.canonical_render_object()?;
+//RS                 self.canonical_emit(&object)?;
+//RS                 self.canonical_complete_value()
+//RS             }
+//RS             jet_std::DataEvent::Bytes(_) | jet_std::DataEvent::Number(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "internal JSON carriers cannot be written as DataEvent values")),
+//RS             jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS cannot encode a non-finite Float")),
+//RS             jet_std::DataEvent::Int(value) if (value as f64) as i128 != value as i128 => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text")),
+//RS             value => {
+//RS                 if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
+//RS                     && self.canonical_frames.len() as i64 >= self.limits.max_depth
+//RS                 {
+//RS                     return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth)));
+//RS                 }
+//RS                 let encoded = match &value {
+//RS                     jet_std::DataEvent::Null => Some(b"null".to_vec()),
+//RS                     jet_std::DataEvent::Bool(true) => Some(b"true".to_vec()),
+//RS                     jet_std::DataEvent::Bool(false) => Some(b"false".to_vec()),
+//RS                     jet_std::DataEvent::Int(value) => Some(jet_json_jcs_number(*value as f64).into_bytes()),
+//RS                     jet_std::DataEvent::Float(value) => Some(jet_json_jcs_number(*value).into_bytes()),
+//RS                     jet_std::DataEvent::Text(value) => Some(self.canonical_quote(value)?),
+//RS                     jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart => None,
+//RS                     _ => unreachable!(),
+//RS                 };
+//RS                 self.canonical_before_value()?;
+//RS                 match value {
+//RS                     jet_std::DataEvent::ArrayStart => {
+//RS                         self.canonical_emit(b"[")?;
+//RS                         self.canonical_frames.push(JetJSONCanonicalFrame::Array { first: true });
+//RS                         Ok(())
+//RS                     }
+//RS                     jet_std::DataEvent::ObjectStart => {
+//RS                         self.canonical_frames.push(JetJSONCanonicalFrame::Object { entries: Vec::new(), key: None, value: Vec::new(), retained: 0 });
+//RS                         Ok(())
+//RS                     }
+//RS                     _ => {
+//RS                         self.canonical_emit(encoded.as_deref().unwrap())?;
+//RS                         self.canonical_complete_value()
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     fn write_event_inner(&mut self, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> {
+//RS         if self.finished { return Err(self.state_error("write called after finish")); }
+//RS         let result = match event {
+//RS             jet_std::DataEvent::Key(key) => {
+//RS                 let first = match self.frames.last().copied() { Some(JetJSONWriteFrame::ObjectKey { first }) => first, _ => return self.fail(self.state_error("Key is only valid while an object expects a key")) };
+//RS                 let key_len = self.quoted_len(&key)?.checked_add(2).and_then(|n| n.checked_add(1 + usize::from(!first)))
+//RS                     .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)))?;
+//RS                 self.ensure_total(key_len)?;
+//RS                 if !first { self.write_bytes(b",")?; }
+//RS                 self.write_quoted(&key)?; self.write_bytes(b":")?;
+//RS                 *self.frames.last_mut().unwrap() = JetJSONWriteFrame::ObjectValue; Ok(())
+//RS             }
+//RS             jet_std::DataEvent::ArrayEnd => match self.frames.last().copied() { Some(JetJSONWriteFrame::Array { .. }) => { self.ensure_total(1)?; self.write_bytes(b"]")?; self.frames.pop(); Ok(()) }, _ => Err(self.state_error("ArrayEnd does not match an open array")) },
+//RS             jet_std::DataEvent::ObjectEnd => match self.frames.last().copied() { Some(JetJSONWriteFrame::ObjectKey { .. }) => { self.ensure_total(1)?; self.write_bytes(b"}")?; self.frames.pop(); Ok(()) }, Some(JetJSONWriteFrame::ObjectValue) => Err(self.state_error("object key has no value")), _ => Err(self.state_error("ObjectEnd does not match an open object")) },
+//RS             jet_std::DataEvent::Bytes(_) | jet_std::DataEvent::Number(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "internal JSON carriers cannot be written as DataEvent values")),
+//RS             jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode a non-finite Float")),
+//RS             value => {
+//RS                 if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
+//RS                     && self.frames.len() as i64 >= self.limits.max_depth
+//RS                 {
+//RS                     return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_depth {} exceeded", self.limits.max_depth)));
+//RS                 }
+//RS                 let payload_len = match &value {
+//RS                     jet_std::DataEvent::Null => 4,
+//RS                     jet_std::DataEvent::Bool(true) => 4,
+//RS                     jet_std::DataEvent::Bool(false) => 5,
+//RS                     jet_std::DataEvent::Int(v) => v.to_string().len(),
+//RS                     jet_std::DataEvent::Float(v) => v.to_string().len(),
+//RS                     jet_std::DataEvent::Text(v) => self.quoted_len(v)?.checked_add(2).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)))?,
+//RS                     jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart => 1,
+//RS                     _ => return Err(self.state_error("unsupported JSON writer event")),
+//RS                 };
+//RS                 let event_len = self.value_prefix_len()?.checked_add(payload_len)
+//RS                     .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.total, 1, self.total + 1, "JSON event wire size overflow"))?;
+//RS                 self.ensure_total(event_len)?;
+//RS                 self.before_value()?;
+//RS                 match value {
+//RS                     jet_std::DataEvent::Null => self.write_bytes(b"null"),
+//RS                     jet_std::DataEvent::Bool(v) => self.write_bytes(if v { b"true" } else { b"false" }),
+//RS                     jet_std::DataEvent::Int(v) => self.write_bytes(v.to_string().as_bytes()),
+//RS                     jet_std::DataEvent::Float(v) => self.write_bytes(v.to_string().as_bytes()),
+//RS                     jet_std::DataEvent::Text(v) => self.write_quoted(&v),
+//RS                     jet_std::DataEvent::ArrayStart => { self.write_bytes(b"[")?; self.frames.push(JetJSONWriteFrame::Array { first: true }); Ok(()) },
+//RS                     jet_std::DataEvent::ObjectStart => { self.write_bytes(b"{")?; self.frames.push(JetJSONWriteFrame::ObjectKey { first: true }); Ok(()) },
+//RS                     _ => unreachable!(),
+//RS                 }
+//RS             }
+//RS         };
+//RS         result
+//RS     }
+//RS     fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         if let Some(error) = &self.terminal { return Err(error.clone()); }
+//RS         use std::io::Write;
+//RS         jet_encoding_file_flush(&mut self.output).map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e)).or_else(|e| self.fail(e))
+//RS     }
+//RS     fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
+//RS         if let Some(error) = &self.terminal { return Err(error.clone()); }
+//RS         if self.finished { return Ok(()); }
+//RS         let open = if self.canonical { !self.canonical_frames.is_empty() } else { !self.frames.is_empty() };
+//RS         if !self.root_written || open { return self.fail(self.state_error("finish requires one structurally complete JSON root")); }
+//RS         self.flush_output()?; self.finished = true; Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn jet_enc_json_writer_write(writer: &mut jet_std::JSONWriter, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> { writer.write_event(event) }
+//RS fn jet_enc_json_writer_flush(writer: &mut jet_std::JSONWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
+//RS fn jet_enc_json_writer_finish(writer: &mut jet_std::JSONWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
+//RS 
+//RS // D-ENCSTREAM-SURFACE1=A: JSONL shares the byte-at-a-time JSON tokenizer and
+//RS // event writer above. Only record framing and DataEvent<->DataTree folding are
+//RS // format-specific; no line buffer or second JSON parser exists here.
+//RS enum JetJsonlFoldFrame {
+//RS     Array(Vec<jet_std::DataTree>),
+//RS     Object {
+//RS         entries: Vec<(String, jet_std::DataTree)>,
+//RS         key: Option<String>,
+//RS     },
+//RS }
+//RS 
+//RS struct JetJsonlHeapBudget {
+//RS     allocation: JetEncodingAllocationBudget,
+//RS     decoded: usize,
+//RS     decoded_limit: usize,
+//RS     tracked: usize,
+//RS }
+//RS 
+//RS impl JetJsonlHeapBudget {
+//RS     fn charge_decoded(&mut self, bytes: usize) -> bool {
+//RS         let Some(next) = self.decoded.checked_add(bytes) else { return false };
+//RS         if next > self.decoded_limit { return false; }
+//RS         self.decoded = next;
+//RS         true
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS impl Drop for JetJsonlHeapBudget {
+//RS     fn drop(&mut self) {
+//RS         self.allocation.release(self.tracked);
+//RS         self.tracked = 0;
+//RS     }
+//RS }
+//RS 
+//RS // Charge capacity growth before asking the allocator. `reserve_exact` makes
+//RS // the prospective geometric capacity deterministic, with no
+//RS // allocate-then-check window. Existing spare capacity was charged when it was
+//RS // created, so pushes inside it need no new charge.
+//RS fn jet_jsonl_discard_vec<T>(heap: &mut JetJsonlHeapBudget, values: &mut Vec<T>) {
+//RS     let bytes = values
+//RS         .capacity()
+//RS         .saturating_mul(std::mem::size_of::<T>());
+//RS     let values = std::mem::take(values);
+//RS     drop(values);
+//RS     heap.allocation.release(bytes);
+//RS     heap.tracked = heap.tracked.saturating_sub(bytes);
+//RS }
+//RS 
+//RS fn jet_jsonl_reserve_push<T>(heap: &mut JetJsonlHeapBudget, values: &mut Vec<T>) -> bool {
+//RS     if values.len() < values.capacity() { return true; }
+//RS     let Some(minimum) = values.len().checked_add(1) else {
+//RS         jet_jsonl_discard_vec(heap, values);
+//RS         return false;
+//RS     };
+//RS     let next_capacity = if values.capacity() == 0 {
+//RS         1
+//RS     } else {
+//RS         let Some(doubled) = values.capacity().checked_mul(2) else {
+//RS             jet_jsonl_discard_vec(heap, values);
+//RS             return false;
+//RS         };
+//RS         doubled.max(minimum)
+//RS     };
+//RS     let additional = next_capacity.saturating_sub(values.len());
+//RS     let old_bytes = values
+//RS         .capacity()
+//RS         .saturating_mul(std::mem::size_of::<T>());
+//RS     let reserved = jet_encoding_reserve_vec(
+//RS         Some(&heap.allocation),
+//RS         values,
+//RS         additional,
+//RS     );
+//RS     if reserved {
+//RS         let new_bytes = values
+//RS             .capacity()
+//RS             .saturating_mul(std::mem::size_of::<T>());
+//RS         heap.tracked = heap
+//RS             .tracked
+//RS             .saturating_add(new_bytes.saturating_sub(old_bytes));
+//RS     } else {
+//RS         heap.tracked = heap.tracked.saturating_sub(old_bytes);
+//RS     }
+//RS     reserved
+//RS }
+//RS 
+//RS fn jet_jsonl_project_error(
+//RS     mut error: jet_std::EncodingError,
+//RS     record_index: Option<i64>,
+//RS ) -> jet_std::EncodingError {
+//RS     error.format = jet_std::EncodingFormat::JSONL;
+//RS     if let Some(index) = record_index {
+//RS         let suffix = error.path.strip_prefix('$').unwrap_or(&error.path);
+//RS         error.path = format!("$[{index}]{suffix}");
+//RS     }
+//RS     error
+//RS }
+//RS 
+//RS fn jet_enc_jsonl_reader(
+//RS     input: JetFileReader,
+//RS     limits: jet_std::EncodingLimits,
+//RS ) -> Result<jet_std::JSONLReader, jet_std::EncodingError> {
+//RS     let mut json = jet_enc_json_reader(input, limits)
+//RS         .map_err(|error| jet_jsonl_project_error(error, None))?;
+//RS     json.record_mode = true;
+//RS     Ok(jet_std::JSONLReader {
+//RS         json,
+//RS         terminal: None,
+//RS         record_index: 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_json_fold_limit_error(
+//RS     reader: &jet_std::JSONReader,
+//RS     heap_limit: bool,
+//RS ) -> jet_std::EncodingError {
+//RS     let mut error = jet_encoding_error(
+//RS         jet_std::EncodingErrorKind::Limit,
+//RS         reader.offset,
+//RS         reader.line,
+//RS         reader.column,
+//RS         if heap_limit {
+//RS             format!(
+//RS                 "JSON value heap exceeded the bounded allocator ceiling for max_item_bytes {}",
+//RS                 reader.limits.max_item_bytes
+//RS             )
+//RS         } else {
+//RS             format!("max_item_bytes {} exceeded", reader.limits.max_item_bytes)
+//RS         },
+//RS     );
+//RS     error.path = reader.path();
+//RS     error
+//RS }
+//RS 
+//RS fn jet_json_fold_budget(
+//RS     reader: &jet_std::JSONReader,
+//RS ) -> Result<JetJsonlHeapBudget, jet_std::EncodingError> {
+//RS     let allocation = reader.allocation_budget.clone().ok_or_else(|| {
+//RS         jet_encoding_error(
+//RS             jet_std::EncodingErrorKind::State,
+//RS             reader.offset,
+//RS             reader.line,
+//RS             reader.column,
+//RS             "JSON reader allocation budget is unavailable",
+//RS         )
+//RS     })?;
+//RS     let decoded_limit = usize::try_from(reader.limits.max_item_bytes).map_err(|_| {
+//RS         jet_encoding_error(
+//RS             jet_std::EncodingErrorKind::Limit,
+//RS             reader.offset,
+//RS             reader.line,
+//RS             reader.column,
+//RS             "max_item_bytes cannot be represented by this target",
+//RS         )
+//RS     })?;
+//RS     Ok(JetJsonlHeapBudget {
+//RS         allocation,
+//RS         decoded: 0,
+//RS         decoded_limit,
+//RS         tracked: 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_json_fold_push_value(
+//RS     reader: &jet_std::JSONReader,
+//RS     heap: &mut JetJsonlHeapBudget,
+//RS     root: &mut Option<jet_std::DataTree>,
+//RS     frames: &mut Vec<JetJsonlFoldFrame>,
+//RS     value: jet_std::DataTree,
+//RS ) -> Result<(), jet_std::EncodingError> {
+//RS     match frames.last_mut() {
+//RS         Some(JetJsonlFoldFrame::Array(items)) => {
+//RS             if !jet_jsonl_reserve_push(heap, items) {
+//RS                 return Err(jet_json_fold_limit_error(reader, true));
+//RS             }
+//RS             items.push(value);
+//RS         }
+//RS         Some(JetJsonlFoldFrame::Object { entries, key }) => {
+//RS             let Some(key) = key.take() else {
+//RS                 return Err(jet_encoding_error(
+//RS                     jet_std::EncodingErrorKind::State,
+//RS                     reader.offset,
+//RS                     reader.line,
+//RS                     reader.column,
+//RS                     "JSON event stream produced an object value without a key",
+//RS                 ));
+//RS             };
+//RS             if entries.iter().any(|(existing, _)| existing == &key) {
+//RS                 return Err(jet_encoding_error(
+//RS                     jet_std::EncodingErrorKind::Syntax,
+//RS                     reader.offset,
+//RS                     reader.line,
+//RS                     reader.column,
+//RS                     format!("duplicate object key `{key}`"),
+//RS                 ));
+//RS             }
+//RS             if !jet_jsonl_reserve_push(heap, entries) {
+//RS                 return Err(jet_json_fold_limit_error(reader, true));
+//RS             }
+//RS             entries.push((key, value));
+//RS         }
+//RS         None if root.is_none() => *root = Some(value),
+//RS         None => {
+//RS             return Err(jet_encoding_error(
+//RS                 jet_std::EncodingErrorKind::State,
+//RS                 reader.offset,
+//RS                 reader.line,
+//RS                 reader.column,
+//RS                 "JSON event stream produced two roots for one value",
+//RS             ));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Fold one complete JSON value from the shared tokenizer event stream.
+//RS ///
+//RS /// Data rows and JSONL records use this same bounded tree fold. The caller
+//RS /// supplies the first event because a data array has already consumed its
+//RS /// opening delimiter; no adapter owns a second parser or an unbounded
+//RS /// materialization fallback.
+// END-PORT-PENDING 0130 crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:1-1740
+

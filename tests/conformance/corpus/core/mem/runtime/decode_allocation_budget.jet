@@ -1,0 +1,174 @@
+use core.mem.runtime.decode_allocation_budget as mem_decode_budget
+
+// True Core Int ledger transitions only. No allocator/scope/provider fake and
+// no native/tier accounting claim: every real growth rail remains #4448-gated.
+fn decode_budget_test_live(state: mem_decode_budget.DecodeAllocationLedger, old_bytes: Int, new_bytes: Int) -> Int Never! {
+    mem_decode_budget.decode_budget_prospective(state, old_bytes, new_bytes) ?? panic("expected permitted prospective charge")
+}
+fn decode_budget_test_rejected(state: mem_decode_budget.DecodeAllocationLedger, old_bytes: Int, new_bytes: Int) Never! {
+    if mem_decode_budget.decode_budget_prospective(state, old_bytes, new_bytes) == {
+        .Val(_) -> panic("expected budget rejection")
+        .None -> {}
+    }
+}
+fn decode_budget_test_state(state: mem_decode_budget.DecodeAllocationLedger, limit: Int, live: Int, peak: Int, failed: Bool) Never! {
+    assert_eq(state.limit, limit)
+    assert_eq(state.live, live)
+    assert_eq(state.peak, peak)
+    assert_eq(state.failed, failed)
+}
+
+#Test("decode input length and allocation peak are independent bounds") {
+    assert(mem_decode_budget.decode_budget_input_allowed(64, 0))
+    assert(mem_decode_budget.decode_budget_input_allowed(64, 64))
+    assert(!mem_decode_budget.decode_budget_input_allowed(64, 65))
+    state := mem_decode_budget.decode_budget_new(64)
+    // Input length 64 does not spend any of the independently available 64.
+    next :: decode_budget_test_live(state, 0, 64)
+    _ :: decode_budget_test_state(state, 64, 0, 0, false)
+    mem_decode_budget.decode_budget_commit(&state, next)
+    _ :: decode_budget_test_state(state, 64, 64, 64, false)
+}
+
+#Test("decode allocation zero cap permits zero but not one byte") {
+    assert(mem_decode_budget.decode_budget_input_allowed(0, 0))
+    assert(!mem_decode_budget.decode_budget_input_allowed(0, 1))
+    state := mem_decode_budget.decode_budget_new(0)
+    next :: decode_budget_test_live(state, 0, 0)
+    mem_decode_budget.decode_budget_commit(&state, next)
+    decode_budget_test_rejected(state, 0, 1)
+    _ :: decode_budget_test_state(state, 0, 0, 0, false)
+    mem_decode_budget.decode_budget_latch_failure(&state)
+    mem_decode_budget.decode_budget_free(&state, 0)
+    _ :: decode_budget_test_state(state, 0, 0, 0, true)
+}
+
+#Test("decode allocation cap equality and cap plus one are prospective") {
+    state := mem_decode_budget.decode_budget_new(64)
+    assert_eq(decode_budget_test_live(state, 0, 64), 64)
+    decode_budget_test_rejected(state, 0, 65)
+    _ :: decode_budget_test_state(state, 64, 0, 0, false)
+    // A permitted proposal may still fail its real allocation; cancel means
+    // NOT committing it. No fake allocation result is introduced by this test.
+    _ :: decode_budget_test_live(state, 0, 48)
+    _ :: decode_budget_test_state(state, 64, 0, 0, false)
+    next :: decode_budget_test_live(state, 0, 48)
+    mem_decode_budget.decode_budget_commit(&state, next)
+    _ :: decode_budget_test_state(state, 64, 48, 48, false)
+    decode_budget_test_rejected(state, 0, 17)
+    _ :: decode_budget_test_state(state, 64, 48, 48, false)
+}
+
+#Test("decode realloc replaces its old capacity rather than double charging") {
+    state := mem_decode_budget.decode_budget_new(64)
+    first :: decode_budget_test_live(state, 0, 48)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    // 48 -> 64 fits exactly. The deliberately wrong old=0 control in scratch
+    // must fail here; live+new would wrongly reject this lawful replacement.
+    replacement :: decode_budget_test_live(state, 48, 64)
+    assert_eq(replacement, 64)
+    _ :: decode_budget_test_state(state, 64, 48, 48, false)
+    mem_decode_budget.decode_budget_commit(&state, replacement)
+    _ :: decode_budget_test_state(state, 64, 64, 64, false)
+    decode_budget_test_rejected(state, 64, 65)
+    _ :: decode_budget_test_state(state, 64, 64, 64, false)
+}
+
+#Test("decode realloc subtracts only the resized block among live allocations") {
+    state := mem_decode_budget.decode_budget_new(100)
+    first :: decode_budget_test_live(state, 0, 40)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    second :: decode_budget_test_live(state, 0, 20)
+    mem_decode_budget.decode_budget_commit(&state, second)
+    assert_eq(decode_budget_test_live(state, 20, 60), 100)
+    grown :: decode_budget_test_live(state, 20, 60)
+    mem_decode_budget.decode_budget_commit(&state, grown)
+    _ :: decode_budget_test_state(state, 100, 100, 100, false)
+    shrunk :: decode_budget_test_live(state, 60, 10)
+    mem_decode_budget.decode_budget_commit(&state, shrunk)
+    _ :: decode_budget_test_state(state, 100, 50, 100, false)
+    mem_decode_budget.decode_budget_free(&state, 40)
+    _ :: decode_budget_test_state(state, 100, 10, 100, false)
+    mem_decode_budget.decode_budget_free(&state, 10)
+    _ :: decode_budget_test_state(state, 100, 0, 100, false)
+}
+
+#Test("decode shrink and free preserve historical peak") {
+    state := mem_decode_budget.decode_budget_new(64)
+    first :: decode_budget_test_live(state, 0, 48)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    grown :: decode_budget_test_live(state, 48, 64)
+    mem_decode_budget.decode_budget_commit(&state, grown)
+    shrunk :: decode_budget_test_live(state, 64, 16)
+    mem_decode_budget.decode_budget_commit(&state, shrunk)
+    _ :: decode_budget_test_state(state, 64, 16, 64, false)
+    mem_decode_budget.decode_budget_free(&state, 16)
+    _ :: decode_budget_test_state(state, 64, 0, 64, false)
+    second :: decode_budget_test_live(state, 0, 32)
+    mem_decode_budget.decode_budget_commit(&state, second)
+    _ :: decode_budget_test_state(state, 64, 32, 64, false)
+}
+
+#Test("decode failed reserve latches separately and still permits cleanup") {
+    // Rust allocator_families.rs:796–828 logical 64/48/32/free oracle. Unlike
+    // the program allocator, decode failure additionally latches its own scope.
+    state := mem_decode_budget.decode_budget_new(64)
+    first :: decode_budget_test_live(state, 0, 48)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    decode_budget_test_rejected(state, 0, 32)
+    _ :: decode_budget_test_state(state, 64, 48, 48, false)
+    mem_decode_budget.decode_budget_latch_failure(&state)
+    _ :: decode_budget_test_state(state, 64, 48, 48, true)
+    // Even growth that would fit the ceiling is rejected after failure.
+    decode_budget_test_rejected(state, 48, 49)
+    decode_budget_test_rejected(state, 0, 1)
+    assert_eq(decode_budget_test_live(state, 48, 48), 48)
+    shrunk :: decode_budget_test_live(state, 48, 16)
+    mem_decode_budget.decode_budget_commit(&state, shrunk)
+    _ :: decode_budget_test_state(state, 64, 16, 48, true)
+    mem_decode_budget.decode_budget_free(&state, 16)
+    mem_decode_budget.decode_budget_latch_failure(&state)
+    _ :: decode_budget_test_state(state, 64, 0, 48, true)
+    decode_budget_test_rejected(state, 0, 1)
+    assert_eq(decode_budget_test_live(state, 0, 0), 0)
+}
+
+#Test("decode exact Int capacities and counters cannot wrap at machine width") {
+    limit :: 18446744073709551616
+    state := mem_decode_budget.decode_budget_new(limit)
+    assert(mem_decode_budget.decode_budget_input_allowed(limit, limit))
+    assert(!mem_decode_budget.decode_budget_input_allowed(limit, limit + 1))
+    capacity :: 9223372036854775808
+    element_size :: 2
+    exact_charge :: capacity * element_size
+    assert_eq(exact_charge, limit)
+    first :: decode_budget_test_live(state, 0, exact_charge)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    _ :: decode_budget_test_state(state, limit, limit, limit, false)
+    decode_budget_test_rejected(state, 0, 1)
+    decode_budget_test_rejected(state, limit, limit + 1)
+    // live+new exceeds U64 even though the replacement fits. Subtract old first.
+    assert_eq(decode_budget_test_live(state, limit, limit), limit)
+    shrunk :: decode_budget_test_live(state, limit, limit - 1)
+    mem_decode_budget.decode_budget_commit(&state, shrunk)
+    _ :: decode_budget_test_state(state, limit, limit - 1, limit, false)
+    mem_decode_budget.decode_budget_free(&state, limit - 1)
+    _ :: decode_budget_test_state(state, limit, 0, limit, false)
+}
+
+#Test("decode exact Int ledger retains values far beyond fixed counters") {
+    limit :: 100000000000000000000000000000000000000000000000000
+    state := mem_decode_budget.decode_budget_new(limit)
+    old :: limit - 100
+    first :: decode_budget_test_live(state, 0, old)
+    mem_decode_budget.decode_budget_commit(&state, first)
+    decode_budget_test_rejected(state, 0, 101)
+    grown :: decode_budget_test_live(state, old, limit)
+    mem_decode_budget.decode_budget_commit(&state, grown)
+    _ :: decode_budget_test_state(state, limit, limit, limit, false)
+    shrunk :: decode_budget_test_live(state, limit, 1)
+    mem_decode_budget.decode_budget_commit(&state, shrunk)
+    _ :: decode_budget_test_state(state, limit, 1, limit, false)
+    mem_decode_budget.decode_budget_free(&state, 1)
+    _ :: decode_budget_test_state(state, limit, 0, limit, false)
+}

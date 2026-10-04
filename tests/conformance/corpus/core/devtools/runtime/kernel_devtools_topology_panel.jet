@@ -1,0 +1,175 @@
+// DevtoolsTopologyPanel.rs:1693-1807: all five original fixtures/assertions.
+// Main wires the private module plus canonical Foundation event/JSON owners.
+use core.devtools.runtime.kernel_devtools_topology_panel as topology
+use jet_foundation.Devtools.Observation as topology_event
+use core.text.runtime.kernel_unicode_string as topology_test_text
+
+// Rust test helper :1697.
+fn supervisor(id: String, parent: String?) -> topology.JetDevtoolsTopologyFact Never! {
+    fact :: topology.JetDevtoolsTopologySupervisorFact.new(~id, "test", ~parent, .Running, [topology.JetDevtoolsTopologyRestartFact]{}, topology.JetDevtoolsTopologyFreshness.fresh(U64{10})) ?? panic("supervisor fixture")
+    topology.JetDevtoolsTopologyFact.Supervisor{fact: ^fact}
+}
+fn task(id: String, parent: String?) -> topology.JetDevtoolsTopologyTaskFact Never! {
+    topology.JetDevtoolsTopologyTaskFact.new(~id, "test", ~parent, .Running, [topology.JetDevtoolsTopologyRestartFact]{}, topology.JetDevtoolsTopologyFreshness.fresh(U64{11})) ?? panic("task fixture")
+}
+fn endpoint(host: String, scheme: topology.JetDevtoolsTopologyEndpointScheme, port: U16?) -> topology.JetDevtoolsTopologyEndpointFact topology.JetDevtoolsTopologyError! {
+    topology.JetDevtoolsTopologyEndpointFact.new("api", "test", None, scheme, ~host, port, .Verified, topology.JetDevtoolsTopologyFreshness.fresh(U64{12})) ?? return Err(err)
+}
+
+#Test("duplicate_identity_is_rejected_across_fact_kinds") {
+    state := topology.JetDevtoolsTopologyState.new()
+    &state.ingest(supervisor("root", None)) ?? panic("root ingest")
+    duplicate :: topology.JetDevtoolsTopologyProcessFact.new("root", "test", None, .Running, Val(U64{7}), [topology.JetDevtoolsTopologyRestartFact]{}, topology.JetDevtoolsTopologyFreshness.fresh(U64{10})) ?? panic("process fixture")
+    result :: &state.ingest(topology.JetDevtoolsTopologyFact.Process{fact: ^duplicate})
+    if result == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.DuplicateIdentity{id: "root"})
+        .Ok(_) -> panic("duplicate accepted")
+    }
+    assert(state.len() == 1)
+}
+#Test("cycle_is_rejected_deterministically") {
+    state := topology.JetDevtoolsTopologyState.new()
+    &state.ingest(supervisor("a", Val("b"))) ?? panic("forward parent ingest")
+    result :: &state.ingest(supervisor("b", Val("a")))
+    if result == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.Cycle{id: "b"})
+        .Ok(_) -> panic("cycle accepted")
+    }
+    assert(state.len() == 1)
+}
+#Test("tree_and_rows_project_the_same_sorted_fact_set") {
+    state := topology.JetDevtoolsTopologyState.new()
+    &state.ingest(supervisor("root", None)) ?? panic("root ingest")
+    child :: task("task", Val("root"))
+    &state.ingest(topology.JetDevtoolsTopologyFact.Task{fact: ^child}) ?? panic("task ingest")
+    rows :: state.rows()
+    tree :: state.tree(None) ?? panic("tree projection")
+    assert(rows.len() == 2)
+    assert(tree.roots.len() == 1)
+    assert(tree.roots[0].row.id == "root")
+    assert(tree.roots[0].children[0].row.id == "task")
+    assert(rows[0].id == "root")
+    assert(rows[1].id == "task")
+}
+#Test("endpoint_display_has_no_authority_proof") {
+    fact :: endpoint("api.example.test", .Https, Val(U16{443})) ?? panic("endpoint fixture")
+    display :: fact.display()
+    assert(display.render() == "https://api.example.test:443")
+    assert(display.authority_state == topology.JetDevtoolsTopologyEndpointAuthorityState.Verified)
+}
+#Test("invalid_endpoint_userinfo_is_rejected") {
+    result :: endpoint("token@api.example.test", .Https, Val(U16{443}))
+    if result == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidEndpointAddress)
+        .Ok(_) -> panic("userinfo accepted")
+    }
+}
+
+// Additional branch controls use real typed facts, not fake event providers.
+#Test("topology graph validation precedes root lookup and protocol construction") {
+    state := topology.JetDevtoolsTopologyState.new()
+    assert(state.is_empty())
+    &state.ingest(supervisor("a", Val("missing"))) ?? panic("forward reference")
+    if state.tree(Val("unknown")) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.MissingParent{child_id: "a", parent_id: "missing"})
+        .Ok(_) -> panic("dangling graph accepted")
+    }
+    if state.to_protocol_events("test") == {
+        .Err(error) -> assert(error == "topology parent `missing` for `a` is missing")
+        .Ok(_) -> panic("partial protocol projection accepted")
+    }
+    &state.ingest(supervisor("missing", None)) ?? panic("resolve parent")
+    if state.tree(Val("unknown")) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.UnknownRoot{id: "unknown"})
+        .Ok(_) -> panic("unknown root accepted")
+    }
+    subtree :: state.tree(Val("a")) ?? panic("subtree")
+    assert(subtree.roots.len() == 1 && subtree.roots[0].row.id == "a")
+    assert(subtree.roots[0].children.is_empty())
+}
+#Test("topology endpoint validates exact address and unsigned byte limit") {
+    invalid :: [String]{"", "a b", "a?b", "a#b", "a/b", "a\\b", "a\nb"}
+    loop host in invalid {
+        if endpoint(host, .Https, None) == {
+            .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidEndpointAddress)
+            .Ok(_) -> panic("invalid address accepted")
+        }
+    }
+    unicode_space := [U8]{}
+    topology_test_text.append_cp(&unicode_space, 160)
+    spaced :: String.from_bytes(unicode_space) ?? panic("space scalar")
+    if endpoint("a{spaced}b", .Tcp, None) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidEndpointAddress)
+        .Ok(_) -> panic("Unicode whitespace accepted")
+    }
+    unix :: endpoint("/run/service.sock", .Unix, None) ?? panic("unix endpoint")
+    assert(unix.display().render() == "unix:///run/service.sock")
+    if endpoint("/run/service.sock", .Unix, Val(U16{1})) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidEndpointAddress)
+        .Ok(_) -> panic("unix port accepted")
+    }
+    fact := endpoint("localhost", .Tcp, Val(U16{0})) ?? panic("zero port is valid")
+    fact.bytes_in = Val(U64{1099511627776})
+    _ :: fact.to_protocol_event("test") ?? panic("byte limit should be inclusive")
+    fact.bytes_out = Val(U64{1099511627777})
+    if fact.to_protocol_event("test") == {
+        .Err(error) -> assert(error == "invalid endpoint byte count for `api`")
+        .Ok(_) -> panic("oversized byte count accepted")
+    }
+}
+#Test("topology restart policy and history preserve limits and error precedence") {
+    policy :: topology.JetDevtoolsTopologyRestartPolicy.new(.OneForAll, U32{1000}, U64{86400000}) ?? panic("inclusive policy limits")
+    assert(policy.render_json() == "{{\"strategy\":\"one_for_all\",\"max_restarts\":1000,\"window_ms\":86400000}}")
+    if topology.JetDevtoolsTopologyRestartPolicy.new(.OneForOne, U32{0}, U64{1}) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidRestartPolicy{id: "<policy>"})
+        .Ok(_) -> panic("zero budget accepted")
+    }
+    history := [topology.JetDevtoolsTopologyRestartFact]{}
+    loop i in 0..<65 -> &history.push(topology.JetDevtoolsTopologyRestartFact{at_ms: U64{0}, duration_ms: U64{18446744073709551615}, reason: .Policy})
+    if topology.JetDevtoolsTopologySupervisorFact.new("root", "test", None, .Running, ^history, topology.JetDevtoolsTopologyFreshness.default()) == {
+        .Err(error) -> assert(error == topology.JetDevtoolsTopologyError.InvalidRestartHistory{id: "root"})
+        .Ok(_) -> panic("65 restarts accepted")
+    }
+    invalid := task("task", None)
+    invalid.owner = Val("")
+    invalid.restart_policy = Val(topology.JetDevtoolsTopologyRestartPolicy{strategy: .OneForOne, max_restarts: U32{0}, window_ms: U64{0}})
+    if invalid.to_protocol_event("test") == {
+        .Err(error) -> assert(error == "invalid topology owner")
+        .Ok(_) -> panic("invalid builder output accepted")
+    }
+}
+#Test("topology exact sorted protocol fields and owned row projection") {
+    state := topology.JetDevtoolsTopologyState.new()
+    child := task("z", Val("root"))
+    child.owner = Val("worker")
+    child.wait_target = Val("io")
+    child.duration_ms = Val(U64{9})
+    child.failure = Val(topology.JetDevtoolsTopologyFailureKind.TimedOut)
+    child.restart_policy = Val(topology.JetDevtoolsTopologyRestartPolicy.new(.RestForOne, U32{2}, U64{3}) ?? panic("policy"))
+    &state.ingest(topology.JetDevtoolsTopologyFact.Task{fact: ^child}) ?? panic("child first")
+    &state.ingest(supervisor("root", None)) ?? panic("root second")
+    events :: state.to_protocol_events("host") ?? panic("events")
+    assert(events.len() == 2)
+    assert(events[0].entity() == "root")
+    assert(events[1].entity() == "z")
+    assert(events[1].source() == "host")
+    expected :: "{{\"id\":\"z\",\"source\":\"test\",\"parent_id\":\"root\",\"freshness\":\"fresh\",\"observed_at_ms\":11,\"state\":\"running\",\"restart_history\":[],\"owner\":\"worker\",\"wait_target\":\"io\",\"duration_ms\":9,\"failure\":\"timed_out\",\"restart_policy\":{{\"strategy\":\"rest_for_one\",\"max_restarts\":2,\"window_ms\":3}}}}"
+    assert(events[1].fields_json() == expected)
+    assert(events[1].payload_json() == None)
+    rows :: state.rows()
+    assert(rows[1].owner == Val("worker"))
+    assert(rows[1].wait_target == Val("io"))
+    assert(rows[1].duration_ms == Val(U64{9}))
+    assert(rows[1].failure == Val(topology.JetDevtoolsTopologyFailureKind.TimedOut))
+    assert(rows[1].restart_count() == 0)
+    assert(rows[1].connection == None && rows[1].process_id == None && rows[1].endpoint == None)
+}
+#Test("topology errors retain all Display message branches") {
+    errors :: [topology.JetDevtoolsTopologyError]{
+        .TooManyFacts, .TooManyRestarts{id: "x"}, .DuplicateIdentity{id: "x"}, .InvalidText{field: "identity"},
+        .InvalidEndpointAddress, .InvalidRestartHistory{id: "x"}, .InvalidRestartPolicy{id: "x"},
+        .InvalidByteCount{id: "x"}, .Cycle{id: "x"}, .MissingParent{child_id: "x", parent_id: "p"}, .UnknownRoot{id: "x"},
+    }
+    expected :: [String]{"topology fact limit exceeded", "restart history limit exceeded for `x`", "duplicate topology identity `x`", "invalid topology identity", "invalid topology endpoint address", "invalid restart history for `x`", "invalid restart policy for `x`", "invalid endpoint byte count for `x`", "topology cycle at `x`", "topology parent `p` for `x` is missing", "unknown topology root `x`"}
+    loop i in 0..<errors.len() -> assert(errors[i].show() == expected[i])
+}

@@ -1,0 +1,1005 @@
+// Continuation of std_common_types: maintained queries, clocks and exact integers.
+// GATE #4494: shared ownership, interior cells, mutexes and monotonic native time.
+use std.rc.[Rc]
+use std.sync.[Arc, Mutex]
+use std.cell.[Cell, RefCell]
+use std.time.[Instant]
+use std.cmp.[Ordering]
+use core.data.[DataError, DataErrorKind, DataLimits]
+use core.prelude.runtime.std_common_types.[DataWatchOperationSource, DataWatchEntry, DataWatchMaterialized, DataWatchSource, DataQueryOperation, DataTrackedReader, DataTrackedMeta, DataTracked, DataTrackedChange, DataTrackedChangeKind, DataQueryRows, DataQueryPlan]
+use core.prelude.runtime.kernel_shared.[JetShared, JetSharedRevisionError]
+use core.prelude.runtime.kernel_live.[JetLiveLifecycle]
+use jet_table.[JetTablePlan]
+
+impl DataWatchOperationSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1788
+    fn apply_operation(self, entries: [DataWatchEntry<T>], retained_rows: Int) -> [DataWatchEntry<T>] DataError! {
+        match self.operation {
+            .Filter(predicate) => entries.retain(fn(entry) { predicate(entry.value.clone()) }),
+            .SortBy(key) => {
+                limit :: DataLimits.safe().max_sort_rows
+                if retained_rows as I64 > limit -> return Err(DataError.simple(.Limit, "data.query.watch", "max_sort_rows {limit} exceeded"))
+                for entry in &entries -> entry.key = Some(key(entry.value.clone()))
+                entries.sort_by(fn(left, right) { left.key.cmp(right.key) })
+            },
+        }
+        entries
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1816
+impl DataWatchOperationSource<T>.DataWatchSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1817
+    fn initial(self) -> DataWatchMaterialized<T> DataError! {
+        materialized :: self.inner.initial()?
+        next_base :: materialized.entries.clone()
+        entries :: self.apply_operation(next_base.clone(), materialized.retained_rows)?
+        self.base.replace(Some(next_base))
+        DataWatchMaterialized{entries: entries, revision: materialized.revision, mode: materialized.mode,
+            recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1833
+    fn refresh(self, revision: U64, prior: View<DataWatchEntry<T>>) -> DataWatchMaterialized<T> DataError! {
+        base :: self.base.borrow().clone().ok_or_else(fn() { DataError.simple(.State, "data.query.watch", "derived watch was not initialized") })?
+        materialized :: self.inner.refresh(revision, &base)?
+        if !materialized.changed && materialized.revision == revision {
+            return DataWatchMaterialized{entries: prior.to_list(), revision: materialized.revision, mode: materialized.mode,
+                recomputed: false, changed: false, retained_rows: materialized.retained_rows}
+        }
+        next_base :: materialized.entries.clone()
+        entries :: self.apply_operation(next_base.clone(), materialized.retained_rows)?
+        self.base.replace(Some(next_base))
+        DataWatchMaterialized{entries: entries, revision: materialized.revision, mode: materialized.mode,
+            recomputed: materialized.recomputed, changed: materialized.changed, retained_rows: materialized.retained_rows}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1871
+struct DataTrackedWatchSource<T> { source: Rc<DataTrackedReader<T>>, operations: [DataQueryOperation<T>] }
+impl DataTrackedWatchSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1877
+    fn accepts(operations: View<DataQueryOperation<T>>, row: T) -> (Bool, String?) Never! {
+        sort_key := None
+        for operation in operations {
+            match operation {
+                .Filter(predicate) => { if !predicate(row.clone()) -> return (false, None) },
+                .SortBy(key) => sort_key = Some(key(row.clone())),
+            }
+        }
+        (true, sort_key)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1897
+    fn insert_entry(entries: &[DataWatchEntry<T>], entry: DataWatchEntry<T>) Never! {
+        position :: entries.iter().position(fn(existing) {
+            match (entry.key, existing.key) {
+                (Some(left), Some(right)) => left.cmp(right) == .Less || (left == right && entry.order < existing.order),
+                _ => entry.order < existing.order,
+            }
+        }).unwrap_or(entries.len())
+        entries.insert(position, entry)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1911
+    fn entries_from_snapshot(self, rows: [(U64, T)]) -> [DataWatchEntry<T>] Never! {
+        entries := []
+        for (order, value) in rows {
+            (accepted, key) :: Self.accepts(&self.operations, value)
+            if accepted -> Self.insert_entry(&entries, DataWatchEntry{order: order, key: key, value: value})
+        }
+        entries
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1924
+    fn check_sort_limit(self) DataError! {
+        if self.operations.iter().any(fn(operation) { match operation { .SortBy(_) => true, _ => false } }) {
+            limit :: DataLimits.safe().max_sort_rows
+            if self.source.retained_rows() as I64 > limit -> return Err(DataError.simple(.Limit, "data.query.watch", "max_sort_rows {limit} exceeded"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1942
+    fn apply_change(self, entries: &[DataWatchEntry<T>], change: DataTrackedChange<T>) DataError! {
+        index :: entries.iter().position(fn(entry) { entry.order == change.order })
+        match change.kind {
+            .Insert{row} => {
+                (accepted, key) :: Self.accepts(&self.operations, row)
+                if accepted -> Self.insert_entry(entries, DataWatchEntry{order: change.order, key: key, value: row})
+            },
+            .Replace{after, ..} => {
+                if Some(index) = index -> entries.remove(index)
+                (accepted, key) :: Self.accepts(&self.operations, after)
+                if accepted -> Self.insert_entry(entries, DataWatchEntry{order: change.order, key: key, value: after})
+            },
+            .Remove{..} => { if Some(index) = index -> entries.remove(index) },
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1978
+impl DataTrackedWatchSource<T>.DataWatchSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1979
+    fn initial(self) -> DataWatchMaterialized<T> DataError! {
+        self.check_sort_limit()?
+        (revision, rows) :: self.source.snapshot_entries_at_revision()
+        entries :: self.entries_from_snapshot(rows)
+        DataWatchMaterialized{entries: entries, revision: revision, mode: "incremental", recomputed: false,
+            changed: true, retained_rows: self.source.retained_rows()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1993
+    fn refresh(self, revision: U64, prior: View<DataWatchEntry<T>>) -> DataWatchMaterialized<T> DataError! {
+        self.check_sort_limit()?
+        changes :: self.source.changes_since(revision)?
+        entries := prior.to_list()
+        for change in changes -> self.apply_change(&entries, change)?
+        DataWatchMaterialized{entries: entries, revision: self.source.revision(), mode: "incremental", recomputed: false,
+            changed: self.source.revision() != revision, retained_rows: self.source.retained_rows()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2015
+#Clone
+struct DataWatchState<T> {
+    entries: [DataWatchEntry<T>]
+    source_revision: U64
+    mode: String
+    retained_rows: Int
+    recomputations: U64
+    lifecycle: JetLiveLifecycle
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2025
+#Clone
+#Debug
+#Equatable
+pub struct DataWatchStatus {
+    pub mode: String
+    pub revision: I64
+    pub retained_rows: I64
+    pub recomputations: I64
+    pub active: Bool
+    pub generation: I64
+    pub dirty: Bool
+    pub error: String
+    pub freshness_ms: I64
+    pub invalidation_cause: String
+    pub refreshing: Bool
+    pub cancelled: Bool
+}
+impl DataWatchStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2042
+    fn jet_show(self) -> String Never! {
+        "DataWatchStatus{{mode: {self.mode}, revision: {self.revision}, retained_rows: {self.retained_rows}, recomputations: {self.recomputations}, active: {self.active}, generation: {self.generation}, dirty: {self.dirty}, error: {self.error}, freshness_ms: {self.freshness_ms}, invalidation_cause: {self.invalidation_cause}, refreshing: {self.refreshing}, cancelled: {self.cancelled}}}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2061
+    fn jet_display(self) -> String Never! { self.jet_show() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2066
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2070
+pub struct DataWatch<T> { query: DataQuery<T>, source: Rc<DataWatchSource<T>>, state: Rc<JetShared<DataWatchState<T>>> }
+impl DataWatch<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2077
+    fn clone(self) -> DataWatch<T> Never! { Self{query: self.query.clone(), source: self.source.clone(), state: self.state.clone()} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2088
+    fn from_query(query: DataQuery<T>) -> DataWatch<T> DataError! {
+        source :: query.maintained_watch_source().ok_or_else(fn() {
+            DataError.simple(.Unsupported, "data.query.watch", "E2476: watch requires a maintained data.track source")
+        })?
+        initial :: source.initial()?
+        if initial.entries.len() as I64 > DataLimits.safe().max_output_rows -> return Err(DataError.simple(.Limit, "data.query.watch", "maintained result exceeds max_output_rows"))
+        state :: DataWatchState{entries: initial.entries, source_revision: initial.revision, mode: initial.mode,
+            retained_rows: initial.retained_rows, recomputations: if initial.recomputed { 1 } else { 0 }, lifecycle: JetLiveLifecycle.active_now()}
+        Self{query: query, source: source, state: Rc.new(JetShared.new(state))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2119
+    fn is_active(self) -> Bool Never! { self.state.read(fn(state) { state.lifecycle.active }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2123
+    fn cancel(self) Never! { self.state.edit(fn(state) { _ :: state.lifecycle.cancel() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2129
+    fn get(self) -> [T] DataError! {
+        if !self.is_active() -> return Err(DataError.simple(.State, "data.watch.get", "watch is cancelled"))
+        snapshot :: self.state.capture()
+        current :: snapshot.value()
+        generation :: current.lifecycle.generation
+        lifecycle := current.lifecycle.clone()
+        if !lifecycle.begin_refresh(generation) -> return Err(DataError.simple(.State, "data.watch.get", "watch is cancelled"))
+        update :: match self.source.refresh(current.source_revision, &current.entries) {
+            Val(update) => update,
+            Err(error) => {
+                _ :: lifecycle.fail(generation, error.to_string())
+                failed :: DataWatchState{entries: current.entries.clone(), source_revision: current.source_revision,
+                    mode: current.mode.clone(), retained_rows: current.retained_rows, recomputations: current.recomputations, lifecycle: lifecycle}
+                _ :: self.state.try_replace(snapshot, failed)
+                return Err(error)
+            },
+        }
+        if update.entries.len() as I64 > DataLimits.safe().max_output_rows {
+            error :: DataError.simple(.Limit, "data.watch.get", "maintained result exceeds max_output_rows")
+            _ :: lifecycle.fail(generation, error.to_string())
+            failed :: DataWatchState{entries: current.entries.clone(), source_revision: current.source_revision,
+                mode: current.mode.clone(), retained_rows: current.retained_rows, recomputations: current.recomputations, lifecycle: lifecycle}
+            _ :: self.state.try_replace(snapshot, failed)
+            return Err(error)
+        }
+        _ :: lifecycle.publish(generation, JetLiveLifecycle.active_now().fresh_at_ms)
+        next :: DataWatchState{entries: update.entries, source_revision: update.revision, mode: update.mode,
+            retained_rows: update.retained_rows, recomputations: current.recomputations.saturating_add(if update.recomputed { 1 } else { 0 }), lifecycle: lifecycle}
+        if !self.is_active() -> return Err(DataError.simple(.State, "data.watch.get", "watch was cancelled before publication"))
+        match self.state.try_replace(snapshot, next) {
+            Val(true) => self.state.read(fn(state) { state.entries.iter().map(fn(entry) { entry.value.clone() }).collect() }),
+            Val(false) => Err(DataError.simple(.StaleRevision, "data.watch.get", "watch state changed before publication")),
+            Err(.WrongOwner) => Err(DataError.simple(.WrongOwner, "data.watch.get", "watch snapshot belongs to another owner")),
+            Err(.GenerationExhausted) => Err(DataError.simple(.Overflow, "data.watch.get", "watch publication revision exhausted")),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2227
+    fn note_refresh(self) Never! { _ :: self.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2231
+    fn status(self) -> DataWatchStatus Never! {
+        self.state.read(fn(state) {
+            DataWatchStatus{mode: state.mode.clone(), revision: state.source_revision.min(I64.MAX as U64) as I64,
+                retained_rows: state.retained_rows.min(I64.MAX as Int) as I64, recomputations: state.recomputations.min(I64.MAX as U64) as I64,
+                active: state.lifecycle.active, generation: state.lifecycle.generation.min(I64.MAX as U64) as I64,
+                dirty: state.lifecycle.dirty, error: state.lifecycle.error.clone(), freshness_ms: state.lifecycle.freshness_ms().min(I64.MAX as U64) as I64,
+                invalidation_cause: state.lifecycle.invalidation_cause.clone(), refreshing: state.lifecycle.refreshing, cancelled: state.lifecycle.cancelled}
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2250
+    fn jet_show(self) -> String Never! { self.status().jet_show() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2255
+    fn jet_display(self) -> String Never! { self.jet_show() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2260
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+impl DataQueryOperation<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2266
+    fn clone(self) -> DataQueryOperation<T> Never! {
+        match self { .Filter(predicate) => .Filter(predicate.clone()), .SortBy(key) => .SortBy(key.clone()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2275
+// Computed producers are single-use; every derived query shares consumed state.
+enum DataQuerySource<T> {
+    Rows(DataQueryRows<T>)
+    Tracked(Rc<DataTrackedReader<T>>)
+    Computed(Rc<RefCell<Box<fn() -> [T] DataError!>?>>)
+    Recomputed(Rc<fn() -> [T] DataError!>)
+}
+impl DataQuerySource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2290
+    fn clone(self) -> DataQuerySource<T> Never! {
+        match self { .Rows(rows) => .Rows(rows.clone()), .Tracked(source) => .Tracked(source.clone()),
+            .Computed(compute) => .Computed(compute.clone()), .Recomputed(compute) => .Recomputed(compute.clone()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2301
+// Logical plan steps keep their public spelling on every tier.
+pub struct DataQuery<T> {
+    source: DataQuerySource<T>
+    operations: [DataQueryOperation<T>]
+    steps: [String]
+    tracking: Rc<DataTrackedMeta>?
+    watch_source: Rc<DataWatchSource<T>>?
+    consumed: Rc<Cell<Bool>>
+}
+impl DataQuery<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2314
+    fn clone(self) -> DataQuery<T> Never! {
+        Self{source: self.source.clone(), operations: self.operations.clone(), steps: self.steps.clone(),
+            tracking: self.tracking.clone(), watch_source: self.watch_source.clone(), consumed: self.consumed.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2328
+    pub fn from_rows(rows: [T], missing: I64, plan: JetTablePlan) -> DataQuery<T> Never! {
+        Self{source: .Rows(DataQueryRows.from_rows(rows, missing, plan)), operations: [], steps: ["scan"],
+            tracking: None, watch_source: None, consumed: Rc.new(Cell.new(false))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2339
+    pub fn from_tracked<K>(tracked: DataTracked<T, K>) -> DataQuery<T> Never! {
+        Self{source: .Tracked(Rc.new(tracked.clone())), operations: [], steps: ["track"],
+            tracking: Some(Rc.new(tracked.clone())), watch_source: None, consumed: Rc.new(Cell.new(false))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2355
+    pub fn with_step(self, step: String) -> DataQuery<T> Never! { self.steps.push(step); self }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2360
+    pub fn plan(self) -> [String] Never! { self.steps.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2364
+    pub fn filter(self, predicate: fn(T) -> Bool) -> DataQuery<T> Never! {
+        operation :: DataQueryOperation.Filter(Arc.new(predicate))
+        operations := self.operations.clone()
+        operations.push(operation.clone())
+        steps := self.steps.clone()
+        steps.push("filter")
+        watch_source :: self.watch_source.map(fn(source) {
+            Rc.new(DataWatchOperationSource{inner: source.clone(), operation: operation, base: RefCell.new(None)})
+        })
+        Self{source: self.source.clone(), operations: operations, steps: steps, tracking: self.tracking.clone(),
+            watch_source: watch_source, consumed: self.consumed.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2392
+    pub fn sort_by(self, key: fn(T) -> String) -> DataQuery<T> Never! {
+        operation :: DataQueryOperation.SortBy(Arc.new(key))
+        operations := self.operations.clone()
+        operations.push(operation.clone())
+        steps := self.steps.clone()
+        steps.push("sort_by")
+        watch_source :: self.watch_source.map(fn(source) {
+            Rc.new(DataWatchOperationSource{inner: source.clone(), operation: operation, base: RefCell.new(None)})
+        })
+        Self{source: self.source.clone(), operations: operations, steps: steps, tracking: self.tracking.clone(),
+            watch_source: watch_source, consumed: self.consumed.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2420
+    fn rows_frame(self) -> DataQueryRows<T>? Never! {
+        rows := match self.source {
+            .Rows(rows) => rows.clone(),
+            .Tracked(source) => {
+                values :: source.snapshot_rows()
+                DataQueryRows.from_rows(values.clone(), 0, source.plan(values.len()))
+            },
+            .Computed(_) | .Recomputed(_) => return None,
+        }
+        for operation in self.operations {
+            match operation {
+                .Filter(predicate) => { predicate :: predicate.clone(); rows = rows.filter(fn(row) { predicate(row) }) },
+                .SortBy(key) => { key :: key.clone(); rows = rows.sort_by(fn(row) { key(row) }) },
+            }
+        }
+        Some(rows)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2447
+    fn is_computed(self) -> Bool Never! { match self.source { .Computed(_) => true, _ => false } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2451
+    fn is_recomputed(self) -> Bool Never! { match self.source { .Recomputed(_) => true, _ => false } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2455
+    fn recomputation(self) -> ([T] DataError!)? Never! {
+        match self.source { .Recomputed(compute) => Some(compute()), _ => None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2463
+    fn from_computation(steps: [String], compute: fn() -> [T] DataError!) -> DataQuery<T> Never! {
+        Self{source: .Computed(Rc.new(RefCell.new(Some(Box.new(compute))))), operations: [], steps: steps,
+            tracking: None, watch_source: None, consumed: Rc.new(Cell.new(false))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2479
+    fn from_recomputation(steps: [String], tracking: Rc<DataTrackedMeta>, compute: fn() -> [T] DataError!) -> DataQuery<T> Never! {
+        Self{source: .Recomputed(Rc.new(compute)), operations: [], steps: steps, tracking: Some(tracking),
+            watch_source: None, consumed: Rc.new(Cell.new(false))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2496
+    fn with_watch_source(self, source: Rc<DataWatchSource<T>>) -> DataQuery<T> Never! { self.watch_source = Some(source); self }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2504
+    fn tracked_reader(self) -> Rc<DataTrackedReader<T>>? Never! {
+        match self.source { .Tracked(source) => Some(source.clone()), _ => None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2511
+    fn maintained_watch_source(self) -> Rc<DataWatchSource<T>>? Never! {
+        if Some(source) = self.watch_source -> return Some(source.clone())
+        self.tracked_reader().map(fn(source) { Rc.new(DataTrackedWatchSource{source: source, operations: self.operations.clone()}) })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2528
+    fn take_computation(self) -> Box<fn() -> [T] DataError!>? Never! {
+        if !self.is_computed() || self.consumed.replace(true) -> return None
+        match self.source { .Computed(compute) => compute.borrow_mut().take(), _ => None }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2541
+#Clone
+pub struct DataGroupedQuery<T, K> { query: DataQuery<T>, key: Arc<fn(T) -> K> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2550
+// Pull execution retains only the bounded sort buffer, initialized on first pull.
+struct DataQueryCursor<T> { state: DataQueryCursorState<T> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2557
+enum DataQueryCursorState<T> {
+    Scan{rows: Arc<[T]>, index: Int}
+    Filter{input: Box<DataQueryCursor<T>>, predicate: Arc<fn(T) -> Bool>}
+    SortBy{input: Box<DataQueryCursor<T>>, key: Arc<fn(T) -> String>, rows: [T]?, index: Int}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2574
+#Clone
+#Debug
+#Equatable
+#Error
+struct DataQueryPlanLimit { operation: String, limit: I64 }
+impl DataQueryRows<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2581
+    fn cursor(self) -> DataQueryCursor<T> Never! { DataQueryCursor.from_plan(self.root.clone()) }
+}
+impl DataQueryCursor<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2587
+    fn from_plan(plan: Arc<DataQueryPlan<T>>) -> DataQueryCursor<T> Never! {
+        state :: match plan.as_ref() {
+            .Scan{rows} => DataQueryCursorState.Scan{rows: rows.clone(), index: 0},
+            .Filter{input, predicate} => DataQueryCursorState.Filter{input: Box.new(Self.from_plan(input.clone())), predicate: predicate.clone()},
+            .SortBy{input, key} => DataQueryCursorState.SortBy{input: Box.new(Self.from_plan(input.clone())), key: key.clone(), rows: None, index: 0},
+        }
+        Self{state: state}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2607
+    fn next(self) -> T? Never! { self.next_with_sort_limit(None).ok().flatten() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2611
+    fn next_batch(self, batch_size: Int) -> [T] Never! { self.next_batch_with_sort_limit(batch_size, None).unwrap_or_default() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2616
+    fn next_batch_with_sort_limit(self, batch_size: Int, max_sort_rows: I64?) -> [T] DataQueryPlanLimit! {
+        batch := [T].with_capacity(batch_size)
+        for _ in 0..batch_size {
+            row :: self.next_with_sort_limit(max_sort_rows)?
+            match row { Some(row) => batch.push(row), None => break }
+        }
+        batch
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2631
+    fn next_with_sort_limit(self, max_sort_rows: I64?) -> T? DataQueryPlanLimit! {
+        match &self.state {
+            .Scan{rows, index} => {
+                if index >= rows.len() -> return None
+                row :: rows[index].clone()
+                index += 1
+                Some(row)
+            },
+            .Filter{input, predicate} => {
+                loop {
+                    row :: input.next_with_sort_limit(max_sort_rows)?
+                    match row { None => return None, Some(row) => { if predicate(row.clone()) -> return Some(row) } }
+                }
+            },
+            .SortBy{input, key, rows, index} => {
+                if rows.is_none() {
+                    keyed := []
+                    loop {
+                        row :: input.next_with_sort_limit(max_sort_rows)?
+                        match row {
+                            None => break,
+                            Some(row) => {
+                                if max_sort_rows.is_some_and(fn(limit) { limit < 1 || I64.try_from(keyed.len()).unwrap_or(I64.MAX) >= limit }) {
+                                    return Err(DataQueryPlanLimit{operation: "sort_by", limit: max_sort_rows.unwrap_or(0)})
+                                }
+                                keyed.push((key(row.clone()), row))
+                            },
+                        }
+                    }
+                    keyed.sort_by(fn(left, right) { left.0.cmp(right.0) })
+                    rows = Some(keyed.into_iter().map(fn(pair) { pair.1 }).collect())
+                }
+                sorted :: rows.as_ref().expect("sort rows initialized")
+                if index >= sorted.len() -> return None
+                row :: sorted[index].clone()
+                index += 1
+                Some(row)
+            },
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2690
+#Clone
+#Debug
+#Equatable
+pub struct DataJoin<L, R> { pub left: L, pub right: R }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2696
+// Canonical LogField has the identical key/value/kind/redacted representation.
+use core.log.[LogField]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2704
+#Clone
+#Debug
+#Equatable
+pub struct LogSpan { pub id: I64, pub name: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2710
+#Clone
+#Debug
+pub struct Stopwatch { pub start: Instant }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2715
+// Normal Clock clones fork a timeline; observers share it. System time is monotonic.
+#Debug
+pub enum ClockState { Manual(I64), System{started: Instant, offset_ms: I64} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2727
+#Debug
+pub struct Clock { state: Arc<Mutex<ClockState>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2732
+#Clone
+#Debug
+pub struct ClockObserver { state: Arc<Mutex<ClockState>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2737
+fn clock_state_now(state: ClockState) -> I64 Never! {
+    match state {
+        .Manual(now) => now,
+        .System{started, offset_ms} => offset_ms.saturating_add(I64.try_from(started.elapsed().as_millis()).unwrap_or(I64.MAX)),
+    }
+}
+impl Clock {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2746
+    pub fn manual(now: I64) -> Clock Never! { Self{state: Arc.new(Mutex.new(ClockState.Manual(now)))} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2752
+    pub fn system() -> Clock Never! { Self{state: Arc.new(Mutex.new(ClockState.System{started: Instant.now(), offset_ms: 0}))} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2761
+    pub fn now(self) -> I64 Never! { clock_state_now(self.state.lock().unwrap_or_else(fn(e) { e.into_inner() })) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2765
+    pub fn set(self, now: I64) Never! {
+        state := self.state.lock().unwrap_or_else(fn(e) { e.into_inner() })
+        match &state {
+            .Manual(current) => current = now,
+            .System{started, offset_ms} => {
+                current :: offset_ms.saturating_add(I64.try_from(started.elapsed().as_millis()).unwrap_or(I64.MAX))
+                started = Instant.now()
+                offset_ms = now.max(current)
+            },
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2779
+    pub fn observer(self) -> ClockObserver Never! { ClockObserver{state: self.state.clone()} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2793
+    fn clone(self) -> Clock Never! {
+        state :: self.state.lock().unwrap_or_else(fn(e) { e.into_inner() })
+        match state {
+            .Manual(now) => Self.manual(now),
+            .System{..} => Self{state: Arc.new(Mutex.new(ClockState.System{started: Instant.now(), offset_ms: clock_state_now(state)}))},
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2808
+    fn eq(self, other: Clock) -> Bool Never! { self.now() == other.now() }
+}
+impl ClockObserver {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2787
+    pub fn now(self) -> I64 Never! { clock_state_now(self.state.lock().unwrap_or_else(fn(e) { e.into_inner() })) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2813
+// SplitMix64 deterministic state capability: identical seeds produce identical draws.
+#Clone
+#Debug
+#Equatable
+pub struct Rng { pub state: U64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2821
+// Locale is closed: 0=en, 1=de. The Prelude owns generation semantics.
+#Clone
+#Debug
+#Equatable
+pub struct Fake { pub state: U64, pub locale: U8 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2829
+#Clone
+#Debug
+#Equatable
+pub struct Solver { pub seed: I64, pub checked: I64, pub failures: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2838
+// Checked whole nanoseconds; whole-unit reads truncate.
+#Clone
+#Debug
+#Equatable
+#Ordered
+pub struct Duration { pub ns: I64 }
+impl Duration {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2847
+    pub fn as_millis(self) -> I64 Never! { self.ns / 1_000_000 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2852
+    pub fn as_nanos(self) -> I64 Never! { self.ns }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2861
+    fn jet_display(self) -> String Never! { jet_duration_kernel_show(self.ns) }
+}
+use core.prelude.runtime.kernel_duration.[jet_duration_kernel_show]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2866
+#Clone
+#Debug
+#Equatable
+pub enum DurationUnit { Nanoseconds, Microseconds, Milliseconds, Seconds, Minutes, Hours }
+impl DurationUnit {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2877
+    pub fn nanoseconds(self) -> I64 Never! {
+        match self { .Nanoseconds => 1, .Microseconds => 1_000, .Milliseconds => 1_000_000,
+            .Seconds => 1_000_000_000, .Minutes => 60_000_000_000, .Hours => 3_600_000_000_000 }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2889
+#Clone
+#Debug
+#Equatable
+#Error
+pub struct RangeError { pub reason: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2902
+// Exact sign-magnitude integer, little-endian base 10^9, matching CtBigInt limb-for-limb.
+#Clone
+#Debug
+#Equatable
+pub struct JetBigInt { negative: Bool, limbs: [U32] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2908
+BI_BASE: U64 :: 1_000_000_000
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2910
+fn jet_limb_len(limbs: View<U32>) -> Int Never! {
+    length := limbs.len()
+    while length > 1 && limbs[length - 1] == 0 -> length -= 1
+    length
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2918
+fn jet_limb_is_zero(limbs: View<U32>) -> Bool Never! { jet_limb_len(limbs) == 1 && limbs.first().copied().unwrap_or(0) == 0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2922
+fn jet_limb_decimal_digits(limbs: View<U32>) -> Int Never! {
+    length :: jet_limb_len(limbs)
+    if length == 0 || limbs[0] == 0 && length == 1 -> return 1
+    top := limbs[length - 1]
+    digits := 1
+    while top >= 10 { top /= 10; digits += 1 }
+    digits + length.saturating_sub(1) * 9
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2936
+fn jet_limb_decimal_prefix_f64(limbs: View<U32>, digits: Int) -> Float Never! {
+    if jet_limb_is_zero(limbs) -> return 0.0
+    total :: jet_limb_decimal_digits(limbs)
+    take :: digits.min(total)
+    top_index :: jet_limb_len(limbs) - 1
+    top_width := 1
+    width_probe := limbs[top_index]
+    while width_probe >= 10 { width_probe /= 10; top_width += 1 }
+    prefix := 0.0
+    consumed := 0
+    for index in (0..=top_index).rev() {
+        if consumed == take -> break
+        limb :: limbs[index]
+        width :: if index == top_index { top_width } else { 9 }
+        need :: take - consumed
+        if need >= width {
+            prefix = prefix * 10.0.powi(width as I32) + limb as Float
+            consumed += width
+        } else {
+            divisor :: U32(10).pow((width - need) as U32)
+            prefix = prefix * 10.0.powi(need as I32) + (limb / divisor) as Float
+            break
+        }
+    }
+    prefix
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2970
+fn jet_limb_cmp(left: View<U32>, right: View<U32>) -> Ordering Never! {
+    left_len :: jet_limb_len(left)
+    right_len :: jet_limb_len(right)
+    match left_len.cmp(right_len) {
+        .Equal => {
+            for index in (0..left_len).rev() {
+                match left[index].cmp(right[index]) { .Equal => {}, ordering => return ordering }
+            }
+            .Equal
+        },
+        ordering => ordering,
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:2987
+fn jet_limb_shift_left(limbs: &[U32], bits: Int) Never! {
+    limbs.reserve(bits.saturating_div(28).saturating_add(1))
+    for _ in 0..bits {
+        carry: U64 := 0
+        for limb in &limbs {
+            value :: limb as U64 * 2 + carry
+            limb = (value % BI_BASE) as U32
+            carry = value / BI_BASE
+        }
+        if carry != 0 -> limbs.push(carry as U32)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3002
+fn jet_limb_double(limbs: &[U32]) Never! {
+    carry: U64 := 0
+    for limb in &limbs {
+        value :: limb as U64 * 2 + carry
+        limb = (value % BI_BASE) as U32
+        carry = value / BI_BASE
+    }
+    if carry != 0 -> limbs.push(carry as U32)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3014
+fn jet_limb_sub_assign(left: &[U32], right: View<U32>) Never! {
+    assert(jet_limb_cmp(left, right) != .Less)
+    borrow: I64 := 0
+    for index in 0..left.len() {
+        subtrahend :: right.get(index).copied().unwrap_or(0) as I64 + borrow
+        difference :: left[index] as I64 - subtrahend
+        if difference < 0 { left[index] = (difference + BI_BASE as I64) as U32; borrow = 1 }
+        else { left[index] = difference as U32; borrow = 0 }
+    }
+    assert(borrow == 0)
+    while left.len() > 1 && left.last() == Some(0) -> _ :: left.pop()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3034
+fn jet_ratio_cmp_pow2(numerator: View<U32>, denominator: View<U32>, exponent: I64) -> Ordering Never! {
+    shifted := if exponent >= 0 { denominator.to_list() } else { numerator.to_list() }
+    bits :: Int.try_from(exponent.unsigned_abs()).unwrap_or(Int.MAX)
+    jet_limb_shift_left(&shifted, bits)
+    if exponent >= 0 { jet_limb_cmp(numerator, &shifted) } else { jet_limb_cmp(&shifted, denominator) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3053
+fn jet_ratio_exponent(numerator: View<U32>, denominator: View<U32>) -> I64 Never! {
+    numerator_digits :: jet_limb_decimal_digits(numerator)
+    denominator_digits :: jet_limb_decimal_digits(denominator)
+    numerator_take :: numerator_digits.min(17)
+    denominator_take :: denominator_digits.min(17)
+    log2_ten :: 10.0.log2()
+    numerator_log :: (numerator_digits - numerator_take) as Float * log2_ten + jet_limb_decimal_prefix_f64(numerator, numerator_take).log2()
+    denominator_log :: (denominator_digits - denominator_take) as Float * log2_ten + jet_limb_decimal_prefix_f64(denominator, denominator_take).log2()
+    (numerator_log - denominator_log).floor() as I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3068
+fn jet_ratio_inf(negative: Bool) -> Float Never! { if negative { Float.NEG_INFINITY } else { Float.INFINITY } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3076
+fn jet_ratio_zero(negative: Bool) -> Float Never! { if negative { Float.from_bits(U64(1) << 63) } else { 0.0 } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3084
+fn jet_ratio_limbs_to_f64(numerator: View<U32>, denominator: View<U32>, negative: Bool) -> Float Never! {
+    if jet_limb_is_zero(numerator) -> return 0.0
+    assert(!jet_limb_is_zero(denominator))
+    numerator_digits :: jet_limb_decimal_digits(numerator)
+    denominator_digits :: jet_limb_decimal_digits(denominator)
+    decimal_delta :: numerator_digits as I64 - denominator_digits as I64
+    if decimal_delta > 400 -> return jet_ratio_inf(negative)
+    if decimal_delta < -400 -> return jet_ratio_zero(negative)
+    exponent := jet_ratio_exponent(numerator, denominator)
+    loop {
+        if jet_ratio_cmp_pow2(numerator, denominator, exponent) == .Less { exponent -= 1; continue }
+        if jet_ratio_cmp_pow2(numerator, denominator, exponent + 1) != .Less { exponent += 1; continue }
+        break
+    }
+    if exponent > 1023 -> return jet_ratio_inf(negative)
+    if exponent < -1075 -> return jet_ratio_zero(negative)
+    if exponent == -1075 {
+        scaled := numerator.to_list()
+        jet_limb_shift_left(&scaled, 1074)
+        jet_limb_double(&scaled)
+        magnitude :: if jet_limb_cmp(&scaled, denominator) == .Greater { Float.from_bits(1) } else { 0.0 }
+        return if negative { -magnitude } else { magnitude }
+    }
+    divisor_storage := []
+    remainder := if exponent >= 0 {
+        if exponent == 0 { numerator.to_list() }
+        else {
+            divisor_storage.extend_from_slice(denominator)
+            jet_limb_shift_left(&divisor_storage, exponent as Int)
+            numerator.to_list()
+        }
+    } else {
+        scaled := numerator.to_list()
+        jet_limb_shift_left(&scaled, exponent.unsigned_abs() as Int)
+        scaled
+    }
+    divisor :: if exponent > 0 { &divisor_storage } else { denominator }
+    jet_limb_sub_assign(&remainder, divisor)
+    significand: U64 := U64(1) << 52
+    for shift in (0..52).rev() {
+        jet_limb_double(&remainder)
+        if jet_limb_cmp(&remainder, divisor) != .Less {
+            jet_limb_sub_assign(&remainder, divisor)
+            significand |= U64(1) << shift
+        }
+    }
+    jet_limb_double(&remainder)
+    guard :: jet_limb_cmp(&remainder, divisor) != .Less
+    if guard -> jet_limb_sub_assign(&remainder, divisor)
+    sticky :: !jet_limb_is_zero(&remainder)
+    if guard && (sticky || (significand & 1) != 0) {
+        significand += 1
+        if significand == U64(1) << 53 { significand >>= 1; exponent += 1 }
+    }
+    if exponent > 1023 -> return jet_ratio_inf(negative)
+    bits :: ((exponent + 1023) as U64) << 52 | (significand & ((U64(1) << 52) - 1))
+    bits :: if negative { bits | (U64(1) << 63) } else { bits }
+    Float.from_bits(bits)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3194
+fn jet_decimal_power10_limbs(scale: U32) -> [U32] Never! {
+    groups :: Int.try_from(scale / 9).unwrap_or(Int.MAX)
+    remainder :: scale % 9
+    limbs := [U32].repeat(0, groups.saturating_add(1))
+    limbs[groups] = U32(10).pow(remainder)
+    limbs
+}
+impl JetBigInt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3203
+    pub fn from_u64(value: U64) -> JetBigInt Never! {
+        if value == 0 -> return Self.from_int(0)
+        limbs := []
+        while value > 0 { limbs.push((value % BI_BASE) as U32); value /= BI_BASE }
+        Self{negative: false, limbs: limbs}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3218
+    pub fn from_int(n: I64) -> JetBigInt Never! {
+        if n == 0 -> return Self{negative: false, limbs: [0]}
+        negative :: n < 0
+        // GATE #4483: native widened negation preserves I64.MIN's magnitude.
+        v := if negative { std.i128.from(n).wrapping_neg() as U64 } else { n as U64 }
+        limbs := []
+        while v > 0 { limbs.push((v % BI_BASE) as U32); v /= BI_BASE }
+        Self{negative: negative, limbs: limbs}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3239
+    pub fn from_str(s: String) -> JetBigInt Err! {
+        t := s.trim() // #4303
+        if t.is_empty() -> return Err("empty exact Int string")
+        (negative, body) :: if Some(rest) = t.strip_prefix('-') { (true, rest) }
+            else if Some(rest) = t.strip_prefix('+') { (false, rest) } else { (false, t) }
+        if body.is_empty() || !body.chars().all(fn(c) { c.is_ascii_digit() }) -> return Err("invalid exact Int string `{s}`")
+        acc := Self{negative: false, limbs: [0]}
+        for ch in body.chars() -> acc = acc.mul_small(10).add_small(ch.to_digit(10).unwrap() as U32)
+        acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0)
+        acc
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3266
+    pub fn from_radix(text: String, radix: U32) -> JetBigInt Err! {
+        if radix < 2 || radix > 36 -> return Err("integer radix must be between 2 and 36, got {radix}")
+        text := text.trim() // #4303
+        (negative, digits) :: if Some(rest) = text.strip_prefix('-') { (true, rest) }
+            else if Some(rest) = text.strip_prefix('+') { (false, rest) } else { (false, text) }
+        if digits.is_empty() -> return Err("integer radix text is empty")
+        value := Self.from_int(0)
+        for digit in digits.chars() {
+            digit :: digit.to_digit(radix).ok_or_else(fn() { "invalid base-{radix} integer `{text}`" })?
+            value = value.mul_small(radix).add_small(digit)
+        }
+        value.negative = negative && !value.is_zero()
+        value
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3294
+    fn normalize(self) -> JetBigInt Never! {
+        while self.limbs.len() > 1 && self.limbs.last().unwrap() == 0 -> _ :: self.limbs.pop()
+        if self.limbs.len() == 1 && self.limbs[0] == 0 -> self.negative = false
+        self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3304
+    fn mul_small(self, m: U32) -> JetBigInt Never! {
+        carry: U64 := 0
+        limbs := [U32].with_capacity(self.limbs.len() + 1)
+        for limb in self.limbs {
+            prod :: limb as U64 * m as U64 + carry
+            limbs.push((prod % BI_BASE) as U32)
+            carry = prod / BI_BASE
+        }
+        if carry > 0 -> limbs.push(carry as U32)
+        Self{negative: self.negative, limbs: limbs}.normalize()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3322
+    fn add_small(self, n: U32) -> JetBigInt Never! { self.add(Self.from_int(n as I64)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3326
+    pub fn add(self, other: JetBigInt) -> JetBigInt Never! {
+        if self.negative == other.negative {
+            carry: U64 := 0
+            len :: self.limbs.len().max(other.limbs.len())
+            limbs := [U32].with_capacity(len + 1)
+            for i in 0..len {
+                a :: self.limbs.get(i).unwrap_or(0) as U64
+                b :: other.limbs.get(i).unwrap_or(0) as U64
+                sum :: a + b + carry
+                limbs.push((sum % BI_BASE) as U32)
+                carry = sum / BI_BASE
+            }
+            if carry > 0 -> limbs.push(carry as U32)
+            Self{negative: self.negative, limbs: limbs}.normalize()
+        } else {
+            cmp :: self.cmp_abs(other)
+            if cmp == 0 { Self.from_int(0) }
+            else if cmp > 0 { self.sub_abs(other).with_sign(self.negative) }
+            else { other.sub_abs(self).with_sign(other.negative) }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3358
+    fn with_sign(self, negative: Bool) -> JetBigInt Never! { Self{negative: negative, limbs: self.limbs} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3365
+    pub fn sub(self, other: JetBigInt) -> JetBigInt Never! {
+        neg_other := other.clone()
+        neg_other.negative = !neg_other.negative
+        self.add(neg_other)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3371
+    fn sub_abs(self, other: JetBigInt) -> JetBigInt Never! {
+        borrow: I64 := 0
+        len :: self.limbs.len()
+        limbs := [U32].with_capacity(len)
+        for i in 0..len {
+            a :: self.limbs[i] as I64
+            b :: other.limbs.get(i).unwrap_or(0) as I64
+            cur := a - b - borrow
+            if cur < 0 { cur += BI_BASE as I64; borrow = 1 } else { borrow = 0 }
+            limbs.push(cur as U32)
+        }
+        Self{negative: false, limbs: limbs}.normalize()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3394
+    fn cmp_abs(self, other: JetBigInt) -> I8 Never! {
+        match self.limbs.len().cmp(other.limbs.len()) {
+            .Greater => 1,
+            .Less => -1,
+            .Equal => {
+                for (a, b) in self.limbs.iter().rev().zip(other.limbs.iter().rev()) {
+                    match a.cmp(b) { .Greater => return 1, .Less => return -1, .Equal => {} }
+                }
+                0
+            },
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3411
+    pub fn mul(self, other: JetBigInt) -> JetBigInt Never! {
+        out := Self.from_int(0)
+        for (i, limb) in other.limbs.iter().enumerate() {
+            if limb == 0 -> continue
+            part := self.mul_small(limb)
+            for _ in 0..i -> part = part.mul_small(BI_BASE as U32)
+            out = out.add(part)
+        }
+        Self{negative: self.negative != other.negative, limbs: out.limbs}.normalize()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3430
+    pub fn neg(self) -> JetBigInt Never! {
+        if self.limbs.len() == 1 && self.limbs[0] == 0 { self.clone() }
+        else { Self{negative: !self.negative, limbs: self.limbs.clone()} }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3441
+    fn div_rem_small(self, divisor: U32) -> (JetBigInt, U32) Never! {
+        divisor :: divisor as U64
+        remainder: U64 := 0
+        limbs := [U32].repeat(0, self.limbs.len())
+        for index in (0..self.limbs.len()).rev() {
+            current :: remainder * BI_BASE + self.limbs[index] as U64
+            limbs[index] = (current / divisor) as U32
+            remainder = current % divisor
+        }
+        (Self{negative: false, limbs: limbs}.normalize(), remainder as U32)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3461
+    fn bit_width(self) -> Int Never! {
+        value := self.abs()
+        width := 0
+        while !value.is_zero() { (next, _) :: value.div_rem_small(2); value = next; width += 1 }
+        width
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3472
+    fn unsigned_bits(self, width: Int) -> [Bool] Never! {
+        value := self.abs()
+        bits := [Bool].with_capacity(width)
+        for _ in 0..width { (next, remainder) :: value.div_rem_small(2); bits.push(remainder != 0); value = next }
+        bits
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3483
+    fn from_unsigned_bits(bits: View<Bool>) -> JetBigInt Never! {
+        value := Self.from_int(0)
+        for bit in bits.iter().rev() { value = value.mul_small(2); if bit -> value = value.add_small(1) }
+        value
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3494
+    fn twos_complement(self, width: Int) -> [Bool] Never! {
+        bits := self.unsigned_bits(width)
+        if self.negative {
+            for bit in &bits -> bit = !bit
+            carry := true
+            for bit in &bits {
+                if !carry -> break
+                if bit -> bit = false
+                else { bit = true; carry = false }
+            }
+        }
+        bits
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3516
+    fn from_twos_complement(bits: [Bool]) -> JetBigInt Never! {
+        negative :: bits.last().copied().unwrap_or(false)
+        if !negative -> return Self.from_unsigned_bits(&bits)
+        for bit in &bits -> bit = !bit
+        carry := true
+        for bit in &bits {
+            if !carry -> break
+            if bit -> bit = false
+            else { bit = true; carry = false }
+        }
+        Self.from_unsigned_bits(&bits).neg()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3539
+    fn bitwise(self, other: JetBigInt, op: fn(Bool, Bool) -> Bool) -> JetBigInt Never! {
+        width :: self.bit_width().max(other.bit_width()).saturating_add(1)
+        left :: self.twos_complement(width)
+        right :: other.twos_complement(width)
+        bits :: left.into_iter().zip(right).map(fn(pair) { op(pair.0, pair.1) }).collect()
+        Self.from_twos_complement(bits)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3551
+    pub fn bit_and(self, other: JetBigInt) -> JetBigInt Never! { self.bitwise(other, fn(left, right) { left & right }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3555
+    pub fn bit_or(self, other: JetBigInt) -> JetBigInt Never! { self.bitwise(other, fn(left, right) { left | right }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3559
+    pub fn bit_xor(self, other: JetBigInt) -> JetBigInt Never! { self.bitwise(other, fn(left, right) { left ^ right }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3563
+    pub fn bit_count(self, width: U32, method: String) -> I64? Never! {
+        width :: Int.try_from(width).ok()?
+        if width == 0 -> return None
+        bits :: self.twos_complement(width)
+        ones :: bits.iter().filter(fn(bit) { bit }).count()
+        count :: match method {
+            "count_ones" => ones,
+            "count_zeros" => width - ones,
+            "leading_zeros" => bits.iter().rev().take_while(fn(bit) { !bit }).count(),
+            "trailing_zeros" => bits.iter().take_while(fn(bit) { !bit }).count(),
+            "bit_count" => self.unsigned_bits(self.bit_width()).into_iter().filter(fn(bit) { bit }).count(),
+            "bit_length" => self.bit_width(),
+            _ => return None,
+        }
+        I64.try_from(count).ok()
+    }
+}

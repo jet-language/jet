@@ -1,0 +1,1313 @@
+// PORT-PENDING 0169 crates-jet-codegen-src-prelude-corelib-jetstd-urlmime: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1-1309
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     include!("Mime.rs");
+//RS 
+//RS     impl JetURLParts {
+//RS         pub fn parse(input: &String) -> Result<Self, String> {
+//RS             Self::parse_without_normalization(input).map(|url| url.normalize())
+//RS         }
+//RS 
+//RS         fn parse_without_normalization(input: &String) -> Result<Self, String> {
+//RS             Self::parse_without_normalization_with_marker(input, None)
+//RS         }
+//RS 
+//RS         fn parse_without_normalization_with_marker(
+//RS             input: &String,
+//RS             typed_marker: Option<&str>,
+//RS         ) -> Result<Self, String> {
+//RS             let raw = input.trim();
+//RS             let Some(colon) = raw.find(':') else {
+//RS                 return Err("URL needs a scheme".to_string());
+//RS             };
+//RS             let scheme_raw = &raw[..colon];
+//RS             let marker_scheme = typed_marker.is_some_and(|marker| scheme_raw.contains(marker));
+//RS             if !marker_scheme && !jet_url_valid_scheme(scheme_raw) {
+//RS                 return Err(format!("invalid URL scheme `{}`", scheme_raw));
+//RS             }
+//RS             let scheme = scheme_raw.to_ascii_lowercase();
+//RS             let mut rest = &raw[colon + 1..];
+//RS             let mut fragment = None;
+//RS             if let Some(i) = rest.find('#') {
+//RS                 fragment = Some(jet_url_percent_decode_str(&rest[i + 1..])?);
+//RS                 rest = &rest[..i];
+//RS             }
+//RS             let mut query = Vec::new();
+//RS             if let Some(i) = rest.find('?') {
+//RS                 query = jet_url_parse_query(&rest[i + 1..])?;
+//RS                 rest = &rest[..i];
+//RS             }
+//RS             let mut host = None;
+//RS             let mut port = None;
+//RS             let mut username = None;
+//RS             let mut password = None;
+//RS             let path;
+//RS             if let Some(after_slashes) = rest.strip_prefix("//") {
+//RS                 let auth_end = after_slashes.find('/').unwrap_or(after_slashes.len());
+//RS                 let authority = &after_slashes[..auth_end];
+//RS                 let path_raw = &after_slashes[auth_end..];
+//RS                 let (user, pass, h, p) = jet_url_parse_authority(authority, typed_marker)?;
+//RS                 username = user;
+//RS                 password = pass;
+//RS                 host = Some(h);
+//RS                 port = p;
+//RS                 path = if path_raw.is_empty() {
+//RS                     "/".to_string()
+//RS                 } else {
+//RS                     jet_url_percent_decode_str(path_raw)?
+//RS                 };
+//RS             } else if matches!(scheme.as_str(), "http" | "https") {
+//RS                 return Err(format!("{} URL needs `//host`", scheme));
+//RS             } else if scheme == "data" {
+//RS                 path = rest.to_string();
+//RS             } else {
+//RS                 path = jet_url_percent_decode_str(rest)?;
+//RS             }
+//RS             let url = JetURLParts {
+//RS                 scheme,
+//RS                 username,
+//RS                 password,
+//RS                 host,
+//RS                 port,
+//RS                 path,
+//RS                 query,
+//RS                 fragment,
+//RS                 typed_host: None,
+//RS                 typed_path: None,
+//RS             };
+//RS             Ok(url)
+//RS         }
+//RS 
+//RS         pub fn from_parts(
+//RS             scheme: &String,
+//RS             host: &String,
+//RS             path: &String,
+//RS             query: &Vec<Vec<String>>,
+//RS             fragment: &String,
+//RS         ) -> Result<Self, String> {
+//RS             if !jet_url_valid_scheme(scheme) {
+//RS                 return Err(format!("invalid URL scheme `{}`", scheme));
+//RS             }
+//RS             let host = if host.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(jet_url_host_to_ascii(host)?)
+//RS             };
+//RS             let fragment = if fragment.is_empty() {
+//RS                 None
+//RS             } else {
+//RS                 Some(fragment.clone())
+//RS             };
+//RS             Ok(JetURLParts {
+//RS                 scheme: scheme.to_ascii_lowercase(),
+//RS                 username: None,
+//RS                 password: None,
+//RS                 host,
+//RS                 port: None,
+//RS                 path: path.clone(),
+//RS                 query: jet_url_pairs_from_rows(query),
+//RS                 fragment,
+//RS                 typed_host: None,
+//RS                 typed_path: None,
+//RS             }
+//RS             .normalize())
+//RS         }
+//RS 
+//RS         pub fn file(path: &String) -> Self {
+//RS             JetURLParts {
+//RS                 scheme: "file".to_string(),
+//RS                 username: None,
+//RS                 password: None,
+//RS                 host: Some(String::new()),
+//RS                 port: None,
+//RS                 path: if path.starts_with('/') {
+//RS                     path.clone()
+//RS                 } else {
+//RS                     format!("/{}", path)
+//RS                 },
+//RS                 query: Vec::new(),
+//RS                 fragment: None,
+//RS                 typed_host: None,
+//RS                 typed_path: None,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn data(mime: &JetMIME, text: &String) -> Self {
+//RS             JetURLParts {
+//RS                 scheme: "data".to_string(),
+//RS                 username: None,
+//RS                 password: None,
+//RS                 host: None,
+//RS                 port: None,
+//RS                 path: format!(
+//RS                     "{},{}",
+//RS                     mime.to_string_value(),
+//RS                     jet_url_percent_encode(text, false)
+//RS                 ),
+//RS                 query: Vec::new(),
+//RS                 fragment: None,
+//RS                 typed_host: None,
+//RS                 typed_path: None,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn scheme(&self) -> String {
+//RS             self.scheme.clone()
+//RS         }
+//RS         pub fn username(&self) -> String {
+//RS             self.username.clone().unwrap_or_default()
+//RS         }
+//RS         pub fn password(&self) -> String {
+//RS             self.password.clone().unwrap_or_default()
+//RS         }
+//RS         pub fn userinfo(&self) -> String {
+//RS             match (&self.username, &self.password) {
+//RS                 (None, None) => String::new(),
+//RS                 (Some(user), None) => user.clone(),
+//RS                 (Some(user), Some(pass)) => format!("{}:{}", user, pass),
+//RS                 (None, Some(pass)) => format!(":{}", pass),
+//RS             }
+//RS         }
+//RS         pub fn authority(&self) -> String {
+//RS             let raw_host = self.host.as_ref().filter(|h| !h.is_empty());
+//RS             if raw_host.is_none() && self.typed_host.is_none() {
+//RS                 return String::new();
+//RS             }
+//RS             let mut out = String::new();
+//RS             let info = self.userinfo();
+//RS             if !info.is_empty() {
+//RS                 out.push_str(&info);
+//RS                 out.push('@');
+//RS             }
+//RS             if let Some(parts) = &self.typed_host {
+//RS                 out.push_str(&jet_url_render_typed_parts(parts, false));
+//RS             } else if let Some(raw_host) = raw_host {
+//RS                 out.push_str(raw_host);
+//RS             }
+//RS             if let Some(port) = self.port {
+//RS                 out.push(':');
+//RS                 out.push_str(&port.to_string());
+//RS             }
+//RS             out
+//RS         }
+//RS         pub fn host(&self) -> JetOutcome<String, JetAbsent> {
+//RS             jet_outcome_of(self.host.clone().filter(|h| !h.is_empty()))
+//RS         }
+//RS         pub fn port(&self) -> JetOutcome<i64, JetAbsent> {
+//RS             jet_outcome_of(self.port)
+//RS         }
+//RS         pub fn default_port(&self) -> JetOutcome<i64, JetAbsent> {
+//RS             match self.scheme.as_str() {
+//RS                 "http" | "ws" => Ok(80),
+//RS                 "https" | "wss" => Ok(443),
+//RS                 "ftp" => Ok(21),
+//RS                 "ssh" => Ok(22),
+//RS                 "smtp" => Ok(25),
+//RS                 "pop3" => Ok(110),
+//RS                 "imap" => Ok(143),
+//RS                 _ => Err(JetAbsent),
+//RS             }
+//RS         }
+//RS         pub fn path(&self) -> String {
+//RS             self.path.clone()
+//RS         }
+//RS         pub fn path_segments(&self) -> Vec<String> {
+//RS             if let Some(parts) = &self.typed_path {
+//RS                 return jet_url_typed_path_segments(parts);
+//RS             }
+//RS             self.path
+//RS                 .split('/')
+//RS                 .filter(|s| !s.is_empty())
+//RS                 .map(|s| s.to_string())
+//RS                 .collect()
+//RS         }
+//RS         pub fn query(&self) -> String {
+//RS             jet_url_render_query(&self.query)
+//RS         }
+//RS         pub fn query_pairs(&self) -> Vec<Vec<String>> {
+//RS             self.query
+//RS                 .iter()
+//RS                 .map(|(k, v)| vec![k.clone(), v.clone()])
+//RS                 .collect()
+//RS         }
+//RS         pub fn fragment(&self) -> JetOutcome<String, JetAbsent> {
+//RS             jet_outcome_of(self.fragment.clone())
+//RS         }
+//RS         pub fn normalize(&self) -> Self {
+//RS             let mut out = self.clone();
+//RS             out.scheme = out.scheme.to_ascii_lowercase();
+//RS             if out.typed_host.is_none() {
+//RS                 if let Some(h) = &out.host {
+//RS                     if let Ok(ascii) = jet_url_host_to_ascii(h) {
+//RS                         out.host = Some(ascii);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             if out.typed_path.is_none() && out.scheme != "data" {
+//RS                 out.path = jet_url_remove_dot_segments(&out.path);
+//RS             }
+//RS             out
+//RS         }
+//RS         pub fn join(&self, rel: &String) -> Result<Self, String> {
+//RS             if let Some(colon) = rel.find(':') {
+//RS                 let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
+//RS                 if before_slash && jet_url_valid_scheme(&rel[..colon]) {
+//RS                     return JetURLParts::parse(rel);
+//RS                 }
+//RS             }
+//RS             if rel.starts_with("//") {
+//RS                 return JetURLParts::parse(&format!("{}:{}", self.scheme, rel));
+//RS             }
+//RS             let mut out = self.clone();
+//RS             let mut rest = rel.as_str();
+//RS             out.fragment = None;
+//RS             if let Some(i) = rest.find('#') {
+//RS                 out.fragment = Some(jet_url_percent_decode_str(&rest[i + 1..])?);
+//RS                 rest = &rest[..i];
+//RS             }
+//RS             out.query.clear();
+//RS             if let Some(i) = rest.find('?') {
+//RS                 out.query = jet_url_parse_query(&rest[i + 1..])?;
+//RS                 rest = &rest[..i];
+//RS             }
+//RS             let path = jet_url_percent_decode_str(rest)?;
+//RS             let path_is_empty = path.is_empty();
+//RS             let base_parts = self
+//RS                 .typed_path
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| vec![(self.path.clone(), false)]);
+//RS             let mut joined_parts = if path.starts_with('/') {
+//RS                 vec![(path, false)]
+//RS             } else {
+//RS                 let mut directory = jet_url_typed_path_directory(&base_parts);
+//RS                 if directory.is_empty() {
+//RS                     directory.push(("/".to_string(), false));
+//RS                 }
+//RS                 if !path.is_empty() {
+//RS                     directory.push((path, false));
+//RS                 }
+//RS                 directory
+//RS             };
+//RS             if path_is_empty {
+//RS                 out.typed_path = self.typed_path.clone();
+//RS                 out.path = self.path.clone();
+//RS             } else {
+//RS                 let typed_path = jet_url_normalize_typed_path(std::mem::take(&mut joined_parts));
+//RS                 out.path = typed_path
+//RS                     .iter()
+//RS                     .map(|(part, _)| part.as_str())
+//RS                     .collect();
+//RS                 out.typed_path = Some(typed_path);
+//RS             }
+//RS             // `typed_path` owns component boundaries. Normalizing a rendered
+//RS             // URL string here would erase hole boundaries before the next
+//RS             // operation can apply its component policy.
+//RS             Ok(out)
+//RS         }
+//RS         pub fn set_query(&self, key: &String, value: &String) -> Self {
+//RS             let mut out = self.clone();
+//RS             out.query.retain(|(k, _)| k != key);
+//RS             out.query.push((key.clone(), value.clone()));
+//RS             out
+//RS         }
+//RS         pub fn add_query(&self, key: &String, value: &String) -> Self {
+//RS             let mut out = self.clone();
+//RS             out.query.push((key.clone(), value.clone()));
+//RS             out
+//RS         }
+//RS         pub fn to_string_value(&self) -> String {
+//RS             let mut out = format!("{}:", self.scheme);
+//RS             if let Some(host) = &self.host {
+//RS                 out.push_str("//");
+//RS                 if let Some(user) = &self.username {
+//RS                     out.push_str(&jet_url_percent_encode(user, false));
+//RS                     if let Some(pass) = &self.password {
+//RS                         out.push(':');
+//RS                         out.push_str(&jet_url_percent_encode(pass, false));
+//RS                     }
+//RS                     out.push('@');
+//RS                 } else if let Some(pass) = &self.password {
+//RS                     out.push(':');
+//RS                     out.push_str(&jet_url_percent_encode(pass, false));
+//RS                     out.push('@');
+//RS                 }
+//RS                 if let Some(parts) = &self.typed_host {
+//RS                     out.push_str(&jet_url_render_typed_parts(parts, false));
+//RS                 } else {
+//RS                     out.push_str(host);
+//RS                 }
+//RS                 if let Some(port) = self.port {
+//RS                     out.push(':');
+//RS                     out.push_str(&port.to_string());
+//RS                 }
+//RS             }
+//RS             if self.scheme == "data" && self.host.is_none() {
+//RS                 if let Some(parts) = &self.typed_path {
+//RS                     out.push_str(&jet_url_render_typed_data_parts(parts));
+//RS                 } else {
+//RS                     out.push_str(&self.path);
+//RS                 }
+//RS             } else if let Some(parts) = &self.typed_path {
+//RS                 out.push_str(&jet_url_render_typed_parts(parts, true));
+//RS             } else {
+//RS                 out.push_str(&jet_url_percent_encode(&self.path, true));
+//RS             }
+//RS             if !self.query.is_empty() {
+//RS                 out.push('?');
+//RS                 out.push_str(&jet_url_render_query(&self.query));
+//RS             }
+//RS             if let Some(fragment) = &self.fragment {
+//RS                 out.push('#');
+//RS                 out.push_str(&jet_url_percent_encode(fragment, false));
+//RS             }
+//RS             out
+//RS         }
+//RS 
+//RS         /// D-BOUND-HEAD1=A: the `core.net.url.URL` record projection every
+//RS         /// tier shares (AOT `JetURL`, the JIT record, the evaluator struct).
+//RS         /// An absent port takes the scheme default, as `core.net.url.parse`
+//RS         /// does; the flag records an authority port written in the source.
+//RS         pub fn core_port(&self) -> (i64, bool) {
+//RS             let port = self
+//RS                 .port
+//RS                 .or_else(|| self.default_port().ok())
+//RS                 .unwrap_or(-1);
+//RS             (port, self.port.is_some())
+//RS         }
+//RS 
+//RS         /// Re-enter the kernel from the Core record fields (the inverse of
+//RS         /// `core_port`/`query`): a default port written implicitly stays absent.
+//RS         pub fn from_core_record(
+//RS             scheme: &str,
+//RS             user_text: &str,
+//RS             password_text: &str,
+//RS             host: &str,
+//RS             port: i64,
+//RS             port_explicit: bool,
+//RS             path: &str,
+//RS             query: &str,
+//RS             fragment: &str,
+//RS         ) -> Self {
+//RS             let some = |text: &str| (!text.is_empty()).then(|| text.to_string());
+//RS             let mut parts = JetURLParts {
+//RS                 scheme: scheme.to_string(),
+//RS                 username: some(user_text),
+//RS                 password: some(password_text),
+//RS                 host: some(host),
+//RS                 port: None,
+//RS                 path: path.to_string(),
+//RS                 query: jet_url_parse_query(query).unwrap_or_default(),
+//RS                 fragment: some(fragment),
+//RS                 typed_host: None,
+//RS                 typed_path: None,
+//RS             };
+//RS             if port >= 0 && (port_explicit || parts.default_port().ok() != Some(port)) {
+//RS                 parts.port = Some(port);
+//RS             }
+//RS             parts
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-BOUND-HEAD1=A: validate the URL skeleton before lowering. Scheme and
+//RS     /// port are structural components, so interpolation cannot enter either.
+//RS     pub fn jet_validate_typed_url_literal(literals: &[&str]) -> Result<(), String> {
+//RS         if literals.is_empty() {
+//RS             return Err("URL literal needs a quoted body".to_string());
+//RS         }
+//RS         let marker = jet_typed_url_marker_name(literals);
+//RS         let skeleton = jet_typed_url_skeleton(literals, &marker);
+//RS         if let Some(colon) = skeleton.find(':') {
+//RS             let scheme_raw = &skeleton[..colon];
+//RS             if scheme_raw.contains(&marker) {
+//RS                 return Err("URL scheme cannot contain interpolation".to_string());
+//RS             }
+//RS             if scheme_raw.eq_ignore_ascii_case("data") {
+//RS                 let data_body = skeleton[colon + 1..]
+//RS                     .split(|ch| matches!(ch, '?' | '#'))
+//RS                     .next()
+//RS                     .unwrap_or_default();
+//RS                 match data_body.find(',') {
+//RS                     Some(comma) if data_body[..comma].contains(&marker) => {
+//RS                         return Err("data URL MIME metadata cannot contain interpolation".to_string());
+//RS                     }
+//RS                     None if data_body.contains(&marker) => {
+//RS                         return Err("data URL payload needs a MIME separator".to_string());
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             if let Some(authority) = jet_url_typed_authority(&skeleton[colon + 1..]) {
+//RS                 let host_port = authority
+//RS                     .rsplit_once('@')
+//RS                     .map_or(authority, |(_, host_port)| host_port);
+//RS                 let port_has_marker = if let Some(end) = host_port.find(']') {
+//RS                     host_port
+//RS                         .get(end + 1..)
+//RS                         .is_some_and(|suffix| suffix.starts_with(':') && suffix[1..].contains(&marker))
+//RS                 } else {
+//RS                     host_port
+//RS                         .rsplit_once(':')
+//RS                         .is_some_and(|(_, port)| port.contains(&marker))
+//RS                 };
+//RS                 if port_has_marker {
+//RS                     return Err("URL port cannot contain interpolation".to_string());
+//RS                 }
+//RS             }
+//RS         }
+//RS         JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker)).map(|_| ())
+//RS     }
+//RS 
+//RS     /// D-BOUND-HEAD1=A: URL heads parse the literal skeleton once. Hole values
+//RS     /// are assembled after parsing, so path and authority boundaries remain
+//RS     /// opaque to URL normalization and reparsing.
+//RS     pub fn jet_typed_url_parts_literal(
+//RS         literals: &[&str],
+//RS         holes: Vec<String>,
+//RS     ) -> JetURLParts {
+//RS         let Ok(url) = jet_typed_url_literal_checked(literals, holes) else {
+//RS             // The parser/sema boundary rejects malformed heads before this
+//RS             // constructor is lowered. There is no user-facing runtime error
+//RS             // path to recover here, and manufacturing a URL would be worse
+//RS             // than terminating the violated compiler invariant.
+//RS             std::process::abort();
+//RS         };
+//RS         url
+//RS     }
+//RS 
+//RS     fn jet_typed_url_literal_checked(
+//RS         literals: &[&str],
+//RS         holes: Vec<String>,
+//RS     ) -> Result<JetURLParts, String> {
+//RS         if literals.len() != holes.len() + 1 {
+//RS             return Err("typed URL literal and hole counts do not match".to_string());
+//RS         }
+//RS         let (marker, mut url) = jet_typed_url_marker(literals)?;
+//RS         let mut hole_index = 0;
+//RS         let (scheme, _) = jet_url_apply_typed_holes(
+//RS             &url.scheme,
+//RS             &marker,
+//RS             &holes,
+//RS             &mut hole_index,
+//RS         )?;
+//RS         url.scheme = scheme.to_ascii_lowercase();
+//RS         if let Some(username) = url.username.take() {
+//RS             url.username = Some(jet_url_apply_typed_holes(
+//RS                 &username,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?.0);
+//RS         }
+//RS         if let Some(password) = url.password.take() {
+//RS             url.password = Some(jet_url_apply_typed_holes(
+//RS                 &password,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?.0);
+//RS         }
+//RS         if let Some(host) = url.host.take() {
+//RS             let (host, parts) = jet_url_apply_typed_holes(
+//RS                 &host,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?;
+//RS             url.host = Some(host);
+//RS             url.typed_host = parts;
+//RS         }
+//RS         let (path, path_parts) = jet_url_apply_typed_holes(
+//RS             &url.path,
+//RS             &marker,
+//RS             &holes,
+//RS             &mut hole_index,
+//RS         )?;
+//RS         url.path = path;
+//RS         url.typed_path = path_parts;
+//RS         if let Some(parts) = url.typed_path.take() {
+//RS             let parts = if url.scheme == "data" {
+//RS                 parts
+//RS             } else {
+//RS                 jet_url_normalize_typed_path(parts)
+//RS             };
+//RS             url.path = parts
+//RS                 .iter()
+//RS                 .map(|(part, _)| part.as_str())
+//RS                 .collect();
+//RS             url.typed_path = Some(parts);
+//RS         } else if url.scheme != "data" {
+//RS             url.path = jet_url_remove_dot_segments(&url.path);
+//RS         }
+//RS         for (key, value) in &mut url.query {
+//RS             let key_value = jet_url_apply_typed_holes(
+//RS                 key,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?.0;
+//RS             *key = key_value;
+//RS             let value_value = jet_url_apply_typed_holes(
+//RS                 value,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?.0;
+//RS             *value = value_value;
+//RS         }
+//RS         if let Some(fragment) = url.fragment.take() {
+//RS             url.fragment = Some(jet_url_apply_typed_holes(
+//RS                 &fragment,
+//RS                 &marker,
+//RS                 &holes,
+//RS                 &mut hole_index,
+//RS             )?.0);
+//RS         }
+//RS         if hole_index != holes.len() {
+//RS             return Err("typed URL holes do not match its literal skeleton".to_string());
+//RS         }
+//RS         Ok(url)
+//RS     }
+//RS 
+//RS     impl PartialEq for JetURLParts {
+//RS         fn eq(&self, other: &Self) -> bool {
+//RS             self.scheme == other.scheme
+//RS                 && self.username == other.username
+//RS                 && self.password == other.password
+//RS                 && self.host == other.host
+//RS                 && self.port == other.port
+//RS                 && self.path == other.path
+//RS                 && self.query == other.query
+//RS                 && self.fragment == other.fragment
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetShow for JetURLParts {
+//RS         fn jet_show(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetDisplay for JetURLParts {
+//RS         fn jet_display(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetDebug for JetURLParts {
+//RS         fn jet_debug(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetMIME {
+//RS         pub fn parse(input: &String) -> Result<Self, String> {
+//RS             let parts = jet_mime_parse_parts(input)?;
+//RS             Ok(JetMIME {
+//RS                 top: parts.top,
+//RS                 sub: parts.sub,
+//RS                 parameters: parts
+//RS                     .params
+//RS                     .into_iter()
+//RS                     .map(|(name, value)| vec![name, value])
+//RS                     .collect(),
+//RS             })
+//RS         }
+//RS         /// The `[name, value]` rows as kernel pairs.
+//RS         fn parameter_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
+//RS             self.parameters.iter().filter_map(|row| match row.as_slice() {
+//RS                 [name, value] => Some((name.as_str(), value.as_str())),
+//RS                 _ => None,
+//RS             })
+//RS         }
+//RS         pub fn media_type(&self) -> String {
+//RS             self.top.clone()
+//RS         }
+//RS         pub fn subtype(&self) -> String {
+//RS             self.sub.clone()
+//RS         }
+//RS         pub fn essence(&self) -> String {
+//RS             jet_mime_essence(&self.top, &self.sub)
+//RS         }
+//RS         pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
+//RS             jet_outcome_of(jet_mime_param(self.parameter_pairs(), name).map(str::to_string))
+//RS         }
+//RS         pub fn params(&self) -> Vec<Vec<String>> {
+//RS             self.parameters.clone()
+//RS         }
+//RS         pub fn to_string_value(&self) -> String {
+//RS             jet_mime_to_string(&self.top, &self.sub, self.parameter_pairs())
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetShow for JetMIME {
+//RS         fn jet_show(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetDisplay for JetMIME {
+//RS         fn jet_display(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     impl crate::JetDebug for JetMIME {
+//RS         fn jet_debug(&self) -> String {
+//RS             self.to_string_value()
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_typed_url_marker_name(literals: &[&str]) -> String {
+//RS         let mut nonce = 0;
+//RS         loop {
+//RS             let marker = format!("jet-hole-opaque-{nonce}-");
+//RS             if !literals.iter().any(|literal| literal.contains(&marker)) {
+//RS                 return marker;
+//RS             }
+//RS             nonce += 1;
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_typed_url_marker(literals: &[&str]) -> Result<(String, JetURLParts), String> {
+//RS         let marker = jet_typed_url_marker_name(literals);
+//RS         let skeleton = jet_typed_url_skeleton(literals, &marker);
+//RS         let url = JetURLParts::parse_without_normalization_with_marker(&skeleton, Some(&marker))?;
+//RS         Ok((marker, url))
+//RS     }
+//RS 
+//RS     fn jet_url_typed_authority(rest: &str) -> Option<&str> {
+//RS         let rest = rest.strip_prefix("//")?;
+//RS         let end = rest
+//RS             .char_indices()
+//RS             .find_map(|(index, ch)| matches!(ch, '/' | '?' | '#').then_some(index))
+//RS             .unwrap_or(rest.len());
+//RS         Some(&rest[..end])
+//RS     }
+//RS 
+//RS     fn jet_typed_url_skeleton(literals: &[&str], marker: &str) -> String {
+//RS         let mut skeleton = String::new();
+//RS         for (index, literal) in literals.iter().enumerate() {
+//RS             skeleton.push_str(literal);
+//RS             if index + 1 < literals.len() {
+//RS                 skeleton.push_str(marker);
+//RS             }
+//RS         }
+//RS         skeleton
+//RS     }
+//RS 
+//RS     fn jet_url_apply_typed_holes(
+//RS         value: &str,
+//RS         marker: &str,
+//RS         holes: &[String],
+//RS         hole_index: &mut usize,
+//RS     ) -> Result<(String, Option<Vec<(String, bool)>>), String> {
+//RS         let mut parts = Vec::new();
+//RS         let mut cursor = 0;
+//RS         while let Some(offset) = value[cursor..].find(marker) {
+//RS             let start = cursor + offset;
+//RS             let literal = &value[cursor..start];
+//RS             if !literal.is_empty() || parts.is_empty() {
+//RS                 parts.push((literal.to_string(), false));
+//RS             }
+//RS             let hole = holes
+//RS                 .get(*hole_index)
+//RS                 .ok_or_else(|| "typed URL holes do not match its literal skeleton".to_string())?
+//RS                 .clone();
+//RS             parts.push((hole, true));
+//RS             *hole_index += 1;
+//RS             cursor = start + marker.len();
+//RS         }
+//RS         if parts.is_empty() {
+//RS             return Ok((value.to_string(), None));
+//RS         }
+//RS         let tail = &value[cursor..];
+//RS         if !tail.is_empty() {
+//RS             parts.push((tail.to_string(), false));
+//RS         }
+//RS         let assembled = parts
+//RS             .iter()
+//RS             .map(|(part, _)| part.as_str())
+//RS             .collect::<String>();
+//RS         Ok((assembled, Some(parts)))
+//RS     }
+//RS 
+//RS     fn jet_url_render_data_mime_literal(value: &str) -> String {
+//RS         let mut out = String::new();
+//RS         for byte in value.bytes() {
+//RS             if byte.is_ascii_alphanumeric()
+//RS                 || matches!(
+//RS                     byte,
+//RS                     b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'/' | b';' | b'=' | b'^'
+//RS                         | b'_' | b'.'
+//RS                 )
+//RS             {
+//RS                 out.push(byte as char);
+//RS             } else {
+//RS                 out.push_str(&format!("%{byte:02X}"));
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     /// Data URLs have two grammars in one path: MIME metadata before the
+//RS     /// first comma, payload after it. Keep literal MIME separators intact and
+//RS     /// percent-encode only interpolated payload data.
+//RS     fn jet_url_render_typed_data_parts(parts: &[(String, bool)]) -> String {
+//RS         let mut out = String::new();
+//RS         let mut payload = false;
+//RS         for (part, hole) in parts {
+//RS             if payload {
+//RS                 if *hole {
+//RS                     out.push_str(&jet_url_percent_encode(part, false));
+//RS                 } else {
+//RS                     out.push_str(part);
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             if *hole {
+//RS                 out.push_str(&jet_url_percent_encode(part, false));
+//RS                 continue;
+//RS             }
+//RS             if let Some(comma) = part.find(',') {
+//RS                 out.push_str(&jet_url_render_data_mime_literal(&part[..comma]));
+//RS                 out.push(',');
+//RS                 payload = true;
+//RS                 out.push_str(&part[comma + 1..]);
+//RS             } else {
+//RS                 out.push_str(&jet_url_render_data_mime_literal(part));
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn jet_url_render_typed_parts(parts: &[(String, bool)], literal_path: bool) -> String {
+//RS         parts
+//RS             .iter()
+//RS             .map(|(part, hole)| {
+//RS                 if literal_path && *hole && matches!(part.as_str(), "." | "..") {
+//RS                     return part
+//RS                         .as_bytes()
+//RS                         .iter()
+//RS                         .map(|byte| format!("%{byte:02X}"))
+//RS                         .collect();
+//RS                 }
+//RS                 if !literal_path && !*hole {
+//RS                     jet_url_percent_encode_authority_literal(part)
+//RS                 } else {
+//RS                     jet_url_percent_encode(part, literal_path && !*hole)
+//RS                 }
+//RS             })
+//RS             .collect::<String>()
+//RS     }
+//RS 
+//RS     fn jet_url_percent_encode_authority_literal(s: &str) -> String {
+//RS         let mut out = String::new();
+//RS         for byte in s.bytes() {
+//RS             let keep = byte.is_ascii_alphanumeric()
+//RS                 || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'[' | b']' | b':');
+//RS             if keep {
+//RS                 out.push(byte as char);
+//RS             } else {
+//RS                 out.push_str(&format!("%{byte:02X}"));
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn jet_url_normalize_typed_path(
+//RS         parts: Vec<(String, bool)>,
+//RS     ) -> Vec<(String, bool)> {
+//RS         let absolute = parts
+//RS             .first()
+//RS             .is_some_and(|(part, hole)| !*hole && part.starts_with('/'));
+//RS         let trailing = parts
+//RS             .last()
+//RS             .is_some_and(|(part, hole)| !*hole && part.ends_with('/'));
+//RS         let mut segments: Vec<Vec<(String, bool)>> = vec![Vec::new()];
+//RS         for (part, hole) in parts {
+//RS             if hole {
+//RS                 if let Some(current) = segments.last_mut() {
+//RS                     current.push((part, true));
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             for (index, piece) in part.split('/').enumerate() {
+//RS                 if index > 0 {
+//RS                     segments.push(Vec::new());
+//RS                 }
+//RS                 if !piece.is_empty() {
+//RS                     if let Some(current) = segments.last_mut() {
+//RS                         current.push((piece.to_string(), false));
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut normalized: Vec<Vec<(String, bool)>> = Vec::new();
+//RS         for segment in segments {
+//RS             if segment.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             let has_hole = segment.iter().any(|(_, hole)| *hole);
+//RS             let value = segment
+//RS                 .iter()
+//RS                 .map(|(part, _)| part.as_str())
+//RS                 .collect::<String>();
+//RS             if !has_hole && value == "." {
+//RS                 continue;
+//RS             }
+//RS             if !has_hole && value == ".." {
+//RS                 match normalized.last() {
+//RS                     Some(previous)
+//RS                         if !previous.iter().any(|(_, hole)| *hole) =>
+//RS                     {
+//RS                         normalized.pop();
+//RS                     }
+//RS                     Some(_) => normalized.push(segment),
+//RS                     None => {}
+//RS                 }
+//RS                 continue;
+//RS             }
+//RS             normalized.push(segment);
+//RS         }
+//RS         let mut out = Vec::new();
+//RS         if absolute {
+//RS             out.push(("/".to_string(), false));
+//RS         }
+//RS         for (index, segment) in normalized.into_iter().enumerate() {
+//RS             if index > 0 {
+//RS                 out.push(("/".to_string(), false));
+//RS             }
+//RS             out.extend(segment);
+//RS         }
+//RS         if trailing && !out.last().is_some_and(|(part, _)| part.ends_with('/')) {
+//RS             out.push(("/".to_string(), false));
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     fn jet_url_typed_path_directory(parts: &[(String, bool)]) -> Vec<(String, bool)> {
+//RS         let Some((last_index, slash)) = parts.iter().enumerate().rev().find_map(
+//RS             |(index, (part, hole))| {
+//RS                 (!*hole)
+//RS                     .then(|| part.rfind('/').map(|slash| (index, slash)))
+//RS                     .flatten()
+//RS             },
+//RS         ) else {
+//RS             return Vec::new();
+//RS         };
+//RS         let mut directory = parts[..last_index].to_vec();
+//RS         let literal = &parts[last_index].0;
+//RS         directory.push((literal[..=slash].to_string(), false));
+//RS         directory
+//RS     }
+//RS 
+//RS     fn jet_url_typed_path_segments(parts: &[(String, bool)]) -> Vec<String> {
+//RS         let mut segments = Vec::new();
+//RS         let mut current = String::new();
+//RS         for (part, hole) in parts {
+//RS             if *hole {
+//RS                 current.push_str(part);
+//RS                 continue;
+//RS             }
+//RS             for (index, piece) in part.split('/').enumerate() {
+//RS                 if index > 0 && !current.is_empty() {
+//RS                     segments.push(std::mem::take(&mut current));
+//RS                 }
+//RS                 current.push_str(piece);
+//RS             }
+//RS         }
+//RS         if !current.is_empty() {
+//RS             segments.push(current);
+//RS         }
+//RS         segments
+//RS     }
+//RS 
+//RS     fn jet_url_valid_scheme(s: &str) -> bool {
+//RS         let mut chars = s.chars();
+//RS         matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+//RS             && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+//RS     }
+//RS 
+//RS     fn jet_url_parse_authority(
+//RS         authority: &str,
+//RS         typed_marker: Option<&str>,
+//RS     ) -> Result<(Option<String>, Option<String>, String, Option<i64>), String> {
+//RS         let (userinfo, host_port) = match authority.rsplit_once('@') {
+//RS             Some((ui, hp)) => (Some(ui), hp),
+//RS             None => (None, authority),
+//RS         };
+//RS         let (username, password) = if let Some(ui) = userinfo {
+//RS             match ui.split_once(':') {
+//RS                 Some((user, pass)) => (
+//RS                     Some(jet_url_percent_decode_str(user)?),
+//RS                     Some(jet_url_percent_decode_str(pass)?),
+//RS                 ),
+//RS                 None => (Some(jet_url_percent_decode_str(ui)?), None),
+//RS             }
+//RS         } else {
+//RS             (None, None)
+//RS         };
+//RS         if host_port.is_empty() {
+//RS             return Err("URL host is empty".to_string());
+//RS         }
+//RS         if host_port.starts_with('[') {
+//RS             let Some(end) = host_port.find(']') else {
+//RS                 return Err("IPv6 host is missing `]`".to_string());
+//RS             };
+//RS             let suffix = &host_port[end + 1..];
+//RS             let (host, port) = if suffix.is_empty() {
+//RS                 (host_port[..=end].to_ascii_lowercase(), None)
+//RS             } else if let Some(marker) = typed_marker {
+//RS                 if suffix.starts_with(':')
+//RS                     && jet_url_only_typed_markers(&suffix[1..], marker)
+//RS                 {
+//RS                     // Validation rejects port holes. Keep marker parsing
+//RS                     // total so a rejected head cannot panic before its
+//RS                     // registered diagnostic is emitted.
+//RS                     (host_port.to_ascii_lowercase(), None)
+//RS                 } else if jet_url_only_typed_markers(suffix, marker) {
+//RS                     // Preserve trailing typed parts after `]` for the same
+//RS                     // authority-boundary rule.
+//RS                     (host_port.to_ascii_lowercase(), None)
+//RS                 } else if suffix.starts_with(':') {
+//RS                     (
+//RS                         host_port[..=end].to_ascii_lowercase(),
+//RS                         Some(jet_url_parse_port(&suffix[1..])?),
+//RS                     )
+//RS                 } else {
+//RS                     return Err("invalid text after IPv6 host".to_string());
+//RS                 }
+//RS             } else if suffix.starts_with(':') {
+//RS                 (
+//RS                     host_port[..=end].to_ascii_lowercase(),
+//RS                     Some(jet_url_parse_port(&suffix[1..])?),
+//RS                 )
+//RS             } else {
+//RS                 return Err("invalid text after IPv6 host".to_string());
+//RS             };
+//RS             return Ok((username, password, host, port));
+//RS         }
+//RS         let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
+//RS             if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
+//RS                 (h, Some(jet_url_parse_port(p)?))
+//RS             } else {
+//RS                 (host_port, None)
+//RS             }
+//RS         } else {
+//RS             (host_port, None)
+//RS         };
+//RS         Ok((username, password, jet_url_host_to_ascii(host)?, port))
+//RS     }
+//RS 
+//RS     fn jet_url_only_typed_markers(value: &str, marker: &str) -> bool {
+//RS         if marker.is_empty() {
+//RS             return false;
+//RS         }
+//RS         let mut rest = value;
+//RS         while let Some(next) = rest.strip_prefix(marker) {
+//RS             rest = next;
+//RS         }
+//RS         rest.is_empty()
+//RS     }
+//RS 
+//RS     fn jet_url_parse_port(p: &str) -> Result<i64, String> {
+//RS         let n: i64 = p.parse().map_err(|_| format!("invalid URL port `{}`", p))?;
+//RS         if !(0..=65535).contains(&n) {
+//RS             return Err(format!("URL port out of range `{}`", p));
+//RS         }
+//RS         Ok(n)
+//RS     }
+//RS 
+//RS     fn jet_url_host_to_ascii(host: &str) -> Result<String, String> {
+//RS         let host = host.trim_end_matches('.').to_ascii_lowercase();
+//RS         let mut labels = Vec::new();
+//RS         for label in host.split('.') {
+//RS             if label.is_empty() {
+//RS                 return Err("URL host has an empty label".to_string());
+//RS             }
+//RS             labels.push(if label.is_ascii() {
+//RS                 label.to_string()
+//RS             } else {
+//RS                 format!("xn--{}", jet_punycode_encode(label)?)
+//RS             });
+//RS         }
+//RS         Ok(labels.join("."))
+//RS     }
+//RS 
+//RS     fn jet_punycode_encode(input: &str) -> Result<String, String> {
+//RS         const BASE: u32 = 36;
+//RS         const TMIN: u32 = 1;
+//RS         const TMAX: u32 = 26;
+//RS         const SKEW: u32 = 38;
+//RS         const DAMP: u32 = 700;
+//RS         const INITIAL_BIAS: u32 = 72;
+//RS         const INITIAL_N: u32 = 128;
+//RS         let codepoints: Vec<u32> = input.chars().map(|c| c as u32).collect();
+//RS         let mut out = String::new();
+//RS         for &cp in &codepoints {
+//RS             if cp < 0x80 {
+//RS                 out.push(char::from_u32(cp).ok_or_else(|| "bad codepoint".to_string())?);
+//RS             }
+//RS         }
+//RS         let basic = out.chars().count() as u32;
+//RS         let mut handled = basic;
+//RS         if basic > 0 && handled < codepoints.len() as u32 {
+//RS             out.push('-');
+//RS         }
+//RS         let mut n = INITIAL_N;
+//RS         let mut delta = 0u32;
+//RS         let mut bias = INITIAL_BIAS;
+//RS         while handled < codepoints.len() as u32 {
+//RS             let m = *codepoints
+//RS                 .iter()
+//RS                 .filter(|&&cp| cp >= n)
+//RS                 .min()
+//RS                 .ok_or_else(|| "bad punycode input".to_string())?;
+//RS             delta = delta
+//RS                 .checked_add((m - n).saturating_mul(handled + 1))
+//RS                 .ok_or_else(|| "punycode overflow".to_string())?;
+//RS             n = m;
+//RS             for &cp in &codepoints {
+//RS                 if cp < n {
+//RS                     delta = delta.checked_add(1).ok_or_else(|| "punycode overflow".to_string())?;
+//RS                 } else if cp == n {
+//RS                     let mut q = delta;
+//RS                     let mut k = BASE;
+//RS                     loop {
+//RS                         let t = if k <= bias {
+//RS                             TMIN
+//RS                         } else if k >= bias + TMAX {
+//RS                             TMAX
+//RS                         } else {
+//RS                             k - bias
+//RS                         };
+//RS                         if q < t {
+//RS                             break;
+//RS                         }
+//RS                         out.push(jet_punycode_digit(t + ((q - t) % (BASE - t)))?);
+//RS                         q = (q - t) / (BASE - t);
+//RS                         k += BASE;
+//RS                     }
+//RS                     out.push(jet_punycode_digit(q)?);
+//RS                     bias = jet_punycode_adapt(delta, handled + 1, handled == basic);
+//RS                     delta = 0;
+//RS                     handled += 1;
+//RS                 }
+//RS             }
+//RS             delta = delta.checked_add(1).ok_or_else(|| "punycode overflow".to_string())?;
+//RS             n = n.checked_add(1).ok_or_else(|| "punycode overflow".to_string())?;
+//RS         }
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     fn jet_punycode_digit(d: u32) -> Result<char, String> {
+//RS         char::from_u32(if d < 26 { b'a' as u32 + d } else { b'0' as u32 + d - 26 })
+//RS             .ok_or_else(|| "bad punycode digit".to_string())
+//RS     }
+//RS 
+//RS     fn jet_punycode_adapt(mut delta: u32, points: u32, first: bool) -> u32 {
+//RS         delta = if first { delta / 700 } else { delta / 2 };
+//RS         delta += delta / points;
+//RS         let mut k = 0;
+//RS         while delta > ((36 - 1) * 26) / 2 {
+//RS             delta /= 36 - 1;
+//RS             k += 36;
+//RS         }
+//RS         k + (((36 - 1 + 1) * delta) / (delta + 38))
+//RS     }
+//RS 
+//RS     pub fn jet_url_join_text(base: &str, rel: &str) -> String {
+//RS         if rel.is_empty() {
+//RS             return base.to_string();
+//RS         }
+//RS         if let Some(colon) = rel.find(':') {
+//RS             let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
+//RS             if before_slash && jet_url_valid_scheme(&rel[..colon]) {
+//RS                 return rel.to_string();
+//RS             }
+//RS         }
+//RS         let Ok(parsed) = JetURLParts::parse(&base.to_string()) else {
+//RS             return rel.to_string();
+//RS         };
+//RS         if rel.starts_with("//") {
+//RS             return JetURLParts::parse(&format!("{}:{}", parsed.scheme, rel))
+//RS                 .map(|url| url.to_string_value())
+//RS                 .unwrap_or_else(|_| rel.to_string());
+//RS         }
+//RS         parsed
+//RS             .join(&rel.to_string())
+//RS             .map(|url| url.to_string_value())
+//RS             .unwrap_or_else(|_| rel.to_string())
+//RS     }
+//RS 
+//RS     pub fn jet_url_parse_qsl_rows(query: &str) -> Vec<Vec<String>> {
+//RS         let query = query.strip_prefix('?').unwrap_or(query);
+//RS         if query.is_empty() {
+//RS             return Vec::new();
+//RS         }
+//RS         query
+//RS             .split('&')
+//RS             .filter(|part| !part.is_empty())
+//RS             .map(|part| {
+//RS                 let (raw_key, raw_value) = part.split_once('=').unwrap_or((part, ""));
+//RS                 let key = jet_url_percent_decode_str(raw_key)
+//RS                     .unwrap_or_else(|_| raw_key.to_string());
+//RS                 let value = jet_url_percent_decode_str(raw_value)
+//RS                     .unwrap_or_else(|_| raw_value.to_string());
+//RS                 vec![key, value]
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn jet_url_query_rows(rows: &[Vec<String>]) -> String {
+//RS         rows.iter()
+//RS             .filter(|row| !row.is_empty())
+//RS             .map(|row| {
+//RS                 let key = row.first().cloned().unwrap_or_default();
+//RS                 let value = row.get(1).cloned().unwrap_or_default();
+//RS                 format!(
+//RS                     "{}={}",
+//RS                     jet_url_percent_encode(&key, false),
+//RS                     jet_url_percent_encode(&value, false)
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join("&")
+//RS     }
+//RS 
+//RS     pub fn jet_url_quote(text: &str) -> String {
+//RS         jet_url_percent_encode(text, true)
+//RS     }
+//RS 
+//RS     pub fn jet_url_quote_from_bytes(data: &[u8]) -> String {
+//RS         String::from_utf8(data.to_vec())
+//RS             .map(|text| jet_url_quote(&text))
+//RS             .unwrap_or_default()
+//RS     }
+//RS 
+//RS     pub fn jet_url_quote_plus(text: &str) -> String {
+//RS         jet_url_percent_encode(text, false).replace("%20", "+")
+//RS     }
+//RS 
+//RS     pub fn jet_url_unquote(text: &str) -> Result<String, String> {
+//RS         jet_url_percent_decode_str(text)
+//RS     }
+//RS 
+//RS     pub fn jet_url_unquote_to_bytes(text: &str) -> Result<Vec<u8>, String> {
+//RS         jet_url_percent_decode_str(text).map(|decoded| decoded.into_bytes())
+//RS     }
+//RS 
+//RS     pub fn jet_url_unquote_plus(text: &str) -> Result<String, String> {
+//RS         jet_url_percent_decode_str(&text.replace('+', " "))
+//RS     }
+//RS 
+//RS     pub fn jet_url_split_fragment(text: &str) -> (String, String) {
+//RS         text.find('#')
+//RS             .map(|index| (text[..index].to_string(), text[index + 1..].to_string()))
+//RS             .unwrap_or_else(|| (text.to_string(), String::new()))
+//RS     }
+//RS 
+//RS     fn jet_url_parse_query(q: &str) -> Result<Vec<(String, String)>, String> {
+//RS         if q.is_empty() {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         let mut out = Vec::new();
+//RS         for part in q.split('&') {
+//RS             let (k, v) = part.split_once('=').unwrap_or((part, ""));
+//RS             out.push((jet_url_percent_decode_str(k)?, jet_url_percent_decode_str(v)?));
+//RS         }
+//RS         Ok(out)
+//RS     }
+//RS 
+//RS     fn jet_url_pairs_from_rows(rows: &Vec<Vec<String>>) -> Vec<(String, String)> {
+//RS         rows.iter()
+//RS             .filter(|r| !r.is_empty())
+//RS             .map(|r| {
+//RS                 (
+//RS                     r.get(0).cloned().unwrap_or_default(),
+//RS                     r.get(1).cloned().unwrap_or_default(),
+//RS                 )
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS     fn jet_url_render_query(pairs: &[(String, String)]) -> String {
+//RS         pairs
+//RS             .iter()
+//RS             .map(|(k, v)| format!(
+//RS                 "{}={}",
+//RS                 jet_url_percent_encode(k, false),
+//RS                 jet_url_percent_encode(v, false)
+//RS             ))
+//RS             .collect::<Vec<_>>()
+//RS             .join("&")
+//RS     }
+//RS 
+//RS     pub fn jet_url_percent_encode(s: &str, path: bool) -> String {
+//RS         let mut out = String::new();
+//RS         for b in s.as_bytes() {
+//RS             let keep = b.is_ascii_alphanumeric()
+//RS                 || matches!(*b, b'-' | b'.' | b'_' | b'~')
+//RS                 || (path && *b == b'/');
+//RS             if keep {
+//RS                 out.push(*b as char);
+//RS             } else {
+//RS                 out.push_str(&format!("%{:02X}", b));
+//RS             }
+//RS         }
+//RS         out
+//RS     }
+//RS 
+//RS     pub fn jet_url_percent_decode_str(s: &str) -> Result<String, String> {
+//RS         let bytes = s.as_bytes();
+//RS         let mut out = Vec::new();
+//RS         let mut i = 0;
+//RS         while i < bytes.len() {
+//RS             if bytes[i] == b'%' {
+//RS                 if i + 2 >= bytes.len() {
+//RS                     return Err("truncated percent escape".to_string());
+//RS                 }
+//RS                 let hex = &s[i + 1..i + 3];
+//RS                 let byte = u8::from_str_radix(hex, 16)
+//RS                     .map_err(|_| format!("invalid percent escape `%{}`", hex))?;
+//RS                 out.push(byte);
+//RS                 i += 3;
+//RS             } else {
+//RS                 out.push(bytes[i]);
+//RS                 i += 1;
+//RS             }
+//RS         }
+//RS         String::from_utf8(out).map_err(|_| "percent escape is not valid UTF-8".to_string())
+//RS     }
+//RS 
+//RS     fn jet_url_remove_dot_segments(path: &str) -> String {
+//RS         if path.is_empty() || !path.contains('.') {
+//RS             return path.to_string();
+//RS         }
+//RS         let absolute = path.starts_with('/');
+//RS         let trailing = path.ends_with('/');
+//RS         let mut parts = Vec::new();
+//RS         for p in path.split('/') {
+//RS             match p {
+//RS                 "" | "." => {}
+//RS                 ".." => {
+//RS                     parts.pop();
+//RS                 }
+//RS                 _ => parts.push(p),
+//RS             }
+//RS         }
+//RS         let mut out = String::new();
+//RS         if absolute {
+//RS             out.push('/');
+//RS         }
+//RS         out.push_str(&parts.join("/"));
+//RS         if trailing && !out.ends_with('/') {
+//RS             out.push('/');
+//RS         }
+//RS         if out.is_empty() && absolute {
+//RS             "/".to_string()
+//RS         } else {
+//RS             out
+//RS         }
+//RS     }
+// END-PORT-PENDING 0169 crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1-1309
+

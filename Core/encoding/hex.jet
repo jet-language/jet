@@ -1,4 +1,7 @@
 use core as core
+use core.encoding as hex_encoding
+use core.encoding.runtime.kernel_base_encode as hex_base_encode
+use core.text.runtime.kernel_unicode_string as hex_unicode
 
 #Error
 pub struct HexError {
@@ -16,36 +19,54 @@ impl HexError {
 // including whitespace and an odd number of digits. There is no ignore-whitespace
 // mode; strip input first if a wire format wrapped the hex.
 //
+// EncodingBase.rs:6–116 policy is Jet-owned here: hex encode/decode/is_hex,
+// separator and dump forms reuse the canonical core.encoding hex law
+// (bytes_to_hex, hex_to_bytes, hex_nibble, hex_value); CRC registers are fixed
+// U16/U32 words. Native/JIT/comptime host rows become marshalling adapters.
 
 // Both functions are pure. `encode` allocates `2 * data.len()` bytes of ASCII.
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 
 /// Encode `data` as lowercase hexadecimal text.
-pub fn encode(data: [U8]) -> String Never! { core.encoding.hex.encode(data) }
+// Rust jet_std_hex_encode (:42); the canonical law borrows the original list.
+pub fn encode(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    hex_encoding.bytes_to_hex(view)
+}
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
+// Rust jet_std_hex_decode (:8): byte length checked before the digit scan.
 pub fn decode(text: String) -> [U8] HexError! {
-    if core.encoding.hex.decode(text) == {
+    if hex_encoding.hex_to_bytes(text) == {
         .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(HexError{reason: reason})
+        .Err(error) -> return Err(HexError{reason: error.reason})
     }
 }
 
-fn digit(b: U8) -> Int? {
-    n :: u8_int(b)
-    if n >= 48 && n <= 57 -> return Val(n - 48)
-    if n >= 97 && n <= 102 -> return Val(n - 87)
-    if n >= 65 && n <= 70 -> return Val(n - 55)
-    None
+// Rust jet_std_hex_encode_upper (:45) via hex_with_digits (:34).
+pub fn encode_upper(data: [U8]) -> String Never! {
+    out := [U8]{}
+    loop byte in data {
+        n :: u8_int(byte)
+        &out.push(nibble_upper(n /% 16))
+        &out.push(nibble_upper(n %% 16))
+    }
+    String.from_bytes(out) ?? panic("uppercase hex produced invalid UTF-8")
 }
-
-pub fn encode_upper(data: [U8]) -> String Never! { core.encoding.hex.encode_upper(data) }
 
 pub fn encode_prefixed(data: [U8]) -> String Never! { "0x{encode(data)}" }
 
-pub fn is_hex(text: String) -> Bool Never! { core.encoding.hex.is_hex(text) }
+// Rust jet_std_hex_is_hex (:55): non-empty, even UTF-8 byte length, all digits.
+pub fn is_hex(text: String) -> Bool Never! {
+    raw :: hex_unicode.utf8_bytes(text)
+    if raw.len() == 0 || raw.len() %% 2 != 0 -> return false
+    loop byte in raw {
+        if hex_encoding.hex_value(byte) == None -> return false
+    }
+    true
+}
 
 fn nibble_upper(n: Int) -> U8 {
     if n < 10 -> return (U8{48 + n})
@@ -63,8 +84,11 @@ pub fn b2a_hex(data: [U8]) -> String Never! { encode(data) }
 pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 
 /// Python `binascii.b2a_base64`: one unwrapped standard Base64 line. The
-/// `core.encoding.hex.b2a_base64` row is the bare encoder; the newline is added here.
-pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.hex.b2a_base64(data)}\n" }
+/// canonical standard encoder owns the text; the newline is added here.
+pub fn b2a_base64(data: [U8]) -> String Never! {
+    view :: data[0..<data.len()]
+    "{hex_base_encode.encode64(view)}\n"
+}
 
 pub fn a2b_base64(text: String) -> [U8] HexError! {
     if core.encoding.hex.a2b_base64(text) == {
@@ -74,10 +98,47 @@ pub fn a2b_base64(text: String) -> [U8] HexError! {
 }
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
-pub fn crc_hqx(data: [U8], value: Int) -> Int Never! { core.encoding.hex.crc_hqx(data, value) }
+// Rust jet_std_crc_hqx (:87): the seed is `value & 0xffff` as a U16 register.
+pub fn crc_hqx(data: [U8], value: Int) -> Int Never! {
+    seed :: U16.from_int(value & 65535) ?? panic("masked CRC-CCITT seed exceeds U16")
+    Int.from_u16(crc_hqx_word(data, seed))
+}
+
+// Rust jet_std_crc_hqx (:87–100): MSB-first polynomial 0x1021, no final xor.
+fn crc_hqx_word(data: [U8], seed: U16) -> U16 Never! {
+    crc := seed
+    loop byte in data {
+        crc = crc ~| (U16.from_u8(byte) << 8)
+        loop _ in 0..<8 {
+            if (crc & U16{32768}) != (U16{0}) {
+                crc = ((crc & U16{32767}) << 1) ~| U16{4129}
+            } else {
+                crc = crc << 1
+            }
+        }
+    }
+    crc
+}
 
 /// Python `binascii.crc32` (ISO 3309, non-negative result).
-pub fn crc32(data: [U8]) -> Int Never! { core.encoding.hex.crc32(data) }
+// Rust jet_std_crc32 (:102–115): reflected 0xEDB88320, init/final all-ones;
+// the i32→i64 & 0xffffffff result is exactly the unsigned U32 word.
+pub fn crc32(data: [U8]) -> Int Never! { Int.from_u32(crc32_word(data)) }
+
+fn crc32_word(data: [U8]) -> U32 Never! {
+    crc := U32{4294967295}
+    loop byte in data {
+        crc = crc ~| U32.from_u8(byte)
+        loop _ in 0..<8 {
+            if (crc & U32{1}) != (U32{0}) {
+                crc = (crc >> 1) ~| U32{3988292384}
+            } else {
+                crc = crc >> 1
+            }
+        }
+    }
+    crc ~| U32{4294967295}
+}
 
 /// Python `binascii.b2a_qp` basic text form.
 pub fn b2a_qp(data: [U8]) -> String Never! {
@@ -105,12 +166,12 @@ pub fn a2b_qp(text: String) -> [U8] Never! {
                 i = i + 2
                 next
             }
-            hi :: digit(raw[i + 1]) ?? {
+            hi :: hex_encoding.hex_value(raw[i + 1]) ?? {
                 &out.push(raw[i])
                 i = i + 1
                 next
             }
-            lo :: digit(raw[i + 2]) ?? {
+            lo :: hex_encoding.hex_value(raw[i + 2]) ?? {
                 &out.push(raw[i])
                 i = i + 1
                 next
@@ -198,10 +259,70 @@ fn uu_value(byte: U8) -> Int {
     (n - 32) & 63
 }
 
-pub fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
+// Rust jet_std_hex_encode_sep (:48): lowercase byte pairs joined by `sep`.
+pub fn encode_sep(data: [U8], sep: String) -> String Never! {
+    separator :: hex_unicode.utf8_bytes(sep)
+    out := [U8]{}
+    loop index in 0..<data.len() {
+        if index > 0 {
+            loop byte in separator -> &out.push(byte)
+        }
+        n :: u8_int(data[index])
+        &out.push(hex_encoding.hex_nibble(n /% 16))
+        &out.push(hex_encoding.hex_nibble(n %% 16))
+    }
+    String.from_bytes(out) ?? panic("separated hex produced invalid UTF-8")
+}
 
 /// 16-byte rows of offset, hex, and ASCII. Unprintable bytes become `.`.
-pub fn dump(data: [U8]) -> String Never! { core.encoding.hex.dump(data) }
+// Rust jet_std_hex_dump (:58–86): "{offset:08x}  {hex}  {ascii}\n" per row;
+// absent cells are two spaces and bytes outside 32..=126 print as `.`.
+pub fn dump(data: [U8]) -> String Never! {
+    out := [U8]{}
+    start := 0
+    loop start < data.len() {
+        dump_offset(&out, U64.from_int(start) ?? panic("hex dump offset exceeds U64"))
+        &out.push(U8{32})
+        &out.push(U8{32})
+        loop index in 0..<16 {
+            if index > 0 -> &out.push(U8{32})
+            if start + index < data.len() {
+                n :: u8_int(data[start + index])
+                &out.push(hex_encoding.hex_nibble(n /% 16))
+                &out.push(hex_encoding.hex_nibble(n %% 16))
+            } else {
+                &out.push(U8{32})
+                &out.push(U8{32})
+            }
+        }
+        &out.push(U8{32})
+        &out.push(U8{32})
+        end := start + 16
+        if end > data.len() -> end = data.len()
+        loop index in start..<end {
+            byte :: data[index]
+            if byte >= (U8{32}) && byte <= (U8{126}) {
+                &out.push(byte)
+            } else {
+                &out.push(U8{46})
+            }
+        }
+        &out.push(U8{10})
+        start += 16
+    }
+    String.from_bytes(out) ?? panic("hex dump produced invalid UTF-8")
+}
+
+// Rust `{offset:08x}`: lowercase, at least eight digits, wider when needed.
+fn dump_offset(out: &[U8], offset: U64) Never! {
+    shift := 60
+    loop shift >= 0 {
+        if shift < 32 || (offset >> shift) != (U64{0}) {
+            &out.push(hex_encoding.hex_nibble(Int.from_u64((offset >> shift) & U64{15})))
+        }
+        shift -= 4
+    }
+}
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.

@@ -1,0 +1,296 @@
+// PORT-PENDING 0271 crates-jet-codegen-src-prelude-corelib-top-fsruntimeops-module-group: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:1-292
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // ── Typed Path API (D-PATHFS1) ────────────────────────────────────────────────
+//RS #[derive(Clone, Debug)]
+//RS struct JetPath {
+//RS     inner: std::path::PathBuf,
+//RS }
+//RS impl JetShow for JetPath {
+//RS     fn jet_show(&self) -> String {
+//RS         self.inner.to_string_lossy().to_string()
+//RS     }
+//RS }
+//RS impl JetDisplay for JetPath {
+//RS     fn jet_display(&self) -> String {
+//RS         self.inner.to_string_lossy().to_string()
+//RS     }
+//RS }
+//RS impl JetDebug for JetPath {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.inner.to_string_lossy().to_string()
+//RS     }
+//RS }
+//RS fn jet_path_from(s: &String) -> JetPath {
+//RS     JetPath {
+//RS         inner: std::path::PathBuf::from(s),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_path_to_string(path: &JetPath) -> String {
+//RS     path.jet_display()
+//RS }
+//RS 
+//RS fn jet_path_home() -> JetPath {
+//RS     jet_path_from(&jet_std_path_home())
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1=A: encode each Path hole as one component, then use the
+//RS /// existing infallible Path constructor.
+//RS fn jet_typed_path_literal(literals: &[&str], holes: Vec<String>) -> JetPath {
+//RS     let text = jet_typed_path_interpolate(literals, &holes);
+//RS     jet_path_from(&text)
+//RS }
+//RS 
+//RS fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
+//RS     JetPath {
+//RS         inner: std::path::PathBuf::from(jet_std_path_join(
+//RS             &p.inner.to_string_lossy().to_string(),
+//RS             other,
+//RS         )),
+//RS     }
+//RS }
+//RS fn jet_path_parent(p: &JetPath) -> JetOutcome<JetPath, JetAbsent> {
+//RS     jet_outcome_of(jet_std_path_parent_opt(&p.inner.to_string_lossy().to_string()).map(|par| JetPath {
+//RS         inner: std::path::PathBuf::from(par),
+//RS     }))
+//RS }
+//RS fn jet_path_extension(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+//RS     jet_outcome_of(jet_std_path_extension_opt(&p.inner.to_string_lossy().to_string()))
+//RS }
+//RS fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+//RS     jet_outcome_of(jet_std_path_stem_opt(&p.inner.to_string_lossy().to_string()))
+//RS }
+//RS fn jet_path_normalize(p: &JetPath) -> JetPath {
+//RS     jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
+//RS }
+//RS 
+//RS /// Lexical containment only. The receiver is the candidate and the argument
+//RS /// is the containing path; no filesystem access or symlink resolution occurs.
+//RS fn jet_path_is_within(path: &JetPath, base: &JetPath) -> bool {
+//RS     let path = path.inner.to_string_lossy().into_owned();
+//RS     let base = base.inner.to_string_lossy().into_owned();
+//RS     jet_std_path_is_within(&path, &base)
+//RS }
+//RS 
+//RS static JET_ATOMIC_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
+//RS     std::sync::atomic::AtomicU64::new(0);
+//RS 
+//RS struct JetAtomicTemp {
+//RS     path: std::path::PathBuf,
+//RS     file: Option<std::fs::File>,
+//RS     committed: bool,
+//RS }
+//RS 
+//RS impl JetAtomicTemp {
+//RS     fn create(dir: &std::path::Path) -> std::io::Result<Self> {
+//RS         for _ in 0..128 {
+//RS             let sequence = JET_ATOMIC_TEMP_COUNTER
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+//RS             let path = dir.join(format!(
+//RS                 ".jet_tmp_{}_{}",
+//RS                 std::process::id(),
+//RS                 sequence
+//RS             ));
+//RS             match std::fs::OpenOptions::new()
+//RS                 .create_new(true)
+//RS                 .write(true)
+//RS                 .open(&path)
+//RS             {
+//RS                 Ok(file) => {
+//RS                     return Ok(Self {
+//RS                         path,
+//RS                         file: Some(file),
+//RS                         committed: false,
+//RS                     });
+//RS                 }
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS         }
+//RS         Err(std::io::Error::new(
+//RS             std::io::ErrorKind::AlreadyExists,
+//RS             "could not reserve an atomic-write temporary file",
+//RS         ))
+//RS     }
+//RS 
+//RS     fn file_mut(&mut self) -> &mut std::fs::File {
+//RS         self.file.as_mut().expect("atomic temp file must be open")
+//RS     }
+//RS 
+//RS     fn close(&mut self) {
+//RS         self.file.take();
+//RS     }
+//RS 
+//RS     fn commit(&mut self) {
+//RS         self.committed = true;
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetAtomicTemp {
+//RS     fn drop(&mut self) {
+//RS         self.close();
+//RS         if !self.committed {
+//RS             let _ = std::fs::remove_file(&self.path);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_atomic_windows
+//RS #[cfg(windows)]
+//RS mod jet_atomic_windows {
+//RS     use std::os::windows::ffi::OsStrExt;
+//RS 
+//RS     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+//RS     const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+//RS     const ERROR_FILE_NOT_FOUND: i32 = 2;
+//RS     const ERROR_PATH_NOT_FOUND: i32 = 3;
+//RS     extern "system" {
+//RS         fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+//RS         fn ReplaceFileW(
+//RS             replaced: *const u16,
+//RS             replacement: *const u16,
+//RS             backup: *const u16,
+//RS             flags: u32,
+//RS             exclude: *mut std::ffi::c_void,
+//RS             reserved: *mut std::ffi::c_void,
+//RS         ) -> i32;
+//RS     }
+//RS 
+//RS     fn wide(path: &std::path::Path) -> std::io::Result<Vec<u16>> {
+//RS         let mut encoded: Vec<u16> = path.as_os_str().encode_wide().collect();
+//RS         if encoded.contains(&0) {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidInput,
+//RS                 "Windows path contains an embedded NUL",
+//RS             ));
+//RS         }
+//RS         encoded.push(0);
+//RS         Ok(encoded)
+//RS     }
+//RS 
+//RS     pub fn replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+//RS         let target_exists = target.exists();
+//RS         let temp = wide(temp)?;
+//RS         let target = wide(target)?;
+//RS         if target_exists {
+//RS             let replaced = unsafe {
+//RS                 ReplaceFileW(
+//RS                     target.as_ptr(),
+//RS                     temp.as_ptr(),
+//RS                     std::ptr::null(),
+//RS                     0,
+//RS                     std::ptr::null_mut(),
+//RS                     std::ptr::null_mut(),
+//RS                 )
+//RS             };
+//RS             if replaced != 0 {
+//RS                 return Ok(());
+//RS             }
+//RS             let error = std::io::Error::last_os_error();
+//RS             if !matches!(
+//RS                 error.raw_os_error(),
+//RS                 Some(ERROR_FILE_NOT_FOUND) | Some(ERROR_PATH_NOT_FOUND)
+//RS             ) {
+//RS                 return Err(error);
+//RS             }
+//RS         }
+//RS         let moved = unsafe {
+//RS             MoveFileExW(
+//RS                 temp.as_ptr(),
+//RS                 target.as_ptr(),
+//RS                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+//RS             )
+//RS         };
+//RS         if moved == 0 {
+//RS             Err(std::io::Error::last_os_error())
+//RS         } else {
+//RS             Ok(())
+//RS         }
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_atomic_windows
+//RS 
+//RS #[cfg(not(windows))]
+//RS fn jet_atomic_replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+//RS     std::fs::rename(temp, target)
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS fn jet_atomic_replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+//RS     jet_atomic_windows::replace(temp, target)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_atomic_sync_parent(dir: &std::path::Path) -> std::io::Result<()> {
+//RS     std::fs::File::open(dir)?.sync_all()
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_atomic_sync_parent(_dir: &std::path::Path) -> std::io::Result<()> {
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IOError> {
+//RS     use std::io::Write;
+//RS 
+//RS     let path_s = p.inner.to_string_lossy().into_owned();
+//RS     if let Some(error) = jet_std::jet_std_files_writer_refusal(&path_s) {
+//RS         return Err(error);
+//RS     }
+//RS     if jet_fault_should_fail("FS.Write") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Write,
+//RS             Some(path_s.clone()),
+//RS             "fault injected: FS.Write",
+//RS         ));
+//RS     }
+//RS     let parent = p.inner.parent().ok_or_else(|| {
+//RS         jet_std::io_error_at(
+//RS             jet_std::IOOperation::Write,
+//RS             &path_s,
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidInput,
+//RS                 "path has no parent directory",
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     // Path::parent("file") is Some(""). Treat that lexical parent as the
+//RS     // current directory so the post-rename directory sync cannot turn a
+//RS     // successful relative replacement into an error.
+//RS     let dir = if parent.as_os_str().is_empty() {
+//RS         std::path::Path::new(".")
+//RS     } else {
+//RS         parent
+//RS     };
+//RS     let existing_permissions = std::fs::metadata(&p.inner)
+//RS         .ok()
+//RS         .map(|metadata| metadata.permissions());
+//RS     let mut temp = JetAtomicTemp::create(dir)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, dir.to_string_lossy().as_ref(), error))?;
+//RS     temp.file_mut()
+//RS         .write_all(content)
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
+//RS     if let Some(permissions) = existing_permissions {
+//RS         temp.file_mut()
+//RS             .set_permissions(permissions)
+//RS             .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
+//RS     }
+//RS     temp.file_mut()
+//RS         .sync_all()
+//RS         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, temp.path.to_string_lossy().as_ref(), error))?;
+//RS     temp.close();
+//RS     jet_atomic_replace(&temp.path, &p.inner).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &path_s, error))?;
+//RS     temp.commit();
+//RS     jet_atomic_sync_parent(dir).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &path_s, error))
+//RS }
+//RS fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
+//RS     jet_std_path_walk(&p.inner.to_string_lossy().into_owned())
+//RS         .into_iter()
+//RS         .map(|path| JetPath {
+//RS             inner: std::path::PathBuf::from(path),
+//RS         })
+//RS         .collect()
+//RS }
+//RS // ─────────────────────────────────────────────────────────────────────────────
+// END-PORT-PENDING 0271 crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:1-292
+

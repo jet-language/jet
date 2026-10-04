@@ -1,0 +1,122 @@
+// Duration.rs:1–197: fixed nanosecond policy for the shared runtime.
+// Scalar operations must lower to the canonical primitive/fixed-arithmetic
+// leaves, never recursively re-enter this duration owner. Arguments are
+// borrowed/value scalars. String rendering/error-message transport still needs
+// the canonical native append/retention owner for allocation parity.
+use core.math as duration_math
+
+fn duration_min() -> I64 Never! {
+    // #4391: the equivalent in-range expression preserves the minimum word.
+    I64{-9223372036854775807} - I64{1}
+}
+fn duration_max() -> I64 Never! { I64{9223372036854775807} }
+
+// Rust jet_duration_kernel_from_int (:3).
+pub fn jet_duration_kernel_from_int(value: I64, scale: I64) -> I64? Never! {
+    value.checked_mul(scale)
+}
+
+// Rust jet_duration_kernel_from_float (:7). Check before truncating/casting;
+// +2^63 is exclusive, whereas -2^63 is an admissible exact Float.
+pub fn jet_duration_kernel_from_float(value: Float, scale: I64) -> I64? Never! {
+    nanoseconds :: value * Float.from_i64(scale)
+    if !duration_math.is_finite(nanoseconds) || nanoseconds < -9223372036854775808.0 || nanoseconds >= 9223372036854775808.0 -> return None
+    converted :: I64.from_float(duration_math.trunc(nanoseconds)) ?? return None
+    Val(converted)
+}
+
+// Rust jet_duration_kernel_scale (:17).
+pub fn jet_duration_kernel_scale(value: I64, factor: I64) -> I64? Never! {
+    value.checked_mul(factor)
+}
+// Rust jet_duration_kernel_divide (:21): checked division truncates, not floors.
+pub fn jet_duration_kernel_divide(value: I64, factor: I64) -> I64? Never! {
+    value.checked_div(factor)
+}
+// Rust jet_duration_kernel_scale_error_reason (:25).
+pub fn jet_duration_kernel_scale_error_reason() -> String Never! {
+    "duration scaling overflowed or divided by zero"
+}
+// Rust jet_duration_kernel_int_error_reason (:29).
+pub fn jet_duration_kernel_int_error_reason() -> String Never! {
+    "duration is outside the supported range"
+}
+// Rust jet_duration_kernel_float_error_reason (:33).
+pub fn jet_duration_kernel_float_error_reason() -> String Never! {
+    "duration must be finite and inside the supported range"
+}
+// Rust jet_duration_kernel_in (:37): retains the divide-zero/overflow trap.
+pub fn jet_duration_kernel_in(value: I64, scale: I64) -> I64 Never! {
+    // Sized I64 division keeps I64 and truncates (unlike exact Int `/`).
+    value / scale
+}
+// Rust jet_duration_kernel_is_zero (:41).
+pub fn jet_duration_kernel_is_zero(value: I64) -> Bool Never! { value == I64{0} }
+// Rust jet_duration_kernel_total_seconds (:45).
+pub fn jet_duration_kernel_total_seconds(value: I64) -> I64 Never! {
+    jet_duration_kernel_in(value, I64{1000000000})
+}
+// Rust jet_duration_kernel_seconds_value (:49).
+pub fn jet_duration_kernel_seconds_value(value: I64) -> Float Never! {
+    Float.from_i64(value) / 1000000000.0
+}
+
+// Rust jet_duration_kernel_unit_nanoseconds (:56). Every unit is exactly
+// representable in I64; widening this lookup for the signed128 rounding owner
+// requires the compiler's native signed128 scalar carrier, not exact Int.
+pub fn jet_duration_kernel_unit_nanoseconds(unit: String) -> I64? Never! {
+    if unit == {
+        "nanosecond" | "nanoseconds" | "ns" -> Val(I64{1})
+        "microsecond" | "microseconds" | "us" | "µs" -> Val(I64{1000})
+        "millisecond" | "milliseconds" | "ms" -> Val(I64{1000000})
+        "second" | "seconds" | "s" -> Val(I64{1000000000})
+        "minute" | "minutes" | "min" -> Val(I64{60000000000})
+        "hour" | "hours" | "h" -> Val(I64{3600000000000})
+        "day" | "days" | "d" -> Val(I64{86400000000000})
+        "week" | "weeks" | "w" -> Val(I64{604800000000000})
+        else -> None
+    }
+}
+// Rust jet_duration_kernel_total_in (:70): unknown units return zero.
+pub fn jet_duration_kernel_total_in(value: I64, unit: String) -> Float Never! {
+    unit_ns :: jet_duration_kernel_unit_nanoseconds(unit) ?? return 0.0
+    Float.from_i64(value) / Float.from_i64(unit_ns)
+}
+
+// Rust jet_duration_kernel_round_quotient (:76), round_i128 (:143), round
+// (:156) require native I128 quotient/remainder and checked multiplication.
+// Their exact behavioral corpus is retained separately from the executable
+// I64 cases; no allocating Int or second wide-arithmetic owner substitutes
+// for this missing compiler carrier.
+
+// Rust jet_duration_kernel_abs (:167).
+pub fn jet_duration_kernel_abs(value: I64) -> I64 Never! {
+    if value == duration_min() -> return duration_max()
+    if (value < I64{0}) -> return -value
+    value
+}
+// Rust jet_duration_kernel_negated (:171).
+pub fn jet_duration_kernel_negated(value: I64) -> I64 Never! {
+    if value == duration_min() -> return duration_max()
+    return -value
+}
+// Rust jet_duration_kernel_sign (:175).
+pub fn jet_duration_kernel_sign(value: I64) -> I64 Never! {
+    if (value < I64{0}) -> return I64{-1}
+    if (value > I64{0}) -> return I64{1}
+    I64{0}
+}
+// Rust jet_duration_kernel_add (:179).
+pub fn jet_duration_kernel_add(left: I64, right: I64) -> I64 Never! {
+    left.saturating_add(right)
+}
+// Rust jet_duration_kernel_sub (:183).
+pub fn jet_duration_kernel_sub(left: I64, right: I64) -> I64 Never! {
+    left.saturating_sub(right)
+}
+// Rust jet_duration_kernel_difference (:187).
+pub fn jet_duration_kernel_difference(left: I64, right: I64) -> I64 Never! {
+    jet_duration_kernel_sub(left, right)
+}
+// Rust jet_duration_kernel_show (:195).
+pub fn jet_duration_kernel_show(value: I64) -> String Never! { "{value}ns" }

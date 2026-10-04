@@ -1,0 +1,71 @@
+// Direct assertions on the complete Measurement.rs policy owner.
+use core.math.runtime.kernel_measurement as measurement_kernel
+use core.math as math_small_test
+
+#Test("measurement_tiers Rust known result and Debug Float spelling") {
+    left :: measurement_kernel.jet_measurement_kernel_new(Float{12.0}, Float{0.1})
+    right :: measurement_kernel.jet_measurement_kernel_new(Float{3.0}, Float{0.2})
+    sum :: measurement_kernel.jet_measurement_kernel_add(left, right)
+    assert_eq(sum.value, Float{15.0})
+    assert_eq(sum.uncertainty, Float{0.223606797749979})
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(sum), "15.0 ± 0.223606797749979")
+    difference :: measurement_kernel.jet_measurement_kernel_sub(left, right)
+    assert_eq(difference.value, Float{9.0})
+    assert_eq(difference.uncertainty, sum.uncertainty)
+}
+
+#Test("measurement magnitude relative error and exact zero derivative") {
+    negative :: measurement_kernel.jet_measurement_kernel_new(-Float{12.0}, -Float{0.1})
+    assert_eq(negative.value, -Float{12.0})
+    assert_eq(negative.uncertainty, Float{0.1})
+    relative :: measurement_kernel.jet_measurement_kernel_from_relative(-Float{12.0}, -Float{0.25})
+    assert_eq(relative.uncertainty, Float{3.0})
+    zero :: measurement_kernel.jet_measurement_kernel_sqrt(measurement_kernel.jet_measurement_kernel_new(Float{0.0}, Float{0.0}))
+    assert_eq(zero.value, Float{0.0})
+    assert_eq(zero.uncertainty, Float{0.0})
+    uncertain_zero :: measurement_kernel.jet_measurement_kernel_sqrt(measurement_kernel.jet_measurement_kernel_new(Float{0.0}, Float{1.0}))
+    assert(math_small_test.is_inf(uncertain_zero.uncertainty))
+    negative_root :: measurement_kernel.jet_measurement_kernel_sqrt(negative)
+    assert(math_small_test.is_nan(negative_root.value))
+    assert(math_small_test.is_nan(negative_root.uncertainty))
+}
+
+#Test("math_display_parity first order measurement evaluation order") {
+    gravity :: measurement_kernel.jet_measurement_kernel_new(Float{9.8}, Float{0.1})
+    time :: measurement_kernel.jet_measurement_kernel_new(Float{2.0}, Float{0.05})
+    squared :: measurement_kernel.jet_measurement_kernel_mul(time, time)
+    half :: measurement_kernel.jet_measurement_kernel_new(Float{0.5}, Float{0.0})
+    height :: measurement_kernel.jet_measurement_kernel_mul(measurement_kernel.jet_measurement_kernel_mul(half, gravity), squared)
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(height), "19.6 ± 0.7212489168102787")
+    root :: measurement_kernel.jet_measurement_kernel_sqrt(gravity)
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(root), "3.1304951684997055 ± 0.015971914124998498")
+    division :: measurement_kernel.jet_measurement_kernel_div(measurement_kernel.jet_measurement_kernel_new(Float{6.0}, Float{0.3}), measurement_kernel.jet_measurement_kernel_new(Float{2.0}, Float{0.4}))
+    assert_eq(division.value, Float{3.0})
+    assert_eq(division.uncertainty, math_small_test.sqrt(Float{0.15} * Float{0.15} + Float{0.6000000000000001} * Float{0.6000000000000001}))
+}
+
+#Test("measurement preserves IEEE signed zero and exceptional Float results") {
+    negative_zero :: measurement_kernel.jet_measurement_kernel_new(-Float{0.0}, -Float{0.0})
+    assert(math_small_test.sign_bit(negative_zero.value))
+    assert(!math_small_test.sign_bit(negative_zero.uncertainty))
+    root :: measurement_kernel.jet_measurement_kernel_sqrt(negative_zero)
+    assert(math_small_test.sign_bit(root.value))
+    assert(!math_small_test.sign_bit(root.uncertainty))
+    numerator :: measurement_kernel.jet_measurement_kernel_new(Float{1.0}, Float{0.0})
+    denominator :: measurement_kernel.jet_measurement_kernel_new(Float{0.0}, Float{0.0})
+    quotient :: measurement_kernel.jet_measurement_kernel_div(numerator, denominator)
+    assert(math_small_test.is_inf(quotient.value))
+    assert(math_small_test.is_nan(quotient.uncertainty))
+}
+
+// Rust {:?} Float spelling at the exceptional/exponent boundaries (:58).
+#Test("measurement show keeps Rust Debug spelling for exceptional Floats") {
+    signed :: measurement_kernel.jet_measurement_kernel_new(-Float{0.0}, -Float{0.0})
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(signed), "-0.0 ± 0.0")
+    scaled :: measurement_kernel.jet_measurement_kernel_new(Float{1e20}, Float{1e-7})
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(scaled), "1e20 ± 1e-7")
+    boundary :: measurement_kernel.jet_measurement_kernel_new(Float{1e15}, Float{0.0001})
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(boundary), "1000000000000000.0 ± 0.0001")
+    exceptional :: measurement_kernel.jet_measurement_kernel_new(math_small_test.nan(), -math_small_test.infinity())
+    assert_eq(measurement_kernel.jet_measurement_kernel_show(exceptional), "NaN ± inf")
+}

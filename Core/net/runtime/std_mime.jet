@@ -1,0 +1,135 @@
+// PORT-PENDING 0153 crates-jet-codegen-src-prelude-core-neterror-module-group: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs:1-131
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-ONCE-LAW1 / I9: one MIME parser and extension table for every tier.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetMimeParts {
+//RS     pub top: String,
+//RS     pub sub: String,
+//RS     pub params: Vec<(String, String)>,
+//RS }
+//RS 
+//RS pub fn jet_mime_parse_parts(input: &str) -> Result<JetMimeParts, String> {
+//RS     let mut parts = input.split(';');
+//RS     let essence = parts.next().unwrap_or("").trim();
+//RS     let Some((top, sub)) = essence.split_once('/') else {
+//RS         return Err("MIME type needs `type/subtype`".to_string());
+//RS     };
+//RS     let top = top.trim().to_ascii_lowercase();
+//RS     let sub = sub.trim().to_ascii_lowercase();
+//RS     if top.is_empty() || sub.is_empty() || !jet_mime_token(&top) || !jet_mime_token(&sub) {
+//RS         return Err(format!("invalid MIME type `{}`", essence));
+//RS     }
+//RS     let mut params = Vec::new();
+//RS     for parameter in parts {
+//RS         let parameter = parameter.trim();
+//RS         if parameter.is_empty() {
+//RS             continue;
+//RS         }
+//RS         let Some((key, value)) = parameter.split_once('=') else {
+//RS             return Err(format!("invalid MIME parameter `{}`", parameter));
+//RS         };
+//RS         let key = key.trim().to_ascii_lowercase();
+//RS         if key.is_empty() || !jet_mime_token(&key) {
+//RS             return Err(format!("invalid MIME parameter `{}`", key.trim()));
+//RS         }
+//RS         params.push((key, value.trim().trim_matches('"').to_string()));
+//RS     }
+//RS     Ok(JetMimeParts { top, sub, params })
+//RS }
+//RS 
+//RS pub fn jet_mime_essence(top: &str, sub: &str) -> String {
+//RS     format!("{top}/{sub}")
+//RS }
+//RS 
+//RS pub fn jet_mime_param<'a>(
+//RS     params: impl IntoIterator<Item = (&'a str, &'a str)>,
+//RS     name: &str,
+//RS ) -> Option<&'a str> {
+//RS     let name = name.to_ascii_lowercase();
+//RS     params
+//RS         .into_iter()
+//RS         .find(|(key, _)| *key == name)
+//RS         .map(|(_, value)| value)
+//RS }
+//RS 
+//RS pub fn jet_mime_to_string<'a>(
+//RS     top: &str,
+//RS     sub: &str,
+//RS     params: impl IntoIterator<Item = (&'a str, &'a str)>,
+//RS ) -> String {
+//RS     let mut output = jet_mime_essence(top, sub);
+//RS     for (key, value) in params {
+//RS         output.push_str("; ");
+//RS         output.push_str(key);
+//RS         output.push('=');
+//RS         output.push_str(value);
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn jet_mime_token(value: &str) -> bool {
+//RS     !value.is_empty()
+//RS         && value.bytes().all(|byte| {
+//RS             byte.is_ascii_alphanumeric()
+//RS                 || matches!(
+//RS                     byte,
+//RS                     b'!' | b'#' | b'$' | b'&' | b'-' | b'^' | b'_' | b'.' | b'+'
+//RS                 )
+//RS         })
+//RS }
+//RS 
+//RS pub fn jet_mime_from_extension(ext: &str) -> Option<&'static str> {
+//RS     match ext.trim_start_matches('.').to_ascii_lowercase().as_str() {
+//RS         "html" | "htm" => Some("text/html"),
+//RS         "css" => Some("text/css"),
+//RS         "csv" => Some("text/csv"),
+//RS         "txt" | "text" => Some("text/plain"),
+//RS         "md" => Some("text/markdown"),
+//RS         "json" => Some("application/json"),
+//RS         "js" | "mjs" => Some("text/javascript"),
+//RS         "wasm" => Some("application/wasm"),
+//RS         "pdf" => Some("application/pdf"),
+//RS         "png" => Some("image/png"),
+//RS         "jpg" | "jpeg" => Some("image/jpeg"),
+//RS         "gif" => Some("image/gif"),
+//RS         "svg" => Some("image/svg+xml"),
+//RS         "webp" => Some("image/webp"),
+//RS         "ico" => Some("image/x-icon"),
+//RS         "mp3" => Some("audio/mpeg"),
+//RS         "mp4" => Some("video/mp4"),
+//RS         "xml" => Some("application/xml"),
+//RS         "zip" => Some("application/zip"),
+//RS         "gz" => Some("application/gzip"),
+//RS         "tar" => Some("application/x-tar"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_extension_from_mime(mime: &str) -> Option<&'static str> {
+//RS     match mime.to_ascii_lowercase().split(';').next().unwrap_or("").trim() {
+//RS         "text/html" => Some("html"),
+//RS         "text/css" => Some("css"),
+//RS         "text/csv" => Some("csv"),
+//RS         "text/plain" => Some("txt"),
+//RS         "text/markdown" => Some("md"),
+//RS         "application/json" => Some("json"),
+//RS         "text/javascript" | "application/javascript" => Some("js"),
+//RS         "application/wasm" => Some("wasm"),
+//RS         "application/pdf" => Some("pdf"),
+//RS         "image/png" => Some("png"),
+//RS         "image/jpeg" => Some("jpg"),
+//RS         "image/gif" => Some("gif"),
+//RS         "image/svg+xml" => Some("svg"),
+//RS         "image/webp" => Some("webp"),
+//RS         "image/x-icon" => Some("ico"),
+//RS         "audio/mpeg" => Some("mp3"),
+//RS         "video/mp4" => Some("mp4"),
+//RS         "application/xml" | "text/xml" => Some("xml"),
+//RS         "application/zip" => Some("zip"),
+//RS         "application/gzip" => Some("gz"),
+//RS         "application/x-tar" => Some("tar"),
+//RS         _ => None,
+//RS     }
+//RS }
+// END-PORT-PENDING 0153 crates/jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs:1-131
+

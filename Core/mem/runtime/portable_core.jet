@@ -1,0 +1,427 @@
+// PORT-PENDING 0190 crates-jet-codegen-src-prelude-targetadapters-module-group: crates/jet-codegen/src/Prelude/PortableCore.rs:1-423
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FREESTAND-CORE1=A: the canonical no-OS Core closure.
+//RS //
+//RS // This source is deliberately heap-free.  It owns the checked carrier,
+//RS // arithmetic policy adapters, source-location stop boundary, and the target
+//RS // formatting macros.  Target I/O and failure are supplied by TargetAdapters;
+//RS // no host runtime, synchronization, filesystem, or UI code belongs here.
+//RS 
+//RS use core::fmt;
+//RS use core::fmt::Write;
+//RS use core::sync::atomic::{AtomicI32, Ordering};
+//RS use crate::RuntimeDiagnosticCore::{
+//RS     JetRuntimeDiagnosticRow, JetRuntimeStopContext, jet_require_eq_message,
+//RS     jet_runtime_stop_status, jet_write_runtime_stop,
+//RS };
+//RS 
+//RS pub type JetOutcome<T, E> = Result<T, E>;
+//RS 
+//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+//RS pub struct JetAbsent;
+//RS 
+//RS /// Errors crossing the portable entry boundary expose bytes without allocating.
+//RS pub trait JetPortableError {
+//RS     fn jet_error_bytes(&self) -> &[u8];
+//RS 
+//RS     fn jet_error_status(&self) -> i32 {
+//RS         1
+//RS     }
+//RS }
+//RS 
+//RS impl JetPortableError for &'static str {
+//RS     fn jet_error_bytes(&self) -> &[u8] {
+//RS         self.as_bytes()
+//RS     }
+//RS }
+//RS 
+//RS impl JetPortableError for &'static [u8] {
+//RS     fn jet_error_bytes(&self) -> &[u8] {
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS pub static __JET_LAST_TARGET_STATUS: AtomicI32 = AtomicI32::new(0);
+//RS 
+//RS 
+//RS #[inline(always)]
+//RS fn jet_stop_rich<M: fmt::Display>(
+//RS     code: &'static str,
+//RS     context: JetRuntimeStopContext<'_>,
+//RS     message: &dyn fmt::Display,
+//RS     locals: Option<M>,
+//RS ) -> ! {
+//RS     let row = jet_runtime_diagnostic_row(code);
+//RS     jet_target_failure_render(jet_runtime_stop_status(row), |out| {
+//RS         jet_write_runtime_stop(
+//RS             out, row, code, context, message,
+//RS             locals.as_ref().map(|value| value as &dyn fmt::Display),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_runtime_boundary<F, T>(run: F) -> T
+//RS where
+//RS     F: FnOnce() -> T,
+//RS {
+//RS     run()
+//RS }
+//RS /// Report a top-level `Result` failure without constructing a hosted `String`.
+//RS /// The MIR emitter uses this carrier for no-OS entries, where formatting must
+//RS /// stay in `core` and the selected target report provider owns the bytes.
+//RS #[inline(never)]
+//RS pub fn jet_entry_error_exit<E: fmt::Debug>(error: E) -> ! {
+//RS     let row = jet_runtime_diagnostic_row("E3001");
+//RS     jet_target_failure_render(jet_runtime_stop_status(row), |out| {
+//RS         jet_write_runtime_stop(
+//RS             out,
+//RS             row,
+//RS             "E3001",
+//RS             JetRuntimeStopContext {
+//RS                 file: "",
+//RS                 line: 0,
+//RS                 function: "",
+//RS                 source_line: "",
+//RS                 column: 1,
+//RS                 caret_len: 1,
+//RS                 expected_type: "",
+//RS             },
+//RS             &format_args!("{error:?}"),
+//RS             None,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_runtime_stop(code: &'static str, file: &str, line: u32, message: &str) -> ! {
+//RS     jet_stop_rich(
+//RS         code,
+//RS         JetRuntimeStopContext {
+//RS             file, line, function: "", source_line: "", column: 1, caret_len: 1,
+//RS             expected_type: message.rsplit_once(" — expected ").map(|(_, expected)| expected).unwrap_or(message),
+//RS         },
+//RS         &message,
+//RS         Option::<fmt::Arguments<'_>>::None,
+//RS     )
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_panic(file: &str, line: u32, message: &str) -> ! {
+//RS     jet_panic_rich(file, line, "", "", 1, 1, message, None::<fmt::Arguments<'_>>)
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {
+//RS     jet_runtime_stop("E3010", file, line, message)
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {
+//RS     jet_runtime_stop(
+//RS         "E3011",
+//RS         file,
+//RS         line,
+//RS         expected_type,
+//RS     )
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_panic_rich<M: fmt::Display>(
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     source_line: &str,
+//RS     col: u32,
+//RS     caret_len: u32,
+//RS     message: &str,
+//RS     locals: Option<M>,
+//RS ) -> ! {
+//RS     jet_stop_rich(
+//RS         "E3001",
+//RS         JetRuntimeStopContext {
+//RS             file, line, function: fn_name, source_line, column: col, caret_len,
+//RS             expected_type: message,
+//RS         },
+//RS         &message,
+//RS         locals,
+//RS     )
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_require<M: fmt::Display>(
+//RS     condition: bool,
+//RS     message: &str,
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     source_line: &str,
+//RS     col: u32,
+//RS     caret_len: u32,
+//RS     locals: Option<M>,
+//RS ) {
+//RS     if !condition {
+//RS         jet_panic_rich(
+//RS             file,
+//RS             line,
+//RS             fn_name,
+//RS             source_line,
+//RS             col,
+//RS             caret_len,
+//RS             message,
+//RS             locals,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_require_eq<L: fmt::Display, R: fmt::Display, M: fmt::Display>(
+//RS     condition: bool,
+//RS     left_debug: L,
+//RS     right_debug: R,
+//RS     file: &str,
+//RS     line: u32,
+//RS     fn_name: &str,
+//RS     source_line: &str,
+//RS     col: u32,
+//RS     caret_len: u32,
+//RS     locals: Option<M>,
+//RS ) {
+//RS     if !condition {
+//RS         let message = jet_require_eq_message(&left_debug, &right_debug);
+//RS         jet_stop_rich(
+//RS             "E3001",
+//RS             JetRuntimeStopContext {
+//RS                 file, line, function: fn_name, source_line, column: col, caret_len,
+//RS                 expected_type: "",
+//RS             },
+//RS             &message,
+//RS             locals,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[macro_export]
+//RS macro_rules! print {
+//RS     ($($arg:tt)*) => {{
+//RS         $crate::jet_target_print(core::format_args!($($arg)*));
+//RS     }};
+//RS }
+//RS 
+//RS #[macro_export]
+//RS macro_rules! println {
+//RS     () => {{
+//RS         $crate::jet_target_println(core::format_args!(""));
+//RS     }};
+//RS     ($($arg:tt)*) => {{
+//RS         $crate::jet_target_println(core::format_args!($($arg)*));
+//RS     }};
+//RS }
+//RS 
+//RS #[macro_export]
+//RS macro_rules! eprint {
+//RS     ($($arg:tt)*) => {{
+//RS         $crate::jet_target_report(core::format_args!($($arg)*));
+//RS     }};
+//RS }
+//RS 
+//RS #[macro_export]
+//RS macro_rules! eprintln {
+//RS     () => {{
+//RS         $crate::jet_target_reportln(core::format_args!(""));
+//RS     }};
+//RS     ($($arg:tt)*) => {{
+//RS         $crate::jet_target_reportln(core::format_args!($($arg)*));
+//RS     }};
+//RS }
+//RS const JET_ARITHMETIC_CODE: &str = "E3010";
+//RS const JET_ARITHMETIC_ADD_OVERFLOW: &str =
+//RS     "This addition overflows the value's type (the result is outside its range)";
+//RS const JET_ARITHMETIC_SUB_OVERFLOW: &str =
+//RS     "This subtraction overflows the value's type (the result is outside its range)";
+//RS const JET_ARITHMETIC_MUL_OVERFLOW: &str =
+//RS     "This multiplication overflows the value's type (the result is outside its range)";
+//RS const JET_ARITHMETIC_DIVIDE_ZERO: &str = "divided by zero";
+//RS const JET_ARITHMETIC_DIVIDE_OVERFLOW: &str =
+//RS     "This division overflows the value's type (the result is outside its range)";
+//RS const JET_ARITHMETIC_POWER_NEGATIVE: &str =
+//RS     "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
+//RS const JET_ARITHMETIC_POWER_OVERFLOW: &str =
+//RS     "This power overflows the value's type (the result is outside its range)";
+//RS const JET_ARITHMETIC_ROTATE_NEGATIVE: &str = "A rotation count cannot be negative";
+//RS const JET_ARITHMETIC_REMAINDER_OVERFLOW: &str =
+//RS     "Attempt to calculate the remainder with overflow";
+//RS 
+//RS // D-INTBIG1/D-NUMOPS1: operation selection and overflow semantics remain in
+//RS // Core/FixedArithmetic.rs.  This file supplies only the no-allocation adapter.
+//RS trait JetArith: Copy {
+//RS     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_wrapping_add(self, rhs: Self) -> Self;
+//RS     fn jet_wrapping_sub(self, rhs: Self) -> Self;
+//RS     fn jet_wrapping_mul(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_add(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_sub(self, rhs: Self) -> Self;
+//RS     fn jet_saturating_mul(self, rhs: Self) -> Self;
+//RS     fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self;
+//RS     fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self;
+//RS     fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self;
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
+//RS     match result {
+//RS         JetFixedArithmeticResult::Value(value) => value,
+//RS         JetFixedArithmeticResult::Absent => {
+//RS             jet_arithmetic_stop(file, line, "This checked fixed-width operation has no result")
+//RS         }
+//RS         JetFixedArithmeticResult::Trap(error) => jet_fixed_error_stop(error, file, line),
+//RS     }
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS fn jet_fixed_error_stop(error: JetFixedArithmeticError, file: &str, line: u32) -> ! {
+//RS     jet_stop_rich(
+//RS         JET_ARITHMETIC_CODE,
+//RS         JetRuntimeStopContext {
+//RS             file,
+//RS             line,
+//RS             function: "",
+//RS             source_line: "",
+//RS             column: 1,
+//RS             caret_len: 1,
+//RS             expected_type: "",
+//RS         },
+//RS         &error,
+//RS         None::<fmt::Arguments<'_>>,
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS macro_rules! jet_arith_impl {
+//RS     ($(($t:ty, $signed:expr)),*) => { $(
+//RS         impl JetArith for $t {
+//RS             #[inline(always)]
+//RS             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 self.checked_add(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW))
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 self.checked_sub(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW))
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 self.checked_mul(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW))
+//RS             }
+//RS             #[inline(always)] fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+//RS             #[inline(always)] fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+//RS             #[inline(always)] fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+//RS             #[inline(always)] fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+//RS             #[inline(always)] fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+//RS             #[inline(always)] fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+//RS             #[inline(always)]
+//RS             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, rhs as i128, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, $signed), file, line) as $t
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, rhs as i128, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, $signed), file, line) as $t
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, true), file, line) as $t
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, true), file, line) as $t
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, true), file, line) as $t
+//RS             }
+//RS             #[inline(always)]
+//RS             fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self {
+//RS                 jet_fixed_value(jet_fixed_arithmetic(self as i64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, $signed, <$t>::BITS as u8, true), file, line) as $t
+//RS             }
+//RS         }
+//RS     )* };
+//RS }
+//RS jet_arith_impl!((i8, true), (i16, true), (i32, true), (i64, true), (u8, false), (u16, false), (u32, false), (u64, false));
+//RS 
+//RS #[inline(always)]
+//RS fn jet_fixed_option<T>(result: JetFixedArithmeticResult, map: impl FnOnce(i64) -> T) -> Option<T> {
+//RS     match result {
+//RS         JetFixedArithmeticResult::Value(value) => Some(map(value)),
+//RS         JetFixedArithmeticResult::Absent | JetFixedArithmeticResult::Trap(_) => None,
+//RS     }
+//RS }
+//RS 
+//RS // Concrete route items are the checked Prelude ABI used by MIR.  The
+//RS // operation, width, and overflow mode are encoded by each function item.
+//RS macro_rules! jet_fixed_route_kernels {
+//RS     ($t:ty, $signed:expr, $bits:expr;
+//RS      trap: {$($trap:ident),+};
+//RS      wrapping: {$($wrap:ident),+};
+//RS      saturating: {$($sat:ident),+};
+//RS      checked: {$($checked:ident),+};
+//RS      rotate: {$($rotate:ident),+}) => {
+//RS         jet_fixed_route_kernels!(@trap $t, $signed, $bits; $($trap),+);
+//RS         jet_fixed_route_kernels!(@wrapping $t, $signed, $bits; $($wrap),+);
+//RS         jet_fixed_route_kernels!(@saturating $t, $signed, $bits; $($sat),+);
+//RS         jet_fixed_route_kernels!(@checked $t, $signed, $bits; $($checked),+);
+//RS         jet_fixed_route_kernels!(@rotate $t, $signed, $bits; $($rotate),+);
+//RS     };
+//RS     (@trap $t:ty, $signed:expr, $bits:expr; $add:ident, $sub:ident, $mul:ident, $div:ident, $rem:ident, $floor:ident, $mod:ident, $pow:ident, $shl:ident, $shr:ident) => {
+//RS         #[inline(always)] pub(crate) fn $add(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_add(a,b,f,l) }
+//RS         #[inline(always)] pub(crate) fn $sub(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_sub(a,b,f,l) }
+//RS         #[inline(always)] pub(crate) fn $mul(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_mul(a,b,f,l) }
+//RS         #[inline(always)] pub(crate) fn $div(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_div(a,b,f,l) }
+//RS         #[inline(always)] pub(crate) fn $rem(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_rem(a,b,f,l) }
+//RS         #[inline(always)] pub(crate) fn $floor(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_FLOOR_DIV,JET_FIXED_MODE_TRAP,$signed,$bits,$signed),f,l) as $t }
+//RS         #[inline(always)] pub(crate) fn $mod(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_MOD,JET_FIXED_MODE_TRAP,$signed,$bits,$signed),f,l) as $t }
+//RS         #[inline(always)] pub(crate) fn $pow(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetPow>::jet_pow(a,b as i128,f,l) }
+//RS         #[inline(always)] pub(crate) fn $shl<C: Into<i128>>(a:$t,b:C,f:&str,l:u32)->$t { <$t as JetArith>::jet_shl(a,b.into(),f,l) }
+//RS         #[inline(always)] pub(crate) fn $shr<C: Into<i128>>(a:$t,b:C,f:&str,l:u32)->$t { <$t as JetArith>::jet_shr(a,b.into(),f,l) }
+//RS     };
+//RS     (@wrapping $t:ty, $signed:expr, $bits:expr; $add:ident, $sub:ident, $mul:ident, $div:ident, $pow:ident) => {
+//RS         #[inline(always)] pub(crate) fn $add(a:$t,b:$t)->$t { <$t as JetArith>::jet_wrapping_add(a,b) }
+//RS         #[inline(always)] pub(crate) fn $sub(a:$t,b:$t)->$t { <$t as JetArith>::jet_wrapping_sub(a,b) }
+//RS         #[inline(always)] pub(crate) fn $mul(a:$t,b:$t)->$t { <$t as JetArith>::jet_wrapping_mul(a,b) }
+//RS         #[inline(always)] pub(crate) fn $div(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_DIV,JET_FIXED_MODE_WRAPPING,$signed,$bits,$signed),f,l) as $t }
+//RS         #[inline(always)] pub(crate) fn $pow(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetPow>::jet_wrapping_pow(a,b as i128,f,l) }
+//RS     };
+//RS     (@saturating $t:ty, $signed:expr, $bits:expr; $add:ident, $sub:ident, $mul:ident, $div:ident, $pow:ident) => {
+//RS         #[inline(always)] pub(crate) fn $add(a:$t,b:$t)->$t { <$t as JetArith>::jet_saturating_add(a,b) }
+//RS         #[inline(always)] pub(crate) fn $sub(a:$t,b:$t)->$t { <$t as JetArith>::jet_saturating_sub(a,b) }
+//RS         #[inline(always)] pub(crate) fn $mul(a:$t,b:$t)->$t { <$t as JetArith>::jet_saturating_mul(a,b) }
+//RS         #[inline(always)] pub(crate) fn $div(a:$t,b:$t,f:&str,l:u32)->$t { jet_fixed_value(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_DIV,JET_FIXED_MODE_SATURATING,$signed,$bits,$signed),f,l) as $t }
+//RS         #[inline(always)] pub(crate) fn $pow(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetPow>::jet_saturating_pow(a,b as i128,f,l) }
+//RS     };
+//RS     (@checked $t:ty, $signed:expr, $bits:expr; $add:ident, $sub:ident, $mul:ident, $div:ident, $rem:ident, $pow:ident) => {
+//RS         #[inline(always)] pub(crate) fn $add(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_ADD,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS         #[inline(always)] pub(crate) fn $sub(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_SUB,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS         #[inline(always)] pub(crate) fn $mul(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_MUL,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS         #[inline(always)] pub(crate) fn $div(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_DIV,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS         #[inline(always)] pub(crate) fn $rem(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_REM,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS         #[inline(always)] pub(crate) fn $pow(a:$t,b:$t)->Option<$t> { jet_fixed_option(jet_fixed_arithmetic(a as i64,b as i128,JET_FIXED_OP_POW,JET_FIXED_MODE_CHECKED,$signed,$bits,$signed),|v|v as $t) }
+//RS     };
+//RS     (@rotate $t:ty, $signed:expr, $bits:expr; $left:ident, $right:ident) => {
+//RS         #[inline(always)] pub(crate) fn $left(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_rotate_left(a,b as i128,f,l) }
+//RS         #[inline(always)] pub(crate) fn $right(a:$t,b:$t,f:&str,l:u32)->$t { <$t as JetArith>::jet_rotate_right(a,b as i128,f,l) }
+//RS     };
+//RS }
+//RS 
+//RS jet_fixed_route_kernels!(i8,true,8; trap:{jet_i8_trap_add,jet_i8_trap_sub,jet_i8_trap_mul,jet_i8_trap_div,jet_i8_trap_rem,jet_i8_trap_floor_div,jet_i8_trap_mod,jet_i8_trap_pow,jet_i8_trap_shl,jet_i8_trap_shr}; wrapping:{jet_i8_wrapping_add,jet_i8_wrapping_sub,jet_i8_wrapping_mul,jet_i8_wrapping_div,jet_i8_wrapping_pow}; saturating:{jet_i8_saturating_add,jet_i8_saturating_sub,jet_i8_saturating_mul,jet_i8_saturating_div,jet_i8_saturating_pow}; checked:{jet_i8_checked_add,jet_i8_checked_sub,jet_i8_checked_mul,jet_i8_checked_div,jet_i8_checked_rem,jet_i8_checked_pow}; rotate:{jet_i8_rotate_left,jet_i8_rotate_right});
+//RS jet_fixed_route_kernels!(i16,true,16; trap:{jet_i16_trap_add,jet_i16_trap_sub,jet_i16_trap_mul,jet_i16_trap_div,jet_i16_trap_rem,jet_i16_trap_floor_div,jet_i16_trap_mod,jet_i16_trap_pow,jet_i16_trap_shl,jet_i16_trap_shr}; wrapping:{jet_i16_wrapping_add,jet_i16_wrapping_sub,jet_i16_wrapping_mul,jet_i16_wrapping_div,jet_i16_wrapping_pow}; saturating:{jet_i16_saturating_add,jet_i16_saturating_sub,jet_i16_saturating_mul,jet_i16_saturating_div,jet_i16_saturating_pow}; checked:{jet_i16_checked_add,jet_i16_checked_sub,jet_i16_checked_mul,jet_i16_checked_div,jet_i16_checked_rem,jet_i16_checked_pow}; rotate:{jet_i16_rotate_left,jet_i16_rotate_right});
+//RS jet_fixed_route_kernels!(i32,true,32; trap:{jet_i32_trap_add,jet_i32_trap_sub,jet_i32_trap_mul,jet_i32_trap_div,jet_i32_trap_rem,jet_i32_trap_floor_div,jet_i32_trap_mod,jet_i32_trap_pow,jet_i32_trap_shl,jet_i32_trap_shr}; wrapping:{jet_i32_wrapping_add,jet_i32_wrapping_sub,jet_i32_wrapping_mul,jet_i32_wrapping_div,jet_i32_wrapping_pow}; saturating:{jet_i32_saturating_add,jet_i32_saturating_sub,jet_i32_saturating_mul,jet_i32_saturating_div,jet_i32_saturating_pow}; checked:{jet_i32_checked_add,jet_i32_checked_sub,jet_i32_checked_mul,jet_i32_checked_div,jet_i32_checked_rem,jet_i32_checked_pow}; rotate:{jet_i32_rotate_left,jet_i32_rotate_right});
+//RS jet_fixed_route_kernels!(i64,true,64; trap:{jet_i64_trap_add,jet_i64_trap_sub,jet_i64_trap_mul,jet_i64_trap_div,jet_i64_trap_rem,jet_i64_trap_floor_div,jet_i64_trap_mod,jet_i64_trap_pow,jet_i64_trap_shl,jet_i64_trap_shr}; wrapping:{jet_i64_wrapping_add,jet_i64_wrapping_sub,jet_i64_wrapping_mul,jet_i64_wrapping_div,jet_i64_wrapping_pow}; saturating:{jet_i64_saturating_add,jet_i64_saturating_sub,jet_i64_saturating_mul,jet_i64_saturating_div,jet_i64_saturating_pow}; checked:{jet_i64_checked_add,jet_i64_checked_sub,jet_i64_checked_mul,jet_i64_checked_div,jet_i64_checked_rem,jet_i64_checked_pow}; rotate:{jet_i64_rotate_left,jet_i64_rotate_right});
+//RS jet_fixed_route_kernels!(u8,false,8; trap:{jet_u8_trap_add,jet_u8_trap_sub,jet_u8_trap_mul,jet_u8_trap_div,jet_u8_trap_rem,jet_u8_trap_floor_div,jet_u8_trap_mod,jet_u8_trap_pow,jet_u8_trap_shl,jet_u8_trap_shr}; wrapping:{jet_u8_wrapping_add,jet_u8_wrapping_sub,jet_u8_wrapping_mul,jet_u8_wrapping_div,jet_u8_wrapping_pow}; saturating:{jet_u8_saturating_add,jet_u8_saturating_sub,jet_u8_saturating_mul,jet_u8_saturating_div,jet_u8_saturating_pow}; checked:{jet_u8_checked_add,jet_u8_checked_sub,jet_u8_checked_mul,jet_u8_checked_div,jet_u8_checked_rem,jet_u8_checked_pow}; rotate:{jet_u8_rotate_left,jet_u8_rotate_right});
+//RS jet_fixed_route_kernels!(u16,false,16; trap:{jet_u16_trap_add,jet_u16_trap_sub,jet_u16_trap_mul,jet_u16_trap_div,jet_u16_trap_rem,jet_u16_trap_floor_div,jet_u16_trap_mod,jet_u16_trap_pow,jet_u16_trap_shl,jet_u16_trap_shr}; wrapping:{jet_u16_wrapping_add,jet_u16_wrapping_sub,jet_u16_wrapping_mul,jet_u16_wrapping_div,jet_u16_wrapping_pow}; saturating:{jet_u16_saturating_add,jet_u16_saturating_sub,jet_u16_saturating_mul,jet_u16_saturating_div,jet_u16_saturating_pow}; checked:{jet_u16_checked_add,jet_u16_checked_sub,jet_u16_checked_mul,jet_u16_checked_div,jet_u16_checked_rem,jet_u16_checked_pow}; rotate:{jet_u16_rotate_left,jet_u16_rotate_right});
+//RS jet_fixed_route_kernels!(u32,false,32; trap:{jet_u32_trap_add,jet_u32_trap_sub,jet_u32_trap_mul,jet_u32_trap_div,jet_u32_trap_rem,jet_u32_trap_floor_div,jet_u32_trap_mod,jet_u32_trap_pow,jet_u32_trap_shl,jet_u32_trap_shr}; wrapping:{jet_u32_wrapping_add,jet_u32_wrapping_sub,jet_u32_wrapping_mul,jet_u32_wrapping_div,jet_u32_wrapping_pow}; saturating:{jet_u32_saturating_add,jet_u32_saturating_sub,jet_u32_saturating_mul,jet_u32_saturating_div,jet_u32_saturating_pow}; checked:{jet_u32_checked_add,jet_u32_checked_sub,jet_u32_checked_mul,jet_u32_checked_div,jet_u32_checked_rem,jet_u32_checked_pow}; rotate:{jet_u32_rotate_left,jet_u32_rotate_right});
+//RS jet_fixed_route_kernels!(u64,false,64; trap:{jet_u64_trap_add,jet_u64_trap_sub,jet_u64_trap_mul,jet_u64_trap_div,jet_u64_trap_rem,jet_u64_trap_floor_div,jet_u64_trap_mod,jet_u64_trap_pow,jet_u64_trap_shl,jet_u64_trap_shr}; wrapping:{jet_u64_wrapping_add,jet_u64_wrapping_sub,jet_u64_wrapping_mul,jet_u64_wrapping_div,jet_u64_wrapping_pow}; saturating:{jet_u64_saturating_add,jet_u64_saturating_sub,jet_u64_saturating_mul,jet_u64_saturating_div,jet_u64_saturating_pow}; checked:{jet_u64_checked_add,jet_u64_checked_sub,jet_u64_checked_mul,jet_u64_checked_div,jet_u64_checked_rem,jet_u64_checked_pow}; rotate:{jet_u64_rotate_left,jet_u64_rotate_right});
+// END-PORT-PENDING 0190 crates/jet-codegen/src/Prelude/PortableCore.rs:1-423
+

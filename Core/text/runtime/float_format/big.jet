@@ -1,0 +1,167 @@
+// Rust 1.97.1 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+// library/core/src/num/imp/bignum.rs Big32x40 and FullOps<u32>.
+// Only Dragon's reached operations are retained. Storage is exactly forty
+// U32 limbs (1280 bits); products/addends/carries widen to U64, never Int.
+pub struct Big {
+    pub size: Int
+    pub base: [U32#40]
+}
+pub fn from_word(value: U64) -> Big Never! {
+    base := [U32#40]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+    base[0] = low_word(value)
+    base[1] = low_word(value >> 32)
+    Big{size: if base[1] != (U32{0}) -> 2 else -> if value != (U64{0}) -> 1 else -> 0, base: ^base}
+}
+fn low_word(value: U64) -> U32 Never! {
+    U32.from_u64(value & U64{0xffffffff}) ?? panic("masked limb")
+}
+pub fn copy(value: &Big) -> Big Never! { Big{size: value.size, base: ~value.base} }
+pub fn compare(a: &Big, b: &Big) -> I32 Never! {
+    i := if a.size > b.size -> a.size else -> b.size
+    loop i > 0 {
+        i -= 1
+        if a.base[i] < b.base[i] -> return I32{-1}
+        if a.base[i] > b.base[i] -> return I32{1}
+    }
+    I32{0}
+}
+pub fn is_zero(a: &Big) -> Bool Never! {
+    loop i in 0..<a.size -> if a.base[i] != (U32{0}) -> return false
+    true
+}
+pub fn add(a: &Big, b: &Big) Never! {
+    size :: if a.size > b.size -> a.size else -> b.size
+    carry := U64{0}
+    loop i in 0..<size {
+        v :: U64.from_u32(a.base[i]) + U64.from_u32(b.base[i]) + carry
+        a.base[i] = low_word(v)
+        carry = v >> 32
+    }
+    a.size = size
+    if carry != (U64{0}) {
+        assert(size < 40)
+        a.base[size] = low_word(carry)
+        a.size += 1
+    }
+}
+pub fn sub(a: &Big, b: &Big) Never! {
+    size :: if a.size > b.size -> a.size else -> b.size
+    borrow := U64{0}
+    loop i in 0..<size {
+        rhs :: U64.from_u32(b.base[i]) + borrow
+        lhs :: U64.from_u32(a.base[i])
+        borrow = if lhs < rhs -> U64{1} else -> U64{0}
+        a.base[i] = low_word(lhs + (borrow << 32) - rhs)
+    }
+    assert(borrow == (U64{0}))
+    a.size = size
+}
+pub fn mul_small(a: &Big, b: U64) Never! {
+    assert(b <= (U64{0xffffffff}))
+    carry := U64{0}
+    loop i in 0..<a.size {
+        v :: U64.from_u32(a.base[i]) * b + carry
+        a.base[i] = low_word(v)
+        carry = v >> 32
+    }
+    if carry != (U64{0}) {
+        assert(a.size < 40)
+        a.base[a.size] = low_word(carry)
+        a.size += 1
+    }
+}
+pub fn shift(a: &Big, bits: Int) Never! {
+    words :: bits / 32
+    rest :: bits % 32
+    assert(words < 40)
+    i := a.size
+    loop i > 0 {
+        i -= 1
+        assert(i + words < 40)
+        a.base[i + words] = a.base[i]
+    }
+    loop j in 0..<words -> a.base[j] = U32{0}
+    size := a.size + words
+    if rest > 0 && size > 0 {
+        carry :: a.base[size - 1] >> (32 - rest)
+        if carry != (U32{0}) {
+            assert(size < 40)
+            a.base[size] = carry
+            size += 1
+        }
+        i = a.size + words
+        loop i > words + 1 {
+            i -= 1
+            a.base[i] = low_word((U64.from_u32(a.base[i]) << rest) | U64.from_u32(a.base[i - 1] >> (32 - rest)))
+        }
+        a.base[words] = low_word(U64.from_u32(a.base[words]) << rest)
+    }
+    a.size = size
+}
+pub fn div_small(a: &Big, divisor: U64) Never! {
+    remainder := U64{0}
+    i := a.size
+    loop i > 0 {
+        i -= 1
+        value :: (remainder << 32) | U64.from_u32(a.base[i])
+        a.base[i] = low_word(value / divisor)
+        remainder = value % divisor
+    }
+}
+pub fn mul_digits(a: &Big, digits: &[U64#N]) Never! {
+    out := from_word(U64{0})
+    loop i in 0..<N {
+        if digits[i] == (U64{0}) -> next
+        carry := U64{0}
+        loop j in 0..<a.size {
+            assert(i + j < 40)
+            value :: digits[i] * U64.from_u32(a.base[j]) + U64.from_u32(out.base[i + j]) + carry
+            out.base[i + j] = low_word(value)
+            carry = value >> 32
+        }
+        size := i + a.size
+        if carry != (U64{0}) {
+            assert(size < 40)
+            out.base[size] = low_word(carry)
+            size += 1
+        }
+        if size > out.size -> out.size = size
+    }
+    a.base = ^out.base
+    a.size = out.size
+}
+// dragon.rs cached powers of 5; little-endian source words, no generated table.
+pub fn pow10(a: &Big, n: Int) Never! {
+    assert(n >= 0 && n < 512)
+    powers :: [U64#10]{1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000}
+    if n < 8 { mul_small(a, powers[n]); return }
+    if (n & 7) != 0 -> mul_small(a, powers[n & 7] >> (n & 7))
+    if (n & 8) != 0 -> mul_small(a, U64{390625})
+    if (n & 16) != 0 {
+        p :: [U64#2]{0x86f26fc1,0x23}
+        mul_digits(a, &p)
+    }
+    if (n & 32) != 0 {
+        p :: [U64#3]{0x85acef81,0x2d6d415b,0x4ee}
+        mul_digits(a, &p)
+    }
+    if (n & 64) != 0 {
+        p :: [U64#5]{0xbf6a1f01,0x6e38ed64,0xdaa797ed,0xe93ff9f4,0x184f03}
+        mul_digits(a, &p)
+    }
+    if (n & 128) != 0 {
+        p :: [U64#10]{0x2e953e01,0x3df9909,0xf1538fd,0x2374e42f,0xd3cff5ec,0xc404dc08,0xbccdb0da,0xa6337f19,0xe91f2603,0x24e}
+        mul_digits(a, &p)
+    }
+    if (n & 256) != 0 {
+        p :: [U64#19]{0x982e7c01,0xbed3875b,0xd8d99f72,0x12152f87,0x6bde50c6,0xcf4a6e70,0xd595d80f,0x26b2716e,0xadc666b0,0x1d153624,0x3c42d35a,0x63ff540e,0xcc5573c0,0x65f9ef17,0x55bc28f2,0x80dcc7f7,0xf46eeddc,0x5fdcefce,0x553f7}
+        mul_digits(a, &p)
+    }
+    shift(a, n)
+}
+pub fn div_2pow10(a: &Big, n: Int) Never! {
+    remaining := n
+    loop remaining > 9 { div_small(a, U64{1000000000}); remaining -= 9 }
+    powers :: [U64#10]{1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000}
+    div_small(a, powers[remaining] * U64{2})
+}

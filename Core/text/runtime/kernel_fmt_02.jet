@@ -1,0 +1,163 @@
+// PORT-PENDING 2165 crates-jet-jit-src-fmt: crates/jet-jit/src/Fmt.rs:1-159
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.text.fmt` host shims (#729). The formatting rules live in the shared
+//RS //! Prelude kernel; this file only marshals JIT strings.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use crate::Marshal::{alloc_string, clone_string};
+//RS 
+//RS mod fmt_rt {
+//RS     include!("../../jet-codegen/src/Prelude/Core/Fmt.rs");
+//RS }
+//RS 
+//RS fn jet_jit_fmt_number(value: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_number(value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_pretty(value: i64) -> i64 {
+//RS     let value = clone_string(value);
+//RS     alloc_string(fmt_rt::jet_fmt_pretty(&value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_quantity(value: f64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_quantity(value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_decimal_int(value: i64, precision: i64) -> i64 {
+//RS     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+//RS     alloc_string(fmt_rt::jet_fmt_decimal_int(&value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_grouped(value: f64, precision: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_grouped(value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_grouped_int(value: i64, precision: i64) -> i64 {
+//RS     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+//RS     alloc_string(fmt_rt::jet_fmt_grouped_int(&value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_hex(value: i64, width: i64) -> i64 {
+//RS     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+//RS     alloc_string(fmt_rt::jet_fmt_hex_decimal(&value, width))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_sci(value: f64, precision: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_sci(value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_percent(value, precision))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_bin(value: i64) -> i64 {
+//RS     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+//RS     alloc_string(fmt_rt::jet_fmt_bin_decimal(&value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_oct(value: i64) -> i64 {
+//RS     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+//RS     alloc_string(fmt_rt::jet_fmt_oct_decimal(&value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_bytes(value: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_bytes(value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_duration(ms: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_duration(ms))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_ordinal(value: i64) -> i64 {
+//RS     alloc_string(fmt_rt::jet_fmt_ordinal(value))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
+//RS     let singular = clone_string(singular);
+//RS     let plural = clone_string(plural);
+//RS     alloc_string(fmt_rt::jet_fmt_plural(count, &singular, &plural))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_pad(text: i64, width: i64, fill: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let fill = clone_string(fill);
+//RS     alloc_string(fmt_rt::jet_fmt_pad(&text, width, &fill))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let fill = clone_string(fill);
+//RS     alloc_string(fmt_rt::jet_fmt_pad_left(&text, width, &fill))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_pad_right(text: i64, width: i64, fill: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let fill = clone_string(fill);
+//RS     alloc_string(fmt_rt::jet_fmt_pad_right(&text, width, &fill))
+//RS }
+//RS 
+//RS fn jet_jit_fmt_pad_center(text: i64, width: i64, fill: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let fill = clone_string(fill);
+//RS     alloc_string(fmt_rt::jet_fmt_pad_center(&text, width, &fill))
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct FmtHostFns;
+//RS     register: register_fmt_symbols;
+//RS     declare: declare_fmt_host_fns(module) {
+//RS         use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig_i64 = Signature::new(cc);
+//RS         let mut sig_f64 = Signature::new(cc);
+//RS         sig_f64.params.push(AbiParam::new(types::F64));
+//RS         sig_f64.returns.push(AbiParam::new(types::I64));
+//RS         sig_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_f64_i64 = Signature::new(cc);
+//RS         sig_f64_i64.params.push(AbiParam::new(types::F64));
+//RS         sig_f64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_f64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_i64_i64 = Signature::new(cc);
+//RS         sig_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_i64x3 = Signature::new(cc);
+//RS         sig_i64x3.params.push(AbiParam::new(types::I64));
+//RS         sig_i64x3.params.push(AbiParam::new(types::I64));
+//RS         sig_i64x3.params.push(AbiParam::new(types::I64));
+//RS         sig_i64x3.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     quantity: "jet_jit_fmt_quantity" => jet_jit_fmt_quantity: sig_f64;
+//RS     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
+//RS     pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
+//RS     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
+//RS     decimal_int: "jet_jit_fmt_decimal_int" => jet_jit_fmt_decimal_int: sig_i64_i64;
+//RS     grouped: "jet_jit_fmt_grouped" => jet_jit_fmt_grouped: sig_f64_i64;
+//RS     grouped_int: "jet_jit_fmt_grouped_int" => jet_jit_fmt_grouped_int: sig_i64_i64;
+//RS     hex: "jet_jit_fmt_hex" => jet_jit_fmt_hex: sig_i64_i64;
+//RS     sci: "jet_jit_fmt_sci" => jet_jit_fmt_sci: sig_f64_i64;
+//RS     percent: "jet_jit_fmt_percent" => jet_jit_fmt_percent: sig_f64_i64;
+//RS     bin: "jet_jit_fmt_bin" => jet_jit_fmt_bin: sig_i64;
+//RS     oct: "jet_jit_fmt_oct" => jet_jit_fmt_oct: sig_i64;
+//RS     bytes: "jet_jit_fmt_bytes" => jet_jit_fmt_bytes: sig_i64;
+//RS     duration: "jet_jit_fmt_duration" => jet_jit_fmt_duration: sig_i64;
+//RS     ordinal: "jet_jit_fmt_ordinal" => jet_jit_fmt_ordinal: sig_i64;
+//RS     plural: "jet_jit_fmt_plural" => jet_jit_fmt_plural: sig_i64x3;
+//RS     pad: "jet_jit_fmt_pad" => jet_jit_fmt_pad: sig_i64x3;
+//RS     pad_left: "jet_jit_fmt_pad_left" => jet_jit_fmt_pad_left: sig_i64x3;
+//RS     pad_right: "jet_jit_fmt_pad_right" => jet_jit_fmt_pad_right: sig_i64x3;
+//RS     pad_center: "jet_jit_fmt_pad_center" => jet_jit_fmt_pad_center: sig_i64x3;
+//RS }
+//RS 
+// END-PORT-PENDING 2165 crates/jet-jit/src/Fmt.rs:1-159
+

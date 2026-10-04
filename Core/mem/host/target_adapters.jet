@@ -1,0 +1,263 @@
+// PORT-PENDING 0190 crates-jet-codegen-src-prelude-targetadapters-module-group: crates/jet-codegen/src/Prelude/TargetAdapters.rs:1-259
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FREESTAND-PROVIDER1=A: target adapters marshal the checked provider
+//RS // contracts.  This file contains no host fallback and no success-shaped stub.
+//RS // Codegen appends only declarations/wrappers for ProviderPolicy facts selected
+//RS // by the checked TargetDossier.
+//RS 
+//RS use core::fmt;
+//RS use core::fmt::Write;
+//RS use core::sync::atomic::Ordering;
+//RS use crate::RuntimeDiagnosticCore::{
+//RS     JetRuntimeStopContext, jet_runtime_stop_status, jet_write_runtime_stop,
+//RS };
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetTargetError {
+//RS     pub operation: &'static str,
+//RS     pub status: i32,
+//RS }
+//RS 
+//RS impl JetTargetError {
+//RS     pub const fn provider(operation: &'static str, status: i32) -> Self {
+//RS         Self { operation, status }
+//RS     }
+//RS 
+//RS     pub const fn unavailable(operation: &'static str) -> Self {
+//RS         Self {
+//RS             operation,
+//RS             status: -1,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn protocol(operation: &'static str) -> Self {
+//RS         Self {
+//RS             operation,
+//RS             status: -2,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetPortableError for JetTargetError {
+//RS     fn jet_error_bytes(&self) -> &[u8] {
+//RS         self.operation.as_bytes()
+//RS     }
+//RS 
+//RS     fn jet_error_status(&self) -> i32 {
+//RS         self.status
+//RS     }
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS fn checked_used(operation: &'static str, requested: usize, used: usize) -> Result<usize, JetTargetError> {
+//RS     if used <= requested {
+//RS         Ok(used)
+//RS     } else {
+//RS         Err(JetTargetError::protocol(operation))
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_read_bytes(buffer: &mut [u8]) -> Result<usize, JetTargetError> {
+//RS     let used = jet_target_read_bytes_impl(buffer)?;
+//RS     checked_used("read", buffer.len(), used)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_write_bytes(buffer: &[u8]) -> Result<usize, JetTargetError> {
+//RS     let used = jet_target_write_bytes_impl(buffer)?;
+//RS     checked_used("write", buffer.len(), used)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_report_bytes(buffer: &[u8]) -> Result<usize, JetTargetError> {
+//RS     let used = jet_target_report_bytes_impl(buffer)?;
+//RS     checked_used("report", buffer.len(), used)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_wall_clock() -> Result<i64, JetTargetError> {
+//RS     jet_target_wall_clock_impl()
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_monotonic_clock() -> Result<u64, JetTargetError> {
+//RS     jet_target_monotonic_clock_impl()
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_sleep(nanoseconds: u64) -> Result<(), JetTargetError> {
+//RS     jet_target_sleep_impl(nanoseconds)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_entropy(buffer: &mut [u8]) -> Result<(), JetTargetError> {
+//RS     jet_target_entropy_impl(buffer)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_mmio_read(address: u64, buffer: &mut [u8]) -> Result<usize, JetTargetError> {
+//RS     let used = jet_target_mmio_read_impl(address, buffer)?;
+//RS     checked_used("mmio_read", buffer.len(), used)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_mmio_write(address: u64, buffer: &[u8]) -> Result<usize, JetTargetError> {
+//RS     let used = jet_target_mmio_write_impl(address, buffer)?;
+//RS     checked_used("mmio_write", buffer.len(), used)
+//RS }
+//RS 
+//RS #[inline(always)]
+//RS pub fn jet_target_scheduler_yield() {
+//RS     jet_target_scheduler_yield_impl()
+//RS }
+//RS 
+//RS struct JetTargetWriter {
+//RS     report: bool,
+//RS }
+//RS 
+//RS impl fmt::Write for JetTargetWriter {
+//RS     fn write_str(&mut self, value: &str) -> fmt::Result {
+//RS         let mut remaining = value.as_bytes();
+//RS         while !remaining.is_empty() {
+//RS             let used = if self.report {
+//RS                 jet_target_report_bytes(remaining)
+//RS             } else {
+//RS                 jet_target_write_bytes(remaining)
+//RS             }.map_err(|_| fmt::Error)?;
+//RS             if used == 0 {
+//RS                 return Err(fmt::Error);
+//RS             }
+//RS             remaining = &remaining[used..];
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_target_print(args: fmt::Arguments<'_>) {
+//RS     if (JetTargetWriter { report: false }).write_fmt(args).is_err() {
+//RS         jet_target_failure_bytes(b"target write failed", -1);
+//RS     }
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_target_println(args: fmt::Arguments<'_>) {
+//RS     jet_target_print(args);
+//RS     jet_target_print(format_args!("\n"));
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_target_report(args: fmt::Arguments<'_>) {
+//RS     if (JetTargetWriter { report: true }).write_fmt(args).is_err() {
+//RS         jet_target_failure_bytes(b"target report failed", -1);
+//RS     }
+//RS }
+//RS 
+//RS #[inline]
+//RS pub fn jet_target_reportln(args: fmt::Arguments<'_>) {
+//RS     jet_target_report(args);
+//RS     jet_target_report(format_args!("\n"));
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_target_failure_bytes(message: &[u8], status: i32) -> ! {
+//RS     __JET_LAST_TARGET_STATUS.store(status, Ordering::Release);
+//RS     let _ = jet_target_report_bytes(message);
+//RS     jet_target_abort()
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_target_failure_render<F>(status: i32, render: F) -> !
+//RS where
+//RS     F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
+//RS {
+//RS     __JET_LAST_TARGET_STATUS.store(status, Ordering::Release);
+//RS     let mut writer = JetTargetWriter { report: true };
+//RS     let _ = render(&mut writer);
+//RS     jet_target_abort()
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_target_failure_fmt<M: fmt::Display>(
+//RS     code: &str,
+//RS     file: &str,
+//RS     line: u32,
+//RS     message: M,
+//RS     status: i32,
+//RS ) -> ! {
+//RS     jet_target_failure_render(status, |out| {
+//RS         out.write_fmt(format_args!("{code} {file}:{line}: {message}\n"))
+//RS     })
+//RS }
+//RS 
+//RS #[inline(never)]
+//RS pub fn jet_target_exit(status: i32) -> ! {
+//RS     __JET_LAST_TARGET_STATUS.store(status, Ordering::Release);
+//RS     jet_target_abort()
+//RS }
+//RS 
+//RS // Board profiles expose the authoritative abort ABI.  Wasm has no provider
+//RS // object in the no-OS profile and therefore traps through its target primitive;
+//RS // it must never acquire a C import through this fallback.
+//RS #[cfg(target_arch = "wasm32")]
+//RS #[inline(never)]
+//RS pub fn jet_target_abort() -> ! {
+//RS     core::arch::wasm32::unreachable()
+//RS }
+//RS 
+//RS #[cfg(all(not(target_arch = "wasm32"), target_os = "none"))]
+//RS extern "C" {
+//RS     fn __jet_target_abort();
+//RS }
+//RS 
+//RS #[cfg(all(not(target_arch = "wasm32"), target_os = "none"))]
+//RS #[inline(never)]
+//RS pub fn jet_target_abort() -> ! {
+//RS     unsafe { __jet_target_abort() };
+//RS     loop {
+//RS         core::hint::spin_loop();
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(all(not(target_arch = "wasm32"), not(target_os = "none")))]
+//RS #[inline(never)]
+//RS pub fn jet_target_abort() -> ! {
+//RS     loop {
+//RS         core::hint::spin_loop();
+//RS     }
+//RS }
+//RS 
+//RS #[panic_handler]
+//RS fn jet_panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
+//RS     if __JET_TARGET_PANIC_REPORT {
+//RS         let (file, line) = info
+//RS             .location()
+//RS             .map(|location| (location.file(), location.line()))
+//RS             .unwrap_or(("", 0));
+//RS         let message = info.message();
+//RS         let row = jet_runtime_diagnostic_row("E3001");
+//RS         jet_target_failure_render(jet_runtime_stop_status(row), |out| {
+//RS             jet_write_runtime_stop(
+//RS                 out,
+//RS                 row,
+//RS                 "E3001",
+//RS                 JetRuntimeStopContext {
+//RS                     file,
+//RS                     line,
+//RS                     function: "",
+//RS                     source_line: "",
+//RS                     column: 1,
+//RS                     caret_len: 1,
+//RS                     expected_type: "",
+//RS                 },
+//RS                 &message,
+//RS                 None,
+//RS             )
+//RS         });
+//RS     }
+//RS     jet_target_exit(101)
+//RS }
+// END-PORT-PENDING 0190 crates/jet-codegen/src/Prelude/TargetAdapters.rs:1-259
+

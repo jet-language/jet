@@ -1,0 +1,315 @@
+// RT181: actual ProcessPolicy source, sole accepted sixteen-field spec,
+// canonical UnicodeString/ASCII/UTF8 + sole SHA256 byte owner. The native
+// journeys inventoried in the owner are not simulated by these pure vectors.
+use core.process.runtime.top_process_policy as process_policy_kernel
+use core.process.runtime.top_process_spec as process_policy_spec
+use core as process_policy_native_core
+
+fn process_policy_bound(wire: String) -> process_policy_spec.ProcessSpecState Never! {
+    spec :: process_policy_spec.jet_std_process_cmd_owned([String]{"tool"})
+    process_policy_spec.jet_process_spec_under_wire(^spec, wire)
+}
+
+#Test("rights preserve exact Rust lines without whitespace normalization") {
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    spec :: process_policy_bound("Net{carriage_return}\n\nExec\nNet\n IO \nX{carriage_return}Y\n尾{carriage_return}")
+    assert_eq(process_policy_kernel.jet_process_policy_rights(spec), [String]{" IO ", "Exec", "Net", "X{carriage_return}Y", "尾{carriage_return}"})
+    empty :: process_policy_bound("\n{carriage_return}\n\n")
+    assert_eq(process_policy_kernel.jet_process_policy_rights(empty), [String]{})
+    cr :: process_policy_bound(carriage_return)
+    assert_eq(process_policy_kernel.jet_process_policy_rights(cr), [String]{~carriage_return})
+    repeated_cr :: process_policy_bound("a{carriage_return}{carriage_return}\nb\n")
+    assert_eq(process_policy_kernel.jet_process_policy_rights(repeated_cr), [String]{"a{carriage_return}", "b"})
+    unbound :: process_policy_spec.jet_std_process_cmd_owned([String]{})
+    assert_eq(process_policy_kernel.jet_process_policy_rights(unbound), [String]{})
+}
+
+#Test("rights are byte ordered and dedup only before receipt transforms") {
+    spec :: process_policy_bound("z\nSecret=b\nSecret=a\nNet\nNet\nÅ\nA\n")
+    assert_eq(process_policy_kernel.jet_process_policy_rights(spec), [String]{"A", "Net", "Secret=a", "Secret=b", "z", "Å"})
+    assert_eq(process_policy_kernel.jet_process_policy_receipt_rights(spec), [String]{"A", "Net", "Secret=<red<redacted>cted>", "Secret=<red<redacted>cted>", "z", "Å"})
+}
+
+#Test("digest secret projection keeps original key and ASCII-only matching") {
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right("SeCrEt=a=b"), "SeCrEt=<redacted>")
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right("SECRET="), "SECRET=<redacted>")
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right(" secret=x"), " secret=x")
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right("Secret:repo=value"), "Secret:repo=value")
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right("ſecret=x"), "ſecret=x")
+}
+
+#Test("secrets stable descending UTF8 byte length then adjacent dedup") {
+    spec := process_policy_bound("Secret=bbb\nSecret=aaa\nSecret=\nSECRET=éé\nSECRET=bbb\n")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "API_TOKEN", "bbb")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "password", "xx")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "monkey", "xx")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "ordinary", "not-secret")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "credential", "")
+    // SECRET=bbb, then Secret=aaa, then Secret=bbb; stable ties are NOT
+    // lexical/global dedup. The last bbb (env) is adjacent and deduplicated.
+    assert_eq(process_policy_kernel.jet_process_policy_secret_values(spec), [String]{"éé", "bbb", "aaa", "bbb", "xx"})
+    assert_eq(process_policy_kernel.jet_process_policy_redact(spec, "éé bbb aaa xx not-secret"), "<redacted> <redacted> <redacted> <redacted> not-secret")
+}
+
+#Test("longest secret first prevents prefix leaks in receipts") {
+    spec := process_policy_bound("Secret=abc\nIO\nSecret=abcdef\n")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "KEY", "abcdef")
+    assert_eq(process_policy_kernel.jet_process_policy_secret_values(spec), [String]{"abcdef", "abc"})
+    assert_eq(process_policy_kernel.jet_process_policy_redact(spec, "abcdef abc abcdefabcdef"), "<redacted> <redacted> <redacted><redacted>")
+    assert_eq(process_policy_kernel.jet_process_redact_text("x", [String]{""}), "x")
+    assert_eq(process_policy_kernel.jet_process_redact_text("abcdef", [String]{"abc", "abcdef"}), "<redacted>def")
+}
+
+#Test("receipt secret keys redact before sequential value fold") {
+    spec :: process_policy_bound("Secret=redacted\nSecret=Se\nExec:/tool/redacted\n")
+    // Digest replacement <redacted> is itself redacted by the first secret;
+    // Se then replaces the KEY. Wrong ordering would lose Secret recognition.
+    assert_eq(process_policy_kernel.jet_process_policy_receipt_rights(spec), [String]{"Exec:/tool/<redacted>", "<redacted>cret=<<redacted>>", "<redacted>cret=<<redacted>>"})
+    assert_eq(process_policy_kernel.jet_process_policy_digest_right("Secret=redacted"), "Secret=<redacted>")
+}
+
+#Test("environment projection contains names not secret values") {
+    spec := process_policy_bound("Exec\nIO")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "TOKEN", "secret-one")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "A", "first")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "A", "last")
+    spec = process_policy_spec.jet_process_spec_env_remove(^spec, "TOKEN")
+    spec = process_policy_spec.jet_process_spec_env_remove(^spec, "TOKEN")
+    spec = process_policy_spec.jet_process_spec_env_remove(^spec, "z")
+    assert_eq(process_policy_kernel.jet_process_policy_environment(spec), "remove:TOKEN\nremove:z\nset:A\nset:TOKEN")
+    assert_eq(spec.env_set.len(), 3)
+    assert_eq(spec.env_set[1].value, "first")
+    assert_eq(spec.env_set[2].value, "last")
+}
+
+#Test("network exact grant and safe right name expose no values") {
+    spec :: process_policy_bound("net\nNet:host\nNET\n")
+    assert(!process_policy_kernel.jet_process_policy_network(spec))
+    granted :: process_policy_bound("Net\n")
+    assert(process_policy_kernel.jet_process_policy_network(granted))
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name("Secret=password"), "Secret")
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name("Exec:/bin/tool=arg"), "Exec")
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name("=secret:more"), "")
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name(":"), "")
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name(""), "")
+    assert_eq(process_policy_kernel.jet_process_policy_safe_right_name("é:key=value"), "é")
+}
+
+#Test("descendant projection distinguishes Some empty policy from None") {
+    spec := process_policy_spec.jet_std_process_cmd_owned([String]{"tool"})
+    assert_eq(process_policy_kernel.jet_process_policy_descendants(spec), "direct")
+    spec = process_policy_spec.jet_process_spec_under_wire(^spec, "")
+    assert_eq(process_policy_kernel.jet_process_policy_descendants(spec), "contained")
+    spec.detached = true
+    assert_eq(process_policy_kernel.jet_process_policy_descendants(spec), "detached")
+}
+
+#Test("terminal capability projection is the original pure Bool contract") {
+    // Bool vectors test the pure leaf, not PTY/backend availability.
+    assert_eq(process_policy_kernel.terminal_facts(true), [String]{"terminal", "resize", "raw"})
+    assert_eq(process_policy_kernel.terminal_facts(false), [String]{})
+}
+
+#Test("backend limits consume the genuine native OS fact") {
+    // OsExtra.rs:4–6 jet_std_os_name()->String is std::env::consts::OS,
+    // exposed by the existing core.sys.name route, not FAMILY inference.
+    target_os :: process_policy_native_core.sys.name()
+    actual :: process_policy_kernel.jet_process_backend_limits(target_os)
+    if target_os == "linux" -> assert_eq(actual, [String]{"private-tmpfs-bytes=67108864"})
+    if target_os == "windows" -> assert_eq(actual, [String]{"job-kill-on-close=true", "active-processes=256", "memory-bytes=2147483648"})
+    if target_os != "linux" && target_os != "windows" -> assert_eq(actual, [String]{})
+    spec := process_policy_spec.jet_std_process_cmd_owned([String]{"tool"})
+    limits :: process_policy_kernel.jet_process_policy_limits(spec, ~actual)
+    assert_eq(limits[actual.len()], "timeout-ms=none")
+    assert_eq(limits[actual.len() + 1], "output-limit=67108864")
+    assert_eq(limits[actual.len() + 2], "cpu-time-limit-ms=none")
+    assert_eq(limits[actual.len() + 3], "memory-limit-bytes=none")
+    assert_eq(limits[actual.len() + 4], "open-file-limit=none")
+    spec.timeout_ms = Val(I64{0})
+    spec.output_limit = None
+    spec.cpu_time_limit_ms = Val(I64{7})
+    spec.memory_limit_bytes = Val(I64{9223372036854775807})
+    spec.open_file_limit = Val(I64{-1})
+    changed :: process_policy_kernel.jet_process_policy_limits(spec, ~actual)
+    assert_eq(changed[actual.len()], "timeout-ms=0")
+    assert_eq(changed[actual.len() + 1], "output-limit=none")
+    assert_eq(changed[actual.len() + 2], "cpu-time-limit-ms=7")
+    assert_eq(changed[actual.len() + 3], "memory-limit-bytes=9223372036854775807")
+    assert_eq(changed[actual.len() + 4], "open-file-limit=-1")
+}
+
+#Test("input identity uses exact UTF8 lengths and original argv order") {
+    spec :: process_policy_spec.jet_std_process_cmd_owned([String]{"tool", "é\nx", ""})
+    assert_eq(process_policy_kernel.jet_process_input_material(spec), "jet-process-input-v1\n4:tool\n4:é\nx\n0:\n")
+    assert_eq(process_policy_kernel.jet_process_input_digest(spec), "3dd3ceb829bc8990b96453346ad1afaf4fbe6261f74d71162c1c9199c173dc90")
+    empty :: process_policy_spec.jet_std_process_cmd_owned([String]{})
+    assert_eq(process_policy_kernel.jet_process_input_digest(empty), "4dcdc0e95922e3f821b65d73b31b4babe2a378f3c101a80247043ab5a7c00764")
+    left :: process_policy_spec.jet_std_process_cmd_owned([String]{"a", "bc"})
+    right :: process_policy_spec.jet_std_process_cmd_owned([String]{"ab", "c"})
+    assert_eq(process_policy_kernel.jet_process_input_digest(left), "735581b95bd566aae3ff7f53feb68e6efabfec94fc59e1869511bc01b4ad9926")
+    assert_eq(process_policy_kernel.jet_process_input_digest(right), "6989f6566d7153cfbbfec1922240780f25022074cc311558df3ebab224a348a3")
+}
+
+// #4476: exact native stream pattern owner currently cannot lower. Keep
+// material/hash/output assertions intact; do not replace enum patterns/facts.
+#Test("#4476 policy material exact twenty fields and byte lengths") {
+    spec :: process_policy_spec.jet_std_process_cmd_owned([String]{"tool"})
+    backend :: process_policy_kernel.jet_process_backend_limits(process_policy_native_core.sys.name())
+    expected := "jet-process-policy-v1\nauthority.rights=0:\nnetwork=4:deny\nhome=4:deny\nsecrets=4:deny\ndevices=4:deny\ninherited-handles=4:deny\nenvironment=9:inherited\ncwd=17:<unspecified-cwd>\ntimeout-ms=0:\noutput-limit=8:67108864\ncpu-time-limit-ms=0:\nmemory-limit-bytes=0:\nopen-file-limit=0:\n"
+    backend_text :: backend.join("\n")
+    expected = "{expected}backend.limits={backend_text.bytes().len()}:{backend_text}\nenvironment.keys=0:\nstdin=6:closed\nstdout=7:capture\nstderr=7:capture\ndetached=5:false\nterminal=4:none\n"
+    assert_eq(process_policy_kernel.jet_process_policy_material(spec, backend), expected)
+    assert_eq(process_policy_kernel.jet_process_policy_outputs(spec), [String]{"stdout=capture", "stderr=capture"})
+    // The golden digest is tied to actual native target facts, never a fake
+    // unavailable/backend provider. Host linux actual vector is fixed here.
+    if process_policy_native_core.sys.name() == "linux" -> assert_eq(process_policy_kernel.jet_process_policy_digest(spec, backend), "e34f85b78850b23661e2dc2239a0eeca80f384518e94b6c3bdd5a6c02d79d564")
+}
+
+#Test("#4476 policy secret changes never change identity but argv changes do") {
+    spec := process_policy_bound("Secret=abc\nSecret=abcdef\nNet\nIO\n")
+    spec.cwd = Val("/é")
+    spec.timeout_ms = Val(I64{0})
+    spec.cpu_time_limit_ms = Val(I64{7})
+    spec.memory_limit_bytes = Val(I64{9})
+    spec.open_file_limit = Val(I64{3})
+    spec = process_policy_spec.jet_process_spec_env(^spec, "TOKEN", "abc")
+    backend :: process_policy_kernel.jet_process_backend_limits(process_policy_native_core.sys.name())
+    before :: process_policy_kernel.jet_process_policy_material(spec, backend)
+    hash_before :: process_policy_kernel.jet_process_policy_digest(spec, backend)
+    input_before :: process_policy_kernel.jet_process_input_digest(spec)
+    changed := ~spec
+    changed.policy_wire = Val("Secret=xyz\nSecret=uvwxyz\nNet\nIO\n")
+    changed.env_set[0].value = "xyz"
+    assert_eq(process_policy_kernel.jet_process_policy_material(changed, backend), before)
+    assert_eq(process_policy_kernel.jet_process_policy_digest(changed, backend), hash_before)
+    changed.cmd[0] = "other"
+    assert_eq(process_policy_kernel.jet_process_policy_digest(changed, backend), hash_before)
+    assert(process_policy_kernel.jet_process_input_digest(changed) != input_before)
+    assert(before.contains("cwd=3:/é\n"))
+    assert(before.contains("authority.rights=42:IO\nNet\nSecret=<redacted>\nSecret=<redacted>\n"))
+    assert(before.contains("environment=13:explicit-only\n"))
+    assert(before.contains("environment.keys=9:set:TOKEN\n"))
+    assert(before.contains("timeout-ms=1:0\n"))
+    assert(before.contains("cpu-time-limit-ms=1:7\n"))
+    spec.detached = true
+    assert_eq(process_policy_kernel.jet_process_policy_outputs(spec), [String]{"stdout=discarded", "stderr=discarded"})
+}
+
+fn process_policy_error_cause(error: IOError) -> String Never! {
+    if error == {
+        .Other(context) -> context.cause ?? ""
+        .InvalidInput(context) -> context.cause ?? ""
+        else -> panic("wrong original IO error variant")
+    }
+}
+
+// #4476/#4477: original native enum/optional patterns and Eq facts held.
+// These are not re-exercised as known gates; no private substitute IOError.
+#Test("#4477 supported rights validate before receipt transport") {
+    valid :: process_policy_bound("FS.Read:repo\nFS.Write:.jet/build\nNet\nExec\nExec:/tool\nIO\nTime.Wait\n")
+    process_policy_kernel.jet_process_policy_check(valid)
+    bad := process_policy_bound("Secret=very-private\nAAA:value\nExec:\n")
+    bad.stdout = ProcessStreamMode.Stream
+    if process_policy_kernel.jet_process_policy_check(bad) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority grant `AAA` cannot be enforced by the native process boundary; refusing before spawn")
+    } else -> panic("unsupported grant was accepted")
+    empty_exec :: process_policy_bound("Exec:")
+    if process_policy_kernel.jet_process_policy_check(empty_exec) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority grant `Exec` cannot be enforced by the native process boundary; refusing before spawn")
+    } else -> panic("empty executable grant was accepted")
+    stream := process_policy_bound("Exec\nIO")
+    stream.stdout = ProcessStreamMode.Stream
+    if process_policy_kernel.jet_process_policy_check(stream) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn")
+    } else -> panic("live output bypassed the receipt redactor")
+    stream.detached = true
+    process_policy_kernel.jet_process_policy_check(stream)
+    inherited := process_policy_bound("Exec")
+    inherited.stderr = ProcessStreamMode.Inherit
+    if process_policy_kernel.jet_process_policy_check(inherited) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn")
+    } else -> panic("inherited descriptor bypassed the receipt redactor")
+    terminal := process_policy_bound("Exec")
+    terminal.detached = true
+    terminal.terminal = Val(TerminalPolicy{size: TerminalSize{cols: I64{80}, rows: I64{24}}, mode: TerminalMode.Cooked})
+    if process_policy_kernel.jet_process_policy_check(terminal) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn")
+    } else -> panic("detached terminal bypassed the receipt redactor")
+}
+
+#Test("#4476 executable scoped grants and exact sandbox projection") {
+    spec :: process_policy_bound("Exec\nExec:/tool\nFS.Read:repo\nFS.Write:.jet/build\nNet")
+    process_policy_kernel.jet_process_policy_check_executable(spec, "/tool")
+    scope :: process_policy_kernel.jet_process_policy_sandbox_scope(spec, "/tool")
+    assert(scope.source_readable && scope.output_writable && scope.share_network)
+    if process_policy_kernel.jet_process_policy_check_executable(spec, "/other") == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority policy does not grant the resolved executable")
+    } else -> panic("broad Exec overrode the scoped executable grant")
+    broad :: process_policy_bound("Exec")
+    process_policy_kernel.jet_process_policy_check_executable(broad, "/other")
+    empty :: process_policy_bound("")
+    scope2 :: process_policy_kernel.jet_process_policy_sandbox_scope(empty, "/other")
+    assert(!scope2.source_readable && !scope2.output_writable && !scope2.share_network)
+}
+
+#Test("#4476 cwd absence precedes native absolute predicate") {
+    // None has no native path to sample; bool is ignored on these branches.
+    // Present-path behavior needs the exact native Path::is_absolute leaf;
+    // do not pass a platform-neutral lexical guess as an actual native fact.
+    effect :: process_policy_bound("Exec\nIO")
+    assert_eq(process_policy_kernel.jet_process_policy_authority_cwd(effect, false), None)
+    path :: process_policy_bound("FS.Read:repo")
+    if process_policy_kernel.jet_process_policy_authority_cwd(path, false) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "authority-bound process execution requires an explicit absolute cwd/PathAuthority")
+    } else -> panic("filesystem right without explicit cwd was accepted")
+}
+
+#Test("#4476 plan empty command and authority preconditions keep original errors") {
+    empty :: process_policy_spec.jet_std_process_cmd_owned([String]{})
+    if process_policy_kernel.jet_process_command_check(empty) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "process command needs at least one word")
+    } else -> panic("empty command was accepted")
+    if process_policy_kernel.jet_process_plan_authority_check(empty) == .Err(error) {
+        assert_eq(process_policy_error_cause(error), "ProcessSpec.plan() requires an authority policy from .under(...)")
+    } else -> panic("unbound plan was accepted")
+    bound :: process_policy_bound("")
+    process_policy_kernel.jet_process_plan_authority_check(bound)
+}
+
+#Test("#4476 material explicit environment streams limits and terminal values") {
+    spec := process_policy_spec.jet_std_process_cmd_owned([String]{"tool"})
+    spec.cwd = Val("/é")
+    spec.env_clear = true
+    spec.env_set = [(name: String, value: String)]{(name: "A", value: "value"), (name: "A", value: "last")}
+    spec.env_remove = [String]{"B", "B"}
+    spec.stdin = Val(ProcessStreamMode.Inherit)
+    spec.stdout = ProcessStreamMode.Stream
+    spec.stderr = ProcessStreamMode.Inherit
+    spec.timeout_ms = Val(I64{0})
+    spec.output_limit = None
+    spec.cpu_time_limit_ms = Val(I64{7})
+    spec.memory_limit_bytes = Val(I64{9})
+    spec.open_file_limit = Val(I64{3})
+    spec.detached = true
+    spec.terminal = Val(TerminalPolicy{size: TerminalSize{cols: I64{80}, rows: I64{24}}, mode: TerminalMode.Cooked})
+    backend :: process_policy_kernel.jet_process_backend_limits(process_policy_native_core.sys.name())
+    backend_text :: backend.join("\n")
+    expected :: "jet-process-policy-v1\nauthority.rights=0:\nnetwork=4:deny\nhome=4:deny\nsecrets=4:deny\ndevices=4:deny\ninherited-handles=4:deny\nenvironment=13:explicit-only\ncwd=3:/é\ntimeout-ms=1:0\noutput-limit=0:\ncpu-time-limit-ms=1:7\nmemory-limit-bytes=1:9\nopen-file-limit=1:3\nbackend.limits={backend_text.bytes().len()}:{backend_text}\nenvironment.keys=14:remove:B\nset:A\nstdin=7:inherit\nstdout=6:stream\nstderr=7:inherit\ndetached=4:true\nterminal=9:requested\n"
+    assert_eq(process_policy_kernel.jet_process_policy_material(spec, backend), expected)
+    assert_eq(process_policy_kernel.jet_process_policy_outputs(spec), [String]{"stdout=discarded", "stderr=discarded"})
+}
+
+#Test("every original secret environment-name part uses ASCII substring matching") {
+    spec := process_policy_bound("Exec")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "client_SECRET", "S")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "api_TOKEN", "T")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "PASSWORD", "P")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "PASSWD", "W")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "CREDENTIAL", "C")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "monKEY", "K")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "ſecret", "leave")
+    spec = process_policy_spec.jet_process_spec_env(^spec, "token", "")
+    assert_eq(process_policy_kernel.jet_process_policy_secret_values(spec), [String]{"S", "T", "P", "W", "C", "K"})
+    empty :: process_policy_spec.jet_std_process_cmd_owned([String]{})
+    assert_eq(process_policy_kernel.jet_process_policy_secret_values(empty), [String]{})
+}

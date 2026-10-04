@@ -1,0 +1,142 @@
+// TestReport.rs projection laws. Typed evidence/status/render assertions live
+// with the outer Foundation testing adapter, not a second Core carrier.
+use core.testing.runtime.test_report as testing_report
+
+fn report_test_record(terminal: Bool, outcome: testing_report.JetTestRecordOutcome, expected_failure: Bool) -> testing_report.JetTestOutcomeRecord Never! {
+    testing_report.JetTestOutcomeRecord{terminal: terminal, outcome: outcome, expected_failure: expected_failure}
+}
+
+#Test("projection_negative_control_changes_with_record_outcome") {
+    passed :: [testing_report.JetTestOutcomeRecord]{report_test_record(true, testing_report.JetTestRecordOutcome.Passed, false)}
+    failed :: [testing_report.JetTestOutcomeRecord]{report_test_record(true, testing_report.JetTestRecordOutcome.Failed, false)}
+    passed_view :: passed[0..<passed.len()]
+    failed_view :: failed[0..<failed.len()]
+    baseline :: testing_report.jet_test_outcome_projection(passed_view)
+    altered :: testing_report.jet_test_outcome_projection(failed_view)
+    assert_eq(baseline.passed, 1)
+    assert_eq(baseline.failed, 0)
+    assert_eq(testing_report.jet_test_selected(baseline), 1)
+    assert_eq(altered.passed, 0)
+    assert_eq(altered.failed, 1)
+    assert_eq(testing_report.jet_test_selected(altered), 1)
+    assert(baseline != altered)
+}
+
+#Test("canonical terminal outcomes exclude raw runtime observations") {
+    records :: [testing_report.JetTestOutcomeRecord]{
+        report_test_record(true, testing_report.JetTestRecordOutcome.Passed, false),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Failed, true),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Passed, true),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Skipped, false),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Error, false),
+        report_test_record(false, testing_report.JetTestRecordOutcome.Failed, true),
+        report_test_record(false, testing_report.JetTestRecordOutcome.Failed, false),
+    }
+    records_view :: records[0..<records.len()]
+    projection :: testing_report.jet_test_outcome_projection(records_view)
+    assert_eq(projection.passed, 1)
+    assert_eq(projection.failed, 1)
+    assert_eq(projection.skipped, 1)
+    assert_eq(projection.expected_failures, 1)
+    assert_eq(projection.unexpected_passes, 1)
+    assert_eq(testing_report.jet_test_selected(projection), 5)
+    assert(!testing_report.jet_test_report_ok(projection))
+    assert_eq(testing_report.jet_test_report_summary(projection), "1 passed, 1 failed, 1 skipped, 1 expected-fail, 1 unexpected-pass")
+    // Read the retained extent, not the owner's last-use len: the preserved
+    // #4404: repro-owner-last-len retains its invalid MIR owner take/drop.
+    assert_eq(records_view.len(), 7)
+}
+
+#Test("expected failure precedence applies only to passed and failed") {
+    records :: [testing_report.JetTestOutcomeRecord]{
+        report_test_record(true, testing_report.JetTestRecordOutcome.Error, true),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Skipped, true),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Other, true),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Other, false),
+    }
+    records_view :: records[0..<records.len()]
+    projection :: testing_report.jet_test_outcome_projection(records_view)
+    assert_eq(projection.passed, 0)
+    assert_eq(projection.failed, 1)
+    assert_eq(projection.skipped, 1)
+    assert_eq(projection.expected_failures, 0)
+    assert_eq(projection.unexpected_passes, 0)
+    assert_eq(testing_report.jet_test_selected(projection), 2)
+}
+
+#Test("empty and wholly nonterminal evidence select no tests") {
+    empty :: [testing_report.JetTestOutcomeRecord]{}
+    empty_view :: empty[0..<0]
+    projection :: testing_report.jet_test_outcome_projection(empty_view)
+    assert_eq(testing_report.jet_test_selected(projection), 0)
+    assert(testing_report.jet_test_report_ok(projection))
+    assert_eq(testing_report.jet_test_report_summary(projection), "0 passed, 0 failed, 0 skipped")
+    outcomes :: [testing_report.JetTestRecordOutcome]{testing_report.JetTestRecordOutcome.Passed, testing_report.JetTestRecordOutcome.Failed, testing_report.JetTestRecordOutcome.Error, testing_report.JetTestRecordOutcome.Skipped, testing_report.JetTestRecordOutcome.Other}
+    streamed := testing_report.jet_test_empty_projection()
+    loop outcome in outcomes {
+        testing_report.jet_test_project_record(&streamed, report_test_record(false, outcome, false))
+        testing_report.jet_test_project_record(&streamed, report_test_record(false, outcome, true))
+    }
+    assert_eq(testing_report.jet_test_selected(streamed), 0)
+}
+
+// tests/jet_test.rs:155–158 expected-failure summary and :175–187 xpass
+// status; ordinary error/failure status at :470–480 shares the same policy.
+#Test("expected failures stay green and unexpected passes fail status") {
+    projection := testing_report.jet_test_empty_projection()
+    testing_report.jet_test_project_record(&projection, report_test_record(true, testing_report.JetTestRecordOutcome.Failed, true))
+    assert(testing_report.jet_test_report_ok(projection))
+    assert_eq(testing_report.jet_test_report_summary(projection), "0 passed, 0 failed, 0 skipped, 1 expected-fail")
+    testing_report.jet_test_project_record(&projection, report_test_record(true, testing_report.JetTestRecordOutcome.Passed, true))
+    assert(!testing_report.jet_test_report_ok(projection))
+    assert_eq(testing_report.jet_test_report_summary(projection), "0 passed, 0 failed, 0 skipped, 1 expected-fail, 1 unexpected-pass")
+    ordinary := testing_report.jet_test_empty_projection()
+    testing_report.jet_test_project_record(&ordinary, report_test_record(true, testing_report.JetTestRecordOutcome.Failed, false))
+    assert(!testing_report.jet_test_report_ok(ordinary))
+    assert_eq(testing_report.jet_test_report_summary(ordinary), "0 passed, 1 failed, 0 skipped")
+}
+
+#Test("projection borrows precisely the selected view extent") {
+    records :: [testing_report.JetTestOutcomeRecord]{
+        report_test_record(true, testing_report.JetTestRecordOutcome.Failed, false),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Passed, false),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Skipped, false),
+        report_test_record(true, testing_report.JetTestRecordOutcome.Passed, true),
+    }
+    middle :: records[1..<3]
+    projection :: testing_report.jet_test_outcome_projection(middle)
+    assert_eq(projection.passed, 1)
+    assert_eq(projection.failed, 0)
+    assert_eq(projection.skipped, 1)
+    assert_eq(projection.unexpected_passes, 0)
+    assert_eq(testing_report.jet_test_selected(projection), 2)
+    assert(testing_report.jet_test_report_ok(projection))
+    assert_eq(testing_report.jet_test_report_summary(projection), "1 passed, 0 failed, 1 skipped")
+    assert(records[0].outcome == testing_report.JetTestRecordOutcome.Failed)
+    assert(records[3].expected_failure)
+}
+
+#Test("ordinary and expected outcomes preserve all five counters") {
+    outcomes :: [testing_report.JetTestRecordOutcome]{testing_report.JetTestRecordOutcome.Passed, testing_report.JetTestRecordOutcome.Failed, testing_report.JetTestRecordOutcome.Error, testing_report.JetTestRecordOutcome.Skipped, testing_report.JetTestRecordOutcome.Other}
+    ordinary := testing_report.jet_test_empty_projection()
+    expected := testing_report.jet_test_empty_projection()
+    loop outcome in outcomes {
+        testing_report.jet_test_project_record(&ordinary, report_test_record(true, outcome, false))
+        testing_report.jet_test_project_record(&expected, report_test_record(true, outcome, true))
+    }
+    assert_eq(ordinary.passed, 1)
+    assert_eq(ordinary.failed, 2)
+    assert_eq(ordinary.skipped, 1)
+    assert_eq(ordinary.expected_failures, 0)
+    assert_eq(ordinary.unexpected_passes, 0)
+    assert_eq(testing_report.jet_test_selected(ordinary), 4)
+    assert_eq(expected.passed, 0)
+    assert_eq(expected.failed, 1)
+    assert_eq(expected.skipped, 1)
+    assert_eq(expected.expected_failures, 1)
+    assert_eq(expected.unexpected_passes, 1)
+    assert_eq(testing_report.jet_test_selected(expected), 4)
+    xpass := testing_report.jet_test_empty_projection()
+    testing_report.jet_test_project_record(&xpass, report_test_record(true, testing_report.JetTestRecordOutcome.Passed, true))
+    assert_eq(testing_report.jet_test_report_summary(xpass), "0 passed, 0 failed, 0 skipped, 1 unexpected-pass")
+}

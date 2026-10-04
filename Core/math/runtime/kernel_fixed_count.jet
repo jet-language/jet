@@ -1,0 +1,95 @@
+// MathLibPure.rs:862–892,914–967: checked fixed-I64 counting policy.
+// Primitive I64 arithmetic and Float sqrt/trunc/conversion are allocation-free
+// scalar leaves. Main owns typed native/ABI/tier binding; exact Int math is not
+// narrowed here. View<I64> borrows its original owner/extent for both passes,
+// never copies input or retains it beyond the call.
+use core.math as fixed_count_math
+
+// Rust jet_std_math_isqrt (:862), with Main-approved overflow repair.
+pub fn jet_std_math_isqrt(value: I64) -> I64? Never! {
+    if value < (I64{0}) -> return None
+    root := I64.from_float(fixed_count_math.trunc(fixed_count_math.sqrt(Float.from_i64(value)))) ?? return None
+    // Division compares squares without overflow/saturation. The Float seed
+    // is near sqrt(value), so correction remains constant-small, even at MAX.
+    loop root > (I64{0}) && root > value / root {
+        root = root - I64{1}
+    }
+    next := root + I64{1}
+    loop next <= value / next {
+        root = next
+        next = root + I64{1}
+    }
+    Val(root)
+}
+
+// Rust jet_std_math_factorial (:881).
+pub fn jet_std_math_factorial(value: I64) -> I64? Never! {
+    if value < (I64{0}) -> return None
+    total := I64{1}
+    step := I64{2}
+    loop step <= value {
+        total = total.checked_mul(step) ?? return None
+        step = step + I64{1}
+    }
+    Val(total)
+}
+
+// Rust jet_std_math_binomial (:914). Preserve multiply BEFORE division: an
+// intermediate overflow is absent even when the mathematical answer fits.
+pub fn jet_std_math_binomial(n: I64, k: I64) -> I64? Never! {
+    if n < (I64{0}) || k < (I64{0}) || k > n -> return None
+    choose_k := k
+    if n - k < choose_k -> choose_k = n - k
+    out := I64{1}
+    i := I64{1}
+    loop i <= choose_k {
+        product :: out.checked_mul(n - choose_k + i) ?? return None
+        out = product.checked_div(i) ?? return None
+        i = i + I64{1}
+    }
+    Val(out)
+}
+
+// Rust jet_std_math_perm (:927).
+pub fn jet_std_math_perm(n: I64, k: I64) -> I64? Never! {
+    if n < (I64{0}) || k < (I64{0}) || k > n -> return None
+    out := I64{1}
+    i := I64{0}
+    loop i < k {
+        out = out.checked_mul(n - i) ?? return None
+        i = i + I64{1}
+    }
+    Val(out)
+}
+
+// Rust jet_std_math_rising_factorial (:939): negative n is legal; checked
+// n+step occurs before multiplication, including when out is already zero.
+pub fn jet_std_math_rising_factorial(n: I64, k: I64) -> I64? Never! {
+    if k < (I64{0}) -> return None
+    out := I64{1}
+    step := I64{0}
+    loop step < k {
+        factor :: n.checked_add(step) ?? return None
+        out = out.checked_mul(factor) ?? return None
+        step = step + I64{1}
+    }
+    Val(out)
+}
+
+// Rust jet_std_math_multinomial (:952): validate/sum all parts before product.
+pub fn jet_std_math_multinomial(parts: View<I64>) -> I64? Never! {
+    remaining := I64{0}
+    loop i in 0..<parts.len() {
+        part :: parts[i]
+        if part < (I64{0}) -> return None
+        remaining = remaining.checked_add(part) ?? return None
+    }
+    out := I64{1}
+    loop i in 0..<parts.len() {
+        part :: parts[i]
+        factor :: jet_std_math_binomial(remaining, part) ?? return None
+        out = out.checked_mul(factor) ?? return None
+        remaining = remaining - part
+    }
+    Val(out)
+}

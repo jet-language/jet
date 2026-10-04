@@ -10,6 +10,8 @@ package {
 }
 use core
 use core.crypto.expert as rawcrypto
+use core.crypto.runtime.kernel_sha256 as crypto_sha256
+use core.encoding as crypto_encoding
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
 //
@@ -30,6 +32,8 @@ use core.crypto.expert as rawcrypto
 // key bytes. Fail closed: a missing RNG is an error, never a fallback to
 // a weak generator.
 module expert
+
+module runtime
 
 module random
 
@@ -62,7 +66,10 @@ pub struct Digest256 {
 
     pub fn as_bytes(self) -> [U8] Never! { self.bytes }
 
-    pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
+    pub fn hex(self) -> String Never! {
+        bytes :: self.bytes[0..<self.bytes.len()]
+        crypto_encoding.bytes_to_hex(bytes)
+    }
 }
 
 pub struct Digest512 {
@@ -70,7 +77,10 @@ pub struct Digest512 {
 
     pub fn as_bytes(self) -> [U8] Never! { self.bytes }
 
-    pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
+    pub fn hex(self) -> String Never! {
+        bytes :: self.bytes[0..<self.bytes.len()]
+        crypto_encoding.bytes_to_hex(bytes)
+    }
 }
 
 pub struct Hasher {
@@ -247,33 +257,61 @@ pub struct KeyWrapError {
 }
 
 /// SHA-256. Pure Jet, RFC 6234. Allocates a 32-byte digest.
-pub fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
+pub fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: crypto_sha256.sha256_bytes(bytes)} }
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
-pub fn sha224(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
+pub fn sha224(bytes: [U8]) -> String Never! {
+    digest :: crypto_sha256.sha224_bytes(bytes)
+    crypto_encoding.bytes_to_hex(digest[0..<28])
+}
 
 /// SHA-1. RFC 3174. Prefer SHA-256; this exists for UUID v5 and legacy checks.
-pub fn sha1(bytes: [U8]) -> String Never! { hex_encode(sha1_raw(bytes)) }
+pub fn sha1(bytes: [U8]) -> String Never! {
+    digest :: sha1_raw(bytes)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
 /// SHA-384. SHA-512 with the SHA-384 IV, truncated to 48 bytes.
-pub fn sha384(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
+pub fn sha384(bytes: [U8]) -> String Never! {
+    digest :: slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
 /// SHA-512 (FIPS 180-4).
 pub fn sha512(bytes: [U8]) -> Digest512 Never! { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
 
 /// SHA-3 (FIPS 202). Keccak-f[1600] sponge, rate 1152/1088/832/576.
-pub fn sha3_224(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 144, 28, 0x06)) }
+pub fn sha3_224(bytes: [U8]) -> String Never! {
+    digest :: keccak(bytes, 144, 28, 0x06)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
-pub fn sha3_256(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 136, 32, 0x06)) }
+pub fn sha3_256(bytes: [U8]) -> String Never! {
+    digest :: keccak(bytes, 136, 32, 0x06)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
-pub fn sha3_384(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 104, 48, 0x06)) }
+pub fn sha3_384(bytes: [U8]) -> String Never! {
+    digest :: keccak(bytes, 104, 48, 0x06)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
-pub fn sha3_512(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 72, 64, 0x06)) }
+pub fn sha3_512(bytes: [U8]) -> String Never! {
+    digest :: keccak(bytes, 72, 64, 0x06)
+    view :: digest[0..<digest.len()]
+    crypto_encoding.bytes_to_hex(view)
+}
 
 /// BLAKE3-256. Tree hasher, 32-byte output.
 pub fn blake3(bytes: [U8]) -> Digest256 Never! { {bytes: blake3_raw(bytes)} }
 
 /// HMAC-SHA256 (RFC 4231).
+// Rust SHA256Raw.rs:103–105, jet_crypto_hmac_sha256.
 pub fn hmac_sha256(key: [U8], data: [U8]) -> [U8] Never! { hmac_sha256_raw(key, data) }
 
 /// HKDF-SHA256 expand. `len` is 0..=8160. The output is a `Secret` so callers
@@ -326,6 +364,7 @@ pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) ->
     Ok(out)
 }
 
+// Rust SHA256Raw.rs:107–116, jet_ct_eq: visit max length, no early exit.
 pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
     diff := 0
     if a.len() != b.len() -> diff = 1
@@ -907,76 +946,6 @@ fn host_write_file(path: String, bytes: [U8]) -[FS]> Bool FileCryptoError! {
     Ok(true)
 }
 
-C_SHA256_IV :: [Int]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
-
-C_SHA224_IV :: [Int]{0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4}
-
-C_SHA256_K :: [Int]{
-    0x428a2f98,
-    0x71374491,
-    0xb5c0fbcf,
-    0xe9b5dba5,
-    0x3956c25b,
-    0x59f111f1,
-    0x923f82a4,
-    0xab1c5ed5,
-    0xd807aa98,
-    0x12835b01,
-    0x243185be,
-    0x550c7dc3,
-    0x72be5d74,
-    0x80deb1fe,
-    0x9bdc06a7,
-    0xc19bf174,
-    0xe49b69c1,
-    0xefbe4786,
-    0x0fc19dc6,
-    0x240ca1cc,
-    0x2de92c6f,
-    0x4a7484aa,
-    0x5cb0a9dc,
-    0x76f988da,
-    0x983e5152,
-    0xa831c66d,
-    0xb00327c8,
-    0xbf597fc7,
-    0xc6e00bf3,
-    0xd5a79147,
-    0x06ca6351,
-    0x14292967,
-    0x27b70a85,
-    0x2e1b2138,
-    0x4d2c6dfc,
-    0x53380d13,
-    0x650a7354,
-    0x766a0abb,
-    0x81c2c92e,
-    0x92722c85,
-    0xa2bfe8a1,
-    0xa81a664b,
-    0xc24b8b70,
-    0xc76c51a3,
-    0xd192e819,
-    0xd6990624,
-    0xf40e3585,
-    0x106aa070,
-    0x19a4c116,
-    0x1e376c08,
-    0x2748774c,
-    0x34b0bcb5,
-    0x391c0cb3,
-    0x4ed8aa4a,
-    0x5b9cca4f,
-    0x682e6ff3,
-    0x748f82ee,
-    0x78a5636f,
-    0x84c87814,
-    0x8cc70208,
-    0x90befffa,
-    0xa4506ceb,
-    0xbef9a3f7,
-    0xc67178f2,
-}
 
 C_SHA512_IV :: [Int]{
     0x6a09e667f3bcc908,
@@ -1024,62 +993,6 @@ fn be32_word(bytes: [U8], i: Int) -> Int Never! {
 fn rotr32(x: Int, n: Int) -> Int Never! {
     v :: wrap32(x)
     wrap32((v >> n) | (v << (32 - n)))
-}
-
-fn sha256_raw(data: [U8]) -> [U8] Never! { sha2_256(data, C_SHA256_IV) }
-
-fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
-    msg := copy_bytes(~data)
-    bit_len :: data.len() * 8
-    &msg.push(U8{0x80})
-    loop msg.len() % 64 != 56 -> &msg.push(U8{0})
-    loop b in be64(bit_len) -> &msg.push(b)
-    state := copy_ints(iv)
-    loop off in 0..<msg.len(), 64 {
-        w := [Int]{}
-        loop t in 0..<16 {
-            i :: off + t * 4
-            &w.push(be32_word(~msg, i))
-        }
-        loop t in 16..<64 {
-            s0 :: rotr32(w[t - 15], 7) ~| rotr32(w[t - 15], 18) ~| (w[t - 15] >> 3)
-            s1 :: rotr32(w[t - 2], 17) ~| rotr32(w[t - 2], 19) ~| (w[t - 2] >> 10)
-            &w.push(wrap32(w[t - 16] + s0 + w[t - 7] + s1))
-        }
-        a := state[0]
-        b := state[1]
-        c := state[2]
-        d := state[3]
-        e := state[4]
-        f := state[5]
-        g := state[6]
-        h := state[7]
-        loop t in 0..<64 {
-            s1 :: rotr32(e, 6) ~| rotr32(e, 11) ~| rotr32(e, 25)
-            ch :: (e & f) ~| ((e ~| C_MASK32) & g)
-            temp1 :: wrap32(h + s1 + ch + C_SHA256_K[t] + w[t])
-            s0 :: rotr32(a, 2) ~| rotr32(a, 13) ~| rotr32(a, 22)
-            maj :: (a & b) ~| (a & c) ~| (b & c)
-            temp2 :: wrap32(s0 + maj)
-            h = g
-            g = f
-            f = e
-            e = wrap32(d + temp1)
-            d = c
-            c = b
-            b = a
-            a = wrap32(temp1 + temp2)
-        }
-        state[0] = wrap32(state[0] + a)
-        state[1] = wrap32(state[1] + b)
-        state[2] = wrap32(state[2] + c)
-        state[3] = wrap32(state[3] + d)
-        state[4] = wrap32(state[4] + e)
-        state[5] = wrap32(state[5] + f)
-        state[6] = wrap32(state[6] + g)
-        state[7] = wrap32(state[7] + h)
-    }
-    words_to_bytes(state, 4)
 }
 
 fn sha1_raw(data: [U8]) -> [U8] {
@@ -1297,11 +1210,12 @@ fn sha512_block(state: &[U64], w: &[U64], k: [U64], msg: [U8], off: Int) Never! 
     state[7] = state[7] + h
 }
 
+// Rust SHA256Raw.rs:82–100, jet_hmac_sha256. Reuses the sole SHA kernel.
 fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] Never! {
     k := [U8]{}
     loop _ in 0..<64 -> &k.push(U8{0})
     if key.len() > 64 {
-        digest :: sha256_raw(key)
+        digest :: crypto_sha256.sha256_bytes(key)
         loop i in 0..<32 -> k[i] = digest[i]
     } else {
         loop i in 0..<key.len() -> k[i] = key[i]
@@ -1310,10 +1224,10 @@ fn hmac_sha256_raw(key: [U8], data: [U8]) -> [U8] Never! {
     outer := [U8]{}
     loop b in k -> &inner.push(to_u8(u8_int(b) ~| 0x36))
     loop b in data -> &inner.push(b)
-    inner_hash :: sha256_raw(inner)
+    inner_hash :: crypto_sha256.sha256_bytes(inner)
     loop b in k -> &outer.push(to_u8(u8_int(b) ~| 0x5c))
     loop b in inner_hash -> &outer.push(b)
-    sha256_raw(outer)
+    crypto_sha256.sha256_bytes(outer)
 }
 
 fn rotl32(x: Int, n: Int) -> Int Never! {
@@ -1358,20 +1272,6 @@ fn copy_ints(xs: [Int]) -> [Int] Never! {
     out
 }
 
-fn hex_encode(bytes: [U8]) -> String Never! {
-    out := [U8]{}
-    loop b in bytes {
-        n :: u8_int(b)
-        &out.push(hex_nibble(n >> 4))
-        &out.push(hex_nibble(n & 15))
-    }
-    String.from_bytes(out) ?? panic("invalid UTF-8 in hexadecimal encoding")
-}
-
-fn hex_nibble(n: Int) -> U8 Never! {
-    if n < 10 -> return to_u8(48 + n)
-    to_u8(87 + n)
-}
 
 fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
@@ -1407,28 +1307,6 @@ fn parse_int(text: String) -> Int? {
     }
     if !any -> return None
     Val(n)
-}
-
-fn hex_decode(text: String) -> [U8]? {
-    raw :: text.bytes()
-    if raw.len() % 2 != 0 -> return None
-    out := [U8]{}
-    i := 0
-    loop {
-        if i >= raw.len() -> return Val(~out)
-        hi :: hex_val(raw[i]) ?? return None
-        lo :: hex_val(raw[i + 1]) ?? return None
-        &out.push(to_u8(hi * 16 + lo))
-        i = i + 2
-    }
-}
-
-fn hex_val(b: U8) -> Int? {
-    n :: Int.from_u8(b)
-    if n >= 48 && n <= 57 -> return Val(n - 48)
-    if n >= 97 && n <= 102 -> return Val(n - 87)
-    if n >= 65 && n <= 70 -> return Val(n - 55)
-    None
 }
 
 C_KECCAK_RC :: [Int]{

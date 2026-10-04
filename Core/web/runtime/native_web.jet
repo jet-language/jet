@@ -1,0 +1,1800 @@
+// PORT-PENDING 0238 crates-jet-jit-src-web-slice-1: crates/jet-jit/src/Web.rs:1-1796
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-WEBAPP1 / c-devserver / D-FLAGSHIP-WEBAPI1: resident-JIT web host.
+//RS //! Thin opaque-handle adapters over Prelude/App.rs + DevServer.rs.
+//RS //! Source-owned `core.web` behavior stays in CoreLib; this module only carries
+//RS //! real host boundaries.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS pub(crate) mod web_rt {
+//RS     /// The active resident runtime is the only policy carrier. Querying it at
+//RS     /// the Prelude hook keeps the policy invocation-local and avoids a stale
+//RS     /// caller-thread TLS value leaking into a later run or HTTP worker.
+//RS     pub(crate) fn jet_web_runtime_devtools_enabled() -> bool {
+//RS         crate::Concurrency::with_runtime_mut(|runtime| runtime.web_runtime_devtools_enabled())
+//RS     }
+//RS 
+//RS     fn jet_web_runtime_history_enabled() -> bool {
+//RS         crate::Concurrency::with_runtime_mut(|runtime| runtime.web_runtime_history_enabled())
+//RS     }
+//RS     fn jet_runtime_stop(code: &'static str, _file: &str, line: u32, message: &str) -> ! {
+//RS         crate::runtime_host::runtime_stop_unwind(code, line, message)
+//RS     }
+//RS 
+//RS     use jet_foundation::Devtools::jet_devtools_publish_event;
+//RS     pub(crate) use crate::Reactive::{
+//RS         JetWebMutationState, JetWebMutationStatus, JetWebQuery, JetWebQueryNetworkMode,
+//RS         JetWebQueryState, JetWebQueryStatus, jet_web_query_live,
+//RS         jet_web_query_subscribe, jet_web_query_invalidate, jet_web_query_get,
+//RS         jet_web_query_state, jet_web_query_state_signal, jet_web_query_mutation_signal,
+//RS         jet_web_query_show, jet_web_query_facts, jet_web_query_queue, jet_web_query_refresh,
+//RS         jet_web_query_cancel, jet_web_query_set_online, jet_web_query_set_mode,
+//RS         jet_web_query_mutation_state, jet_web_query_mutate,
+//RS         jet_web_query_mutate_with_invalidations, jet_web_query_retry,
+//RS     };
+//RS     pub(crate) use crate::net_http_rt::{
+//RS         console_http_router_from_mux, jet_app_http_assets, jet_app_http_mount,
+//RS         jet_app_http_mux_new, jet_app_http_page_response, jet_app_http_reload,
+//RS         jet_app_http_request_url, jet_app_http_serve, jet_std, jet_web_server_fn_new,
+//RS         jet_web_server_fn_register_http, jet_web_server_fn_typed, ConsoleHttpRouter, JetHTTPMux,
+//RS         JetHTTPRequest, JetHTTPRouter, JetWebServerFnError, JetWebServerFnHandler,
+//RS         JetWebServerFunction,
+//RS     };
+//RS     // The keyed live-query entries WebTable.rs names and the query-panel
+//RS     // projections App.rs names live with the resident reactive host, which
+//RS     // includes the one LiveQuery.rs / WebQuery.rs source.
+//RS     pub(crate) use crate::Reactive::{
+//RS         jet_live_publish_transport,
+//RS         jet_app_invalidate_key, jet_app_live_keyed, jet_web_query_dev_panel,
+//RS         jet_web_query_facts_json,
+//RS     };
+//RS     // EncodingTraits.rs' map codec, inline-range refinement, and CSV rows are
+//RS     // the same kernels the collection, runtime, and encoding hosts compile.
+//RS     pub(crate) use crate::Collections::collection_semantics::JetMap;
+//RS     pub(crate) use crate::runtime_host::inline_range_kernel::jet_inline_range_from_int;
+//RS     fn jet_ring_csv_parse(
+//RS         text: &String,
+//RS         delimiter: &String,
+//RS         header: bool,
+//RS         skip_blank: bool,
+//RS     ) -> Result<Vec<Vec<String>>, String> {
+//RS         crate::Encoding::csv_parse(text, delimiter, header, skip_blank)
+//RS             .map(|rows| rows.into_iter().map(|row| row.fields).collect())
+//RS     }
+//RS     // EncodingTraits.rs names these unqualified; the canonical definitions
+//RS     // are the JIT modules reexported through the net_http_rt jet_std shim.
+//RS     #[allow(unused_imports)]
+//RS     pub(crate) use jet_std::{
+//RS         jet_codec_date_decode, jet_codec_date_encode, jet_codec_datetime_decode,
+//RS         jet_codec_datetime_encode, jet_codec_decimal_decode_int, jet_codec_decimal_decode_text,
+//RS         jet_codec_decimal_encode, jet_codec_duration_decode, jet_codec_duration_encode,
+//RS         jet_codec_local_time_decode, jet_codec_local_time_encode, JetDate, JetDateTime,
+//RS         JetDecimal, JetLocalTime,
+//RS     };
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs");
+//RS     const MAX_SYNC_TEXT: usize = 1024 * 1024;
+//RS     const MAX_SYNC_REPLICAS: usize = 4096;
+//RS     const MAX_SYNC_ENTRIES: usize = 100_000;
+//RS     const MAX_SYNC_SESSION: usize = 256;
+//RS     const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
+//RS     fn jet_sync_counter_total(counts: &[(String, u64, u64)]) -> Option<i64> {
+//RS         let mut total = 0i128;
+//RS         for (_, positive, negative) in counts {
+//RS             total = total
+//RS                 .checked_add(i128::from(*positive))?
+//RS                 .checked_sub(i128::from(*negative))?;
+//RS         }
+//RS         i64::try_from(total).ok()
+//RS     }
+//RS     pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
+//RS         !value.trim().is_empty()
+//RS             && value.len() <= MAX_SYNC_TEXT
+//RS             && !value.chars().any(char::is_control)
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/SyncPublish.rs");
+//RS     mod jet_app_middleware {
+//RS         include!("../../jet-foundation/src/AppMiddleware.rs");
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/App.rs");
+//RS     // Browser storage has no native AOT row, so App.rs does not re-export it;
+//RS     // the resident host marshals these entries directly. `jet_web_page` is a
+//RS     // canonical Core row and reaches every host through the App.rs root.
+//RS     pub(crate) use jet_app_impl::{
+//RS         jet_web_storage_local_clear, jet_web_storage_local_get, jet_web_storage_local_remove,
+//RS         jet_web_storage_local_set, jet_web_storage_session_clear, jet_web_storage_session_get,
+//RS         jet_web_storage_session_remove, jet_web_storage_session_set,
+//RS     };
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/WebPending.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs");
+//RS     include!("../../jet-codegen/src/Prelude/DevServer.rs");
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::web_rt::__jet_Decode;
+//RS     use jet_foundation::{DataTree::DataTree, Numeric::JetInt};
+//RS 
+//RS     #[test]
+//RS     fn web_decode_preserves_exact_integers_and_fixed_bounds() {
+//RS         for expected in [i64::MIN, i64::MAX] {
+//RS             let tree = DataTree::Number(expected.to_string());
+//RS             assert_eq!(<i64 as __jet_Decode>::jet_decode(&tree).unwrap(), expected);
+//RS         }
+//RS         for text in ["-9223372036854775809", "9223372036854775808"] {
+//RS             let tree = DataTree::Number(text.to_string());
+//RS             assert!(<i64 as __jet_Decode>::jet_decode(&tree).is_err());
+//RS             assert_eq!(
+//RS                 <JetInt as __jet_Decode>::jet_decode(&tree).unwrap().to_string(),
+//RS                 text,
+//RS             );
+//RS         }
+//RS         let tree = DataTree::Number(u64::MAX.to_string());
+//RS         assert_eq!(<u64 as __jet_Decode>::jet_decode(&tree).unwrap(), u64::MAX);
+//RS         for text in ["-1", "18446744073709551616"] {
+//RS             assert!(
+//RS                 <u64 as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+//RS                     .is_err()
+//RS             );
+//RS         }
+//RS         let text = "12345678901234567890123456789012345678901234567890";
+//RS         assert_eq!(
+//RS             <JetInt as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+//RS                 .unwrap()
+//RS                 .to_string(),
+//RS             text,
+//RS         );
+//RS         assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::Number("1.5".to_string())).is_err());
+//RS         assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::TypedText("12".to_string())).is_err());
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS #[derive(Default)]
+//RS pub(crate) struct WebState {
+//RS     pub(crate) apps: Vec<web_rt::JetApp>,
+//RS     pub(crate) pages: Vec<web_rt::JetWebPage>,
+//RS     pub(crate) routers: Vec<web_rt::JetWebRouter>,
+//RS     pub(crate) queries: Vec<web_rt::JetWebQuery>,
+//RS     pub(crate) forms: Vec<web_rt::JetWebForm>,
+//RS     pub(crate) form_inputs: Vec<web_rt::JetWebFormInput>,
+//RS     pub(crate) typed_forms: Vec<web_rt::JetWebFormTyped>,
+//RS     pub(crate) form_validations: Vec<Option<web_rt::JetWebFormTypedValidation>>,
+//RS     pub(crate) form_submissions: Vec<Option<web_rt::JetWebFormTypedSubmission>>,
+//RS     pub(crate) tables: Vec<web_rt::JetWebTable<i64>>,
+//RS     pub(crate) table_columns: Vec<web_rt::JetWebTableColumn<i64>>,
+//RS     pub(crate) stores: Vec<web_rt::JetWebStore<i64>>,
+//RS     pub(crate) store_subscriptions: Vec<web_rt::JetWebStoreSubscription>,
+//RS     pub(crate) store_patches: Vec<Option<web_rt::JetWebStorePatch<i64>>>,
+//RS     pub(crate) servers: Vec<web_rt::JetDevServer>,
+//RS     pub(crate) virtual_windows: Vec<web_rt::JetWebVirtualWindow>,
+//RS     pub(crate) virtual_plan_viewports: Vec<web_rt::JetWebVirtualPlanViewport>,
+//RS }
+//RS 
+//RS fn with_rt<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut crate::runtime_host::JitRuntime) -> R,
+//RS {
+//RS     Concurrency::with_runtime_mut(|rt| Some(f(rt))).expect("Web host requires an active JIT runtime")
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_app() -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.web.apps.push(web_rt::jet_app());
+//RS         rt.web.apps.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_page(title: i64, body: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let title = rt.heap.clone_string(title).unwrap_or_default();
+//RS         let body = rt.heap.clone_string(body).unwrap_or_default();
+//RS         rt.web.pages.push(web_rt::jet_web_page(title, body));
+//RS         rt.web.pages.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS /// Entry-boundary adapter for an App returned by `fn run`. The operation is
+//RS /// still the Prelude App `serve` method; this function only supplies the
+//RS /// opaque JIT handle and releases the runtime borrow before the server blocks.
+//RS pub(crate) fn serve_app(app: i64) {
+//RS     let app_handle = with_rt(|rt| rt.web.apps.get(app.saturating_sub(1) as usize).cloned())
+//RS         .expect("jit web app: bad handle");
+//RS     app_handle.serve();
+//RS }
+//RS /// Build the typed console adapter from an assembled application mux without
+//RS /// opening a listener. CLI hosts use this to dispatch console requests through
+//RS /// the same route graph as `serve`.
+//RS pub(crate) fn console_app_router(
+//RS     app: i64,
+//RS ) -> Result<web_rt::ConsoleHttpRouter, String> {
+//RS     let app = with_rt(|rt| rt.web.apps.get(app.saturating_sub(1) as usize).cloned());
+//RS     let Some(app) = app else {
+//RS         return Err("jit web app: bad handle".to_string());
+//RS     };
+//RS     Ok(web_rt::console_http_router_from_mux(app.console_http_mux()))
+//RS }
+//RS 
+//RS fn web_route_error_text(rt: &mut crate::runtime_host::JitRuntime, bits: i64) -> String {
+//RS     if let Some(message) = rt.heap.clone_string(bits) {
+//RS         return message;
+//RS     }
+//RS     let len = rt.heap.list_len(bits).unwrap_or(0);
+//RS     if len == 0 {
+//RS         return "typed route callback failed".to_string();
+//RS     }
+//RS     let mut rendered = Vec::with_capacity(len as usize);
+//RS     for index in 0..len {
+//RS         let record = rt.heap.list_get_int(bits, index).unwrap_or(0);
+//RS         let path = rt
+//RS             .heap
+//RS             .record_get_string(record, 0)
+//RS             .and_then(|id| rt.heap.clone_string(id))
+//RS             .unwrap_or_default();
+//RS         let reason = rt
+//RS             .heap
+//RS             .record_get_string(record, 1)
+//RS             .and_then(|id| rt.heap.clone_string(id))
+//RS             .unwrap_or_else(|| "typed route input is invalid".to_string());
+//RS         if path.is_empty() {
+//RS             rendered.push(reason);
+//RS         } else {
+//RS             rendered.push(format!("{path}: {reason}"));
+//RS         }
+//RS     }
+//RS     rendered.join("; ")
+//RS }
+//RS 
+//RS fn web_route_result(result: i64) -> Result<i64, String> {
+//RS     with_rt(|rt| {
+//RS         let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
+//RS             return Err("typed route callback returned an invalid result".to_string());
+//RS         };
+//RS         if ok {
+//RS             Ok(bits as i64)
+//RS         } else {
+//RS             Err(web_route_error_text(rt, bits as i64))
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_route_decode_tree(tree: i64, type_key: i64) -> i64 {
+//RS     let tree = crate::Encoding::read_datatree(tree);
+//RS     let type_key = with_rt(|rt| rt.heap.clone_string(type_key));
+//RS     let Some(tree) = tree else {
+//RS         return with_rt(|rt| {
+//RS             let message = rt
+//RS                 .heap
+//RS                 .alloc_string("typed route input has an invalid DataTree");
+//RS             crate::runtime_host::alloc_jit_result(rt, false, message as u64)
+//RS         });
+//RS     };
+//RS     let Some(type_key) = type_key else {
+//RS         return with_rt(|rt| {
+//RS             let message = rt
+//RS                 .heap
+//RS                 .alloc_string("typed route input has no type identity");
+//RS             crate::runtime_host::alloc_jit_result(rt, false, message as u64)
+//RS         });
+//RS     };
+//RS     match crate::Encoding::decode_datatree_for_type(&tree, &type_key) {
+//RS         Ok(value) => with_rt(|rt| crate::runtime_host::alloc_jit_result(rt, true, value as u64)),
+//RS         Err(errors) => with_rt(|rt| {
+//RS             let list = rt.heap.alloc_empty_list();
+//RS             for error in errors {
+//RS                 let record = rt.heap.alloc_record(2);
+//RS                 let path = rt.heap.alloc_string(error.path);
+//RS                 let reason = rt.heap.alloc_string(error.reason);
+//RS                 let _ = rt.heap.record_set_string(record, 0, path);
+//RS                 let _ = rt.heap.record_set_string(record, 1, reason);
+//RS                 let _ = rt.heap.list_push_int(list, record);
+//RS             }
+//RS             crate::runtime_host::alloc_jit_result(rt, false, list as u64)
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn web_route_type_descriptor(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     type_key: &str,
+//RS ) -> Option<crate::runtime_host::RuntimeTypeDescriptor> {
+//RS     type_key
+//RS         .strip_prefix("id:")
+//RS         .and_then(|id| id.parse::<u64>().ok())
+//RS         .and_then(|id| rt.runtime_type_descriptor(id).cloned())
+//RS         .or_else(|| rt.runtime_type_descriptor_by_name(type_key).cloned())
+//RS }
+//RS 
+//RS enum WebEncodedValue {
+//RS     Text(String),
+//RS     Tree(crate::Encoding::json_rt::DataTree),
+//RS }
+//RS 
+//RS fn web_route_encoded_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS     type_key: i64,
+//RS ) -> Result<WebEncodedValue, String> {
+//RS     let type_key = rt
+//RS         .heap
+//RS         .clone_string(type_key)
+//RS         .ok_or_else(|| "typed route callback has no result type identity".to_string())?;
+//RS     let descriptor = web_route_type_descriptor(rt, &type_key)
+//RS         .ok_or_else(|| format!("typed route callback has unknown result type `{type_key}`"))?;
+//RS     if matches!(
+//RS         descriptor.kind,
+//RS         crate::runtime_host::RuntimeValueKind::String
+//RS     ) {
+//RS         return rt
+//RS             .heap
+//RS             .clone_string(value)
+//RS             .map(WebEncodedValue::Text)
+//RS             .ok_or_else(|| "typed route callback returned invalid text".to_string());
+//RS     }
+//RS     crate::Receipt::encode_jit_value(rt, value, &descriptor)
+//RS         .map(WebEncodedValue::Tree)
+//RS }
+//RS 
+//RS fn web_encoded_text(value: WebEncodedValue) -> Result<String, String> {
+//RS     match value {
+//RS         WebEncodedValue::Text(value) => Ok(value),
+//RS         WebEncodedValue::Tree(tree) => Ok(crate::Encoding::json_rt::render_datatree_json(
+//RS             &tree, false, 0,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn web_result_error(text: String) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let message = rt.heap.alloc_string(text);
+//RS         crate::runtime_host::alloc_jit_result(rt, false, message as u64)
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_route_encode_result(result: i64, ok_type: i64, err_type: i64) -> i64 {
+//RS     let Some((ok, bits)) =
+//RS         with_rt(|rt| crate::runtime_host::jit_result_parts(rt, result))
+//RS     else {
+//RS         return web_result_error("typed route callback returned an invalid result".to_string());
+//RS     };
+//RS     let type_key = if ok { ok_type } else { err_type };
+//RS     let encoded = with_rt(|rt| web_route_encoded_value(rt, bits as i64, type_key))
+//RS         .and_then(web_encoded_text);
+//RS     match encoded {
+//RS         Ok(encoded) => with_rt(|rt| {
+//RS             let value = rt.heap.alloc_string(encoded);
+//RS             crate::runtime_host::alloc_jit_result(rt, ok, value as u64)
+//RS         }),
+//RS         Err(error) => web_result_error(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_web_route_stringify_error(result: i64, err_type: i64) -> i64 {
+//RS     let Some((ok, bits)) =
+//RS         with_rt(|rt| crate::runtime_host::jit_result_parts(rt, result))
+//RS     else {
+//RS         return web_result_error("typed route callback returned an invalid result".to_string());
+//RS     };
+//RS     if ok {
+//RS         return result;
+//RS     }
+//RS     let encoded = with_rt(|rt| web_route_encoded_value(rt, bits as i64, err_type))
+//RS         .and_then(web_encoded_text);
+//RS     match encoded {
+//RS         Ok(encoded) => with_rt(|rt| {
+//RS             let value = rt.heap.alloc_string(encoded);
+//RS             crate::runtime_host::alloc_jit_result(rt, false, value as u64)
+//RS         }),
+//RS         Err(error) => web_result_error(error),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn web_pack_route_trees(trees: &[web_rt::jet_std::DataTree]) -> i64 {
+//RS     let handles = trees
+//RS         .iter()
+//RS         .map(crate::Encoding::alloc_datatree)
+//RS         .collect::<Vec<_>>();
+//RS     with_rt(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for handle in handles {
+//RS             let _ = rt.heap.list_push_int(list, handle);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS /// Invoke a retained route callback on an HTTP worker and resolve its result
+//RS /// while the worker still holds the resident runtime.
+//RS ///
+//RS /// Workers are raw OS threads: `try_with_http_jet_runtime_at` pins the
+//RS /// published runtime onto the thread only for the closure it runs, so every
+//RS /// heap read of the callback's result — unpacking the `Result`, cloning the
+//RS /// page or text it names — has to happen inside that same closure.  Reading
+//RS /// after it returns runs with no runtime and aborts the request.
+//RS fn web_invoke_route_callback<R>(
+//RS     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
+//RS     trees: &[web_rt::jet_std::DataTree],
+//RS     resolve: impl FnOnce(&mut crate::runtime_host::JitRuntime, i64) -> Result<R, String>,
+//RS ) -> Result<R, String> {
+//RS     let Some((epoch, callback)) = callback else {
+//RS         return Err("typed route callback unavailable".to_string());
+//RS     };
+//RS     Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS         let packed = web_pack_route_trees(trees);
+//RS         let result = crate::runtime_host::invoke_universal_unary(callback, packed)
+//RS             .ok_or_else(|| "typed route callback invocation failed".to_string())?;
+//RS         let value = web_route_result(result)?;
+//RS         with_rt(|rt| resolve(rt, value))
+//RS     })
+//RS     .ok_or_else(|| "typed route callback runtime unavailable".to_string())?
+//RS }
+//RS 
+//RS fn web_page_callback(
+//RS     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
+//RS     trees: &[web_rt::jet_std::DataTree],
+//RS ) -> Result<web_rt::JetWebPage, String> {
+//RS     web_invoke_route_callback(callback, trees, |rt, page| {
+//RS         rt.web
+//RS             .pages
+//RS             .get(page.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .ok_or_else(|| "typed route callback returned an invalid page".to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn web_encoded_callback(
+//RS     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
+//RS     trees: &[web_rt::jet_std::DataTree],
+//RS ) -> Result<String, String> {
+//RS     web_invoke_route_callback(callback, trees, |rt, encoded| {
+//RS         rt.heap
+//RS             .clone_string(encoded)
+//RS             .ok_or_else(|| "typed route callback returned non-text data".to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn web_form_encoded_callback(
+//RS     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
+//RS     body: &str,
+//RS ) -> Result<String, String> {
+//RS     let tree = web_rt::jet_std::parse_json_typed_datatree(body)
+//RS         .map_err(|_| "typed form action input is not valid JSON".to_string())?;
+//RS     web_encoded_callback(callback, &[tree])
+//RS }
+//RS 
+//RS fn jet_jit_web_app_method(
+//RS     app: i64,
+//RS     method: i64,
+//RS     a0: i64,
+//RS     a1: i64,
+//RS     a2: i64,
+//RS     output_type: i64,
+//RS     binding: i64,
+//RS ) -> i64 {
+//RS     let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
+//RS     if method_name == "facts_json" {
+//RS         return with_rt(|rt| {
+//RS             let app_handle = rt
+//RS                 .web
+//RS                 .apps
+//RS                 .get(app.saturating_sub(1) as usize)
+//RS                 .expect("jit app: bad handle")
+//RS                 .clone();
+//RS             rt.heap.alloc_string(app_handle.facts_json())
+//RS         });
+//RS     }
+//RS     if method_name == "serve" || method_name == "serve_on" {
+//RS         let app_handle = with_rt(|rt| rt.web.apps.get(app.saturating_sub(1) as usize).cloned())
+//RS             .expect("jit app: bad handle");
+//RS         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS             if method_name == "serve_on" {
+//RS                 app_handle.serve_on(a0);
+//RS             } else {
+//RS                 app_handle.serve();
+//RS             }
+//RS         }));
+//RS         if let Err(payload) = result {
+//RS             if !payload.is::<crate::runtime_host::JitRuntimeStop>() {
+//RS                 std::panic::resume_unwind(payload);
+//RS             }
+//RS         }
+//RS         return app;
+//RS     }
+//RS     let (key, data_type, binding) = with_rt(|rt| {
+//RS         (
+//RS             rt.heap.clone_string(a0).unwrap_or_default(),
+//RS             rt.heap.clone_string(output_type).unwrap_or_default(),
+//RS             rt.heap.clone_string(binding).unwrap_or_default(),
+//RS         )
+//RS     });
+//RS     let app_handle = with_rt(|rt| {
+//RS         rt.web
+//RS             .apps
+//RS             .get(app.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS     })
+//RS     .expect("jit web app: bad handle");
+//RS     let next = match method_name.as_str() {
+//RS         "csr" => app_handle.csr(),
+//RS         "ssr" => app_handle.ssr(),
+//RS         "ssg" => app_handle.ssg(),
+//RS         "stream" => app_handle.stream(),
+//RS         "streaming" => app_handle.streaming(),
+//RS         "island" => app_handle.island(),
+//RS         "hydration_dev" => app_handle.hydration_dev(),
+//RS         "hydration_release" => app_handle.hydration_release(),
+//RS         "route" | "page" | "layout" => {
+//RS             let callback = Concurrency::http_callable_snapshot(a1);
+//RS             let arity = web_rt::jet_app_route_binding(&binding).len();
+//RS             let handler = web_rt::JetAppTreeRouteCallback::new(
+//RS                 arity,
+//RS                 std::sync::Arc::new(move |trees| web_page_callback(callback, trees)),
+//RS             );
+//RS             match method_name.as_str() {
+//RS                 "route" => web_rt::jet_app_route(&app_handle, key, handler, binding),
+//RS                 "page" => web_rt::jet_app_page(&app_handle, key, handler, binding),
+//RS                 _ => web_rt::jet_app_layout(&app_handle, key, handler, binding),
+//RS             }
+//RS         }
+//RS         "loader" => {
+//RS             let callback = Concurrency::http_callable_snapshot(a1);
+//RS             let binding = web_rt::jet_app_route_binding(&binding);
+//RS             // `loader_encoded` takes the encoded result as the route output,
+//RS             // so the tree callback's own failure channel stays empty.
+//RS             let handler = web_rt::JetAppTreeRouteCallback::new(
+//RS                 binding.len(),
+//RS                 std::sync::Arc::new(move |trees| Ok(web_encoded_callback(callback, trees))),
+//RS             );
+//RS             app_handle.loader_encoded(handler, binding, data_type, a2 != 0)
+//RS         }
+//RS         "pending" | "not_found" | "error" => {
+//RS             let callback = Concurrency::http_callable_snapshot(a0);
+//RS             let handler: std::sync::Arc<
+//RS                 dyn Fn() -> Result<web_rt::JetWebPage, String> + Send + Sync + 'static,
+//RS             > = std::sync::Arc::new(move || web_page_callback(callback, &[]));
+//RS             match method_name.as_str() {
+//RS                 "pending" => app_handle.pending(handler),
+//RS                 "not_found" => app_handle.not_found(handler),
+//RS                 _ => app_handle.error(handler),
+//RS             }
+//RS         }
+//RS         "action" | "form" | "data" => {
+//RS             let callback = Concurrency::http_callable_snapshot(a1);
+//RS             if a2 == 0 {
+//RS                 let handler: std::sync::Arc<
+//RS                     dyn Fn() -> Result<String, String> + Send + Sync + 'static,
+//RS                 > = std::sync::Arc::new(move || web_encoded_callback(callback, &[]));
+//RS                 match method_name.as_str() {
+//RS                     "action" => app_handle.action(key, handler),
+//RS                     "form" => app_handle.form(key, handler, binding),
+//RS                     _ => app_handle.data(key, handler),
+//RS                 }
+//RS             } else {
+//RS                 let is_form = method_name == "form";
+//RS                 let handler: std::sync::Arc<
+//RS                     dyn Fn(&String) -> Result<String, String> + Send + Sync + 'static,
+//RS                 > = std::sync::Arc::new(move |body: &String| {
+//RS                     if is_form {
+//RS                         web_form_encoded_callback(callback, body)
+//RS                     } else {
+//RS                         web_encoded_callback(
+//RS                             callback,
+//RS                             &[web_rt::jet_std::DataTree::Text(body.clone())],
+//RS                         )
+//RS                     }
+//RS                 });
+//RS                 match method_name.as_str() {
+//RS                     "action" => app_handle.action(key, handler),
+//RS                     "form" => app_handle.form(key, handler, binding),
+//RS                     _ => app_handle.data(key, handler),
+//RS                 }
+//RS             }
+//RS         }
+//RS         "mount" => {
+//RS             let callback = Concurrency::http_callable_snapshot(a1);
+//RS             app_handle.mount(
+//RS                 key,
+//RS                 move |path: &String| {
+//RS                     if let Some((epoch, callback)) = callback {
+//RS                         let _ = Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS                             let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
+//RS                             unsafe {
+//RS                                 web_invoke_unit(callback, path);
+//RS                             }
+//RS                         });
+//RS                     }
+//RS                 },
+//RS             )
+//RS         }
+//RS         "routes" => app_handle.routes(key),
+//RS         "security" => app_handle.security(key),
+//RS         "assets" => app_handle.assets(key),
+//RS         "split" => app_handle.split(key),
+//RS         "code_split" => app_handle.code_split(key),
+//RS         "cache" => app_handle.cache(key),
+//RS         "a11y" => app_handle.a11y(key),
+//RS         "adapter" => app_handle.adapter(key),
+//RS         _ => app_handle,
+//RS     };
+//RS     with_rt(|rt| {
+//RS         rt.web.apps.push(next);
+//RS         rt.web.apps.len() as i64
+//RS     })
+//RS }
+//RS fn jet_jit_app_sync(doc_show: i64, session_id: i64) -> i64 {
+//RS     let (doc_show, session_id) = with_rt(|rt| {
+//RS         (
+//RS             rt.heap.clone_string(doc_show).unwrap_or_default(),
+//RS             rt.heap.clone_string(session_id).unwrap_or_default(),
+//RS         )
+//RS     });
+//RS     let shown = web_rt::jet_app_sync(doc_show, session_id);
+//RS     with_rt(|rt| rt.heap.alloc_string(shown))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_devserver_app() -> i64 {
+//RS     with_rt(|rt| {
+//RS         let server = web_rt::jet_devserver_app();
+//RS         rt.web.servers.push(server);
+//RS         rt.web.servers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_devserver_for_app(path: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let path = rt.heap.clone_string(path).unwrap_or_default();
+//RS         rt.web.servers.push(web_rt::jet_devserver_for_app(&path));
+//RS         rt.web.servers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_devserver_html(server: i64, path: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let path = rt.heap.clone_string(path).unwrap_or_default();
+//RS         let next = rt
+//RS             .web
+//RS             .servers
+//RS             .get(server.saturating_sub(1) as usize)
+//RS             .expect("jit devserver html: bad handle")
+//RS             .html(path);
+//RS         rt.web.servers.push(next);
+//RS         rt.web.servers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_devserver_port(server: i64, port: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let next = rt
+//RS             .web
+//RS             .servers
+//RS             .get(server.saturating_sub(1) as usize)
+//RS             .expect("jit devserver port: bad handle")
+//RS             .port(port);
+//RS         rt.web.servers.push(next);
+//RS         rt.web.servers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_devserver_serve(server: i64) {
+//RS     // Do not block forever in JIT/AOT ProgramOutput tests — `fn run()` never
+//RS     // calls serve; compiling `fn dev()` only needs the symbol to exist.
+//RS     let _ = server;
+//RS }
+//RS 
+//RS fn jit_web_storage_get(
+//RS     key: i64,
+//RS     get: fn(&String) -> Option<String>,
+//RS ) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
+//RS     match get(&key) {
+//RS         Some(value) => with_rt(|rt| rt.heap.alloc_string(value).wrapping_add(1)),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jit_web_storage_remove(key: i64, remove: fn(&String)) {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).unwrap_or_default());
+//RS     remove(&key);
+//RS }
+//RS 
+//RS fn jit_web_storage_set(key: i64, value: i64, set: fn(&String, &String)) {
+//RS     let (key, value) = with_rt(|rt| {
+//RS         (
+//RS             rt.heap.clone_string(key).unwrap_or_default(),
+//RS             rt.heap.clone_string(value).unwrap_or_default(),
+//RS         )
+//RS     });
+//RS     set(&key, &value);
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_local_get(key: i64) -> i64 {
+//RS     jit_web_storage_get(key, web_rt::jet_web_storage_local_get)
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_local_remove(key: i64) {
+//RS     jit_web_storage_remove(key, web_rt::jet_web_storage_local_remove);
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_local_set(key: i64, value: i64) {
+//RS     jit_web_storage_set(key, value, web_rt::jet_web_storage_local_set);
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_local_clear() {
+//RS     web_rt::jet_web_storage_local_clear();
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_session_get(key: i64) -> i64 {
+//RS     jit_web_storage_get(key, web_rt::jet_web_storage_session_get)
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_session_remove(key: i64) {
+//RS     jit_web_storage_remove(key, web_rt::jet_web_storage_session_remove);
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_session_set(key: i64, value: i64) {
+//RS     jit_web_storage_set(key, value, web_rt::jet_web_storage_session_set);
+//RS }
+//RS 
+//RS fn jet_jit_web_storage_session_clear() {
+//RS     web_rt::jet_web_storage_session_clear();
+//RS }
+//RS 
+//RS fn web_int_value(rt: &crate::runtime_host::JitRuntime, value: i64) -> i64 {
+//RS     rt.heap.int_to_i64(value).unwrap_or(value)
+//RS }
+//RS 
+//RS fn web_int_handle(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {
+//RS     rt.heap.int_from_i64(value)
+//RS }
+//RS 
+//RS fn web_string_map(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     map: i64,
+//RS ) -> Option<std::collections::BTreeMap<String, String>> {
+//RS     let count = rt.heap.map_len(map)?;
+//RS     let mut result = std::collections::BTreeMap::new();
+//RS     for index in 0..count {
+//RS         let key = rt.heap.map_key_at(map, index)?;
+//RS         let value = rt.heap.map_value_at(map, index)?;
+//RS         result.insert(rt.heap.clone_string(key)?, rt.heap.clone_string(value)?);
+//RS     }
+//RS     Some(result)
+//RS }
+//RS 
+//RS fn web_map_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     values: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+//RS ) -> i64 {
+//RS     let map = rt.heap.alloc_empty_map();
+//RS     for (key, value) in values {
+//RS         let key = rt.heap.alloc_string(key.into());
+//RS         let value = rt.heap.alloc_string(value.into());
+//RS         let _ = rt.heap.map_insert(map, key, value);
+//RS     }
+//RS     map
+//RS }
+//RS 
+//RS fn web_raw_list(rt: &crate::runtime_host::JitRuntime, list: i64) -> Option<Vec<i64>> {
+//RS     let count = rt.heap.list_len(list)?;
+//RS     (0..count).map(|index| rt.heap.list_get_int(list, index)).collect()
+//RS }
+//RS 
+//RS fn web_string_list_value(rt: &crate::runtime_host::JitRuntime, list: i64) -> Vec<String> {
+//RS     let count = rt.heap.list_len(list).expect("checked Web string list");
+//RS     (0..count).map(|index| {
+//RS         rt.heap.list_get_string(list, index).expect("checked Web string list element")
+//RS     }).collect()
+//RS }
+//RS 
+//RS fn web_result_handle<T>(
+//RS     result: Result<T, String>,
+//RS     encode: impl FnOnce(&mut crate::runtime_host::JitRuntime, T) -> i64,
+//RS ) -> i64 {
+//RS     with_rt(|rt| match result {
+//RS         Ok(value) => {
+//RS             let value = encode(rt, value);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS         }
+//RS         Err(error) => {
+//RS             let error = rt.heap.alloc_string(error);
+//RS             crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn web_raw_list_handle(rt: &mut crate::runtime_host::JitRuntime, values: Vec<i64>) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for value in values {
+//RS         let _ = rt.heap.list_push_int(list, value);
+//RS     }
+//RS     list
+//RS }
+//RS fn web_string_list_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     values: impl IntoIterator<Item = impl Into<String>>,
+//RS ) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for value in values {
+//RS         let value = rt.heap.alloc_string(value.into());
+//RS         let _ = rt.heap.list_push_int(list, value);
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn web_enum_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     discriminant: i64,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(value, 0, discriminant);
+//RS     value
+//RS }
+//RS 
+//RS fn web_navigation_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     navigation: &web_rt::JetWebNavigation,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(4);
+//RS     let url = rt.heap.alloc_string(navigation.url.clone());
+//RS     let route = rt.heap.alloc_string(navigation.route.clone());
+//RS     let params = web_map_handle(rt, &navigation.params);
+//RS     let search = web_map_handle(rt, &navigation.search);
+//RS     let _ = rt.heap.record_set_string(value, 0, url);
+//RS     let _ = rt.heap.record_set_string(value, 1, route);
+//RS     let _ = rt.heap.record_set_int(value, 2, params);
+//RS     let _ = rt.heap.record_set_int(value, 3, search);
+//RS     value
+//RS }
+//RS 
+//RS fn web_navigation_status(status: web_rt::JetWebNavigationStatus) -> i64 {
+//RS     match status {
+//RS         web_rt::JetWebNavigationStatus::Idle => 0,
+//RS         web_rt::JetWebNavigationStatus::Preloading => 1,
+//RS         web_rt::JetWebNavigationStatus::Pending => 2,
+//RS         web_rt::JetWebNavigationStatus::Ready => 3,
+//RS         web_rt::JetWebNavigationStatus::Error => 4,
+//RS         web_rt::JetWebNavigationStatus::Aborted => 5,
+//RS     }
+//RS }
+//RS 
+//RS fn web_optional_string_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: Option<String>,
+//RS ) -> i64 {
+//RS     match value {
+//RS         Some(value) => {
+//RS             let value = rt.heap.alloc_string(value);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS         }
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     }
+//RS }
+//RS 
+//RS fn web_navigation_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: &web_rt::JetWebNavigationState,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(8);
+//RS     let status = web_enum_handle(rt, web_navigation_status(state.status));
+//RS     let current = match state.current.as_ref() {
+//RS         Some(navigation) => {
+//RS             let navigation = web_navigation_handle(rt, navigation);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, navigation as u64)
+//RS         }
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     };
+//RS     let data = rt.heap.alloc_string(state.data.clone());
+//RS     let error = rt.heap.alloc_string(state.error.clone());
+//RS     let pending_boundary_id = web_optional_string_handle(
+//RS         rt,
+//RS         state
+//RS             .pending_boundary_id
+//RS             .as_ref()
+//RS             .map(|boundary| boundary.as_str().to_string()),
+//RS     );
+//RS     let error_boundary_id = web_optional_string_handle(
+//RS         rt,
+//RS         state
+//RS             .error_boundary_id
+//RS             .as_ref()
+//RS             .map(|boundary| boundary.as_str().to_string()),
+//RS     );
+//RS     let island_identity = web_optional_string_handle(
+//RS         rt,
+//RS         state.island_identity.as_ref().map(|identity| identity.compact()),
+//RS     );
+//RS     let hydration_trigger = web_optional_string_handle(
+//RS         rt,
+//RS         state
+//RS             .hydration_trigger
+//RS             .map(|trigger| trigger.as_str().to_string()),
+//RS     );
+//RS     let _ = rt.heap.record_set_int(value, 0, status);
+//RS     let _ = rt.heap.record_set_int(value, 1, current);
+//RS     let _ = rt.heap.record_set_string(value, 2, data);
+//RS     let _ = rt.heap.record_set_string(value, 3, error);
+//RS     let _ = rt.heap.record_set_int(value, 4, pending_boundary_id);
+//RS     let _ = rt.heap.record_set_int(value, 5, error_boundary_id);
+//RS     let _ = rt.heap.record_set_int(value, 6, island_identity);
+//RS     let _ = rt.heap.record_set_int(value, 7, hydration_trigger);
+//RS     value
+//RS }
+//RS fn web_router_cache_status(status: web_rt::JetWebRouterCacheStatus) -> i64 {
+//RS     match status {
+//RS         web_rt::JetWebRouterCacheStatus::Fresh => 0,
+//RS         web_rt::JetWebRouterCacheStatus::Stale => 1,
+//RS         web_rt::JetWebRouterCacheStatus::Invalidated => 2,
+//RS         web_rt::JetWebRouterCacheStatus::Collected => 3,
+//RS     }
+//RS }
+//RS 
+//RS fn web_router_cache_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: &web_rt::JetWebRouterCacheState,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(5);
+//RS     let identity = rt.heap.alloc_string(state.identity.clone());
+//RS     let status = web_enum_handle(rt, web_router_cache_status(state.status));
+//RS     let data = rt.heap.alloc_string(state.data.clone());
+//RS     let dependencies = web_string_list_handle(rt, &state.dependencies);
+//RS     let generation = web_int_handle(rt, state.generation as i64);
+//RS     let _ = rt.heap.record_set_string(value, 0, identity);
+//RS     let _ = rt.heap.record_set_int(value, 1, status);
+//RS     let _ = rt.heap.record_set_string(value, 2, data);
+//RS     let _ = rt.heap.record_set_int(value, 3, dependencies);
+//RS     let _ = rt.heap.record_set_int(value, 4, generation);
+//RS     value
+//RS }
+//RS 
+//RS fn web_mutation_status(status: web_rt::JetWebMutationStatus) -> i64 {
+//RS     match status {
+//RS         web_rt::JetWebMutationStatus::Idle => 0,
+//RS         web_rt::JetWebMutationStatus::Pending => 1,
+//RS         web_rt::JetWebMutationStatus::Success => 2,
+//RS         web_rt::JetWebMutationStatus::Error => 3,
+//RS         web_rt::JetWebMutationStatus::Settled => 4,
+//RS     }
+//RS }
+//RS 
+//RS fn web_mutation_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: web_rt::JetWebMutationState,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(11);
+//RS     let status = web_enum_handle(rt, web_mutation_status(state.status));
+//RS     let generation = web_int_handle(rt, state.generation as i64);
+//RS     let optimistic = state.optimistic;
+//RS     let mutation_value = rt.heap.alloc_string(state.value);
+//RS     let result = rt.heap.alloc_string(state.result);
+//RS     let error = rt.heap.alloc_string(state.error);
+//RS     let context = rt.heap.alloc_string(state.context);
+//RS     let rollback = state.rollback;
+//RS     let paused = state.paused;
+//RS     let queued = web_int_handle(rt, state.queued as i64);
+//RS     let replayed = web_int_handle(rt, state.replayed as i64);
+//RS     let _ = rt.heap.record_set_int(value, 0, status);
+//RS     let _ = rt.heap.record_set_int(value, 1, generation);
+//RS     let _ = rt.heap.record_set_bool(value, 2, optimistic);
+//RS     let _ = rt.heap.record_set_string(value, 3, mutation_value);
+//RS     let _ = rt.heap.record_set_string(value, 4, result);
+//RS     let _ = rt.heap.record_set_string(value, 5, error);
+//RS     let _ = rt.heap.record_set_string(value, 6, context);
+//RS     let _ = rt.heap.record_set_bool(value, 7, rollback);
+//RS     let _ = rt.heap.record_set_bool(value, 8, paused);
+//RS     let _ = rt.heap.record_set_int(value, 9, queued);
+//RS     let _ = rt.heap.record_set_int(value, 10, replayed);
+//RS     value
+//RS }
+//RS 
+//RS fn web_query_status(status: web_rt::JetWebQueryStatus) -> i64 {
+//RS     match status {
+//RS         web_rt::JetWebQueryStatus::Pending => 0,
+//RS         web_rt::JetWebQueryStatus::Fresh => 1,
+//RS         web_rt::JetWebQueryStatus::Stale => 2,
+//RS         web_rt::JetWebQueryStatus::Fetching => 3,
+//RS         web_rt::JetWebQueryStatus::Error => 4,
+//RS         web_rt::JetWebQueryStatus::Offline => 5,
+//RS     }
+//RS }
+//RS fn web_query_mode(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     mode: i64,
+//RS ) -> web_rt::JetWebQueryNetworkMode {
+//RS     match rt.heap.record_get_int(mode, 0).unwrap_or(0) {
+//RS         1 => web_rt::JetWebQueryNetworkMode::Always,
+//RS         2 => web_rt::JetWebQueryNetworkMode::OfflineFirst,
+//RS         _ => web_rt::JetWebQueryNetworkMode::Online,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn web_query_state_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: web_rt::JetWebQueryState,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(6);
+//RS     let status = web_enum_handle(rt, web_query_status(state.status));
+//RS     let query_value = rt.heap.alloc_string(state.value);
+//RS     let error = rt.heap.alloc_string(state.error);
+//RS     let generation = web_int_handle(rt, state.generation as i64);
+//RS     let queued = web_int_handle(rt, state.queued as i64);
+//RS     let _ = rt.heap.record_set_int(value, 0, status);
+//RS     let _ = rt.heap.record_set_string(value, 1, query_value);
+//RS     let _ = rt.heap.record_set_string(value, 2, error);
+//RS     let _ = rt.heap.record_set_int(value, 3, generation);
+//RS     let _ = rt.heap.record_set_int(value, 4, queued);
+//RS     let _ = rt.heap.record_set_bool(value, 5, state.offline);
+//RS     value
+//RS }
+//RS 
+//RS fn web_virtual_window_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     window: &web_rt::JetWebVirtualWindow,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(9);
+//RS     let fields = [
+//RS         window.total_count,
+//RS         window.scroll_offset,
+//RS         window.viewport_size,
+//RS         window.estimated_item_size,
+//RS         window.overscan,
+//RS         window.start,
+//RS         window.end,
+//RS         window.total_size,
+//RS         window.measured_count,
+//RS     ];
+//RS     for (index, field) in fields.into_iter().enumerate() {
+//RS         let field = web_int_handle(rt, field);
+//RS         let _ = rt.heap.record_set_int(value, index as i64, field);
+//RS     }
+//RS     value
+//RS }
+//RS 
+//RS fn web_virtual_window_value(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS ) -> Option<web_rt::JetWebVirtualWindow> {
+//RS     let mut fields = [0_i64; 9];
+//RS     for (index, field) in fields.iter_mut().enumerate() {
+//RS         let raw = rt.heap.record_get_int(value, index as i64)?;
+//RS         *field = web_int_value(rt, raw);
+//RS     }
+//RS     Some(web_rt::JetWebVirtualWindow {
+//RS         total_count: fields[0],
+//RS         scroll_offset: fields[1],
+//RS         viewport_size: fields[2],
+//RS         estimated_item_size: fields[3],
+//RS         overscan: fields[4],
+//RS         start: fields[5],
+//RS         end: fields[6],
+//RS         total_size: fields[7],
+//RS         measured_count: fields[8],
+//RS     })
+//RS }
+//RS fn jet_jit_web_virtual_window_facts(window: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let facts = web_virtual_window_value(rt, window)
+//RS             .map(|window| window.facts_json())
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_string(facts)
+//RS     })
+//RS }
+//RS 
+//RS fn web_virtual_plan_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     plan: &web_rt::JetWebVirtualPlan,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(13);
+//RS     let fields = [
+//RS         plan.total_count, plan.scroll_offset, plan.viewport_width, plan.viewport_height,
+//RS         plan.estimated_item_size, plan.overscan, plan.start, plan.end, plan.total_size,
+//RS         plan.measured_count, plan.anchor_index, plan.anchor_offset,
+//RS     ];
+//RS     for (index, field) in fields.into_iter().enumerate() {
+//RS         let field = web_int_handle(rt, field);
+//RS         let _ = rt.heap.record_set_int(value, index as i64, field);
+//RS     }
+//RS     let measurements = rt.heap.alloc_empty_list();
+//RS     for (index, size) in &plan.measurements {
+//RS         let measurement = rt.heap.alloc_record(2);
+//RS         let index = web_int_handle(rt, *index);
+//RS         let size = web_int_handle(rt, *size);
+//RS         let _ = rt.heap.record_set_int(measurement, 0, index);
+//RS         let _ = rt.heap.record_set_int(measurement, 1, size);
+//RS         let _ = rt.heap.list_push_int(measurements, measurement);
+//RS     }
+//RS     let _ = rt.heap.record_set_int(value, 12, measurements);
+//RS     value
+//RS }
+//RS 
+//RS fn web_virtual_measurements(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS ) -> Option<Vec<(i64, i64)>> {
+//RS     (0..rt.heap.list_len(list)?).map(|index| {
+//RS         let measurement = rt.heap.list_get_int(list, index)?;
+//RS         let index = rt.heap.record_get_int(measurement, 0)?;
+//RS         let size = rt.heap.record_get_int(measurement, 1)?;
+//RS         Some((web_int_value(rt, index), web_int_value(rt, size)))
+//RS     }).collect()
+//RS }
+//RS 
+//RS fn web_virtual_plan_value(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS ) -> Option<web_rt::JetWebVirtualPlan> {
+//RS     let mut fields = [0_i64; 12];
+//RS     for (index, field) in fields.iter_mut().enumerate() {
+//RS         *field = web_int_value(rt, rt.heap.record_get_int(value, index as i64)?);
+//RS     }
+//RS     Some(web_rt::JetWebVirtualPlan {
+//RS         total_count: fields[0],
+//RS         scroll_offset: fields[1],
+//RS         viewport_width: fields[2],
+//RS         viewport_height: fields[3],
+//RS         estimated_item_size: fields[4],
+//RS         overscan: fields[5],
+//RS         start: fields[6],
+//RS         end: fields[7],
+//RS         total_size: fields[8],
+//RS         measured_count: fields[9],
+//RS         anchor_index: fields[10],
+//RS         anchor_offset: fields[11],
+//RS         measurements: web_virtual_measurements(rt, rt.heap.record_get_int(value, 12)?)?,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan(
+//RS     total: i64, offset: i64, width: i64, height: i64, estimate: i64, overscan: i64,
+//RS ) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let plan = web_rt::jet_web_virtual_plan(total, offset, width, height, estimate, overscan);
+//RS         web_virtual_plan_handle(rt, &plan)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_measured(
+//RS     total: i64, offset: i64, width: i64, height: i64, estimate: i64, overscan: i64,
+//RS     measurements: i64,
+//RS ) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let measurements = web_virtual_measurements(rt, measurements)
+//RS             .expect("Web virtual measurements require checked row carriers");
+//RS         let plan = web_rt::jet_web_virtual_plan_measured(
+//RS             total, offset, width, height, estimate, overscan, &measurements,
+//RS         );
+//RS         web_virtual_plan_handle(rt, &plan)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_from_sizes(
+//RS     total: i64, offset: i64, width: i64, height: i64, estimate: i64, overscan: i64,
+//RS     sizes: i64,
+//RS ) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let sizes = web_raw_list(rt, sizes)
+//RS             .expect("Web virtual sizes require a checked Int list")
+//RS             .into_iter().map(|raw| web_int_value(rt, raw)).collect();
+//RS         let plan = web_rt::jet_web_virtual_plan_from_sizes(
+//RS             total, offset, width, height, estimate, overscan, &sizes,
+//RS         );
+//RS         web_virtual_plan_handle(rt, &plan)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_measure(plan: i64, index: i64, size: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let plan = web_virtual_plan_value(rt, plan)
+//RS             .expect("Web virtual plan requires its checked record carrier");
+//RS         let plan = web_rt::jet_web_virtual_plan_measure(
+//RS             &plan, index, size,
+//RS         );
+//RS         web_virtual_plan_handle(rt, &plan)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_slice(rows: i64, plan: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let plan = web_virtual_plan_value(rt, plan)
+//RS             .expect("Web virtual plan requires its checked record carrier");
+//RS         let rows = rt.heap.list_value(rows)
+//RS             .expect("Web virtual rows require an initialized list carrier");
+//RS         let values = match rows {
+//RS             jet_rt::JetVal::IntList(rows) => {
+//RS                 let values = web_rt::jet_web_virtual_plan_slice(rows, &plan);
+//RS                 return rt.heap.alloc_int_list(values);
+//RS             }
+//RS             jet_rt::JetVal::List(rows) | jet_rt::JetVal::UninitList { values: rows, .. } =>
+//RS                 web_rt::jet_web_virtual_plan_slice(rows, &plan),
+//RS             _ => unreachable!("list_value only returns initialized list carriers"),
+//RS         };
+//RS         rt.heap.alloc_list_values(values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_indices(plan: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let plan = web_virtual_plan_value(rt, plan)
+//RS             .expect("Web virtual plan requires its checked record carrier");
+//RS         let values = web_rt::jet_web_virtual_plan_indices(&plan).into_iter()
+//RS             .map(|index| web_int_handle(rt, index)).collect();
+//RS         web_raw_list_handle(rt, values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_facts(plan: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let plan = web_virtual_plan_value(rt, plan)
+//RS             .expect("Web virtual plan requires its checked record carrier");
+//RS         rt.heap.alloc_string(web_rt::jet_web_virtual_plan_facts(&plan))
+//RS     })
+//RS }
+//RS 
+//RS fn web_virtual_plan_viewport(handle: i64) -> web_rt::JetWebVirtualPlanViewport {
+//RS     with_rt(|rt| rt.web.virtual_plan_viewports.get(handle.wrapping_sub(1) as usize).cloned())
+//RS         .expect("Web virtual viewport requires its registered owner")
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_viewport(plan: i64) -> i64 {
+//RS     let plan = with_rt(|rt| web_virtual_plan_value(rt, plan))
+//RS         .expect("Web virtual plan requires its checked record carrier");
+//RS     let viewport = web_rt::jet_web_virtual_plan_viewport(plan);
+//RS     with_rt(|rt| {
+//RS         rt.web.virtual_plan_viewports.push(viewport);
+//RS         rt.web.virtual_plan_viewports.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_viewport_state(viewport: i64) -> i64 {
+//RS     let plan = web_rt::jet_web_virtual_plan_viewport_state(&web_virtual_plan_viewport(viewport));
+//RS     with_rt(|rt| web_virtual_plan_handle(rt, &plan))
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_scroll_to(viewport: i64, offset: i64) {
+//RS     let viewport = web_virtual_plan_viewport(viewport);
+//RS     web_rt::jet_web_virtual_plan_scroll_to(&viewport, offset);
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_resize(viewport: i64, width: i64, height: i64) {
+//RS     let viewport = web_virtual_plan_viewport(viewport);
+//RS     web_rt::jet_web_virtual_plan_resize(&viewport, width, height);
+//RS }
+//RS 
+//RS fn jet_jit_web_virtual_plan_viewport_measure(viewport: i64, index: i64, size: i64) {
+//RS     let viewport = web_virtual_plan_viewport(viewport);
+//RS     web_rt::jet_web_virtual_plan_viewport_measure(&viewport, index, size);
+//RS }
+//RS 
+//RS fn web_table_page_handle(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     page: &web_rt::JetWebTablePage<i64>,
+//RS ) -> i64 {
+//RS     let value = rt.heap.alloc_record(6);
+//RS     let rows = web_raw_list_handle(rt, page.rows.clone());
+//RS     let row_keys = web_string_list_handle(rt, &page.row_keys);
+//RS     let total_rows = web_int_handle(rt, page.total_rows);
+//RS     let page_index = web_int_handle(rt, page.page_index);
+//RS     let page_size = web_int_handle(rt, page.page_size);
+//RS     let page_count = web_int_handle(rt, page.page_count);
+//RS     let _ = rt.heap.record_set_int(value, 0, rows);
+//RS     let _ = rt.heap.record_set_int(value, 1, row_keys);
+//RS     let _ = rt.heap.record_set_int(value, 2, total_rows);
+//RS     let _ = rt.heap.record_set_int(value, 3, page_index);
+//RS     let _ = rt.heap.record_set_int(value, 4, page_size);
+//RS     let _ = rt.heap.record_set_int(value, 5, page_count);
+//RS     value
+//RS }
+//RS 
+//RS fn web_callable(handle: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     with_rt(|rt| crate::runtime_host::jit_callable_parts(rt, handle))
+//RS }
+//RS 
+//RS fn web_invoke_string(
+//RS     slot: crate::runtime_host::JitCallableSlot,
+//RS     value: i64,
+//RS ) -> String {
+//RS     let result = crate::runtime_host::invoke_universal_unary(slot, value)
+//RS         .expect("Web callback requires its checked unary thunk");
+//RS     with_rt(|rt| rt.heap.clone_string(result)
+//RS         .expect("Web string callback returned an invalid String carrier"))
+//RS }
+//RS 
+//RS fn web_invoke_bool(
+//RS     slot: crate::runtime_host::JitCallableSlot,
+//RS     value: i64,
+//RS ) -> bool {
+//RS     crate::runtime_host::invoke_universal_unary(slot, value)
+//RS         .expect("Web callback requires its checked unary thunk") != 0
+//RS }
+//RS 
+//RS unsafe fn web_invoke_unit(
+//RS     slot: crate::runtime_host::JitCallableSlot,
+//RS     value: i64,
+//RS ) {
+//RS     if slot.has_env {
+//RS         let callback: unsafe extern "C" fn(i64, i64) =
+//RS             std::mem::transmute(slot.fn_ptr as usize);
+//RS         callback(slot.env, value);
+//RS     } else {
+//RS         let callback: unsafe extern "C" fn(i64) =
+//RS             std::mem::transmute(slot.fn_ptr as usize);
+//RS         callback(value);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_web_router_new() -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.web.routers.push(web_rt::jet_web_router_new());
+//RS         rt.web.routers.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_router_navigate(router: i64, url: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned();
+//RS         let url = rt.heap.clone_string(url).unwrap_or_default();
+//RS         let Some(router) = router else {
+//RS             return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS         };
+//RS         match web_rt::jet_web_router_navigate(&router, url) {
+//RS             Ok(navigation) => {
+//RS                 let navigation = web_navigation_handle(rt, &navigation);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, navigation as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let message = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, message as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_preload(router: i64, url: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned();
+//RS         let url = rt.heap.clone_string(url).unwrap_or_default();
+//RS         let Some(router) = router else {
+//RS             return crate::runtime_host::alloc_jit_result(rt, false, 0);
+//RS         };
+//RS         match web_rt::jet_web_router_preload(&router, url) {
+//RS             Ok(navigation) => {
+//RS                 let navigation = web_navigation_handle(rt, &navigation);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, navigation as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let message = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, message as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_current(router: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         web_navigation_state_handle(rt, &web_rt::jet_web_router_current(&router))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_show(router: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_string(web_rt::jet_web_router_show(&router))
+//RS     })
+//RS }
+//RS fn jet_jit_web_router_abort(router: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         i64::from(web_rt::jet_web_router_abort(&router))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_stale(router: i64, identity: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(router) = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS         else {
+//RS             return 0;
+//RS         };
+//RS         let identity = rt.heap.clone_string(identity).unwrap_or_default();
+//RS         web_rt::jet_web_router_stale(&router, identity)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_invalidate(router: i64, identity: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(router) = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS         else {
+//RS             return 0;
+//RS         };
+//RS         let identity = rt.heap.clone_string(identity).unwrap_or_default();
+//RS         web_rt::jet_web_router_invalidate(&router, identity)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_collect(router: i64, identity: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(router) = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS         else {
+//RS             return 0;
+//RS         };
+//RS         let identity = rt.heap.clone_string(identity).unwrap_or_default();
+//RS         web_rt::jet_web_router_collect(&router, identity)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_cache_state(router: i64, identity: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let identity = rt.heap.clone_string(identity).unwrap_or_default();
+//RS         let state = web_rt::jet_web_router_cache_state(&router, identity);
+//RS         web_router_cache_state_handle(rt, &state)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_cache_show(router: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         rt.heap.alloc_string(web_rt::jet_web_router_cache_show(&router))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_router_link(router: i64, pattern: i64, params: i64, search: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let router = rt
+//RS             .web
+//RS             .routers
+//RS             .get(router.saturating_sub(1) as usize)
+//RS             .cloned()
+//RS             .unwrap_or_default();
+//RS         let pattern = rt.heap.clone_string(pattern).unwrap_or_default();
+//RS         let params = web_string_map(rt, params).unwrap_or_default();
+//RS         let search = web_string_map(rt, search).unwrap_or_default();
+//RS         match web_rt::jet_web_router_link(&router, pattern, params, search) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = rt.heap.alloc_string(error);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn web_query(query: i64) -> web_rt::JetWebQuery {
+//RS     with_rt(|rt| {
+//RS         rt.web.queries.get(query.saturating_sub(1) as usize)
+//RS             .cloned().expect("checked WebQuery handle")
+//RS     })
+//RS }
+//RS 
+//RS fn web_query_handle(query: web_rt::JetWebQuery) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.web.queries.push(query);
+//RS         rt.web.queries.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn web_record_text(rt: &crate::runtime_host::JitRuntime, record: i64, field: i64) -> String {
+//RS     match rt.heap.record_get(record, field) {
+//RS         Some(jet_rt::JetVal::String(value)) => value.clone(),
+//RS         _ => panic!("checked Web record string field"),
+//RS     }
+//RS }
+//RS 
+//RS fn web_record_integer(rt: &crate::runtime_host::JitRuntime, record: i64, field: i64) -> i64 {
+//RS     let value = rt.heap.record_get_int(record, field).expect("checked Web record integer field");
+//RS     web_int_value(rt, value)
+//RS }
+//RS 
+//RS fn web_query_state_value(rt: &crate::runtime_host::JitRuntime, value: i64) -> web_rt::JetWebQueryState {
+//RS     let status = rt.heap.record_get_int(value, 0).expect("checked Query status");
+//RS     let status = match rt.heap.record_get_int(status, 0) {
+//RS         Some(0) => web_rt::JetWebQueryStatus::Pending,
+//RS         Some(1) => web_rt::JetWebQueryStatus::Fresh,
+//RS         Some(2) => web_rt::JetWebQueryStatus::Stale,
+//RS         Some(3) => web_rt::JetWebQueryStatus::Fetching,
+//RS         Some(4) => web_rt::JetWebQueryStatus::Error,
+//RS         Some(5) => web_rt::JetWebQueryStatus::Offline,
+//RS         _ => panic!("checked Query status variant"),
+//RS     };
+//RS     web_rt::JetWebQueryState {
+//RS         status,
+//RS         value: web_record_text(rt, value, 1),
+//RS         error: web_record_text(rt, value, 2),
+//RS         generation: web_record_integer(rt, value, 3) as u64,
+//RS         queued: web_record_integer(rt, value, 4) as usize,
+//RS         offline: rt.heap.record_get_bool(value, 5).expect("checked Query offline field"),
+//RS     }
+//RS }
+//RS 
+//RS fn web_mutation_state_value(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     value: i64,
+//RS ) -> web_rt::JetWebMutationState {
+//RS     let status = rt.heap.record_get_int(value, 0).expect("checked mutation status");
+//RS     let status = match rt.heap.record_get_int(status, 0) {
+//RS         Some(0) => web_rt::JetWebMutationStatus::Idle,
+//RS         Some(1) => web_rt::JetWebMutationStatus::Pending,
+//RS         Some(2) => web_rt::JetWebMutationStatus::Success,
+//RS         Some(3) => web_rt::JetWebMutationStatus::Error,
+//RS         Some(4) => web_rt::JetWebMutationStatus::Settled,
+//RS         _ => panic!("checked mutation status variant"),
+//RS     };
+//RS     web_rt::JetWebMutationState {
+//RS         status,
+//RS         generation: web_record_integer(rt, value, 1) as u64,
+//RS         optimistic: rt.heap.record_get_bool(value, 2).expect("checked mutation optimistic field"),
+//RS         value: web_record_text(rt, value, 3),
+//RS         result: web_record_text(rt, value, 4),
+//RS         error: web_record_text(rt, value, 5),
+//RS         context: web_record_text(rt, value, 6),
+//RS         rollback: rt.heap.record_get_bool(value, 7).expect("checked mutation rollback field"),
+//RS         paused: rt.heap.record_get_bool(value, 8).expect("checked mutation paused field"),
+//RS         queued: web_record_integer(rt, value, 9) as usize,
+//RS         replayed: web_record_integer(rt, value, 10) as u64,
+//RS     }
+//RS }
+//RS 
+//RS fn web_optional_string_value(rt: &crate::runtime_host::JitRuntime, value: i64) -> Option<String> {
+//RS     let (present, value) = crate::runtime_host::jit_result_parts(rt, value)
+//RS         .expect("checked Web optional string");
+//RS     present.then(|| rt.heap.clone_string(value as i64).expect("checked Web optional string value"))
+//RS }
+//RS 
+//RS /// Keep the checked `Err` carrier structured until the shared Web kernel
+//RS /// boundary. The kernel still stores callback failures as `String`; the
+//RS /// `_for_kernel` helper below is the single intentional narrowing seam.
+//RS fn web_query_callback(
+//RS     callback: crate::runtime_host::JitCallableSlot,
+//RS     payload: i64,
+//RS ) -> Result<i64, jet_foundation::Outcome::JetErr> {
+//RS     let result = crate::runtime_host::invoke_universal_unary(callback, payload)
+//RS         .expect("checked Query callback thunk");
+//RS     with_rt(|rt| {
+//RS         let (ok, value) = crate::runtime_host::jit_result_parts(rt, result)
+//RS             .expect("checked Query callback outcome");
+//RS         if ok {
+//RS             Ok(value as i64)
+//RS         } else {
+//RS             Err(crate::runtime_host::jit_error(rt, value as i64)
+//RS                 .expect("checked Query callback default Err carrier"))
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn web_query_callback_for_kernel(
+//RS     callback: crate::runtime_host::JitCallableSlot,
+//RS     payload: i64,
+//RS ) -> Result<i64, String> {
+//RS     web_query_callback(callback, payload)
+//RS         .map_err(|error| jet_foundation::Outcome::jet_err_message(&error))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_state_signal(query: i64) -> i64 {
+//RS     let signal = web_rt::jet_web_query_state_signal(&web_query(query));
+//RS     let signal = crate::Reactive::SignalSlot::typed(
+//RS         signal,
+//RS         |state| with_rt(|rt| web_query_state_handle(rt, state)),
+//RS         |value| with_rt(|rt| web_query_state_value(rt, value)),
+//RS     );
+//RS     with_rt(|rt| {
+//RS         rt.reactive.signals.push(signal);
+//RS         rt.reactive.signals.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_query_mutation_signal(query: i64) -> i64 {
+//RS     let signal = web_rt::jet_web_query_mutation_signal(&web_query(query));
+//RS     let signal = crate::Reactive::SignalSlot::typed(
+//RS         signal,
+//RS         |state| with_rt(|rt| web_mutation_state_handle(rt, state)),
+//RS         |value| with_rt(|rt| web_mutation_state_value(rt, value)),
+//RS     );
+//RS     with_rt(|rt| {
+//RS         rt.reactive.signals.push(signal);
+//RS         rt.reactive.signals.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_web_query_mutate(query: i64, payload: i64, optimistic: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Query mutation callback");
+//RS     let (payload, optimistic) = with_rt(|rt| (
+//RS         rt.heap.clone_string(payload).expect("checked Query mutation payload"),
+//RS         web_optional_string_value(rt, optimistic),
+//RS     ));
+//RS     let state = web_rt::jet_web_query_mutate(&web_query(query), payload, optimistic, |payload| {
+//RS         let payload = with_rt(|rt| rt.heap.alloc_string(payload));
+//RS         let value = web_query_callback_for_kernel(callback, payload)?;
+//RS         Ok(with_rt(|rt| rt.heap.clone_string(value).expect("checked Query mutation response")))
+//RS     });
+//RS     with_rt(|rt| web_mutation_state_handle(rt, state))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_mutate_with_invalidations(
+//RS     query: i64, payload: i64, optimistic: i64, invalidations: i64, callback: i64,
+//RS ) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Query mutation callback");
+//RS     let (payload, optimistic, invalidations) = with_rt(|rt| (
+//RS         rt.heap.clone_string(payload).expect("checked Query mutation payload"),
+//RS         web_optional_string_value(rt, optimistic),
+//RS         web_string_list_value(rt, invalidations),
+//RS     ));
+//RS     let state = web_rt::jet_web_query_mutate_with_invalidations(
+//RS         &web_query(query), payload, optimistic, invalidations, |payload| {
+//RS             let payload = with_rt(|rt| rt.heap.alloc_string(payload));
+//RS             let value = web_query_callback_for_kernel(callback, payload)?;
+//RS             Ok(with_rt(|rt| rt.heap.clone_string(value).expect("checked Query mutation response")))
+//RS         },
+//RS     );
+//RS     with_rt(|rt| web_mutation_state_handle(rt, state))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_retry(query: i64, callback: i64) -> i64 {
+//RS     let callback = web_callable(callback).expect("checked Query retry callback");
+//RS     let result = web_rt::jet_web_query_retry(&web_query(query), |payload| {
+//RS         let payload = with_rt(|rt| rt.heap.alloc_string(payload));
+//RS         web_query_callback_for_kernel(callback, payload).map(|_| ())
+//RS     });
+//RS     web_result_handle(result, web_int_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_query_new(key: i64, live: i64) -> i64 {
+//RS     let key = with_rt(|rt| rt.heap.clone_string(key).expect("checked Query key"));
+//RS     web_query_handle(crate::Reactive::web_query_from_live(key, live))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_live(key: i64, footprint: i64, initial: i64, fetch: i64) -> i64 {
+//RS     let fetch = web_callable(fetch).expect("checked Query fetch callback");
+//RS     let (key, footprint, initial) = with_rt(|rt| (
+//RS         rt.heap.clone_string(key).expect("checked Query key"),
+//RS         rt.heap.clone_string(footprint).expect("checked Query footprint"),
+//RS         rt.heap.clone_string(initial).expect("checked Query initial value"),
+//RS     ));
+//RS     web_query_handle(web_rt::jet_web_query_live(key, footprint, initial, move || {
+//RS         let value = web_query_callback_for_kernel(fetch, 0)?;
+//RS         Ok(with_rt(|rt| rt.heap.clone_string(value).expect("checked Query fetch response")))
+//RS     }))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_subscribe(source: i64) -> i64 {
+//RS     let source = with_rt(|rt| rt.heap.clone_string(source).expect("checked Query source"));
+//RS     web_query_handle(web_rt::jet_web_query_subscribe(source))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_invalidate(query: i64) -> i64 {
+//RS     web_rt::jet_web_query_invalidate(&web_query(query))
+//RS }
+//RS fn jet_jit_web_query_cancel(query: i64) -> i64 {
+//RS     i64::from(web_rt::jet_web_query_cancel(&web_query(query)))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_query_get(query: i64) -> i64 {
+//RS     let value = web_rt::jet_web_query_get(&web_query(query));
+//RS     with_rt(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_state(query: i64) -> i64 {
+//RS     let state = web_rt::jet_web_query_state(&web_query(query));
+//RS     with_rt(|rt| web_query_state_handle(rt, state))
+//RS }
+//RS fn jet_jit_web_query_mutation_state(query: i64) -> i64 {
+//RS     let state = web_rt::jet_web_query_mutation_state(&web_query(query));
+//RS     with_rt(|rt| web_mutation_state_handle(rt, state))
+//RS }
+//RS 
+//RS fn jet_jit_web_query_show(query: i64) -> i64 {
+//RS     let value = web_rt::jet_web_query_show(&web_query(query));
+//RS     with_rt(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS fn jet_jit_web_query_facts(query: i64) -> i64 {
+//RS     let value = web_rt::jet_web_query_facts(&web_query(query));
+//RS     with_rt(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_query_queue(query: i64, payload: i64) -> i64 {
+//RS     let payload = with_rt(|rt| rt.heap.clone_string(payload).expect("checked Query queue payload"));
+//RS     web_result_handle(web_rt::jet_web_query_queue(&web_query(query), payload), web_int_handle)
+//RS }
+//RS 
+//RS fn jet_jit_web_query_refresh(query: i64) -> i64 {
+//RS     web_result_handle(web_rt::jet_web_query_refresh(&web_query(query)), |_, ()| 0)
+//RS }
+//RS fn jet_jit_web_query_set_online(query: i64, online: i64) {
+//RS     web_rt::jet_web_query_set_online(&web_query(query), online != 0);
+//RS }
+//RS 
+//RS fn jet_jit_web_query_set_mode(query: i64, mode: i64) {
+//RS     let mode = with_rt(|rt| web_query_mode(rt, mode));
+//RS     web_rt::jet_web_query_set_mode(&web_query(query), mode);
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_web_forms_new(action: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let action = rt.heap.clone_string(action).unwrap_or_default();
+//RS         rt.web.forms.push(web_rt::jet_web_forms_new(action));
+//RS         rt.web.forms.len() as i64
+//RS     })
+//RS }
+//RS 
+// END-PORT-PENDING 0238 crates/jet-jit/src/Web.rs:1-1796
+

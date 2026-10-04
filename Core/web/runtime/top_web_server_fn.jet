@@ -1,0 +1,1575 @@
+// PORT-PENDING 0312 crates-jet-codegen-src-prelude-corelib-top-webserverfn: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1-1571
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-SERVERFN1=A: one checked server-function boundary serves both a typed
+//RS // client call and a progressive form POST. App owns registration; this module
+//RS // owns the transport adapter, request context, policy facts, and state.
+//RS 
+//RS use std::collections::{BTreeMap, BTreeSet};
+//RS use std::fmt;
+//RS use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS use std::time::{Duration, Instant};
+//RS 
+//RS const JET_WEB_SERVER_FN_MAX_NAME: usize = 128;
+//RS const JET_WEB_SERVER_FN_MAX_TYPE: usize = 256;
+//RS const JET_WEB_SERVER_FN_MAX_BODY: usize = 4 * 1024 * 1024;
+//RS const JET_WEB_SERVER_FN_MAX_FORM_FIELDS: usize = 256;
+//RS const JET_WEB_SERVER_FN_MAX_FORM_VALUE: usize = 64 * 1024;
+//RS const JET_WEB_SERVER_FN_MAX_MIDDLEWARE: usize = 64;
+//RS 
+//RS static JET_WEB_SERVER_FN_REQUESTS: AtomicU64 = AtomicU64::new(1);
+//RS 
+//RS fn jet_web_server_fn_clean(value: &str, limit: usize) -> String {
+//RS     let mut result = String::with_capacity(value.len().min(limit));
+//RS     for character in value.chars() {
+//RS         if result.len() >= limit {
+//RS             break;
+//RS         }
+//RS         if character.is_control() {
+//RS             result.push(' ');
+//RS         } else {
+//RS             result.push(character);
+//RS         }
+//RS     }
+//RS     result.trim().to_string()
+//RS }
+//RS 
+//RS fn jet_web_server_fn_json_string(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len().saturating_add(2));
+//RS     out.push('"');
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 use std::fmt::Write;
+//RS                 let _ = write!(out, "\\u{:04x}", character as u32);
+//RS             }
+//RS             character => out.push(character),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_web_server_fn_next_request_id() -> String {
+//RS     let number = JET_WEB_SERVER_FN_REQUESTS.fetch_add(1, Ordering::Relaxed);
+//RS     format!("jet-sfn-{number:016x}")
+//RS }
+//RS 
+//RS fn jet_web_server_fn_valid_token(value: &str, limit: usize) -> bool {
+//RS     !value.is_empty()
+//RS         && value.len() <= limit
+//RS         && value.chars().all(|character| {
+//RS             character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '/')
+//RS         })
+//RS }
+//RS 
+//RS fn jet_web_server_fn_is_mutating(method: &str) -> bool {
+//RS     matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebServerFnCallStatus {
+//RS     Idle,
+//RS     Pending,
+//RS     Success,
+//RS     Error,
+//RS     Cancelled,
+//RS     TimedOut,
+//RS     Uncertain,
+//RS }
+//RS 
+//RS impl JetWebServerFnCallStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Idle => "idle",
+//RS             Self::Pending => "pending",
+//RS             Self::Success => "success",
+//RS             Self::Error => "error",
+//RS             Self::Cancelled => "cancelled",
+//RS             Self::TimedOut => "timed_out",
+//RS             Self::Uncertain => "uncertain_completion",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_server_fn_origin_matches_host(origin: &str, host: Option<&str>) -> bool {
+//RS     if origin == "same-origin" {
+//RS         return true;
+//RS     }
+//RS     let Some(host) = host else {
+//RS         return false;
+//RS     };
+//RS     let authority = origin
+//RS         .strip_prefix("https://")
+//RS         .or_else(|| origin.strip_prefix("http://"))
+//RS         .unwrap_or(origin)
+//RS         .split('/')
+//RS         .next()
+//RS         .unwrap_or_default();
+//RS     !authority.is_empty() && authority.eq_ignore_ascii_case(host)
+//RS }
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebServerFnRetryPolicy {
+//RS     None,
+//RS     Safe { max_attempts: u32 },
+//RS     Idempotent { max_attempts: u32 },
+//RS }
+//RS 
+//RS impl JetWebServerFnRetryPolicy {
+//RS     fn bounded_attempts(self) -> u32 {
+//RS         match self {
+//RS             Self::None => 1,
+//RS             Self::Safe { max_attempts } | Self::Idempotent { max_attempts } => {
+//RS                 max_attempts.max(1).min(8)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::None => "none",
+//RS             Self::Safe { .. } => "safe",
+//RS             Self::Idempotent { .. } => "idempotent",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetWebServerFnCsrfPolicy {
+//RS     SameOrigin {
+//RS         expected_origin: Option<String>,
+//RS         token: Option<String>,
+//RS     },
+//RS     Disabled,
+//RS }
+//RS 
+//RS impl Default for JetWebServerFnCsrfPolicy {
+//RS     fn default() -> Self {
+//RS         Self::SameOrigin {
+//RS             expected_origin: None,
+//RS             token: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebServerFnSpec {
+//RS     pub name: String,
+//RS     pub endpoint: String,
+//RS     pub source_id: String,
+//RS     pub method: String,
+//RS     pub input_type: String,
+//RS     pub output_type: String,
+//RS     pub error_type: String,
+//RS     pub csrf: JetWebServerFnCsrfPolicy,
+//RS     pub capability: Option<String>,
+//RS     pub effects: Vec<String>,
+//RS     pub revalidate: Vec<String>,
+//RS     pub timeout_ms: Option<u64>,
+//RS     pub retry: JetWebServerFnRetryPolicy,
+//RS     pub idempotency_declared: bool,
+//RS }
+//RS 
+//RS impl JetWebServerFnSpec {
+//RS     pub fn mutating(&self) -> bool {
+//RS         jet_web_server_fn_is_mutating(&self.method)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebServerFnState {
+//RS     pub status: JetWebServerFnCallStatus,
+//RS     pub request_id: String,
+//RS     pub endpoint: String,
+//RS     pub source_id: String,
+//RS     pub method: String,
+//RS     pub attempts: u32,
+//RS     pub retry_policy: String,
+//RS     pub idempotency_key: Option<String>,
+//RS     pub result: String,
+//RS     pub error: String,
+//RS     pub middleware: Vec<String>,
+//RS     pub revalidate: Vec<String>,
+//RS }
+//RS 
+//RS impl JetWebServerFnState {
+//RS     fn idle(spec: &JetWebServerFnSpec) -> Self {
+//RS         Self {
+//RS             status: JetWebServerFnCallStatus::Idle,
+//RS             request_id: String::new(),
+//RS             endpoint: spec.endpoint.clone(),
+//RS             source_id: spec.source_id.clone(),
+//RS             method: spec.method.clone(),
+//RS             attempts: 0,
+//RS             retry_policy: spec.retry.name().to_string(),
+//RS             idempotency_key: None,
+//RS             result: String::new(),
+//RS             error: String::new(),
+//RS             middleware: Vec::new(),
+//RS             revalidate: spec.revalidate.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetWebServerFnRequestContext {
+//RS     pub request_id: String,
+//RS     pub source_id: String,
+//RS     pub endpoint: String,
+//RS     pub method: String,
+//RS     pub origin: Option<String>,
+//RS     pub host: Option<String>,
+//RS     pub auth_subject: Option<String>,
+//RS     pub capabilities: BTreeSet<String>,
+//RS     pub csrf_token: Option<String>,
+//RS     pub idempotency_key: Option<String>,
+//RS     pub cancellation: Arc<AtomicBool>,
+//RS     pub deadline: Option<Instant>,
+//RS }
+//RS 
+//RS impl JetWebServerFnRequestContext {
+//RS     pub fn checked(
+//RS         request_id: String,
+//RS         source_id: String,
+//RS         endpoint: String,
+//RS         method: String,
+//RS         origin: Option<String>,
+//RS         host: Option<String>,
+//RS         auth_subject: Option<String>,
+//RS         capabilities: BTreeSet<String>,
+//RS         csrf_token: Option<String>,
+//RS         idempotency_key: Option<String>,
+//RS         timeout_ms: Option<u64>,
+//RS     ) -> Result<Self, JetWebServerFnError> {
+//RS         if !jet_web_server_fn_valid_token(&request_id, 128)
+//RS             || !jet_web_server_fn_valid_token(&source_id, 256)
+//RS             || endpoint.is_empty()
+//RS             || method.is_empty()
+//RS             || idempotency_key
+//RS                 .as_deref()
+//RS                 .is_some_and(|key| !jet_web_server_fn_valid_token(key, 512))
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidContext);
+//RS         }
+//RS         Ok(Self {
+//RS             request_id,
+//RS             source_id,
+//RS             endpoint,
+//RS             method,
+//RS             origin,
+//RS             host,
+//RS             auth_subject,
+//RS             capabilities,
+//RS             csrf_token,
+//RS             idempotency_key,
+//RS             cancellation: Arc::new(AtomicBool::new(false)),
+//RS             deadline: timeout_ms
+//RS                 .map(|milliseconds| Instant::now() + Duration::from_millis(milliseconds)),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn cancelled(&self) -> bool {
+//RS         self.cancellation.load(Ordering::Acquire)
+//RS     }
+//RS 
+//RS     pub fn cancel(&self) {
+//RS         self.cancellation.store(true, Ordering::Release);
+//RS     }
+//RS 
+//RS     fn check_live(&self) -> Result<(), JetWebServerFnError> {
+//RS         if self.cancelled() {
+//RS             return Err(JetWebServerFnError::Cancelled);
+//RS         }
+//RS         if self.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+//RS             return Err(JetWebServerFnError::TimedOut);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetWebServerFnRequest {
+//RS     pub method: String,
+//RS     pub path: String,
+//RS     pub content_type: String,
+//RS     pub body: String,
+//RS     pub headers: BTreeMap<String, String>,
+//RS     pub context: JetWebServerFnRequestContext,
+//RS }
+//RS 
+//RS impl JetWebServerFnRequest {
+//RS     pub fn json(
+//RS         method: String,
+//RS         path: String,
+//RS         body: String,
+//RS         context: JetWebServerFnRequestContext,
+//RS     ) -> Self {
+//RS         let mut headers = BTreeMap::new();
+//RS         headers.insert("content-type".to_string(), "application/json".to_string());
+//RS         Self {
+//RS             method,
+//RS             path,
+//RS             content_type: "application/json".to_string(),
+//RS             body,
+//RS             headers,
+//RS             context,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn progressive(
+//RS         method: String,
+//RS         path: String,
+//RS         body: String,
+//RS         context: JetWebServerFnRequestContext,
+//RS     ) -> Self {
+//RS         let mut headers = BTreeMap::new();
+//RS         headers.insert(
+//RS             "content-type".to_string(),
+//RS             "application/x-www-form-urlencoded".to_string(),
+//RS         );
+//RS         Self {
+//RS             method,
+//RS             path,
+//RS             content_type: "application/x-www-form-urlencoded".to_string(),
+//RS             body,
+//RS             headers,
+//RS             context,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebServerFnResponse {
+//RS     pub status: u16,
+//RS     pub body: String,
+//RS     pub content_type: String,
+//RS     pub request_id: String,
+//RS     pub middleware: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebServerFnFormSubmission {
+//RS     pub method: String,
+//RS     pub action: String,
+//RS     pub content_type: String,
+//RS     pub body: String,
+//RS     pub pending: bool,
+//RS     pub revalidate: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub enum JetWebServerFnError {
+//RS     InvalidDefinition(String),
+//RS     InvalidContext,
+//RS     InvalidInput(String),
+//RS     InvalidOutput,
+//RS     MethodNotAllowed { expected: String, actual: String },
+//RS     EndpointNotFound,
+//RS     UnsupportedMediaType,
+//RS     Csrf(String),
+//RS     Unauthorized,
+//RS     Forbidden(String),
+//RS     Cancelled,
+//RS     TimedOut,
+//RS     RetryExhausted,
+//RS     UncertainCompletion { request_id: String },
+//RS     DuplicateRequest,
+//RS     Handler { code: String, message: String },
+//RS     Transport {
+//RS         code: String,
+//RS         message: String,
+//RS         dispatched: bool,
+//RS     },
+//RS }
+//RS 
+//RS impl JetWebServerFnError {
+//RS     fn code(&self) -> &'static str {
+//RS         match self {
+//RS             Self::InvalidDefinition(_) => "invalid_definition",
+//RS             Self::InvalidContext => "invalid_context",
+//RS             Self::InvalidInput(_) => "invalid_input",
+//RS             Self::InvalidOutput => "invalid_output",
+//RS             Self::MethodNotAllowed { .. } => "method_not_allowed",
+//RS             Self::EndpointNotFound => "endpoint_not_found",
+//RS             Self::UnsupportedMediaType => "unsupported_media_type",
+//RS             Self::Csrf(_) => "csrf_rejected",
+//RS             Self::Unauthorized => "unauthorized",
+//RS             Self::Forbidden(_) => "forbidden",
+//RS             Self::Cancelled => "cancelled",
+//RS             Self::TimedOut => "timed_out",
+//RS             Self::RetryExhausted => "retry_exhausted",
+//RS             Self::UncertainCompletion { .. } => "uncertain_completion",
+//RS             Self::DuplicateRequest => "duplicate_request",
+//RS             Self::Handler { .. } => "handler_error",
+//RS             Self::Transport { .. } => "transport_error",
+//RS         }
+//RS     }
+//RS 
+//RS     fn status(&self) -> u16 {
+//RS         match self {
+//RS             Self::InvalidDefinition(_) | Self::InvalidContext => 500,
+//RS             Self::InvalidInput(_) | Self::UnsupportedMediaType => 400,
+//RS             Self::InvalidOutput => 500,
+//RS             Self::MethodNotAllowed { .. } => 405,
+//RS             Self::EndpointNotFound => 404,
+//RS             Self::Csrf(_) => 403,
+//RS             Self::Unauthorized => 401,
+//RS             Self::Forbidden(_) => 403,
+//RS             Self::Cancelled => 499,
+//RS             Self::TimedOut => 504,
+//RS             Self::RetryExhausted => 503,
+//RS             Self::UncertainCompletion { .. } => 504,
+//RS             Self::DuplicateRequest => 409,
+//RS             Self::Handler { .. } => 422,
+//RS             Self::Transport { .. } => 502,
+//RS         }
+//RS     }
+//RS 
+//RS     fn public_message(&self) -> String {
+//RS         match self {
+//RS             Self::InvalidDefinition(message)
+//RS             | Self::InvalidInput(message)
+//RS             | Self::Csrf(message)
+//RS             | Self::Forbidden(message) => jet_web_server_fn_clean(message, 512),
+//RS             Self::MethodNotAllowed { .. } => "the server function does not accept this method".to_string(),
+//RS             Self::EndpointNotFound => "the server function endpoint was not found".to_string(),
+//RS             Self::UnsupportedMediaType => "the server function body format is not supported".to_string(),
+//RS             Self::InvalidOutput => "the server function returned an invalid wire value".to_string(),
+//RS             Self::InvalidContext => "the request context is invalid".to_string(),
+//RS             Self::Unauthorized => "authentication is required".to_string(),
+//RS             Self::Cancelled => "the server function call was cancelled".to_string(),
+//RS             Self::TimedOut => "the server function call timed out".to_string(),
+//RS             Self::RetryExhausted => "the server function retry policy was exhausted".to_string(),
+//RS             Self::UncertainCompletion { .. } => "the server may have completed the call".to_string(),
+//RS             Self::DuplicateRequest => "the idempotency key was already used".to_string(),
+//RS             Self::Handler { message, .. } => jet_web_server_fn_clean(message, 512),
+//RS             Self::Transport { message, .. } => jet_web_server_fn_clean(message, 512),
+//RS         }
+//RS     }
+//RS 
+//RS     fn dispatched(&self) -> bool {
+//RS         matches!(self, Self::Transport { dispatched: true, .. })
+//RS     }
+//RS 
+//RS     fn structured(&self, request_id: &str) -> String {
+//RS         let mut fields = vec![
+//RS             format!("\"schema\":\"jet.web.server-fn/v1\""),
+//RS             format!("\"code\":{}", jet_web_server_fn_json_string(self.code())),
+//RS             format!("\"message\":{}", jet_web_server_fn_json_string(&self.public_message())),
+//RS             format!("\"request_id\":{}", jet_web_server_fn_json_string(request_id)),
+//RS         ];
+//RS         if let Self::MethodNotAllowed { expected, actual } = self {
+//RS             fields.push(format!(
+//RS                 "\"expected_method\":{}",
+//RS                 jet_web_server_fn_json_string(expected)
+//RS             ));
+//RS             fields.push(format!(
+//RS                 "\"actual_method\":{}",
+//RS                 jet_web_server_fn_json_string(actual)
+//RS             ));
+//RS         }
+//RS         format!("{{{}}}", fields.join(","))
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Display for JetWebServerFnError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter.write_str(self.code())
+//RS     }
+//RS }
+//RS 
+//RS pub type JetWebServerFnHandler =
+//RS     Arc<dyn Fn(&JetWebServerFnRequestContext, &str) -> Result<String, JetWebServerFnError> + Send + Sync>;
+//RS pub type JetWebServerFnValidator = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+//RS pub type JetWebServerFnMiddleware =
+//RS     Arc<dyn Fn(&mut JetWebServerFnRequestContext) -> Result<(), JetWebServerFnError> + Send + Sync>;
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetWebServerFnMiddlewareEntry {
+//RS     name: String,
+//RS     callback: JetWebServerFnMiddleware,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebServerFunction {
+//RS     spec: JetWebServerFnSpec,
+//RS     handler: JetWebServerFnHandler,
+//RS     validator: Option<JetWebServerFnValidator>,
+//RS     form_binding: Option<String>,
+//RS     middleware: Vec<JetWebServerFnMiddlewareEntry>,
+//RS     state: Arc<Mutex<JetWebServerFnState>>,
+//RS     idempotency_results: Arc<Mutex<BTreeMap<String, String>>>,
+//RS }
+//RS 
+//RS impl JetWebServerFunction {
+//RS     pub fn new(
+//RS         name: String,
+//RS         source_id: String,
+//RS         handler: JetWebServerFnHandler,
+//RS     ) -> Result<Self, JetWebServerFnError> {
+//RS         Self::typed(
+//RS             name,
+//RS             source_id,
+//RS             "POST".to_string(),
+//RS             "Input".to_string(),
+//RS             "Output".to_string(),
+//RS             "Error".to_string(),
+//RS             handler,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn typed(
+//RS         name: String,
+//RS         source_id: String,
+//RS         method: String,
+//RS         input_type: String,
+//RS         output_type: String,
+//RS         error_type: String,
+//RS         handler: JetWebServerFnHandler,
+//RS     ) -> Result<Self, JetWebServerFnError> {
+//RS         let name = jet_web_server_fn_clean(&name, JET_WEB_SERVER_FN_MAX_NAME);
+//RS         let source_id = jet_web_server_fn_clean(&source_id, JET_WEB_SERVER_FN_MAX_TYPE);
+//RS         let method = method.trim().to_ascii_uppercase();
+//RS         let input_type = jet_web_server_fn_clean(&input_type, JET_WEB_SERVER_FN_MAX_TYPE);
+//RS         let output_type = jet_web_server_fn_clean(&output_type, JET_WEB_SERVER_FN_MAX_TYPE);
+//RS         let error_type = jet_web_server_fn_clean(&error_type, JET_WEB_SERVER_FN_MAX_TYPE);
+//RS         if name.is_empty()
+//RS             || name.len() > JET_WEB_SERVER_FN_MAX_NAME
+//RS             || !name
+//RS                 .chars()
+//RS                 .enumerate()
+//RS                 .all(|(index, character)| {
+//RS                     character.is_ascii_alphanumeric() || character == '_' || (index > 0 && character == '-')
+//RS                 })
+//RS             || source_id.is_empty()
+//RS             || input_type.is_empty()
+//RS             || output_type.is_empty()
+//RS             || error_type.is_empty()
+//RS             || !matches!(method.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE")
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidDefinition(
+//RS                 "server function metadata is incomplete or invalid".to_string(),
+//RS             ));
+//RS         }
+//RS         let endpoint = format!("/actions/{name}");
+//RS         let spec = JetWebServerFnSpec {
+//RS             name,
+//RS             endpoint,
+//RS             source_id,
+//RS             method,
+//RS             input_type,
+//RS             output_type,
+//RS             error_type,
+//RS             csrf: JetWebServerFnCsrfPolicy::default(),
+//RS             capability: None,
+//RS             effects: Vec::new(),
+//RS             revalidate: Vec::new(),
+//RS             timeout_ms: None,
+//RS             retry: JetWebServerFnRetryPolicy::None,
+//RS             idempotency_declared: false,
+//RS         };
+//RS         let mut function = Self {
+//RS             state: Arc::new(Mutex::new(JetWebServerFnState::idle(&spec))),
+//RS             spec,
+//RS             handler,
+//RS             validator: None,
+//RS             form_binding: None,
+//RS             middleware: Vec::new(),
+//RS             idempotency_results: Arc::new(Mutex::new(BTreeMap::new())),
+//RS         };
+//RS         for kind in jet_app_middleware::APP_SERVER_FUNCTION_MIDDLEWARE {
+//RS             function = function.with_middleware(kind.as_str().to_string(), |_context| Ok(()));
+//RS         }
+//RS         Ok(function)
+//RS     }
+//RS 
+//RS     pub fn spec(&self) -> JetWebServerFnSpec {
+//RS         self.spec.clone()
+//RS     }
+//RS 
+//RS     pub fn with_csrf(mut self, policy: JetWebServerFnCsrfPolicy) -> Self {
+//RS         self.spec.csrf = policy;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_capability(mut self, capability: String) -> Self {
+//RS         if !capability.is_empty() {
+//RS             self.spec.capability = Some(capability);
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_effects(mut self, effects: Vec<String>) -> Self {
+//RS         self.spec.effects = effects
+//RS             .into_iter()
+//RS             .map(|effect| jet_web_server_fn_clean(&effect, 64))
+//RS             .filter(|effect| !effect.is_empty())
+//RS             .collect();
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_revalidate(mut self, keys: Vec<String>) -> Self {
+//RS         self.spec.revalidate = keys
+//RS             .into_iter()
+//RS             .map(|key| jet_web_server_fn_clean(&key, 256))
+//RS             .filter(|key| !key.is_empty())
+//RS             .collect();
+//RS         if let Ok(mut state) = self.state.lock() {
+//RS             state.revalidate = self.spec.revalidate.clone();
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+//RS         self.spec.timeout_ms = Some(timeout_ms.clamp(1, 86_400_000));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_retry(mut self, retry: JetWebServerFnRetryPolicy) -> Self {
+//RS         self.spec.retry = retry;
+//RS         if let Ok(mut state) = self.state.lock() {
+//RS             state.retry_policy = retry.name().to_string();
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_idempotency(mut self, declared: bool) -> Self {
+//RS         self.spec.idempotency_declared = declared;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_form_binding(mut self, binding: String) -> Self {
+//RS         let binding = binding.trim();
+//RS         if !binding.is_empty() {
+//RS             self.form_binding = Some(binding.to_string());
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_validator<F>(mut self, validator: F) -> Self
+//RS     where
+//RS         F: Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+//RS     {
+//RS         self.validator = Some(Arc::new(validator));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn with_middleware<F>(mut self, name: String, middleware: F) -> Self
+//RS     where
+//RS         F: Fn(&mut JetWebServerFnRequestContext) -> Result<(), JetWebServerFnError>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         if self.middleware.len() < JET_WEB_SERVER_FN_MAX_MIDDLEWARE {
+//RS             self.middleware.push(JetWebServerFnMiddlewareEntry {
+//RS                 name: jet_web_server_fn_clean(&name, 128),
+//RS                 callback: Arc::new(middleware),
+//RS             });
+//RS         }
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn state(&self) -> JetWebServerFnState {
+//RS         self.state
+//RS             .lock()
+//RS             .map(|state| state.clone())
+//RS             .unwrap_or_else(|_| JetWebServerFnState::idle(&self.spec))
+//RS     }
+//RS 
+//RS     pub fn facts_json(&self) -> String {
+//RS         let state = self.state();
+//RS         let middleware = self
+//RS             .middleware
+//RS             .iter()
+//RS             .map(|entry| jet_web_server_fn_json_string(&entry.name))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let revalidate = self
+//RS             .spec
+//RS             .revalidate
+//RS             .iter()
+//RS             .map(|key| jet_web_server_fn_json_string(key))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"name\":{},\"endpoint\":{},\"source_id\":{},\"method\":{},\"input\":{},\"output\":{},\"error\":{},\"mutating\":{},\"csrf\":{},\"capability\":{},\"effects\":{},\"retry\":{},\"idempotency\":{},\"state\":{},\"attempts\":{},\"middleware\":[{}],\"revalidate\":[{}]}}",
+//RS             jet_web_server_fn_json_string(&self.spec.name),
+//RS             jet_web_server_fn_json_string(&self.spec.endpoint),
+//RS             jet_web_server_fn_json_string(&self.spec.source_id),
+//RS             jet_web_server_fn_json_string(&self.spec.method),
+//RS             jet_web_server_fn_json_string(&self.spec.input_type),
+//RS             jet_web_server_fn_json_string(&self.spec.output_type),
+//RS             jet_web_server_fn_json_string(&self.spec.error_type),
+//RS             self.spec.mutating(),
+//RS             match &self.spec.csrf {
+//RS                 JetWebServerFnCsrfPolicy::SameOrigin { .. } => "\"same-origin\"",
+//RS                 JetWebServerFnCsrfPolicy::Disabled => "\"disabled\"",
+//RS             },
+//RS             self.spec
+//RS                 .capability
+//RS                 .as_deref()
+//RS                 .map(jet_web_server_fn_json_string)
+//RS                 .unwrap_or_else(|| "null".to_string()),
+//RS             format!(
+//RS                 "[{}]",
+//RS                 self.spec
+//RS                     .effects
+//RS                     .iter()
+//RS                     .map(|effect| jet_web_server_fn_json_string(effect))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             ),
+//RS             jet_web_server_fn_json_string(self.spec.retry.name()),
+//RS             self.spec.idempotency_declared,
+//RS             jet_web_server_fn_json_string(state.status.name()),
+//RS             state.attempts,
+//RS             middleware,
+//RS             revalidate,
+//RS         )
+//RS     }
+//RS 
+//RS     fn set_state(&self, update: impl FnOnce(&mut JetWebServerFnState)) {
+//RS         if let Ok(mut state) = self.state.lock() {
+//RS             update(&mut state);
+//RS         }
+//RS     }
+//RS 
+//RS     fn context_from_http(
+//RS         &self,
+//RS         request: &JetHTTPRequest,
+//RS         idempotency_key: Option<String>,
+//RS     ) -> Result<JetWebServerFnRequestContext, JetWebServerFnError> {
+//RS         let request_id = request
+//RS             .headers
+//RS             .first("x-request-id")
+//RS             .filter(|value| jet_web_server_fn_valid_token(value, 128))
+//RS             .map(str::to_string)
+//RS             .unwrap_or_else(jet_web_server_fn_next_request_id);
+//RS         let origin = request.headers.first("origin").map(str::to_string);
+//RS         let host = request.headers.first("host").map(str::to_string);
+//RS         let auth_subject = request
+//RS             .headers
+//RS             .first("authorization")
+//RS             .filter(|value| !value.trim().is_empty())
+//RS             .map(|_| "authorization".to_string())
+//RS             .or_else(|| {
+//RS                 request
+//RS                     .headers
+//RS                     .first("cookie")
+//RS                     .filter(|value| !value.trim().is_empty())
+//RS                     .map(|_| "cookie".to_string())
+//RS             });
+//RS         let capabilities = request
+//RS             .headers
+//RS             .first("x-jet-capability")
+//RS             .map(|value| {
+//RS                 value
+//RS                     .split(',')
+//RS                     .map(str::trim)
+//RS                     .filter(|capability| !capability.is_empty())
+//RS                     .map(str::to_string)
+//RS                     .collect()
+//RS             })
+//RS             .unwrap_or_default();
+//RS         let csrf_token = request.headers.first("x-csrf-token").map(str::to_string);
+//RS         JetWebServerFnRequestContext::checked(
+//RS             request_id,
+//RS             self.spec.source_id.clone(),
+//RS             self.spec.endpoint.clone(),
+//RS             request.method.clone(),
+//RS             origin,
+//RS             host,
+//RS             auth_subject,
+//RS             capabilities,
+//RS             csrf_token,
+//RS             idempotency_key,
+//RS             self.spec.timeout_ms,
+//RS         )
+//RS     }
+//RS 
+//RS     fn check_csrf(
+//RS         &self,
+//RS         context: &JetWebServerFnRequestContext,
+//RS     ) -> Result<(), JetWebServerFnError> {
+//RS         if !self.spec.mutating() {
+//RS             return Ok(());
+//RS         }
+//RS         match &self.spec.csrf {
+//RS             JetWebServerFnCsrfPolicy::Disabled => Ok(()),
+//RS             JetWebServerFnCsrfPolicy::SameOrigin {
+//RS                 expected_origin,
+//RS                 token,
+//RS             } => {
+//RS                 let same_origin = match (expected_origin.as_deref(), context.origin.as_deref()) {
+//RS                     (Some(expected), Some(actual)) => expected == actual,
+//RS                     (Some(_), None) => false,
+//RS                     (None, Some(actual)) => {
+//RS                         jet_web_server_fn_origin_matches_host(actual, context.host.as_deref())
+//RS                     }
+//RS                     (None, None) => true,
+//RS                 };
+//RS                 if !same_origin {
+//RS                     return Err(JetWebServerFnError::Csrf(
+//RS                         "the request origin is not same-origin".to_string(),
+//RS                     ));
+//RS                 }
+//RS                 if let Some(expected) = token {
+//RS                     if context.csrf_token.as_deref() != Some(expected.as_str()) {
+//RS                         return Err(JetWebServerFnError::Csrf(
+//RS                             "the request CSRF token is invalid".to_string(),
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 Ok(())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn normalize_input(
+//RS         &self,
+//RS         content_type: &str,
+//RS         body: &str,
+//RS     ) -> Result<String, JetWebServerFnError> {
+//RS         if body.len() > JET_WEB_SERVER_FN_MAX_BODY {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "server function input exceeds the payload limit".to_string(),
+//RS             ));
+//RS         }
+//RS         if body.trim().is_empty() {
+//RS             if self.spec.input_type == "Unit" {
+//RS                 // Native forms legitimately omit a body for a Unit input.
+//RS                 // The declared boundary type, not an endpoint or test route,
+//RS                 // decides whether the empty wire representation is valid.
+//RS                 return Ok("null".to_string());
+//RS             }
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "server function input is missing".to_string(),
+//RS             ));
+//RS         }
+//RS         if content_type.eq_ignore_ascii_case("application/json")
+//RS             || content_type
+//RS                 .to_ascii_lowercase()
+//RS                 .starts_with("application/json;")
+//RS         {
+//RS             if jet_std::parse_json_typed_datatree(&body.to_string()).is_err() {
+//RS                 return Err(JetWebServerFnError::InvalidInput(
+//RS                     "server function input is not valid JSON".to_string(),
+//RS                 ));
+//RS             }
+//RS             if self.form_binding.is_some()
+//RS                 && (self.spec.input_type == "String"
+//RS                     || self.spec.input_type.ends_with("::String"))
+//RS             {
+//RS                 return Ok(jet_web_server_fn_json_string(body));
+//RS             }
+//RS             return Ok(body.to_string());
+//RS         }
+//RS         if content_type
+//RS             .to_ascii_lowercase()
+//RS             .starts_with("application/x-www-form-urlencoded")
+//RS         {
+//RS             if let Some(binding) = self.form_binding.as_deref() {
+//RS                 let normalized = jet_web_server_fn_form_json_typed(body, binding)?;
+//RS                 if self.spec.input_type == "String" || self.spec.input_type.ends_with("::String") {
+//RS                     return Ok(jet_web_server_fn_json_string(&normalized));
+//RS                 }
+//RS                 return Ok(normalized);
+//RS             }
+//RS             return jet_web_server_fn_form_json(body);
+//RS         }
+//RS         Err(JetWebServerFnError::UnsupportedMediaType)
+//RS     }
+//RS 
+//RS     fn authorize(&self, context: &JetWebServerFnRequestContext) -> Result<(), JetWebServerFnError> {
+//RS         if self.spec.capability.is_some() && context.auth_subject.is_none() {
+//RS             return Err(JetWebServerFnError::Unauthorized);
+//RS         }
+//RS         if let Some(required) = &self.spec.capability {
+//RS             if !context.capabilities.contains(required) {
+//RS                 return Err(JetWebServerFnError::Forbidden(
+//RS                     "the request lacks the required capability".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn dispatch_checked(
+//RS         &self,
+//RS         mut request: JetWebServerFnRequest,
+//RS     ) -> Result<(String, Vec<String>), JetWebServerFnError> {
+//RS         if request.method != self.spec.method {
+//RS             return Err(JetWebServerFnError::MethodNotAllowed {
+//RS                 expected: self.spec.method.clone(),
+//RS                 actual: request.method,
+//RS             });
+//RS         }
+//RS         if request.path != self.spec.endpoint {
+//RS             return Err(JetWebServerFnError::EndpointNotFound);
+//RS         }
+//RS         if request.context.source_id != self.spec.source_id
+//RS             || request.context.endpoint != self.spec.endpoint
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidContext);
+//RS         }
+//RS         request.context.check_live()?;
+//RS         self.check_csrf(&request.context)?;
+//RS         self.authorize(&request.context)?;
+//RS         let body = self.normalize_input(&request.content_type, &request.body)?;
+//RS         if let Some(validator) = &self.validator {
+//RS             validator(&body).map_err(|message| JetWebServerFnError::InvalidInput(
+//RS                 jet_web_server_fn_clean(message.as_str(), 512),
+//RS             ))?;
+//RS         }
+//RS         let mut middleware = Vec::with_capacity(self.middleware.len());
+//RS         for entry in &self.middleware {
+//RS             request.context.check_live()?;
+//RS             (entry.callback)(&mut request.context)?;
+//RS             middleware.push(entry.name.clone());
+//RS         }
+//RS         if self.spec.idempotency_declared {
+//RS             if let Some(key) = request.context.idempotency_key.as_deref() {
+//RS                 let cached = self
+//RS                     .idempotency_results
+//RS                     .lock()
+//RS                     .ok()
+//RS                     .and_then(|results| results.get(key).cloned());
+//RS                 if let Some(output) = cached {
+//RS                     return Ok((output, middleware));
+//RS                 }
+//RS             }
+//RS         }
+//RS         request.context.check_live()?;
+//RS         let output = (self.handler)(&request.context, &body)?;
+//RS         if output.len() > JET_WEB_SERVER_FN_MAX_BODY
+//RS             || jet_std::parse_json_typed_datatree(&output).is_err()
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidOutput);
+//RS         }
+//RS         if self.spec.idempotency_declared {
+//RS             if let Some(key) = request.context.idempotency_key.as_deref() {
+//RS                 if let Ok(mut results) = self.idempotency_results.lock() {
+//RS                     if results.len() >= 1024 {
+//RS                         if let Some(first) = results.keys().next().cloned() {
+//RS                             results.remove(&first);
+//RS                         }
+//RS                     }
+//RS                     results.insert(key.to_string(), output.clone());
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok((output, middleware))
+//RS     }
+//RS 
+//RS     pub fn dispatch(&self, request: JetWebServerFnRequest) -> JetWebServerFnResponse {
+//RS         let request_id = request.context.request_id.clone();
+//RS         self.set_state(|state| {
+//RS             state.status = JetWebServerFnCallStatus::Pending;
+//RS             state.request_id = request_id.clone();
+//RS             state.attempts = state.attempts.saturating_add(1);
+//RS             state.error.clear();
+//RS             state.result.clear();
+//RS         });
+//RS         match self.dispatch_checked(request) {
+//RS             Ok((body, middleware)) => {
+//RS                 self.set_state(|state| {
+//RS                     state.status = JetWebServerFnCallStatus::Success;
+//RS                     state.result = body.clone();
+//RS                     state.middleware = middleware.clone();
+//RS                 });
+//RS                 JetWebServerFnResponse {
+//RS                     status: 200,
+//RS                     body,
+//RS                     content_type: "application/json".to_string(),
+//RS                     request_id,
+//RS                     middleware,
+//RS                 }
+//RS             }
+//RS             Err(error) => {
+//RS                 let body = error.structured(&request_id);
+//RS                 self.set_state(|state| {
+//RS                     state.status = match &error {
+//RS                         JetWebServerFnError::Cancelled => JetWebServerFnCallStatus::Cancelled,
+//RS                         JetWebServerFnError::TimedOut => JetWebServerFnCallStatus::TimedOut,
+//RS                         JetWebServerFnError::UncertainCompletion { .. } => {
+//RS                             JetWebServerFnCallStatus::Uncertain
+//RS                         }
+//RS                         _ => JetWebServerFnCallStatus::Error,
+//RS                     };
+//RS                     state.error = body.clone();
+//RS                 });
+//RS                 JetWebServerFnResponse {
+//RS                     status: error.status(),
+//RS                     body,
+//RS                     content_type: "application/json".to_string(),
+//RS                     request_id,
+//RS                     middleware: Vec::new(),
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn progressive_form(&self, body: String) -> Result<JetWebServerFnResponse, JetWebServerFnError> {
+//RS         let request_id = jet_web_server_fn_next_request_id();
+//RS         let mut context = JetWebServerFnRequestContext::checked(
+//RS             request_id.clone(),
+//RS             self.spec.source_id.clone(),
+//RS             self.spec.endpoint.clone(),
+//RS             self.spec.method.clone(),
+//RS             None,
+//RS             None,
+//RS             None,
+//RS             BTreeSet::new(),
+//RS             None,
+//RS             None,
+//RS             self.spec.timeout_ms,
+//RS         )?;
+//RS         context.origin = Some("same-origin".to_string());
+//RS         let request = JetWebServerFnRequest::progressive(
+//RS             self.spec.method.clone(),
+//RS             self.spec.endpoint.clone(),
+//RS             body,
+//RS             context,
+//RS         );
+//RS         let response = self.dispatch(request);
+//RS         if response.status >= 400 {
+//RS             let message = response
+//RS                 .body
+//RS                 .as_str()
+//RS                 .to_string();
+//RS             return Err(JetWebServerFnError::Handler {
+//RS                 code: "progressive_submission".to_string(),
+//RS                 message,
+//RS             });
+//RS         }
+//RS         Ok(response)
+//RS     }
+//RS 
+//RS     pub fn progressive_submission(&self, body: String) -> JetWebServerFnFormSubmission {
+//RS         JetWebServerFnFormSubmission {
+//RS             method: self.spec.method.clone(),
+//RS             action: self.spec.endpoint.clone(),
+//RS             content_type: "application/x-www-form-urlencoded".to_string(),
+//RS             body,
+//RS             pending: true,
+//RS             revalidate: self.spec.revalidate.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn synthetic_client_request(
+//RS         &self,
+//RS         body: String,
+//RS         idempotency_key: Option<String>,
+//RS     ) -> Result<JetWebServerFnRequest, JetWebServerFnError> {
+//RS         let request_id = jet_web_server_fn_next_request_id();
+//RS         let mut context = JetWebServerFnRequestContext::checked(
+//RS             request_id,
+//RS             self.spec.source_id.clone(),
+//RS             self.spec.endpoint.clone(),
+//RS             self.spec.method.clone(),
+//RS             self.spec
+//RS                 .csrf
+//RS                 .expected_origin()
+//RS                 .map(str::to_string),
+//RS             None,
+//RS             None,
+//RS             BTreeSet::new(),
+//RS             self.spec.csrf.token().map(str::to_string),
+//RS             idempotency_key.clone(),
+//RS             self.spec.timeout_ms,
+//RS         )?;
+//RS         context.origin = self
+//RS             .spec
+//RS             .csrf
+//RS             .expected_origin()
+//RS             .map(str::to_string)
+//RS             .or_else(|| Some("same-origin".to_string()));
+//RS         let mut request = JetWebServerFnRequest::json(
+//RS             self.spec.method.clone(),
+//RS             self.spec.endpoint.clone(),
+//RS             body,
+//RS             context,
+//RS         );
+//RS         if let Some(key) = idempotency_key {
+//RS             request
+//RS                 .headers
+//RS                 .insert("idempotency-key".to_string(), key);
+//RS         }
+//RS         if let Some(origin) = self.spec.csrf.expected_origin() {
+//RS             request
+//RS                 .headers
+//RS                 .insert("origin".to_string(), origin.to_string());
+//RS         }
+//RS         if let Some(token) = self.spec.csrf.token() {
+//RS             request
+//RS                 .headers
+//RS                 .insert("x-csrf-token".to_string(), token.to_string());
+//RS         }
+//RS         Ok(request)
+//RS     }
+//RS 
+//RS     fn can_retry(&self, attempt: u32, key: Option<&str>, error: &JetWebServerFnError) -> bool {
+//RS         if attempt >= self.spec.retry.bounded_attempts() || !matches!(error, JetWebServerFnError::Transport { .. } | JetWebServerFnError::TimedOut) {
+//RS             return false;
+//RS         }
+//RS         match self.spec.retry {
+//RS             JetWebServerFnRetryPolicy::None => false,
+//RS             JetWebServerFnRetryPolicy::Safe { .. } => !self.spec.mutating(),
+//RS             JetWebServerFnRetryPolicy::Idempotent { .. } => {
+//RS                 self.spec.idempotency_declared && key.is_some_and(|value| !value.is_empty())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn call_encoded<F>(
+//RS         &self,
+//RS         body: String,
+//RS         idempotency_key: Option<String>,
+//RS         transport: F,
+//RS     ) -> Result<String, JetWebServerFnError>
+//RS     where
+//RS         F: Fn(JetWebServerFnRequest) -> Result<JetWebServerFnResponse, JetWebServerFnError>,
+//RS     {
+//RS         if body.len() > JET_WEB_SERVER_FN_MAX_BODY {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "server function input exceeds the payload limit".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.spec.mutating()
+//RS             && matches!(self.spec.retry, JetWebServerFnRetryPolicy::Idempotent { .. })
+//RS             && (idempotency_key.is_none() || !self.spec.idempotency_declared)
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidDefinition(
+//RS                 "idempotent retries require a declared idempotency key".to_string(),
+//RS             ));
+//RS         }
+//RS         let max_attempts = self.spec.retry.bounded_attempts();
+//RS         let mut last_error = None;
+//RS         for attempt in 1..=max_attempts {
+//RS             let request = self.synthetic_client_request(body.clone(), idempotency_key.clone())?;
+//RS             let request_id = request.context.request_id.clone();
+//RS             self.set_state(|state| {
+//RS                 state.status = JetWebServerFnCallStatus::Pending;
+//RS                 state.request_id = request_id.clone();
+//RS                 state.attempts = attempt;
+//RS                 state.idempotency_key = idempotency_key.clone();
+//RS                 state.error.clear();
+//RS                 state.result.clear();
+//RS             });
+//RS             if let Err(error) = request.context.check_live() {
+//RS                 self.set_state(|state| {
+//RS                     state.status = match &error {
+//RS                         JetWebServerFnError::Cancelled => JetWebServerFnCallStatus::Cancelled,
+//RS                         _ => JetWebServerFnCallStatus::TimedOut,
+//RS                     };
+//RS                     state.error = error.to_string();
+//RS                 });
+//RS                 return Err(error);
+//RS             }
+//RS             let started = Instant::now();
+//RS             let result = transport(request);
+//RS             let elapsed = started.elapsed();
+//RS             let outcome = match result {
+//RS                 Ok(response) if (200..300).contains(&response.status) => {
+//RS                     if self
+//RS                         .spec
+//RS                         .timeout_ms
+//RS                         .is_some_and(|timeout| elapsed > Duration::from_millis(timeout))
+//RS                     {
+//RS                         Err(JetWebServerFnError::UncertainCompletion { request_id })
+//RS                     } else if jet_std::parse_json_typed_datatree(&response.body).is_err() {
+//RS                         Err(JetWebServerFnError::InvalidOutput)
+//RS                     } else {
+//RS                         Ok(response.body)
+//RS                     }
+//RS                 }
+//RS                 Ok(response) => Err(JetWebServerFnError::Handler {
+//RS                     code: format!("http_{}", response.status),
+//RS                     message: "the server function returned an error".to_string(),
+//RS                 }),
+//RS                 Err(error) => Err(if error.dispatched() {
+//RS                     JetWebServerFnError::UncertainCompletion { request_id }
+//RS                 } else {
+//RS                     error
+//RS                 }),
+//RS             };
+//RS             match outcome {
+//RS                 Ok(body) => {
+//RS                     self.set_state(|state| {
+//RS                         state.status = JetWebServerFnCallStatus::Success;
+//RS                         state.result = body.clone();
+//RS                     });
+//RS                     return Ok(body);
+//RS                 }
+//RS                 Err(error) => {
+//RS                     let retry = self.can_retry(attempt, idempotency_key.as_deref(), &error);
+//RS                     self.set_state(|state| {
+//RS                         state.status = match &error {
+//RS                             JetWebServerFnError::Cancelled => JetWebServerFnCallStatus::Cancelled,
+//RS                             JetWebServerFnError::TimedOut => JetWebServerFnCallStatus::TimedOut,
+//RS                             JetWebServerFnError::UncertainCompletion { .. } => {
+//RS                                 JetWebServerFnCallStatus::Uncertain
+//RS                             }
+//RS                             _ => JetWebServerFnCallStatus::Error,
+//RS                         };
+//RS                         state.error = error.to_string();
+//RS                     });
+//RS                     if !retry {
+//RS                         return Err(error);
+//RS                     }
+//RS                     last_error = Some(error);
+//RS                 }
+//RS             }
+//RS         }
+//RS         Err(last_error.unwrap_or(JetWebServerFnError::RetryExhausted))
+//RS     }
+//RS 
+//RS     pub fn call<T, U, F>(
+//RS         &self,
+//RS         input: &T,
+//RS         idempotency_key: Option<String>,
+//RS         transport: F,
+//RS     ) -> Result<U, JetWebServerFnError>
+//RS     where
+//RS         T: __jet_Encode,
+//RS         U: __jet_Decode,
+//RS         F: Fn(JetWebServerFnRequest) -> Result<JetWebServerFnResponse, JetWebServerFnError>,
+//RS     {
+//RS         let body = jet_enc_json_to_string(input);
+//RS         let result = self.call_encoded(body, idempotency_key, transport)?;
+//RS         jet_enc_json_decode(&result).map_err(|_| JetWebServerFnError::InvalidOutput)
+//RS     }
+//RS 
+//RS     pub(crate) fn http_handler(&self) -> JetHTTPHandler {
+//RS         let function = self.clone();
+//RS         Arc::new(move |request| Ok(function.http_dispatch(request)))
+//RS     }
+//RS 
+//RS     fn http_dispatch(&self, request: JetHTTPRequest) -> JetHTTPResponse {
+//RS         let idempotency_key = request.headers.first("idempotency-key").map(str::to_string);
+//RS         let mut context = match self.context_from_http(&request, idempotency_key) {
+//RS             Ok(context) => context,
+//RS             Err(error) => {
+//RS                 let mut response = jet_http_srv_response_owned(
+//RS                     error.status() as i64,
+//RS                     error.structured(&jet_web_server_fn_next_request_id()),
+//RS                 );
+//RS                 let _ = response
+//RS                     .headers
+//RS                     .set("content-type", "application/json");
+//RS                 let _ = response
+//RS                     .headers
+//RS                     .set("content-security-policy", "default-src 'self'");
+//RS                 return response;
+//RS             }
+//RS         };
+//RS         let body = match jet_http_request_text_with_limit(&request, JET_WEB_SERVER_FN_MAX_BODY as i64) {
+//RS             Ok(body) => body,
+//RS             Err(_) => {
+//RS                 let error = JetWebServerFnError::InvalidInput(
+//RS                     "server function request body is unreadable".to_string(),
+//RS                 );
+//RS                 let mut response = jet_http_srv_response_owned(
+//RS                     error.status() as i64,
+//RS                     error.structured(&context.request_id),
+//RS                 );
+//RS                 let _ = response.headers.set("content-type", "application/json");
+//RS                 let _ = response
+//RS                     .headers
+//RS                     .set("content-security-policy", "default-src 'self'");
+//RS                 return response;
+//RS             }
+//RS         };
+//RS         let content_type = request
+//RS             .headers
+//RS             .first("content-type")
+//RS             .unwrap_or("application/json")
+//RS             .to_string();
+//RS         if context.csrf_token.is_none()
+//RS             && content_type
+//RS                 .to_ascii_lowercase()
+//RS                 .starts_with("application/x-www-form-urlencoded")
+//RS         {
+//RS             context.csrf_token = jet_web_server_fn_form_field(&body, "__jet_csrf");
+//RS         }
+//RS         let checked = JetWebServerFnRequest {
+//RS             method: request.method,
+//RS             path: request.path,
+//RS             content_type,
+//RS             body,
+//RS             headers: BTreeMap::new(),
+//RS             context,
+//RS         };
+//RS         let response = self.dispatch(checked);
+//RS         let mut http = jet_http_srv_response_owned(response.status as i64, response.body);
+//RS         let _ = http.headers.set("content-type", "application/json");
+//RS         let _ = http.headers.set("cache-control", "no-store");
+//RS         let _ = http.headers.set("x-request-id", &response.request_id);
+//RS         let _ = http
+//RS             .headers
+//RS             .set("content-security-policy", "default-src 'self'");
+//RS         http
+//RS     }
+//RS }
+//RS 
+//RS impl JetWebServerFnCsrfPolicy {
+//RS     fn expected_origin(&self) -> Option<&str> {
+//RS         match self {
+//RS             Self::SameOrigin {
+//RS                 expected_origin: Some(origin),
+//RS                 ..
+//RS             } => Some(origin.as_str()),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn token(&self) -> Option<&str> {
+//RS         match self {
+//RS             Self::SameOrigin { token, .. } => token.as_deref(),
+//RS             Self::Disabled => None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_server_fn_hex(value: u8) -> Option<u8> {
+//RS     match value {
+//RS         b'0'..=b'9' => Some(value - b'0'),
+//RS         b'a'..=b'f' => Some(value - b'a' + 10),
+//RS         b'A'..=b'F' => Some(value - b'A' + 10),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_server_fn_form_decode(value: &str) -> Result<String, JetWebServerFnError> {
+//RS     let bytes = value.as_bytes();
+//RS     let mut out = Vec::with_capacity(value.len());
+//RS     let mut index = 0;
+//RS     while index < bytes.len() {
+//RS         match bytes[index] {
+//RS             b'+' => out.push(b' '),
+//RS             b'%' if index + 2 < bytes.len() => {
+//RS                 let Some(high) = jet_web_server_fn_hex(bytes[index + 1]) else {
+//RS                     return Err(JetWebServerFnError::InvalidInput(
+//RS                         "form input contains an invalid escape".to_string(),
+//RS                     ));
+//RS                 };
+//RS                 let Some(low) = jet_web_server_fn_hex(bytes[index + 2]) else {
+//RS                     return Err(JetWebServerFnError::InvalidInput(
+//RS                         "form input contains an invalid escape".to_string(),
+//RS                     ));
+//RS                 };
+//RS                 out.push(high << 4 | low);
+//RS                 index += 2;
+//RS             }
+//RS             b'%' => {
+//RS                 return Err(JetWebServerFnError::InvalidInput(
+//RS                     "form input contains an incomplete escape".to_string(),
+//RS                 ));
+//RS             }
+//RS             byte => out.push(byte),
+//RS         }
+//RS         index += 1;
+//RS     }
+//RS     String::from_utf8(out).map_err(|_| {
+//RS         JetWebServerFnError::InvalidInput("form input is not valid UTF-8".to_string())
+//RS     })
+//RS }
+//RS 
+//RS fn jet_web_server_fn_form_fields(
+//RS     body: &str,
+//RS ) -> Result<BTreeMap<String, Vec<String>>, JetWebServerFnError> {
+//RS     let mut fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
+//RS     if body.is_empty() {
+//RS         return Ok(fields);
+//RS     }
+//RS     for pair in body.split('&') {
+//RS         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS         let key = jet_web_server_fn_form_decode(raw_key)?;
+//RS         let value = jet_web_server_fn_form_decode(raw_value)?;
+//RS         if key.is_empty() || key.len() > 256 || value.len() > JET_WEB_SERVER_FN_MAX_FORM_VALUE {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "form input contains an invalid field".to_string(),
+//RS             ));
+//RS         }
+//RS         if fields.len() >= JET_WEB_SERVER_FN_MAX_FORM_FIELDS && !fields.contains_key(&key) {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "form input has too many fields".to_string(),
+//RS             ));
+//RS         }
+//RS         fields.entry(key).or_default().push(value);
+//RS     }
+//RS     Ok(fields)
+//RS }
+//RS 
+//RS fn jet_web_server_fn_form_json(body: &str) -> Result<String, JetWebServerFnError> {
+//RS     let fields = jet_web_server_fn_form_fields(body)?;
+//RS     let mut entries = Vec::with_capacity(fields.len());
+//RS     for (key, values) in fields {
+//RS         let value = if values.len() == 1 {
+//RS             jet_web_server_fn_json_string(&values[0])
+//RS         } else {
+//RS             format!(
+//RS                 "[{}]",
+//RS                 values
+//RS                     .iter()
+//RS                     .map(|value| jet_web_server_fn_json_string(value))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             )
+//RS         };
+//RS         entries.push(format!("{}:{value}", jet_web_server_fn_json_string(&key)));
+//RS     }
+//RS     Ok(format!("{{{}}}", entries.join(",")))
+//RS }
+//RS 
+//RS fn jet_web_server_fn_form_json_typed(
+//RS     body: &str,
+//RS     binding: &str,
+//RS ) -> Result<String, JetWebServerFnError> {
+//RS     let schema = binding.strip_prefix("s=json:").ok_or_else(|| {
+//RS         JetWebServerFnError::InvalidInput("form input has an invalid typed binding".to_string())
+//RS     })?;
+//RS     if schema.is_empty() {
+//RS         return Err(JetWebServerFnError::InvalidInput(
+//RS             "form input has an empty typed binding".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut schema_fields: BTreeMap<String, (String, bool)> = BTreeMap::new();
+//RS     for spec in schema.split(',') {
+//RS         let (name, declared_type) = spec.split_once('=').ok_or_else(|| {
+//RS             JetWebServerFnError::InvalidInput("form input has an invalid typed field".to_string())
+//RS         })?;
+//RS         let optional = declared_type.ends_with('?');
+//RS         let field_type = declared_type.strip_suffix('?').unwrap_or(declared_type);
+//RS         if name.is_empty() || field_type.is_empty() {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "form input has an invalid typed field".to_string(),
+//RS             ));
+//RS         }
+//RS         if schema_fields
+//RS             .insert(name.to_string(), (field_type.to_string(), optional))
+//RS             .is_some()
+//RS         {
+//RS             return Err(JetWebServerFnError::InvalidInput(
+//RS                 "form input has a duplicate typed field".to_string(),
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     let posted = jet_web_server_fn_form_fields(body)?;
+//RS     for name in posted.keys() {
+//RS         if !schema_fields.contains_key(name) {
+//RS             return Err(JetWebServerFnError::InvalidInput(format!(
+//RS                 "form input contains unknown field `{name}`"
+//RS             )));
+//RS         }
+//RS     }
+//RS 
+//RS     let mut entries = Vec::with_capacity(schema_fields.len());
+//RS     for (name, (field_type, optional)) in schema_fields {
+//RS         let Some(values) = posted.get(&name) else {
+//RS             if optional {
+//RS                 continue;
+//RS             }
+//RS             return Err(JetWebServerFnError::InvalidInput(format!(
+//RS                 "form input is missing required field `{name}`"
+//RS             )));
+//RS         };
+//RS         if values.len() != 1 {
+//RS             return Err(JetWebServerFnError::InvalidInput(format!(
+//RS                 "form input field `{name}` was posted more than once"
+//RS             )));
+//RS         }
+//RS         let value = &values[0];
+//RS         let json = match field_type.as_str() {
+//RS             "Int" => value
+//RS                 .parse::<i64>()
+//RS                 .map(|parsed| parsed.to_string())
+//RS                 .map_err(|_| {
+//RS                     JetWebServerFnError::InvalidInput(format!(
+//RS                         "form input field `{name}` is not an integer"
+//RS                     ))
+//RS                 })?,
+//RS             "Float" => {
+//RS                 let parsed = value.parse::<f64>().map_err(|_| {
+//RS                     JetWebServerFnError::InvalidInput(format!(
+//RS                         "form input field `{name}` is not a number"
+//RS                     ))
+//RS                 })?;
+//RS                 if !parsed.is_finite() {
+//RS                     return Err(JetWebServerFnError::InvalidInput(format!(
+//RS                         "form input field `{name}` is not a finite number"
+//RS                     )));
+//RS                 }
+//RS                 parsed.to_string()
+//RS             }
+//RS             "Bool" => match value.as_str() {
+//RS                 "true" | "1" => "true".to_string(),
+//RS                 "false" | "0" => "false".to_string(),
+//RS                 _ => {
+//RS                     return Err(JetWebServerFnError::InvalidInput(format!(
+//RS                         "form input field `{name}` is not a boolean"
+//RS                     )));
+//RS                 }
+//RS             },
+//RS             _ => jet_web_server_fn_json_string(value),
+//RS         };
+//RS         entries.push(format!("{}:{json}", jet_web_server_fn_json_string(&name)));
+//RS     }
+//RS     Ok(format!("{{{}}}", entries.join(",")))
+//RS }
+//RS fn jet_web_server_fn_form_field(body: &str, wanted: &str) -> Option<String> {
+//RS     body.split('&').find_map(|pair| {
+//RS         let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS         let key = jet_web_server_fn_form_decode(raw_key).ok()?;
+//RS         if key == wanted {
+//RS             jet_web_server_fn_form_decode(raw_value).ok()
+//RS         } else {
+//RS             None
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_web_server_fn_new(
+//RS     name: String,
+//RS     source_id: String,
+//RS     handler: JetWebServerFnHandler,
+//RS ) -> Result<JetWebServerFunction, JetWebServerFnError> {
+//RS     JetWebServerFunction::new(name, source_id, handler)
+//RS }
+//RS 
+//RS pub fn jet_web_server_fn_typed(
+//RS     name: String,
+//RS     source_id: String,
+//RS     method: String,
+//RS     input_type: String,
+//RS     output_type: String,
+//RS     error_type: String,
+//RS     handler: JetWebServerFnHandler,
+//RS ) -> Result<JetWebServerFunction, JetWebServerFnError> {
+//RS     JetWebServerFunction::typed(
+//RS         name,
+//RS         source_id,
+//RS         method,
+//RS         input_type,
+//RS         output_type,
+//RS         error_type,
+//RS         handler,
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn jet_web_server_fn_register_http(
+//RS     mux: &JetHTTPMux,
+//RS     function: JetWebServerFunction,
+//RS ) {
+//RS     let handler = function.http_handler();
+//RS     jet_http_mux_add_handler(mux, &function.spec.method, &function.spec.endpoint, handler);
+//RS }
+// END-PORT-PENDING 0312 crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:1-1571
+

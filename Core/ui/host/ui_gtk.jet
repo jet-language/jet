@@ -1,0 +1,2052 @@
+// PORT-PENDING 0193 crates-jet-codegen-src-prelude-uigtk: crates/jet-codegen/src/Prelude/UiGtk.rs:1-2048
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. A real
+//RS // `JetBackend` over libgtk-4, emitted only when a Linux build constructs
+//RS // `core.ui.gtk_backend()`. All detail lives inside the module below. (Kept token
+//RS // clean above the module: the golden I1 scan matches the module by name and its
+//RS // own doc lines are stripped with it — see the comment inside.)
+//RS mod jet_gtk {
+//RS     // I1 containment: every raw C-ABI call in this module is the vetted
+//RS     // platform-FFI boundary, audited here and confined here. `tests/golden.rs`
+//RS     // strips this whole `mod jet_gtk { … }` before asserting generated Rust is
+//RS     // free of the low-level tier keyword — the same treatment the S58 C-FFI
+//RS     // wrapper modules (`user___c_*`), `jet_mem`, and the POSIX term shims get.
+//RS     // The loader below uses `dlopen`/`dlsym`, so ordinary programs do not
+//RS     // link-load GTK. Native GTK is opened only when this backend is used and
+//RS     // the display path is initialized.
+//RS     //
+//RS     // Retained-mode widget model: canonical `JetUiNode` trees reconcile by stable
+//RS     // path into real GtkBox/GtkLabel/GtkButton/GtkEntry widgets. Repaint updates
+//RS     // those widgets in place and removes stale children. The existing handle event
+//RS     // methods bind those reconciled widgets rather than creating a second tree.
+//RS     //
+//RS     // Headless safety: with `JET_UI_HEADLESS=1` or no display, `gtk_init_check`
+//RS     // is false, no widgets are created, and every op is a safe no-op — the
+//RS     // program still runs (signals update, terminal output prints) and
+//RS     // terminates, so tests are deterministic and a display-less CI never hangs.
+//RS     use super::{
+//RS         jet_font_shape_with_fallback, jet_font_vetted_bytes, jet_ui_accessibility_attach,
+//RS         jet_ui_accessibility_project, jet_ui_advance_focus, jet_ui_bind_tree_clicks,
+//RS         jet_ui_constraint, jet_ui_dispatch, jet_ui_measure_tree, jet_ui_node_id,
+//RS         jet_ui_paint_tree, jet_ui_rect, JetUiAriaRole,
+//RS         JetBackend, JetEventResult, JetFontFace, JetGlyphRun, JetInputEvent, JetPaintCmd, JetRect,
+//RS         JetShow, JetSize, JetSizeConstraint, JetUiAccessibility, JetUiAccessibilityProjection,
+//RS         JetUiAccessibilityTarget, JetUiCapability, JetUiCapabilityFacts, JetUiCancellation,
+//RS         JetUiClipboardText, JetUiClipboardWrite, JetUiDragEvent, JetUiDragOperation,
+//RS         JetUiDragPhase, JetUiDropItem, JetUiFileDialogKind, JetUiFileDialogRequest,
+//RS         JetUiFileDialogSelection, JetUiFsAccess, JetUiHost, JetUiHostError, JetUiImeComposition,
+//RS         JetUiImeEvent, JetUiImeMode, JetUiImePhase, JetUiNode, JetUiNodeId, JetUiNodeKind,
+//RS         JetUiServiceResult,
+//RS         JetUiShortcut, JetUiShortcutBinding, JetUiShortcutDispatch, JetUiShortcutRegistry,
+//RS         JetUiTextRange,
+//RS     };
+//RS     use std::ffi::{CStr, CString};
+//RS     use std::os::raw::{c_char, c_double, c_int, c_void};
+//RS     use std::sync::{Arc, LazyLock, Mutex};
+//RS 
+//RS     #[allow(non_camel_case_types)]
+//RS     type gboolean = c_int;
+//RS     #[allow(non_camel_case_types)]
+//RS     type gpointer = *mut c_void;
+//RS     type GtkWidget = c_void;
+//RS     type GtkCssProvider = c_void;
+//RS     type GtkEventController = c_void;
+//RS     type GtkDropTarget = c_void;
+//RS     type GtkAccessible = c_void;
+//RS     type GdkDisplay = c_void;
+//RS     type GdkClipboard = c_void;
+//RS     type GtkFileDialog = c_void;
+//RS     type GtkFileFilter = c_void;
+//RS     type GListStore = c_void;
+//RS     type GListModel = c_void;
+//RS     type GFile = c_void;
+//RS     type GValue = c_void;
+//RS     type GAsyncResult = c_void;
+//RS     type GError = c_void;
+//RS     type GMainLoop = c_void;
+//RS     type GClosure = c_void;
+//RS     type GType = usize;
+//RS     #[repr(C)]
+//RS     struct NativeGError {
+//RS         domain: u32,
+//RS         code: c_int,
+//RS         message: *mut c_char,
+//RS     }
+//RS 
+//RS     const G_IO_ERROR_CANCELLED: c_int = 19;
+//RS     const G_IO_ERROR_QUARK: &[u8] = b"g-io-error-quark\0";
+//RS     const GTK_ORIENTATION_VERTICAL: c_int = 1;
+//RS     const GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: c_int = 600;
+//RS     // GtkAccessibleProperty values are ABI-stable enum entries in GTK4:
+//RS     // DESCRIPTION is 1 and LABEL is 4 (gtk/gtkenums.h).
+//RS     const GTK_ACCESSIBLE_PROPERTY_DESCRIPTION: c_int = 1;
+//RS     const GTK_ACCESSIBLE_PROPERTY_LABEL: c_int = 4;
+//RS 
+//RS     // GCallbacks are ABI-polymorphic in GLib; each signal below passes its
+//RS     // typed trampoline through the opaque `gpointer` slot.
+//RS     type AsyncReadyCallback = extern "C" fn(gpointer, *mut GAsyncResult, gpointer);
+//RS     type DestroyCallback = extern "C" fn(gpointer, *mut GClosure);
+//RS 
+//RS     type GtkAccessibleUpdateProperty =
+//RS         unsafe extern "C" fn(*mut GtkAccessible, c_int, *const c_char, c_int);
+//RS 
+//RS     struct Api {
+//RS         _handle: *mut c_void,
+//RS         gtk_init_check: unsafe extern "C" fn() -> gboolean,
+//RS         gtk_window_new: unsafe extern "C" fn() -> *mut GtkWidget,
+//RS         gtk_window_set_title: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_window_set_default_size: unsafe extern "C" fn(*mut GtkWidget, c_int, c_int),
+//RS         gtk_window_set_child: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
+//RS         gtk_window_present: unsafe extern "C" fn(*mut GtkWidget),
+//RS         gtk_box_new: unsafe extern "C" fn(c_int, c_int) -> *mut GtkWidget,
+//RS         gtk_box_append: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
+//RS         gtk_box_remove: unsafe extern "C" fn(*mut GtkWidget, *mut GtkWidget),
+//RS         gtk_label_new: unsafe extern "C" fn(*const c_char) -> *mut GtkWidget,
+//RS         gtk_label_set_text: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_button_new_with_label: unsafe extern "C" fn(*const c_char) -> *mut GtkWidget,
+//RS         gtk_button_set_label: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_entry_new: unsafe extern "C" fn() -> *mut GtkWidget,
+//RS         gtk_editable_set_text: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_widget_set_size_request: unsafe extern "C" fn(*mut GtkWidget, c_int, c_int),
+//RS         gtk_widget_add_css_class: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_widget_remove_css_class: unsafe extern "C" fn(*mut GtkWidget, *const c_char),
+//RS         gtk_widget_grab_focus: unsafe extern "C" fn(*mut GtkWidget) -> gboolean,
+//RS         gtk_css_provider_new: unsafe extern "C" fn() -> *mut GtkCssProvider,
+//RS         gtk_css_provider_load_from_string:
+//RS             unsafe extern "C" fn(*mut GtkCssProvider, *const c_char),
+//RS         gtk_style_context_add_provider_for_display:
+//RS             unsafe extern "C" fn(*mut GdkDisplay, *mut GtkCssProvider, c_int),
+//RS         gdk_display_get_default: unsafe extern "C" fn() -> *mut GdkDisplay,
+//RS         gdk_display_get_clipboard:
+//RS             unsafe extern "C" fn(*mut GdkDisplay) -> *mut GdkClipboard,
+//RS         gdk_clipboard_set_text: unsafe extern "C" fn(*mut GdkClipboard, *const c_char),
+//RS         gdk_clipboard_read_text_async:
+//RS             unsafe extern "C" fn(*mut GdkClipboard, gpointer, AsyncReadyCallback, gpointer),
+//RS         gdk_clipboard_read_text_finish: unsafe extern "C" fn(
+//RS             *mut GdkClipboard,
+//RS             *mut GAsyncResult,
+//RS             *mut *mut GError,
+//RS         ) -> *mut c_char,
+//RS         g_main_context_iteration: unsafe extern "C" fn(gpointer, gboolean) -> gboolean,
+//RS         g_free: unsafe extern "C" fn(gpointer),
+//RS         g_signal_connect_data: unsafe extern "C" fn(
+//RS             gpointer,
+//RS             *const c_char,
+//RS             gpointer,
+//RS             gpointer,
+//RS             Option<DestroyCallback>,
+//RS             c_int,
+//RS         ) -> u64,
+//RS         gtk_file_dialog_new: unsafe extern "C" fn() -> *mut GtkFileDialog,
+//RS         gtk_file_dialog_set_title:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *const c_char),
+//RS         gtk_file_dialog_set_modal: unsafe extern "C" fn(*mut GtkFileDialog, gboolean),
+//RS         gtk_file_dialog_set_initial_folder:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GFile),
+//RS         gtk_file_dialog_set_filters:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GListModel),
+//RS         gtk_file_dialog_open: unsafe extern "C" fn(
+//RS             *mut GtkFileDialog,
+//RS             *mut GtkWidget,
+//RS             gpointer,
+//RS             AsyncReadyCallback,
+//RS             gpointer,
+//RS         ),
+//RS         gtk_file_dialog_open_multiple: unsafe extern "C" fn(
+//RS             *mut GtkFileDialog,
+//RS             *mut GtkWidget,
+//RS             gpointer,
+//RS             AsyncReadyCallback,
+//RS             gpointer,
+//RS         ),
+//RS         gtk_file_dialog_save: unsafe extern "C" fn(
+//RS             *mut GtkFileDialog,
+//RS             *mut GtkWidget,
+//RS             gpointer,
+//RS             AsyncReadyCallback,
+//RS             gpointer,
+//RS         ),
+//RS         gtk_file_dialog_open_finish:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
+//RS                 -> *mut GFile,
+//RS         gtk_file_dialog_open_multiple_finish:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
+//RS                 -> *mut GListModel,
+//RS         gtk_file_dialog_save_finish:
+//RS             unsafe extern "C" fn(*mut GtkFileDialog, *mut GAsyncResult, *mut *mut GError)
+//RS                 -> *mut GFile,
+//RS         gtk_file_filter_new: unsafe extern "C" fn() -> *mut GtkFileFilter,
+//RS         gtk_file_filter_get_type: unsafe extern "C" fn() -> GType,
+//RS         gtk_file_filter_set_name:
+//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
+//RS         gtk_file_filter_add_pattern:
+//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
+//RS         gtk_file_filter_add_mime_type:
+//RS             unsafe extern "C" fn(*mut GtkFileFilter, *const c_char),
+//RS         g_type_from_name: unsafe extern "C" fn(*const c_char) -> GType,
+//RS         g_list_store_new: unsafe extern "C" fn(GType) -> *mut GListStore,
+//RS         g_list_store_append: unsafe extern "C" fn(*mut GListStore, gpointer),
+//RS         g_list_model_get_n_items: unsafe extern "C" fn(*mut GListModel) -> u32,
+//RS         g_list_model_get_item: unsafe extern "C" fn(*mut GListModel, u32) -> gpointer,
+//RS         g_file_new_for_path: unsafe extern "C" fn(*const c_char) -> *mut GFile,
+//RS         g_file_get_path: unsafe extern "C" fn(*mut GFile) -> *mut c_char,
+//RS         g_error_free: unsafe extern "C" fn(*mut GError),
+//RS         g_quark_from_static_string: unsafe extern "C" fn(*const c_char) -> u32,
+//RS         g_error_matches: unsafe extern "C" fn(*const GError, u32, c_int) -> gboolean,
+//RS         g_main_loop_new: unsafe extern "C" fn(gpointer, gboolean) -> *mut GMainLoop,
+//RS         g_main_loop_run: unsafe extern "C" fn(*mut GMainLoop),
+//RS         g_main_loop_unref: unsafe extern "C" fn(*mut GMainLoop),
+//RS         g_object_unref: unsafe extern "C" fn(gpointer),
+//RS         gtk_accessible_update_property: GtkAccessibleUpdateProperty,
+//RS         gtk_event_controller_key_new: unsafe extern "C" fn() -> *mut GtkEventController,
+//RS         gtk_drop_target_new:
+//RS             unsafe extern "C" fn(GType, u32) -> *mut GtkDropTarget,
+//RS         gtk_widget_add_controller:
+//RS             unsafe extern "C" fn(*mut GtkWidget, *mut GtkEventController),
+//RS         gdk_keyval_name: unsafe extern "C" fn(u32) -> *const c_char,
+//RS         g_value_get_string: unsafe extern "C" fn(*const GValue) -> *const c_char,
+//RS     }
+//RS 
+//RS     // The handle and function pointers refer to one process-global, immutable
+//RS     // loader result. Keeping the library open is required for every pointer.
+//RS     unsafe impl Send for Api {}
+//RS     unsafe impl Sync for Api {}
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     #[link(name = "dl")]
+//RS     unsafe extern "C" {}
+//RS 
+//RS     #[cfg(unix)]
+//RS     unsafe extern "C" {
+//RS         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+//RS         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     const RTLD_NOW: c_int = 2;
+//RS 
+//RS     #[cfg(unix)]
+//RS     unsafe fn symbol<T: Copy>(handle: *mut c_void, name: &'static CStr) -> Option<T> {
+//RS         let address = dlsym(handle, name.as_ptr());
+//RS         (!address.is_null()).then(|| std::mem::transmute_copy(&address))
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn load() -> Option<Api> {
+//RS         const LIBRARIES: [&[u8]; 4] = [
+//RS             b"libgtk-4.so.1\0",
+//RS             b"libgtk-4.so\0",
+//RS             b"libgtk-4.1.dylib\0",
+//RS             b"libgtk-4.dylib\0",
+//RS         ];
+//RS         for library in LIBRARIES {
+//RS             // SAFETY: the name is a static NUL-terminated string and the
+//RS             // returned handle remains open for the lifetime of the process.
+//RS             let handle = unsafe { dlopen(library.as_ptr().cast(), RTLD_NOW) };
+//RS             if handle.is_null() {
+//RS                 continue;
+//RS             }
+//RS             macro_rules! load_symbol {
+//RS                 ($name:literal) => {
+//RS                     unsafe {
+//RS                         symbol(
+//RS                             handle,
+//RS                             CStr::from_bytes_with_nul_unchecked(
+//RS                                 concat!($name, "\0").as_bytes(),
+//RS                             ),
+//RS                         )?
+//RS                     }
+//RS                 };
+//RS             }
+//RS             return Some(Api {
+//RS                 _handle: handle,
+//RS                 gtk_init_check: load_symbol!("gtk_init_check"),
+//RS                 gtk_window_new: load_symbol!("gtk_window_new"),
+//RS                 gtk_window_set_title: load_symbol!("gtk_window_set_title"),
+//RS                 gtk_window_set_default_size: load_symbol!("gtk_window_set_default_size"),
+//RS                 gtk_window_set_child: load_symbol!("gtk_window_set_child"),
+//RS                 gtk_window_present: load_symbol!("gtk_window_present"),
+//RS                 gtk_box_new: load_symbol!("gtk_box_new"),
+//RS                 gtk_box_append: load_symbol!("gtk_box_append"),
+//RS                 gtk_box_remove: load_symbol!("gtk_box_remove"),
+//RS                 gtk_label_new: load_symbol!("gtk_label_new"),
+//RS                 gtk_label_set_text: load_symbol!("gtk_label_set_text"),
+//RS                 gtk_button_new_with_label: load_symbol!("gtk_button_new_with_label"),
+//RS                 gtk_button_set_label: load_symbol!("gtk_button_set_label"),
+//RS                 gtk_entry_new: load_symbol!("gtk_entry_new"),
+//RS                 gtk_editable_set_text: load_symbol!("gtk_editable_set_text"),
+//RS                 gtk_widget_set_size_request: load_symbol!("gtk_widget_set_size_request"),
+//RS                 gtk_widget_add_css_class: load_symbol!("gtk_widget_add_css_class"),
+//RS                 gtk_widget_remove_css_class: load_symbol!("gtk_widget_remove_css_class"),
+//RS                 gtk_widget_grab_focus: load_symbol!("gtk_widget_grab_focus"),
+//RS                 gtk_css_provider_new: load_symbol!("gtk_css_provider_new"),
+//RS                 gtk_css_provider_load_from_string:
+//RS                     load_symbol!("gtk_css_provider_load_from_string"),
+//RS                 gtk_style_context_add_provider_for_display:
+//RS                     load_symbol!("gtk_style_context_add_provider_for_display"),
+//RS                 gdk_display_get_default: load_symbol!("gdk_display_get_default"),
+//RS                 gdk_display_get_clipboard: load_symbol!("gdk_display_get_clipboard"),
+//RS                 gdk_clipboard_set_text: load_symbol!("gdk_clipboard_set_text"),
+//RS                 gdk_clipboard_read_text_async: load_symbol!("gdk_clipboard_read_text_async"),
+//RS                 gdk_clipboard_read_text_finish: load_symbol!("gdk_clipboard_read_text_finish"),
+//RS                 g_main_context_iteration: load_symbol!("g_main_context_iteration"),
+//RS                 g_free: load_symbol!("g_free"),
+//RS                 g_signal_connect_data: load_symbol!("g_signal_connect_data"),
+//RS                 gtk_file_dialog_new: load_symbol!("gtk_file_dialog_new"),
+//RS                 gtk_file_dialog_set_title: load_symbol!("gtk_file_dialog_set_title"),
+//RS                 gtk_file_dialog_set_modal: load_symbol!("gtk_file_dialog_set_modal"),
+//RS                 gtk_file_dialog_set_initial_folder:
+//RS                     load_symbol!("gtk_file_dialog_set_initial_folder"),
+//RS                 gtk_file_dialog_set_filters: load_symbol!("gtk_file_dialog_set_filters"),
+//RS                 gtk_file_dialog_open: load_symbol!("gtk_file_dialog_open"),
+//RS                 gtk_file_dialog_open_multiple: load_symbol!("gtk_file_dialog_open_multiple"),
+//RS                 gtk_file_dialog_save: load_symbol!("gtk_file_dialog_save"),
+//RS                 gtk_file_dialog_open_finish: load_symbol!("gtk_file_dialog_open_finish"),
+//RS                 gtk_file_dialog_open_multiple_finish:
+//RS                     load_symbol!("gtk_file_dialog_open_multiple_finish"),
+//RS                 gtk_file_dialog_save_finish: load_symbol!("gtk_file_dialog_save_finish"),
+//RS                 gtk_file_filter_new: load_symbol!("gtk_file_filter_new"),
+//RS                 gtk_file_filter_get_type: load_symbol!("gtk_file_filter_get_type"),
+//RS                 gtk_file_filter_set_name: load_symbol!("gtk_file_filter_set_name"),
+//RS                 gtk_file_filter_add_pattern: load_symbol!("gtk_file_filter_add_pattern"),
+//RS                 gtk_file_filter_add_mime_type: load_symbol!("gtk_file_filter_add_mime_type"),
+//RS                 g_type_from_name: load_symbol!("g_type_from_name"),
+//RS                 g_list_store_new: load_symbol!("g_list_store_new"),
+//RS                 g_list_store_append: load_symbol!("g_list_store_append"),
+//RS                 g_list_model_get_n_items: load_symbol!("g_list_model_get_n_items"),
+//RS                 g_list_model_get_item: load_symbol!("g_list_model_get_item"),
+//RS                 g_file_new_for_path: load_symbol!("g_file_new_for_path"),
+//RS                 g_file_get_path: load_symbol!("g_file_get_path"),
+//RS                 g_error_free: load_symbol!("g_error_free"),
+//RS                 g_quark_from_static_string: load_symbol!("g_quark_from_static_string"),
+//RS                 g_error_matches: load_symbol!("g_error_matches"),
+//RS                 g_main_loop_new: load_symbol!("g_main_loop_new"),
+//RS                 g_main_loop_run: load_symbol!("g_main_loop_run"),
+//RS                 g_main_loop_unref: load_symbol!("g_main_loop_unref"),
+//RS                 g_object_unref: load_symbol!("g_object_unref"),
+//RS                 gtk_accessible_update_property: load_symbol!("gtk_accessible_update_property"),
+//RS                 gtk_event_controller_key_new: load_symbol!("gtk_event_controller_key_new"),
+//RS                 gtk_drop_target_new: load_symbol!("gtk_drop_target_new"),
+//RS                 gtk_widget_add_controller: load_symbol!("gtk_widget_add_controller"),
+//RS                 gdk_keyval_name: load_symbol!("gdk_keyval_name"),
+//RS                 g_value_get_string: load_symbol!("g_value_get_string"),
+//RS             });
+//RS         }
+//RS         None
+//RS     }
+//RS 
+//RS     #[cfg(not(unix))]
+//RS     fn load() -> Option<Api> {
+//RS         None
+//RS     }
+//RS 
+//RS     fn gtk_api() -> Option<&'static Api> {
+//RS         static API: LazyLock<Option<Api>> = LazyLock::new(load);
+//RS         API.as_ref()
+//RS     }
+//RS 
+//RS     macro_rules! gtk_api_wrapper {
+//RS         ($name:ident($($arg:ident: $ty:ty),* $(,)?) -> $ret:ty = $default:expr) => {
+//RS             fn $name($($arg: $ty),*) -> $ret {
+//RS                 let Some(api) = gtk_api() else {
+//RS                     return $default;
+//RS                 };
+//RS                 // SAFETY: `api` contains the symbol with the exact declared GTK ABI.
+//RS                 unsafe { (api.$name)($($arg),*) }
+//RS             }
+//RS         };
+//RS     }
+//RS 
+//RS     gtk_api_wrapper!(gtk_init_check() -> gboolean = 0);
+//RS     gtk_api_wrapper!(gtk_window_new() -> *mut GtkWidget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_window_set_title(window: *mut GtkWidget, title: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_window_set_default_size(window: *mut GtkWidget, width: c_int, height: c_int) -> () = ());
+//RS     gtk_api_wrapper!(gtk_window_set_child(window: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
+//RS     gtk_api_wrapper!(gtk_window_present(window: *mut GtkWidget) -> () = ());
+//RS     gtk_api_wrapper!(gtk_box_new(orientation: c_int, spacing: c_int) -> *mut GtkWidget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_box_append(box_: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
+//RS     gtk_api_wrapper!(gtk_box_remove(box_: *mut GtkWidget, child: *mut GtkWidget) -> () = ());
+//RS     gtk_api_wrapper!(gtk_label_new(text: *const c_char) -> *mut GtkWidget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_label_set_text(label: *mut GtkWidget, text: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_button_new_with_label(label: *const c_char) -> *mut GtkWidget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_button_set_label(button: *mut GtkWidget, label: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_entry_new() -> *mut GtkWidget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_editable_set_text(editable: *mut GtkWidget, text: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_widget_set_size_request(widget: *mut GtkWidget, width: c_int, height: c_int) -> () = ());
+//RS     gtk_api_wrapper!(gtk_widget_add_css_class(widget: *mut GtkWidget, css_class: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_widget_remove_css_class(widget: *mut GtkWidget, css_class: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_widget_grab_focus(widget: *mut GtkWidget) -> gboolean = 0);
+//RS     gtk_api_wrapper!(gtk_css_provider_new() -> *mut GtkCssProvider = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_css_provider_load_from_string(provider: *mut GtkCssProvider, string: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_style_context_add_provider_for_display(display: *mut GdkDisplay, provider: *mut GtkCssProvider, priority: c_int) -> () = ());
+//RS     gtk_api_wrapper!(gdk_display_get_default() -> *mut GdkDisplay = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gdk_display_get_clipboard(display: *mut GdkDisplay) -> *mut GdkClipboard = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gdk_clipboard_set_text(clipboard: *mut GdkClipboard, text: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gdk_clipboard_read_text_async(clipboard: *mut GdkClipboard, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(gdk_clipboard_read_text_finish(clipboard: *mut GdkClipboard, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut c_char = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_main_context_iteration(context: gpointer, may_block: gboolean) -> gboolean = 0);
+//RS     gtk_api_wrapper!(g_free(pointer: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(g_signal_connect_data(instance: gpointer, detailed_signal: *const c_char, c_handler: gpointer, data: gpointer, destroy_data: Option<DestroyCallback>, connect_flags: c_int) -> u64 = 0);
+//RS     gtk_api_wrapper!(gtk_file_dialog_new() -> *mut GtkFileDialog = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_file_dialog_set_title(dialog: *mut GtkFileDialog, title: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_set_modal(dialog: *mut GtkFileDialog, modal: gboolean) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_set_initial_folder(dialog: *mut GtkFileDialog, folder: *mut GFile) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_set_filters(dialog: *mut GtkFileDialog, filters: *mut GListModel) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_open(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_open_multiple(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_save(dialog: *mut GtkFileDialog, parent: *mut GtkWidget, cancellable: gpointer, callback: AsyncReadyCallback, user_data: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_dialog_open_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GFile = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_file_dialog_open_multiple_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GListModel = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_file_dialog_save_finish(dialog: *mut GtkFileDialog, result: *mut GAsyncResult, error: *mut *mut GError) -> *mut GFile = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_file_filter_new() -> *mut GtkFileFilter = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_file_filter_get_type() -> GType = 0);
+//RS     gtk_api_wrapper!(gtk_file_filter_set_name(filter: *mut GtkFileFilter, name: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_filter_add_pattern(filter: *mut GtkFileFilter, pattern: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(gtk_file_filter_add_mime_type(filter: *mut GtkFileFilter, mime: *const c_char) -> () = ());
+//RS     gtk_api_wrapper!(g_type_from_name(name: *const c_char) -> GType = 0);
+//RS     gtk_api_wrapper!(g_list_store_new(item_type: GType) -> *mut GListStore = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_list_store_append(store: *mut GListStore, item: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(g_list_model_get_n_items(model: *mut GListModel) -> u32 = 0);
+//RS     gtk_api_wrapper!(g_list_model_get_item(model: *mut GListModel, position: u32) -> gpointer = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_file_new_for_path(path: *const c_char) -> *mut GFile = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_file_get_path(file: *mut GFile) -> *mut c_char = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_error_free(error: *mut GError) -> () = ());
+//RS     gtk_api_wrapper!(g_quark_from_static_string(string: *const c_char) -> u32 = 0);
+//RS     gtk_api_wrapper!(g_error_matches(error: *const GError, domain: u32, code: c_int) -> gboolean = 0);
+//RS     gtk_api_wrapper!(g_main_loop_new(context: gpointer, is_running: gboolean) -> *mut GMainLoop = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(g_main_loop_run(loop_: *mut GMainLoop) -> () = ());
+//RS     gtk_api_wrapper!(g_main_loop_unref(loop_: *mut GMainLoop) -> () = ());
+//RS     gtk_api_wrapper!(g_object_unref(object: gpointer) -> () = ());
+//RS     gtk_api_wrapper!(gtk_event_controller_key_new() -> *mut GtkEventController = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_drop_target_new(value_type: GType, actions: u32) -> *mut GtkDropTarget = std::ptr::null_mut());
+//RS     gtk_api_wrapper!(gtk_widget_add_controller(widget: *mut GtkWidget, controller: *mut GtkEventController) -> () = ());
+//RS     gtk_api_wrapper!(gdk_keyval_name(keyval: u32) -> *const c_char = std::ptr::null());
+//RS     gtk_api_wrapper!(g_value_get_string(value: *const GValue) -> *const c_char = std::ptr::null());
+//RS 
+//RS     /// Trampoline for a GTK "clicked" signal. Each connection owns one boxed
+//RS     /// `Arc<dyn Fn() + Send + Sync>`; the registry retains another `Arc` for path recreation.
+//RS     extern "C" fn jet_gtk_click_trampoline(_widget: *mut GtkWidget, data: gpointer) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: `data` is a boxed `Arc<dyn Fn() + Send + Sync>` owned by this signal
+//RS         // connection. GTK runs its destroy notifier before releasing it.
+//RS         unsafe {
+//RS             let cb = &*(data as *const Arc<dyn Fn() + Send + Sync>);
+//RS             cb();
+//RS         }
+//RS     }
+//RS     struct ClipboardRead {
+//RS         done: bool,
+//RS         text: Option<String>,
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_clipboard_read_ready(
+//RS         source: gpointer,
+//RS         result: *mut GAsyncResult,
+//RS         data: gpointer,
+//RS     ) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: the callback runs synchronously with the stack value owned
+//RS         // by `read_clipboard_text`; the GTK async operation is drained before
+//RS         // that value leaves scope.
+//RS         let state = unsafe { &mut *(data as *mut ClipboardRead) };
+//RS         let mut error = std::ptr::null_mut();
+//RS         let text = unsafe {
+//RS             gdk_clipboard_read_text_finish(
+//RS                 source as *mut GdkClipboard,
+//RS                 result,
+//RS                 &mut error,
+//RS             )
+//RS         };
+//RS         if !text.is_null() {
+//RS             let value = unsafe { CStr::from_ptr(text) }
+//RS                 .to_string_lossy()
+//RS                 .into_owned();
+//RS             unsafe { g_free(text as gpointer) };
+//RS             state.text = Some(value);
+//RS         }
+//RS         state.done = true;
+//RS     }
+//RS     #[derive(Clone, Copy)]
+//RS     enum FileDialogMode {
+//RS         Open,
+//RS         OpenMultiple,
+//RS         Save,
+//RS     }
+//RS 
+//RS     struct FileDialogRead {
+//RS         done: bool,
+//RS         mode: FileDialogMode,
+//RS         files: Vec<String>,
+//RS         cancelled: bool,
+//RS         error: Option<String>,
+//RS     }
+//RS 
+//RS     unsafe fn gtk_file_path(file: *mut GFile) -> Option<String> {
+//RS         if file.is_null() {
+//RS             return None;
+//RS         }
+//RS         let path = g_file_get_path(file);
+//RS         let value = (!path.is_null())
+//RS             .then(|| CStr::from_ptr(path).to_string_lossy().into_owned());
+//RS         if !path.is_null() {
+//RS             g_free(path as gpointer);
+//RS         }
+//RS         g_object_unref(file as gpointer);
+//RS         value
+//RS     }
+//RS 
+//RS     unsafe fn gtk_file_model_paths(model: *mut GListModel) -> Vec<String> {
+//RS         if model.is_null() {
+//RS             return Vec::new();
+//RS         }
+//RS         let count = g_list_model_get_n_items(model);
+//RS         let mut paths = Vec::with_capacity(count as usize);
+//RS         for index in 0..count {
+//RS             let file = g_list_model_get_item(model, index) as *mut GFile;
+//RS             if let Some(path) = gtk_file_path(file) {
+//RS                 paths.push(path);
+//RS             }
+//RS         }
+//RS         g_object_unref(model as gpointer);
+//RS         paths
+//RS     }
+//RS 
+//RS     unsafe fn gtk_file_error(error: *mut GError) -> (bool, String) {
+//RS         let domain = g_quark_from_static_string(G_IO_ERROR_QUARK.as_ptr() as *const c_char);
+//RS         let cancelled = g_error_matches(error as *const GError, domain, G_IO_ERROR_CANCELLED) != 0;
+//RS         if cancelled {
+//RS             return (true, String::new());
+//RS         }
+//RS         let record = &*(error as *const NativeGError);
+//RS         let text = if record.message.is_null() {
+//RS             "GTK file dialog failed".to_string()
+//RS         } else {
+//RS             CStr::from_ptr(record.message)
+//RS                 .to_string_lossy()
+//RS                 .chars()
+//RS                 .take(512)
+//RS                 .collect::<String>()
+//RS         };
+//RS         (false, format!("GTK file dialog failed: {text}"))
+//RS     }
+//RS     extern "C" fn jet_gtk_file_dialog_ready(
+//RS         source: gpointer,
+//RS 
+//RS         result: *mut GAsyncResult,
+//RS         data: gpointer,
+//RS     ) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: the callback runs while `run_file_dialog` owns the stack
+//RS         // state and drains the GLib context before returning.
+//RS         let state = unsafe { &mut *(data as *mut FileDialogRead) };
+//RS         let mut error = std::ptr::null_mut();
+//RS         let files = unsafe {
+//RS             match state.mode {
+//RS                 FileDialogMode::Open => {
+//RS                     let file = gtk_file_dialog_open_finish(
+//RS                         source as *mut GtkFileDialog,
+//RS                         result,
+//RS                         &mut error,
+//RS                     );
+//RS                     gtk_file_path(file).map(|path| vec![path])
+//RS                 }
+//RS                 FileDialogMode::OpenMultiple => Some(gtk_file_model_paths(
+//RS                     gtk_file_dialog_open_multiple_finish(
+//RS                         source as *mut GtkFileDialog,
+//RS                         result,
+//RS                         &mut error,
+//RS                     ),
+//RS                 )),
+//RS                 FileDialogMode::Save => {
+//RS                     let file = gtk_file_dialog_save_finish(
+//RS                         source as *mut GtkFileDialog,
+//RS                         result,
+//RS                         &mut error,
+//RS                     );
+//RS                     gtk_file_path(file).map(|path| vec![path])
+//RS                 }
+//RS             }
+//RS         };
+//RS         if !error.is_null() {
+//RS             let (cancelled, message) = unsafe { gtk_file_error(error) };
+//RS             state.cancelled = cancelled;
+//RS             if !cancelled {
+//RS                 state.error = Some(message);
+//RS             }
+//RS             unsafe { g_error_free(error) };
+//RS         }
+//RS         state.files = files.unwrap_or_default();
+//RS         state.done = true;
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drop_callback(data: gpointer, _closure: *mut GClosure) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: `on_click` allocated exactly one Box at this pointer; GTK
+//RS         // invokes this notifier once when the signal/widget is destroyed.
+//RS         unsafe {
+//RS             drop(Box::from_raw(data as *mut Arc<dyn Fn() + Send + Sync>));
+//RS         }
+//RS     }
+//RS     struct GtkImeBinding {
+//RS         state: *mut GtkState,
+//RS         target: JetUiNodeId,
+//RS         path: String,
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_binding_drop(data: gpointer, _closure: *mut GClosure) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: each signal owns one boxed binding and invokes this
+//RS         // destroy notifier exactly once.
+//RS         unsafe {
+//RS             drop(Box::from_raw(data as *mut GtkImeBinding));
+//RS         }
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_insert_text_trampoline(
+//RS         _editable: *mut GtkWidget,
+//RS         text: *const c_char,
+//RS         _length: c_int,
+//RS         data: gpointer,
+//RS     ) {
+//RS         if data.is_null() || text.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: GTK owns `text` for the duration of this signal callback;
+//RS         // the binding remains owned by the widget signal.
+//RS         let binding = unsafe { &*(data as *const GtkImeBinding) };
+//RS         let enabled = unsafe {
+//RS             (*binding.state)
+//RS                 .ime_enabled
+//RS                 .get(&binding.path)
+//RS                 .copied()
+//RS                 .unwrap_or(false)
+//RS         };
+//RS         if !enabled {
+//RS             return;
+//RS         }
+//RS         let text = unsafe { CStr::from_ptr(text) }
+//RS             .to_string_lossy()
+//RS             .into_owned();
+//RS         let end = text.chars().count();
+//RS         let selection = JetUiTextRange::new(0, end).unwrap_or_default();
+//RS         unsafe {
+//RS             (*binding.state).ime_events.push_back(JetUiImeEvent {
+//RS                 target: binding.target.clone(),
+//RS                 phase: JetUiImePhase::Commit,
+//RS                 composition: Some(JetUiImeComposition {
+//RS                     text,
+//RS                     selection,
+//RS                     marked: None,
+//RS                 }),
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     struct GtkDragBinding {
+//RS         state: *mut GtkState,
+//RS         target: JetUiNodeId,
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drag_binding_drop(data: gpointer, _closure: *mut GClosure) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         // SAFETY: each drag signal owns one boxed binding.
+//RS         unsafe {
+//RS             drop(Box::from_raw(data as *mut GtkDragBinding));
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_gtk_queue_drag(
+//RS         binding: &GtkDragBinding,
+//RS         phase: JetUiDragPhase,
+//RS         items: Vec<JetUiDropItem>,
+//RS     ) {
+//RS         unsafe {
+//RS             (*binding.state).drag_events.push_back(JetUiDragEvent {
+//RS                 target: binding.target.clone(),
+//RS                 phase,
+//RS                 operation: JetUiDragOperation::Copy,
+//RS                 items,
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drag_enter_trampoline(
+//RS         _target: *mut GtkWidget,
+//RS         _x: c_double,
+//RS         _y: c_double,
+//RS         data: gpointer,
+//RS     ) -> u32 {
+//RS         if data.is_null() {
+//RS             return 0;
+//RS         }
+//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
+//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Enter, Vec::new());
+//RS         1
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drag_motion_trampoline(
+//RS         _target: *mut GtkWidget,
+//RS         _x: c_double,
+//RS         _y: c_double,
+//RS         data: gpointer,
+//RS     ) -> u32 {
+//RS         if data.is_null() {
+//RS             return 0;
+//RS         }
+//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
+//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Over, Vec::new());
+//RS         1
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drag_leave_trampoline(_target: *mut GtkWidget, data: gpointer) {
+//RS         if data.is_null() {
+//RS             return;
+//RS         }
+//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
+//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Leave, Vec::new());
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_drop_trampoline(
+//RS         _target: *mut GtkWidget,
+//RS         value: *const GValue,
+//RS         _x: c_double,
+//RS         _y: c_double,
+//RS         data: gpointer,
+//RS     ) -> gboolean {
+//RS         if data.is_null() {
+//RS             return 0;
+//RS         }
+//RS         let binding = unsafe { &*(data as *const GtkDragBinding) };
+//RS         let items = if value.is_null() {
+//RS             Vec::new()
+//RS         } else {
+//RS             let text = unsafe { g_value_get_string(value) };
+//RS             if text.is_null() {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 let text = unsafe { CStr::from_ptr(text) }
+//RS                     .to_string_lossy()
+//RS                     .into_owned();
+//RS                 if text.starts_with("file://") {
+//RS                     vec![JetUiDropItem::URI(text)]
+//RS                 } else {
+//RS                     vec![JetUiDropItem::Text(text)]
+//RS                 }
+//RS             }
+//RS         };
+//RS         jet_gtk_queue_drag(binding, JetUiDragPhase::Drop, items);
+//RS         1
+//RS     }
+//RS 
+//RS     extern "C" fn jet_gtk_shortcut_trampoline(
+//RS         _controller: *mut GtkWidget,
+//RS         keyval: u32,
+//RS         _keycode: u32,
+//RS         modifiers: u32,
+//RS         data: gpointer,
+//RS     ) -> gboolean {
+//RS         if data.is_null() {
+//RS             return 0;
+//RS         }
+//RS         let state = unsafe { &mut *(data as *mut GtkState) };
+//RS         let key_name = unsafe { gdk_keyval_name(keyval) };
+//RS         if key_name.is_null() {
+//RS             return 0;
+//RS         }
+//RS         let key = unsafe { CStr::from_ptr(key_name) }
+//RS             .to_string_lossy()
+//RS             .into_owned();
+//RS         let mut modifier_bits = 0u8;
+//RS         if modifiers & (1 << 0) != 0 {
+//RS             modifier_bits |= 1 << 2;
+//RS         }
+//RS         if modifiers & (1 << 2) != 0 {
+//RS             modifier_bits |= 1;
+//RS         }
+//RS         if modifiers & (1 << 3) != 0 {
+//RS             modifier_bits |= 1 << 1;
+//RS         }
+//RS         if modifiers & (1 << 26) != 0 {
+//RS             modifier_bits |= 1 << 3;
+//RS         }
+//RS         // `.cmd()` is the logical platform-command modifier. Keep the
+//RS         // physical candidate so explicit `.control`/`.meta` bindings still
+//RS         // work, then try the logical candidate first (Ctrl on Unix/Windows,
+//RS         // Meta on macOS).
+//RS         let physical = super::JetUiShortcutModifiers::from_bits(modifier_bits);
+//RS         let mut logical_bits = modifier_bits;
+//RS         if cfg!(target_os = "macos") && modifier_bits & (1 << 3) != 0 {
+//RS             logical_bits = (logical_bits & !(1 << 3)) | (1 << 4);
+//RS         } else if !cfg!(target_os = "macos") && modifier_bits & 1 != 0 {
+//RS             logical_bits = (logical_bits & !1) | (1 << 4);
+//RS         }
+//RS         let candidates = [
+//RS             super::JetUiShortcutModifiers::from_bits(logical_bits),
+//RS             physical,
+//RS         ];
+//RS         let mut handled_shortcut = None;
+//RS         for candidate_modifiers in candidates {
+//RS             let Ok(candidate) = JetUiShortcut::new(&key, candidate_modifiers) else {
+//RS                 continue;
+//RS             };
+//RS             if !matches!(
+//RS                 state.shortcuts.dispatch(&candidate),
+//RS                 JetUiShortcutDispatch::Unhandled
+//RS             ) {
+//RS                 handled_shortcut = Some(candidate);
+//RS                 break;
+//RS             }
+//RS         }
+//RS         let Some(shortcut) = handled_shortcut else {
+//RS             return 0;
+//RS         };
+//RS         state.trace(&format!("shortcut-dispatch {}", shortcut.key));
+//RS         1
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq)]
+//RS     enum GtkAvailability {
+//RS         Uninitialized,
+//RS         Ready,
+//RS         GtkUnavailable,
+//RS         HeadlessOptIn,
+//RS         UnsupportedDisplay,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq)]
+//RS     enum GtkWidgetKind {
+//RS         Box,
+//RS         Label,
+//RS         Button,
+//RS         Entry,
+//RS     }
+//RS 
+//RS     struct GtkWidgetRecord {
+//RS         path: String,
+//RS         parent: *mut GtkWidget,
+//RS         widget: *mut GtkWidget,
+//RS         kind: GtkWidgetKind,
+//RS         label: String,
+//RS         css_class: Option<String>,
+//RS     }
+//RS 
+//RS     // Reconciled widgets are addressed by a stable tree path; direct widget
+//RS     // handles retain the native pointer for the lifetime of the backend.
+//RS     enum GtkWidgetHandleTarget {
+//RS         Direct(*mut GtkWidget),
+//RS         TreePath(String),
+//RS     }
+//RS 
+//RS     struct GtkWidgetHandle {
+//RS         target: GtkWidgetHandleTarget,
+//RS         kind: GtkWidgetKind,
+//RS     }
+//RS 
+//RS     struct GtkClickBinding {
+//RS         path: String,
+//RS         callback: Arc<dyn Fn() + Send + Sync>,
+//RS         connected_widget: *mut GtkWidget,
+//RS     }
+//RS 
+//RS     struct GtkState {
+//RS         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
+//RS         // the null/tui measure→layout→paint path is available on it too.
+//RS         measured: Option<JetSize>,
+//RS         layout_frame: Option<JetRect>,
+//RS         commands: Vec<JetPaintCmd>,
+//RS         last_event: Option<JetEventResult>,
+//RS         focus_nodes: Vec<JetUiNode>,
+//RS         focus_paths: Vec<String>,
+//RS         focused_index: Option<usize>,
+//RS         // Retained native widgets.
+//RS         inited: bool,
+//RS         display_ok: bool,
+//RS         window: *mut GtkWidget,
+//RS         vbox: *mut GtkWidget,
+//RS         widget_handles: Vec<GtkWidgetHandle>,
+//RS         click_bindings: Vec<GtkClickBinding>,
+//RS         tree_widgets: Vec<GtkWidgetRecord>,
+//RS         availability: GtkAvailability,
+//RS         capabilities: JetUiCapabilityFacts,
+//RS         shortcuts: JetUiShortcutRegistry,
+//RS         /// Current IME policy by retained tree path. Signal bindings stay
+//RS         /// installed across reactive paints and consult this map before
+//RS         /// enqueueing a native composition event.
+//RS         ime_enabled: std::collections::HashMap<String, bool>,
+//RS         ime_events: std::collections::VecDeque<JetUiImeEvent>,
+//RS         drag_events: std::collections::VecDeque<JetUiDragEvent>,
+//RS         native_controllers: bool,
+//RS     }
+//RS 
+//RS     // SAFETY: GTK widgets stay on the creating thread; Send/Sync only satisfy
+//RS     // `jet_ui_reactive_render`'s closure bound (headless runs never cross threads).
+//RS     unsafe impl Send for GtkState {}
+//RS     unsafe impl Sync for GtkState {}
+//RS 
+//RS     fn gtk_set_accessible_property(
+//RS         widget: *mut GtkWidget,
+//RS         property: c_int,
+//RS         value: Option<&str>,
+//RS     ) {
+//RS         let value = value.and_then(|text| CString::new(text).ok());
+//RS         let value_ptr = value
+//RS             .as_ref()
+//RS             .map_or(std::ptr::null(), |text| text.as_ptr());
+//RS         // GtkAccessible properties are not ordinary GObject properties.
+//RS         // Update the interface directly so GTK exports the values through
+//RS         // AT-SPI. The dynamically loaded pointer uses the fixed prefix plus
+//RS         // the ABI-required integer sentinel; no Rust variadic definition or
+//RS         // function-pointer signature cast is needed.
+//RS         let Some(api) = gtk_api() else {
+//RS             return;
+//RS         };
+//RS         unsafe {
+//RS             (api.gtk_accessible_update_property)(
+//RS                 widget as *mut GtkAccessible,
+//RS                 property,
+//RS                 value_ptr,
+//RS                 -1i32,
+//RS             );
+//RS         }
+//RS     }
+//RS 
+//RS     fn gtk_apply_accessibility(widget: *mut GtkWidget, node: &JetUiNode) {
+//RS         if widget.is_null() {
+//RS             return;
+//RS         }
+//RS         let (name, description) = node
+//RS             .accessibility
+//RS             .as_ref()
+//RS             .map_or((None, None), |metadata| {
+//RS                 (metadata.name.as_deref(), metadata.description.as_deref())
+//RS             });
+//RS         gtk_set_accessible_property(widget, GTK_ACCESSIBLE_PROPERTY_LABEL, name);
+//RS         gtk_set_accessible_property(
+//RS             widget,
+//RS             GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+//RS             description,
+//RS         );
+//RS     }
+//RS     impl GtkState {
+//RS         /// Initialize GTK once and create the window + vertical container.
+//RS         /// No-op (and `display_ok = false`) under `JET_UI_HEADLESS` or with no
+//RS         /// display, so every later widget op degrades to nothing.
+//RS         ///
+//RS         /// SAFETY: `gtk_init_check` guards all subsequent GTK calls on a live
+//RS         /// display; the window/box pointers come from GTK constructors.
+//RS         fn ensure_init(&mut self) {
+//RS             if self.inited {
+//RS                 return;
+//RS             }
+//RS             self.inited = true;
+//RS             if std::env::var_os("JET_UI_HEADLESS").is_some() {
+//RS                 self.display_ok = false;
+//RS                 self.capabilities = JetUiCapabilityFacts::empty();
+//RS                 self.availability = GtkAvailability::HeadlessOptIn;
+//RS                 return;
+//RS             }
+//RS             if gtk_api().is_none() {
+//RS                 self.display_ok = false;
+//RS                 self.capabilities = JetUiCapabilityFacts::empty();
+//RS                 self.availability = GtkAvailability::GtkUnavailable;
+//RS                 return;
+//RS             }
+//RS             if gtk_init_check() == 0 {
+//RS                 self.display_ok = false;
+//RS                 self.capabilities = JetUiCapabilityFacts::empty();
+//RS                 self.availability = GtkAvailability::UnsupportedDisplay;
+//RS                 return;
+//RS             }
+//RS             self.display_ok = true;
+//RS             self.availability = GtkAvailability::Ready;
+//RS             self.window = gtk_window_new();
+//RS             self.vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+//RS             gtk_window_set_child(self.window, self.vbox);
+//RS             gtk_window_set_default_size(self.window, 320, 240);
+//RS             if !self.window.is_null() && !self.vbox.is_null() {
+//RS                 self.capabilities.grant(JetUiCapability::Accessibility);
+//RS                 self.capabilities.grant(JetUiCapability::FileDialog);
+//RS                 self.capabilities.grant(JetUiCapability::IME);
+//RS                 self.capabilities.grant(JetUiCapability::DragDrop);
+//RS                 self.capabilities.grant(JetUiCapability::Shortcuts);
+//RS                 let display = gdk_display_get_default();
+//RS                 if !display.is_null() && !gdk_display_get_clipboard(display).is_null() {
+//RS                     self.capabilities.grant(JetUiCapability::Clipboard);
+//RS                 }
+//RS             }
+//RS             self.connect_native_controllers();
+//RS 
+//RS         }
+//RS         fn connect_native_controllers(&mut self) {
+//RS             if self.native_controllers || !self.display_ok || self.window.is_null() {
+//RS                 return;
+//RS             }
+//RS             let controller = unsafe { gtk_event_controller_key_new() };
+//RS             if controller.is_null() {
+//RS                 return;
+//RS             }
+//RS             let signal = CString::new("key-pressed").expect("static GTK signal name");
+//RS             // SAFETY: the GTK window owns the controller; the state lives at
+//RS             // a stable address behind JetGtkBackend's Arc for its lifetime.
+//RS             unsafe {
+//RS                 g_signal_connect_data(
+//RS                     controller as gpointer,
+//RS                     signal.as_ptr(),
+//RS                     jet_gtk_shortcut_trampoline as gpointer,
+//RS                     self as *mut GtkState as gpointer,
+//RS                     None,
+//RS                     0,
+//RS                 );
+//RS                 gtk_widget_add_controller(self.window, controller);
+//RS             }
+//RS             self.native_controllers = true;
+//RS         }
+//RS 
+//RS         fn connect_native_input(&mut self, widget: *mut GtkWidget, node: &JetUiNode, path: &str) {
+//RS             if !self.display_ok || widget.is_null() {
+//RS                 return;
+//RS             }
+//RS             let Ok(identity) = jet_ui_node_id(node, path) else {
+//RS                 return;
+//RS             };
+//RS             if matches!(Self::widget_kind(node), GtkWidgetKind::Entry) {
+//RS                 // GTK's GtkEditable emits this for text committed by native
+//RS                 // keyboard/IME input; the queue is populated at that signal,
+//RS                 // not by a synthetic polling fallback.
+//RS                 let binding = Box::into_raw(Box::new(GtkImeBinding {
+//RS                     state: self as *mut GtkState,
+//RS                     target: identity.clone(),
+//RS                     path: path.to_string(),
+//RS                 }));
+//RS                 let signal = CString::new("insert-text").expect("static GTK signal name");
+//RS                 unsafe {
+//RS                     g_signal_connect_data(
+//RS                         widget as gpointer,
+//RS                         signal.as_ptr(),
+//RS                         jet_gtk_insert_text_trampoline as gpointer,
+//RS                         binding as gpointer,
+//RS                         Some(jet_gtk_binding_drop),
+//RS                         0,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             if node.on_drop.is_some() {
+//RS                 let type_name = CString::new("gchararray").expect("static GType name");
+//RS                 let value_type = unsafe { g_type_from_name(type_name.as_ptr()) };
+//RS                 let controller = unsafe { gtk_drop_target_new(value_type, 7) };
+//RS                 if controller.is_null() {
+//RS                     return;
+//RS                 }
+//RS                 unsafe { gtk_widget_add_controller(widget, controller as *mut GtkEventController) };
+//RS                 let signals: [(&str, gpointer); 4] = [
+//RS                     ("enter", jet_gtk_drag_enter_trampoline as gpointer),
+//RS                     ("motion", jet_gtk_drag_motion_trampoline as gpointer),
+//RS                     ("leave", jet_gtk_drag_leave_trampoline as gpointer),
+//RS                     ("drop", jet_gtk_drop_trampoline as gpointer),
+//RS                 ];
+//RS                 for (signal_name, callback) in signals {
+//RS                     let binding = Box::into_raw(Box::new(GtkDragBinding {
+//RS                         state: self as *mut GtkState,
+//RS                         target: identity.clone(),
+//RS                     }));
+//RS                     let signal = CString::new(signal_name).expect("static GTK signal name");
+//RS                     unsafe {
+//RS                         g_signal_connect_data(
+//RS                             controller as gpointer,
+//RS                             signal.as_ptr(),
+//RS                             callback,
+//RS                             binding as gpointer,
+//RS                             Some(jet_gtk_drag_binding_drop),
+//RS                             0,
+//RS                         );
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }
+//RS         fn trace(&self, message: &str) {
+//RS             if std::env::var_os("JET_UI_GTK_TRACE").is_some() {
+//RS                 eprintln!("GTK_UI {message}");
+//RS             }
+//RS         }
+//RS 
+//RS         fn widget_kind(node: &JetUiNode) -> GtkWidgetKind {
+//RS 
+//RS             match node.kind {
+//RS                 JetUiNodeKind::Box => GtkWidgetKind::Box,
+//RS                 JetUiNodeKind::Button => GtkWidgetKind::Button,
+//RS                 JetUiNodeKind::TextInput => GtkWidgetKind::Entry,
+//RS                 _ => match node.role {
+//RS                     Some(JetUiAriaRole::Button) => GtkWidgetKind::Button,
+//RS                     Some(JetUiAriaRole::TextInput) => GtkWidgetKind::Entry,
+//RS                     Some(JetUiAriaRole::Container) => GtkWidgetKind::Box,
+//RS                     _ => GtkWidgetKind::Label,
+//RS                 },
+//RS             }
+//RS         }
+//RS 
+//RS         fn remove_tree_widget(&mut self, index: usize) {
+//RS             let record = self.tree_widgets.remove(index);
+//RS             self.ime_enabled.remove(&record.path);
+//RS             for binding in &mut self.click_bindings {
+//RS                 if binding.path == record.path {
+//RS                     binding.connected_widget = std::ptr::null_mut();
+//RS                 }
+//RS             }
+//RS             if self.display_ok && !record.parent.is_null() && !record.widget.is_null() {
+//RS                 unsafe { gtk_box_remove(record.parent, record.widget) };
+//RS             }
+//RS             self.trace(&format!("remove {}", record.path));
+//RS         }
+//RS 
+//RS         fn remove_tree_subtree(&mut self, path: &str) {
+//RS             let child_prefix = format!("{path}/");
+//RS             for index in (0..self.tree_widgets.len()).rev() {
+//RS                 let record_path = &self.tree_widgets[index].path;
+//RS                 if record_path == path || record_path.starts_with(&child_prefix) {
+//RS                     self.remove_tree_widget(index);
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         fn reconcile_node(
+//RS             &mut self,
+//RS             node: &JetUiNode,
+//RS             parent: *mut GtkWidget,
+//RS             path: &str,
+//RS             live: &mut Vec<String>,
+//RS             focus_nodes: &mut Vec<JetUiNode>,
+//RS             focus_paths: &mut Vec<String>,
+//RS         ) {
+//RS             let kind = Self::widget_kind(node);
+//RS             if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
+//RS                 if self.tree_widgets[index].kind != kind || self.tree_widgets[index].parent != parent {
+//RS                     self.remove_tree_subtree(path);
+//RS                 }
+//RS             }
+//RS             if kind == GtkWidgetKind::Entry {
+//RS                 self.ime_enabled
+//RS                     .insert(path.to_string(), node.ime != Some(JetUiImeMode::Disabled));
+//RS             }
+//RS             let (index, created) = if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
+//RS                 (index, false)
+//RS             } else {
+//RS                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+//RS                 let widget = if self.display_ok {
+//RS                     unsafe {
+//RS                         let widget = match kind {
+//RS                             GtkWidgetKind::Box => gtk_box_new(GTK_ORIENTATION_VERTICAL, 8),
+//RS                             GtkWidgetKind::Label => gtk_label_new(text.as_ptr()),
+//RS                             GtkWidgetKind::Button => gtk_button_new_with_label(text.as_ptr()),
+//RS                             GtkWidgetKind::Entry => gtk_entry_new(),
+//RS                         };
+//RS                         gtk_box_append(parent, widget);
+//RS                         widget
+//RS                     }
+//RS                 } else {
+//RS                     std::ptr::null_mut()
+//RS                 };
+//RS                 self.tree_widgets.push(GtkWidgetRecord {
+//RS                     path: path.to_string(),
+//RS                     parent,
+//RS                     widget,
+//RS                     kind,
+//RS                     label: String::new(),
+//RS                     css_class: None,
+//RS                 });
+//RS                 self.trace(&format!("create {} {:?}", path, kind));
+//RS                 (self.tree_widgets.len() - 1, true)
+//RS             };
+//RS 
+//RS             live.push(path.to_string());
+//RS             let widget = self.tree_widgets[index].widget;
+//RS             if created && kind == GtkWidgetKind::Button {
+//RS                 // D-WEB-CLICK-PORT1=D / D-UI-EVT-DISP1=E: one click path —
+//RS                 // portable node slots dispatch by identity; legacy
+//RS                 // `backend.on_click` bindings still attach on the same widget.
+//RS                 match jet_ui_node_id(node, path) {
+//RS                     Ok(identity) => Self::connect_click_callback(
+//RS                         widget,
+//RS                         Arc::new(move || jet_ui_dispatch(&identity)),
+//RS                     ),
+//RS                     Err(error) => self.trace(&format!("click identity rejected: {error:?}")),
+//RS                 }
+//RS                 self.attach_click_bindings(path, widget);
+//RS             }
+//RS             if created && (kind == GtkWidgetKind::Entry || node.on_drop.is_some()) {
+//RS                 self.connect_native_input(widget, node, path);
+//RS             }
+//RS             if self.display_ok && !widget.is_null() {
+//RS                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+//RS                 unsafe {
+//RS                     match kind {
+//RS                         GtkWidgetKind::Label => gtk_label_set_text(widget, text.as_ptr()),
+//RS                         GtkWidgetKind::Button => gtk_button_set_label(widget, text.as_ptr()),
+//RS                         GtkWidgetKind::Entry => gtk_editable_set_text(widget, text.as_ptr()),
+//RS                         GtkWidgetKind::Box => {}
+//RS                     }
+//RS                     gtk_widget_set_size_request(widget, node.width as c_int, node.height as c_int);
+//RS                 }
+//RS             }
+//RS             gtk_apply_accessibility(widget, node);
+//RS             self.tree_widgets[index].label = node.label.clone();
+//RS             let old_class = self.tree_widgets[index].css_class.take();
+//RS             let new_class = node.color.as_ref().map(|color| format!("jetfill{}", color.trim_start_matches('#')));
+//RS             if self.display_ok && !widget.is_null() && old_class != new_class {
+//RS                 if let Some(old) = old_class.as_ref().and_then(|class| CString::new(class.as_str()).ok()) {
+//RS                     unsafe { gtk_widget_remove_css_class(widget, old.as_ptr()) };
+//RS                 }
+//RS                 if let (Some(color), Some(class)) = (node.color.as_ref(), new_class.as_ref()) {
+//RS                     let css = format!(".{class} {{ background-color: {color}; }}");
+//RS                     if let (Ok(cclass), Ok(ccss)) = (CString::new(class.as_str()), CString::new(css)) {
+//RS                         unsafe {
+//RS                             let provider = gtk_css_provider_new();
+//RS                             gtk_css_provider_load_from_string(provider, ccss.as_ptr());
+//RS                             let display = gdk_display_get_default();
+//RS                             if !display.is_null() {
+//RS                                 gtk_style_context_add_provider_for_display(display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+//RS                             }
+//RS                             gtk_widget_add_css_class(widget, cclass.as_ptr());
+//RS                             g_object_unref(provider as gpointer);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS             }
+//RS             self.tree_widgets[index].css_class = new_class;
+//RS             self.trace(&format!("update {} {}", path, node.label));
+//RS 
+//RS             if node.role.as_ref().is_some_and(JetUiAriaRole::is_interactive) {
+//RS                 focus_nodes.push(node.clone());
+//RS                 focus_paths.push(path.to_string());
+//RS             }
+//RS             if kind == GtkWidgetKind::Box {
+//RS                 for (child_index, child) in node.children.iter().enumerate() {
+//RS                     self.reconcile_node(
+//RS                         child,
+//RS                         widget,
+//RS                         &format!("{path}/{child_index}"),
+//RS                         live,
+//RS                         focus_nodes,
+//RS                         focus_paths,
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         fn focus_current_widget(&self) {
+//RS             let Some(path) = self.focused_index.and_then(|index| self.focus_paths.get(index)) else {
+//RS                 return;
+//RS             };
+//RS             let Some(record) = self.tree_widgets.iter().find(|record| &record.path == path) else {
+//RS                 return;
+//RS             };
+//RS             if self.display_ok && !record.widget.is_null() {
+//RS                 unsafe { gtk_widget_grab_focus(record.widget) };
+//RS             }
+//RS             self.trace(&format!("focus {path}"));
+//RS         }
+//RS 
+//RS         fn resolve_widget_handle(&self, id: i64) -> Option<(*mut GtkWidget, GtkWidgetKind)> {
+//RS             let handle = self.widget_handles.get(id as usize)?;
+//RS             let widget = match &handle.target {
+//RS                 GtkWidgetHandleTarget::Direct(widget) => *widget,
+//RS                 GtkWidgetHandleTarget::TreePath(path) => self
+//RS                     .tree_widgets
+//RS                     .iter()
+//RS                     .find(|record| record.path == *path && record.kind == handle.kind)
+//RS                     .map(|record| record.widget)?,
+//RS             };
+//RS             (!widget.is_null()).then_some((widget, handle.kind))
+//RS         }
+//RS 
+//RS         fn connect_click_callback(widget: *mut GtkWidget, callback: Arc<dyn Fn() + Send + Sync>) {
+//RS             let boxed = Box::into_raw(Box::new(callback));
+//RS             let signal = CString::new("clicked").unwrap();
+//RS             // SAFETY: `widget` is a live GTK button. The connection owns
+//RS             // `boxed`, and GTK invokes the destroy notifier exactly once.
+//RS             unsafe {
+//RS                 g_signal_connect_data(
+//RS                     widget as gpointer,
+//RS                     signal.as_ptr(),
+//RS                     jet_gtk_click_trampoline as gpointer,
+//RS                     boxed as gpointer,
+//RS                     Some(jet_gtk_drop_callback),
+//RS                     0,
+//RS                 );
+//RS             }
+//RS         }
+//RS 
+//RS         fn attach_click_bindings(&mut self, path: &str, widget: *mut GtkWidget) {
+//RS             if widget.is_null() {
+//RS                 return;
+//RS             }
+//RS             let mut connected = 0;
+//RS             for binding in &mut self.click_bindings {
+//RS                 if binding.path == path && binding.connected_widget != widget {
+//RS                     Self::connect_click_callback(widget, Arc::clone(&binding.callback));
+//RS                     binding.connected_widget = widget;
+//RS                     connected += 1;
+//RS                 }
+//RS             }
+//RS             if connected > 0 {
+//RS                 self.trace(&format!("click-connect {path} {connected}"));
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for GtkState {
+//RS         fn drop(&mut self) {
+//RS             if !self.window.is_null() {
+//RS                 // SAFETY: state owns its initial GTK window reference. GTK
+//RS                 // tears down children and their signal destroy notifiers.
+//RS                 unsafe {
+//RS                     g_object_unref(self.window as gpointer);
+//RS                 }
+//RS                 self.window = std::ptr::null_mut();
+//RS             }
+//RS             self.trace("cleanup");
+//RS         }
+//RS     }
+//RS 
+//RS     /// The native GTK4 backend. Constructing it is free; the first `label` /
+//RS     /// `button` call opens GTK and the window (when a display exists).
+//RS     #[derive(Clone)]
+//RS     pub struct JetGtkBackend {
+//RS         state: Arc<Mutex<GtkState>>,
+//RS     }
+//RS 
+//RS     impl JetGtkBackend {
+//RS         pub fn new() -> Self {
+//RS             JetGtkBackend {
+//RS                 state: Arc::new(Mutex::new(GtkState {
+//RS                     measured: None,
+//RS                     layout_frame: None,
+//RS                     commands: Vec::new(),
+//RS                     last_event: None,
+//RS                     focus_nodes: Vec::new(),
+//RS                     focus_paths: Vec::new(),
+//RS                     focused_index: None,
+//RS                     inited: false,
+//RS                     display_ok: false,
+//RS                     window: std::ptr::null_mut(),
+//RS                     vbox: std::ptr::null_mut(),
+//RS                     widget_handles: Vec::new(),
+//RS                     click_bindings: Vec::new(),
+//RS                     tree_widgets: Vec::new(),
+//RS                     availability: GtkAvailability::Uninitialized,
+//RS                     capabilities: JetUiCapabilityFacts::empty(),
+//RS                     shortcuts: JetUiShortcutRegistry::default(),
+//RS                     ime_events: std::collections::VecDeque::new(),
+//RS                     ime_enabled: std::collections::HashMap::new(),
+//RS                     drag_events: std::collections::VecDeque::new(),
+//RS                     native_controllers: false,
+//RS                 })),
+//RS             }
+//RS         }
+//RS 
+//RS         // ── Seam parity: display-free measure/layout/paint/on_event ──
+//RS         pub fn measure_node(&self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             JetBackend::measure(&mut *state, &node, constraint)
+//RS         }
+//RS         pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             JetBackend::layout(&mut *state, &node, frame);
+//RS         }
+//RS         pub fn paint_node(&self, node: JetUiNode) {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             JetBackend::paint(&mut *state, &node);
+//RS         }
+//RS         /// D-UI-MOUNT1=A: measure → layout → paint in one call.
+//RS         pub fn mount_node(&self, node: JetUiNode, constraint: JetSizeConstraint) {
+//RS             {
+//RS                 let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS                 state.commands.clear();
+//RS             }
+//RS             let size = self.measure_node(node.clone(), constraint);
+//RS             self.layout_node(
+//RS                 node.clone(),
+//RS                 jet_ui_rect(0.0, 0.0, size.width, size.height),
+//RS             );
+//RS             self.paint_node(node);
+//RS         }
+//RS         pub fn mount_node_default(&self, node: JetUiNode) {
+//RS             self.mount_node(node, jet_ui_constraint(0.0, 0.0, 320.0, 240.0));
+//RS         }
+//RS         pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             JetBackend::on_event(&mut *state, event)
+//RS         }
+//RS         pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+//RS             state.focus_paths = nodes
+//RS                 .iter()
+//RS                 .filter_map(|node| state.tree_widgets.iter().find(|record| record.label == node.label).map(|record| record.path.clone()))
+//RS                 .collect();
+//RS             state.focus_nodes = nodes;
+//RS             state.focus_current_widget();
+//RS         }
+//RS         pub fn focused_label(&self) -> String {
+//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             state
+//RS                 .focused_index
+//RS                 .and_then(|i| state.focus_nodes.get(i))
+//RS                 .map(|n| n.label.clone())
+//RS                 .unwrap_or_default()
+//RS         }
+//RS 
+//RS         // ── Retained widget API ──
+//RS 
+//RS         /// Create a text label, append it to the window, and return its handle.
+//RS         pub fn label(&self, text: &str) -> i64 {
+//RS             self.add_widget(text, false)
+//RS         }
+//RS 
+//RS         /// Create a clickable button, append it, and return its handle.
+//RS         pub fn button(&self, text: &str) -> i64 {
+//RS             self.add_widget(text, true)
+//RS         }
+//RS 
+//RS         fn add_widget(&self, text: &str, is_button: bool) -> i64 {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             state.ensure_init();
+//RS             let id = state.widget_handles.len() as i64;
+//RS             let tree_kind = if is_button { GtkWidgetKind::Button } else { GtkWidgetKind::Label };
+//RS             if let Some(path) = state
+//RS                 .tree_widgets
+//RS                 .iter()
+//RS                 .find(|record| record.kind == tree_kind && record.label == text)
+//RS                 .map(|record| record.path.clone())
+//RS             {
+//RS                 state.widget_handles.push(GtkWidgetHandle {
+//RS                     target: GtkWidgetHandleTarget::TreePath(path),
+//RS                     kind: tree_kind,
+//RS                 });
+//RS                 state.trace(&format!("bind {text}"));
+//RS                 return id;
+//RS             }
+//RS             let widget = if state.display_ok {
+//RS                 let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
+//RS                 // SAFETY: display is live (ensure_init); pointers are GTK handles.
+//RS                 unsafe {
+//RS                     let widget = if is_button {
+//RS                         gtk_button_new_with_label(ctext.as_ptr())
+//RS                     } else {
+//RS                         gtk_label_new(ctext.as_ptr())
+//RS                     };
+//RS                     gtk_box_append(state.vbox, widget);
+//RS                     widget
+//RS                 }
+//RS             } else {
+//RS                 std::ptr::null_mut()
+//RS             };
+//RS             state.widget_handles.push(GtkWidgetHandle {
+//RS                 target: GtkWidgetHandleTarget::Direct(widget),
+//RS                 kind: tree_kind,
+//RS             });
+//RS             id
+//RS         }
+//RS 
+//RS         /// Update a widget's text in place (the reactive counter's live update).
+//RS         pub fn set_text(&self, id: i64, text: &str) {
+//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             let Some((widget, kind)) = state.resolve_widget_handle(id) else {
+//RS                 state.trace(&format!("handle-miss {id}"));
+//RS                 return;
+//RS             };
+//RS             let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
+//RS             // SAFETY: display is live and `widget` is a GTK label/button handle.
+//RS             unsafe {
+//RS                 if kind == GtkWidgetKind::Button {
+//RS                     gtk_button_set_label(widget, ctext.as_ptr());
+//RS                 } else {
+//RS                     gtk_label_set_text(widget, ctext.as_ptr());
+//RS                 }
+//RS             }
+//RS             state.trace(&format!("handle-set-text {id} {text}"));
+//RS         }
+//RS 
+//RS         /// Apply a Px minimum size (D-STYLEUNIT1's `Px` reaching native layout).
+//RS         pub fn set_size(&self, id: i64, width: i64, height: i64) {
+//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             let Some((widget, _)) = state.resolve_widget_handle(id) else {
+//RS                 state.trace(&format!("handle-miss {id}"));
+//RS                 return;
+//RS             };
+//RS             // SAFETY: display is live and `widget` is a GTK widget handle.
+//RS             unsafe {
+//RS                 gtk_widget_set_size_request(widget, width as c_int, height as c_int);
+//RS             }
+//RS         }
+//RS 
+//RS         /// Apply a `#RRGGBB` fill via a scoped CSS provider (D-STYLESHAPE1 Color
+//RS         /// reaching the native paint pipeline).
+//RS         pub fn set_color(&self, id: i64, color: &str) {
+//RS             let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             let Some((widget, _)) = state.resolve_widget_handle(id) else {
+//RS                 state.trace(&format!("handle-miss {id}"));
+//RS                 return;
+//RS             };
+//RS             let class_name = format!("jetfill{}", color.trim_start_matches('#'));
+//RS             let css = format!(".{class_name} {{ background-color: {color}; }}");
+//RS             let (Ok(cclass), Ok(ccss)) = (CString::new(class_name), CString::new(css)) else {
+//RS                 return;
+//RS             };
+//RS             // SAFETY: display is live; provider/display are GTK handles.
+//RS             unsafe {
+//RS                 let provider = gtk_css_provider_new();
+//RS                 gtk_css_provider_load_from_string(provider, ccss.as_ptr());
+//RS                 let display = gdk_display_get_default();
+//RS                 if !display.is_null() {
+//RS                     gtk_style_context_add_provider_for_display(
+//RS                         display,
+//RS                         provider,
+//RS                         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION,
+//RS                     );
+//RS                 }
+//RS                 gtk_widget_add_css_class(widget, cclass.as_ptr());
+//RS                 g_object_unref(provider as gpointer);
+//RS             }
+//RS         }
+//RS 
+//RS         /// Wire a button's "clicked" signal to a Jet handler.
+//RS         pub fn on_click<F: Fn() + Send + Sync + 'static>(&self, id: i64, handler: F) {
+//RS             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS             let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) else {
+//RS                 state.trace(&format!("handle-miss {id}"));
+//RS                 return;
+//RS             };
+//RS             let callback = Arc::new(handler) as Arc<dyn Fn() + Send + Sync>;
+//RS             let path = state.widget_handles.get(id as usize).and_then(|handle| {
+//RS                 if let GtkWidgetHandleTarget::TreePath(path) = &handle.target {
+//RS                     Some(path.clone())
+//RS                 } else {
+//RS                     None
+//RS                 }
+//RS 
+//RS             });
+//RS             if let Some(path) = path {
+//RS                 state.click_bindings.push(GtkClickBinding {
+//RS                     path: path.clone(),
+//RS                     callback,
+//RS                     connected_widget: std::ptr::null_mut(),
+//RS                 });
+//RS                 state.attach_click_bindings(&path, widget);
+//RS             } else {
+//RS                 GtkState::connect_click_callback(widget, callback);
+//RS             }
+//RS         }
+//RS 
+//RS         /// Present the window and run the GLib main loop until it closes. No-op
+//RS         /// without a display (`JET_UI_HEADLESS` / headless CI), so the program
+//RS         /// terminates instead of blocking.
+//RS         pub fn present(&self, title: &str) {
+//RS             // Read what we need, then drop the borrow BEFORE the blocking loop so
+//RS             // click handlers (`set_text`, etc.) can re-borrow the state.
+//RS             let (display_ok, window, availability) = {
+//RS                 let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+//RS                 (state.display_ok, state.window, state.availability)
+//RS             };
+//RS             if !display_ok || window.is_null() {
+//RS                 match availability {
+//RS                     GtkAvailability::GtkUnavailable => {
+//RS                         eprintln!(
+//RS                             "UI_UNSUPPORTED[gtk.runtime]: GTK4 runtime is unavailable; install GTK4 or set JET_UI_HEADLESS=1 only for an explicit headless run"
+//RS                         );
+//RS                     }
+//RS                     GtkAvailability::UnsupportedDisplay => {
+//RS                         eprintln!(
+//RS                             "UI_UNSUPPORTED[gtk.display]: no GTK display is available; set JET_UI_HEADLESS=1 only for an explicit headless run"
+//RS                         );
+//RS                     }
+//RS                     _ => {}
+//RS                 }
+//RS                 return;
+//RS             }
+//RS             // SAFETY: display is live and `window` is a GTK window handle.
+//RS             unsafe {
+//RS                 if let Ok(ctitle) = CString::new(title) {
+//RS                     gtk_window_set_title(window, ctitle.as_ptr());
+//RS                 }
+//RS                 gtk_window_present(window);
+//RS                 let main_loop = g_main_loop_new(std::ptr::null_mut(), 0);
+//RS                 g_main_loop_run(main_loop);
+//RS                 g_main_loop_unref(main_loop);
+//RS             }
+//RS         }
+//RS     }
+//RS     fn gtk_file_dialog_setup(
+//RS         dialog: *mut GtkFileDialog,
+//RS         parent: *mut GtkWidget,
+//RS         request: &JetUiFileDialogRequest,
+//RS     ) -> Result<(), JetUiHostError> {
+//RS         if dialog.is_null() || parent.is_null() {
+//RS             return Err(JetUiHostError::CapabilityUnavailable {
+//RS                 capability: "UI.FileDialog",
+//RS             });
+//RS         }
+//RS         let title = CString::new(request.title.as_str()).map_err(|_| {
+//RS             JetUiHostError::InvalidRequest("file dialog title must not contain NUL".to_string())
+//RS         })?;
+//RS         unsafe {
+//RS             gtk_file_dialog_set_title(dialog, title.as_ptr());
+//RS             gtk_file_dialog_set_modal(dialog, 1);
+//RS         }
+//RS 
+//RS         if let Some(directory) = request.initial_directory.as_ref() {
+//RS             let path = CString::new(directory.path()).map_err(|_| {
+//RS                 JetUiHostError::InvalidRequest(
+//RS                     "file dialog initial directory must not contain NUL".to_string(),
+//RS                 )
+//RS             })?;
+//RS             let folder = unsafe { g_file_new_for_path(path.as_ptr()) };
+//RS             if folder.is_null() {
+//RS                 return Err(JetUiHostError::InvalidRequest(
+//RS                     "GTK rejected the file dialog initial directory".to_string(),
+//RS                 ));
+//RS             }
+//RS             unsafe {
+//RS                 gtk_file_dialog_set_initial_folder(dialog, folder);
+//RS                 g_object_unref(folder as gpointer);
+//RS             }
+//RS         }
+//RS 
+//RS         if request.filters.is_empty() {
+//RS             return Ok(());
+//RS         }
+//RS         let object_type = unsafe { gtk_file_filter_get_type() };
+//RS         if object_type == 0 {
+//RS             return Err(JetUiHostError::CapabilityUnavailable {
+//RS                 capability: "UI.FileDialog",
+//RS             });
+//RS         }
+//RS         let store = unsafe { g_list_store_new(object_type) };
+//RS         if store.is_null() {
+//RS             return Err(JetUiHostError::CapabilityUnavailable {
+//RS                 capability: "UI.FileDialog",
+//RS             });
+//RS         }
+//RS         for specification in &request.filters {
+//RS             let filter = unsafe { gtk_file_filter_new() };
+//RS             if filter.is_null() {
+//RS                 unsafe { g_object_unref(store as gpointer) };
+//RS                 return Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.FileDialog",
+//RS                 });
+//RS             }
+//RS             if let Ok(label) = CString::new(specification.label.as_str()) {
+//RS                 if !specification.label.is_empty() {
+//RS                     unsafe { gtk_file_filter_set_name(filter, label.as_ptr()) };
+//RS                 }
+//RS             }
+//RS             for extension in &specification.extensions {
+//RS                 let extension = extension.trim_start_matches('.');
+//RS                 let pattern = if extension.starts_with('*') {
+//RS                     extension.to_string()
+//RS                 } else {
+//RS                     format!("*.{extension}")
+//RS                 };
+//RS                 if let Ok(pattern) = CString::new(pattern) {
+//RS                     unsafe { gtk_file_filter_add_pattern(filter, pattern.as_ptr()) };
+//RS                 }
+//RS             }
+//RS             for mime in &specification.mime_types {
+//RS                 if let Ok(mime) = CString::new(mime.as_str()) {
+//RS                     unsafe { gtk_file_filter_add_mime_type(filter, mime.as_ptr()) };
+//RS                 }
+//RS             }
+//RS             unsafe {
+//RS                 g_list_store_append(store, filter as gpointer);
+//RS                 g_object_unref(filter as gpointer);
+//RS             }
+//RS         }
+//RS         unsafe {
+//RS             gtk_file_dialog_set_filters(dialog, store as *mut GListModel);
+//RS             g_object_unref(store as gpointer);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn gtk_run_file_dialog(
+//RS         window: *mut GtkWidget,
+//RS         request: &JetUiFileDialogRequest,
+//RS     ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS         let dialog = unsafe { gtk_file_dialog_new() };
+//RS         if dialog.is_null() {
+//RS             return Err(JetUiHostError::CapabilityUnavailable {
+//RS                 capability: "UI.FileDialog",
+//RS             });
+//RS         }
+//RS         if let Err(error) = gtk_file_dialog_setup(dialog, window, request) {
+//RS             unsafe { g_object_unref(dialog as gpointer) };
+//RS             return Err(error);
+//RS         }
+//RS         let mode = match (request.kind, request.allow_multiple) {
+//RS             (JetUiFileDialogKind::Open, true) => FileDialogMode::OpenMultiple,
+//RS             (JetUiFileDialogKind::Open, false) => FileDialogMode::Open,
+//RS             (JetUiFileDialogKind::Save, false) => FileDialogMode::Save,
+//RS             (JetUiFileDialogKind::Save, true) => {
+//RS                 unsafe { g_object_unref(dialog as gpointer) };
+//RS                 return Err(JetUiHostError::InvalidRequest(
+//RS                     "save dialogs cannot select multiple files".to_string(),
+//RS                 ));
+//RS             }
+//RS         };
+//RS         let mut pending = FileDialogRead {
+//RS             done: false,
+//RS             mode,
+//RS             files: Vec::new(),
+//RS             cancelled: false,
+//RS             error: None,
+//RS         };
+//RS         unsafe {
+//RS             match mode {
+//RS                 FileDialogMode::Open => gtk_file_dialog_open(
+//RS                     dialog,
+//RS                     window,
+//RS                     std::ptr::null_mut(),
+//RS                     jet_gtk_file_dialog_ready,
+//RS                     (&mut pending as *mut FileDialogRead).cast(),
+//RS                 ),
+//RS                 FileDialogMode::OpenMultiple => gtk_file_dialog_open_multiple(
+//RS                     dialog,
+//RS                     window,
+//RS                     std::ptr::null_mut(),
+//RS                     jet_gtk_file_dialog_ready,
+//RS                     (&mut pending as *mut FileDialogRead).cast(),
+//RS                 ),
+//RS                 FileDialogMode::Save => gtk_file_dialog_save(
+//RS                     dialog,
+//RS                     window,
+//RS                     std::ptr::null_mut(),
+//RS                     jet_gtk_file_dialog_ready,
+//RS                     (&mut pending as *mut FileDialogRead).cast(),
+//RS                 ),
+//RS             }
+//RS             while !pending.done {
+//RS                 let _ = g_main_context_iteration(std::ptr::null_mut(), 1);
+//RS             }
+//RS             g_object_unref(dialog as gpointer);
+//RS         }
+//RS         if let Some(message) = pending.error {
+//RS             return Err(JetUiHostError::HostFailure {
+//RS                 service: "UI.FileDialog",
+//RS                 message,
+//RS             });
+//RS         }
+//RS         if pending.cancelled || pending.files.is_empty() {
+//RS             return Err(JetUiHostError::Cancelled(JetUiCancellation::User));
+//RS         }
+//RS         let access = match request.kind {
+//RS             JetUiFileDialogKind::Open => JetUiFsAccess::Read,
+//RS             JetUiFileDialogKind::Save => JetUiFsAccess::Write,
+//RS         };
+//RS         let files = pending
+//RS             .files
+//RS             .iter()
+//RS             .map(|path| request.grant.scope(path, access))
+//RS             .collect::<Result<Vec<_>, _>>();
+//RS         match files.and_then(JetUiFileDialogSelection::new) {
+//RS             Ok(selection) => Ok(selection),
+//RS             Err(error) => Err(error),
+//RS         }
+//RS     }
+//RS     impl JetUiHost for JetGtkBackend {
+//RS         fn capability_facts(&self) -> JetUiCapabilityFacts {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             state.capabilities
+//RS         }
+//RS 
+//RS         fn attach_accessibility(
+//RS             &self,
+//RS             node: &mut dyn JetUiAccessibilityTarget,
+//RS             accessibility: JetUiAccessibility,
+//RS         ) -> JetUiServiceResult<()> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Accessibility) {
+//RS                 return Err(error);
+//RS             }
+//RS             match jet_ui_accessibility_attach(node, accessibility) {
+//RS                 Ok(()) => Ok(()),
+//RS                 Err(error) => Err(error),
+//RS             }
+//RS         }
+//RS 
+//RS         fn project_accessibility(
+//RS             &self,
+//RS             node: &dyn JetUiAccessibilityTarget,
+//RS             node_id: JetUiNodeId,
+//RS         ) -> JetUiServiceResult<Option<JetUiAccessibilityProjection>> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Accessibility) {
+//RS                 return Err(error);
+//RS             }
+//RS             Ok(jet_ui_accessibility_project(node, node_id))
+//RS         }
+//RS 
+//RS         fn open_file(
+//RS             &mut self,
+//RS             request: JetUiFileDialogRequest,
+//RS         ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS             if let Err(error) = request.validate() {
+//RS                 return Err(error);
+//RS             }
+//RS             let (window, display_ok, capabilities) = {
+//RS                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS                 state.ensure_init();
+//RS                 (state.window, state.display_ok, state.capabilities)
+//RS             };
+//RS             if let Err(error) = capabilities.require(JetUiCapability::FileDialog) {
+//RS                 return Err(error);
+//RS             }
+//RS             if !display_ok || window.is_null() {
+//RS                 return Err(JetUiHostError::Cancelled(JetUiCancellation::Headless));
+//RS             }
+//RS             gtk_run_file_dialog(window, &request)
+//RS         }
+//RS 
+//RS         fn save_file(
+//RS             &mut self,
+//RS             request: JetUiFileDialogRequest,
+//RS         ) -> JetUiServiceResult<JetUiFileDialogSelection> {
+//RS             if let Err(error) = request.validate() {
+//RS                 return Err(error);
+//RS             }
+//RS             let (window, display_ok, capabilities) = {
+//RS                 let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS                 state.ensure_init();
+//RS                 (state.window, state.display_ok, state.capabilities)
+//RS             };
+//RS             if let Err(error) = capabilities.require(JetUiCapability::FileDialog) {
+//RS                 return Err(error);
+//RS             }
+//RS             if !display_ok || window.is_null() {
+//RS                 return Err(JetUiHostError::Cancelled(JetUiCancellation::Headless));
+//RS             }
+//RS             gtk_run_file_dialog(window, &request)
+//RS         }
+//RS 
+//RS         fn read_clipboard_text(&mut self) -> JetUiServiceResult<JetUiClipboardText> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Clipboard) {
+//RS                 return Err(error);
+//RS             }
+//RS             let display = unsafe { gdk_display_get_default() };
+//RS             if display.is_null() {
+//RS                 return Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.Clipboard",
+//RS                 });
+//RS             }
+//RS             let clipboard = unsafe { gdk_display_get_clipboard(display) };
+//RS             if clipboard.is_null() {
+//RS                 return Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.Clipboard",
+//RS                 });
+//RS             }
+//RS             let mut pending = ClipboardRead {
+//RS                 done: false,
+//RS                 text: None,
+//RS             };
+//RS             unsafe {
+//RS                 gdk_clipboard_read_text_async(
+//RS                     clipboard,
+//RS                     std::ptr::null_mut(),
+//RS                     jet_gtk_clipboard_read_ready,
+//RS                     (&mut pending as *mut ClipboardRead).cast(),
+//RS                 );
+//RS                 while !pending.done {
+//RS                     let _ = g_main_context_iteration(std::ptr::null_mut(), 1);
+//RS                 }
+//RS             }
+//RS             match pending.text {
+//RS                 Some(text) => Ok(JetUiClipboardText {
+//RS                     text,
+//RS                     selection: None,
+//RS                 }),
+//RS                 None => Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.Clipboard",
+//RS                 }),
+//RS             }
+//RS         }
+//RS 
+//RS         fn write_clipboard_text(&mut self, text: String) -> JetUiServiceResult<JetUiClipboardWrite> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Clipboard) {
+//RS                 return Err(error);
+//RS             }
+//RS             let Ok(text_c) = CString::new(text.as_str()) else {
+//RS                 return Err(JetUiHostError::InvalidRequest(
+//RS                     "clipboard text must not contain NUL".to_string(),
+//RS                 ));
+//RS             };
+//RS             let display = unsafe { gdk_display_get_default() };
+//RS             if display.is_null() {
+//RS                 return Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.Clipboard",
+//RS                 });
+//RS             }
+//RS             let clipboard = unsafe { gdk_display_get_clipboard(display) };
+//RS             if clipboard.is_null() {
+//RS                 return Err(JetUiHostError::CapabilityUnavailable {
+//RS                     capability: "UI.Clipboard",
+//RS                 });
+//RS             }
+//RS             unsafe { gdk_clipboard_set_text(clipboard, text_c.as_ptr()) };
+//RS             Ok(JetUiClipboardWrite {
+//RS                 characters: text.chars().count(),
+//RS             })
+//RS         }
+//RS 
+//RS         fn poll_ime_event(&mut self) -> JetUiServiceResult<Option<JetUiImeEvent>> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::IME) {
+//RS                 return Err(error);
+//RS             }
+//RS             Ok(state.ime_events.pop_front())
+//RS         }
+//RS 
+//RS         fn poll_drag_event(&mut self) -> JetUiServiceResult<Option<JetUiDragEvent>> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::DragDrop) {
+//RS                 return Err(error);
+//RS             }
+//RS             Ok(state.drag_events.pop_front())
+//RS         }
+//RS 
+//RS         fn register_shortcut(
+//RS             &mut self,
+//RS             binding: JetUiShortcutBinding,
+//RS         ) -> JetUiServiceResult<JetUiShortcutBinding> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Shortcuts) {
+//RS                 return Err(error);
+//RS             }
+//RS             match state.shortcuts.register(binding) {
+//RS                 Ok(binding) => Ok(binding),
+//RS                 Err(error) => Err(error),
+//RS             }
+//RS         }
+//RS 
+//RS         fn dispatch_shortcut(
+//RS             &mut self,
+//RS             shortcut: JetUiShortcut,
+//RS         ) -> JetUiServiceResult<JetUiShortcutDispatch> {
+//RS             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS             state.ensure_init();
+//RS             if let Err(error) = state.capabilities.require(JetUiCapability::Shortcuts) {
+//RS                 return Err(error);
+//RS             }
+//RS             Ok(state.shortcuts.dispatch(&shortcut))
+//RS         }
+//RS 
+//RS     }
+//RS 
+//RS 
+//RS     impl Default for JetGtkBackend {
+//RS         fn default() -> Self {
+//RS             Self::new()
+//RS         }
+//RS     }
+//RS 
+//RS     impl JetBackend for GtkState {
+//RS         fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+//RS             let size = jet_ui_measure_tree(node, constraint);
+//RS             self.measured = Some(size);
+//RS             size
+//RS         }
+//RS 
+//RS         fn layout(&mut self, node: &JetUiNode, frame: JetRect) {
+//RS             let _ = node;
+//RS             self.layout_frame = Some(frame);
+//RS         }
+//RS 
+//RS         fn paint(&mut self, node: &JetUiNode) {
+//RS             let frame = self.layout_frame.unwrap_or(JetRect {
+//RS                 x: 0.0,
+//RS                 y: 0.0,
+//RS                 width: node.width,
+//RS                 height: node.height,
+//RS             });
+//RS             jet_ui_paint_tree(node, frame, &mut self.commands);
+//RS             self.ensure_init();
+//RS             let previous_focus = self
+//RS                 .focused_index
+//RS                 .and_then(|index| self.focus_paths.get(index))
+//RS                 .cloned();
+//RS             let mut live = Vec::new();
+//RS             let mut focus_nodes = Vec::new();
+//RS             let mut focus_paths = Vec::new();
+//RS             self.reconcile_node(
+//RS                 node,
+//RS                 self.vbox,
+//RS                 "root",
+//RS                 &mut live,
+//RS                 &mut focus_nodes,
+//RS                 &mut focus_paths,
+//RS             );
+//RS             // D-UI-EVT-DISP1=E: refresh identity→slot bindings after reconcile.
+//RS             jet_ui_bind_tree_clicks(node, "root");
+//RS             for index in (0..self.tree_widgets.len()).rev() {
+//RS                 if !live.contains(&self.tree_widgets[index].path) {
+//RS                     self.remove_tree_widget(index);
+//RS                 }
+//RS             }
+//RS             self.focused_index = previous_focus
+//RS                 .as_ref()
+//RS                 .and_then(|path| focus_paths.iter().position(|candidate| candidate == path))
+//RS                 .or_else(|| (!focus_paths.is_empty()).then_some(0));
+//RS             self.focus_nodes = focus_nodes;
+//RS             self.focus_paths = focus_paths;
+//RS             self.focus_current_widget();
+//RS         }
+//RS 
+//RS         fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+//RS             if let JetInputEvent::Key { code } = &event {
+//RS                 if let Some(result) =
+//RS                     jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code, 0)
+//RS                 {
+//RS                     self.focus_current_widget();
+//RS                     self.last_event = Some(result);
+//RS                     return result;
+//RS                 }
+//RS             }
+//RS             let result = match &event {
+//RS                 JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
+//RS                 JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {
+//RS                     JetEventResult::Ignored
+//RS                 }
+//RS                 _ => JetEventResult::Handled,
+//RS             };
+//RS             self.last_event = Some(result);
+//RS             result
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn jet_ui_gtk() -> JetGtkBackend {
+//RS         JetGtkBackend::new()
+//RS     }
+//RS }
+//RS 
+//RS pub use jet_gtk::{jet_ui_gtk, JetGtkBackend};
+// END-PORT-PENDING 0193 crates/jet-codegen/src/Prelude/UiGtk.rs:1-2048
+

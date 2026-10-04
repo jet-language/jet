@@ -1,0 +1,49 @@
+// MathLibPure.rs:1–83: internal allocation-free Float-pair arithmetic policy.
+// The compiler owns Complex's ABI, Clone/Copy/PartialEq and typed marshalling;
+// this labelled pair is not a second public Complex carrier.
+use core.math as complex_math
+
+// Rust JetComplex::from_parts (:14), jet_complex_from_parts (:57).
+pub fn jet_complex_from_parts(real: Float, imaginary: Float) -> (real: Float, imaginary: Float) Never! {
+    (real: real, imaginary: imaginary)
+}
+
+// Rust JetComplex::add (:18), jet_complex_add (:61).
+pub fn jet_complex_add(left: (real: Float, imaginary: Float), right: (real: Float, imaginary: Float)) -> (real: Float, imaginary: Float) Never! {
+    jet_complex_from_parts(left.real + right.real, left.imaginary + right.imaginary)
+}
+
+// Rust JetComplex::sub (:22), jet_complex_sub (:65).
+pub fn jet_complex_sub(left: (real: Float, imaginary: Float), right: (real: Float, imaginary: Float)) -> (real: Float, imaginary: Float) Never! {
+    jet_complex_from_parts(left.real - right.real, left.imaginary - right.imaginary)
+}
+
+// Rust JetComplex::mul (:26), jet_complex_mul (:69): do not fuse or reorder.
+pub fn jet_complex_mul(left: (real: Float, imaginary: Float), right: (real: Float, imaginary: Float)) -> (real: Float, imaginary: Float) Never! {
+    jet_complex_from_parts(
+        left.real * right.real - left.imaginary * right.imaginary,
+        left.real * right.imaginary + left.imaginary * right.real,
+    )
+}
+
+// Rust JetComplex::div (:33), jet_complex_div (:73): denominator first;
+// preserve the naive products, including their overflow/underflow and NaNs.
+pub fn jet_complex_div(left: (real: Float, imaginary: Float), right: (real: Float, imaginary: Float)) -> (real: Float, imaginary: Float) Never! {
+    denominator :: right.real * right.real + right.imaginary * right.imaginary
+    jet_complex_from_parts(
+        (left.real * right.real + left.imaginary * right.imaginary) / denominator,
+        (left.imaginary * right.real - left.real * right.imaginary) / denominator,
+    )
+}
+
+// Rust JetComplex::abs (:41), jet_complex_abs (:77): native hypot, not sqrt(x*x+y*y).
+pub fn jet_complex_abs(value: (real: Float, imaginary: Float)) -> Float Never! {
+    complex_math.hypot(value.real, value.imaginary)
+}
+
+// Rust to_string_rep (:45), fmt (:52), jet_complex_to_string (:81), and
+// MathComplexTraits.rs jet_show (:5), jet_display (:11), jet_debug (:17)
+// all require ONE canonical Rust-Display Float append route. Jet's existing
+// Float Display/Show/Debug use Debug spelling, which is not equivalent.
+// These consumers remain compiler/formatter-gated; no alternate formatter or
+// native body belongs here. The corpus retains their exact public expectations.

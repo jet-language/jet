@@ -1,0 +1,141 @@
+// SHA256Raw.rs:2–77 and SHAFamily.rs:3–23,47–58,149–213.
+// Fixed words/scratch stay inline. Input is borrowed; padding is synthesized
+// while loading words, so hashing never copies or grows the input buffer.
+// HMAC and constant-time equality remain in the canonical crypto entry.
+
+// D-CONSTMARK1 requires one addressable fixed table, not per-round value copies.
+#Static C_SHA256_K :: [U32#64]{
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+}
+
+// Rust sha256_raw_with_iv:195–206, message framing (length modulo 2^64).
+fn sha256_padded_byte(data: [U8], index: Int, end: Int, bits: U64) -> U32 Never! {
+    if index < data.len() -> return U32.from_u8(data[index])
+    if index == data.len() -> return U32{128}
+    if index >= end - 8 -> return U32.from_u64((bits >> ((end - 1 - index) * 8)) & U64{255}) ?? panic("SHA-256 length byte narrowing failed")
+    U32{0}
+}
+
+// Rust u32::from_be_bytes in sha256_compress:152. Ordinary input words
+// bypass all padding checks; only the final partial word and trailer use them.
+fn sha256_load_word(data: [U8], off: Int, end: Int, bits: U64) -> U32 Never! {
+    if off + 4 <= data.len() {
+        return (U32.from_u8(data[off]) << 24) | (U32.from_u8(data[off + 1]) << 16) |
+            (U32.from_u8(data[off + 2]) << 8) | U32.from_u8(data[off + 3])
+    }
+    word := U32{0}
+    loop j in 0..<4 -> word = (word << 8) | sha256_padded_byte(data, off + j, end, bits)
+    word
+}
+
+// Rust sha256_compress:149–193. Both mutable arrays borrow the caller's
+// original fixed storage. The schedule is reused for every block.
+#Arithmetic(.Wrapping)
+fn sha256_compress(state: &[U32#8], w: &[U32#64], data: [U8], off: Int, end: Int, bits: U64) Never! {
+    loop t in 0..<16 -> w[t] = sha256_load_word(data, off + t * 4, end, bits)
+    loop t in 16..<64 {
+        x :: ~w[t - 15]
+        y :: ~w[t - 2]
+        s0 :: x.rotate_right(7) ~| x.rotate_right(18) ~| (x >> 3)
+        s1 :: y.rotate_right(17) ~| y.rotate_right(19) ~| (y >> 10)
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1
+    }
+    a := state[0]
+    b := state[1]
+    c := state[2]
+    d := state[3]
+    e := state[4]
+    f := state[5]
+    g := state[6]
+    h := state[7]
+    loop t in 0..<64 {
+        s1 :: e.rotate_right(6) ~| e.rotate_right(11) ~| e.rotate_right(25)
+        ch :: (e & f) ~| ((e ~| U32.MAX) & g)
+        temp1 :: h + s1 + ch + C_SHA256_K[t] + w[t]
+        s0 :: a.rotate_right(2) ~| a.rotate_right(13) ~| a.rotate_right(22)
+        maj :: (a & b) ~| (a & c) ~| (b & c)
+        h = g
+        g = f
+        f = e
+        e = d + temp1
+        d = c
+        c = b
+        b = a
+        a = temp1 + s0 + maj
+    }
+    state[0] = state[0] + a
+    state[1] = state[1] + b
+    state[2] = state[2] + c
+    state[3] = state[3] + d
+    state[4] = state[4] + e
+    state[5] = state[5] + f
+    state[6] = state[6] + g
+    state[7] = state[7] + h
+}
+
+// Rust sha256_raw_with_iv:195–206. The caller owns the initialized state;
+// it remains borrowed throughout hashing, never returned/copied by value.
+fn sha256_hash(data: [U8], state: &[U32#8]) Never! {
+    w := [U32#64]{
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    }
+    bits :: U64{data.len()}.wrapping_mul(U64{8})
+    end :: ((data.len() + 8) /% 64 + 1) * 64
+    loop off in 0..<end, 64 -> sha256_compress(&state, &w, data, off, end, bits)
+}
+
+// Rust word.to_be_bytes:207–210. The mask proves the existing checked fixed
+// conversion succeeds; it never spills through Int or creates an owner.
+// #4463: omit the optional always-inline hint until parameter-place remapping
+// preserves this helper's checked-conversion fallback.
+fn sha256_digest_byte(word: U32, shift: Int) -> U8 Never! {
+    U8.from_u32((word >> shift) & U32{255}) ?? panic("SHA-256 digest byte narrowing failed")
+}
+
+// Rust jet_sha256_raw / sha256_raw_with_iv:207–211 and the public Core
+// owning-byte boundary. This sole digest buffer is exactly 32 bytes;
+// no owning list state, schedule, or padded input is built.
+pub fn sha256_bytes(data: [U8]) -> [U8] Never! {
+    // Rust SHA256Raw.rs:15–18 / SHAFamily.rs:3–12, SHA256_IV.
+    state := [U32#8]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
+    sha256_hash(data, &state)
+    [U8]{
+        sha256_digest_byte(state[0], 24), sha256_digest_byte(state[0], 16), sha256_digest_byte(state[0], 8), sha256_digest_byte(state[0], 0),
+        sha256_digest_byte(state[1], 24), sha256_digest_byte(state[1], 16), sha256_digest_byte(state[1], 8), sha256_digest_byte(state[1], 0),
+        sha256_digest_byte(state[2], 24), sha256_digest_byte(state[2], 16), sha256_digest_byte(state[2], 8), sha256_digest_byte(state[2], 0),
+        sha256_digest_byte(state[3], 24), sha256_digest_byte(state[3], 16), sha256_digest_byte(state[3], 8), sha256_digest_byte(state[3], 0),
+        sha256_digest_byte(state[4], 24), sha256_digest_byte(state[4], 16), sha256_digest_byte(state[4], 8), sha256_digest_byte(state[4], 0),
+        sha256_digest_byte(state[5], 24), sha256_digest_byte(state[5], 16), sha256_digest_byte(state[5], 8), sha256_digest_byte(state[5], 0),
+        sha256_digest_byte(state[6], 24), sha256_digest_byte(state[6], 16), sha256_digest_byte(state[6], 8), sha256_digest_byte(state[6], 0),
+        sha256_digest_byte(state[7], 24), sha256_digest_byte(state[7], 16), sha256_digest_byte(state[7], 8), sha256_digest_byte(state[7], 0),
+    }
+}
+
+// Rust jet_crypto_sha224_hex:371–373. Emit just the seven SHA-224 words;
+// no intermediate owning 32-byte digest or copied truncation buffer.
+pub fn sha224_bytes(data: [U8]) -> [U8#28] Never! {
+    // Rust SHAFamily.rs:14–23, SHA224_IV.
+    state := [U32#8]{0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4}
+    sha256_hash(data, &state)
+    out := [U8#28]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    loop i in 0..<28 -> out[i] = sha256_digest_byte(state[i /% 4], 24 - (i % 4) * 8)
+    out
+}

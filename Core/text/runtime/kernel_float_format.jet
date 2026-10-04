@@ -1,0 +1,141 @@
+// Private Rust core::fmt f64 defaults, pinned 1.97.1
+// 8bab26f4f68e0e26f0bb7960be334d5b520ea452 fmt/float.rs and
+// num/imp/flt2dec/mod.rs. Display NEVER imports Debug's exponent threshold.
+// fixed preserves fmt::rt::Argument::from_usize refusal before rendering;
+// precision is NEVER clamped, including to the 1024-byte scratch capacity.
+// Source-only activation gates: #4500 private child source closure; #4483
+// selected target usize_max; #4494 generic fixed scratch initialized-prefix
+// flow/field loans. Reuse the sole approved scalar IEEE bit seam (#4467),
+// which borrows the F64/Type::Float Copy scalar and returns the COMPLETE U64.
+// No signed i64 math.to_bits ingress or exact-number digit arithmetic.
+// Final list->String ownership remains #4392/#4318; no allocation parity claim.
+use core.mem
+use core.math.runtime.kernel_float_policy as bits_policy
+use core.sys.target as target
+use core.text.runtime.float_format.decoded as dec
+use core.text.runtime.float_format.grisu as grisu
+
+fn flag(value: Bool) -> Int Never! { if value -> 1 else -> 0 }
+fn bits(value: F64) -> U64 Never! {
+    bits_policy.float_policy_to_bits(value)
+}
+fn zeroes(out: &[U8], count: Int) Never! {
+    loop i in 0..<count -> &out.push(U8{48})
+}
+fn bytes(out: &[U8], digits: &[U8#N], start: Int, end: Int) Never! {
+    loop i in start..<end -> &out.push(digits[i])
+}
+fn owned(out: [U8]) -> String Never! {
+    String.from_bytes(^out) ?? panic("float formatter emitted non-ASCII")
+}
+fn sign(out: &[U8], raw: U64) Never! {
+    if (raw >> 63) != (U64{0}) -> &out.push(U8{45})
+}
+fn special(raw: U64) -> String? Never! {
+    if ((raw >> 52) & U64{0x7ff}) != (U64{0x7ff}) -> return None
+    // determine_sign ignores NaN sign/payload, including signaling NaNs.
+    if (raw & U64{0xfffffffffffff}) != (U64{0}) -> return Val("NaN")
+    if (raw >> 63) != (U64{0}) -> return Val("-inf")
+    Val("inf")
+}
+fn render_zero(raw: U64, precision: Int) -> String Never! {
+    out := [U8]{}
+    length :: precision + (if precision > 0 -> 2 else -> 1) + flag((raw >> 63) != (U64{0}))
+    &out.try_reserve(length) ?? panic("float string allocation failed")
+    sign(&out, raw)
+    &out.push(U8{48})
+    if precision > 0 { &out.push(U8{46}); zeroes(&out, precision) }
+    owned(^out)
+}
+// digits_to_dec_str, with four source pieces written into ONE reserved owner.
+// Arithmetic below uses subtract-before-add exactly as source zero-run logic.
+fn decimal(raw: U64, buf: &[U8#N], digits: dec.Digits, precision: Int) -> String Never! {
+    exp :: digits.exp
+    len :: digits.len
+    trailing := 0
+    integer := if exp > 0 -> exp else -> 1
+    fractional := if exp < len -> len - exp else -> 0
+    if precision > fractional -> trailing = precision - fractional
+    point :: fractional > 0 || precision > 0
+    length :: integer + fractional + trailing + flag(point) + flag((raw >> 63) != (U64{0}))
+    out := [U8]{}
+    &out.try_reserve(length) ?? panic("float string allocation failed")
+    sign(&out, raw)
+    if exp <= 0 {
+        &out.push(U8{48}); &out.push(U8{46})
+        zeroes(&out, -exp); bytes(&out, buf, 0, len); zeroes(&out, trailing)
+    } else {
+        if exp < len {
+            bytes(&out, buf, 0, exp); &out.push(U8{46}); bytes(&out, buf, exp, len); zeroes(&out, trailing)
+        } else {
+            bytes(&out, buf, 0, len); zeroes(&out, exp - len)
+            if precision > 0 { &out.push(U8{46}); zeroes(&out, precision) }
+        }
+    }
+    owned(^out)
+}
+fn exponential(raw: U64, buf: &[U8#N], digits: dec.Digits) -> String Never! {
+    exponent := digits.exp - 1
+    negative :: exponent < 0
+    if negative -> exponent = -exponent
+    // Source Part::Num is at most five ASCII digits. f64 needs at most three.
+    number := [U8#5]{0,0,0,0,0}
+    n := 0
+    value := U32.from_int(exponent) ?? panic("float exponent")
+    loop {
+        number[n] = U8{48} + (U8.from_u32(value % U32{10}) ?? panic("exponent digit"))
+        n += 1; value /= U32{10}
+        if value == (U32{0}) -> break
+    }
+    out := [U8]{}
+    length :: digits.len + flag(digits.len > 1) + 1 + flag(negative) + n + flag((raw >> 63) != (U64{0}))
+    &out.try_reserve(length) ?? panic("float string allocation failed")
+    sign(&out, raw); &out.push(buf[0])
+    if digits.len > 1 { &out.push(U8{46}); bytes(&out, buf, 1, digits.len) }
+    &out.push(U8{101})
+    if negative -> &out.push(U8{45})
+    loop n > 0 { n -= 1; &out.push(number[n]) }
+    owned(^out)
+}
+pub fn display(value: F64) -> String Never! {
+    raw :: bits(value)
+    exceptional :: special(raw)
+    if exceptional != None -> return exceptional ?? panic("special")
+    if (raw & U64{0x7fffffffffffffff}) == (U64{0}) -> return render_zero(raw, 0)
+    decoded :: dec.finite(raw)
+    buf := [U8#17]{uninit}
+    digits :: grisu.shortest(&decoded, &buf)
+    decimal(raw, &buf, digits, 0)
+}
+pub fn debug(value: F64) -> String Never! {
+    raw :: bits(value)
+    exceptional :: special(raw)
+    if exceptional != None -> return exceptional ?? panic("special")
+    magnitude :: raw & U64{0x7fffffffffffffff}
+    if magnitude == (U64{0}) -> return render_zero(raw, 1)
+    decoded :: dec.finite(raw)
+    buf := [U8#17]{uninit}
+    digits :: grisu.shortest(&decoded, &buf)
+    // Positive finite IEEE bits have the same ordering as the values.
+    // Literal thresholds are exact binary64 representations of 1e-4 and 1e16.
+    if magnitude < (U64{0x3f1a36e2eb1c432d}) || magnitude >= (U64{0x4341c37937e08000}) -> return exponential(raw, &buf, digits)
+    decimal(raw, &buf, digits, 1)
+}
+pub fn fixed(value: F64, precision: Int) -> String Never! {
+    // Check original nonnegative usize domain against the selected target.
+    // Then reproduce fmt/rt.rs Argument::from_usize, not a clamp/truncation.
+    unsigned :: U64.from_int(precision) ?? panic("float precision is outside usize")
+    if unsigned > target.usize_max() -> panic("float precision is outside usize")
+    if unsigned > (U64{65535}) -> panic("Formatting argument out of range")
+    raw :: bits(value)
+    exceptional :: special(raw)
+    if exceptional != None -> return exceptional ?? panic("special")
+    if (raw & U64{0x7fffffffffffffff}) == (U64{0}) -> return render_zero(raw, precision)
+    decoded :: dec.finite(raw)
+    maxlen :: 21 + (if decoded.exp < 0 -> -12 * decoded.exp else -> 5 * decoded.exp) / 16
+    limit :: if precision < 32768 -> -precision else -> -32768
+    buf := [U8#1024]{uninit}
+    digits :: grisu.exact(&decoded, &buf, maxlen, limit)
+    if digits.exp <= limit -> return render_zero(raw, precision)
+    decimal(raw, &buf, digits, precision)
+}

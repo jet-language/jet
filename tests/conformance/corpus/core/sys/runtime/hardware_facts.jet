@@ -1,0 +1,185 @@
+// RUNTIME-HARDWARE-FACTS-1. Policy vectors are independent of native evidence.
+// No original TraceHardware::current test exists (JetTrace fixtures are owned
+// by Foundation). Pin: std 1.97.1 commit8bab26f4f68e0e26f0bb7960be334d5b520ea452.
+// Native tests at the end require Main's actual canonical sys activation;
+// they are deliberately not replaced by fixture-backed successful providers.
+// Child affinity/quota and selected ARCH/Option<buildtarget> agreement require
+// #4494 native storage/descriptor/subprocess closure + checked build-fact ABI.
+// A child must set its OWN affinity and restore it before exit; never mutate
+// the agent/test-runner/main process. No unsafe post-fork Jet allocation.
+use core.sys.runtime.hardware_facts as hardware_policy
+use core.files.runtime.kernel_path_components as hardware_paths
+use core.sys as hardware_sys
+
+fn decimal(text: String, maximum: U64) -> U64? Never! {
+    raw :: text.bytes()
+    hardware_policy.parse_usize_decimal(raw[0..<raw.len()], maximum)
+}
+fn v2(text: String, maximum: U64) -> hardware_policy.QuotaV2Line Never! {
+    raw :: text.bytes()
+    hardware_policy.quota_v2_line(raw[0..<raw.len()], maximum)
+}
+fn line_fields(text: String) -> hardware_policy.CgroupLineFields Never! {
+    raw :: text.bytes()
+    hardware_policy.cgroup_line_fields(raw[0..<raw.len()]) ?? panic("expected cgroup fields")
+}
+fn controller(text: String) -> hardware_policy.CgroupVersion? Never! {
+    raw :: text.bytes()
+    hardware_policy.controller_version(raw[0..<raw.len()])
+}
+fn mount_fields(text: String) -> hardware_policy.MountLineFields? Never! {
+    raw :: text.bytes()
+    hardware_policy.mount_line_fields(raw[0..<raw.len()])
+}
+
+#Test("hardware trace fallback is caller policy only on actual failure") {
+    assert_eq(hardware_policy.trace_logical_cpus(hardware_policy.ParallelismResult.Count(U64{7})), U64{7})
+    assert_eq(hardware_policy.trace_logical_cpus(hardware_policy.ParallelismResult.OsError(I32{13})), U64{1})
+    assert_eq(hardware_policy.trace_logical_cpus(hardware_policy.ParallelismResult.UnknownThreadCount), U64{1})
+    assert_eq(hardware_policy.trace_logical_cpus(hardware_policy.ParallelismResult.Unsupported), U64{1})
+}
+#Test("selected build target preserves present empty metadata") {
+    assert_eq(hardware_policy.trace_build_target(None), "unknown")
+    assert_eq(hardware_policy.trace_build_target(Val("")), "")
+    assert_eq(hardware_policy.trace_build_target(Val("aarch64-apple-darwin")), "aarch64-apple-darwin")
+}
+#Test("affinity intersects quota before falling through on empty mask") {
+    assert_eq(hardware_policy.affinity_limit(U64{8}, U64{3}), Val(U64{3}))
+    assert_eq(hardware_policy.affinity_limit(U64{2}, U64{8}), Val(U64{2}))
+    assert_eq(hardware_policy.affinity_limit(U64{8}, U64{0}), Val(U64{1}))
+    assert_eq(hardware_policy.affinity_limit(U64{0}, U64{0}), None)
+    assert_eq(hardware_policy.affinity_limit(U64{0}, U64{8}), None)
+}
+#Test("sysconf zero is unknown thread count rather than successful one") {
+    assert_eq(hardware_policy.online_limit(U64{0}, U64{8}), hardware_policy.ParallelismResult.UnknownThreadCount)
+    assert_eq(hardware_policy.online_limit(U64{8}, U64{0}), hardware_policy.ParallelismResult.Count(U64{1}))
+    assert_eq(hardware_policy.online_limit(U64{8}, U64{3}), hardware_policy.ParallelismResult.Count(U64{3}))
+}
+#Test("CPU mask word count keeps high unsigned bits without exact Int") {
+    assert_eq(hardware_policy.cpu_mask_word_count(U64{0}), U64{0})
+    assert_eq(hardware_policy.cpu_mask_word_count(U64{0x8000000000000000}), U64{1})
+    assert_eq(hardware_policy.cpu_mask_word_count(U64{0xffffffffffffffff}), U64{64})
+    assert_eq(hardware_policy.cpu_mask_word_count(U64{0xaaaaaaaaaaaaaaaa}), U64{32})
+    words :: [U64]{U64{0}, U64{0xffffffffffffffff}, U64{0x8000000000000001}}
+    assert_eq(hardware_policy.cpu_mask_count(words[0..<words.len()]), U64{66})
+}
+#Test("usize decimal parsing uses selected 32bit and 64bit maxima") {
+    assert_eq(decimal("4294967295", U64{4294967295}), Val(U64{4294967295}))
+    assert_eq(decimal("4294967296", U64{4294967295}), None)
+    assert_eq(decimal("18446744073709551615", U64{0xffffffffffffffff}), Val(U64{0xffffffffffffffff}))
+    assert_eq(decimal("18446744073709551616", U64{0xffffffffffffffff}), None)
+    assert_eq(decimal("+000100", U64{0xffffffffffffffff}), Val(U64{100}))
+    assert_eq(decimal("0", U64{0}), Val(U64{0}))
+    assert_eq(decimal("1", U64{0}), None)
+}
+#Test("usize parser rejects signs whitespace and nondecimal text exactly") {
+    invalid :: [String]{"", "+", "-1", " 1", "1 ", "1\t", "1_0", "0x10", "١", "max"}
+    loop item in invalid -> assert_eq(decimal(item, U64{0xffffffffffffffff}), None)
+}
+#Test("v1 quota floor keeps zero until final clamp and ignores unlimited") {
+    assert_eq(hardware_policy.quota_v1_values(Val(U64{150000}), Val(U64{100000})), Val(U64{1}))
+    assert_eq(hardware_policy.quota_v1_values(Val(U64{50000}), Val(U64{100000})), Val(U64{0}))
+    assert_eq(hardware_policy.quota_v1_values(decimal("-1", U64{0xffffffffffffffff}), Val(U64{100000})), None)
+    assert_eq(hardware_policy.quota_v1_values(Val(U64{100}), Val(U64{0})), None)
+    assert_eq(hardware_policy.quota_v1_values(None, Val(U64{100})), None)
+}
+#Test("v2 reads first line floor quota and permits trailing fields") {
+    assert_eq(v2("150000 100000\n1 1\n", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.Bound(U64{1}))
+    assert_eq(v2("50000 100000\r\n", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.Bound(U64{0}))
+    assert_eq(v2("+200 +100 ignored", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.Bound(U64{2}))
+    assert_eq(v2("100 10\r", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.NoBound)
+}
+#Test("v2 malformed numeric line skips bound but missing field stops hierarchy") {
+    invalid :: [String]{"max 100000\n", "100 0\n", "100  10\n", " 100 10\n", "100\t10 10\n", "4294967296 1\n"}
+    loop item in invalid -> assert_eq(v2(item, U64{4294967295}), hardware_policy.QuotaV2Line.NoBound)
+    assert_eq(v2("", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.StopHierarchy)
+    assert_eq(v2("\n100 1", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.StopHierarchy)
+    assert_eq(v2("100", U64{0xffffffffffffffff}), hardware_policy.QuotaV2Line.StopHierarchy)
+}
+#Test("hierarchical quotas select the minimum without ceil or premature clamp") {
+    quota := U64{0xffffffffffffffff}
+    quota = hardware_policy.quota_min(quota, Val(U64{4}))
+    quota = hardware_policy.quota_min(quota, None)
+    quota = hardware_policy.quota_min(quota, Val(U64{2}))
+    assert_eq(quota, U64{2})
+    quota = hardware_policy.quota_min(quota, Val(U64{0}))
+    assert_eq(quota, U64{0})
+    assert_eq(hardware_policy.affinity_limit(U64{8}, quota), Val(U64{1}))
+}
+#Test("controller tokens are exact comma fields and v1 wins over v2") {
+    assert_eq(controller(""), Val(hardware_policy.CgroupVersion.V2))
+    assert_eq(controller("cpuacct,cpu"), Val(hardware_policy.CgroupVersion.V1))
+    assert_eq(controller("cpu,cpuacct"), Val(hardware_policy.CgroupVersion.V1))
+    assert_eq(controller("é,cpu"), Val(hardware_policy.CgroupVersion.V1))
+    assert_eq(controller("cpuacct,cpuset"), None)
+    assert_eq(controller(" cpu"), None)
+    assert(!hardware_policy.replace_cgroup(Val(hardware_policy.CgroupVersion.V1), hardware_policy.CgroupVersion.V2))
+    assert(!hardware_policy.replace_cgroup(Val(hardware_policy.CgroupVersion.V2), hardware_policy.CgroupVersion.V2))
+    assert(hardware_policy.replace_cgroup(Val(hardware_policy.CgroupVersion.V2), hardware_policy.CgroupVersion.V1))
+}
+#Test("cgroup membership offsets retain colon path bytes and later v1 replaces") {
+    fields :: line_fields("1:cpu:/a:b")
+    assert_eq(fields.controllers.start, 2)
+    assert_eq(fields.controllers.end, 5)
+    assert_eq(fields.group, Val(hardware_paths.PathSpan{start: 6, end: 10}))
+    selected :: hardware_policy.select_cgroup(None, Val(hardware_policy.CgroupVersion.V1), fields, 12) ?? panic("selection")
+    assert_eq(selected.group, hardware_paths.PathSpan{start: 19, end: 22})
+    ignored :: hardware_policy.select_cgroup(Val(selected), Val(hardware_policy.CgroupVersion.V2), line_fields("0::/"), 0) ?? panic("v1 retained")
+    assert_eq(ignored, selected)
+    replaced :: hardware_policy.select_cgroup(Val(selected), Val(hardware_policy.CgroupVersion.V1), line_fields("9:cpu:/next"), 0) ?? panic("new v1")
+    assert_eq(replaced.group, hardware_paths.PathSpan{start: 7, end: 11})
+}
+#Test("malformed relevant membership resets selection rather than returning old path") {
+    previous :: hardware_policy.select_cgroup(None, Val(hardware_policy.CgroupVersion.V2), line_fields("0::/first"), 0)
+    assert_eq(hardware_policy.select_cgroup(previous, Val(hardware_policy.CgroupVersion.V1), line_fields("9:cpu"), 0), None)
+    assert_eq(hardware_policy.select_cgroup(previous, None, line_fields("9:memory"), 0), previous)
+}
+#Test("mountinfo field spans preserve literal spaces and variable optional fields") {
+    text :: "36 29 0:32 /slice /sys/fs/cgroup/cpu rw shared:3 - cgroup cgroup rw,cpu"
+    fields :: mount_fields(text) ?? panic("mount fields")
+    path :: hardware_paths.from_text(text, hardware_paths.PathPlatform.Unix)
+    fs_view :: path.encoded[fields.filesystem.start..<fields.filesystem.end]
+    assert_eq(fs_view, [U8]{99, 103, 114, 111, 117, 112})
+    opts_view :: path.encoded[fields.mount_options.start..<fields.mount_options.end]
+    assert(hardware_policy.has_cpu_controller(opts_view))
+    assert_eq(mount_fields("1 2 3 4 5 6 7"), None)
+}
+#Test("bind mount group uses canonical path components without copying subpaths") {
+    line :: hardware_paths.from_text("36 29 0:32 /slice /cg rw - cgroup cgroup rw,cpu", hardware_paths.PathPlatform.Unix)
+    fields :: mount_fields("36 29 0:32 /slice /cg rw - cgroup cgroup rw,cpu") ?? panic("fields")
+    slash :: hardware_paths.from_text("/", hardware_paths.PathPlatform.Unix)
+    group :: hardware_paths.from_text("slice/job", hardware_paths.PathPlatform.Unix)
+    remainder :: hardware_policy.bind_mount_group(group, hardware_paths.PathSpan{start: 0, end: group.encoded.len()}, line, fields.sub_path, slash) ?? panic("bind mount contains group")
+    assert_eq(remainder, hardware_paths.PathSpan{start: 6, end: 9})
+    sibling :: hardware_paths.from_text("slicex/job", hardware_paths.PathPlatform.Unix)
+    assert_eq(hardware_policy.bind_mount_group(sibling, hardware_paths.PathSpan{start: 0, end: sibling.encoded.len()}, line, fields.sub_path, slash), None)
+}
+
+// These are REAL provider acceptance tests, not policy fixture evidence.
+// Unexecuted: canonical root/build/native storage activation is Main-owned.
+#Test("native hardware facts are nonempty selected arch and OS with positive CPU count") {
+    facts :: hardware_sys.hardware_facts()
+    assert(facts.cpu_arch.len() > 0)
+    assert(facts.os.len() > 0)
+    assert(facts.logical_cpus >= (U64{1}))
+}
+#Test("native hardware OS agrees with actual selected compiler build OS") {
+    facts :: hardware_sys.hardware_facts()
+    // Compiler OS variants are title-case dispatch facts, whereas the
+    // canonical std OS identity is lowercase; no uname/host-env expectation.
+    prep if $build.os == {
+        .Linux -> { assert_eq(facts.os, "linux") }
+        .MacOS -> { assert_eq(facts.os, "macos") }
+        .Windows -> { assert_eq(facts.os, "windows") }
+    }
+}
+
+#Test("v1 numeric input uses canonical Unicode trim rather than ASCII whitespace only") {
+    trimmed := "　+150000　\r\n".trim() // #4303: trimmed loan flows into String-typed decimal.
+    assert_eq(hardware_policy.quota_v1_values(decimal(trimmed, U64{0xffffffffffffffff}), Val(U64{100000})), Val(U64{1}))
+}
+
+#Test("pinned unsupported platform and unsupported Unix errors remain distinct") {
+    assert_eq(hardware_policy.unsupported_platform_parallelism(), hardware_policy.ParallelismResult.UnknownThreadCount)
+    assert_eq(hardware_policy.unsupported_unix_parallelism(), hardware_policy.ParallelismResult.Unsupported)
+}

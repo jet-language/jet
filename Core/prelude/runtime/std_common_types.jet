@@ -1,0 +1,1108 @@
+use core.sys.target.[selected_os, selected_family]
+// GATE #4494: native ownership, interior cells, atomics and worker handles.
+use std.clone.[Clone]
+use std.rc.[Rc]
+use std.cell.[Cell, RefCell]
+use std.sync.[Arc, Mutex, Condvar]
+use std.sync.atomic.[AtomicBool]
+use std.process.[Child, ChildStdin, ChildStdout, ChildStderr]
+use std.fs.[File]
+use std.io.[BufReader, ErrorKind]
+use std.fmt.[Formatter, Display, Debug]
+use std.thread.[JoinHandle]
+use std.time.[Instant]
+use core.encoding.runtime.std_data_tree.[EncodingError, EncodingCause, EncodingLimits, DataTree]
+use core.encoding.runtime.std_error_kernel.[jet_encoding_error_kernel_show]
+use core.encoding.runtime.std_stream.[JetFileReader, JetFileWriter, JetEncodingAllocationBudget, JetJSONReadFrame, JetJSONWriteFrame, JetJSONCanonicalFrame, JetCBORReadFrame, JetCBORWriteFrame]
+use jet_csv_kernel.[CsvParser]
+use jet_xml_pull.[StreamScanner, StreamWriter]
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay, JetDebug, JetAbsent]
+use core.concurrency.runtime.kernel_shared.[JetShared, JetSharedRevisionError]
+use jet_codegen.[JetTablePlan, JetTableSchema, JetTableTypeId, JetTableCallable, JetTableSource]
+use jet_foundation.Shape.[ShapeProjection]
+use core.terminal.runtime.terminal_default.[JET_TERMINAL_DEFAULT_COLS, JET_TERMINAL_DEFAULT_ROWS]
+use core.process.runtime.std_receipt.[ProcessReceipt]
+use core.files.[IOError]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1
+// Stream and Capture both pipe bytes; only their Jet consumer differs.
+#Equatable
+pub enum ProcessStreamMode { Stream, Inherit, Capture }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:14
+#Equatable
+pub enum ProcessSignal { Term, Hup, Int }
+impl ProcessSignal {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:23
+    pub fn mask(self) -> Int Never! {
+        match self { .Int => 1 << 0, .Hup => 1 << 1, .Term => 1 << 2 }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:34
+#Equatable
+pub struct TerminalSize { pub cols: I64, pub rows: I64 }
+impl TerminalSize {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:42
+    pub fn default() -> TerminalSize Never! {
+        TerminalSize{cols: JET_TERMINAL_DEFAULT_COLS, rows: JET_TERMINAL_DEFAULT_ROWS}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:50
+#Equatable
+pub enum TerminalMode { Raw, Cooked }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:56
+#Equatable
+pub struct TerminalPolicy { pub size: TerminalSize, pub mode: TerminalMode }
+impl TerminalPolicy {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:63
+    pub fn default() -> TerminalPolicy Never! {
+        TerminalPolicy{size: TerminalSize.default(), mode: .Cooked}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:71
+// GATE #4494: Windows HPCON is an owned native handle, not a file pipe.
+struct ConPtyControl { handle: Cell<Int> }
+impl ConPtyControl {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:87
+    fn new(handle: Int) -> ConPtyControl Never! { ConPtyControl{handle: Cell.new(handle)} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:93
+    fn raw(self) -> Int Never! { self.handle.get() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:97
+    fn close(self) Never! {
+        handle :: self.handle.replace(0)
+        if handle != 0 {
+            // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:82
+            // GATE #4494: kernel32 ClosePseudoConsole, system ABI. Zeroing first
+            // preserves the single HPCON owner and makes wait/drop idempotent.
+            if selected_os() == .Windows -> std.windows.kernel32.ClosePseudoConsole(handle)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:109
+impl ConPtyControl.Close { fn close(^self) { ConPtyControl.close(self) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:115
+pub struct TerminalSession {
+    // GATE #4483/#4494: only the selected family's native handle is present.
+    master: Rc<File>?
+    control: Rc<ConPtyControl>?
+}
+impl TerminalSession {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:127
+    pub fn eq(self, other: TerminalSession) -> Bool Never! {
+        match selected_family() {
+            .Unix => Rc.ptr_eq(self.master.unwrap(), other.master.unwrap()),
+            .Windows => Rc.ptr_eq(self.control.unwrap(), other.control.unwrap()),
+            _ => false,
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:128
+impl TerminalSession.Equatable {
+    fn equal(self, rhs: TerminalSession) -> Bool Never! { self.eq(rhs) }
+}
+impl TerminalSession.Clone {
+    fn clone(self) -> TerminalSession Never! {
+        TerminalSession{master: self.master.clone(), control: self.control.clone()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:139
+// A terminal has exactly one output byte stream, exposed as stdout.
+pub enum ProcessStdin { Pipe(ChildStdin), Terminal(File) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:149
+pub enum ProcessReader {
+    Stdout(ChildStdout)
+    Stderr(ChildStderr)
+    Terminal(File)
+    Shared(Arc<ProcessOutputState>)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:156
+pub type ProcessStdinHandle = Rc<RefCell<ProcessStdin?>>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:162
+pub type ProcessStdoutStreamHandle = Rc<RefCell<BufReader<ProcessReader>?>>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:164
+pub type ProcessStderrStreamHandle = Rc<RefCell<BufReader<ProcessReader>?>>
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:168
+struct ProcessOutputState { bytes: Mutex<ProcessOutputBuffer>, ready: Condvar }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:174
+struct ProcessOutputBuffer {
+    bytes: [U8]
+    cursor: Int
+    closed: Bool
+    error: (ErrorKind, String)?
+}
+impl EncodingError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:184
+    pub fn cause(self) -> EncodingCause? Never! { self.cause.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:187
+    fn display_text(self) -> String Never! {
+        jet_encoding_error_kernel_show(self.format.as_str(), "{self.kind:Debug}", self.byte_offset,
+            self.line, self.column, self.path, self.reason)
+    }
+}
+impl EncodingError.Display {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:200
+    fn fmt(self, f: &Formatter) Err! { f.write_str(self.display_text()) }
+}
+impl EncodingError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:205
+    fn jet_show(self) -> String Never! { self.display_text() }
+}
+impl EncodingError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:210
+    fn jet_display(self) -> String Never! { self.display_text() }
+}
+impl EncodingError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:215
+    fn jet_debug(self) -> String Never! { self.display_text() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:222
+#Equatable
+pub enum XMLReason {
+    InvalidEncoding, Malformed, MismatchedTag, InvalidName, Namespace,
+    DuplicateAttribute, Entity, EntityCycle, Limit, Canonicalization, Shape, Unsupported
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:238
+#Error
+#Equatable
+pub struct XMLError {
+    pub kind: XMLReason
+    pub byte_offset: I64?
+    pub line: I64?
+    pub column: I64?
+    pub path: String
+    pub reason: String
+}
+impl XMLError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:249
+    fn display_text(self) -> String Never! {
+        jet_encoding_error_kernel_show("XML", "{self.kind:Debug}", self.byte_offset.unwrap_or(0),
+            self.line, self.column, self.path, self.reason)
+    }
+}
+impl XMLError.Display {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:262
+    fn fmt(self, f: &Formatter) Err! { f.write_str(self.display_text()) }
+}
+impl XMLError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:267
+    fn jet_show(self) -> String Never! { self.display_text() }
+}
+impl XMLError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:272
+    fn jet_display(self) -> String Never! { self.display_text() }
+}
+impl XMLError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:277
+    fn jet_debug(self) -> String Never! { self.display_text() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:281
+#Equatable
+pub enum DataEvent {
+    Null, Bool(Bool), Int(I64), Float(Float), Number(String), Text(String), Bytes([U8]),
+    ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:298
+// Exact policy/error carriers already live at the CBOR surface owner.
+use core.encoding.cbor.[CBOROptions, CBORErrorKind, CBORError]
+impl CBOROptions {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:305
+    pub fn safe() -> CBOROptions Never! {
+        CBOROptions{max_depth: 256, max_items: 1_000_000, max_bytes: 1_073_741_824, require_canonical: false}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:315
+// CBORErrorKind: Syntax, Truncated, Unsupported, Limit, TypeMismatch,
+// TrailingData, NonCanonical; canonical declaration imported above.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:325
+// CBORError retains kind, byte_offset, path and reason at core.encoding.cbor.
+impl CBORError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:332
+    fn display_text(self) -> String Never! {
+        jet_encoding_error_kernel_show("CBOR", "{self.kind:Debug}", self.byte_offset,
+            None, None, self.path, self.reason)
+    }
+}
+impl CBORError.Display {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:345
+    fn fmt(self, f: &Formatter) Err! { f.write_str(self.display_text()) }
+}
+impl CBORError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:350
+    fn jet_show(self) -> String Never! { self.display_text() }
+}
+impl CBORError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:355
+    fn jet_display(self) -> String Never! { self.display_text() }
+}
+impl CBORError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:360
+    fn jet_debug(self) -> String Never! { self.display_text() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:364
+#Equatable
+pub enum XMLCanonicalMode { Inclusive11, Exclusive10 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:369
+#Equatable
+pub struct XMLCanonical {
+    pub mode: XMLCanonicalMode
+    pub comments: Bool
+    pub inclusive_prefixes: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:375
+pub struct JSONReader {
+    input: JetFileReader
+    limits: EncodingLimits
+    total: I64
+    offset: I64
+    line: I64
+    column: I64
+    lookahead: U8?
+    frames: [JetJSONReadFrame]
+    root_started: Bool
+    root_done: Bool
+    terminal: EncodingError?
+    eof: Bool
+    record_mode: Bool
+    typed_numbers: Bool
+    allocation_budget: JetEncodingAllocationBudget?
+    // Owned decoded event charge remains live through key cloning and is
+    // released exactly once when handed out or when a terminal error occurs.
+    output_heap: Int
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:397
+pub struct JSONWriter {
+    output: JetFileWriter
+    limits: EncodingLimits
+    frames: [JetJSONWriteFrame]
+    root_written: Bool
+    finished: Bool
+    terminal: EncodingError?
+    total: I64
+    canonical: Bool
+    canonical_frames: [JetJSONCanonicalFrame]
+    canonical_retained: Int
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:409
+pub struct JSONLReader { json: JSONReader, terminal: EncodingError?, record_index: I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:414
+pub struct JSONLWriter {
+    json: JSONWriter
+    terminal: EncodingError?
+    record_index: I64
+    finished: Bool
+    // Only finish emits the final record LF; dropping leaves it unterminated.
+    pending_lf: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:423
+use core.encoding.csv.[CSVRow]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:428
+pub struct CSVReader {
+    input: JetFileReader
+    limits: EncodingLimits
+    delimiter: Char
+    header: Bool
+    skip_blank: Bool
+    parser: CsvParser
+    allocation: JetEncodingAllocationBudget
+    utf8: [U8#4]
+    utf8_len: Int
+    total: I64
+    offset: I64
+    line: I64
+    column: I64
+    terminal: EncodingError?
+    eof: Bool
+    record_index: I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:446
+pub struct CSVWriter {
+    output: JetFileWriter
+    limits: EncodingLimits
+    terminal: EncodingError?
+    total: I64
+    record_index: I64
+    finished: Bool
+    // Only finish emits the final CRLF; dropping leaves it unterminated.
+    pending_crlf: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:457
+pub struct XMLReader {
+    input: JetFileReader
+    limits: EncodingLimits
+    scanner: StreamScanner
+    terminal: EncodingError?
+    total: I64
+    eof: Bool
+    allocation: JetEncodingAllocationBudget
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:467
+pub struct XMLWriter {
+    output: JetFileWriter
+    limits: EncodingLimits
+    renderer: StreamWriter
+    buffer: [U8]
+    terminal: EncodingError?
+    total: I64
+    finished: Bool
+    allocation: JetEncodingAllocationBudget
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:477
+pub struct CBORReader {
+    input: JetFileReader
+    limits: EncodingLimits
+    total: I64
+    terminal: EncodingError?
+    eof: Bool
+    root_done: Bool
+    lookahead: U8?
+    frames: [JetCBORReadFrame]
+    retained: Int
+    workspace: Int
+    allocation: JetEncodingAllocationBudget
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:491
+pub struct CBORWriter {
+    output: JetFileWriter
+    limits: EncodingLimits
+    terminal: EncodingError?
+    total: I64
+    frames: [JetCBORWriteFrame]
+    root_written: Bool
+    // Finish validates exactly one root; dropping never writes incomplete containers.
+    finished: Bool
+    retained: Int
+    workspace: Int
+    allocation: JetEncodingAllocationBudget
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:507
+#Equatable
+pub struct ProcessSpec {
+    pub cmd: [String]
+    pub cwd: String?
+    pub env_clear: Bool
+    pub env_set: [(String, String)]
+    pub env_remove: [String]
+    // None closes child stdin; there is no accidental inheritance.
+    pub stdin: ProcessStreamMode?
+    pub stdout: ProcessStreamMode
+    pub stderr: ProcessStreamMode
+    pub timeout_ms: I64?
+    pub output_limit: I64?
+    pub cpu_time_limit_ms: I64?
+    pub memory_limit_bytes: I64?
+    pub open_file_limit: I64?
+    pub detached: Bool
+    // Opt-in never falls back to non-terminal execution when unavailable.
+    pub terminal: TerminalPolicy?
+    // ProcessPolicy owns interpretation, digesting, planning and refusal.
+    pub policy_wire: String?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:541
+// Resolved identity and selected backend; argv is redacted, input_digest binds
+// the exact launch argv without exposing secrets.
+#Equatable
+pub struct ProcessPlan {
+    pub executable_identity: String
+    pub argv: [String]
+    pub input_digest: String
+    pub policy_digest: String
+    pub backend: String
+    pub authority: [String]
+    pub descendants: String
+    pub limits: [String]
+    pub outputs: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:558
+// Native arm is constructed only for selected_os() == .Windows (#4483).
+enum ProcessHandle {
+    Std{child: Child, job: Rc<File>?}
+    Native{process: File, job: Rc<File>, pid: U32}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:572
+pub struct ProcessChild {
+    pub inner: Rc<RefCell<ProcessHandle?>>
+    pub wait_result: Rc<RefCell<ProcessReceipt?>>
+    // Retained cleanup failure is delivered as a typed error on later wait.
+    pub cleanup_error: Rc<RefCell<IOError?>>
+    pub stdin: ProcessStdinHandle
+    pub stdout: ProcessStdoutStreamHandle
+    pub stderr: ProcessStderrStreamHandle
+    pub stdout_state: Arc<ProcessOutputState>?
+    pub stderr_state: Arc<ProcessOutputState>?
+    pub stdout_worker: Rc<RefCell<JoinHandle<() IOError!>?>>
+    pub stderr_worker: Rc<RefCell<JoinHandle<() IOError!>?>>
+    pub output_limit_hit: Arc<AtomicBool>
+    pub output_read_error: Arc<AtomicBool>
+    pub terminal: TerminalSession?
+    pub process_group: Bool
+    pub detached: Bool
+    pub timeout_ms: I64?
+    // spawn().wait() enforces the same captured byte bound as run().
+    pub output_limit: I64?
+    pub audit_spec: Rc<ProcessSpec>
+    pub audit_plan: Rc<ProcessPlan>?
+    pub started: Instant
+}
+impl ProcessChild {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:604
+    pub fn eq(self, other: ProcessChild) -> Bool Never! { Rc.ptr_eq(self.inner, other.inner) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:605
+impl ProcessChild.Equatable {
+    fn equal(self, rhs: ProcessChild) -> Bool Never! { self.eq(rhs) }
+}
+impl ProcessChild.Clone {
+    fn clone(self) -> ProcessChild Never! {
+        ProcessChild{
+            inner: self.inner.clone(), wait_result: self.wait_result.clone(),
+            cleanup_error: self.cleanup_error.clone(), stdin: self.stdin.clone(),
+            stdout: self.stdout.clone(), stderr: self.stderr.clone(),
+            stdout_state: self.stdout_state.clone(), stderr_state: self.stderr_state.clone(),
+            stdout_worker: self.stdout_worker.clone(), stderr_worker: self.stderr_worker.clone(),
+            output_limit_hit: self.output_limit_hit.clone(), output_read_error: self.output_read_error.clone(),
+            terminal: self.terminal.clone(), process_group: self.process_group,
+            detached: self.detached, timeout_ms: self.timeout_ms, output_limit: self.output_limit,
+            audit_spec: self.audit_spec.clone(), audit_plan: self.audit_plan.clone(), started: self.started,
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:609
+use core.files.[DirEntry]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:616
+use core.files.[Stat]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:629
+use core.files.[WalkEntry]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:637
+use core.watcher.[WatchDomain]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:647
+use core.watcher.[WatchEventKind as WatchKind]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:657
+use core.watcher.[WatchEvent]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:667
+use core.files.runtime.std_owners.[JetFileLockOwner as FileLock, JetTempDirOwner as TempDir, JetTempFileOwner as TempFile]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:671
+#Equatable
+pub struct GroupValue<K, V> { pub key: K, pub value: V }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:679
+use core.data.[DataLineOptions]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:692
+use core.data.[DataErrorKind]
+impl DataErrorKind.Display {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:719
+    fn fmt(self, f: &Formatter) Err! { f.write_str(self.jet_show()) }
+}
+impl DataErrorKind.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:724
+    fn jet_show(self) -> String Never! {
+        match self {
+            .Decode => "Decode", .Limit => "Limit", .IO => "IO", .Empty => "Empty",
+            .InvalidArgument => "InvalidArgument", .NonFinite => "NonFinite",
+            .Overflow => "Overflow", .State => "State", .Bridge => "Bridge",
+            .Unsupported => "Unsupported", .DuplicateKey => "DuplicateKey",
+            .MissingKey => "MissingKey", .WrongOwner => "WrongOwner",
+            .StaleRevision => "StaleRevision", .InvalidValue => "InvalidValue",
+        }
+    }
+}
+impl DataErrorKind.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:729
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+impl DataErrorKind.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:734
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:738
+use core.data.[DataError]
+impl DataError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:749
+    fn simple(kind: DataErrorKind, operation: String, reason: String) -> DataError Never! {
+        DataError{kind: kind, operation: operation, row: None, column: None, index: None, reason: reason, cause: None}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:761
+    fn display_text(self) -> String Never! {
+        out := "{self.kind:Debug} {self.operation}"
+        if self.row is Val(row) -> out += ", row {row}"
+        if self.column is Val(column) -> out += ", column {column}"
+        if self.index is Val(index) -> out += ", index {index}"
+        out += ": {self.reason}"
+        out
+    }
+}
+impl DataError.Display {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:777
+    fn fmt(self, f: &Formatter) Err! { f.write_str(self.display_text()) }
+}
+impl DataError.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:782
+    fn jet_show(self) -> String Never! { self.display_text() }
+}
+impl DataError.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:787
+    fn jet_debug(self) -> String Never! { self.display_text() }
+}
+impl DataError.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:792
+    fn jet_display(self) -> String Never! { self.display_text() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:796
+use core.data.[DataLimits]
+impl DataLimits {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:805
+    pub fn safe() -> DataLimits Never! {
+        DataLimits{encoding: EncodingLimits.safe(), max_groups: 100_000,
+            max_sort_rows: 1_000_000, max_join_rows: 1_000_000, max_output_rows: 1_000_000}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:815
+#Equatable
+pub struct DataPivotCell {
+    pub row_key: String
+    pub column_key: String
+    pub count: I64
+    pub sum: Float
+    pub mean: Float
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:823
+pub enum DataStreamInner {
+    CSV{reader: CSVReader, headers: [String]?}
+    JSON{reader: JSONReader, array_started: Bool, array_done: Bool}
+    JSONL{reader: JSONLReader}
+    Provider{format: DataFormat, rows: [DataTree], cursor: Int}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:842
+pub struct DataStream {
+    inner: DataStreamInner
+    limits: DataLimits
+    terminal: DataError?
+    eof: Bool
+    row_index: I64
+    cancelled: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:851
+use core.data.[DataColumn]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:861
+#Equatable
+pub struct DataSchema {
+    pub identity: String
+    pub format: DataFormat
+    pub columns: [DataColumn]
+    pub projection: ShapeProjection?
+}
+impl DataSchema {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:875
+    pub fn infer(tree: DataTree, format: DataFormat) -> DataSchema Never! {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:876
+        fn merge_type(left: String, right: String) -> (String, Bool) Never! {
+            if left == right {
+                name :: match left {
+                    "null" => "null", "bool" => "bool", "int" => "int", "float" => "float",
+                    "text" => "text", "bytes" => "bytes", "array" => "array", "object" => "object", _ => "Any",
+                }
+                return (name, left == "null")
+            }
+            if left == "null" -> return (right, true)
+            if right == "null" -> return (left, true)
+            if (left == "int" and right == "float") or (left == "float" and right == "int") -> return ("float", false)
+            ("Any", false)
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:904
+        fn value_type(value: DataTree) -> String Never! {
+            match value {
+                .Null => "null", .Bool(_) => "bool", .Int(_) => "int",
+                .Float(_) | .Number(_) => "float", .TypedText(_) | .Text(_) => "text",
+                .Bytes(_) => "bytes", .Array(_) => "array", .Object(_) => "object",
+            }
+        }
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:916
+        fn absorb(fields: &[String: (String, Bool)], name: String, value: DataTree, nullable: Bool) Never! {
+            current_type :: value_type(value)
+            merged := (current_type, nullable or current_type == "null")
+            if fields.get(name) is Val(current) {
+                pair :: merge_type(current.0, current_type)
+                merged = (pair.0, current.1 or nullable or pair.1)
+            }
+            fields[name] = merged
+        }
+        fields := [String: (String, Bool)]{}
+        match tree {
+            .Object(entries) => {
+                loop (name, value) in entries -> absorb(&fields, name.clone(), value, value is .Null)
+            },
+            .Array(values) => {
+                rows_seen := 0
+                loop value in values {
+                    if value is .Object(entries) {
+                        present := [String: Bool]{}
+                        loop (name, _) in entries -> present[name] = true
+                        loop (name, item) in entries -> absorb(&fields, name.clone(), item, rows_seen > 0 or item is .Null)
+                        names :: fields.keys().collect()
+                        loop name in names {
+                            if not present.contains_key(name) {
+                                if fields.get(name) is Val(current) -> fields[name] = (current.0, true)
+                            }
+                        }
+                    } else {
+                        absorb(&fields, "$", value, rows_seen > 0 or value is .Null)
+                    }
+                    rows_seen = rows_seen.saturating_add(1)
+                }
+            },
+            value => absorb(&fields, "$", value, value is .Null),
+        }
+        // Rust BTreeMap order: sort the keys once, never depend on hash iteration.
+        names := fields.keys().collect()
+        names.sort()
+        columns := [DataColumn]{}
+        loop order in 0..<names.len() {
+            name :: names[order]
+            pair :: fields[name]
+            columns.push(DataColumn{id: "column-{order}-{name}", name: name,
+                type_name: pair.0, nullable: pair.1})
+        }
+        identity := ""
+        format_name :: format.as_str()
+        identity += "{format_name.bytes().len()}:{format_name};"
+        loop column in columns {
+            nullable :: if column.nullable { "true" } else { "false" }
+            loop value in [column.id, column.name, column.type_name, nullable] {
+                identity += "{value.bytes().len()}:{value};"
+            }
+        }
+        DataSchema{identity: identity, format: format, columns: columns, projection: None}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1023
+use core.data.[DataStatus]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1035
+#Equatable
+pub enum DataLoaderKind { File, URL, Database, Value }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1046
+use core.data.[DataFormat]
+impl DataFormat {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1056
+    pub fn as_str(self) -> String Never! {
+        match self { .CSV => "csv", .JSON => "json", .JSONL => "jsonl", .Parquet => "parquet", .Arrow => "arrow" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1066
+    pub fn from_str(value: String) -> DataFormat? Never! {
+        match value.to_ascii_lowercase() {
+            "csv" => Val(.CSV), "json" => Val(.JSON), "jsonl" | "ndjson" => Val(.JSONL),
+            "parquet" => Val(.Parquet), "arrow" | "arrow-ipc" | "feather" => Val(.Arrow), _ => None,
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1078
+use core.data.[DataFreshness]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1088
+use core.data.[DataInvalidationCause]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1100
+use core.data.[DataAuthority]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1106
+use core.data.[DataSourceIdentity]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1114
+use core.data.[DataProvenance]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1121
+use core.data.[DataSnapshotIdentity]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1130
+use core.data.[DataLoaderStatus]
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1142
+// Provider payload is lazy input, last_good the sole retained offline payload.
+pub struct DataLoader<T> {
+    pub source: DataSourceIdentity
+    pub format: DataFormat
+    pub authority: DataAuthority
+    pub limits: DataLimits
+    pub payload: [U8]?
+    pub last_good: [U8]?
+    pub cancelled: Bool
+    pub offline: Bool
+    pub status: DataLoaderStatus
+    raw_locator: String
+    pub marker: std.marker.PhantomData<fn() -> T>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1161
+pub struct DataSnapshot<T> {
+    pub value: T
+    pub identity: DataSnapshotIdentity
+    pub provenance: DataProvenance
+    pub schema: DataSchema
+    pub status: DataLoaderStatus
+    pub content: [U8]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1171
+pub trait DataArrowOps<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1175
+    fn row_count(self) -> Int Never!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1176
+    fn row(self, index: Int) -> T Err!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1179
+// One release owner; immutable row operations share access, not ownership.
+pub struct DataArrowBatch<T> { owner: Box<DataArrowOps<T>> }
+impl DataArrowBatch<T>.Debug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1186
+    fn fmt(self, f: &Formatter) Err! {
+        f.debug_struct("DataArrowBatch").field("rows", self.row_count()).finish()
+    }
+}
+impl DataArrowBatch<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1194
+    fn from_ops(owner: Box<DataArrowOps<T>>) -> DataArrowBatch<T> Never! { DataArrowBatch{owner: ^owner} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1198
+    pub fn row_count(self) -> Int Never! { self.owner.row_count() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1201
+    fn row(self, index: Int) -> T Err! { self.owner.row(index) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1207
+#Equatable
+pub struct DataSummary {
+    pub count: I64
+    pub sum: Float
+    pub mean: Float
+    pub min: Float
+    pub max: Float
+    pub median: Float
+    pub variance: Float
+    pub stddev: Float
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1220
+// Query's immutable internal source, not another materialized public carrier.
+enum DataQueryPlan<T> {
+    Scan{rows: Arc<[T]>}
+    Filter{input: Arc<DataQueryPlan<T>>, predicate: Arc<fn(T) -> Bool>}
+    SortBy{input: Arc<DataQueryPlan<T>>, key: Arc<fn(T) -> String>}
+}
+impl DataQueryPlan<T>.Clone {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1236
+    fn clone(self) -> DataQueryPlan<T> Never! {
+        match self {
+            .Scan{rows} => .Scan{rows: rows.clone()},
+            .Filter{input, predicate} => .Filter{input: input.clone(), predicate: predicate.clone()},
+            .SortBy{input, key} => .SortBy{input: input.clone(), key: key.clone()},
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1252
+#Equatable
+enum DataQueryNodeKind { Scan, Filter, SortBy }
+impl DataQueryNodeKind {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1260
+    fn name(self) -> String Never! {
+        match self { .Scan => "scan", .Filter => "filter", .SortBy => "sort_by" }
+    }
+}
+impl DataQueryPlan<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1270
+    fn node_kind(self) -> DataQueryNodeKind Never! {
+        match self { .Scan{..} => .Scan, .Filter{..} => .Filter, .SortBy{..} => .SortBy }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1278
+    fn is_streaming(self) -> Bool Never! {
+        match self { .Scan{..} => true, .Filter{input, ..} => input.is_streaming(), .SortBy{..} => false }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1286
+    fn streaming_fallback(self) -> String? Never! {
+        match self { .Scan{..} => None, .Filter{input, ..} => input.streaming_fallback(), .SortBy{..} => Val("sort_by") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1295
+struct DataQueryRows<T> { root: Arc<DataQueryPlan<T>>, missing: I64, plan: JetTablePlan }
+impl DataQueryRows<T>.Clone {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1303
+    fn clone(self) -> DataQueryRows<T> Never! {
+        DataQueryRows{root: self.root.clone(), missing: self.missing, plan: self.plan.clone()}
+    }
+}
+impl DataQueryRows<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1314
+    fn from_rows(rows: [T], missing: I64, plan: JetTablePlan) -> DataQueryRows<T> Never! {
+        DataQueryRows{root: Arc.new(DataQueryPlan.Scan{rows: Arc.new(^rows)}), missing: missing, plan: ^plan}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1324
+    fn filter(self, predicate: fn(T) -> Bool) -> DataQueryRows<T> Never! {
+        plan := self.plan.clone()
+        schema :: plan.output_schema().cloned().unwrap_or_else(fn() {
+            JetTableSchema.new(JetTableTypeId.new(std.any.type_name<T>()), [])
+        })
+        row_type :: schema.row_type.clone()
+        callable :: JetTableCallable.new("data.query.filter", row_type, JetTableTypeId.boolean())
+        plan.append_filter(schema, callable).expect("typed query filter plan must remain valid")
+        DataQueryRows{root: Arc.new(DataQueryPlan.Filter{input: self.root.clone(), predicate: Arc.new(predicate)}),
+            missing: self.missing, plan: ^plan}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1353
+    fn sort_by(self, key: fn(T) -> String) -> DataQueryRows<T> Never! {
+        plan := self.plan.clone()
+        schema :: plan.output_schema().cloned().unwrap_or_else(fn() {
+            JetTableSchema.new(JetTableTypeId.new(std.any.type_name<T>()), [])
+        })
+        row_type :: schema.row_type.clone()
+        callable :: JetTableCallable.new("data.query.sort_by", row_type, JetTableTypeId.string())
+        plan.append_sort(schema, callable).expect("typed query sort plan must remain valid")
+        DataQueryRows{root: Arc.new(DataQueryPlan.SortBy{input: self.root.clone(), key: Arc.new(key)}),
+            missing: self.missing, plan: ^plan}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1382
+    fn is_streaming(self) -> Bool Never! { self.root.is_streaming() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1386
+    fn streaming_fallback(self) -> String? Never! { self.root.streaming_fallback() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1390
+    fn explain(self) -> [String] Never! {
+        steps := [String]{}
+        loop node in self.plan.nodes -> steps.push(node.operation.as_str())
+        if self.plan.output_node() is Val(node) {
+            if not node.stream.is_streaming() -> steps.push("streaming_fallback:{node.operation.as_str()}")
+        }
+        steps
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1409
+// Derived one-shot queries retain shared stream state; collect cannot reopen it.
+enum DataQueryOperation<T> { Filter(Arc<fn(T) -> Bool>), SortBy(Arc<fn(T) -> String>) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1416
+enum DataTrackedChangeKind<T> { Insert{row: T}, Replace{before: T, after: T}, Remove{row: T} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1420
+impl DataTrackedChangeKind<T>.Clone {
+    fn clone(self) -> DataTrackedChangeKind<T> Never! {
+        match self {
+            .Insert{row} => .Insert{row: row.clone()},
+            .Replace{before, after} => .Replace{before: before.clone(), after: after.clone()},
+            .Remove{row} => .Remove{row: row.clone()},
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1426
+struct DataTrackedChange<T> { revision: U64, order: U64, kind: DataTrackedChangeKind<T> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1427
+impl DataTrackedChange<T>.Clone {
+    fn clone(self) -> DataTrackedChange<T> Never! {
+        DataTrackedChange{revision: self.revision, order: self.order, kind: self.kind.clone()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1433
+struct DataTrackedState<T, K> {
+    rows: [T]
+    keys: [K]
+    orders: [U64]
+    next_order: U64
+    changes: [DataTrackedChange<T>]
+    key: Arc<fn(T) -> K>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1434
+impl DataTrackedState<T, K>.Clone {
+    fn clone(self) -> DataTrackedState<T, K> Never! {
+        DataTrackedState{rows: self.rows.clone(), keys: self.keys.clone(), orders: self.orders.clone(),
+            next_order: self.next_order, changes: self.changes.clone(), key: self.key.clone()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1443
+trait DataTrackedReader<T> {
+    fn snapshot_rows(self) -> [T] Never!
+    fn snapshot_entries(self) -> [(U64, T)] Never!
+    fn snapshot_entries_at_revision(self) -> (U64, [(U64, T)]) Never!
+    fn changes_since(self, revision: U64) -> [DataTrackedChange<T>] DataError!
+    fn revision(self) -> U64 Never!
+    fn retained_rows(self) -> Int Never!
+    fn plan(self, row_count: Int) -> JetTablePlan Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1453
+trait DataTrackedMeta {
+    fn revision(self) -> U64 Never!
+    fn retained_rows(self) -> Int Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1458
+// JetShared is the sole publication revision; payload has no second epoch.
+pub struct DataTracked<T, K> { state: Rc<JetShared<DataTrackedState<T, K>>> }
+impl DataTracked<T, K>.Clone {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1466
+    pub fn clone(self) -> DataTracked<T, K> Never! { DataTracked{state: self.state.clone()} }
+}
+impl DataTracked<T, K> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1474
+    pub fn new(rows: [T], key: fn(T) -> K) -> DataTracked<T, K> DataError! {
+        shared_key :: Arc.new(key)
+        max_rows :: DataLimits.safe().max_output_rows
+        if rows.len() > max_rows -> return Err(DataError.simple(.Limit, "data.track",
+            "retained rows {rows.len()} exceed max_output_rows {max_rows}"))
+        keys := [K]{}
+        keys.reserve(rows.len())
+        loop row in rows {
+            candidate :: shared_key(row.clone())
+            if keys.iter().any(fn(existing) { existing == candidate }) -> return Err(
+                DataError.simple(.DuplicateKey, "data.track", "source keys must be unique"))
+            keys.push(candidate)
+        }
+        orders := [U64]{}
+        orders.reserve(rows.len())
+        loop order in 0..<rows.len() -> orders.push(U64{order})
+        next_order :: U64{keys.len()}
+        DataTracked{state: Rc.new(JetShared.new(DataTrackedState{rows: ^rows, keys: ^keys, orders: ^orders,
+            next_order: next_order, changes: [], key: shared_key}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1510
+    fn update(self, operation: String, update: fn(&DataTrackedState<T, K>, U64) DataError!) DataError! {
+        snapshot :: self.state.capture()
+        source_revision :: snapshot.revision()
+        next_revision :: source_revision.checked_add(U64{1}).ok_or_else(fn() {
+            DataError.simple(.Overflow, operation, "source revision exhausted")
+        })?
+        next := snapshot.value()
+        update(&next, next_revision)?
+        match self.state.try_replace(snapshot, ^next) {
+            Val(true) => {},
+            Val(false) => return Err(DataError.simple(.StaleRevision, operation, "source changed before publication")),
+            Err(.WrongOwner) => return Err(DataError.simple(.WrongOwner, operation, "source snapshot belongs to another owner")),
+            Err(.GenerationExhausted) => return Err(DataError.simple(.Overflow, operation, "source revision exhausted")),
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1545
+    fn ensure_change_capacity(state: DataTrackedState<T, K>, operation: String) DataError! {
+        // GATE #4483: preserve usize::try_from(...).unwrap_or(usize::MAX).
+        limit :: std.convert.usize_try_from(DataLimits.safe().max_output_rows).unwrap_or(std.usize.MAX)
+        if state.changes.len() >= limit -> return Err(DataError.simple(.Limit, operation,
+            "retained change state exceeds max_output_rows {limit}"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1560
+    pub fn insert(self, row: T) DataError! {
+        self.update("data.track.insert", fn(state, revision) {
+            candidate :: state.key(row.clone())
+            if state.keys.iter().any(fn(existing) { existing == candidate }) -> return Err(
+                DataError.simple(.DuplicateKey, "data.track.insert", "source key already exists"))
+            max_rows :: DataLimits.safe().max_output_rows
+            if state.rows.len() >= max_rows -> return Err(DataError.simple(.Limit, "data.track.insert",
+                "retained rows would exceed max_output_rows {max_rows}"))
+            Self.ensure_change_capacity(state, "data.track.insert")?
+            order :: state.next_order
+            state.next_order = state.next_order.checked_add(U64{1}).ok_or_else(fn() {
+                DataError.simple(.Overflow, "data.track.insert", "source order exhausted")
+            })?
+            state.rows.push(row.clone())
+            state.keys.push(candidate)
+            state.orders.push(order)
+            state.changes.push(DataTrackedChange{revision: revision, order: order, kind: .Insert{row: ^row}})
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1601
+    // Identity remains immutable even if derived grouping keys change.
+    pub fn replace(self, key: K, row: T) DataError! {
+        self.update("data.track.replace", fn(state, revision) {
+            index :: state.keys.iter().position(fn(existing) { existing == key }).ok_or_else(fn() {
+                DataError.simple(.MissingKey, "data.track.replace", "source key does not exist")
+            })?
+            if state.key(row.clone()) != key -> return Err(DataError.simple(.InvalidValue,
+                "data.track.replace", "replacement row must retain its source key"))
+            Self.ensure_change_capacity(state, "data.track.replace")?
+            before :: std.mem.replace(&state.rows[index], row.clone())
+            order :: state.orders[index]
+            state.changes.push(DataTrackedChange{revision: revision, order: order, kind: .Replace{before: ^before, after: ^row}})
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1632
+    pub fn remove(self, key: K) DataError! {
+        self.update("data.track.remove", fn(state, revision) {
+            index :: state.keys.iter().position(fn(existing) { existing == key }).ok_or_else(fn() {
+                DataError.simple(.MissingKey, "data.track.remove", "source key does not exist")
+            })?
+            Self.ensure_change_capacity(state, "data.track.remove")?
+            row :: state.rows.remove(index)
+            _ :: state.keys.remove(index)
+            order :: state.orders.remove(index)
+            state.changes.push(DataTrackedChange{revision: revision, order: order, kind: .Remove{row: ^row}})
+        })
+    }
+}
+impl DataTracked<T, K>.DataTrackedReader<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1658
+    fn snapshot_rows(self) -> [T] Never! { self.state.capture().value().rows }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1662
+    fn snapshot_entries(self) -> [(U64, T)] Never! { self.snapshot_entries_at_revision().1 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1666
+    fn snapshot_entries_at_revision(self) -> (U64, [(U64, T)]) Never! {
+        snapshot :: self.state.capture_with(fn(state) {
+            entries := [(U64, T)]{}
+            entries.reserve(state.rows.len())
+            loop index in 0..<state.rows.len() -> entries.push((state.orders[index], state.rows[index].clone()))
+            entries
+        })
+        (snapshot.revision(), snapshot.value())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1678
+    fn changes_since(self, revision: U64) -> [DataTrackedChange<T>] DataError! {
+        current :: self.state.revision()
+        self.state.read(fn(state) {
+            if revision > current -> return Err(DataError.simple(.StaleRevision, "data.query.watch",
+                "requested revision is newer than the source"))
+            if state.changes.first() is Val(first) {
+                if revision.saturating_add(U64{1}) < first.revision -> return Err(
+                    DataError.simple(.StaleRevision, "data.query.watch", "requested revision is no longer retained"))
+            }
+            changes := [DataTrackedChange<T>]{}
+            loop change in state.changes {
+                if change.revision > revision -> changes.push(change.clone())
+            }
+            changes
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1706
+    fn revision(self) -> U64 Never! { self.state.revision() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1710
+    fn retained_rows(self) -> Int Never! { self.state.read(fn(state) { state.rows.len() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1714
+    fn plan(self, row_count: Int) -> JetTablePlan Never! {
+        schema :: JetTableSchema.new(JetTableTypeId.new(std.any.type_name<T>()), [])
+        // GATE #4483: selected native u128 row-count widening.
+        source :: JetTableSource.new("data.track", schema).with_rows(std.u128.from(row_count))
+        JetTablePlan.from_source("data.track", source)
+    }
+}
+impl DataTracked<T, K>.DataTrackedMeta {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1727
+    fn revision(self) -> U64 Never! { DataTrackedReader<T>.revision(self) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1731
+    fn retained_rows(self) -> Int Never! { DataTrackedReader<T>.retained_rows(self) }
+}
+impl DataTracked<T, K>.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1737
+    fn jet_show(self) -> String Never! { "DataTracked(..)" }
+}
+impl DataTracked<T, K>.JetDisplay {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1742
+    fn jet_display(self) -> String Never! { self.jet_show() }
+}
+impl DataTracked<T, K>.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1747
+    fn jet_debug(self) -> String Never! { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1752
+struct DataWatchEntry<T> { order: U64, key: String?, value: T }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1753
+impl DataWatchEntry<T>.Clone {
+    fn clone(self) -> DataWatchEntry<T> Never! {
+        DataWatchEntry{order: self.order, key: self.key.clone(), value: self.value.clone()}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1759
+struct DataWatchMaterialized<T> {
+    entries: [DataWatchEntry<T>]
+    revision: U64
+    mode: String
+    recomputed: Bool
+    changed: Bool
+    retained_rows: Int
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1769
+trait DataWatchSource<T> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1770
+    fn initial(self) -> DataWatchMaterialized<T> DataError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1771
+    fn refresh(self, revision: U64, prior: View<DataWatchEntry<T>>) -> DataWatchMaterialized<T> DataError!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1778
+// Retains inner prior materialization; refresh never reopens or rereads it.
+struct DataWatchOperationSource<T> {
+    inner: Rc<DataWatchSource<T>>
+    operation: DataQueryOperation<T>
+    base: RefCell<[DataWatchEntry<T>]?>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:1787
+// The DataWatchOperationSource implementation body is in the next Rust range.

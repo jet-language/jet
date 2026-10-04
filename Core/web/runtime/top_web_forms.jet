@@ -1,0 +1,1809 @@
+// PORT-PENDING 0308 crates-jet-codegen-src-prelude-corelib-top-webforms-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1-1805
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-SUITE1=C: first-party Forms state on the shared reactive primitive.
+//RS //
+//RS // Field descriptors are supplied by the type-driven compiler projection. This
+//RS // runtime owns the common validation, async validation, action submission, and
+//RS // no-script HTML contract; renderers consume the same headless state.
+//RS 
+//RS use std::collections::BTreeMap as JetWebFormMap;
+//RS use std::sync::atomic::{AtomicU64, Ordering as JetWebFormOrdering};
+//RS use std::sync::{Arc as JetWebFormArc, Mutex as JetWebFormMutex};
+//RS 
+//RS const JET_WEB_FORM_MAX_FIELDS: usize = 256;
+//RS const JET_WEB_FORM_MAX_NAME: usize = 256;
+//RS const JET_WEB_FORM_MAX_VALUE: usize = 1024 * 1024;
+//RS const JET_WEB_FORM_MAX_BODY: usize = 4 * 1024 * 1024;
+//RS fn jet_web_form_json(value: &str) -> String {
+//RS     format!("{value:?}")
+//RS }
+//RS 
+//RS fn jet_web_form_event_entity(action: &str) -> String {
+//RS     if !action.trim().is_empty()
+//RS         && action.len() <= JET_WEB_FORM_MAX_NAME
+//RS         && action.chars().all(|character| !character.is_control())
+//RS     {
+//RS         action.to_string()
+//RS     } else {
+//RS         "form".to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_form_publish_state(state: &JetWebFormState, cause: &str) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let invalid = state.fields.values().filter(|field| !field.errors.is_empty()).count();
+//RS     let validating = state.fields.values().filter(|field| field.validating).count();
+//RS     let touched = state.fields.values().filter(|field| field.touched).count();
+//RS     let fields = format!(
+//RS         "{{\"status\":{},\"field_count\":{},\"invalid_count\":{},\"validating_count\":{},\"touched_count\":{},\"submissions\":{},\"error_bytes\":{},\"result_bytes\":{},\"cause\":{}}}",
+//RS         jet_web_form_json(state.status.name()),
+//RS         state.fields.len(),
+//RS         invalid,
+//RS         validating,
+//RS         touched,
+//RS         state.submission_count,
+//RS         state.error.len(),
+//RS         state.result.len(),
+//RS         jet_web_form_json(cause),
+//RS     );
+//RS     if let Ok(event) = jet_foundation::Devtools::JetDevtoolsEvent::from_parts(
+//RS         jet_web_form_now_ms(),
+//RS         "core.web.forms",
+//RS         "Form",
+//RS         jet_web_form_event_entity(&state.action),
+//RS         fields,
+//RS     ) {
+//RS         jet_devtools_publish_event(event);
+//RS     }
+//RS }
+//RS const JET_WEB_FORM_MAX_ERROR: usize = 4096;
+//RS fn jet_web_form_now_ms() -> u64 {
+//RS     std::time::SystemTime::now()
+//RS         .duration_since(std::time::UNIX_EPOCH)
+//RS         .ok()
+//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_web_form_publish_lifecycle(
+//RS     type_name: &str,
+//RS     lifecycle: &JetWebFormLifecycle,
+//RS     state: &JetWebFormState,
+//RS ) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let entity = if jet_web_form_valid_type_name(type_name) {
+//RS         type_name.to_string()
+//RS     } else {
+//RS         "typed-form".to_string()
+//RS     };
+//RS     let fields = format!(
+//RS         "{{\"lifecycle\":{},\"generation\":{},\"form_status\":{},\"error_bytes\":{},\"result_bytes\":{}}}",
+//RS         jet_web_form_json(lifecycle.status.name()),
+//RS         lifecycle.generation,
+//RS         jet_web_form_json(state.status.name()),
+//RS         lifecycle.error.len(),
+//RS         lifecycle.result.len(),
+//RS     );
+//RS     if let Ok(event) = jet_foundation::Devtools::JetDevtoolsEvent::from_parts(
+//RS         jet_web_form_now_ms(),
+//RS         "core.web.forms",
+//RS         "Form",
+//RS         entity,
+//RS         fields,
+//RS     ) {
+//RS         jet_devtools_publish_event(event);
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetWebFormPanelFact {
+//RS     id: u64,
+//RS     type_name: String,
+//RS     action: String,
+//RS     fields: Vec<JetWebFormFieldSpec>,
+//RS     state: jet_std::JetSignal<JetWebFormState>,
+//RS     lifecycle: jet_std::JetSignal<JetWebFormLifecycle>,
+//RS }
+//RS 
+//RS static JET_WEB_FORM_PANEL_FACTS: std::sync::LazyLock<JetWebFormMutex<Vec<JetWebFormPanelFact>>> =
+//RS     std::sync::LazyLock::new(|| JetWebFormMutex::new(Vec::new()));
+//RS static JET_WEB_FORM_PANEL_NEXT_ID: AtomicU64 = AtomicU64::new(1);
+//RS 
+//RS fn jet_web_form_register_panel_fact(form: &JetWebFormTyped) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let fact = JetWebFormPanelFact {
+//RS         id: JET_WEB_FORM_PANEL_NEXT_ID.fetch_add(1, JetWebFormOrdering::Relaxed),
+//RS         type_name: form.input.type_name.clone(),
+//RS         action: form.form.state().action,
+//RS         fields: form.input.fields(),
+//RS         state: form.form.state_signal(),
+//RS         lifecycle: form.lifecycle.clone(),
+//RS     };
+//RS     if let Ok(mut facts) = JET_WEB_FORM_PANEL_FACTS.lock() {
+//RS         facts.push(fact);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_form_panel_values(state: &JetWebFormState) -> String {
+//RS     state
+//RS         .fields
+//RS         .iter()
+//RS         .map(|(name, field)| {
+//RS             format!(
+//RS                 "{}={}",
+//RS                 jet_web_form_escape(name),
+//RS                 jet_web_form_escape(&field.value)
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS fn jet_web_form_panel_names(
+//RS     state: &JetWebFormState,
+//RS     select: impl Fn(&JetWebFormFieldState) -> bool,
+//RS ) -> String {
+//RS     state
+//RS         .fields
+//RS         .iter()
+//RS         .filter(|(_, field)| select(field))
+//RS         .map(|(name, _)| jet_web_form_escape(name))
+//RS         .collect::<Vec<_>>()
+//RS         .join(",")
+//RS }
+//RS 
+//RS /// Development-only form state. Values are intentionally visible here because
+//RS /// this panel is opt-in dev output; release HTML never calls this function.
+//RS pub(crate) fn jet_web_form_dev_panel() -> String {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return String::new();
+//RS     }
+//RS     let Ok(facts) = JET_WEB_FORM_PANEL_FACTS.lock() else {
+//RS         return String::new();
+//RS     };
+//RS     let mut rows = Vec::new();
+//RS     for fact in facts.iter() {
+//RS         let state = fact.state.get();
+//RS         let lifecycle = fact.lifecycle.get();
+//RS         let field_errors = state
+//RS             .fields
+//RS             .iter()
+//RS             .filter(|(_, field)| !field.errors.is_empty())
+//RS             .map(|(name, field)| {
+//RS                 format!(
+//RS                     "{}={}",
+//RS                     jet_web_form_escape(name),
+//RS                     jet_web_form_escape(&field.errors.join("; "))
+//RS                 )
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         let validation_phase = if state.fields.values().any(|field| field.validating) {
+//RS             "validating"
+//RS         } else {
+//RS             state.status.name()
+//RS         };
+//RS         let facts_text = format!(
+//RS             "values=[{}],touched=[{}],validation_phase={},lifecycle={},submissions={},field_errors=[{}],form_error={}",
+//RS             jet_web_form_panel_values(&state),
+//RS             jet_web_form_panel_names(&state, |field| field.touched),
+//RS             validation_phase,
+//RS             lifecycle.status.name(),
+//RS             state.submission_count,
+//RS             field_errors,
+//RS             jet_web_form_escape(&state.error),
+//RS         );
+//RS         rows.push(format!(
+//RS             "<li data-jet-form-id=\"{}\" data-jet-form-type=\"{}\" data-jet-form-action=\"{}\"><code>{}</code><pre>{}</pre></li>",
+//RS             fact.id,
+//RS             jet_web_form_escape(&fact.type_name),
+//RS             jet_web_form_escape(&fact.action),
+//RS             jet_web_form_escape(&fact.type_name),
+//RS             jet_web_form_escape(&facts_text),
+//RS         ));
+//RS     }
+//RS     if rows.is_empty() {
+//RS         return String::new();
+//RS     }
+//RS     format!(
+//RS         "<aside id=\"jet-dev-forms\" data-jet-devtools=\"forms\"><h2>Forms</h2><ul>{}</ul></aside>",
+//RS         rows.join("")
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebFormValueType {
+//RS     String,
+//RS     Int,
+//RS     Bool,
+//RS     Float,
+//RS }
+//RS 
+//RS impl JetWebFormValueType {
+//RS     fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::String => "String",
+//RS             Self::Int => "Int",
+//RS             Self::Bool => "Bool",
+//RS             Self::Float => "Float",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebFormStatus {
+//RS     Idle,
+//RS     Dirty,
+//RS     Validating,
+//RS     Invalid,
+//RS     Submitting,
+//RS     Submitted,
+//RS     Error,
+//RS }
+//RS 
+//RS impl JetWebFormStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Idle => "idle",
+//RS             Self::Dirty => "dirty",
+//RS             Self::Validating => "validating",
+//RS             Self::Invalid => "invalid",
+//RS             Self::Submitting => "submitting",
+//RS             Self::Submitted => "submitted",
+//RS             Self::Error => "error",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebFormFieldState {
+//RS     pub name: String,
+//RS     pub value_type: JetWebFormValueType,
+//RS     pub required: bool,
+//RS     pub value: String,
+//RS     pub touched: bool,
+//RS     pub validating: bool,
+//RS     pub errors: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetWebFormState {
+//RS     pub status: JetWebFormStatus,
+//RS     pub fields: JetWebFormMap<String, JetWebFormFieldState>,
+//RS     pub action: String,
+//RS     pub method: String,
+//RS     pub result: String,
+//RS     pub error: String,
+//RS     pub submission_count: u64,
+//RS }
+//RS 
+//RS impl JetWebFormState {
+//RS     fn new(action: String) -> Self {
+//RS         Self {
+//RS             status: JetWebFormStatus::Idle,
+//RS             fields: JetWebFormMap::new(),
+//RS             action,
+//RS             method: "post".to_string(),
+//RS             result: String::new(),
+//RS             error: String::new(),
+//RS             submission_count: 0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS type JetWebFormValidator = JetWebFormArc<dyn Fn(String) -> Result<(), String> + Send + Sync>;
+//RS type JetWebFormAction = JetWebFormArc<dyn Fn(String) -> Result<String, String> + Send + Sync>;
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetWebFormRules {
+//RS     validators: JetWebFormMap<String, Vec<JetWebFormValidator>>,
+//RS     async_validators: JetWebFormMap<String, Vec<JetWebFormValidator>>,
+//RS     action: Option<JetWebFormAction>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebForm {
+//RS     state: jet_std::JetSignal<JetWebFormState>,
+//RS     rules: JetWebFormArc<JetWebFormMutex<JetWebFormRules>>,
+//RS     validation_generation: JetWebFormArc<AtomicU64>,
+//RS }
+//RS 
+//RS pub struct JetWebFormValidation {
+//RS     join: Option<jet_std::JetTask<Result<(), String>>>,
+//RS }
+//RS 
+//RS impl JetWebFormValidation {
+//RS     pub fn wait(mut self) -> Result<(), String> {
+//RS         let Some(join) = self.join.take() else {
+//RS             return Err("form validation worker is unavailable".to_string());
+//RS         };
+//RS         match join.join() {
+//RS             Ok(result) => result,
+//RS             Err(error) => Err(format!("form validation task failed: {error:?}")),
+//RS         }
+//RS     }
+//RS     pub fn cancel(&self) {
+//RS         if let Some(join) = &self.join {
+//RS             join.cancel();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetWebForm {
+//RS     pub fn new(action: String) -> Self {
+//RS         Self {
+//RS             state: jet_std::JetSignal::new(JetWebFormState::new(action)),
+//RS             rules: JetWebFormArc::new(JetWebFormMutex::new(JetWebFormRules {
+//RS                 validators: JetWebFormMap::new(),
+//RS                 async_validators: JetWebFormMap::new(),
+//RS                 action: None,
+//RS             })),
+//RS             validation_generation: JetWebFormArc::new(AtomicU64::new(0)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn field(
+//RS         &self,
+//RS         name: String,
+//RS         value_type: JetWebFormValueType,
+//RS         required: bool,
+//RS     ) -> Result<Self, String> {
+//RS         if !jet_web_form_valid_name(&name) {
+//RS             return Err(format!("invalid form field name `{name}`"));
+//RS         }
+//RS         if name.len() > JET_WEB_FORM_MAX_NAME {
+//RS             return Err(format!("form field name exceeds {} bytes", JET_WEB_FORM_MAX_NAME));
+//RS         }
+//RS         let mut state = self.state.get();
+//RS         if state.fields.len() >= JET_WEB_FORM_MAX_FIELDS && !state.fields.contains_key(&name) {
+//RS             return Err("form has too many fields".to_string());
+//RS         }
+//RS         if state.fields.contains_key(&name) {
+//RS             return Err(format!("duplicate form field `{name}`"));
+//RS         }
+//RS         state.fields.insert(
+//RS             name.clone(),
+//RS             JetWebFormFieldState {
+//RS                 name,
+//RS                 value_type,
+//RS                 required,
+//RS                 value: String::new(),
+//RS                 touched: false,
+//RS                 validating: false,
+//RS                 errors: Vec::new(),
+//RS             },
+//RS         );
+//RS         self.set_state(state, "field-added");
+//RS         self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel);
+//RS         Ok(self.clone())
+//RS     }
+//RS 
+//RS     pub fn set(&self, name: String, value: String) -> Result<(), String> {
+//RS         if value.len() > JET_WEB_FORM_MAX_VALUE {
+//RS             return Err(format!("form field `{name}` exceeds {} bytes", JET_WEB_FORM_MAX_VALUE));
+//RS         }
+//RS         let mut state = self.state.get();
+//RS         let field = state
+//RS             .fields
+//RS             .get_mut(&name)
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))?;
+//RS         field.value = value;
+//RS         field.errors.clear();
+//RS         field.validating = false;
+//RS         state.status = JetWebFormStatus::Dirty;
+//RS         state.error.clear();
+//RS         self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel);
+//RS         self.set_state(state, "field-set");
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn blur(&self, name: String) -> Result<(), String> {
+//RS         self.blur_with_async(name, true)
+//RS     }
+//RS 
+//RS     fn blur_with_async(&self, name: String, run_async: bool) -> Result<(), String> {
+//RS         let mut state = self.state.get();
+//RS         let field = state
+//RS             .fields
+//RS             .get_mut(&name)
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))?;
+//RS         field.touched = true;
+//RS         field.errors.clear();
+//RS         let value = field.value.clone();
+//RS         let value_type = field.value_type;
+//RS         let required = field.required;
+//RS         self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel);
+//RS         state.status = JetWebFormStatus::Dirty;
+//RS         self.set_state(state, "blur");
+//RS         self.validate_one(name, value, value_type, required, run_async)
+//RS     }
+//RS 
+//RS     pub fn set_validator<F>(&self, name: String, validator: F) -> Result<(), String>
+//RS     where
+//RS         F: Fn(String) -> Result<(), String> + Send + Sync + 'static,
+//RS     {
+//RS         if !self.state.get().fields.contains_key(&name) {
+//RS             return Err(format!("unknown form field `{name}`"));
+//RS         }
+//RS         let mut rules = self.rules.lock().map_err(|_| "form rules are unavailable".to_string())?;
+//RS         rules
+//RS             .validators
+//RS             .entry(name)
+//RS             .or_default()
+//RS             .push(JetWebFormArc::new(validator));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_async_validator<F>(&self, name: String, validator: F) -> Result<(), String>
+//RS     where
+//RS         F: Fn(String) -> Result<(), String> + Send + Sync + 'static,
+//RS     {
+//RS         if !self.state.get().fields.contains_key(&name) {
+//RS             return Err(format!("unknown form field `{name}`"));
+//RS         }
+//RS         let mut rules = self.rules.lock().map_err(|_| "form rules are unavailable".to_string())?;
+//RS         rules
+//RS             .async_validators
+//RS             .entry(name)
+//RS             .or_default()
+//RS             .push(JetWebFormArc::new(validator));
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn set_action<F>(&self, action: F)
+//RS     where
+//RS         F: Fn(String) -> Result<String, String> + Send + Sync + 'static,
+//RS     {
+//RS         if let Ok(mut rules) = self.rules.lock() {
+//RS             rules.action = Some(JetWebFormArc::new(action));
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn state(&self) -> JetWebFormState {
+//RS         self.state.get()
+//RS     }
+//RS 
+//RS     pub fn state_signal(&self) -> jet_std::JetSignal<JetWebFormState> {
+//RS         self.state.clone()
+//RS     }
+//RS     fn set_state(&self, state: JetWebFormState, cause: &str) {
+//RS         self.state.set(state.clone());
+//RS         jet_web_form_publish_state(&state, cause);
+//RS     }
+//RS 
+//RS 
+//RS     pub fn validate(&self) -> Result<(), String> {
+//RS         let generation = self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel) + 1;
+//RS         let snapshot = self.state.get();
+//RS         let rules = self
+//RS             .rules
+//RS             .lock()
+//RS             .map_err(|_| "form rules are unavailable".to_string())?
+//RS             .clone();
+//RS         let mut errors = JetWebFormMap::new();
+//RS         for field in snapshot.fields.values() {
+//RS             let field_errors =
+//RS                 jet_web_form_validate_field(field, rules.validators.get(&field.name));
+//RS             if !field_errors.is_empty() {
+//RS                 errors.insert(field.name.clone(), field_errors);
+//RS             }
+//RS         }
+//RS         self.apply_validation_if_current(errors, generation)
+//RS     }
+//RS 
+//RS     pub fn validate_async(&self) -> JetWebFormValidation {
+//RS         let generation = self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel) + 1;
+//RS         let snapshot = self.state.get();
+//RS         let rules = match self.rules.lock() {
+//RS             Ok(rules) => rules.clone(),
+//RS             Err(_) => {
+//RS                 let join = jet_std::JetTask::spawn(|| {
+//RS                     Err("form rules are unavailable".to_string())
+//RS                 });
+//RS                 return JetWebFormValidation { join: Some(join) };
+//RS             }
+//RS         };
+//RS         let mut sync_errors = JetWebFormMap::new();
+//RS         let mut has_async = false;
+//RS         let mut pending = snapshot.clone();
+//RS         for field in pending.fields.values_mut() {
+//RS             let field_errors =
+//RS                 jet_web_form_validate_field(field, rules.validators.get(&field.name));
+//RS             if !field_errors.is_empty() {
+//RS                 sync_errors.insert(field.name.clone(), field_errors.clone());
+//RS             }
+//RS             if rules
+//RS                 .async_validators
+//RS                 .get(&field.name)
+//RS                 .is_some_and(|validators| !validators.is_empty())
+//RS             {
+//RS                 has_async = true;
+//RS                 field.validating = true;
+//RS             } else {
+//RS                 field.validating = false;
+//RS             }
+//RS             field.touched = true;
+//RS             field.errors = field_errors;
+//RS         }
+//RS         pending.status = if has_async {
+//RS             JetWebFormStatus::Validating
+//RS         } else if sync_errors.is_empty() {
+//RS             JetWebFormStatus::Dirty
+//RS         } else {
+//RS             JetWebFormStatus::Invalid
+//RS         };
+//RS         pending.error = if sync_errors.is_empty() {
+//RS             String::new()
+//RS         } else {
+//RS             sync_errors
+//RS                 .values()
+//RS                 .flat_map(|items| items.iter())
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("; ")
+//RS         };
+//RS         self.set_state(pending, "validation-start");
+//RS 
+//RS         if !has_async {
+//RS             let validation_result = if sync_errors.is_empty() {
+//RS                 Ok(())
+//RS             } else {
+//RS                 Err(sync_errors
+//RS                     .values()
+//RS                     .flat_map(|items| items.iter())
+//RS                     .cloned()
+//RS                     .collect::<Vec<_>>()
+//RS                     .join("; "))
+//RS             };
+//RS             let join = jet_std::JetTask::spawn(move || validation_result);
+//RS             return JetWebFormValidation { join: Some(join) };
+//RS         }
+//RS         let form = self.clone();
+//RS         let join = jet_std::JetTask::spawn(move || {
+//RS             let mut errors = sync_errors;
+//RS             for field in snapshot.fields.values() {
+//RS                 let mut field_errors = errors.remove(&field.name).unwrap_or_default();
+//RS                 if let Some(validators) = rules.async_validators.get(&field.name) {
+//RS                     for validator in validators {
+//RS                         if let Err(error) = validator(field.value.clone()) {
+//RS                             field_errors.push(jet_web_form_bound_error(error));
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if !field_errors.is_empty() {
+//RS                     errors.insert(field.name.clone(), field_errors);
+//RS                 }
+//RS             }
+//RS             if !form.validation_current(generation, &snapshot) {
+//RS                 return Ok(());
+//RS             }
+//RS             form.apply_validation(errors)
+//RS         });
+//RS         JetWebFormValidation { join: Some(join) }
+//RS     }
+//RS 
+//RS 
+//RS     pub fn submit(&self) -> Result<String, String> {
+//RS         self.validate_async().wait()?;
+//RS         let body = self.encode_submission()?;
+//RS         self.submit_body_after_validation(body)
+//RS     }
+//RS 
+//RS     /// Dispatch an already encoded body through the same checked action path
+//RS     /// used by `submit`.  Typed forms use this entry point after their input
+//RS     /// contract has selected renamed wire keys.
+//RS     pub fn submit_body(&self, body: String) -> Result<String, String> {
+//RS         if body.len() > JET_WEB_FORM_MAX_BODY {
+//RS             return Err(format!(
+//RS                 "encoded form body exceeds {} bytes",
+//RS                 JET_WEB_FORM_MAX_BODY
+//RS             ));
+//RS         }
+//RS         self.validate_async().wait()?;
+//RS         self.submit_body_after_validation(body)
+//RS     }
+//RS 
+//RS     fn submit_body_after_validation(&self, body: String) -> Result<String, String> {
+//RS         let action = self
+//RS             .rules
+//RS             .lock()
+//RS             .map_err(|_| "form rules are unavailable".to_string())?
+//RS             .action
+//RS             .clone();
+//RS         let mut state = self.state.get();
+//RS         state.status = JetWebFormStatus::Submitting;
+//RS         state.error.clear();
+//RS         self.set_state(state, "submit-start");
+//RS         let result = match action {
+//RS             Some(action) => action(body),
+//RS             None => Ok(body),
+//RS         };
+//RS         match result {
+//RS             Ok(result) if result.len() <= JET_WEB_FORM_MAX_VALUE => {
+//RS                 let mut state = self.state.get();
+//RS                 state.status = JetWebFormStatus::Submitted;
+//RS                 state.result = result.clone();
+//RS                 state.error.clear();
+//RS                 state.submission_count = state.submission_count.saturating_add(1);
+//RS                 self.set_state(state, "submit-success");
+//RS                 Ok(result)
+//RS             }
+//RS             Ok(_) => {
+//RS                 let error = format!(
+//RS                     "form action result exceeds {} bytes",
+//RS                     JET_WEB_FORM_MAX_VALUE
+//RS                 );
+//RS                 let mut state = self.state.get();
+//RS                 state.status = JetWebFormStatus::Error;
+//RS                 state.error = error.clone();
+//RS                 self.set_state(state, "submit-error");
+//RS                 Err(error)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = jet_web_form_bound_error(error);
+//RS                 let mut state = self.state.get();
+//RS                 state.status = JetWebFormStatus::Error;
+//RS                 state.error = error.clone();
+//RS                 self.set_state(state, "submit-error");
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// The same action and encoding used by `submit`, exposed for a browser
+//RS     /// renderer that progressively enhances a normal POST form.
+//RS     pub fn no_script_submission(&self) -> Result<String, String> {
+//RS         self.validate()?;
+//RS         self.encode_submission()
+//RS     }
+//RS 
+//RS     pub fn html(&self) -> String {
+//RS         let state = self.state.get();
+//RS         let mut html = String::new();
+//RS         html.push_str("<form method=\"");
+//RS         html.push_str(&jet_web_form_escape(&state.method));
+//RS         html.push_str("\" action=\"");
+//RS         html.push_str(&jet_web_form_escape(&state.action));
+//RS         html.push_str("\">");
+//RS         for field in state.fields.values() {
+//RS             html.push_str("<label for=\"");
+//RS             html.push_str(&jet_web_form_escape(&field.name));
+//RS             html.push_str("\">");
+//RS             html.push_str(&jet_web_form_escape(&field.name));
+//RS             html.push_str("</label><input name=\"");
+//RS             html.push_str(&jet_web_form_escape(&field.name));
+//RS             html.push_str("\" id=\"");
+//RS             html.push_str(&jet_web_form_escape(&field.name));
+//RS             html.push_str("\" type=\"");
+//RS             html.push_str(jet_web_form_input_type(field.value_type));
+//RS             html.push('"');
+//RS             if field.required {
+//RS                 html.push_str(" required");
+//RS             }
+//RS             html.push_str(" value=\"");
+//RS             html.push_str(&jet_web_form_escape(&field.value));
+//RS             html.push_str("\">");
+//RS             for error in &field.errors {
+//RS                 html.push_str("<span class=\"error\">");
+//RS                 html.push_str(&jet_web_form_escape(error));
+//RS                 html.push_str("</span>");
+//RS             }
+//RS         }
+//RS         html.push_str("<button type=\"submit\">Submit</button></form>");
+//RS         html
+//RS     }
+//RS 
+//RS     pub fn show(&self) -> String {
+//RS         let state = self.state.get();
+//RS         let invalid = state.fields.values().filter(|field| !field.errors.is_empty()).count();
+//RS         format!(
+//RS             "Forms(status={},fields={},invalid={},action={},submissions={},error={})",
+//RS             state.status.name(),
+//RS             state.fields.len(),
+//RS             invalid,
+//RS             state.action,
+//RS             state.submission_count,
+//RS             state.error
+//RS         )
+//RS     }
+//RS 
+//RS     fn validate_one(
+//RS         &self,
+//RS         name: String,
+//RS         value: String,
+//RS         value_type: JetWebFormValueType,
+//RS         required: bool,
+//RS         run_async: bool,
+//RS     ) -> Result<(), String> {
+//RS         let rules = self.rules.lock().map_err(|_| "form rules are unavailable".to_string())?.clone();
+//RS         let mut errors = jet_web_form_validate_value(&value, value_type, required);
+//RS         if let Some(validators) = rules.validators.get(&name) {
+//RS             for validator in validators {
+//RS                 if let Err(error) = validator(value.clone()) {
+//RS                     errors.push(jet_web_form_bound_error(error));
+//RS                 }
+//RS             }
+//RS         }
+//RS         self.apply_one_errors(&name, errors.clone(), false);
+//RS         if run_async {
+//RS             if let Some(validators) = rules.async_validators.get(&name) {
+//RS                 let validators = validators.clone();
+//RS                 let form = self.clone();
+//RS                 let name_for_worker = name.clone();
+//RS                 let sync_errors = errors.clone();
+//RS                 form.apply_one_errors(&name, sync_errors.clone(), true);
+//RS                 let generation = form.validation_generation.load(JetWebFormOrdering::Acquire);
+//RS                 let value_for_worker = value.clone();
+//RS                 let task = jet_std::JetTask::spawn(move || {
+//RS                     let mut async_errors = sync_errors;
+//RS                     for validator in validators {
+//RS                         if let Err(error) = validator(value_for_worker.clone()) {
+//RS                             async_errors.push(jet_web_form_bound_error(error));
+//RS                         }
+//RS                     }
+//RS                     let current = form
+//RS                         .state
+//RS                         .get()
+//RS                         .fields
+//RS                         .get(&name_for_worker)
+//RS                         .map(|field| field.value.clone());
+//RS                     if form.validation_generation.load(JetWebFormOrdering::Acquire) == generation
+//RS                         && current.as_deref() == Some(value_for_worker.as_str())
+//RS                     {
+//RS                         form.apply_one_errors(&name_for_worker, async_errors, false);
+//RS                     }
+//RS                 });
+//RS                 task.detach();
+//RS             }
+//RS         }
+//RS         if errors.is_empty() {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(errors.join("; "))
+//RS         }
+//RS     }
+//RS 
+//RS     /// Cancel pending asynchronous validation.  Workers are cooperative: a
+//RS     /// cancelled generation may finish its sleep or callback, but its result
+//RS     /// can no longer write into this form.
+//RS     pub fn cancel_validation(&self) {
+//RS         self.validation_generation.fetch_add(1, JetWebFormOrdering::AcqRel);
+//RS         let mut state = self.state.get();
+//RS         for field in state.fields.values_mut() {
+//RS             field.validating = false;
+//RS         }
+//RS         if state.status == JetWebFormStatus::Validating {
+//RS             state.status = JetWebFormStatus::Dirty;
+//RS         }
+//RS         self.set_state(state, "validation-cancelled");
+//RS     }
+//RS 
+//RS     /// Apply server-side field errors after the same decoder accepted a POST.
+//RS     /// Unknown fields stay form-level errors instead of being silently dropped.
+//RS     pub fn set_server_errors(
+//RS         &self,
+//RS         field_errors: JetWebFormMap<String, Vec<String>>,
+//RS         form_errors: Vec<String>,
+//RS     ) {
+//RS         let mut state = self.state.get();
+//RS         for field in state.fields.values_mut() {
+//RS             field.errors.clear();
+//RS         }
+//RS         let mut summary = Vec::new();
+//RS         for (name, errors) in field_errors {
+//RS             if let Some(field) = state.fields.get_mut(&name) {
+//RS                 field.errors = errors
+//RS                     .into_iter()
+//RS                     .map(jet_web_form_bound_error)
+//RS                     .collect();
+//RS                 field.touched = true;
+//RS                 summary.extend(field.errors.iter().cloned());
+//RS             } else {
+//RS                 let name = jet_web_form_bound_error(name);
+//RS                 summary.push(format!("server returned an unknown field `{name}`"));
+//RS             }
+//RS         }
+//RS         summary.extend(form_errors.into_iter().map(jet_web_form_bound_error));
+//RS         state.status = JetWebFormStatus::Error;
+//RS         state.error = if summary.is_empty() {
+//RS             "form action failed".to_string()
+//RS         } else {
+//RS             jet_web_form_bound_error(summary.join("; "))
+//RS         };
+//RS         self.set_state(state, "server-errors");
+//RS     }
+//RS 
+//RS     pub fn field_state(&self, name: &str) -> Result<JetWebFormFieldState, String> {
+//RS         self.state
+//RS             .get()
+//RS             .fields
+//RS             .get(name)
+//RS             .cloned()
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))
+//RS     }
+//RS 
+//RS     fn apply_one_errors(&self, name: &str, errors: Vec<String>, validating: bool) {
+//RS         let mut state = self.state.get();
+//RS         if let Some(field) = state.fields.get_mut(name) {
+//RS             field.errors = errors;
+//RS             field.validating = validating;
+//RS         }
+//RS         state.status = if validating {
+//RS             JetWebFormStatus::Validating
+//RS         } else if state.fields.values().any(|field| !field.errors.is_empty()) {
+//RS             JetWebFormStatus::Invalid
+//RS         } else {
+//RS             JetWebFormStatus::Dirty
+//RS         };
+//RS         self.set_state(state, "field-validation");
+//RS     }
+//RS 
+//RS 
+//RS     fn validation_current(&self, generation: u64, snapshot: &JetWebFormState) -> bool {
+//RS         if self.validation_generation.load(JetWebFormOrdering::Acquire) != generation {
+//RS             return false;
+//RS         }
+//RS         let current = self.state.get();
+//RS         snapshot.fields.iter().all(|(name, field)| {
+//RS             current
+//RS                 .fields
+//RS                 .get(name)
+//RS                 .is_some_and(|candidate| candidate.value == field.value)
+//RS         })
+//RS     }
+//RS 
+//RS     fn apply_validation_if_current(
+//RS         &self,
+//RS         errors: JetWebFormMap<String, Vec<String>>,
+//RS         generation: u64,
+//RS     ) -> Result<(), String> {
+//RS         let snapshot = self.state.get();
+//RS         if !self.validation_current(generation, &snapshot) {
+//RS             return Ok(());
+//RS         }
+//RS         self.apply_validation(errors)
+//RS     }
+//RS 
+//RS     fn apply_validation(&self, errors: JetWebFormMap<String, Vec<String>>) -> Result<(), String> {
+//RS         let mut state = self.state.get();
+//RS         for field in state.fields.values_mut() {
+//RS             field.touched = true;
+//RS             field.validating = false;
+//RS             field.errors = errors.get(&field.name).cloned().unwrap_or_default();
+//RS         }
+//RS         if errors.is_empty() {
+//RS             state.status = JetWebFormStatus::Dirty;
+//RS             state.error.clear();
+//RS             self.set_state(state, "validation-success");
+//RS             Ok(())
+//RS         } else {
+//RS             state.status = JetWebFormStatus::Invalid;
+//RS             state.error = errors
+//RS                 .values()
+//RS                 .flat_map(|items| items.iter())
+//RS                 .cloned()
+//RS                 .collect::<Vec<_>>()
+//RS                 .join("; ");
+//RS             self.set_state(state, "validation-error");
+//RS             Err(self.state.get().error)
+//RS         }
+//RS     }
+//RS 
+//RS     fn encode_submission(&self) -> Result<String, String> {
+//RS         let state = self.state.get();
+//RS         let mut body = String::new();
+//RS         for (index, field) in state.fields.values().enumerate() {
+//RS             if index > 0 {
+//RS                 body.push('&');
+//RS             }
+//RS             body.push_str(&jet_web_form_encode(&field.name));
+//RS             body.push('=');
+//RS             body.push_str(&jet_web_form_encode(&field.value));
+//RS             if body.len() > JET_WEB_FORM_MAX_BODY {
+//RS                 return Err(format!(
+//RS                     "encoded form body exceeds {} bytes",
+//RS                     JET_WEB_FORM_MAX_BODY
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(body)
+//RS }
+//RS }
+//RS 
+//RS impl Default for JetWebForm {
+//RS     fn default() -> Self {
+//RS         Self::new(String::new())
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_form_input_type(value_type: JetWebFormValueType) -> &'static str {
+//RS     match value_type {
+//RS         JetWebFormValueType::String => "text",
+//RS         JetWebFormValueType::Int => "number",
+//RS         JetWebFormValueType::Bool => "checkbox",
+//RS         JetWebFormValueType::Float => "number",
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_form_valid_name(name: &str) -> bool {
+//RS     let mut chars = name.chars();
+//RS     matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+//RS         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+//RS }
+//RS 
+//RS fn jet_web_form_validate_value(
+//RS     value: &str,
+//RS     value_type: JetWebFormValueType,
+//RS     required: bool,
+//RS ) -> Vec<String> {
+//RS     let mut errors = Vec::new();
+//RS     if required && value.trim().is_empty() {
+//RS         errors.push("value is required".to_string());
+//RS         return errors;
+//RS     }
+//RS     if value.trim().is_empty() {
+//RS         return errors;
+//RS     }
+//RS     match value_type {
+//RS         JetWebFormValueType::String => {}
+//RS         JetWebFormValueType::Int => {
+//RS             if value.parse::<i64>().is_err() {
+//RS                 errors.push("expected Int".to_string());
+//RS             }
+//RS         }
+//RS         JetWebFormValueType::Bool => {
+//RS             if !matches!(value, "true" | "false" | "1" | "0") {
+//RS                 errors.push("expected Bool".to_string());
+//RS             }
+//RS         }
+//RS         JetWebFormValueType::Float => match value.parse::<f64>() {
+//RS             Ok(number) if number.is_finite() => {}
+//RS             _ => errors.push("expected finite Float".to_string()),
+//RS         },
+//RS     }
+//RS     errors
+//RS }
+//RS 
+//RS fn jet_web_form_validate_field(
+//RS     field: &JetWebFormFieldState,
+//RS     validators: Option<&Vec<JetWebFormValidator>>,
+//RS ) -> Vec<String> {
+//RS     let mut errors = jet_web_form_validate_value(&field.value, field.value_type, field.required);
+//RS     if let Some(validators) = validators {
+//RS         for validator in validators {
+//RS             if let Err(error) = validator(field.value.clone()) {
+//RS                 errors.push(jet_web_form_bound_error(error));
+//RS             }
+//RS         }
+//RS     }
+//RS     errors
+//RS }
+//RS 
+//RS fn jet_web_form_bound_error(error: String) -> String {
+//RS     if error.len() <= JET_WEB_FORM_MAX_ERROR {
+//RS         return error;
+//RS     }
+//RS     error
+//RS         .char_indices()
+//RS         .take_while(|(index, _)| *index < JET_WEB_FORM_MAX_ERROR)
+//RS         .map(|(_, character)| character)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_web_form_encode(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for byte in value.bytes() {
+//RS         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+//RS             out.push(byte as char);
+//RS         } else if byte == b' ' {
+//RS             out.push('+');
+//RS         } else {
+//RS             out.push('%');
+//RS             out.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
+//RS             out.push(char::from(b"0123456789ABCDEF"[(byte & 0x0f) as usize]));
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS fn jet_web_form_escape(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '&' => out.push_str("&amp;"),
+//RS             '<' => out.push_str("&lt;"),
+//RS             '>' => out.push_str("&gt;"),
+//RS             '"' => out.push_str("&quot;"),
+//RS             '\'' => out.push_str("&#39;"),
+//RS             _ => out.push(character),
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS pub fn jet_web_forms_new(action: String) -> JetWebForm {
+//RS     JetWebForm::new(action)
+//RS }
+//RS 
+//RS pub fn jet_web_forms_field(
+//RS     form: &JetWebForm,
+//RS     name: String,
+//RS     value_type: String,
+//RS     required: bool,
+//RS ) -> Result<JetWebForm, String> {
+//RS     let value_type = match value_type.as_str() {
+//RS         "String" | "string" => JetWebFormValueType::String,
+//RS         "Int" | "int" => JetWebFormValueType::Int,
+//RS         "Bool" | "bool" => JetWebFormValueType::Bool,
+//RS         "Float" | "float" => JetWebFormValueType::Float,
+//RS         _ => return Err(format!("unknown form field type `{value_type}`")),
+//RS     };
+//RS     form.field(name, value_type, required)
+//RS }
+//RS 
+//RS pub fn jet_web_forms_set(
+//RS     form: &JetWebForm,
+//RS     name: String,
+//RS     value: String,
+//RS ) -> Result<(), String> {
+//RS     form.set(name, value)
+//RS }
+//RS 
+//RS pub fn jet_web_forms_blur(form: &JetWebForm, name: String) -> Result<(), String> {
+//RS     form.blur(name)
+//RS }
+//RS 
+//RS pub fn jet_web_forms_validate(form: &JetWebForm) -> Result<(), String> {
+//RS     form.validate()
+//RS }
+//RS 
+//RS pub fn jet_web_forms_validate_async(form: &JetWebForm) -> JetWebForm {
+//RS     let validation = form.validate_async();
+//RS     let _ = validation.wait();
+//RS     form.clone()
+//RS }
+//RS 
+//RS pub fn jet_web_forms_submit(form: &JetWebForm) -> Result<String, String> {
+//RS     form.submit()
+//RS }
+//RS 
+//RS pub fn jet_web_forms_no_script(form: &JetWebForm) -> Result<String, String> {
+//RS     form.no_script_submission()
+//RS }
+//RS 
+//RS pub fn jet_web_forms_html(form: &JetWebForm) -> String {
+//RS     form.html()
+//RS }
+//RS 
+//RS pub fn jet_web_forms_show(form: &JetWebForm) -> String {
+//RS     form.show()
+//RS }
+//RS /// Controls are deliberately closed.  Applications own markup, but a derived
+//RS /// form may only select controls whose escaping and parser contract is known.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebFormControl {
+//RS     Text,
+//RS     Email,
+//RS     URL,
+//RS     Password,
+//RS     Number,
+//RS     Date,
+//RS     Checkbox,
+//RS     Hidden,
+//RS }
+//RS 
+//RS impl JetWebFormControl {
+//RS     fn input_type(self) -> &'static str {
+//RS         match self {
+//RS             Self::Text => "text",
+//RS             Self::Email => "email",
+//RS             Self::URL => "url",
+//RS             Self::Password => "password",
+//RS             Self::Number => "number",
+//RS             Self::Date => "date",
+//RS             Self::Checkbox => "checkbox",
+//RS             Self::Hidden => "hidden",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebFormValidationTiming {
+//RS     Change,
+//RS     Blur,
+//RS     Submit,
+//RS }
+//RS 
+//RS impl JetWebFormValidationTiming {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Change => "change",
+//RS             Self::Blur => "blur",
+//RS             Self::Submit => "submit",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS type JetWebFormFieldParser =
+//RS     JetWebFormArc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
+//RS 
+//RS /// The field contract emitted by the typed-form front end.  `name` is the
+//RS /// source-struct field; `wire_name` is the only browser-facing spelling.
+//RS /// Keeping both makes renames explicit instead of changing the action input.
+//RS pub struct JetWebFormFieldSpec {
+//RS     pub name: String,
+//RS     pub value_type: JetWebFormValueType,
+//RS     pub required: bool,
+//RS     pub default: Option<String>,
+//RS     pub label: String,
+//RS     pub control: JetWebFormControl,
+//RS     pub group: Option<String>,
+//RS     pub wire_name: String,
+//RS     parser: Option<JetWebFormFieldParser>,
+//RS }
+//RS 
+//RS impl Clone for JetWebFormFieldSpec {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             name: self.name.clone(),
+//RS             value_type: self.value_type,
+//RS             required: self.required,
+//RS             default: self.default.clone(),
+//RS             label: self.label.clone(),
+//RS             control: self.control,
+//RS             group: self.group.clone(),
+//RS             wire_name: self.wire_name.clone(),
+//RS             parser: self.parser.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetWebFormFieldSpec {
+//RS     pub fn new(
+//RS         name: String,
+//RS         value_type: JetWebFormValueType,
+//RS         required: bool,
+//RS     ) -> Result<Self, String> {
+//RS         if !jet_web_form_valid_name(&name) {
+//RS             return Err(format!("invalid form field name `{name}`"));
+//RS         }
+//RS         Ok(Self {
+//RS             name: name.clone(),
+//RS             value_type,
+//RS             required,
+//RS             default: None,
+//RS             label: jet_web_form_human_label(&name),
+//RS             control: match value_type {
+//RS                 JetWebFormValueType::String => JetWebFormControl::Text,
+//RS                 JetWebFormValueType::Int | JetWebFormValueType::Float => {
+//RS                     JetWebFormControl::Number
+//RS                 }
+//RS                 JetWebFormValueType::Bool => JetWebFormControl::Checkbox,
+//RS             },
+//RS             group: None,
+//RS             wire_name: name,
+//RS             parser: None,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn optional(mut self) -> Self {
+//RS         self.required = false;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn default_value(mut self, value: String) -> Result<Self, String> {
+//RS         if value.len() > JET_WEB_FORM_MAX_VALUE {
+//RS             return Err(format!(
+//RS                 "default for form field `{}` exceeds {} bytes",
+//RS                 self.name, JET_WEB_FORM_MAX_VALUE
+//RS             ));
+//RS         }
+//RS         self.default = Some(value);
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn with_label(mut self, label: String) -> Result<Self, String> {
+//RS         jet_web_form_validate_text(&label, "form field label")?;
+//RS         self.label = label;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn with_control(mut self, control: JetWebFormControl) -> Self {
+//RS         self.control = control;
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn in_group(mut self, group: String) -> Result<Self, String> {
+//RS         jet_web_form_validate_text(&group, "form field group")?;
+//RS         self.group = Some(group);
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn with_wire_name(mut self, wire_name: String) -> Result<Self, String> {
+//RS         if !jet_web_form_valid_name(&wire_name) {
+//RS             return Err(format!("invalid form wire name `{wire_name}`"));
+//RS         }
+//RS         self.wire_name = wire_name;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn with_parser<F>(mut self, parser: F) -> Self
+//RS     where
+//RS         F: Fn(&str) -> Result<String, String> + Send + Sync + 'static,
+//RS     {
+//RS         self.parser = Some(JetWebFormArc::new(parser));
+//RS         self
+//RS     }
+//RS 
+//RS     fn parse(&self, raw: &str) -> Result<String, String> {
+//RS         if raw.len() > JET_WEB_FORM_MAX_VALUE {
+//RS             return Err(format!(
+//RS                 "form field `{}` exceeds {} bytes",
+//RS                 self.name, JET_WEB_FORM_MAX_VALUE
+//RS             ));
+//RS         }
+//RS         if self.required && raw.trim().is_empty() {
+//RS             return Err("value is required".to_string());
+//RS         }
+//RS         if raw.trim().is_empty() {
+//RS             return Ok(String::new());
+//RS         }
+//RS         let parsed = if let Some(parser) = &self.parser {
+//RS             parser(raw)
+//RS         } else {
+//RS             match self.value_type {
+//RS                 JetWebFormValueType::String => Ok(raw.to_string()),
+//RS                 JetWebFormValueType::Int => raw
+//RS                     .parse::<i64>()
+//RS                     .map(|value| value.to_string())
+//RS                     .map_err(|_| "expected Int".to_string()),
+//RS                 JetWebFormValueType::Bool => match raw {
+//RS                     "true" | "1" => Ok("true".to_string()),
+//RS                     "false" | "0" => Ok("false".to_string()),
+//RS                     _ => Err("expected Bool".to_string()),
+//RS                 },
+//RS                 JetWebFormValueType::Float => {
+//RS                     let value = raw
+//RS                         .parse::<f64>()
+//RS                         .map_err(|_| "expected Float".to_string())?;
+//RS                     if value.is_finite() {
+//RS                         Ok(value.to_string())
+//RS                     } else {
+//RS                         Err("expected finite Float".to_string())
+//RS                     }
+//RS                 }
+//RS             }
+//RS         }?;
+//RS         if parsed.len() > JET_WEB_FORM_MAX_VALUE {
+//RS             return Err(format!(
+//RS                 "parsed form field `{}` exceeds {} bytes",
+//RS                 self.name, JET_WEB_FORM_MAX_VALUE
+//RS             ));
+//RS         }
+//RS         if parsed.chars().any(char::is_control) {
+//RS             return Err(format!("form field `{}` contains a control character", self.name));
+//RS         }
+//RS         Ok(parsed)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebFormInput {
+//RS     type_name: String,
+//RS     fields: Vec<JetWebFormFieldSpec>,
+//RS     excluded: std::collections::BTreeSet<String>,
+//RS }
+//RS 
+//RS impl JetWebFormInput {
+//RS     /// The only constructor for a form input.  The compiler emits this for a
+//RS     /// dedicated action-input struct; there is intentionally no record-editing
+//RS     /// constructor.
+//RS     pub fn dedicated(
+//RS         type_name: String,
+//RS         fields: Vec<JetWebFormFieldSpec>,
+//RS     ) -> Result<Self, String> {
+//RS         let input = Self {
+//RS             type_name,
+//RS             fields,
+//RS             excluded: std::collections::BTreeSet::new(),
+//RS         };
+//RS         input.validate()?;
+//RS         Ok(input)
+//RS     }
+//RS 
+//RS     pub fn new(type_name: String, fields: Vec<JetWebFormFieldSpec>) -> Result<Self, String> {
+//RS         Self::dedicated(type_name, fields)
+//RS     }
+//RS 
+//RS     pub fn type_name(&self) -> &str {
+//RS         &self.type_name
+//RS     }
+//RS 
+//RS     pub fn fields(&self) -> Vec<JetWebFormFieldSpec> {
+//RS         self.fields
+//RS             .iter()
+//RS             .filter(|field| !self.excluded.contains(&field.name))
+//RS             .cloned()
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn rename(mut self, name: String, wire_name: String) -> Result<Self, String> {
+//RS         let field_index = self
+//RS             .fields
+//RS             .iter()
+//RS             .position(|field| field.name == name)
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))?;
+//RS         if !jet_web_form_valid_name(&wire_name) {
+//RS             return Err(format!("invalid form wire name `{wire_name}`"));
+//RS         }
+//RS         if self
+//RS             .fields
+//RS             .iter()
+//RS             .enumerate()
+//RS             .any(|(index, other)| index != field_index && other.wire_name == wire_name)
+//RS         {
+//RS             return Err(format!("duplicate form wire name `{wire_name}`"));
+//RS         }
+//RS         self.fields[field_index].wire_name = wire_name;
+//RS         self.validate()?;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn exclude(mut self, name: String) -> Result<Self, String> {
+//RS         if !self.fields.iter().any(|field| field.name == name) {
+//RS             return Err(format!("unknown form field `{name}`"));
+//RS         }
+//RS         self.excluded.insert(name);
+//RS         self.validate()?;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn group(mut self, name: String, group: String) -> Result<Self, String> {
+//RS         jet_web_form_validate_text(&group, "form field group")?;
+//RS         let field = self
+//RS             .fields
+//RS             .iter_mut()
+//RS             .find(|field| field.name == name)
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))?;
+//RS         field.group = Some(group);
+//RS         self.validate()?;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn replace(
+//RS         mut self,
+//RS         name: String,
+//RS         mut replacement: JetWebFormFieldSpec,
+//RS     ) -> Result<Self, String> {
+//RS         let index = self
+//RS             .fields
+//RS             .iter()
+//RS             .position(|field| field.name == name)
+//RS             .ok_or_else(|| format!("unknown form field `{name}`"))?;
+//RS         if replacement.name != name {
+//RS             return Err(format!(
+//RS                 "replacement field `{}` must retain source name `{name}`",
+//RS                 replacement.name
+//RS             ));
+//RS         }
+//RS         if replacement.wire_name == name {
+//RS             replacement.wire_name = self.fields[index].wire_name.clone();
+//RS         }
+//RS         self.fields[index] = replacement;
+//RS         self.validate()?;
+//RS         Ok(self)
+//RS     }
+//RS 
+//RS     pub fn form(&self, action: String) -> Result<JetWebFormTyped, String> {
+//RS         JetWebFormTyped::from_input(self, action, None)
+//RS     }
+//RS 
+//RS     pub fn form_with_action<F>(
+//RS         &self,
+//RS         action: String,
+//RS         handler: F,
+//RS     ) -> Result<JetWebFormTyped, String>
+//RS     where
+//RS         F: Fn(JetWebFormDecodedInput) -> Result<String, JetWebFormActionError>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         JetWebFormTyped::from_input(self, action, Some(JetWebFormArc::new(handler)))
+//RS     }
+//RS 
+//RS     pub fn decode_post(&self, body: &str) -> Result<JetWebFormDecodedInput, String> {
+//RS         self.validate()?;
+//RS         if body.len() > JET_WEB_FORM_MAX_BODY {
+//RS             return Err(format!(
+//RS                 "encoded form body exceeds {} bytes",
+//RS                 JET_WEB_FORM_MAX_BODY
+//RS             ));
+//RS         }
+//RS         let mut posted = JetWebFormMap::new();
+//RS         for pair in body.split('&') {
+//RS             if pair.is_empty() {
+//RS                 continue;
+//RS             }
+//RS             let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+//RS             let key = jet_web_form_decode_component(raw_key)?;
+//RS             let value = jet_web_form_decode_component(raw_value)?;
+//RS             if !jet_web_form_valid_name(&key) {
+//RS                 return Err(format!("invalid form field name `{key}`"));
+//RS             }
+//RS             if posted.insert(key.clone(), value).is_some() {
+//RS                 return Err(format!("form field `{key}` was posted more than once"));
+//RS             }
+//RS         }
+//RS         for field in &self.fields {
+//RS             if self.excluded.contains(&field.name)
+//RS                 && posted.contains_key(&field.wire_name)
+//RS             {
+//RS                 return Err(format!("form field `{}` is excluded", field.name));
+//RS             }
+//RS         }
+//RS         let mut values = JetWebFormMap::new();
+//RS         let mut wire_values = JetWebFormMap::new();
+//RS         for field in self.fields() {
+//RS             let raw = match posted.remove(&field.wire_name) {
+//RS                 Some(value) => value,
+//RS                 None if field.default.is_some() => field.default.clone().unwrap_or_default(),
+//RS                 None if field.value_type == JetWebFormValueType::Bool && !field.required => {
+//RS                     "false".to_string()
+//RS                 }
+//RS                 None if field.required => {
+//RS                     return Err(format!("missing required form field `{}`", field.name));
+//RS                 }
+//RS                 None => String::new(),
+//RS             };
+//RS             let parsed = field
+//RS                 .parse(&raw)
+//RS                 .map_err(|error| format!("field `{}`: {error}", field.name))?;
+//RS             values.insert(field.name.clone(), parsed);
+//RS             wire_values.insert(field.wire_name.clone(), raw);
+//RS         }
+//RS         if let Some((name, _)) = posted.into_iter().next() {
+//RS             return Err(format!("unknown form field `{name}`"));
+//RS         }
+//RS         Ok(JetWebFormDecodedInput {
+//RS             type_name: self.type_name.clone(),
+//RS             values,
+//RS             wire_values,
+//RS         })
+//RS     }
+//RS 
+//RS     fn encode_post(&self, input: &JetWebFormDecodedInput) -> Result<String, String> {
+//RS         if input.type_name != self.type_name {
+//RS             return Err(format!(
+//RS                 "form input type `{}` does not match `{}`",
+//RS                 input.type_name, self.type_name
+//RS             ));
+//RS         }
+//RS         let mut body = String::new();
+//RS         for (index, field) in self.fields().into_iter().enumerate() {
+//RS             let value = input
+//RS                 .values
+//RS                 .get(&field.name)
+//RS                 .cloned()
+//RS                 .or_else(|| field.default.clone())
+//RS                 .unwrap_or_else(|| {
+//RS                     if field.value_type == JetWebFormValueType::Bool {
+//RS                         "false".to_string()
+//RS                     } else {
+//RS                         String::new()
+//RS                     }
+//RS                 });
+//RS             let value = field
+//RS                 .parse(&value)
+//RS                 .map_err(|error| format!("field `{}`: {error}", field.name))?;
+//RS             if index > 0 {
+//RS                 body.push('&');
+//RS             }
+//RS             body.push_str(&jet_web_form_encode(&field.wire_name));
+//RS             body.push('=');
+//RS             body.push_str(&jet_web_form_encode(&value));
+//RS             if body.len() > JET_WEB_FORM_MAX_BODY {
+//RS                 return Err(format!(
+//RS                     "encoded form body exceeds {} bytes",
+//RS                     JET_WEB_FORM_MAX_BODY
+//RS                 ));
+//RS             }
+//RS         }
+//RS         Ok(body)
+//RS     }
+//RS 
+//RS     fn validate(&self) -> Result<(), String> {
+//RS         if !jet_web_form_valid_type_name(&self.type_name) {
+//RS             return Err(format!("invalid dedicated form input type `{}`", self.type_name));
+//RS         }
+//RS         if self.fields.is_empty() {
+//RS             return Err(format!("dedicated form input `{}` has no fields", self.type_name));
+//RS         }
+//RS         if self.fields.len() > JET_WEB_FORM_MAX_FIELDS {
+//RS             return Err("form input has too many fields".to_string());
+//RS         }
+//RS         let mut names = std::collections::BTreeSet::new();
+//RS         let mut wire_names = std::collections::BTreeSet::new();
+//RS         for field in &self.fields {
+//RS             if !jet_web_form_valid_name(&field.name)
+//RS                 || !names.insert(field.name.clone())
+//RS             {
+//RS                 return Err(format!("duplicate or invalid form field `{}`", field.name));
+//RS             }
+//RS             if !jet_web_form_valid_name(&field.wire_name)
+//RS                 || !wire_names.insert(field.wire_name.clone())
+//RS             {
+//RS                 return Err(format!(
+//RS                     "duplicate or invalid form wire name `{}`",
+//RS                     field.wire_name
+//RS                 ));
+//RS             }
+//RS             jet_web_form_validate_text(&field.label, "form field label")?;
+//RS             if let Some(group) = &field.group {
+//RS                 jet_web_form_validate_text(group, "form field group")?;
+//RS             }
+//RS             if let Some(default) = &field.default {
+//RS                 field.parse(default).map_err(|error| {
+//RS                     format!("default for form field `{}`: {error}", field.name)
+//RS                 })?;
+//RS             }
+//RS         }
+//RS         if self.excluded.iter().any(|name| !names.contains(name)) {
+//RS             return Err("form excludes an unknown field".to_string());
+//RS         }
+//RS         if self.fields().is_empty() {
+//RS             return Err(format!("dedicated form input `{}` excludes every field", self.type_name));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS pub struct JetWebFormDecodedInput {
+//RS     pub type_name: String,
+//RS     pub values: JetWebFormMap<String, String>,
+//RS     pub wire_values: JetWebFormMap<String, String>,
+//RS }
+//RS 
+//RS impl JetWebFormDecodedInput {
+//RS     pub fn value(&self, name: &str) -> Option<String> {
+//RS         self.values.get(name).cloned()
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct JetWebFormActionError {
+//RS     pub field_errors: JetWebFormMap<String, Vec<String>>,
+//RS     pub form_errors: Vec<String>,
+//RS }
+//RS 
+//RS impl JetWebFormActionError {
+//RS     pub fn field(mut self, name: String, message: String) -> Self {
+//RS         if !jet_web_form_valid_name(&name) || name.len() > JET_WEB_FORM_MAX_NAME {
+//RS             self.form_errors
+//RS                 .push("action returned an invalid field error".to_string());
+//RS             return self;
+//RS         }
+//RS         self.field_errors
+//RS             .entry(name)
+//RS             .or_default()
+//RS             .push(jet_web_form_bound_error(message));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn form(mut self, message: String) -> Self {
+//RS         self.form_errors.push(jet_web_form_bound_error(message));
+//RS         self
+//RS     }
+//RS 
+//RS     fn normalized(&self) -> Self {
+//RS         let mut normalized = Self::default();
+//RS         for (name, messages) in &self.field_errors {
+//RS             for message in messages {
+//RS                 normalized = normalized.field(name.clone(), message.clone());
+//RS             }
+//RS         }
+//RS         for message in &self.form_errors {
+//RS             normalized = normalized.form(message.clone());
+//RS         }
+//RS         normalized
+//RS     }
+//RS 
+//RS     fn summary(&self) -> String {
+//RS         let normalized = self.normalized();
+//RS         let mut messages = Vec::new();
+//RS         for (name, errors) in &normalized.field_errors {
+//RS             for error in errors {
+//RS                 messages.push(format!("{name}: {error}"));
+//RS             }
+//RS         }
+//RS         messages.extend(normalized.form_errors.iter().cloned());
+//RS         if messages.is_empty() {
+//RS             "form action failed".to_string()
+//RS         } else {
+//RS             jet_web_form_bound_error(messages.join("; "))
+//RS         }
+//RS     }
+//RS }
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebFormLifecycleStatus {
+//RS     Idle,
+//RS     Pending,
+//RS     Submitting,
+//RS     Success,
+//RS     Failure,
+//RS     Cancelled,
+//RS }
+//RS 
+//RS impl JetWebFormLifecycleStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Idle => "idle",
+//RS             Self::Pending => "pending",
+//RS             Self::Submitting => "submitting",
+//RS             Self::Success => "success",
+//RS             Self::Failure => "failure",
+//RS             Self::Cancelled => "cancelled",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebFormLifecycle {
+//RS     pub status: JetWebFormLifecycleStatus,
+//RS     pub result: String,
+//RS     pub error: String,
+//RS     pub generation: u64,
+//RS }
+//RS 
+//RS impl JetWebFormLifecycle {
+//RS     fn idle() -> Self {
+//RS         Self {
+//RS             status: JetWebFormLifecycleStatus::Idle,
+//RS             result: String::new(),
+//RS             error: String::new(),
+//RS             generation: 0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
+//RS pub struct JetWebFormErrorState {
+//RS     pub fields: JetWebFormMap<String, Vec<String>>,
+//RS     pub form: Vec<String>,
+//RS }
+//RS 
+//RS pub type JetWebFormTypedAction =
+//RS     JetWebFormArc<dyn Fn(JetWebFormDecodedInput) -> Result<String, JetWebFormActionError> + Send + Sync>;
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebFormTyped {
+//RS     input: JetWebFormArc<JetWebFormInput>,
+//RS     form: JetWebForm,
+//RS     lifecycle: jet_std::JetSignal<JetWebFormLifecycle>,
+//RS     focus: jet_std::JetSignal<Option<String>>,
+//RS     action_errors: JetWebFormArc<JetWebFormMutex<Option<JetWebFormActionError>>>,
+//RS     cancelled: JetWebFormArc<std::sync::atomic::AtomicBool>,
+//RS     async_timings: JetWebFormArc<JetWebFormMutex<JetWebFormMap<String, JetWebFormValidationTiming>>>,
+//RS }
+//RS 
+//RS impl JetWebFormTyped {
+//RS     fn from_input(
+//RS         input: &JetWebFormInput,
+//RS         action: String,
+//RS         handler: Option<JetWebFormTypedAction>,
+//RS     ) -> Result<Self, String> {
+//RS         input.validate()?;
+//RS         let input = JetWebFormArc::new(input.clone());
+//RS         let form = JetWebForm::new(action);
+//RS         for field in input.fields() {
+//RS             let name = field.name.clone();
+//RS             form.field(name.clone(), field.value_type, field.required)?;
+//RS             if let Some(default) = field.default.clone() {
+//RS                 form.set(name.clone(), default)?;
+//RS             }
+//RS             if let Some(parser) = field.parser.clone() {
+//RS                 let parser_name = name.clone();
+//RS                 form.set_validator(name, move |value| {
+//RS                     parser(value.as_str())
+//RS                         .map(|_| ())
+//RS                         .map_err(|error| format!("field `{parser_name}`: {error}"))
+//RS                 })?;
+//RS             }
+//RS         }
+//RS         let mut initial = form.state.get();
+//RS         initial.status = JetWebFormStatus::Idle;
+//RS         initial.error.clear();
+//RS         initial.result.clear();
+//RS         form.state.set(initial);
+//RS 
+//RS         let action_errors = JetWebFormArc::new(JetWebFormMutex::new(None));
+//RS         let typed = Self {
+//RS             input,
+//RS             form,
+//RS             lifecycle: jet_std::JetSignal::new(JetWebFormLifecycle::idle()),
+//RS             focus: jet_std::JetSignal::new(None),
+//RS             action_errors,
+//RS             cancelled: JetWebFormArc::new(std::sync::atomic::AtomicBool::new(false)),
+//RS             async_timings: JetWebFormArc::new(JetWebFormMutex::new(JetWebFormMap::new())),
+//RS         };
+//RS         jet_web_form_register_panel_fact(&typed);
+//RS         if let Some(handler) = handler {
+//RS             typed.install_action(handler);
+//RS         }
+//RS         Ok(typed)
+//RS     }
+//RS 
+//RS     pub fn input(&self) -> JetWebFormInput {
+//RS         (*self.input).clone()
+//RS     }
+//RS 
+//RS     pub fn fields(&self) -> Vec<JetWebFormFieldSpec> {
+//RS         self.input.fields()
+//RS     }
+//RS 
+//RS     pub fn state(&self) -> JetWebFormState {
+//RS         self.form.state()
+//RS     }
+//RS 
+//RS     pub fn state_signal(&self) -> jet_std::JetSignal<JetWebFormState> {
+//RS         self.form.state_signal()
+//RS     }
+//RS 
+//RS     pub fn lifecycle(&self) -> JetWebFormLifecycle {
+//RS         self.lifecycle.get()
+//RS     }
+//RS 
+//RS     pub fn lifecycle_signal(&self) -> jet_std::JetSignal<JetWebFormLifecycle> {
+//RS         self.lifecycle.clone()
+//RS     }
+//RS 
+//RS     pub fn focus(&self) -> Option<String> {
+//RS         self.focus.get()
+//RS     }
+//RS 
+//RS     pub fn focus_signal(&self) -> jet_std::JetSignal<Option<String>> {
+//RS         self.focus.clone()
+//RS     }
+//RS 
+//RS     pub fn set(&self, name: String, value: String) -> Result<(), String> {
+//RS         self.form.set(name.clone(), value)?;
+//RS         let timing = self
+//RS             .async_timings
+//RS             .lock()
+//RS             .ok()
+//RS             .and_then(|timings| timings.get(&name).copied());
+//RS         if timing == Some(JetWebFormValidationTiming::Change) {
+//RS             if let Ok(field) = self.form.field_state(&name) {
+//RS                 let _ = self.form.validate_one(
+//RS                     name,
+//RS                     field.value,
+//RS                     field.value_type,
+//RS                     field.required,
+//RS                     true,
+//RS                 );
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub fn blur(&self, name: String) -> Result<(), String> {
+//RS         let run_async = self
+//RS             .async_timings
+//RS             .lock()
+//RS             .ok()
+//RS             .and_then(|timings| timings.get(&name).copied())
+//RS             .map(|timing| timing == JetWebFormValidationTiming::Blur)
+//RS             .unwrap_or(true);
+//RS         self.form.blur_with_async(name, run_async)
+//RS     }
+//RS 
+// END-PORT-PENDING 0308 crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1-1805
+

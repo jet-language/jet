@@ -1,0 +1,865 @@
+// PORT-PENDING 1026 tests-crypto-entropy: tests/crypto_entropy.rs:1-861
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod common;
+//RS 
+//RS mod runtime {
+//RS     // This module includes shared Prelude source that several hosts compile,
+//RS     // each using a different subset, so dead-code reports here describe the
+//RS     // other hosts' usage rather than this target's.
+//RS     #![allow(dead_code)]
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS     pub use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+//RS }
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use jet_foundation::JitBackend::JitBackend;
+//RS use jet_jit::CraneliftBackend;
+//RS pub(crate) use runtime::*;
+//RS use std::fs;
+//RS use std::sync::{Arc, Barrier};
+//RS 
+//RS #[test]
+//RS fn crypto_error_display_contract_is_exact_and_redacted() {
+//RS     let cases = [
+//RS         (
+//RS             JetCryptoEntropyError::InvalidLength {
+//RS                 operation: "seal",
+//RS                 parameter: "key",
+//RS                 expected: "exactly 32",
+//RS                 actual: 31,
+//RS             },
+//RS             "seal: key must be exactly 32; got 31",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::InvalidEncoding {
+//RS                 operation: "PasswordHash.parse",
+//RS                 value_kind: "PHC string",
+//RS             },
+//RS             "PasswordHash.parse: PHC string is not canonical",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::UnsupportedVersion {
+//RS                 operation: "PasswordHash.parse",
+//RS                 version: 16,
+//RS             },
+//RS             "PasswordHash.parse: version 16 is not supported",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::UnsupportedAlgorithm {
+//RS                 operation: "PasswordHash.parse",
+//RS                 algorithm: "argon2i".to_string(),
+//RS             },
+//RS             "PasswordHash.parse: algorithm argon2i is not supported",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::OpenFailed,
+//RS             "encrypted data could not be opened",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::NonContributoryKey,
+//RS             "X25519 peer key does not contribute to a shared secret",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::OutputLength {
+//RS                 operation: "hkdf_sha256",
+//RS                 minimum: 0,
+//RS                 maximum: 8160,
+//RS                 actual: 8161,
+//RS             },
+//RS             "hkdf_sha256: output length must be 0..8160; got 8161",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::PasswordPolicy {
+//RS                 reason: "public-policy-id",
+//RS             },
+//RS             "password hash is outside Jet's accepted policy",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::EntropyUnavailable,
+//RS             "the operating system could not provide cryptographic randomness",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::ResourceUnavailable {
+//RS                 resource: "Argon2 worker pool",
+//RS             },
+//RS             "Argon2 worker pool is unavailable for this cryptographic operation",
+//RS         ),
+//RS         (
+//RS             JetCryptoEntropyError::Internal {
+//RS                 incident_id: "crypto-17",
+//RS             },
+//RS             "Jet could not preserve a cryptographic invariant; incident crypto-17",
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (error, expected) in cases {
+//RS         assert_eq!(error.to_string(), expected);
+//RS         let rendered = format!("{error:?} {error}");
+//RS         for forbidden in [
+//RS             "hunter2",
+//RS             "plaintext sentinel",
+//RS             "ciphertext sentinel",
+//RS             "/home/nate",
+//RS         ] {
+//RS             assert!(
+//RS                 !rendered.contains(forbidden),
+//RS                 "error leaked `{forbidden}`: {rendered}"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn actual_bridge_fixture_compiles_and_runs() {
+//RS     let root = std::env::current_dir().unwrap();
+//RS     let dir =
+//RS         std::env::temp_dir().join(format!("jet-crypto-bridge-entropy-{}", std::process::id()));
+//RS     match std::fs::remove_dir_all(&dir) {
+//RS         Ok(()) => {}
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS         Err(error) => panic!(
+//RS             "crypto bridge fixture pre-cleanup failed for {}: {error}",
+//RS             dir.display()
+//RS         ),
+//RS     }
+//RS     std::fs::create_dir_all(dir.join("src")).unwrap();
+//RS     std::fs::write(
+//RS         dir.join("Cargo.toml"),
+//RS         r#"[package]
+//RS name = "jet-crypto-entropy-proof"
+//RS version = "0.0.0"
+//RS edition = "2021"
+//RS 
+//RS [workspace]
+//RS 
+//RS [dependencies]
+//RS aes-gcm = "0.10"
+//RS argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }
+//RS blake3 = "1"
+//RS chacha20poly1305 = "0.10"
+//RS ed25519-dalek = "2"
+//RS hkdf = "0.12"
+//RS sha2 = "0.10"
+//RS subtle = "2"
+//RS x25519-dalek = "2"
+//RS "#,
+//RS     )
+//RS     .unwrap();
+//RS     let fixture = root.join("tests/fixtures/crypto_bridge_entropy.rs");
+//RS     // The bridge crate's exact runtime projection, then the fixture's crypto
+//RS     // runtime and its tests.
+//RS     std::fs::write(
+//RS         dir.join("src/lib.rs"),
+//RS         format!(
+//RS             "#![allow(non_snake_case, dead_code)]\n{}\n{}\ninclude!({:?});\n",
+//RS             jet_pkg_model::FFI::crypto_bridge_root_modules(),
+//RS             jet_pkg_model::FFI::crypto_bridge_entropy_runtime(),
+//RS             fixture
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     let output = std::process::Command::new("cargo")
+//RS         .args(["test", "--offline", "--quiet", "--manifest-path"])
+//RS         .arg(dir.join("Cargo.toml"))
+//RS         .env("CARGO_TARGET_DIR", dir.join("target"))
+//RS         .output()
+//RS         .unwrap();
+//RS     let cleanup = std::fs::remove_dir_all(&dir);
+//RS     assert!(cleanup.is_ok(), "bridge proof left temporary artifacts");
+//RS     assert!(
+//RS         output.status.success(),
+//RS         "bridge proof failed:\nstdout:\n{}\nstderr:\n{}",
+//RS         String::from_utf8_lossy(&output.stdout),
+//RS         String::from_utf8_lossy(&output.stderr)
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn scripted_provider_fills_suffix_and_retries_interruption() {
+//RS     let mut out = [0u8; 7];
+//RS     let mut calls = 0usize;
+//RS     jet_crypto_entropy_fill_with(&mut out, |suffix| {
+//RS         calls += 1;
+//RS         match calls {
+//RS             1 => {
+//RS                 suffix[..2].copy_from_slice(&[1, 2]);
+//RS                 JetCryptoEntropyStep::Filled(2)
+//RS             }
+//RS             2 => JetCryptoEntropyStep::Interrupted,
+//RS             3 => {
+//RS                 suffix.copy_from_slice(&[3, 4, 5, 6, 7]);
+//RS                 JetCryptoEntropyStep::Filled(5)
+//RS             }
+//RS             _ => unreachable!(),
+//RS         }
+//RS     })
+//RS     .unwrap();
+//RS     assert_eq!(out, [1, 2, 3, 4, 5, 6, 7]);
+//RS     assert_eq!(calls, 3);
+//RS }
+//RS 
+//RS #[test]
+//RS fn failure_and_zero_fill_clear_the_entire_attempt() {
+//RS     for terminal in [
+//RS         JetCryptoEntropyStep::Filled(0),
+//RS         JetCryptoEntropyStep::Failed,
+//RS     ] {
+//RS         let mut out = [0xa5; 32];
+//RS         let err = jet_crypto_entropy_fill_with(&mut out, |suffix| {
+//RS             suffix[..8].fill(0x5a);
+//RS             terminal
+//RS         })
+//RS         .unwrap_err();
+//RS         assert_eq!(err, JetCryptoEntropyError::EntropyUnavailable);
+//RS         assert_eq!(out, [0; 32], "tainted attempt must be zeroized");
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn injected_partial_failure_returns_no_bytes() {
+//RS     let mut first = true;
+//RS     jet_crypto_entropy_set_test_provider(move |suffix| {
+//RS         if first {
+//RS             first = false;
+//RS             suffix[..4].copy_from_slice(&[1, 2, 3, 4]);
+//RS             JetCryptoEntropyStep::Filled(4)
+//RS         } else {
+//RS             JetCryptoEntropyStep::Failed
+//RS         }
+//RS     });
+//RS     assert_eq!(
+//RS         jet_crypto_entropy_bytes(16),
+//RS         Err(JetCryptoEntropyError::EntropyUnavailable)
+//RS     );
+//RS     jet_crypto_entropy_clear_test_provider();
+//RS }
+//RS 
+//RS #[test]
+//RS fn wasi_interrupt_retries_zeroize_each_exact_count_buffer() {
+//RS     let lifecycle = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+//RS     let observed_lifecycle = std::rc::Rc::clone(&lifecycle);
+//RS     jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| {
+//RS         observed_lifecycle
+//RS             .borrow_mut()
+//RS             .push((event, generation, bytes.to_vec()));
+//RS     });
+//RS     let zeroized = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
+//RS     let observed = std::rc::Rc::clone(&zeroized);
+//RS     jet_crypto_entropy_set_zeroize_test_observer(move |bytes| {
+//RS         observed.borrow_mut().push(bytes.to_vec());
+//RS     });
+//RS     let mut calls = 0usize;
+//RS     let bytes = jet_crypto_entropy_wasi_with_for_test(32, |out| {
+//RS         assert_eq!(out.len(), 32);
+//RS         calls += 1;
+//RS         if calls < 3 {
+//RS             out[..4].fill(0xa5);
+//RS             27
+//RS         } else {
+//RS             out.fill(7);
+//RS             0
+//RS         }
+//RS     })
+//RS     .unwrap();
+//RS     assert_eq!(bytes, vec![7; 32]);
+//RS     assert_eq!(calls, 3);
+//RS     jet_crypto_entropy_clear_zeroize_test_observer();
+//RS     jet_crypto_entropy_clear_wasi_attempt_test_observer();
+//RS     assert_eq!(&*zeroized.borrow(), &vec![vec![0; 32], vec![0; 32]]);
+//RS 
+//RS     let lifecycle = lifecycle.borrow();
+//RS     let mut live_attempt = None;
+//RS     let mut generations = Vec::new();
+//RS     for (event, generation, snapshot) in lifecycle.iter() {
+//RS         match event {
+//RS             JetCryptoWasiAttemptEvent::Created => {
+//RS                 assert!(live_attempt.replace(*generation).is_none());
+//RS                 assert_eq!(snapshot, &vec![0; 32]);
+//RS                 generations.push(*generation);
+//RS             }
+//RS             JetCryptoWasiAttemptEvent::ProviderReturned(27) => {
+//RS                 assert_eq!(live_attempt, Some(*generation));
+//RS                 assert_eq!(&snapshot[..4], &[0xa5; 4]);
+//RS             }
+//RS             JetCryptoWasiAttemptEvent::ProviderReturned(0) => {
+//RS                 assert_eq!(live_attempt, Some(*generation));
+//RS                 assert_eq!(snapshot, &vec![7; 32]);
+//RS             }
+//RS             JetCryptoWasiAttemptEvent::Zeroized => {
+//RS                 assert_eq!(live_attempt, Some(*generation));
+//RS                 assert_eq!(snapshot, &vec![0; 32]);
+//RS             }
+//RS             JetCryptoWasiAttemptEvent::Released | JetCryptoWasiAttemptEvent::Returned => {
+//RS                 assert_eq!(live_attempt.take(), Some(*generation));
+//RS             }
+//RS             JetCryptoWasiAttemptEvent::ProviderReturned(errno) => {
+//RS                 panic!("unexpected WASI errno {errno}")
+//RS             }
+//RS         }
+//RS     }
+//RS     assert_eq!(generations, vec![0, 1, 2]);
+//RS     assert!(live_attempt.is_none());
+//RS     assert!(!bytes.contains(&0xa5));
+//RS }
+//RS 
+//RS #[test]
+//RS fn wasi_stops_after_seventeen_interrupts() {
+//RS     let generations = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+//RS     let observed = std::rc::Rc::clone(&generations);
+//RS     jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| {
+//RS         if event == JetCryptoWasiAttemptEvent::Released {
+//RS             assert!(bytes.is_empty());
+//RS             observed.borrow_mut().push(generation);
+//RS         }
+//RS     });
+//RS     let mut calls = 0usize;
+//RS     let result = jet_crypto_entropy_wasi_with_for_test(8, |out| {
+//RS         calls += 1;
+//RS         out.fill(0xa5);
+//RS         27
+//RS     });
+//RS     assert_eq!(result, Err(JetCryptoEntropyError::EntropyUnavailable));
+//RS     assert_eq!(calls, 17);
+//RS     jet_crypto_entropy_clear_wasi_attempt_test_observer();
+//RS     assert_eq!(&*generations.borrow(), &(0..17).collect::<Vec<_>>());
+//RS }
+//RS 
+//RS #[test]
+//RS fn unsupported_provider_zeroizes_and_fails_closed() {
+//RS     let mut out = [0xa5; 16];
+//RS     assert_eq!(
+//RS         jet_crypto_entropy_unsupported_for_test(&mut out),
+//RS         Err(JetCryptoEntropyError::EntropyUnavailable)
+//RS     );
+//RS     assert_eq!(out, [0; 16]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn live_provider_obeys_bounds_zero_and_concurrency() {
+//RS     assert_eq!(jet_crypto_entropy_bytes(0).unwrap(), Vec::<u8>::new());
+//RS     let mut filled = [0u8; 32];
+//RS     jet_crypto_entropy_fill(&mut filled).unwrap();
+//RS     assert_ne!(filled, [0; 32]);
+//RS     assert_eq!(
+//RS         jet_crypto_entropy_bytes(-1),
+//RS         Err(JetCryptoEntropyError::InvalidLength {
+//RS             operation: "core.crypto.random.bytes",
+//RS             parameter: "count",
+//RS             expected: "non-negative",
+//RS             actual: 1
+//RS         })
+//RS     );
+//RS     assert_eq!(
+//RS         jet_crypto_entropy_bytes(1_048_577),
+//RS         Err(JetCryptoEntropyError::OutputLength {
+//RS             operation: "core.crypto.random.bytes",
+//RS             minimum: 0,
+//RS             maximum: 1_048_576,
+//RS             actual: 1_048_577
+//RS         })
+//RS     );
+//RS 
+//RS     let workers = 8;
+//RS     let barrier = Arc::new(Barrier::new(workers));
+//RS     let joins: Vec<_> = (0..workers)
+//RS         .map(|_| {
+//RS             let barrier = Arc::clone(&barrier);
+//RS             std::thread::spawn(move || {
+//RS                 barrier.wait();
+//RS                 jet_crypto_entropy_bytes(64).unwrap()
+//RS             })
+//RS         })
+//RS         .collect();
+//RS     let outputs: Vec<Vec<u8>> = joins.into_iter().map(|j| j.join().unwrap()).collect();
+//RS     assert!(outputs.iter().all(|bytes| bytes.len() == 64));
+//RS     for i in 0..outputs.len() {
+//RS         for j in i + 1..outputs.len() {
+//RS             assert_ne!(outputs[i], outputs[j]);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn live_provider_subprocess_child() {
+//RS     if std::env::var_os("JET_CRYPTO_ENTROPY_SUBPROCESS").is_none() {
+//RS         return;
+//RS     }
+//RS     let bytes = jet_crypto_entropy_bytes(64).unwrap();
+//RS     let encoded: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+//RS     println!("JET_CRYPTO_ENTROPY={encoded}");
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn live_provider_remains_independent_across_process_exec() {
+//RS     use std::io::Read;
+//RS     use std::process::Stdio;
+//RS     use std::time::{Duration, Instant};
+//RS 
+//RS     let parent_bytes = jet_crypto_entropy_bytes(64).unwrap();
+//RS     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+//RS         .args(["--exact", "live_provider_subprocess_child", "--nocapture"])
+//RS         .env("JET_CRYPTO_ENTROPY_SUBPROCESS", "1")
+//RS         .stdout(Stdio::piped())
+//RS         .spawn()
+//RS         .unwrap();
+//RS     let deadline = Instant::now() + Duration::from_secs(5);
+//RS     let status = loop {
+//RS         if let Some(status) = child.try_wait().unwrap() {
+//RS             break status;
+//RS         }
+//RS         if Instant::now() >= deadline {
+//RS             let _ = child.kill();
+//RS             let _ = child.wait();
+//RS             panic!("entropy subprocess exceeded five-second deadline");
+//RS         }
+//RS         std::thread::sleep(Duration::from_millis(10));
+//RS     };
+//RS     assert!(status.success(), "entropy subprocess failed: {status}");
+//RS     let mut stdout = String::new();
+//RS     child
+//RS         .stdout
+//RS         .take()
+//RS         .unwrap()
+//RS         .read_to_string(&mut stdout)
+//RS         .unwrap();
+//RS     // Single-threaded libtest prints the child's line after its own
+//RS     // `test … ... ` status prefix, so the marker need not start the line.
+//RS     let encoded = stdout
+//RS         .lines()
+//RS         .find_map(|line| line.split_once("JET_CRYPTO_ENTROPY=").map(|(_, hex)| hex))
+//RS         .expect("child emitted entropy marker");
+//RS     assert_eq!(encoded.len(), 128);
+//RS     assert!(encoded.bytes().all(|byte| byte.is_ascii_hexdigit()));
+//RS     let parent_encoded: String = parent_bytes
+//RS         .iter()
+//RS         .map(|byte| format!("{byte:02x}"))
+//RS         .collect();
+//RS     assert_ne!(encoded, parent_encoded);
+//RS }
+//RS 
+//RS #[test]
+//RS fn crypto_runtime_sources_contain_no_predictable_fallback() {
+//RS     let delivered_base =
+//RS         include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS     let sources = [
+//RS         delivered_base,
+//RS         include_str!("../crates/jet-foundation/src/Syntax/core_calls.rs"),
+//RS         include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs"),
+//RS         include_str!("../crates/jet-pkg-model/src/Prelude/Crypto.rs"),
+//RS     ]
+//RS     .join("\n");
+//RS     for forbidden in [
+//RS         "SplitMix",
+//RS         "xorshift",
+//RS         "SystemTime",
+//RS         "UNIX_EPOCH",
+//RS         "/dev/urandom",
+//RS         "/dev/random",
+//RS         "Math.random",
+//RS         "jet_uuid_fill_random",
+//RS     ] {
+//RS         assert!(
+//RS             !sources.contains(forbidden),
+//RS             "cryptographic runtime contains forbidden fallback marker {forbidden}"
+//RS         );
+//RS     }
+//RS     let host_sources = [
+//RS         include_str!("../crates/jet-jit/src/Crypto.rs"),
+//RS         include_str!("../crates/jet-jit/src/Encoding.rs"),
+//RS         include_str!("../crates/jet-jit/src/net_http_rt.rs"),
+//RS     ]
+//RS     .join("\n");
+//RS     for forbidden in [
+//RS         "SplitMix",
+//RS         "xorshift",
+//RS         "/dev/urandom",
+//RS         "/dev/random",
+//RS         "Math.random",
+//RS         "uuid_fill_random",
+//RS     ] {
+//RS         assert!(
+//RS             !host_sources.contains(forbidden),
+//RS             "JIT/runtime adapter contains forbidden fallback marker {forbidden}"
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS mod auth_session_regression {
+//RS     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+//RS 
+//RS     static FAIL_ENTROPY: AtomicBool = AtomicBool::new(false);
+//RS     static NEXT_BYTE: AtomicU8 = AtomicU8::new(1);
+//RS 
+//RS     fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, ()> {
+//RS         if FAIL_ENTROPY.load(Ordering::Relaxed) {
+//RS             return Err(());
+//RS         }
+//RS         let count = usize::try_from(count).map_err(|_| ())?;
+//RS         let byte = NEXT_BYTE.fetch_add(1, Ordering::Relaxed);
+//RS         Ok(vec![byte; count])
+//RS     }
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
+//RS 
+//RS     #[test]
+//RS     fn auth_tokens_are_opaque_and_fail_closed_without_entropy() {
+//RS         FAIL_ENTROPY.store(false, Ordering::Relaxed);
+//RS         let user = format!("auth-regression-{}@example.com", std::process::id());
+//RS         jet_auth_register_user(user.clone(), "password-hash".into()).unwrap();
+//RS 
+//RS         let first = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
+//RS             .unwrap();
+//RS         let second = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
+//RS             .unwrap();
+//RS         assert!(first.id.starts_with("sess-"));
+//RS         assert!(second.id.starts_with("sess-"));
+//RS         assert_ne!(first.id, second.id);
+//RS 
+//RS         let magic = jet_auth_magic_link_issue(user.clone(), 0, 1_000).unwrap();
+//RS         assert!(magic.starts_with("magic-"));
+//RS         assert_ne!(magic, format!("magic-{}", "00".repeat(32)));
+//RS         assert!(jet_auth_magic_link_consume(magic, 0, 1_000).is_ok());
+//RS 
+//RS         FAIL_ENTROPY.store(true, Ordering::Relaxed);
+//RS         assert!(jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000).is_err());
+//RS         assert!(jet_auth_magic_link_issue(user, 0, 1_000).is_err());
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn uuid_entropy_shared_seam_is_live_and_fail_closed() {
+//RS     let first = runtime::jet_crypto_uuid_v4_result().expect("live entropy should produce UUID v4");
+//RS     let second = runtime::jet_crypto_uuid_v4_result().expect("live entropy should produce UUID v4");
+//RS     assert_ne!(first, second, "UUID v4 must use live entropy for each call");
+//RS     let ordered = runtime::jet_crypto_uuid_v7_result(1_700_000_000_000)
+//RS         .expect("live entropy should produce UUID v7");
+//RS     assert_eq!(&ordered[14..15], "7");
+//RS 
+//RS     jet_crypto_entropy_set_test_provider(|out| {
+//RS         out.fill(0xa5);
+//RS         JetCryptoEntropyStep::Failed
+//RS     });
+//RS     let v4 = runtime::jet_crypto_uuid_v4_result();
+//RS     let v7 = runtime::jet_crypto_uuid_v7_result(1_700_000_000_000);
+//RS     jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS     assert!(matches!(v4, Err(JetCryptoEntropyError::EntropyUnavailable)));
+//RS     assert!(matches!(v7, Err(JetCryptoEntropyError::EntropyUnavailable)));
+//RS }
+//RS 
+//RS #[test]
+//RS fn live_crypto_entropy_and_uuid_match_interpreter_resident_jit_and_aot() {
+//RS     assert!(common::have_rustc(), "AOT parity requires rustc");
+//RS     assert!(
+//RS         jet_jit::cranelift_host_supported(),
+//RS         "resident-JIT parity requires a supported Cranelift host"
+//RS     );
+//RS 
+//RS     const SOURCE: &str = r#"
+//RS use core.crypto.random as crypto
+//RS use core.time as time
+//RS use core.crypto.uuid as uuid
+//RS 
+//RS fn run() {
+//RS     first :: crypto.bytes(32) ?? return
+//RS     second :: crypto.bytes(32) ?? return
+//RS     print(first.len() == 32)
+//RS     print(first != second)
+//RS     v4a :: uuid.v4() ?? return
+//RS     v4b :: uuid.v4() ?? return
+//RS     print(v4a.len() == 36)
+//RS     print(v4a != v4b)
+//RS     clk := Clock.new(1_700_000_000_000)
+//RS     v7 :: uuid.v7(&clk) ?? return
+//RS     print(v7.len() == 36)
+//RS     print(v7.slice(14, 15) == "7")
+//RS }
+//RS "#;
+//RS     let expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\n";
+//RS     let dir = common::unique_tmp("jet_crypto_entropy_parity");
+//RS     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+//RS         fs::create_dir_all(&dir).unwrap();
+//RS         let path = dir.join("parity.jet");
+//RS         fs::write(&path, SOURCE).unwrap();
+//RS         let shown = path.to_string_lossy().into_owned();
+//RS 
+//RS         let mut bundle = jet::Loader::load_entry(&shown).expect("parity bundle should load");
+//RS         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+//RS         assert!(
+//RS             diagnostics.iter().all(|diagnostic| !matches!(
+//RS                 diagnostic.severity,
+//RS                 jet::Diagnostics::Severity::Error
+//RS             )),
+//RS             "parity source must type-check: {diagnostics:?}"
+//RS         );
+//RS         assert!(
+//RS             common::cranelift_resident_safe(&bundle),
+//RS             "parity source must be resident-JIT safe"
+//RS         );
+//RS         let policy = common::development_policy();
+//RS         assert!(
+//RS             common::compile_cranelift_bundle(&bundle, &policy).is_ok(),
+//RS             "parity source must compile in the resident JIT"
+//RS         );
+//RS 
+//RS         let interpreted = match dev_iteration(&shown, false, true) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => (stdout, stderr, exit_code),
+//RS             RunOutcome::Problems(diagnostics) => {
+//RS                 panic!("interpreter entropy/UUID parity failed: {diagnostics:?}")
+//RS             }
+//RS         };
+//RS         assert_eq!(interpreted, (expected.to_string(), String::new(), 0));
+//RS 
+//RS         jet_jit::reset_jit_trace_for_test();
+//RS         let mut backend = CraneliftBackend::new();
+//RS         let jit =
+//RS             jet_jit::with_program_args(&[shown.clone()], || {
+//RS                 match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+//RS                     RunOutcome::Ran {
+//RS                         stdout,
+//RS                         stderr,
+//RS                         exit_code,
+//RS                     } => (stdout, stderr, exit_code),
+//RS                     RunOutcome::Problems(diagnostics) => {
+//RS                         panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
+//RS                     }
+//RS                 }
+//RS             });
+//RS         assert!(jet_jit::jit_executed_for_test());
+//RS         assert!(!jet_jit::deopt_invoked_for_test());
+//RS         assert!(!jet_jit::fallback_invoked_for_test());
+//RS         assert_eq!(jit, interpreted, "resident JIT drifted from interpreter");
+//RS 
+//RS         let aot = common::build_and_run("jet_crypto_entropy_parity", "parity", SOURCE);
+//RS         assert_eq!(aot, (0, expected.to_string(), String::new()));
+//RS         assert_eq!(jit, (expected.to_string(), String::new(), 0));
+//RS     }));
+//RS     match (result, fs::remove_dir_all(&dir)) {
+//RS         (Ok(()), Ok(())) => {}
+//RS         (Ok(()), Err(error)) => {
+//RS             panic!(
+//RS                 "crypto entropy parity artifact cleanup failed for {}: {error}",
+//RS                 dir.display()
+//RS             );
+//RS         }
+//RS         (Err(payload), Ok(())) => {
+//RS             std::panic::resume_unwind(payload);
+//RS         }
+//RS         (Err(payload), Err(error)) => {
+//RS             eprintln!(
+//RS                 "crypto entropy parity artifact cleanup failed for {}: {error}",
+//RS                 dir.display()
+//RS             );
+//RS             std::panic::resume_unwind(payload);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The golden I1 scan removes the provider exactly as codegen emits it for a
+//RS /// crypto program, and nothing the user wrote.
+//RS #[test]
+//RS fn golden_i1_scan_strips_only_the_vetted_entropy_module() {
+//RS     let source = "use core.crypto.random as random\n\nfn run() {\n    drawn :: random.bytes(16) ?? return\n    print(\"i1-user-marker {drawn.len()}\")\n}\n";
+//RS     let dir = common::unique_tmp("jet_crypto_entropy_i1");
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join("i1.jet");
+//RS     fs::write(&path, source).unwrap();
+//RS     let shown = path.to_string_lossy().into_owned();
+//RS     let compiled = jet::compile_with_path(source, &shown).unwrap_or_else(|diagnostics| {
+//RS         panic!("{}", jet::render_diagnostics(&shown, source, &diagnostics))
+//RS     });
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     assert!(
+//RS         compiled.rust.contains("fn getrandom("),
+//RS         "a crypto program must embed the OS entropy provider"
+//RS     );
+//RS     let user = common::strip_vetted_prelude_modules(&compiled.rust);
+//RS     assert!(!user.contains("fn getrandom("), "the audited provider survived the I1 scan");
+//RS     assert!(!user.contains("mod jet_crypto_entropy"), "the provider module survived the I1 scan");
+//RS     assert!(user.contains("i1-user-marker"), "the I1 scan removed user code");
+//RS }
+//RS 
+//RS #[test]
+//RS fn keygen_entropy_failure_uses_closed_silent_helper_status() {
+//RS     let ffi = include_str!("../crates/jet-pkg-model/src/FFI.rs");
+//RS     let keygen = ffi
+//RS         .split("\"keygen\" => {{")
+//RS         .nth(1)
+//RS         .expect("crypto helper keygen branch exists")
+//RS         .split("\"sign\" => {{")
+//RS         .next()
+//RS         .unwrap();
+//RS     assert!(keygen.contains("Err(_) => exit(ENTROPY_UNAVAILABLE)"));
+//RS     assert!(ffi.contains("const ENTROPY_UNAVAILABLE: i32 = 75;"));
+//RS     assert!(!keygen.contains("fail(&e"));
+//RS     assert!(!keygen.contains("eprintln!"));
+//RS }
+//RS 
+//RS /// Start `command` on a platform whose OS entropy source is absent: the Linux
+//RS /// `getrandom` syscall answers ENOSYS under a seccomp filter the child inherits.
+//RS /// Every execution tier then reaches the production provider's real failure
+//RS /// path; no test hook or fallback provider is involved.
+//RS #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+//RS fn without_os_entropy(command: &mut std::process::Command) -> &mut std::process::Command {
+//RS     use std::os::unix::process::CommandExt;
+//RS 
+//RS     #[repr(C)]
+//RS     struct SockFilter {
+//RS         code: u16,
+//RS         jt: u8,
+//RS         jf: u8,
+//RS         k: u32,
+//RS     }
+//RS     #[repr(C)]
+//RS     struct SockFprog {
+//RS         len: u16,
+//RS         filter: *const SockFilter,
+//RS     }
+//RS     #[cfg(target_arch = "x86_64")]
+//RS     const SYS_GETRANDOM: u32 = 318;
+//RS     #[cfg(target_arch = "aarch64")]
+//RS     const SYS_GETRANDOM: u32 = 278;
+//RS     const ENOSYS: u32 = 38;
+//RS     const PR_SET_NO_NEW_PRIVS: std::ffi::c_int = 38;
+//RS     const PR_SET_SECCOMP: std::ffi::c_int = 22;
+//RS     const SECCOMP_MODE_FILTER: std::ffi::c_ulong = 2;
+//RS     // ld [seccomp_data.nr]; jeq getrandom; ret ERRNO(ENOSYS); ret ALLOW
+//RS     static FILTER: [SockFilter; 4] = [
+//RS         SockFilter { code: 0x20, jt: 0, jf: 0, k: 0 },
+//RS         SockFilter { code: 0x15, jt: 0, jf: 1, k: SYS_GETRANDOM },
+//RS         SockFilter { code: 0x06, jt: 0, jf: 0, k: 0x0005_0000 | ENOSYS },
+//RS         SockFilter { code: 0x06, jt: 0, jf: 0, k: 0x7fff_0000 },
+//RS     ];
+//RS     unsafe extern "C" {
+//RS         fn prctl(option: std::ffi::c_int, ...) -> std::ffi::c_int;
+//RS     }
+//RS     // SAFETY: the closure runs between fork and exec and only issues two
+//RS     // async-signal-safe prctl calls over a static, fully initialized filter.
+//RS     unsafe {
+//RS         command.pre_exec(|| {
+//RS             let program = SockFprog {
+//RS                 len: FILTER.len() as u16,
+//RS                 filter: FILTER.as_ptr(),
+//RS             };
+//RS             let zero: std::ffi::c_ulong = 0;
+//RS             if prctl(PR_SET_NO_NEW_PRIVS, 1 as std::ffi::c_ulong, zero, zero, zero) != 0
+//RS                 || prctl(
+//RS                     PR_SET_SECCOMP,
+//RS                     SECCOMP_MODE_FILTER,
+//RS                     &program as *const SockFprog,
+//RS                     zero,
+//RS                     zero,
+//RS                 ) != 0
+//RS             {
+//RS                 return Err(std::io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// #1000: with no OS entropy, every core.crypto consumer (raw bytes, UUID v4,
+//RS /// X25519 key generation) stops with one typed failure that is byte-identical
+//RS /// on the AOT binary, the default `jet run` and the interpreter, and no tier
+//RS /// prints a value that should have come from entropy.
+//RS #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+//RS #[test]
+//RS fn entropy_unavailable_propagates_through_every_consumer_on_all_tiers() {
+//RS     assert!(common::have_rustc(), "AOT parity requires rustc");
+//RS     let consumers = [
+//RS         (
+//RS             "bytes",
+//RS             "use core.crypto.random as random\n\nfn run() {\n    print(\"before\")\n    secret :: random.bytes(32) ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew {secret.len()} bytes\")\n}\n",
+//RS         ),
+//RS         (
+//RS             "uuid",
+//RS             "use core.crypto.uuid as uuid\n\nfn run() {\n    print(\"before\")\n    id :: uuid.v4() ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew {id}\")\n}\n",
+//RS         ),
+//RS         (
+//RS             "keygen",
+//RS             "use core.crypto as crypto\n\nfn run() {\n    print(\"before\")\n    key :: crypto.generatekey() ?? {\n        print(\"typed failure\")\n        return\n    }\n    print(\"drew a key: {key.public_key().bytes.len()} public bytes\")\n}\n",
+//RS         ),
+//RS     ];
+//RS     let scratch = common::Scratch::new("crypto-entropy-unavailable");
+//RS     fs::write(
+//RS         scratch.join("package.jet"),
+//RS         "name: \"entropy-unavailable\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Rand] } }\n",
+//RS     )
+//RS     .unwrap();
+//RS     let jet = env!("CARGO_BIN_EXE_jet");
+//RS     let normalize = |bytes: &[u8]| {
+//RS         String::from_utf8_lossy(bytes).replace(&scratch.path.display().to_string(), "$CASE")
+//RS     };
+//RS     for (name, source) in consumers {
+//RS         let file = format!("{name}.jet");
+//RS         fs::write(scratch.join(&file), source).unwrap();
+//RS         let cache = scratch.join(&format!("cache-{name}"));
+//RS         let build = std::process::Command::new(jet)
+//RS             .args(["build", &file])
+//RS             .current_dir(&scratch.path)
+//RS             .env("JET_STORE_DIR", cache.join("aot"))
+//RS             .env("NO_COLOR", "1")
+//RS             .output()
+//RS             .unwrap();
+//RS         assert!(
+//RS             build.status.success(),
+//RS             "{name}: AOT build failed:\n{}",
+//RS             String::from_utf8_lossy(&build.stderr)
+//RS         );
+//RS         let mut tiers = Vec::new();
+//RS         for (tier, mut command) in [
+//RS             ("aot", std::process::Command::new(scratch.join(".jet").join("build").join(name))),
+//RS             ("default run", {
+//RS                 let mut command = std::process::Command::new(jet);
+//RS                 command.args(["run", &file]);
+//RS                 command
+//RS             }),
+//RS             ("interpreter", {
+//RS                 let mut command = std::process::Command::new(jet);
+//RS                 command.args(["run", "--interpret", &file]);
+//RS                 command
+//RS             }),
+//RS         ] {
+//RS             let output = without_os_entropy(&mut command)
+//RS                 .current_dir(&scratch.path)
+//RS                 .env("JET_RUN_CACHE_DIR", cache.join("run"))
+//RS                 .env("JET_STORE_DIR", cache.join("build"))
+//RS                 .env("NO_COLOR", "1")
+//RS                 .output()
+//RS                 .unwrap();
+//RS             let observed = (
+//RS                 output.status.code(),
+//RS                 normalize(&output.stdout),
+//RS                 normalize(&output.stderr),
+//RS             );
+//RS             assert!(
+//RS                 observed.1.starts_with("before\n") && !observed.1.contains("drew"),
+//RS                 "{name} on {tier} produced a value without entropy: {observed:?}"
+//RS             );
+//RS             assert!(
+//RS                 observed.1.contains("typed failure")
+//RS                     || (observed.0 != Some(0)
+//RS                         && observed.2.contains("could not provide cryptographic randomness")),
+//RS                 "{name} on {tier} did not report the entropy failure: {observed:?}"
+//RS             );
+//RS             tiers.push((tier, observed));
+//RS         }
+//RS         let (first_tier, first) = &tiers[0];
+//RS         for (tier, observed) in &tiers[1..] {
+//RS             assert_eq!(
+//RS                 observed, first,
+//RS                 "{name}: {tier} differs from {first_tier} without entropy"
+//RS             );
+//RS         }
+//RS     }
+//RS }
+// END-PORT-PENDING 1026 tests/crypto_entropy.rs:1-861
+

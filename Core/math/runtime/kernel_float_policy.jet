@@ -1,0 +1,184 @@
+// MathLibPure.rs:1425–1477,1520–1671: non-statistical f64 policy.
+// Native scalar libm/IEEE leaves borrow Copy scalars, allocate/retain nothing,
+// and cannot unwind across their provider ABI. No original high-level policy
+// entry is called here. Shared native symbol/ABI/tier integration is Main-owned.
+use core.math as float_policy_math
+
+// APPROVED native tandem seam, HELD until Main's post-stage2 registration.
+// #4467 separately gates #Import(c) lowering: infallible scalar declarations
+// currently emit Result<scalar,Never> with undefined Never instead of raw ABI.
+// Float is IEEE binary64; U64 is the complete unsigned word (including sign),
+// I64 is the exponent; all are borrowed Copy scalars, no pointers/null/extent,
+// allocation, ownership transfer, retained resources or callback lifetimes.
+// Provider/target availability is a checked link fact, never a fallback. The
+// shared native archive must export these symbols on every supported target,
+// contain stop/panic at its boundary, and use the checked scalar ABI/layout.
+// Source leaves: f64::{to_bits,from_bits} at :1531–1532,1540–1551,1595–1601;
+// f64::powi at :1578 (clamped I64 always fits its native i32 exponent).
+#Import(c) pub fn float_policy_to_bits(value: Float) -> U64 = "jet_rt_float_to_bits"
+#Import(c) pub fn float_policy_from_bits(bits: U64) -> Float = "jet_rt_float_from_bits"
+#Import(c) fn float_policy_powi(value: Float, exponent: I64) -> Float = "jet_rt_float_powi"
+
+// Rust jet_std_math_remainder (:1429): literal quotient/ties-even policy, not
+// libc remainder. Overflowing quotient and exact cancellation keep source IEEE
+// behavior; in particular -0 minus -0 yields +0, not a copysign correction.
+pub fn jet_std_math_remainder(value: Float, divisor: Float) -> Float Never! {
+    if !float_policy_math.is_finite(value) || !float_policy_math.is_finite(divisor) || divisor == (Float{0.0}) -> return Float.NAN
+    quotient :: value / divisor
+    lower :: float_policy_math.floor(quotient)
+    fraction :: quotient - lower
+    nearest := lower
+    if fraction < (Float{0.5}) {
+        nearest = lower
+    } else {
+        if fraction > (Float{0.5}) || float_policy_math.fmod(lower, Float{2.0}) != (Float{0.0}) -> nearest = lower + Float{1.0}
+    }
+    value - nearest * divisor
+}
+
+// f64::max ignores one NaN. A partial-order conditional alone would not retain
+// the source's NaN-tolerance behavior; this is not the collection comparator.
+fn float_policy_max(left: Float, right: Float) -> Float Never! {
+    if left != left -> return right
+    if right != right -> return left
+    if left > right -> return left
+    right
+}
+
+// Rust jet_std_math_isclose (:1446): negative tolerance before equality, then
+// nonfinite rejection. NaN tolerances are not rejected by an extra validation.
+pub fn jet_std_math_isclose(left: Float, right: Float, relative_tolerance: Float, absolute_tolerance: Float) -> Bool Never! {
+    if relative_tolerance < (Float{0.0}) || absolute_tolerance < (Float{0.0}) -> return false
+    if left == right -> return true
+    if !float_policy_math.is_finite(left) || !float_policy_math.is_finite(right) -> return false
+    float_policy_math.fabs(left - right) <= float_policy_max(relative_tolerance * float_policy_max(float_policy_math.fabs(left), float_policy_math.fabs(right)), absolute_tolerance)
+}
+
+// Rust jet_std_math_dist (:1465): borrow existing extents; no zipped list or
+// compensated/scaled reduction. Native adapter owns original Vec consumption.
+pub fn jet_std_math_dist(left: [Float], right: [Float]) -> Float Never! {
+    if left.len() != right.len() -> return Float.NAN
+    // Rust Sum<f64> folds from -0.0; empty distance consequently is -0.0.
+    total := -Float{0.0}
+    loop i in 0..<left.len() {
+        delta :: left[i] - right[i]
+        total = total + delta * delta
+    }
+    float_policy_math.sqrt(total)
+}
+
+// Rust jet_std_math_ulp (:1520): one positive-magnitude bit step; MAX yields
+// infinity. HELD on the approved native U64 bit seam, never exact Int scratch.
+pub fn jet_std_math_ulp(value: Float) -> Float Never! {
+    if value != value -> return Float.NAN
+    if float_policy_math.is_inf(value) -> return Float.INFINITY
+    magnitude :: float_policy_math.fabs(value)
+    if magnitude == (Float{0.0}) -> return float_policy_from_bits(U64{1})
+    bits :: float_policy_to_bits(magnitude)
+    float_policy_from_bits(bits + U64{1}) - magnitude
+}
+
+// Rust jet_std_math_significand (:1536): subnormal scaling loop and normal
+// fraction-bit reconstruction; zero/nonfinite returns the original bit value.
+pub fn jet_std_math_significand(value: Float) -> Float Never! {
+    if value == (Float{0.0}) || !float_policy_math.is_finite(value) -> return value
+    bits :: float_policy_to_bits(value)
+    exponent :: (bits >> 52) & U64{0x7ff}
+    if exponent == (U64{0}) {
+        magnitude := float_policy_math.fabs(value)
+        loop magnitude < (Float{1.0}) -> magnitude = magnitude * Float{2.0}
+        if float_policy_math.sign_bit(value) -> return -magnitude
+        return magnitude
+    }
+    fraction :: bits & ((U64{1} << 52) - U64{1})
+    significand :: float_policy_from_bits((U64{0x3ff} << 52) | fraction)
+    if float_policy_math.sign_bit(value) -> return -significand
+    significand
+}
+
+// Rust jet_std_math_ilogb (:1559): log2().floor(), not bit exponent extraction.
+pub fn jet_std_math_ilogb(value: Float) -> I64? Never! {
+    if value == (Float{0.0}) || !float_policy_math.is_finite(value) -> return None
+    exponent :: I64.from_float(float_policy_math.floor(float_policy_math.log2(float_policy_math.fabs(value)))) ?? return None
+    Val(exponent)
+}
+
+// Rust jet_std_math_logb (:1566): NaN maps to +Inf, exactly like other absent
+// nonzero inputs. Do not silently replace the source with libc logb semantics.
+pub fn jet_std_math_logb(value: Float) -> Float Never! {
+    exponent :: jet_std_math_ilogb(value) ?? return if value == (Float{0.0}) -> -Float.INFINITY else -> Float.INFINITY
+    Float.from_i64(exponent)
+}
+
+// Rust jet_std_math_ldexp (:1574): do not substitute libc ldexp/scalbn or
+// powf/exp2 for x * powi(2,clamp(exp)); source intermediate overflow remains.
+pub fn jet_std_math_ldexp(value: Float, exponent: I64) -> Float Never! {
+    if !float_policy_math.is_finite(value) || value == (Float{0.0}) || exponent == (I64{0}) -> return value
+    clamped := exponent
+    if clamped < (I64{-2099}) -> clamped = I64{-2099}
+    if clamped > (I64{2099}) -> clamped = I64{2099}
+    value * float_policy_powi(Float{2.0}, clamped)
+}
+
+// Rust jet_std_math_next_after (:1581): equal zeros return toward's sign;
+// infinities are ordinary bit neighbours after NaN/equality/zero precedence.
+pub fn jet_std_math_next_after(value: Float, toward: Float) -> Float Never! {
+    if value != value || toward != toward -> return Float.NAN
+    if value == toward -> return toward
+    if value == (Float{0.0}) {
+        if toward > (Float{0.0}) -> return float_policy_from_bits(U64{1})
+        return -float_policy_from_bits(U64{1})
+    }
+    bits :: float_policy_to_bits(value)
+    if (toward > value) == !float_policy_math.sign_bit(value) -> return float_policy_from_bits(bits + U64{1})
+    float_policy_from_bits(bits - U64{1})
+}
+
+// Rust jet_std_math_erf (:1605): Abramowitz & Stegun 7.1.26, same operation order.
+pub fn jet_std_math_erf(value: Float) -> Float Never! {
+    if value != value -> return Float.NAN
+    if float_policy_math.is_inf(value) -> return float_policy_math.signum(value)
+    sign := Float{1.0}
+    if value < (Float{0.0}) -> sign = -Float{1.0}
+    magnitude :: float_policy_math.fabs(value)
+    t :: Float{1.0} / (Float{1.0} + Float{0.3275911} * magnitude)
+    polynomial :: t * (Float{0.254829592} + t * (-Float{0.284496736} + t * (Float{1.421413741} + t * (-Float{1.453152027} + t * Float{1.061405429}))))
+    sign * (Float{1.0} - polynomial * float_policy_math.exp(-magnitude * magnitude))
+}
+
+// Rust jet_std_math_erfc (:1622): source complement, not independent libm erfc.
+pub fn jet_std_math_erfc(value: Float) -> Float Never! {
+    Float{1.0} - jet_std_math_erf(value)
+}
+
+// Rust jet_std_math_gamma (:1627): Lanczos g=7,n=9 and reflection in the same
+// order. Scalar literals replace const C indexing without a per-call copied
+// array (#4455); each addition/division remains the source loop's operation.
+pub fn jet_std_math_gamma(value: Float) -> Float Never! {
+    if value != value -> return Float.NAN
+    pi :: Float{3.14159265358979323846264338327950288}
+    if value <= (Float{0.0}) {
+        if value == float_policy_math.floor(value) -> return Float.NAN
+        return pi / (float_policy_math.sin(pi * value) * jet_std_math_gamma(Float{1.0} - value))
+    }
+    if value < (Float{0.5}) -> return pi / (float_policy_math.sin(pi * value) * jet_std_math_gamma(Float{1.0} - value))
+    z :: value - Float{1.0}
+    accumulator := Float{0.99999999999980993}
+    accumulator = accumulator + Float{676.5203681218851} / (z + Float{1.0})
+    accumulator = accumulator + -Float{1259.1392167224028} / (z + Float{2.0})
+    accumulator = accumulator + Float{771.32342877765313} / (z + Float{3.0})
+    accumulator = accumulator + -Float{176.61502916214059} / (z + Float{4.0})
+    accumulator = accumulator + Float{12.507343278686905} / (z + Float{5.0})
+    accumulator = accumulator + -Float{0.13857109526572012} / (z + Float{6.0})
+    accumulator = accumulator + Float{9.984369654078991e-6} / (z + Float{7.0})
+    accumulator = accumulator + Float{1.5056327351493116e-7} / (z + Float{8.0})
+    t :: z + Float{7.0} + Float{0.5}
+    float_policy_math.sqrt(Float{2.0} * pi) * float_policy_math.pow(t, z + Float{0.5}) * float_policy_math.exp(-t) * accumulator
+}
+
+// Rust jet_std_math_lgamma (:1664): log of positive gamma only, not log(abs(g)).
+pub fn jet_std_math_lgamma(value: Float) -> Float Never! {
+    gamma :: jet_std_math_gamma(value)
+    if gamma != gamma || gamma <= (Float{0.0}) -> return Float.NAN
+    float_policy_math.ln(gamma)
+}

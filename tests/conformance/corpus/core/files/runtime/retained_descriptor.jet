@@ -1,0 +1,185 @@
+// Native-independent metadata marshaling assertions, NOT native IO/lifetime
+// proof. Original native security/race/close/lock tests remain untouched in
+// Source/CmdCodemod/Transaction.rs, tests/{resource_close,authority,
+// core_files_opaque_handles,path_durability}.rs and REPL History tests.
+// Actual same-fd fstat/borrow/open/cleanup/error/counter/clock proofs are gated
+// #4494/#4392/#4483, never substituted by these scalar fixtures.
+use core.files.runtime.descriptor_metadata as descriptor_metadata
+
+#Test("Unix descriptor facts preserve full-width dev ino and nlink") {
+    raw :: descriptor_metadata.RuntimeStat{
+        mode: U32{0x81FF},
+        nlink: U64{18446744073709551615},
+        dev: U64{18446744073709551614},
+        ino: U64{9223372036854775808}
+    }
+    stat :: descriptor_metadata.linux_x86_64_descriptor_stat(raw, U64{18446744073709551615}, U32{0xFFFFFFFF}, I64{-1}, I64{999999999})
+    assert_eq(stat.file_id.device, raw.dev)
+    assert_eq(stat.file_id.inode, raw.ino)
+    assert_eq(stat.nlink, raw.nlink)
+    assert_eq(stat.size, U64{18446744073709551615})
+    if stat.modified == .Unix(seconds, nanoseconds) {
+        assert_eq(seconds, I64{-1})
+        assert_eq(nanoseconds, I64{999999999})
+    } else {
+        panic("Unix modified time must not become an invented epoch value")
+    }
+    assert(stat.is_file)
+    assert(!stat.is_dir)
+    assert(!stat.is_symlink)
+    if stat.native == .Unix(mode, uid) {
+        assert_eq(mode, raw.mode)
+        assert_eq(uid, U32{0xFFFFFFFF})
+    } else {
+        panic("Unix metadata must retain actual Unix mode")
+    }
+}
+
+#Test("Unix file type masks leave permission and special bits intact") {
+    file :: descriptor_metadata.linux_x86_64_descriptor_stat(descriptor_metadata.RuntimeStat{
+        mode: U32{0x8FFF}, nlink: U64{2}, dev: U64{7}, ino: U64{11}
+    }, U64{4194305}, U32{1000}, I64{9223372036854775807}, I64{999999999})
+    assert(file.is_file)
+    assert_eq(file.nlink, U64{2})
+    assert_eq(file.size, U64{4194305})
+    // Generic provider does not reject a hardlinked regular object: CT01's
+    // read_beneath checks ONLY regular; identity/History predicates are separate.
+    assert(file.is_file && file.nlink != (U64{1}))
+    if file.native == .Unix(mode, uid) {
+        assert_eq(mode, U32{0x8FFF})
+        assert_eq(uid, U32{1000})
+    } else {
+        panic("permission bits must not become invented Windows attributes")
+    }
+    directory :: descriptor_metadata.linux_x86_64_descriptor_stat(descriptor_metadata.RuntimeStat{
+        mode: U32{0x41C0}, nlink: U64{3}, dev: U64{7}, ino: U64{12}
+    }, U64{4096}, U32{1000}, I64{0}, I64{0})
+    assert(directory.is_dir && !directory.is_file && !directory.is_symlink)
+    link :: descriptor_metadata.linux_x86_64_descriptor_stat(descriptor_metadata.RuntimeStat{
+        mode: U32{0xA1FF}, nlink: U64{1}, dev: U64{7}, ino: U64{13}
+    }, U64{7}, U32{1000}, I64{0}, I64{0})
+    assert(link.is_symlink && !link.is_dir && !link.is_file)
+}
+
+#Test("Unix special object types are not fabricated regular files") {
+    modes :: [U32{0x1000}, U32{0x2000}, U32{0x6000}, U32{0xC000}, U32{0}, U32{0xFFFFFFFF}]
+    loop mode in modes {
+        stat :: descriptor_metadata.linux_x86_64_descriptor_stat(descriptor_metadata.RuntimeStat{
+            mode: mode, nlink: U64{1}, dev: U64{0}, ino: U64{0}
+        }, U64{0}, U32{0}, I64{0}, I64{0})
+        assert(!stat.is_file && !stat.is_dir && !stat.is_symlink)
+    }
+}
+
+#Test("FileID equality compares both full unsigned words without hashing") {
+    id :: descriptor_metadata.FileID{device: U64{18446744073709551615}, inode: U64{9223372036854775808}}
+    equal :: descriptor_metadata.FileID{device: id.device, inode: id.inode}
+    other_device :: descriptor_metadata.FileID{device: U64{9223372036854775807}, inode: id.inode}
+    other_inode :: descriptor_metadata.FileID{device: id.device, inode: U64{0}}
+    assert(descriptor_metadata.file_id_equal(id, equal))
+    assert(descriptor_metadata.file_id_equal(equal, id))
+    assert(!descriptor_metadata.file_id_equal(id, other_device))
+    assert(!descriptor_metadata.file_id_equal(id, other_inode))
+}
+
+#Test("Windows file identity widens unsigned fields before index shift") {
+    id :: descriptor_metadata.windows_file_id(U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF})
+    assert_eq(id.device, U64{4294967295})
+    assert_eq(id.inode, U64{18446744073709551615})
+    high :: descriptor_metadata.windows_file_id(U32{0x80000000}, U32{0x80000000}, U32{1})
+    assert_eq(high.device, U64{2147483648})
+    assert_eq(high.inode, U64{9223372036854775809})
+    low :: descriptor_metadata.windows_file_id(U32{1}, U32{0}, U32{0xFFFFFFFF})
+    assert_eq(low.inode, U64{4294967295})
+}
+
+#Test("Windows metadata preserves attrs links and no fake Unix mode") {
+    stat :: descriptor_metadata.windows_descriptor_stat(
+        U32{0x80000021}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0xFEDCBA98}, U32{0x76543210}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0}
+    )
+    assert_eq(stat.nlink, U64{4294967295})
+    assert_eq(stat.file_id.device, U64{4294967295})
+    assert_eq(stat.file_id.inode, U64{0xFEDCBA9876543210})
+    assert_eq(stat.size, U64{18446744073709551615})
+    if stat.modified == .Windows(filetime) {
+        assert_eq(filetime, U64{18446744073709551615})
+    } else {
+        panic("Windows modified time must preserve both native FILETIME words")
+    }
+    assert(stat.is_file && !stat.is_dir && !stat.is_symlink)
+    if stat.native == .Windows(attributes, reparse_tag) {
+        assert_eq(attributes, U32{0x80000021})
+        assert_eq(reparse_tag, U32{0})
+    } else {
+        panic("Windows metadata cannot invent a Unix mode")
+    }
+    directory :: descriptor_metadata.windows_descriptor_stat(U32{0x10}, U32{1}, U32{9}, U32{0}, U32{1}, U32{0}, U32{4096}, U32{0}, U32{0}, U32{0})
+    assert(directory.is_dir && !directory.is_file && !directory.is_symlink)
+    assert_eq(directory.size, U64{4096})
+}
+
+#Test("Windows file type uses reparse name surrogate not every reparse point") {
+    symbolic :: descriptor_metadata.windows_descriptor_stat(U32{0x400}, U32{1}, U32{1}, U32{0}, U32{1}, U32{0}, U32{10}, U32{0}, U32{0}, U32{0xA000000C})
+    assert(symbolic.is_symlink && !symbolic.is_file && !symbolic.is_dir)
+    junction :: descriptor_metadata.windows_descriptor_stat(U32{0x410}, U32{1}, U32{1}, U32{0}, U32{2}, U32{0}, U32{20}, U32{0}, U32{0}, U32{0xA0000003})
+    assert(junction.is_symlink && !junction.is_file && !junction.is_dir)
+    other_reparse :: descriptor_metadata.windows_descriptor_stat(U32{0x400}, U32{2}, U32{1}, U32{0}, U32{3}, U32{0x80000000}, U32{1}, U32{0}, U32{0}, U32{0x80000001})
+    assert(other_reparse.is_file && !other_reparse.is_symlink)
+    assert_eq(other_reparse.nlink, U64{2})
+    assert_eq(other_reparse.size, U64{9223372036854775809})
+    no_reparse_attribute :: descriptor_metadata.windows_descriptor_stat(U32{0}, U32{1}, U32{1}, U32{0}, U32{4}, U32{0}, U32{40}, U32{0}, U32{0}, U32{0xA000000C})
+    assert(no_reparse_attribute.is_file && !no_reparse_attribute.is_symlink)
+}
+
+#Test("Identity links projection does not require file kind or reparse query") {
+    windows :: descriptor_metadata.windows_identity_links(U32{1}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF})
+    assert_eq(windows.nlink, U64{1})
+    assert_eq(windows.file_id.device, U64{4294967295})
+    assert_eq(windows.file_id.inode, U64{18446744073709551615})
+    unix :: descriptor_metadata.unix_identity_links(descriptor_metadata.RuntimeStat{
+        mode: U32{0xA1FF}, nlink: U64{18446744073709551615}, dev: U64{0xFFFFFFFFFFFFFFFF}, ino: U64{0x8000000000000000}
+    })
+    assert_eq(unix.nlink, U64{18446744073709551615})
+    assert_eq(unix.file_id.device, U64{18446744073709551615})
+    assert_eq(unix.file_id.inode, U64{9223372036854775808})
+}
+
+#Test("Descriptor epoch adapter retains wider than U64 Unix modified nanoseconds") {
+    raw :: descriptor_metadata.RuntimeStat{mode: U32{0x8000}, nlink: U64{1}, dev: U64{7}, ino: U64{11}}
+    stat :: descriptor_metadata.linux_x86_64_descriptor_stat(raw, U64{9}, U32{1000}, I64{9223372036854775807}, I64{999999999})
+    modified :: descriptor_metadata.modified_nanoseconds(&stat.modified) ?? panic("valid maximum Unix modified timestamp must be present")
+    assert_eq(modified.hi, U64{499999999})
+    assert_eq(modified.lo, U64{18446744073709551615})
+}
+
+#Test("Descriptor epoch adapter preserves before epoch and invalid timestamp None") {
+    raw :: descriptor_metadata.RuntimeStat{mode: U32{0x8000}, nlink: U64{1}, dev: U64{7}, ino: U64{11}}
+    before :: descriptor_metadata.linux_x86_64_descriptor_stat(raw, U64{9}, U32{1000}, I64{-1}, I64{999999999})
+    invalid :: descriptor_metadata.linux_x86_64_descriptor_stat(raw, U64{9}, U32{1000}, I64{0}, I64{1000000000})
+    assert(descriptor_metadata.modified_nanoseconds(&before.modified) == None)
+    assert(descriptor_metadata.modified_nanoseconds(&invalid.modified) == None)
+    // No global directory time elision: only the package-model's pinned
+    // directory FileIdentity policy may choose to ignore a valid timestamp.
+    directory :: descriptor_metadata.linux_x86_64_descriptor_stat(descriptor_metadata.RuntimeStat{
+        mode: U32{0x4000}, nlink: U64{3}, dev: U64{7}, ino: U64{12}
+    }, U64{4096}, U32{1000}, I64{1}, I64{3})
+    modified :: descriptor_metadata.modified_nanoseconds(&directory.modified) ?? panic("metadata projection must retain directory timestamps")
+    assert_eq(modified.hi, U64{0})
+    assert_eq(modified.lo, U64{1000000003})
+}
+
+#Test("Windows descriptor adapter preserves raw highbit and original signed epoch limit") {
+    maximum :: descriptor_metadata.windows_descriptor_stat(U32{0}, U32{1}, U32{9}, U32{0}, U32{1}, U32{0}, U32{9}, U32{0x7FFFFFFF}, U32{0xFFFFFFFF}, U32{0})
+    modified :: descriptor_metadata.modified_nanoseconds(&maximum.modified) ?? panic("original SystemTime maximum must retain wide nanoseconds")
+    assert_eq(modified.hi, U64{49})
+    assert_eq(modified.lo, U64{6802270473709551516})
+    highbit :: descriptor_metadata.windows_descriptor_stat(U32{0}, U32{1}, U32{9}, U32{0}, U32{1}, U32{0}, U32{9}, U32{0x80000000}, U32{0}, U32{0})
+    if highbit.modified == .Windows(filetime) {
+        assert_eq(filetime, U64{9223372036854775808})
+    } else {
+        panic("native FILETIME high bit must not be narrowed away")
+    }
+    assert(descriptor_metadata.modified_nanoseconds(&highbit.modified) == None)
+    full :: descriptor_metadata.windows_descriptor_stat(U32{0}, U32{1}, U32{9}, U32{0}, U32{1}, U32{0}, U32{9}, U32{0xFFFFFFFF}, U32{0xFFFFFFFF}, U32{0})
+    assert(descriptor_metadata.modified_nanoseconds(&full.modified) == None)
+}

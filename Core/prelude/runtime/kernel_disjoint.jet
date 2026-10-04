@@ -1,0 +1,44 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/Disjoint.rs:1-40
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-MEMDISJOINT1=A: canonical runtime proof for mutable partitions.
+//RS // AOT, Cranelift hosts, and TIR evaluation call these checks before creating
+//RS // any mutable view. Bounds are half-open after normalization.
+//RS 
+//RS fn jet_disjoint_split_bounds(
+//RS     len: usize,
+//RS     mid: i64,
+//RS ) -> Result<((usize, usize), (usize, usize)), String> {
+//RS     let len_i64 = len as i64;
+//RS     if mid < 0 || mid > len_i64 {
+//RS         return Err(format!(
+//RS             "split point {} is outside 0..={} for {} items",
+//RS             mid, len_i64, len_i64
+//RS         ));
+//RS     }
+//RS     let mid = mid as usize;
+//RS     Ok(((0, mid), (mid, len)))
+//RS }
+//RS 
+//RS fn jet_disjoint_index_bounds(
+//RS     len: usize,
+//RS     indices: &[i64],
+//RS ) -> Result<Vec<(usize, usize, usize)>, String> {
+//RS     let len_i64 = len as i64;
+//RS     let mut ordered = Vec::with_capacity(indices.len());
+//RS     for (position, &index) in indices.iter().enumerate() {
+//RS         if index < 0 || index >= len_i64 {
+//RS             return Err(format!(
+//RS                 "index {} is outside 0..{} for {} items",
+//RS                 index, len_i64, len_i64
+//RS             ));
+//RS         }
+//RS         ordered.push((index as usize, index as usize + 1, position));
+//RS     }
+//RS     ordered.sort_by_key(|&(start, end, _)| (start, end));
+//RS     if let Some(pair) = ordered.windows(2).find(|pair| pair[0].1 > pair[1].0) {
+//RS         return Err(format!("duplicate index {} overlaps itself", pair[1].0));
+//RS     }
+//RS     Ok(ordered)
+//RS }
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/Disjoint.rs:1-40
+

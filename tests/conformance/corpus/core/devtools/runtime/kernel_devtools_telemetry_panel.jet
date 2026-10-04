@@ -1,0 +1,227 @@
+// Original DevtoolsTelemetryPanel.rs:2052-2167; actual typed stores/projections.
+// Queue retention/element loans (#4500) and canonical envelope packet0176 must
+// land before Main exercises this corpus. No mocks or success placeholders.
+use core.devtools.runtime.kernel_devtools_telemetry_panel as t
+use core.text.runtime.kernel_unicode_string as text
+
+// Rust:2056 context fixture.
+fn context() -> t.JetDevtoolsTelemetryContext Never! {
+    t.JetDevtoolsTelemetryContext.new(t.JetDevtoolsSourceIdentity.new("src/orders", "orders.jet", U32{12}, U32{4}, "orders.list"), Val("trace-1"), Val("span-1"), Val("request-1"))
+}
+fn point(timestamp: U64, value: t.JetDevtoolsMetricValue?) -> t.JetDevtoolsMetricPoint Never! {
+    row := t.JetDevtoolsMetricPoint.new(timestamp, "orders.count", ^[t.JetDevtoolsMetricTag]{t.JetDevtoolsMetricTag.text("route", "list")}, context())
+    row.value = value
+    ^row
+}
+fn instrument() -> t.JetDevtoolsMetricInstrument Never! {
+    t.JetDevtoolsMetricInstrument.new("orders.count", t.JetDevtoolsMetricKind.Counter, "items", "orders", context().source)
+}
+fn closed_span(start: U64, end: U64) -> t.JetDevtoolsTraceSpan Never! {
+    span := t.JetDevtoolsTraceSpan.new("orders.list", t.JetDevtoolsSpanKind.Internal, start, context())
+    &span.finish(end, t.JetDevtoolsSpanStatus.Ok) ?? panic("finish")
+    ^span
+}
+
+#Test("projections_share_identity_and_omit_unpublished_values (Rust:2066)") {
+    retention :: t.JetDevtoolsTelemetryRetention.bounded(2, 2, 2, 2, 2, 2)
+    metrics := t.JetDevtoolsMetricStore.new(retention)
+    &metrics.register(instrument()) ?? panic("register")
+    incoming := point(U64{10}, None)
+    _ :: &metrics.record(^incoming) ?? panic("record")
+    chart :: metrics.chart_points("orders.count")
+    table :: metrics.table_rows(Val("orders.count"))
+    assert(chart[0].source_id() == table[0].source_id())
+    assert(chart[0].trace_id() == Val("trace-1"))
+    assert(!chart[0].payload_json().contains("\"value\""))
+}
+
+#Test("query_and_trace_links_preserve_shared_context (Rust:2097)") {
+    retention :: t.JetDevtoolsTelemetryRetention.bounded(1, 1, 4, 4, 2, 2)
+    logs := t.JetDevtoolsLogRing.new(retention)
+    log := t.JetDevtoolsLogRecord.new(U64{20}, t.JetDevtoolsLogLevel.Warn, context())
+    log = ^log.publish_body("slow orders")
+    field := t.JetDevtoolsLogField.new("kind")
+    field = ^field.publish(t.JetDevtoolsLogValue.text("slow"))
+    log = ^log.with_field(field)
+    secret := t.JetDevtoolsLogField.new("secret")
+    secret = ^secret.redact()
+    log = ^log.with_field(secret)
+    log_index :: &logs.append(^log) ?? panic("append log")
+    span := t.JetDevtoolsTraceSpan.new("orders.list", t.JetDevtoolsSpanKind.Server, U64{10}, context())
+    span = ^span.with_parent_span("root-span")
+    &span.finish(U64{120}, t.JetDevtoolsSpanStatus.Ok) ?? panic("finish span")
+    &span.link_log(logs.records()[0]) ?? panic("link log")
+    traces := t.JetDevtoolsTraceRing.new(retention)
+    span_index :: &traces.append(^span) ?? panic("append span")
+    trace_row :: traces.rows()[0]
+    assert(trace_row.parent_span_id == Val("root-span"))
+    assert(trace_row.payload_json().contains("\"parent_span_id\":\"root-span\""))
+    links :: traces.linked_logs(span_index, logs)
+    assert(links[0].trace_id == Val("trace-1"))
+    assert(links[0].span_id == Val("span-1"))
+    assert(links[0].log_index == log_index)
+    high := t.JetDevtoolsLogQuery.default()
+    high.minimum_level = Val(t.JetDevtoolsLogLevel.Error)
+    assert(logs.query(high).is_empty())
+    containing := t.JetDevtoolsLogQuery.default()
+    containing.contains = Val("slow")
+    rows :: logs.query(containing)
+    assert(rows.len() == 1)
+    assert(rows[0].source_id() == "src/orders")
+    fields := t.JetDevtoolsLogQuery.default()
+    fields.field_key = Val("kind")
+    fields.field_value = Val(t.JetDevtoolsLogValue.text("slow"))
+    field_rows :: logs.query(fields)
+    assert(field_rows.len() == 1)
+    payload :: field_rows[0].payload_json()
+    assert(payload.contains("\"key\":\"secret\",\"redacted\":true"))
+    assert(!payload.contains("\"key\":\"secret\",\"value\""))
+}
+
+#Test("slow_work_is_bounded_and_keeps_ids (Rust:2148)") {
+    retention :: t.JetDevtoolsTelemetryRetention.bounded(1, 1, 1, 1, 1, 1)
+    span :: closed_span(U64{10}, U64{110})
+    slow := t.JetDevtoolsSlowWorkRing.new(retention)
+    index :: &slow.record(span, t.JetDevtoolsSlowWorkThreshold.new("orders.list", U64{100})) ?? panic("slow work")
+    assert(index == Val(U64{1}))
+    row :: slow.rows()[0]
+    assert(row.source_id() == "src/orders")
+    assert(row.trace_id == Val("trace-1"))
+    assert(row.span_id == Val("span-1"))
+}
+
+#Test("bounded rings evict oldest without resetting signal indexes") {
+    retention :: t.JetDevtoolsTelemetryRetention.bounded(0, 0, 0, 0, 0, 0)
+    assert(retention.metric_series == 1 && retention.metric_points == 1 && retention.log_records == 1)
+    assert(retention.trace_spans == 1 && retention.linked_logs == 1 && retention.slow_work_rows == 1)
+    upper :: t.JetDevtoolsTelemetryRetention.bounded(999, 999, 999, 999, 999, 999)
+    assert(upper.metric_series == 64 && upper.metric_points == 256 && upper.log_records == 256)
+    assert(upper.trace_spans == 256 && upper.linked_logs == 32 && upper.slow_work_rows == 256)
+    series := t.JetDevtoolsMetricSeries.new(instrument(), 1)
+    first := point(U64{10}, Val(t.JetDevtoolsMetricValue.integer(I64{7})))
+    second := point(U64{10}, None)
+    assert((&series.record(^first) ?? panic("first")) == (U64{1}))
+    assert((&series.record(^second) ?? panic("second")) == (U64{2}))
+    assert(series.len() == 1 && series.points()[0].index == (U64{2}))
+    earlier := point(U64{9}, None)
+    failure :: &series.record(^earlier)
+    if failure == {
+        .Err(error) -> assert(error.message() == "devtools telemetry timestamp moved backward from 10 to 9")
+        .Ok(_) -> panic("accepted backward timestamp")
+    }
+    assert(series.points()[0].index == (U64{2}))
+    logs := t.JetDevtoolsLogRing.new(retention)
+    a := t.JetDevtoolsLogRecord.new(U64{1}, t.JetDevtoolsLogLevel.Info, context())
+    b := t.JetDevtoolsLogRecord.new(U64{2}, t.JetDevtoolsLogLevel.Info, context())
+    _ :: &logs.append(^a) ?? panic("log 1")
+    _ :: &logs.append(^b) ?? panic("log 2")
+    assert(logs.len() == 1 && logs.records()[0].index == (U64{2}))
+    traces := t.JetDevtoolsTraceRing.new(retention)
+    x := closed_span(U64{1}, U64{101})
+    y := closed_span(U64{2}, U64{102})
+    _ :: &traces.append(^x) ?? panic("span 1")
+    _ :: &traces.append(^y) ?? panic("span 2")
+    assert(traces.spans().len() == 1 && traces.spans()[0].index == (U64{2}))
+    slow := t.JetDevtoolsSlowWorkRing.new(retention)
+    threshold :: t.JetDevtoolsSlowWorkThreshold.new("orders.list", U64{100})
+    assert((&slow.record(closed_span(U64{1}, U64{101}), threshold) ?? panic("slow 1")) == Val(U64{1}))
+    assert((&slow.record(closed_span(U64{2}, U64{102}), threshold) ?? panic("slow 2")) == Val(U64{2}))
+    assert(slow.rows().len() == 1 && slow.rows()[0].index == (U64{2}))
+}
+
+#Test("unpublished and redacted values remain absent; controls keep typed facts") {
+    value := t.JetDevtoolsLogField.new("secret")
+    value = ^value.publish(t.JetDevtoolsLogValue.text("private"))
+    value = ^value.redact()
+    value = ^value.publish(t.JetDevtoolsLogValue.text("attempted republish"))
+    assert(value.redacted && value.value == None)
+    log := t.JetDevtoolsLogRecord.new(U64{1}, t.JetDevtoolsLogLevel.Debug, context())
+    log = ^log.with_field(value)
+    assert(log.body == None)
+    payload :: log.payload_json()
+    assert(!payload.contains("private") && !payload.contains("attempted republish"))
+    assert(payload.contains("\"key\":\"secret\",\"redacted\":true"))
+    open :: t.JetDevtoolsTraceSpan.new("orders.list", t.JetDevtoolsSpanKind.Internal, U64{10}, context())
+    slow := t.JetDevtoolsSlowWorkRing.new(t.JetDevtoolsTelemetryRetention.development())
+    assert((&slow.record(open, t.JetDevtoolsSlowWorkThreshold.new("orders.list", U64{0})) ?? panic("open")) == None)
+    assert((&slow.record(closed_span(U64{10}, U64{110}), t.JetDevtoolsSlowWorkThreshold.new("other", U64{0})) ?? panic("other")) == None)
+    assert((&slow.record(closed_span(U64{10}, U64{110}), t.JetDevtoolsSlowWorkThreshold.new("orders.list", U64{101})) ?? panic("below")) == None)
+}
+
+#Test("query filters use shared context, field identity and inclusive bounds") {
+    log := t.JetDevtoolsLogRecord.new(U64{20}, t.JetDevtoolsLogLevel.Warn, context())
+    log = ^log.publish_body("slow orders")
+    field := t.JetDevtoolsLogField.new("kind")
+    field = ^field.publish(t.JetDevtoolsLogValue.text("slow"))
+    log = ^log.with_field(field)
+    query := t.JetDevtoolsLogQuery.default()
+    query.source_id = Val("src/orders")
+    query.trace_id = Val("trace-1")
+    query.span_id = Val("span-1")
+    query.request_id = Val("request-1")
+    query.minimum_level = Val(t.JetDevtoolsLogLevel.Warn)
+    query.from_ns = Val(U64{20})
+    query.to_ns = Val(U64{20})
+    query.field_key = Val("kind")
+    query.field_value = Val(t.JetDevtoolsLogValue.text("slow"))
+    query.contains = Val("orders")
+    assert(query.matches(log))
+    query.field_key = None
+    assert(!query.matches(log))
+    query.field_value = None
+    query.trace_id = Val("another")
+    assert(!query.matches(log))
+    query.trace_id = Val("trace-1")
+    query.from_ns = Val(U64{21})
+    assert(!query.matches(log))
+    query.from_ns = Val(U64{20})
+    query.to_ns = Val(U64{19})
+    assert(!query.matches(log))
+}
+
+#Test("link validation precedes duplicate and retention decisions") {
+    span := closed_span(U64{10}, U64{110})
+    log := t.JetDevtoolsLogRecord.new(U64{20}, t.JetDevtoolsLogLevel.Info, context())
+    log.index = U64{1}
+    &span.link_log(log) ?? panic("first link")
+    &span.link_log(log) ?? panic("duplicate link")
+    assert(span.linked_log_indexes.len() == 1)
+    log.identity.trace_id = Val("different")
+    result :: &span.link_log(log)
+    if result == {
+        .Err(error) -> assert(error.message() == "devtools telemetry log and span trace ids do not match")
+        .Ok(_) -> panic("accepted different trace")
+    }
+    log.identity.trace_id = Val("trace-1")
+    log.identity.span_id = Val("different")
+    result2 :: &span.link_log(log)
+    if result2 == {
+        .Err(error) -> assert(error.message() == "devtools telemetry log and span ids do not match")
+        .Ok(_) -> panic("accepted different span")
+    }
+}
+
+#Test("UTF8 byte limit and C1 JSON escaping match Rust text law") {
+    bytes := [U8]{}
+    loop i in 0..<8192 -> text.append_cp(&bytes, 233)
+    exact :: String.from_bytes(bytes) ?? panic("UTF8 fixture")
+    identity := context()
+    identity.source.source_id = exact
+    identity.validate() ?? panic("exact 16384-byte identity")
+    identity.source.source_id = "{exact}a"
+    result :: identity.validate()
+    if result == {
+        .Err(error) -> assert(error.message() == "devtools telemetry source id exceeds 16384 bytes")
+        .Ok(_) -> panic("accepted oversized UTF8 identity")
+    }
+    controls := [U8]{}
+    text.append_cp(&controls, 133)
+    text.append_cp(&controls, 127)
+    text.append_cp(&controls, 8)
+    text.append_cp(&controls, 12)
+    body :: String.from_bytes(controls) ?? panic("control fixture")
+    log := t.JetDevtoolsLogRecord.new(U64{1}, t.JetDevtoolsLogLevel.Info, context())
+    log = ^log.publish_body(body)
+    payload :: log.payload_json()
+    assert(payload.contains("\"body\":\"\\u0085\\u007f\\b\\f\""))
+}

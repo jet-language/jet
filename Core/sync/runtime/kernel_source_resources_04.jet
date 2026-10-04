@@ -1,0 +1,1804 @@
+// PORT-PENDING 2027 crates-jet-jit-src-sourceresources-slice-5401: crates/jet-jit/src/SourceResources.rs:5401-7200
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         MirLoopSourceKind::ChannelReceiver => Ok(Box::new(ChannelIter { owner })),
+//RS         MirLoopSourceKind::EncodingReader { .. } => Ok(Box::new(EncodingIter { owner })),
+//RS         MirLoopSourceKind::Chars | MirLoopSourceKind::Iterable { .. } => Err(MirNativeCursorError::internal(
+//RS             "Source resource owner does not match checked loop source",
+//RS         )),
+//RS     }
+//RS }
+//RS fn runtime_error(
+//RS     type_name: impl Into<String>,
+//RS     fields: Vec<(String, MirRuntimeValue)>,
+//RS ) -> MirNativeCursorError {
+//RS     MirNativeCursorError::from_runtime_value(MirRuntimeValue::Struct {
+//RS         type_name: type_name.into(),
+//RS         fields,
+//RS     })
+//RS }
+//RS 
+//RS fn mir_named(name: &str) -> jet_foundation::MIR::MirType {
+//RS     jet_foundation::MIR::MirType::from_kind(
+//RS         jet_foundation::MIR::MirTypeKind::Apply {
+//RS             name: jet_foundation::MIR::MirNominalRef::from_name(name),
+//RS             args: Vec::new(),
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn mir_absent_nominal(name: &str) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Absent {
+//RS         element: mir_named(name),
+//RS     }
+//RS }
+//RS 
+//RS fn mir_absent_int() -> MirRuntimeValue {
+//RS     MirRuntimeValue::Absent {
+//RS         element: jet_foundation::MIR::MirType::from_kind(
+//RS             jet_foundation::MIR::MirTypeKind::Int,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn optional_int<E>(value: &Result<i64, E>) -> MirRuntimeValue {
+//RS     match value {
+//RS         Ok(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Int(*value))),
+//RS         Err(_) => mir_absent_int(),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn mir_enum(type_name: &str, variant: &str) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn encoding_format_value(
+//RS     format: crate::enc_stream::runtime::jet_std::EncodingFormat,
+//RS ) -> MirRuntimeValue {
+//RS     mir_enum("EncodingFormat", format.as_str())
+//RS }
+//RS 
+//RS fn encoding_kind_value(
+//RS     kind: &crate::enc_stream::runtime::jet_std::EncodingErrorKind,
+//RS ) -> MirRuntimeValue {
+//RS     use crate::enc_stream::runtime::jet_std::EncodingErrorKind;
+//RS     let variant = match kind {
+//RS         EncodingErrorKind::Syntax => "Syntax",
+//RS         EncodingErrorKind::Truncated => "Truncated",
+//RS         EncodingErrorKind::Unsupported => "Unsupported",
+//RS         EncodingErrorKind::Limit => "Limit",
+//RS         EncodingErrorKind::IO => "IO",
+//RS         EncodingErrorKind::State => "State",
+//RS     };
+//RS     mir_enum("EncodingErrorKind", variant)
+//RS }
+//RS 
+//RS fn encoding_error(
+//RS     error: &crate::enc_stream::runtime::jet_std::EncodingError,
+//RS ) -> MirNativeCursorError {
+//RS     let cause = match &error.cause {
+//RS         Ok(cause) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Struct {
+//RS             type_name: "EncodingCause".to_string(),
+//RS             fields: vec![
+//RS                 ("kind".to_string(), MirRuntimeValue::String(cause.kind.clone())),
+//RS                 ("os_code".to_string(), optional_int(&cause.os_code)),
+//RS                 (
+//RS                     "message".to_string(),
+//RS                     MirRuntimeValue::String(cause.message.clone()),
+//RS                 ),
+//RS             ],
+//RS         })),
+//RS         Err(_) => mir_absent_nominal("EncodingCause"),
+//RS     };
+//RS     runtime_error(
+//RS         "EncodingError",
+//RS         vec![
+//RS             ("format".to_string(), encoding_format_value(error.format)),
+//RS             ("kind".to_string(), encoding_kind_value(&error.kind)),
+//RS             ("byte_offset".to_string(), MirRuntimeValue::Int(error.byte_offset)),
+//RS             ("line".to_string(), optional_int(&error.line)),
+//RS             ("column".to_string(), optional_int(&error.column)),
+//RS             ("path".to_string(), MirRuntimeValue::String(error.path.clone())),
+//RS             (
+//RS                 "reason".to_string(),
+//RS                 MirRuntimeValue::String(error.reason.clone()),
+//RS             ),
+//RS             ("cause".to_string(), cause),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn process_error(
+//RS     error: crate::ProcessPrelude::process_prelude::jet_std::IOError,
+//RS ) -> MirNativeCursorError {
+//RS     MirNativeCursorError::from_runtime_value(crate::Process::mir_io_error(error))
+//RS }
+//RS 
+//RS fn file_error(error: crate::enc_stream::SourceIoError) -> MirNativeCursorError {
+//RS     MirNativeCursorError::from_runtime_value(crate::Process::mir_io_error(error))
+//RS }
+//RS 
+//RS 
+//RS 
+//RS type OwnerLease = Arc<Mutex<BackendOwner>>;
+//RS 
+//RS fn owner_lock(
+//RS     owner: &OwnerLease,
+//RS ) -> Result<MutexGuard<'_, BackendOwner>, MirNativeCursorError> {
+//RS     owner
+//RS         .lock()
+//RS         .map_err(|_| MirNativeCursorError::internal("Source resource owner lock is poisoned"))
+//RS }
+//RS 
+//RS struct PlainIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for PlainIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         match &mut *owner {
+//RS             BackendOwner::PlainStream(stream) => stream.pull_checked().map(Ok),
+//RS             _ => Some(Err(MirNativeCursorError::internal("plain stream owner payload mismatch"))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct FileIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for FileIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let BackendOwner::File(reader) = &mut *owner else {
+//RS             return Some(Err(MirNativeCursorError::internal("file owner payload mismatch")));
+//RS         };
+//RS         match crate::enc_stream::source_file_next_line(&mut reader.0) {
+//RS             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
+//RS             Ok(None) => None,
+//RS             Err(error) => Some(Err(file_error(error))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct StdinIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for StdinIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let BackendOwner::Stdin(reader) = &mut *owner else {
+//RS             return Some(Err(MirNativeCursorError::internal("stdin owner payload mismatch")));
+//RS         };
+//RS         match crate::enc_stream::source_stdin_next_line(reader) {
+//RS             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
+//RS             Ok(None) => None,
+//RS             Err(error) => Some(Err(process_error(error))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct ProcessIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for ProcessIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let BackendOwner::Process(reader) = &mut *owner else {
+//RS             return Some(Err(MirNativeCursorError::internal("process stream owner payload mismatch")));
+//RS         };
+//RS         match crate::ProcessPrelude::process_prelude::source_process_stream_next_line(&reader.0) {
+//RS             Ok(Some(value)) => Some(Ok(MirRuntimeValue::String(value))),
+//RS             Ok(None) => None,
+//RS             Err(error) => Some(Err(process_error(error))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct ChannelIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for ChannelIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let BackendOwner::ChannelReceiver(receiver) = &mut *owner else {
+//RS             return Some(Err(MirNativeCursorError::internal("channel owner payload mismatch")));
+//RS         };
+//RS         receiver.receive().map(Ok)
+//RS     }
+//RS }
+//RS 
+//RS struct EncodingIter {
+//RS     owner: OwnerLease,
+//RS }
+//RS 
+//RS impl Iterator for EncodingIter {
+//RS     type Item = Result<MirRuntimeValue, MirNativeCursorError>;
+//RS 
+//RS     fn next(&mut self) -> Option<Self::Item> {
+//RS         let mut owner = match owner_lock(&self.owner) {
+//RS             Ok(owner) => owner,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let BackendOwner::Encoding(reader) = &mut *owner else {
+//RS             return Some(Err(MirNativeCursorError::internal("encoding owner payload mismatch")));
+//RS         };
+//RS         match encoding_next(&mut reader.0) {
+//RS             Ok(Some(value)) => Some(Ok(value)),
+//RS             Ok(None) => None,
+//RS             Err(error) => Some(Err(error)),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn encoding_next(
+//RS     reader: &mut EncodingReader,
+//RS ) -> Result<Option<MirRuntimeValue>, MirNativeCursorError> {
+//RS     match reader {
+//RS         EncodingReader::Json(reader) => crate::enc_stream::runtime::enc_json_reader_next(reader)
+//RS             .map(|value| value.map(data_event_value))
+//RS             .map_err(|error| encoding_error(&error)),
+//RS         EncodingReader::Jsonl(reader) => crate::enc_stream::runtime::enc_jsonl_reader_next(reader)
+//RS             .map(|value| value.map(data_tree_value))
+//RS             .map_err(|error| encoding_error(&error)),
+//RS         EncodingReader::Csv(reader) => crate::enc_stream::runtime::enc_csv_reader_next(reader)
+//RS             .map(|value| value.map(csv_row_value))
+//RS             .map_err(|error| encoding_error(&error)),
+//RS         EncodingReader::Xml(reader) => crate::enc_stream::runtime::enc_xml_reader_next(reader)
+//RS             .map(|value| value.map(data_tree_value))
+//RS             .map_err(|error| encoding_error(&error)),
+//RS         EncodingReader::Cbor(reader) => crate::enc_stream::runtime::enc_cbor_reader_next(reader)
+//RS             .map(|value| value.map(data_event_value))
+//RS             .map_err(|error| encoding_error(&error)),
+//RS     }
+//RS }
+//RS 
+//RS fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> MirRuntimeValue {
+//RS     use crate::enc_stream::runtime::jet_std::DataEvent;
+//RS     let (variant, args) = match event {
+//RS         DataEvent::Null => ("Null", Vec::new()),
+//RS         DataEvent::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
+//RS         DataEvent::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
+//RS         DataEvent::Float(value) => (
+//RS             "Float",
+//RS             vec![MirRuntimeValue::Float { value, f32: false }],
+//RS         ),
+//RS         DataEvent::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
+//RS         DataEvent::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
+//RS         DataEvent::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
+//RS         DataEvent::ArrayStart => ("ArrayStart", Vec::new()),
+//RS         DataEvent::ArrayEnd => ("ArrayEnd", Vec::new()),
+//RS         DataEvent::ObjectStart => ("ObjectStart", Vec::new()),
+//RS         DataEvent::Key(value) => ("Key", vec![MirRuntimeValue::String(value)]),
+//RS         DataEvent::ObjectEnd => ("ObjectEnd", Vec::new()),
+//RS     };
+//RS     MirRuntimeValue::Enum {
+//RS         type_name: "DataEvent".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: args.into_iter().map(|value| (None, value)).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRuntimeValue {
+//RS     use crate::enc_stream::runtime::jet_std::DataTree;
+//RS     let (variant, args) = match tree {
+//RS         DataTree::Null => ("Null", Vec::new()),
+//RS         DataTree::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
+//RS         DataTree::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
+//RS         DataTree::Float(value) => (
+//RS             "Float",
+//RS             vec![MirRuntimeValue::Float { value, f32: false }],
+//RS         ),
+//RS         DataTree::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
+//RS         DataTree::TypedText(value) => ("TypedText", vec![MirRuntimeValue::String(value)]),
+//RS         DataTree::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
+//RS         DataTree::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
+//RS         DataTree::Array(values) => (
+//RS             "Array",
+//RS             vec![MirRuntimeValue::List(
+//RS                 values.into_iter().map(data_tree_value).collect(),
+//RS             )],
+//RS         ),
+//RS         DataTree::Object(values) => (
+//RS             "Object",
+//RS             vec![MirRuntimeValue::List(
+//RS                 values
+//RS                     .into_iter()
+//RS                     .map(|(key, value)| MirRuntimeValue::Struct {
+//RS                         type_name: "Tuple".to_string(),
+//RS                         fields: vec![
+//RS                             ("key".to_string(), MirRuntimeValue::String(key)),
+//RS                             ("value".to_string(), data_tree_value(value)),
+//RS                         ],
+//RS                     })
+//RS                     .collect(),
+//RS             )],
+//RS         ),
+//RS     };
+//RS     MirRuntimeValue::Enum {
+//RS         type_name: "DataTree".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: args.into_iter().map(|value| (None, value)).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn csv_row_value(row: crate::enc_stream::runtime::jet_std::CSVRow) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Struct {
+//RS         type_name: "CSVRow".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "fields".to_string(),
+//RS                 MirRuntimeValue::List(
+//RS                     row.fields
+//RS                         .into_iter()
+//RS                         .map(MirRuntimeValue::String)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             ("line".to_string(), MirRuntimeValue::Int(row.line)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn data_event_from_value(
+//RS     value: &MirRuntimeValue,
+//RS ) -> Result<crate::enc_stream::runtime::jet_std::DataEvent, MirNativeCursorError> {
+//RS     use crate::enc_stream::runtime::jet_std::DataEvent;
+//RS     let MirRuntimeValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(MirNativeCursorError::internal(
+//RS             "encoding writer expects a DataEvent carrier",
+//RS         ));
+//RS     };
+//RS     if type_name != "DataEvent" {
+//RS         return Err(MirNativeCursorError::internal(format!(
+//RS             "encoding writer expects DataEvent, got `{type_name}`"
+//RS         )));
+//RS     }
+//RS     let arg = |index: usize| {
+//RS         args.get(index)
+//RS             .map(|(_, value)| value)
+//RS             .ok_or_else(|| MirNativeCursorError::internal("DataEvent carrier is missing an argument"))
+//RS     };
+//RS     let unit = || {
+//RS         if args.is_empty() {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(MirNativeCursorError::internal(
+//RS                 "unit DataEvent variant has unexpected arguments",
+//RS             ))
+//RS         }
+//RS     };
+//RS     match variant.as_str() {
+//RS         "Null" => {
+//RS             unit()?;
+//RS             Ok(DataEvent::Null)
+//RS         }
+//RS         "ArrayStart" => {
+//RS             unit()?;
+//RS             Ok(DataEvent::ArrayStart)
+//RS         }
+//RS         "ArrayEnd" => {
+//RS             unit()?;
+//RS             Ok(DataEvent::ArrayEnd)
+//RS         }
+//RS         "ObjectStart" => {
+//RS             unit()?;
+//RS             Ok(DataEvent::ObjectStart)
+//RS         }
+//RS         "ObjectEnd" => {
+//RS             unit()?;
+//RS             Ok(DataEvent::ObjectEnd)
+//RS         }
+//RS         "Bool" => match arg(0)? {
+//RS             MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(DataEvent::Bool(*value)),
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Bool carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Int" => match arg(0)? {
+//RS             MirRuntimeValue::Int(value) if args.len() == 1 => Ok(DataEvent::Int(*value)),
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Int carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Float" => match arg(0)? {
+//RS             MirRuntimeValue::Float { value, .. } if args.len() == 1 => {
+//RS                 Ok(DataEvent::Float(*value))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Float carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Number" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataEvent::Number(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Number carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Text" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataEvent::Text(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Text carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Key" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataEvent::Key(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Key carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Bytes" => match arg(0)? {
+//RS             MirRuntimeValue::Bytes(value) if args.len() == 1 => {
+//RS                 Ok(DataEvent::Bytes(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataEvent.Bytes carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         _ => Err(MirNativeCursorError::internal(format!(
+//RS             "unknown DataEvent variant `{variant}`"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn data_tree_from_value(
+//RS     value: &MirRuntimeValue,
+//RS ) -> Result<crate::enc_stream::runtime::jet_std::DataTree, MirNativeCursorError> {
+//RS     use crate::enc_stream::runtime::jet_std::DataTree;
+//RS     let MirRuntimeValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(MirNativeCursorError::internal(
+//RS             "encoding writer expects a DataTree carrier",
+//RS         ));
+//RS     };
+//RS     if type_name != "DataTree" {
+//RS         return Err(MirNativeCursorError::internal(format!(
+//RS             "encoding writer expects DataTree, got `{type_name}`"
+//RS         )));
+//RS     }
+//RS     let arg = |index: usize| {
+//RS         args.get(index)
+//RS             .map(|(_, value)| value)
+//RS             .ok_or_else(|| MirNativeCursorError::internal("DataTree carrier is missing an argument"))
+//RS     };
+//RS     let unit = || {
+//RS         if args.is_empty() {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(MirNativeCursorError::internal(
+//RS                 "unit DataTree variant has unexpected arguments",
+//RS             ))
+//RS         }
+//RS     };
+//RS     match variant.as_str() {
+//RS         "Null" => {
+//RS             unit()?;
+//RS             Ok(DataTree::Null)
+//RS         }
+//RS         "Bool" => match arg(0)? {
+//RS             MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(DataTree::Bool(*value)),
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Bool carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Int" => match arg(0)? {
+//RS             MirRuntimeValue::Int(value) if args.len() == 1 => Ok(DataTree::Int(*value)),
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Int carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Float" => match arg(0)? {
+//RS             MirRuntimeValue::Float { value, .. } if args.len() == 1 => {
+//RS                 Ok(DataTree::Float(*value))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Float carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Number" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataTree::Number(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Number carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "TypedText" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataTree::TypedText(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.TypedText carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Text" => match arg(0)? {
+//RS             MirRuntimeValue::String(value) if args.len() == 1 => {
+//RS                 Ok(DataTree::Text(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Text carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Bytes" => match arg(0)? {
+//RS             MirRuntimeValue::Bytes(value) if args.len() == 1 => {
+//RS                 Ok(DataTree::Bytes(value.clone()))
+//RS             }
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "DataTree.Bytes carrier has the wrong payload",
+//RS             )),
+//RS         },
+//RS         "Array" => {
+//RS             let MirRuntimeValue::List(values) = arg(0)? else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "DataTree.Array carrier has the wrong payload",
+//RS                 ));
+//RS             };
+//RS             if args.len() != 1 {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "DataTree.Array carrier has unexpected arguments",
+//RS                 ));
+//RS             }
+//RS             values
+//RS                 .iter()
+//RS                 .map(data_tree_from_value)
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(DataTree::Array)
+//RS         }
+//RS         "Object" => {
+//RS             let MirRuntimeValue::List(values) = arg(0)? else {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "DataTree.Object carrier has the wrong payload",
+//RS                 ));
+//RS             };
+//RS             if args.len() != 1 {
+//RS                 return Err(MirNativeCursorError::internal(
+//RS                     "DataTree.Object carrier has unexpected arguments",
+//RS                 ));
+//RS             }
+//RS             let mut entries = Vec::with_capacity(values.len());
+//RS             for value in values {
+//RS                 let MirRuntimeValue::Struct { type_name, fields } = value else {
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "DataTree.Object carrier contains a non-tuple entry",
+//RS                     ));
+//RS                 };
+//RS                 if type_name != "Tuple" {
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "DataTree.Object carrier entry is not a Tuple",
+//RS                     ));
+//RS                 }
+//RS                 let key = named_field(fields, "key")?;
+//RS                 let value = named_field(fields, "value")?;
+//RS                 let MirRuntimeValue::String(key) = key else {
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "DataTree.Object carrier key is not a String",
+//RS                     ));
+//RS                 };
+//RS                 entries.push((key.clone(), data_tree_from_value(value)?));
+//RS             }
+//RS             Ok(DataTree::Object(entries))
+//RS         }
+//RS         _ => Err(MirNativeCursorError::internal(format!(
+//RS             "unknown DataTree variant `{variant}`"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn named_field<'a>(
+//RS     fields: &'a [(String, MirRuntimeValue)],
+//RS     name: &str,
+//RS ) -> Result<&'a MirRuntimeValue, MirNativeCursorError> {
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(field, value)| (field == name).then_some(value))
+//RS         .ok_or_else(|| {
+//RS             MirNativeCursorError::internal(format!("carrier is missing `{name}` field"))
+//RS         })
+//RS }
+//RS 
+//RS fn csv_row_from_value(value: &MirRuntimeValue) -> Result<Vec<String>, MirNativeCursorError> {
+//RS     let fields = match value {
+//RS         MirRuntimeValue::List(values) => values,
+//RS         MirRuntimeValue::Struct { type_name, fields } if type_name == "CSVRow" => {
+//RS             match named_field(fields, "fields")? {
+//RS                 MirRuntimeValue::List(values) => values,
+//RS                 _ => {
+//RS                     return Err(MirNativeCursorError::internal(
+//RS                         "CSVRow.fields is not a list",
+//RS                     ))
+//RS                 }
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             return Err(MirNativeCursorError::internal(
+//RS                 "CSV writer expects a CSVRow or string list",
+//RS             ))
+//RS         }
+//RS     };
+//RS     fields
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             MirRuntimeValue::String(value) => Ok(value.clone()),
+//RS             _ => Err(MirNativeCursorError::internal(
+//RS                 "CSV writer row contains a non-string field",
+//RS             )),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS     use crate::backend::{SourceDeoptError, SourceExecutionCompletionDisposition};
+//RS     use crate::enc_stream::runtime::jet_std::{
+//RS         EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat,
+//RS     };
+//RS     use crate::ProcessPrelude::process_prelude::jet_std::{
+//RS         IOContext, IOError, IOOperation, ProcessResourceLimit,
+//RS     };
+//RS     use jet_foundation::Outcome::JetAbsent;
+//RS     use std::path::PathBuf;
+//RS     use std::panic::{catch_unwind, AssertUnwindSafe};
+//RS     use std::sync::{Arc, Mutex};
+//RS     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+//RS 
+//RS     fn test_handle(value: u64) -> MirHandleId {
+//RS         MirHandleId(value)
+//RS     }
+//RS 
+//RS     fn test_path(label: &str) -> PathBuf {
+//RS         static NEXT_PATH: AtomicU32 = AtomicU32::new(0);
+//RS         let suffix = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
+//RS         let root = std::env::var_os("JET_SCRATCH")
+//RS             .map(PathBuf::from)
+//RS             .or_else(|| {
+//RS                 std::env::var_os("HOME")
+//RS                     .map(PathBuf::from)
+//RS                     .map(|home| home.join(".cache").join("jet-luna"))
+//RS             })
+//RS             .expect("JET_SCRATCH or HOME must select the Jet scratch directory");
+//RS         std::fs::create_dir_all(&root).expect("create Jet scratch directory");
+//RS         root.join(format!(
+//RS             "source-resources-{label}-{}-{suffix}.tmp",
+//RS             std::process::id()
+//RS         ))
+//RS     }
+//RS 
+//RS     fn test_channel_arena() -> SourceResourceArena {
+//RS         SourceResourceArena::new_with_finalizer(
+//RS             Arc::new(|finalization| {
+//RS                 finalization.with_live_scope(|_, _, values, _completions| {
+//RS                     if values.is_empty() {
+//RS                         Ok(())
+//RS                     } else {
+//RS                         Err("channel test did not consume its queued values".to_string())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(|error| panic!("channel test finalization failed: {error:?}")),
+//RS         )
+//RS     }
+//RS 
+//RS     fn test_shared_interop_session() -> SourceResourceSession {
+//RS         SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(|finalization| {
+//RS                 finalization.with_live_scope(|_, _, values, _completions| {
+//RS                     if values.is_empty() {
+//RS                         Ok(())
+//RS                     } else {
+//RS                         Err("Shared interop test did not consume queued values".to_string())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(|outcome| panic!("unexpected automatic Shared finalization: {outcome:?}")),
+//RS         )
+//RS     }
+//RS 
+//RS     fn test_completion(id: i64) -> SourceExecutionCompletion {
+//RS         SourceExecutionCompletion {
+//RS             execution: None,
+//RS             function: None,
+//RS             lease: None,
+//RS             disposition: SourceExecutionCompletionDisposition::NotInvoked {
+//RS                 cause: SourceDeoptError::Backend(format!("completion-{id}")),
+//RS                 entry_values: vec![MirRuntimeValue::Int(id)],
+//RS                 write_borrow_indices: vec![id as usize],
+//RS                 completions: Vec::new(),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn test_nested_completion() -> SourceExecutionCompletion {
+//RS         SourceExecutionCompletion {
+//RS             execution: None,
+//RS             function: None,
+//RS             lease: None,
+//RS             disposition: SourceExecutionCompletionDisposition::NotInvoked {
+//RS                 cause: SourceDeoptError::Backend("completion-1".to_string()),
+//RS                 entry_values: vec![MirRuntimeValue::Int(1)],
+//RS                 write_borrow_indices: vec![1],
+//RS                 completions: vec![test_completion(2)],
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn assert_completion_receipt(
+//RS         completion: &SourceExecutionCompletion,
+//RS         id: i64,
+//RS     ) -> &[SourceExecutionCompletion] {
+//RS         assert!(completion.execution.is_none());
+//RS         assert!(completion.function.is_none());
+//RS         assert!(completion.lease.is_none());
+//RS         match &completion.disposition {
+//RS             SourceExecutionCompletionDisposition::NotInvoked {
+//RS                 cause,
+//RS                 entry_values,
+//RS                 write_borrow_indices,
+//RS                 completions,
+//RS             } => {
+//RS                 assert_eq!(
+//RS                     cause,
+//RS                     &SourceDeoptError::Backend(format!("completion-{id}"))
+//RS                 );
+//RS                 assert_eq!(entry_values, &[MirRuntimeValue::Int(id)]);
+//RS                 assert_eq!(write_borrow_indices, &[id as usize]);
+//RS                 completions
+//RS             }
+//RS             SourceExecutionCompletionDisposition::Invoked { .. } => {
+//RS                 panic!("expected the exact not-invoked completion receipt")
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn assert_nested_completion(completion: &SourceExecutionCompletion) {
+//RS         let nested = assert_completion_receipt(completion, 1);
+//RS         assert_eq!(nested.len(), 1);
+//RS         assert!(assert_completion_receipt(&nested[0], 2).is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn last_root_retires_empty_no_handler_session() {
+//RS         let session = SourceResourceSession::new();
+//RS         let arena = session.arena();
+//RS         let root = session.retain_root().expect("retain Source session root");
+//RS 
+//RS         session.retire().expect("defer retirement while root is live");
+//RS         assert!(!arena.is_retired().expect("root keeps arena live"));
+//RS 
+//RS         drop(root);
+//RS         assert!(arena.is_retired().expect("last root completes retirement"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dropping_session_before_last_root_delivers_success_to_live_handler() {
+//RS         let outcomes = Arc::new(Mutex::new(Vec::new()));
+//RS         let handler_target = Arc::downgrade(&outcomes);
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(|finalization| {
+//RS                 finalization.with_live_scope(|_, _, values, completions| {
+//RS                     if values.len() != 1 || values[0] != MirRuntimeValue::Int(81) {
+//RS                         return Err("success finalizer received the wrong Source value".to_string());
+//RS                     }
+//RS                     values.clear();
+//RS                     completions.push(test_nested_completion());
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(move |outcome| {
+//RS                 if let Some(target) = handler_target.upgrade() {
+//RS                     target
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .push(outcome);
+//RS                 }
+//RS             }),
+//RS         );
+//RS         let root = session.retain_root().expect("retain Source session root");
+//RS         let arena = root.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1140), test_handle(1141), None)
+//RS             .expect("register Source cleanup receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(81))
+//RS             .expect("queue Source cleanup value");
+//RS         assert!(session
+//RS             .retire()
+//RS             .expect("defer retirement while the root is live")
+//RS             .is_empty());
+//RS 
+//RS         drop(session);
+//RS         drop(root);
+//RS 
+//RS         assert!(arena.is_retired().expect("successful cleanup retires arena"));
+//RS         let mut outcomes = outcomes
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         assert_eq!(outcomes.len(), 1);
+//RS         match outcomes.pop().expect("one last-root outcome") {
+//RS             SourceResourceFinalizationOutcome::Retired { completions } => {
+//RS                 assert_eq!(completions.len(), 1);
+//RS                 assert_nested_completion(&completions[0]);
+//RS             }
+//RS             SourceResourceFinalizationOutcome::Failed(error) => {
+//RS                 panic!("successful last-root cleanup failed: {error:?}");
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dropping_session_before_last_root_delivers_failure_to_live_handler() {
+//RS         let outcomes = Arc::new(Mutex::new(Vec::new()));
+//RS         let handler_target = Arc::downgrade(&outcomes);
+//RS         let attempts = Arc::new(AtomicUsize::new(0));
+//RS         let finalizer_attempts = attempts.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 let first_attempt = finalizer_attempts.fetch_add(1, Ordering::SeqCst) == 0;
+//RS                 finalization.with_live_scope(move |_, _, values, completions| {
+//RS                     if values.len() != 1 || values[0] != MirRuntimeValue::Int(82) {
+//RS                         return Err("failure finalizer received the wrong Source value".to_string());
+//RS                     }
+//RS                     if first_attempt {
+//RS                         completions.push(test_nested_completion());
+//RS                         Err("Source cleanup retained its owned carrier".to_string())
+//RS                     } else {
+//RS                         values.clear();
+//RS                         Ok(())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(move |outcome| {
+//RS                 if let Some(target) = handler_target.upgrade() {
+//RS                     target
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .push(outcome);
+//RS                 }
+//RS             }),
+//RS         );
+//RS         let root = session.retain_root().expect("retain Source session root");
+//RS         let arena = root.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1150), test_handle(1151), None)
+//RS             .expect("register Source cleanup receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(82))
+//RS             .expect("queue Source cleanup value");
+//RS         assert!(session
+//RS             .retire()
+//RS             .expect("defer retirement while the root is live")
+//RS             .is_empty());
+//RS 
+//RS         drop(session);
+//RS         drop(root);
+//RS 
+//RS         assert!(!arena.is_retired().expect("failed cleanup remains retryable"));
+//RS         let mut outcomes = outcomes
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         assert_eq!(outcomes.len(), 1);
+//RS         let failure = match outcomes.pop().expect("one last-root outcome") {
+//RS             SourceResourceFinalizationOutcome::Failed(error) => {
+//RS                 assert_eq!(error.error, "Source cleanup retained its owned carrier");
+//RS                 assert_eq!(error.values, vec![MirRuntimeValue::Int(82)]);
+//RS                 assert_eq!(error.completions.len(), 1);
+//RS                 assert_nested_completion(&error.completions[0]);
+//RS                 assert!(error.retryable);
+//RS                 error
+//RS             }
+//RS             SourceResourceFinalizationOutcome::Retired { .. } => {
+//RS                 panic!("failed last-root cleanup was reported as retired");
+//RS             }
+//RS         };
+//RS         drop(outcomes);
+//RS 
+//RS         assert!(!arena.is_retired().expect("failed cleanup remains retryable"));
+//RS         let completions = arena
+//RS             .retry_retire(failure)
+//RS             .expect("retry exact full outcome delivered to handler");
+//RS         assert_eq!(completions.len(), 1);
+//RS         assert_nested_completion(&completions[0]);
+//RS         assert_eq!(attempts.load(Ordering::Acquire), 2);
+//RS         assert!(arena.is_retired().expect("retry consumes retained carrier"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn no_handler_admits_physical_shared_roots_but_rejects_source_alias_debt() {
+//RS         let session = SourceResourceSession::new();
+//RS         let arena = session.arena();
+//RS         let owner_count = Arc::new(AtomicUsize::new(1));
+//RS         let count_for_count = owner_count.clone();
+//RS         let count_for_retain = owner_count.clone();
+//RS         let root = crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             0xfeed_01,
+//RS             MirRuntimeValue::Int(1),
+//RS         )
+//RS         .with_owner_alias_lifecycle(
+//RS             move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS             move || {
+//RS                 reserve_test_shared_alias(&count_for_retain, 0x501)?
+//RS                     .ok_or_else(|| "test Shared owner has no live aliases".to_string())
+//RS             },
+//RS         );
+//RS         let physical_root = arena
+//RS             .register_shared_interop_root(0xfeed_01, &root)
+//RS             .expect("bare physical Shared root has no Source alias debt");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS         assert_eq!(
+//RS             arena.retain_shared_interop_alias(&physical_root),
+//RS             Err("Source Shared aliases require an origin outcome handler".to_string())
+//RS         );
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS 
+//RS         let alias = root
+//RS             .retain_owner_alias()
+//RS             .expect("reserve test Source Shared alias");
+//RS         let alias_root = root
+//RS             .clone()
+//RS             .with_owner_alias_lease(alias)
+//RS             .expect("attach Source alias to physical root");
+//RS         let alias_token = alias_root
+//RS             .owner_alias_token_id()
+//RS             .expect("attached Source alias token");
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         assert_eq!(
+//RS             arena.register_shared_interop_root(0xfeed_01, &alias_root),
+//RS             Err("Source Shared aliases require an origin outcome handler before root registration"
+//RS                 .to_string())
+//RS         );
+//RS         assert_eq!(alias_root.owner_alias_token_id(), Some(alias_token));
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 2);
+//RS         let released = alias_root.release_owner_alias();
+//RS         assert!(released.result.is_ok());
+//RS         assert!(released.completion.is_none());
+//RS         assert_eq!(owner_count.load(Ordering::Acquire), 1);
+//RS 
+//RS         let root_lease = session.retain_root().expect("retain no-handler session root");
+//RS         assert!(session
+//RS             .retire()
+//RS             .expect("defer no-work retirement while root is live")
+//RS             .is_empty());
+//RS         drop(root);
+//RS         drop(alias_root);
+//RS         drop(session);
+//RS         drop(root_lease);
+//RS         assert!(arena
+//RS             .is_retired()
+//RS             .expect("no-handler physical root finishes without Source work"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn no_handler_rejects_source_receiver_without_adopting_it() {
+//RS         let session = SourceResourceSession::new();
+//RS         let arena = session.arena();
+//RS         let receiver = jet_codegen::scheduler::JetSchedulerChannel::new();
+//RS         let error = arena
+//RS             .register_channel_receiver(test_handle(1160), &receiver)
+//RS             .expect_err("Source cleanup receiver requires an origin outcome owner");
+//RS         assert_eq!(
+//RS             error,
+//RS             "Source channel receiver requires an origin-owner finalizer and completion handler"
+//RS         );
+//RS 
+//RS         let sender = receiver.sender();
+//RS         assert!(sender.send(MirRuntimeValue::Int(83)));
+//RS         assert_eq!(receiver.try_receive(), Some(MirRuntimeValue::Int(83)));
+//RS         session.retire().expect("rejected receiver was not adopted");
+//RS         assert!(arena.is_retired().expect("empty no-handler arena retires"));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn finalizer_returns_full_nested_receipt_without_active_scope() {
+//RS         let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
+//RS         let completion = pending.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 let packet = completion
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                     .take()
+//RS                     .expect("one queued value owns one completion packet");
+//RS                 finalization.with_live_scope(move |_, _, values, completions| {
+//RS                     values.clear();
+//RS                     completions.push(packet);
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1100), test_handle(1101), None)
+//RS             .expect("register completion receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+//RS             .expect("queue Source finalization value");
+//RS 
+//RS         let completions = session.retire().expect("retire and return exact receipt");
+//RS         assert_eq!(completions.len(), 1);
+//RS         assert_nested_completion(&completions[0]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn finalizer_routes_full_receipt_into_the_current_execution_scope() {
+//RS         let pending = Arc::new(Mutex::new(Some(test_nested_completion())));
+//RS         let completion = pending.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 let packet = completion
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                     .take()
+//RS                     .expect("one queued value owns one completion packet");
+//RS                 finalization.with_live_scope(move |_, _, values, completions| {
+//RS                     values.clear();
+//RS                     completions.push(packet);
+//RS                     Ok(())
+//RS                 })
+//RS             }),
+//RS             Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1110), test_handle(1111), None)
+//RS             .expect("register completion receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+//RS             .expect("queue Source finalization value");
+//RS 
+//RS         let scope = SourceExecutionCompletionScope::new();
+//RS         let returned = scope.with_current(|| session.retire().expect("retire in current scope"));
+//RS         assert!(returned.is_empty());
+//RS         let completions = scope.drain();
+//RS         assert_eq!(completions.len(), 1);
+//RS         assert_nested_completion(&completions[0]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn failed_receiver_cleanup_preserves_completion_order() {
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(|finalization| {
+//RS                 finalization.with_live_scope(|_, _, values, completions| {
+//RS                     let MirRuntimeValue::Int(id) =
+//RS                         values.first().expect("receiver cleanup owns one value")
+//RS                     else {
+//RS                         panic!("test receiver value is an integer")
+//RS                     };
+//RS                     let id = *id;
+//RS                     completions.push(test_completion(id));
+//RS                     if id == 1 {
+//RS                         values.clear();
+//RS                         Ok(())
+//RS                     } else {
+//RS                         Err("receiver cleanup failed after its receipt".to_string())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1130), test_handle(1131), None)
+//RS             .expect("register ordered-completion receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(1))
+//RS             .expect("queue first receiver value");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(2))
+//RS             .expect("queue second receiver value");
+//RS 
+//RS         let failure = session
+//RS             .retire()
+//RS             .expect_err("second receiver cleanup fails");
+//RS         assert_eq!(failure.values, vec![MirRuntimeValue::Int(2)]);
+//RS         assert_eq!(failure.completions.len(), 2);
+//RS         assert!(assert_completion_receipt(&failure.completions[0], 1).is_empty());
+//RS         assert!(assert_completion_receipt(&failure.completions[1], 2).is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn failed_finalization_preserves_partial_receipts_through_retry() {
+//RS         let attempts = Arc::new(AtomicUsize::new(0));
+//RS         let finalizer_attempts = attempts.clone();
+//RS         let session = SourceResourceSession::new_with_finalizer(
+//RS             Arc::new(move |finalization| {
+//RS                 let first_attempt = finalizer_attempts.fetch_add(1, Ordering::SeqCst) == 0;
+//RS                 finalization.with_live_scope(move |_, _, values, completions| {
+//RS                     completions.push(if first_attempt {
+//RS                         test_nested_completion()
+//RS                     } else {
+//RS                         test_completion(3)
+//RS                     });
+//RS                     if first_attempt {
+//RS                         Err("Source cleanup failed after producing a receipt".to_string())
+//RS                     } else {
+//RS                         values.clear();
+//RS                         Ok(())
+//RS                     }
+//RS                 })
+//RS             }),
+//RS             Arc::new(|outcome| panic!("unexpected automatic finalization: {outcome:?}")),
+//RS         );
+//RS         let arena = session.arena();
+//RS         let (sender, _) = arena
+//RS             .register_new_channel(test_handle(1120), test_handle(1121), None)
+//RS             .expect("register retry receiver");
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(77))
+//RS             .expect("queue retry value");
+//RS 
+//RS         let failure = session.retire().expect_err("first finalization fails");
+//RS         assert_eq!(
+//RS             failure.error,
+//RS             "Source cleanup failed after producing a receipt"
+//RS         );
+//RS         assert_eq!(failure.values, vec![MirRuntimeValue::Int(77)]);
+//RS         assert_eq!(failure.completions.len(), 1);
+//RS         assert_nested_completion(&failure.completions[0]);
+//RS 
+//RS         let completions = session
+//RS             .retry_retire(failure)
+//RS             .expect("retry full retirement packet");
+//RS         assert_eq!(completions.len(), 2);
+//RS         assert_nested_completion(&completions[0]);
+//RS         assert!(assert_completion_receipt(&completions[1], 3).is_empty());
+//RS         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+//RS         assert!(arena.is_retired().expect("retry completes retirement"));
+//RS     }
+//RS 
+//RS     fn test_native_binding(artifact_id: u64, scope: &str) -> SourceNativeBinding {
+//RS         use jet_foundation::MIR::{
+//RS             MirArtifactBuildMode, MirArtifactIdentity, MirArtifactId, MirArtifactKind,
+//RS             MirArtifactTarget, MirExecutionIdentity, MirProgramIdentity, MIR_SCHEMA_VERSION,
+//RS         };
+//RS 
+//RS         let artifact = MirArtifactId(artifact_id);
+//RS         let execution = MirExecutionIdentity {
+//RS             schema_version: 1,
+//RS             artifact: MirArtifactIdentity {
+//RS                 schema_version: 1,
+//RS                 mir_schema_version: MIR_SCHEMA_VERSION,
+//RS                 program_digest: [0; 32],
+//RS                 package_identity: "source-resource-test".to_string(),
+//RS                 artifact,
+//RS                 name: scope.to_string(),
+//RS                 kind: MirArtifactKind::NativeExecutable,
+//RS                 target: MirArtifactTarget::Cranelift,
+//RS                 mode: MirArtifactBuildMode::Dev,
+//RS                 provider_identity: String::new(),
+//RS                 closure_identity: String::new(),
+//RS                 artifact_identity: String::new(),
+//RS                 program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                 )),
+//RS             },
+//RS         };
+//RS         let bindings = crate::SourceInterfaces::NativeInterfaceBindings::new();
+//RS         let object = bindings
+//RS             .create_object(scope.to_string())
+//RS             .expect("create native test interface");
+//RS         SourceNativeBinding::interface(
+//RS             &object,
+//RS             execution,
+//RS             artifact,
+//RS             MirType::from_kind(MirTypeKind::Int),
+//RS         )
+//RS         .expect("construct checked native binding")
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn active_source_resource_lease_is_scoped_and_restored() {
+//RS         let session = SourceResourceSession::new();
+//RS         let lease = session.retain_root().expect("retain Source callback root");
+//RS         let arena = lease.arena();
+//RS 
+//RS         with_active_source_resource_lease(|active| assert!(active.is_none()));
+//RS         let activation = lease.activate();
+//RS         with_active_source_resource_lease(|active| {
+//RS             let active = active.expect("lease activation is visible");
+//RS             assert!(Arc::ptr_eq(&active.inner, &lease.inner));
+//RS 
+//RS             let nested = active.activate();
+//RS             with_active_source_resource_lease(|nested_active| {
+//RS                 assert!(Arc::ptr_eq(
+//RS                     &nested_active.expect("nested activation is visible").inner,
+//RS                     &lease.inner
+//RS                 ));
+//RS             });
+//RS             drop(nested);
+//RS         });
+//RS 
+//RS         let unwind = catch_unwind(AssertUnwindSafe(|| {
+//RS             with_active_source_resource_lease(|active| {
+//RS                 let _nested = active
+//RS                     .expect("lease activation is visible while unwinding")
+//RS                     .activate();
+//RS                 panic!("nested active lease accessor");
+//RS             });
+//RS         }));
+//RS         assert!(unwind.is_err());
+//RS         with_active_source_resource_lease(|active| {
+//RS             assert!(Arc::ptr_eq(
+//RS                 &active.expect("outer lease activation is restored after unwind").inner,
+//RS                 &lease.inner
+//RS             ));
+//RS         });
+//RS         with_active_source_resource_arena(|active_arena| {
+//RS             let active_arena = active_arena.expect("arena activation is visible");
+//RS             assert!(Arc::ptr_eq(&active_arena.state, &arena.state));
+//RS 
+//RS             let nested = activate_source_resource_arena(active_arena);
+//RS             with_active_source_resource_arena(|nested_arena| {
+//RS                 assert!(Arc::ptr_eq(
+//RS                     &nested_arena.expect("nested arena activation is visible").state,
+//RS                     &arena.state
+//RS                 ));
+//RS             });
+//RS             drop(nested);
+//RS         });
+//RS 
+//RS         let arena_unwind = catch_unwind(AssertUnwindSafe(|| {
+//RS             with_active_source_resource_arena(|active_arena| {
+//RS                 let _nested = activate_source_resource_arena(
+//RS                     active_arena.expect("arena activation is visible while unwinding"),
+//RS                 );
+//RS                 panic!("nested active arena accessor");
+//RS             });
+//RS         }));
+//RS         assert!(arena_unwind.is_err());
+//RS         with_active_source_resource_lease(|active| {
+//RS             assert!(Arc::ptr_eq(
+//RS                 &active.expect("lease activation is restored after arena unwind").inner,
+//RS                 &lease.inner
+//RS             ));
+//RS         });
+//RS 
+//RS         let nested = activate_source_resource_arena(&arena);
+//RS         with_active_source_resource_lease(|active| assert!(active.is_none()));
+//RS         drop(nested);
+//RS         with_active_source_resource_lease(|active| {
+//RS             assert!(Arc::ptr_eq(
+//RS                 &active.expect("outer lease activation is restored").inner,
+//RS                 &lease.inner
+//RS             ));
+//RS         });
+//RS 
+//RS         drop(activation);
+//RS         with_active_source_resource_lease(|active| assert!(active.is_none()));
+//RS         drop(lease);
+//RS         session.retire().expect("retire empty Source session");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn weak_source_resource_lease_alias_does_not_mint_a_root() {
+//RS         let session = SourceResourceSession::new();
+//RS         let lease = session.retain_root().expect("retain Source callback root");
+//RS         let weak = lease.downgrade();
+//RS 
+//RS         session.retire().expect("defer retirement while root is live");
+//RS         assert_eq!(session.retained_root_count().unwrap(), 1);
+//RS         let alias = weak.upgrade().expect("existing counted lease is live");
+//RS         assert!(Arc::ptr_eq(&alias.inner, &lease.inner));
+//RS         assert_eq!(session.retained_root_count().unwrap(), 1);
+//RS         drop(alias);
+//RS 
+//RS         drop(lease);
+//RS         assert_eq!(session.retained_root_count().unwrap(), 0);
+//RS         assert!(session.arena().is_retired().unwrap());
+//RS         assert!(weak.upgrade().is_none());
+//RS     }
+//RS 
+//RS     struct TestSharedInteropAliasLease {
+//RS         owner_count: Arc<AtomicUsize>,
+//RS         token_id: i64,
+//RS         completion: Mutex<Option<crate::Memory::shared_protocol::JetSharedPhysicalCompletion>>,
+//RS         result_error: Option<String>,
+//RS     }
+//RS 
+//RS     impl crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
+//RS         for TestSharedInteropAliasLease
+//RS     {
+//RS         fn token_id(&self) -> i64 {
+//RS             self.token_id
+//RS         }
+//RS 
+//RS         fn release(
+//RS             mut self: Box<Self>,
+//RS         ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS             let completion = self
+//RS                 .completion
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .take();
+//RS             let result = self.result_error.take().map_or(Ok(()), Err);
+//RS             crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 result,
+//RS                 completion,
+//RS             )
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for TestSharedInteropAliasLease {
+//RS         fn drop(&mut self) {
+//RS             let previous = self.owner_count.fetch_sub(1, Ordering::AcqRel);
+//RS             assert!(previous > 0, "test Source Shared alias count underflowed");
+//RS         }
+//RS     }
+//RS 
+//RS     fn reserve_test_shared_alias(
+//RS         owner_count: &Arc<AtomicUsize>,
+//RS         token_id: i64,
+//RS     ) -> Result<Option<Box<dyn crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>>, String>
+//RS     {
+//RS         reserve_test_shared_alias_with_completion(owner_count, token_id, None, None)
+//RS     }
+//RS 
+//RS     fn reserve_test_shared_alias_with_completion(
+//RS         owner_count: &Arc<AtomicUsize>,
+//RS         token_id: i64,
+//RS         completion: Option<crate::Memory::shared_protocol::JetSharedPhysicalCompletion>,
+//RS         result_error: Option<String>,
+//RS     ) -> Result<Option<Box<dyn crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>>, String>
+//RS     {
+//RS         let mut current = owner_count.load(Ordering::Acquire);
+//RS         loop {
+//RS             if current == 0 {
+//RS                 return Ok(None);
+//RS             }
+//RS             let next = current
+//RS                 .checked_add(1)
+//RS                 .ok_or_else(|| "test Source Shared alias count exhausted".to_string())?;
+//RS             match owner_count.compare_exchange_weak(
+//RS                 current,
+//RS                 next,
+//RS                 Ordering::AcqRel,
+//RS                 Ordering::Acquire,
+//RS             ) {
+//RS                 Ok(_) => {
+//RS                     return Ok(Some(Box::new(TestSharedInteropAliasLease {
+//RS                         owner_count: owner_count.clone(),
+//RS                         token_id,
+//RS                         completion: Mutex::new(completion),
+//RS                         result_error,
+//RS                     })))
+//RS                 }
+//RS                 Err(observed) => current = observed,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn release_test_shared_alias(
+//RS         arena: &SourceResourceArena,
+//RS         capability: &SourceResourceHandle,
+//RS         token_id: i64,
+//RS     ) {
+//RS         let outcome = arena
+//RS             .release_shared_interop_alias(capability, token_id)
+//RS             .expect("release pending test Shared alias");
+//RS         assert!(outcome.result.is_ok());
+//RS         assert!(outcome.completion.is_none());
+//RS     }
+//RS 
+//RS     struct TestSharedInteropWeakOwner {
+//RS         owner_slot:
+//RS             std::sync::Weak<Mutex<Option<crate::SourceSharedInterop::SourceSharedInterop>>>,
+//RS         owner_count: Arc<AtomicUsize>,
+//RS         next_token_id: Arc<AtomicU32>,
+//RS     }
+//RS 
+//RS     impl crate::SourceSharedInterop::SourceSharedInteropWeakOwner for TestSharedInteropWeakOwner {
+//RS         fn upgrade(
+//RS             &self,
+//RS         ) -> Result<
+//RS             Option<(
+//RS                 crate::SourceSharedInterop::SourceSharedInterop,
+//RS                 Box<dyn crate::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
+//RS             )>,
+//RS             String,
+//RS         > {
+//RS             let Some(owner) = self.owner_slot.upgrade() else {
+//RS                 return Ok(None);
+//RS             };
+//RS             let root = owner
+//RS                 .lock()
+//RS                 .map_err(|_| "test Shared owner slot is poisoned".to_string())?
+//RS                 .as_ref()
+//RS                 .cloned();
+//RS             let Some(root) = root else {
+//RS                 return Ok(None);
+//RS             };
+//RS             let token_id = i64::from(self.next_token_id.fetch_add(1, Ordering::AcqRel));
+//RS             let Some(alias) = reserve_test_shared_alias(&self.owner_count, token_id)? else {
+//RS                 return Ok(None);
+//RS             };
+//RS             Ok(Some((root, alias)))
+//RS         }
+//RS     }
+//RS 
+//RS     struct ReentrantLeaseDrop {
+//RS         lease: Option<SourceResourceLease>,
+//RS         arena: SourceResourceArena,
+//RS         reentered_after_release: Arc<AtomicUsize>,
+//RS     }
+//RS 
+//RS     impl Drop for ReentrantLeaseDrop {
+//RS         fn drop(&mut self) {
+//RS             drop(self.lease.take());
+//RS             if self.arena.is_retired().unwrap_or(false) {
+//RS                 self.reentered_after_release.fetch_add(1, Ordering::SeqCst);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn value_of(error: MirNativeCursorError) -> MirRuntimeValue {
+//RS         match error {
+//RS             MirNativeCursorError::Value(value) => *value,
+//RS             MirNativeCursorError::Internal(message) => {
+//RS                 panic!("expected a checked value error, got adapter failure: {message}")
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_file_iterator_is_lazy_and_owner_is_typed() {
+//RS         let path = test_path("lazy");
+//RS         std::fs::write(&path, b"").expect("create empty source file");
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .open_file(test_handle(1), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit typed reader");
+//RS         let key = capability.native_loop_key().expect("file loop key");
+//RS         let mut iterator = arena
+//RS             .lines_file(&key, false)
+//RS             .result
+//RS             .expect("borrow typed file owner");
+//RS 
+//RS         // No read occurs during cursor initialization.  Data written after
+//RS         // admission is visible to the first pull.
+//RS         std::fs::write(&path, b"late\n").expect("publish source data");
+//RS         assert_eq!(
+//RS             iterator.next(),
+//RS             Some(Ok(MirRuntimeValue::String("late".to_string())))
+//RS         );
+//RS         assert_eq!(iterator.next(), None);
+//RS         let _ = arena.release_capability(&capability);
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn borrowed_file_iterator_survives_release_and_moved_close() {
+//RS         let path = test_path("lease");
+//RS         std::fs::write(&path, b"borrowed\nmoved\n").expect("create source file");
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .open_file(test_handle(2), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit typed reader");
+//RS         let key = capability.native_loop_key().expect("file loop key");
+//RS         let mut borrowed = arena
+//RS             .lines_file(&key, false)
+//RS             .result
+//RS             .expect("borrow typed file owner");
+//RS         arena
+//RS             .release_capability(&capability)
+//RS             .expect("release source slot while lease is live");
+//RS         assert_eq!(
+//RS             borrowed.next(),
+//RS             Some(Ok(MirRuntimeValue::String("borrowed".to_string())))
+//RS         );
+//RS 
+//RS         let moved_capability = arena
+//RS             .open_file(test_handle(3), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit second typed reader");
+//RS         let moved_key = moved_capability.native_loop_key().expect("file loop key");
+//RS         let mut moved = arena
+//RS             .lines_file(&moved_key, true)
+//RS             .result
+//RS             .expect("move typed file owner");
+//RS         assert!(arena.release_capability(&moved_capability).is_err());
+//RS         assert_eq!(
+//RS             moved.next(),
+//RS             Some(Ok(MirRuntimeValue::String("borrowed".to_string())))
+//RS         );
+//RS         drop(borrowed);
+//RS         drop(moved);
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_file_writer_is_a_typed_release_lease() {
+//RS         let path = test_path("writer");
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .open_file_writer(test_handle(6), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit typed writer");
+//RS         assert_eq!(capability.kind, SourceResourceKind::FileWriter);
+//RS         assert!(capability.native_loop_key().is_err());
+//RS         let line = "writer line".to_string();
+//RS         arena
+//RS             .file_writer_write_line(capability.handle, capability.raw, &line)
+//RS             .expect("write through typed writer lease");
+//RS         arena
+//RS             .file_writer_flush(capability.handle, capability.raw)
+//RS             .expect("flush through typed writer lease");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .file_writer_path(capability.handle, capability.raw)
+//RS                 .expect("writer path"),
+//RS             path.to_str().expect("utf8 scratch path")
+//RS         );
+//RS         assert_eq!(
+//RS             std::fs::read_to_string(&path).expect("read writer output"),
+//RS             "writer line\n"
+//RS         );
+//RS         arena
+//RS             .release_resource(capability.handle, capability.raw)
+//RS             .expect("release typed writer");
+//RS         assert!(arena.release_resource(capability.handle, capability.raw).is_err());
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_capability_lookup_returns_stored_generation_and_kind() {
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena.register_stdin(test_handle(11)).expect("stdin owner");
+//RS         let looked_up = arena
+//RS             .lookup_capability(capability.handle, capability.raw)
+//RS             .expect("lookup canonical source capability");
+//RS         assert_eq!(looked_up, capability);
+//RS         assert!(arena
+//RS             .lookup_capability(test_handle(12), capability.raw)
+//RS             .is_err());
+//RS         arena
+//RS             .release_resource(capability.handle, capability.raw)
+//RS             .expect("release stdin owner");
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn taking_file_reader_rolls_back_when_cursor_aliases_owner() {
+//RS         let path = test_path("take-reader");
+//RS 
+//RS         std::fs::write(&path, b"line\n").expect("create source file");
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .open_file(test_handle(13), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit typed reader");
+//RS         let key = capability.native_loop_key().expect("file loop key");
+//RS         let borrowed = arena
+//RS             .lines_file(&key, false)
+//RS             .result
+//RS             .expect("borrow file owner");
+//RS         assert!(arena
+//RS             .take_file_reader(capability.handle, capability.raw)
+//RS             .is_err());
+//RS         assert_eq!(
+//RS             arena
+//RS                 .lookup_capability(capability.handle, capability.raw)
+//RS                 .expect("rolled back file capability")
+//RS                 .kind,
+//RS             SourceResourceKind::LinesFile
+//RS         );
+//RS         drop(borrowed);
+//RS         let reader = arena
+//RS             .take_file_reader(capability.handle, capability.raw)
+//RS             .expect("consume unaliased file owner");
+//RS         assert!(arena
+//RS             .lookup_capability(capability.handle, capability.raw)
+//RS             .is_err());
+//RS         drop(reader);
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn taking_file_writer_rolls_back_when_owner_is_aliased() {
+//RS         let path = test_path("take-writer");
+//RS         let arena = SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .open_file_writer(test_handle(20), path.to_str().expect("utf8 scratch path"))
+//RS             .expect("admit file writer");
+//RS         let alias = arena
+//RS             .owner_for_raw(
+//RS                 capability.handle,
+//RS                 capability.raw,
+//RS                 &SourceResourceKind::FileWriter,
+//RS             )
+//RS             .expect("borrow writer owner");
+//RS         assert!(arena
+//RS             .take_file_writer(capability.handle, capability.raw)
+//RS             .is_err());
+//RS         assert_eq!(
+//RS             arena
+//RS                 .lookup_capability(capability.handle, capability.raw)
+//RS                 .expect("rolled back writer capability")
+//RS                 .kind,
+//RS             SourceResourceKind::FileWriter
+//RS         );
+//RS         drop(alias);
+//RS         let writer = arena
+//RS             .take_file_writer(capability.handle, capability.raw)
+//RS             .expect("consume unaliased file writer");
+//RS         drop(writer);
+//RS         let _ = std::fs::remove_file(path);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_channel_endpoints_keep_sender_and_receiver_leases_distinct() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(16), test_handle(17), Some(1))
+//RS             .expect("admit channel endpoints");
+//RS         assert_eq!(sender.kind, SourceResourceKind::ChannelSender);
+//RS         assert_eq!(receiver.kind, SourceResourceKind::ChannelReceiver);
+//RS         arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(9))
+//RS             .expect("send channel value");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver.handle, receiver.raw)
+//RS                 .expect("receive channel value"),
+//RS             Some(MirRuntimeValue::Int(9))
+//RS         );
+//RS         arena
+//RS             .channel_sender_close(sender.handle, sender.raw)
+//RS             .expect("close channel sender");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver.handle, receiver.raw)
+//RS                 .expect("observe closed receiver"),
+//RS             None
+//RS         );
+//RS         arena
+//RS             .release_resource(sender.handle, sender.raw)
+//RS             .expect("release sender endpoint");
+//RS         arena
+//RS             .release_resource(receiver.handle, receiver.raw)
+//RS             .expect("release receiver endpoint");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cloned_channel_endpoints_keep_physical_counts_until_last_drop() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(21), test_handle(22), None)
+//RS             .expect("admit channel endpoints");
+//RS         let sender_clone = arena
+//RS             .clone_channel_sender(sender.handle, sender.raw, test_handle(23))
+//RS             .expect("clone sender endpoint");
+//RS         let receiver_clone = arena
+//RS             .clone_channel_receiver(receiver.handle, receiver.raw, test_handle(24))
+//RS             .expect("clone receiver endpoint");
+//RS         arena
+//RS             .release_resource(sender.handle, sender.raw)
+//RS             .expect("release original sender endpoint");
+//RS         arena
+//RS             .release_resource(receiver.handle, receiver.raw)
+//RS             .expect("release original receiver endpoint");
+//RS         arena
+//RS             .channel_sender_send(sender_clone.handle, sender_clone.raw, MirRuntimeValue::Int(11))
+//RS             .expect("send with cloned sender");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(
+//RS                     receiver_clone.handle,
+//RS                     receiver_clone.raw,
+//RS                 )
+//RS                 .expect("receive with cloned receiver"),
+//RS             Some(MirRuntimeValue::Int(11))
+//RS         );
+//RS         arena
+//RS             .channel_sender_close(sender_clone.handle, sender_clone.raw)
+//RS             .expect("close final sender endpoint");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver_clone.handle, receiver_clone.raw)
+//RS                 .expect("observe final sender close"),
+//RS             None
+//RS         );
+//RS         arena
+//RS             .release_resource(sender_clone.handle, sender_clone.raw)
+//RS             .expect("release cloned sender endpoint");
+//RS         arena
+//RS             .release_resource(receiver_clone.handle, receiver_clone.raw)
+//RS             .expect("release cloned receiver endpoint");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_sender_reservation_publishes_only_after_commit() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(24), test_handle(25), Some(1))
+//RS             .expect("admit bounded channel endpoints");
+//RS         let reservation = arena
+//RS             .channel_sender_reserve(sender.handle, sender.raw)
+//RS             .expect("reserve Source sender capacity");
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver.handle, receiver.raw)
+//RS                 .expect("poll receiver before commit"),
+//RS             None
+//RS         );
+//RS         assert!(reservation.commit(MirRuntimeValue::Int(91)).is_ok());
+//RS         assert_eq!(
+//RS             arena
+//RS                 .channel_receiver_try_receive(receiver.handle, receiver.raw)
+//RS                 .expect("receive committed Source value"),
+//RS             Some(MirRuntimeValue::Int(91))
+//RS         );
+//RS         arena
+//RS             .release_capability(&sender)
+//RS             .expect("release bounded sender");
+//RS         arena
+//RS             .release_capability(&receiver)
+//RS             .expect("release bounded receiver");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rejected_channel_send_returns_owned_value() {
+//RS         let arena = test_channel_arena();
+//RS         let (sender, receiver) = arena
+//RS             .register_new_channel(test_handle(25), test_handle(26), None)
+//RS             .expect("admit channel endpoints");
+//RS         arena
+//RS             .release_resource(receiver.handle, receiver.raw)
+//RS             .expect("release final receiver endpoint");
+//RS         let error = arena
+//RS             .channel_sender_send(sender.handle, sender.raw, MirRuntimeValue::Int(12))
+//RS             .expect_err("closed channel must reject send");
+//RS         assert_eq!(error.value, MirRuntimeValue::Int(12));
+//RS         arena
+//RS             .release_resource(sender.handle, sender.raw)
+//RS             .expect("release sender endpoint");
+//RS     }
+//RS 
+// END-PORT-PENDING 2027 crates/jet-jit/src/SourceResources.rs:5401-7200
+

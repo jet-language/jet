@@ -1,0 +1,1805 @@
+// PORT-PENDING 0300 crates-jet-codegen-src-prelude-corelib-top-serviceauthority-slice-1792: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1792-3592
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub fn jet_services_authority_mark_delivered(store: &str, id: &str) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: store.to_string(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     service_authority_validate_runtime(&runtime)?;
+//RS     let _operation_lock = service_authority_operation_lock(&runtime, id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     let entry = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id)
+//RS         .ok_or_else(|| JetServiceError::Unknown(format!("service id `{id}` is unknown")))?;
+//RS     if entry.dead {
+//RS         service_authority_remove_pending_entry(&runtime, entry)?;
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "cannot deliver a dead-lettered service receipt".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.state == JetDeliveryState::Cancelled {
+//RS         service_authority_remove_pending_entry(&runtime, entry)?;
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "cannot deliver a cancelled delivery".to_string(),
+//RS         ));
+//RS     }
+//RS     if !entry.delivered_to_worker {
+//RS         // Remove the in-memory reservation before the durable marker. If the
+//RS         // marker append fails, the log remains the recovery source and the
+//RS         // caller can put the whole suffix back without losing this receipt.
+//RS         service_authority_remove_pending_entry(&runtime, entry)?;
+//RS         service_authority_append_event(
+//RS             &runtime,
+//RS             entry,
+//RS             JetDeliveryState::Delivering,
+//RS             entry.attempts,
+//RS             service_authority_now(),
+//RS         )?;
+//RS     } else {
+//RS         service_authority_remove_pending_entry(&runtime, entry)?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub fn jet_services_authority_has_uncommitted(
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> Result<bool, JetServiceError> {
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+//RS     let store = {
+//RS         let registry = service_endpoint_registry()
+//RS             .lock()
+//RS             .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+//RS         let state = registry.get(&key).ok_or_else(|| {
+//RS             JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+//RS         })?;
+//RS         if state.tree != endpoint.tree || state.worker != endpoint.worker {
+//RS             return Err(JetServiceError::Revoked(
+//RS                 "service endpoint authority does not match its tree".to_string(),
+//RS             ));
+//RS         }
+//RS         state.store.as_ref().and_then(|(store, generation)| {
+//RS             (*generation == endpoint.generation).then(|| store.clone())
+//RS         })
+//RS     };
+//RS     let Some(store) = store else {
+//RS         return Ok(false);
+//RS     };
+//RS     let runtime = JetServiceRuntime {
+//RS         store,
+//RS         retention_ms: 0,
+//RS     };
+//RS     let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     let now = service_authority_now();
+//RS     Ok(entries.iter().any(|entry| {
+//RS         entry.tree == endpoint.tree
+//RS             && entry.worker == endpoint.worker
+//RS             && entry.state != JetDeliveryState::Cancelled
+//RS             && service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
+//RS             // A handoff must pin the shard for every live durable receipt,
+//RS             // including one still waiting in the authority queue. Rotating
+//RS             // only after `delivered_to_worker` strands a receipt between the
+//RS             // old pending queue and the new endpoint. Explicit retry remains
+//RS             // the only redelivery operation; this predicate only preserves
+//RS             // the receipt's current route.
+//RS             && !entry.delivered
+//RS             && !entry.dead
+//RS             && entry.retained_until.is_none()
+//RS             && !service_authority_entry_expired(entry, now)
+//RS     }))
+//RS }
+//RS 
+//RS fn service_authority_enqueue_entry(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS ) -> Result<(), JetServiceError> {
+//RS     let endpoint = service_authority_current_endpoint(runtime, entry)?;
+//RS     if endpoint.tree != entry.tree || endpoint.worker != entry.worker {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "service receipt endpoint no longer names its worker".to_string(),
+//RS         ));
+//RS     }
+//RS     jet_services_authority_enqueue(runtime, &endpoint, &entry.id, &entry.message)
+//RS }
+//RS 
+//RS fn service_authority_entry_routes_to_endpoint(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS     endpoint: &JetServiceEndpoint,
+//RS ) -> bool {
+//RS     if entry.tree != endpoint.tree || entry.worker != endpoint.worker {
+//RS         return false;
+//RS     }
+//RS     if entry.authority == endpoint.authority && entry.generation == endpoint.generation {
+//RS         return true;
+//RS     }
+//RS     // A process restart issues a fresh provider authority for the same logical
+//RS     // shard. The durable receipt keeps its original authority, while the new
+//RS     // tree endpoint is the authenticated route. Compare the resolved logical
+//RS     // endpoint after authority validation; do not rewrite the receipt's
+//RS     // identity or create a retry side channel.
+//RS     service_authority_current_endpoint(runtime, entry).is_ok_and(|current| {
+//RS         current.tree == endpoint.tree
+//RS             && current.worker == endpoint.worker
+//RS             && current.generation == endpoint.generation
+//RS     })
+//RS }
+//RS 
+//RS fn service_authority_hex(bytes: &[u8]) -> String {
+//RS     let mut output = String::with_capacity(bytes.len() * 2);
+//RS     for byte in bytes {
+//RS         output.push_str(&format!("{byte:02x}"));
+//RS     }
+//RS     output
+//RS }
+//RS 
+//RS fn service_authority_unhex(value: &str) -> Option<Vec<u8>> {
+//RS     if value.len() % 2 != 0 {
+//RS         return None;
+//RS     }
+//RS     let mut bytes = Vec::with_capacity(value.len() / 2);
+//RS     let mut chars = value.as_bytes().chunks_exact(2);
+//RS     for pair in &mut chars {
+//RS         let high = (pair[0] as char).to_digit(16)? as u8;
+//RS         let low = (pair[1] as char).to_digit(16)? as u8;
+//RS         bytes.push((high << 4) | low);
+//RS     }
+//RS     Some(bytes)
+//RS }
+//RS 
+//RS fn service_authority_field(value: &str) -> String {
+//RS     format!(
+//RS         "{}:{}",
+//RS         value.len(),
+//RS         service_authority_hex(value.as_bytes())
+//RS     )
+//RS }
+//RS 
+//RS fn service_authority_record(op: char, fields: &[String]) -> String {
+//RS     let mut record = op.to_string();
+//RS     for field in fields {
+//RS         record.push('|');
+//RS         record.push_str(&service_authority_field(field));
+//RS     }
+//RS     record.push('\n');
+//RS     record
+//RS }
+//RS 
+//RS fn service_authority_parse_record(line: &str) -> Result<(char, Vec<String>), JetServiceError> {
+//RS     let mut parts = line.split('|');
+//RS     let op = parts
+//RS         .next()
+//RS         .and_then(|value| value.chars().next())
+//RS         .ok_or_else(|| service_authority_error("service authority record has no operation"))?;
+//RS     let mut fields = Vec::new();
+//RS     for part in parts {
+//RS         let (length, encoded) = part
+//RS             .split_once(':')
+//RS             .ok_or_else(|| service_authority_error("service authority field is malformed"))?;
+//RS         let length = length
+//RS             .parse::<usize>()
+//RS             .map_err(|_| service_authority_error("service authority field length is malformed"))?;
+//RS         let bytes = service_authority_unhex(encoded)
+//RS             .ok_or_else(|| service_authority_error("service authority field is not hex"))?;
+//RS         if bytes.len() != length {
+//RS             return Err(service_authority_error(
+//RS                 "service authority field length does not match",
+//RS             ));
+//RS         }
+//RS         let value = String::from_utf8(bytes)
+//RS             .map_err(|_| service_authority_error("service authority field is not UTF-8"))?;
+//RS         fields.push(value);
+//RS     }
+//RS     Ok((op, fields))
+//RS }
+//RS 
+//RS fn service_authority_read(
+//RS     runtime: &JetServiceRuntime,
+//RS ) -> Result<Vec<(char, Vec<String>)>, JetServiceError> {
+//RS     service_authority_validate_store_path(&runtime.store)?;
+//RS     let _file_lock = service_authority_file_lock(&runtime.store, "store")?;
+//RS     let mut file = match OpenOptions::new().read(true).open(&runtime.store) {
+//RS         Ok(file) => file,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+//RS         Err(error) => {
+//RS             return Err(service_authority_error(format!(
+//RS                 "could not open service store: {error}"
+//RS             )))
+//RS         }
+//RS     };
+//RS     let size = file
+//RS         .metadata()
+//RS         .map_err(|error| {
+//RS             service_authority_error(format!("could not inspect service store: {error}"))
+//RS         })?
+//RS         .len();
+//RS     if size > SERVICE_AUTH_MAX_BYTES {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service authority log exceeds its byte limit".to_string(),
+//RS         ));
+//RS     }
+//RS     let mut contents = String::new();
+//RS     file.read_to_string(&mut contents).map_err(|error| {
+//RS         service_authority_error(format!("could not read service store: {error}"))
+//RS     })?;
+//RS     if contents.lines().count() > SERVICE_AUTH_MAX_RECORDS {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service authority log is full".to_string(),
+//RS         ));
+//RS     }
+//RS     // A process can die after appending bytes but before the newline and fsync.
+//RS     // Ignore only a syntactically incomplete tail. A complete record without
+//RS     // its newline is a truncated log record and fails closed instead of being
+//RS     // silently accepted as a valid history.
+//RS     let (complete, tail) = contents
+//RS         .rfind('\n')
+//RS         .map(|end| (&contents[..end], &contents[end + 1..]))
+//RS         .unwrap_or(("", contents.as_str()));
+//RS     if !tail.is_empty() && service_authority_parse_record(tail).is_ok() {
+//RS         return Err(service_authority_error(
+//RS             "service authority log ends with a truncated record",
+//RS         ));
+//RS     }
+//RS     complete
+//RS         .lines()
+//RS         .map(service_authority_parse_record)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn service_authority_append(
+//RS     runtime: &JetServiceRuntime,
+//RS     op: char,
+//RS     fields: &[String],
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_store_path(&runtime.store)?;
+//RS     let _file_lock = service_authority_file_lock(&runtime.store, "store")?;
+//RS     let record = service_authority_record(op, fields);
+//RS     let mut options = OpenOptions::new();
+//RS     options.create(true).append(true).read(true).write(true);
+//RS     #[cfg(unix)]
+//RS     {
+//RS         use std::os::unix::fs::OpenOptionsExt;
+//RS         options.mode(0o600);
+//RS     }
+//RS     let mut file = options.open(&runtime.store).map_err(|error| {
+//RS         service_authority_error(format!("could not open service store: {error}"))
+//RS     })?;
+//RS     let current_size = file
+//RS         .metadata()
+//RS         .map_err(|error| {
+//RS             service_authority_error(format!("could not inspect service store: {error}"))
+//RS         })?
+//RS         .len();
+//RS     let record_size = u64::try_from(record.len())
+//RS         .map_err(|_| JetServiceError::Policy("service receipt record is too large".to_string()))?;
+//RS     if current_size
+//RS         .checked_add(record_size)
+//RS         .is_none_or(|size| size > SERVICE_AUTH_MAX_BYTES)
+//RS     {
+//RS         return Err(JetServiceError::Policy(
+//RS             "service authority log exceeds its byte limit".to_string(),
+//RS         ));
+//RS     }
+//RS     file.seek(SeekFrom::Start(0)).map_err(|error| {
+//RS         service_authority_error(format!("could not seek service store: {error}"))
+//RS     })?;
+//RS     let mut contents = String::new();
+//RS     file.read_to_string(&mut contents).map_err(|error| {
+//RS         service_authority_error(format!(
+//RS             "could not read service store before append: {error}"
+//RS         ))
+//RS     })?;
+//RS     let complete_end = contents.rfind('\n').map(|end| end + 1).unwrap_or(0);
+//RS     let tail = &contents[complete_end..];
+//RS     if !tail.is_empty() {
+//RS         if service_authority_parse_record(tail).is_ok() {
+//RS             return Err(service_authority_error(
+//RS                 "service authority log ends with a truncated record",
+//RS             ));
+//RS         }
+//RS         file.set_len(complete_end as u64).map_err(|error| {
+//RS             service_authority_error(format!(
+//RS                 "could not repair service authority log tail: {error}"
+//RS             ))
+//RS         })?;
+//RS         file.sync_all().map_err(|error| {
+//RS             service_authority_error(format!(
+//RS                 "could not commit service authority log repair: {error}"
+//RS             ))
+//RS         })?;
+//RS     }
+//RS     file.seek(SeekFrom::End(0)).map_err(|error| {
+//RS         service_authority_error(format!("could not seek service store for append: {error}"))
+//RS     })?;
+//RS     file.write_all(record.as_bytes()).map_err(|error| {
+//RS         service_authority_error(format!("could not append service receipt: {error}"))
+//RS     })?;
+//RS     file.sync_all().map_err(|error| {
+//RS         service_authority_error(format!("could not commit service receipt: {error}"))
+//RS     })
+//RS }
+//RS 
+//RS fn service_authority_id(
+//RS     runtime: &JetServiceRuntime,
+//RS     endpoint: &JetServiceEndpoint,
+//RS     message: &str,
+//RS     key: &str,
+//RS ) -> String {
+//RS     // Receipt IDs cross process boundaries and are persisted in the authority
+//RS     // log. Authority tokens and generations are signing/route facts, not the
+//RS     // logical operation identity: they change when a worker restarts or is
+//RS     // handed off. Use the shared Core SHA-256 primitive with length-framed
+//RS     // logical fields so the same operation keeps one identity across those
+//RS     // transitions and distinct endpoint/message/key tuples cannot alias.
+//RS     let mut input = Vec::new();
+//RS     let store = service_authority_store_identity(&runtime.store);
+//RS     for field in [
+//RS         store.as_bytes(),
+//RS         endpoint.tree.as_bytes(),
+//RS         endpoint.worker.as_bytes(),
+//RS         message.as_bytes(),
+//RS         key.as_bytes(),
+//RS     ] {
+//RS         input.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         input.extend_from_slice(field);
+//RS     }
+//RS     let digest = jet_sha256_raw(&input);
+//RS     format!(
+//RS         "svc-{}",
+//RS         digest
+//RS             .iter()
+//RS             .map(|byte| format!("{byte:02x}"))
+//RS             .collect::<String>()
+//RS     )
+//RS }
+//RS 
+//RS fn service_delivery_state_name(state: JetDeliveryState) -> &'static str {
+//RS     match state {
+//RS         JetDeliveryState::Pending => "Pending",
+//RS         JetDeliveryState::Accepted => "Accepted",
+//RS         JetDeliveryState::Delivering => "Delivering",
+//RS         JetDeliveryState::Delivered => "Delivered",
+//RS         JetDeliveryState::DeadLettered => "DeadLettered",
+//RS         JetDeliveryState::Cancelled => "Cancelled",
+//RS     }
+//RS }
+//RS 
+//RS fn service_delivery_state_parse(value: &str) -> Result<JetDeliveryState, JetServiceError> {
+//RS     match value {
+//RS         "Pending" => Ok(JetDeliveryState::Pending),
+//RS         "Accepted" => Ok(JetDeliveryState::Accepted),
+//RS         "Delivering" => Ok(JetDeliveryState::Delivering),
+//RS         "Delivered" => Ok(JetDeliveryState::Delivered),
+//RS         "DeadLettered" => Ok(JetDeliveryState::DeadLettered),
+//RS         "Cancelled" => Ok(JetDeliveryState::Cancelled),
+//RS         _ => Err(service_authority_error(
+//RS             "service delivery lifecycle state is malformed",
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn service_delivery_transition_allowed(
+//RS     entry: &ServiceAuthorityEntry,
+//RS     state: JetDeliveryState,
+//RS     attempts: i64,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if attempts < entry.attempts {
+//RS         return Err(service_authority_error(
+//RS             "delivery event attempts move backwards",
+//RS         ));
+//RS     }
+//RS     let allowed = match (entry.state, state) {
+//RS         (JetDeliveryState::Pending, JetDeliveryState::Accepted)
+//RS         | (JetDeliveryState::Accepted, JetDeliveryState::Accepted)
+//RS         | (JetDeliveryState::Accepted, JetDeliveryState::Delivering)
+//RS         | (JetDeliveryState::Accepted, JetDeliveryState::DeadLettered)
+//RS         | (JetDeliveryState::Accepted, JetDeliveryState::Cancelled)
+//RS         | (JetDeliveryState::Delivering, JetDeliveryState::Accepted)
+//RS         | (JetDeliveryState::Delivering, JetDeliveryState::Delivered)
+//RS         | (JetDeliveryState::Delivering, JetDeliveryState::DeadLettered)
+//RS         | (JetDeliveryState::Delivering, JetDeliveryState::Cancelled)
+//RS         | (JetDeliveryState::Delivered, JetDeliveryState::DeadLettered) => true,
+//RS         (JetDeliveryState::Delivered, JetDeliveryState::Accepted) => {
+//RS             entry.retained_until.is_some()
+//RS         }
+//RS         _ => false,
+//RS     };
+//RS     if allowed {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(service_authority_error(
+//RS             "delivery event contains an invalid lifecycle transition",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn service_delivery_generation_key(
+//RS     authority: &str,
+//RS     generation: i64,
+//RS ) -> Result<[u8; 32], JetServiceError> {
+//RS     let authority_key = service_authority_signing_key(authority)?;
+//RS     let generation = generation.to_string();
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-delivery-generation-v1".as_bytes(),
+//RS         generation.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     Ok(jet_hmac_sha256(&authority_key, &payload))
+//RS }
+//RS 
+//RS fn service_delivery_event_signature(
+//RS     authority: &str,
+//RS     generation: i64,
+//RS     id: &str,
+//RS     sequence: i64,
+//RS     state: JetDeliveryState,
+//RS     attempts: i64,
+//RS     timestamp: i64,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let key = service_delivery_generation_key(authority, generation)?;
+//RS     let sequence = sequence.to_string();
+//RS     let attempts = attempts.to_string();
+//RS     let timestamp = timestamp.to_string();
+//RS     let state = service_delivery_state_name(state);
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-delivery-event-v1".as_bytes(),
+//RS         id.as_bytes(),
+//RS         sequence.as_bytes(),
+//RS         state.as_bytes(),
+//RS         attempts.as_bytes(),
+//RS         timestamp.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     Ok(service_authority_hex(&jet_hmac_sha256(&key, &payload)))
+//RS }
+//RS 
+//RS fn service_delivery_acceptance_signature(
+//RS     authority: &str,
+//RS     generation: i64,
+//RS     id: &str,
+//RS     key: &str,
+//RS     tree: &str,
+//RS     worker: &str,
+//RS     message: &str,
+//RS     created: i64,
+//RS     expires: i64,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let signing_key = service_delivery_generation_key(authority, generation)?;
+//RS     let generation = generation.to_string();
+//RS     let created = created.to_string();
+//RS     let expires = expires.to_string();
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-delivery-acceptance-v2".as_bytes(),
+//RS         id.as_bytes(),
+//RS         key.as_bytes(),
+//RS         authority.as_bytes(),
+//RS         tree.as_bytes(),
+//RS         worker.as_bytes(),
+//RS         generation.as_bytes(),
+//RS         message.as_bytes(),
+//RS         created.as_bytes(),
+//RS         expires.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     Ok(service_authority_hex(&jet_hmac_sha256(&signing_key, &payload)))
+//RS }
+//RS 
+//RS fn service_delivery_retention_signature(
+//RS     entry: &ServiceAuthorityEntry,
+//RS     retained_until: i64,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let signing_key = service_delivery_generation_key(&entry.authority, entry.generation)?;
+//RS     let retained_until = retained_until.to_string();
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-delivery-retention-v1".as_bytes(),
+//RS         entry.id.as_bytes(),
+//RS         retained_until.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     Ok(service_authority_hex(&jet_hmac_sha256(&signing_key, &payload)))
+//RS }
+//RS 
+//RS fn service_delivery_receipt_signature(
+//RS     entry: &ServiceAuthorityEntry,
+//RS     duplicate: bool,
+//RS ) -> Result<String, JetServiceError> {
+//RS     let key = service_delivery_generation_key(&entry.authority, entry.generation)?;
+//RS     let state = service_delivery_state_name(entry.state);
+//RS     let attempts = entry.attempts.to_string();
+//RS     let expires = entry.expires.to_string();
+//RS     let retained_until = entry.retained_until.unwrap_or(-1).to_string();
+//RS     let generation = entry.generation.to_string();
+//RS     let duplicate = duplicate.to_string();
+//RS     let mut payload = Vec::new();
+//RS     for field in [
+//RS         "jet-service-delivery-receipt-v1".as_bytes(),
+//RS         entry.id.as_bytes(),
+//RS         entry.key.as_bytes(),
+//RS         duplicate.as_bytes(),
+//RS         entry.tree.as_bytes(),
+//RS         entry.worker.as_bytes(),
+//RS         entry.message.as_bytes(),
+//RS         state.as_bytes(),
+//RS         attempts.as_bytes(),
+//RS         expires.as_bytes(),
+//RS         retained_until.as_bytes(),
+//RS         generation.as_bytes(),
+//RS     ] {
+//RS         payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+//RS         payload.extend_from_slice(field);
+//RS     }
+//RS     Ok(service_authority_hex(&jet_hmac_sha256(&key, &payload)))
+//RS }
+//RS 
+//RS fn service_authority_delivery_for_entry(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS     duplicate: bool,
+//RS ) -> JetDelivery {
+//RS     JetDelivery {
+//RS         id: entry.id.clone(),
+//RS         store: service_authority_store_identity(&runtime.store),
+//RS         duplicate,
+//RS         authority: entry.authority.clone(),
+//RS         generation: entry.generation,
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_delivery_for_endpoint(
+//RS     runtime: &JetServiceRuntime,
+//RS     id: &str,
+//RS     endpoint: &JetServiceEndpoint,
+//RS     duplicate: bool,
+//RS ) -> JetDelivery {
+//RS     JetDelivery {
+//RS         id: id.to_string(),
+//RS         store: service_authority_store_identity(&runtime.store),
+//RS         duplicate,
+//RS         authority: endpoint.authority.clone(),
+//RS         generation: endpoint.generation,
+//RS     }
+//RS }
+//RS 
+//RS fn service_authority_entry_state(entry: &ServiceAuthorityEntry) -> JetDeliveryState {
+//RS     entry.state
+//RS }
+//RS 
+//RS fn service_authority_append_event(
+//RS     runtime: &JetServiceRuntime,
+//RS     entry: &ServiceAuthorityEntry,
+//RS     state: JetDeliveryState,
+//RS     attempts: i64,
+//RS     timestamp: i64,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_delivery_transition_allowed(entry, state, attempts)?;
+//RS     let sequence = entry.event_sequence.saturating_add(1);
+//RS     let signature = service_delivery_event_signature(
+//RS         &entry.authority,
+//RS         entry.generation,
+//RS         &entry.id,
+//RS         sequence,
+//RS         state,
+//RS         attempts,
+//RS         timestamp,
+//RS     )?;
+//RS     service_authority_append(
+//RS         runtime,
+//RS         'E',
+//RS         &[
+//RS             entry.id.clone(),
+//RS             sequence.to_string(),
+//RS             service_delivery_state_name(state).to_string(),
+//RS             attempts.to_string(),
+//RS             timestamp.to_string(),
+//RS             signature,
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn service_authority_delivery_entry(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<
+//RS     (
+//RS         JetServiceRuntime,
+//RS         ServiceAuthorityEntry,
+//RS         Vec<(char, Vec<String>)>,
+//RS     ),
+//RS     JetServiceError,
+//RS > {
+//RS     service_authority_validate_text(&delivery.id, "delivery id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: delivery.store.clone(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     service_authority_validate_runtime(&runtime)?;
+//RS     let _operation_lock = service_authority_operation_lock(&runtime, &delivery.id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let mut records = service_authority_read(&runtime)?;
+//RS     let mut entries = service_authority_entries(&runtime, &records)?;
+//RS     if service_authority_cleanup_expired(&runtime, &entries, service_authority_now())? {
+//RS         records = service_authority_read(&runtime)?;
+//RS         entries = service_authority_entries(&runtime, &records)?;
+//RS     }
+//RS     let entry = entries
+//RS         .into_iter()
+//RS         .find(|entry| entry.id == delivery.id)
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Unknown(format!("delivery `{}` is unknown", delivery.id))
+//RS         })?;
+//RS     if delivery.authority != entry.authority {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "delivery handle authority does not match its receipt".to_string(),
+//RS         ));
+//RS     }
+//RS     if delivery.generation != entry.generation {
+//RS         return Err(JetServiceError::Stale(
+//RS             "delivery handle generation does not match its receipt".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok((runtime, entry, records))
+//RS }
+//RS 
+//RS fn service_authority_validate_delivery_runtime(
+//RS     runtime: &JetServiceRuntime,
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<(), JetServiceError> {
+//RS     if service_authority_store_identity(&runtime.store) != delivery.store {
+//RS         return Err(JetServiceError::Revoked(
+//RS             "delivery handle belongs to another authority store".to_string(),
+//RS         ));
+//RS     }
+//RS     service_authority_delivery_entry(delivery).map(|_| ())
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_status(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDeliveryState, JetServiceError> {
+//RS     let (_, entry, _) = service_authority_delivery_entry(delivery)?;
+//RS     Ok(service_authority_entry_state(&entry))
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_wait(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDeliveryState, JetServiceError> {
+//RS     jet_services_delivery_status(delivery)
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_receipt(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDeliveryReceipt, JetServiceError> {
+//RS     let (_, entry, _) = service_authority_delivery_entry(delivery)?;
+//RS     Ok(JetDeliveryReceipt {
+//RS         id: entry.id.clone(),
+//RS         state: service_authority_entry_state(&entry),
+//RS         attempts: entry.attempts,
+//RS         retention_until: entry.retained_until.unwrap_or(-1),
+//RS         deadline: entry.expires,
+//RS         idempotency_key: entry.key.clone(),
+//RS         duplicate: delivery.duplicate,
+//RS         authority: entry.authority.clone(),
+//RS         generation: entry.generation,
+//RS         signature: service_delivery_receipt_signature(&entry, delivery.duplicate)?,
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_events(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<Vec<JetDeliveryEvent>, JetServiceError> {
+//RS     let (_, entry, records) = service_authority_delivery_entry(delivery)?;
+//RS     let mut events = Vec::new();
+//RS     for (op, fields) in records {
+//RS         match (op, fields.as_slice()) {
+//RS             (
+//RS                 'S',
+//RS                 [id, _key, authority, _tree, _worker, generation, _message, created, _expires, signature],
+//RS             ) if id == &delivery.id => {
+//RS                 let generation = generation.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event generation is malformed")
+//RS                 })?;
+//RS                 let timestamp = created.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event timestamp is malformed")
+//RS                 })?;
+//RS                 if !events.is_empty() {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery event sequence is not monotonic",
+//RS                     ));
+//RS                 }
+//RS                 events.push(JetDeliveryEvent {
+//RS                     sequence: 1,
+//RS                     state: JetDeliveryState::Accepted,
+//RS                     attempts: 0,
+//RS                     timestamp,
+//RS                     signature: signature.clone(),
+//RS                 });
+//RS                 let expected = service_delivery_acceptance_signature(
+//RS                     authority,
+//RS                     generation,
+//RS                     id,
+//RS                     _key,
+//RS                     _tree,
+//RS                     _worker,
+//RS                     _message,
+//RS                     timestamp,
+//RS                     _expires.parse::<i64>().map_err(|_| {
+//RS                         service_authority_error("delivery acceptance expiry is malformed")
+//RS                     })?,
+//RS                 )?;
+//RS                 let expected = service_authority_unhex(&expected).ok_or_else(|| {
+//RS                     service_authority_error("delivery acceptance signature is malformed")
+//RS                 })?;
+//RS                 let supplied = service_authority_unhex(signature).ok_or_else(|| {
+//RS                     service_authority_error("delivery acceptance signature is malformed")
+//RS                 })?;
+//RS                 if !jet_ct_eq(&expected, &supplied) {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery acceptance history signature does not validate",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             ('E', [id, sequence, state, attempts, timestamp, signature]) if id == &delivery.id => {
+//RS                 let sequence = sequence
+//RS                     .parse::<i64>()
+//RS                     .map_err(|_| service_authority_error("delivery event sequence is malformed"))?;
+//RS                 let state = service_delivery_state_parse(state)?;
+//RS                 let attempts = attempts.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event attempts are malformed")
+//RS                 })?;
+//RS                 let timestamp = timestamp.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event timestamp is malformed")
+//RS                 })?;
+//RS                 let expected_sequence = events
+//RS                     .last()
+//RS                     .map(|event| event.sequence.saturating_add(1))
+//RS                     .unwrap_or(1);
+//RS                 if sequence != expected_sequence {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery event sequence is not monotonic",
+//RS                     ));
+//RS                 }
+//RS                 let expected = service_delivery_event_signature(
+//RS                     &entry.authority,
+//RS                     entry.generation,
+//RS                     id,
+//RS                     sequence,
+//RS                     state,
+//RS                     attempts,
+//RS                     timestamp,
+//RS                 )?;
+//RS                 let expected = service_authority_unhex(&expected).ok_or_else(|| {
+//RS                     service_authority_error("delivery event signature is malformed")
+//RS                 })?;
+//RS                 let supplied = service_authority_unhex(signature).ok_or_else(|| {
+//RS                     service_authority_error("delivery event signature is malformed")
+//RS                 })?;
+//RS                 if !jet_ct_eq(&expected, &supplied) {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery event signature does not validate",
+//RS                     ));
+//RS                 }
+//RS                 events.push(JetDeliveryEvent {
+//RS                     sequence,
+//RS                     state,
+//RS                     attempts,
+//RS                     timestamp,
+//RS                     signature: signature.clone(),
+//RS                 });
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     if events.len() as i64 != entry.event_sequence
+//RS         || events.first().map(|event| event.sequence) != Some(1)
+//RS     {
+//RS         return Err(service_authority_error(
+//RS             "delivery event history is incomplete",
+//RS         ));
+//RS     }
+//RS     Ok(events)
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_retry(delivery: &JetDelivery) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_delivery_entry(delivery)?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: delivery.store.clone(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     jet_services_runtime_retry(&runtime, delivery)
+//RS }
+//RS 
+//RS pub fn jet_services_delivery_cancel(
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_delivery_entry(delivery)?;
+//RS     let runtime = JetServiceRuntime {
+//RS         store: delivery.store.clone(),
+//RS         retention_ms: 0,
+//RS     };
+//RS     service_authority_validate_runtime(&runtime)?;
+//RS     let _operation_lock = service_authority_operation_lock(&runtime, &delivery.id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+//RS     let entry = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id == delivery.id)
+//RS         .ok_or_else(|| {
+//RS             JetServiceError::Unknown(format!("delivery `{}` is unknown", delivery.id))
+//RS         })?;
+//RS     if entry.state == JetDeliveryState::DeadLettered {
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "dead-lettered delivery cannot be cancelled".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.state == JetDeliveryState::Delivered {
+//RS         return Err(JetServiceError::Policy(
+//RS             "delivered work cannot be cancelled".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.state != JetDeliveryState::Cancelled {
+//RS         service_authority_append_event(
+//RS             &runtime,
+//RS             entry,
+//RS             JetDeliveryState::Cancelled,
+//RS             entry.attempts,
+//RS             service_authority_now(),
+//RS         )?;
+//RS         service_authority_remove_pending_entry(&runtime, entry)?;
+//RS     }
+//RS     Ok(delivery.clone())
+//RS }
+//RS 
+//RS fn service_authority_entries(
+//RS     runtime: &JetServiceRuntime,
+//RS     records: &[(char, Vec<String>)],
+//RS ) -> Result<Vec<ServiceAuthorityEntry>, JetServiceError> {
+//RS     let mut entries: Vec<ServiceAuthorityEntry> = Vec::new();
+//RS     for (op, fields) in records {
+//RS         match (*op, fields.as_slice()) {
+//RS             (
+//RS                 'S',
+//RS                 [id, key, authority, tree, worker, generation, message, created, expires, signature],
+//RS             ) => {
+//RS                 let generation = generation
+//RS                     .parse::<i64>()
+//RS                     .map_err(|_| service_authority_error("service send generation is malformed"))?;
+//RS                 let created = created
+//RS                     .parse::<i64>()
+//RS                     .map_err(|_| service_authority_error("service send timestamp is malformed"))?;
+//RS                 let expires = expires
+//RS                     .parse::<i64>()
+//RS                     .map_err(|_| service_authority_error("service send expiry is malformed"))?;
+//RS                 let endpoint = service_authority_endpoint_unchecked(
+//RS                     tree.clone(),
+//RS                     worker.clone(),
+//RS                     generation,
+//RS                     authority.clone(),
+//RS                 )?;
+//RS                 service_authority_validate_text(
+//RS                     key,
+//RS                     "service idempotency key",
+//RS                     SERVICE_AUTH_MAX_KEY,
+//RS                     false,
+//RS                 )?;
+//RS                 service_authority_validate_text(
+//RS                     message,
+//RS                     "service message",
+//RS                     SERVICE_AUTH_MAX_MESSAGE,
+//RS                     true,
+//RS                 )?;
+//RS                 let expected_id = service_authority_id(runtime, &endpoint, message, key);
+//RS                 if id != &expected_id {
+//RS                     return Err(service_authority_error(
+//RS                         "service receipt identity does not match its authority fields",
+//RS                     ));
+//RS                 }
+//RS                 let expected_signature = service_delivery_acceptance_signature(
+//RS                     authority,
+//RS                     generation,
+//RS                     id,
+//RS                     key,
+//RS                     tree,
+//RS                     worker,
+//RS                     message,
+//RS                     created,
+//RS                     expires,
+//RS                 )?;
+//RS                 let supplied_signature = service_authority_unhex(signature).ok_or_else(|| {
+//RS                     service_authority_error("service acceptance signature is malformed")
+//RS                 })?;
+//RS                 let expected_bytes =
+//RS                     service_authority_unhex(&expected_signature).ok_or_else(|| {
+//RS                         service_authority_error("service acceptance signature is malformed")
+//RS                     })?;
+//RS                 if !jet_ct_eq(&expected_bytes, &supplied_signature) {
+//RS                     return Err(service_authority_error(
+//RS                         "service acceptance signature does not validate",
+//RS                     ));
+//RS                 }
+//RS                 let entry = ServiceAuthorityEntry {
+//RS                     id: id.clone(),
+//RS                     key: key.clone(),
+//RS                     tree: tree.clone(),
+//RS                     worker: worker.clone(),
+//RS                     authority: authority.clone(),
+//RS                     generation,
+//RS                     message: message.clone(),
+//RS                     created,
+//RS                     expires,
+//RS                     retained_until: None,
+//RS                     attempts: 0,
+//RS                     state: JetDeliveryState::Accepted,
+//RS                     event_sequence: 1,
+//RS                     delivered_to_worker: false,
+//RS                     delivered: false,
+//RS                     dead: false,
+//RS                 };
+//RS                 if entries.iter().any(|previous| previous.id.as_str() == id.as_str()) {
+//RS                     return Err(service_authority_error(
+//RS                         "service authority log contains duplicate acceptance",
+//RS                     ));
+//RS                 }
+//RS                 if entries.iter().any(|previous| previous.key.as_str() == key.as_str()) {
+//RS                     return Err(service_authority_error(
+//RS                         "service authority log contains duplicate idempotency work",
+//RS                     ));
+//RS                 }
+//RS                 entries.push(entry);
+//RS             }
+//RS             ('K', [id, until, signature]) => {
+//RS                 let until = until.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("service retention deadline is malformed")
+//RS                 })?;
+//RS                 let entry = entries
+//RS                     .iter_mut()
+//RS                     .find(|entry| entry.id.as_str() == id.as_str())
+//RS                     .ok_or_else(|| {
+//RS                         service_authority_error("service retention references an unknown id")
+//RS                     })?;
+//RS                 let expected = service_delivery_retention_signature(entry, until)?;
+//RS                 let expected = service_authority_unhex(&expected).ok_or_else(|| {
+//RS                     service_authority_error("service retention signature is malformed")
+//RS                 })?;
+//RS                 let supplied = service_authority_unhex(signature).ok_or_else(|| {
+//RS                     service_authority_error("service retention signature is malformed")
+//RS                 })?;
+//RS                 if !jet_ct_eq(&expected, &supplied) {
+//RS                     return Err(service_authority_error(
+//RS                         "service retention signature does not validate",
+//RS                     ));
+//RS                 }
+//RS                 entry.retained_until = Some(until);
+//RS             }
+//RS             ('E', [id, sequence, state, attempts, timestamp, signature]) => {
+//RS                 let sequence = sequence
+//RS                     .parse::<i64>()
+//RS                     .map_err(|_| service_authority_error("delivery event sequence is malformed"))?;
+//RS                 let attempts = attempts.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event attempts are malformed")
+//RS                 })?;
+//RS                 let timestamp = timestamp.parse::<i64>().map_err(|_| {
+//RS                     service_authority_error("delivery event timestamp is malformed")
+//RS                 })?;
+//RS                 let state = service_delivery_state_parse(state)?;
+//RS                 let entry = entries
+//RS                     .iter_mut()
+//RS                     .find(|entry| entry.id.as_str() == id.as_str())
+//RS                     .ok_or_else(|| {
+//RS                         service_authority_error("delivery event references an unknown id")
+//RS                     })?;
+//RS                 if sequence != entry.event_sequence.saturating_add(1) {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery event sequence is not monotonic",
+//RS                     ));
+//RS                 }
+//RS                 service_delivery_transition_allowed(entry, state, attempts)?;
+//RS                 let expected = service_delivery_event_signature(
+//RS                     &entry.authority,
+//RS                     entry.generation,
+//RS                     id,
+//RS                     sequence,
+//RS                     state,
+//RS                     attempts,
+//RS                     timestamp,
+//RS                 )?;
+//RS                 let expected = service_authority_unhex(&expected).ok_or_else(|| {
+//RS                     service_authority_error("delivery event signature is malformed")
+//RS                 })?;
+//RS                 let supplied = service_authority_unhex(signature).ok_or_else(|| {
+//RS                     service_authority_error("delivery event signature is malformed")
+//RS                 })?;
+//RS                 if !jet_ct_eq(&expected, &supplied) {
+//RS                     return Err(service_authority_error(
+//RS                         "delivery event signature does not validate",
+//RS                     ));
+//RS                 }
+//RS                 let _ = timestamp;
+//RS                 entry.event_sequence = sequence;
+//RS                 entry.attempts = attempts;
+//RS                 entry.state = state;
+//RS                 entry.delivered_to_worker =
+//RS                     state == JetDeliveryState::Delivering || state == JetDeliveryState::Delivered;
+//RS                 entry.delivered = state == JetDeliveryState::Delivered;
+//RS                 entry.dead = state == JetDeliveryState::DeadLettered;
+//RS             }
+//RS             _ => {
+//RS                 return Err(service_authority_error(
+//RS                     "service authority record has an unknown shape",
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(entries)
+//RS }
+//RS 
+//RS pub fn jet_services_runtime(store: String, retention_ms: i64) -> JetServiceRuntime {
+//RS     JetServiceRuntime {
+//RS         store,
+//RS         retention_ms,
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_services_runtime_send(
+//RS     runtime: &JetServiceRuntime,
+//RS     endpoint: &JetServiceEndpoint,
+//RS     message: &String,
+//RS     key: &String,
+//RS ) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     service_authority_validate_endpoint(endpoint)?;
+//RS     jet_services_authority_validate(endpoint)?;
+//RS     service_authority_bind_store(runtime, endpoint)?;
+//RS     service_authority_validate_text(key, "idempotency key", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     service_authority_validate_text(message, "service message", SERVICE_AUTH_MAX_MESSAGE, true)?;
+//RS     let _operation_lock = service_authority_operation_lock(runtime, key)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let records = service_authority_read(runtime)?;
+//RS     let mut entries = service_authority_entries(runtime, &records)?;
+//RS     let now = service_authority_now();
+//RS     if service_authority_cleanup_expired(runtime, &entries, now)? {
+//RS         entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     }
+//RS     if let Some(entry) = entries
+//RS         .iter()
+//RS         .find(|entry| entry.key.as_str() == key.as_str() && !entry.authority.is_empty())
+//RS     {
+//RS         // The provider authority token is a generation-scoped signing fact.
+//RS         // A restarted or handed-off provider gets a new token, but the same
+//RS         // logical tree/worker operation must still resolve to this record.
+//RS         // Conflicting route or message reuse is rejected before any work is
+//RS         // appended or enqueued.
+//RS         if entry.tree != endpoint.tree
+//RS             || entry.worker != endpoint.worker
+//RS             || entry.message.as_str() != message.as_str()
+//RS         {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "idempotency key was already used by another service authority or delivery"
+//RS                     .to_string(),
+//RS             ));
+//RS         }
+//RS         let duplicate_delivery = || service_authority_delivery_for_entry(runtime, entry, true);
+//RS         if entry.dead {
+//RS             return Ok(duplicate_delivery());
+//RS         }
+//RS         if entry.expires > now {
+//RS             if !entry.delivered && entry.state != JetDeliveryState::Cancelled {
+//RS                 service_authority_enqueue_entry(runtime, entry)?;
+//RS             }
+//RS             return Ok(duplicate_delivery());
+//RS         }
+//RS         return Ok(duplicate_delivery());
+//RS     }
+//RS     let id = service_authority_id(runtime, endpoint, message, key);
+//RS     let expires = service_authority_retention_deadline(now, runtime.retention_ms);
+//RS     let signature = service_delivery_acceptance_signature(
+//RS         &endpoint.authority,
+//RS         endpoint.generation,
+//RS         &id,
+//RS         key,
+//RS         &endpoint.tree,
+//RS         &endpoint.worker,
+//RS         message,
+//RS         now,
+//RS         expires,
+//RS     )?;
+//RS     service_authority_append(
+//RS         runtime,
+//RS         'S',
+//RS         &[
+//RS             id.clone(),
+//RS             key.clone(),
+//RS             endpoint.authority.clone(),
+//RS             endpoint.tree.clone(),
+//RS             endpoint.worker.clone(),
+//RS             endpoint.generation.to_string(),
+//RS             message.clone(),
+//RS             now.to_string(),
+//RS             expires.to_string(),
+//RS             signature,
+//RS         ],
+//RS     )?;
+//RS     jet_services_authority_enqueue(runtime, endpoint, &id, message)?;
+//RS     Ok(service_authority_delivery_for_endpoint(
+//RS         runtime, &id, endpoint, false,
+//RS     ))
+//RS }
+//RS 
+//RS pub fn jet_services_runtime_retry(
+//RS     runtime: &JetServiceRuntime,
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     service_authority_validate_delivery_runtime(runtime, delivery)?;
+//RS     let id = &delivery.id;
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let _operation_lock = service_authority_operation_lock(runtime, id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let records = service_authority_read(runtime)?;
+//RS     let mut entries = service_authority_entries(runtime, &records)?;
+//RS     let now = service_authority_now();
+//RS     if service_authority_cleanup_expired(runtime, &entries, now)? {
+//RS         entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     }
+//RS     let entry = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id.as_str())
+//RS         .ok_or_else(|| JetServiceError::Unknown(format!("service id `{id}` is unknown")))?;
+//RS     if entry.authority.is_empty() {
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "service receipt has no endpoint authority".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.dead {
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "cannot retry a dead-lettered delivery".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.state == JetDeliveryState::Cancelled {
+//RS         return Err(JetServiceError::Policy(
+//RS             "cancelled delivery cannot be retried".to_string(),
+//RS         ));
+//RS     }
+//RS     if entry.delivered && entry.retained_until.is_none() {
+//RS         return Ok(service_authority_delivery_for_entry(runtime, entry, false));
+//RS     }
+//RS     // Retry is the one explicit operation that may reset a receipt already
+//RS     // handed to a worker but not committed. Without this R record, a retry
+//RS     // would enqueue a copy while the durable marker still said
+//RS     // `delivered_to_worker`, and the receive path could not distinguish it
+//RS     // from a silent duplicate.
+//RS     let attempts = entry.attempts.saturating_add(1);
+//RS     service_authority_append_event(runtime, entry, JetDeliveryState::Accepted, attempts, now)?;
+//RS     service_authority_enqueue_entry(runtime, entry)?;
+//RS     Ok(service_authority_delivery_for_entry(runtime, entry, false))
+//RS }
+//RS 
+//RS pub fn jet_services_runtime_dead_letter(
+//RS     runtime: &JetServiceRuntime,
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     service_authority_validate_delivery_runtime(runtime, delivery)?;
+//RS     let id = &delivery.id;
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let _operation_lock = service_authority_operation_lock(runtime, id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? {
+//RS         entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     }
+//RS     let Some(entry) = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id.as_str())
+//RS     else {
+//RS         return Err(JetServiceError::Unknown(format!(
+//RS             "service id `{id}` is unknown"
+//RS         )));
+//RS     };
+//RS     if entry.dead {
+//RS         return Ok(service_authority_delivery_for_entry(runtime, entry, false));
+//RS     }
+//RS     service_authority_append_event(
+//RS         runtime,
+//RS         entry,
+//RS         JetDeliveryState::DeadLettered,
+//RS         entry.attempts,
+//RS         service_authority_now(),
+//RS     )?;
+//RS     service_authority_remove_pending_entry(runtime, entry)?;
+//RS     Ok(service_authority_delivery_for_entry(runtime, entry, false))
+//RS }
+//RS 
+//RS pub fn jet_services_runtime_retain(
+//RS     runtime: &JetServiceRuntime,
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<JetDelivery, JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     service_authority_validate_delivery_runtime(runtime, delivery)?;
+//RS     let id = &delivery.id;
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let _operation_lock = service_authority_operation_lock(runtime, id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? {
+//RS         entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     }
+//RS     let Some(entry) = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id.as_str())
+//RS     else {
+//RS         return Err(JetServiceError::Unknown(format!(
+//RS             "service id `{id}` is unknown"
+//RS         )));
+//RS     };
+//RS     if entry.dead {
+//RS         return Ok(service_authority_delivery_for_entry(runtime, entry, false));
+//RS     }
+//RS     if entry.state == JetDeliveryState::Cancelled {
+//RS         return Err(JetServiceError::Policy(
+//RS             "cancelled delivery cannot be retained".to_string(),
+//RS         ));
+//RS     }
+//RS     let until = service_authority_retention_deadline(service_authority_now(), runtime.retention_ms);
+//RS     let signature = service_delivery_retention_signature(entry, until)?;
+//RS     service_authority_append(
+//RS         runtime,
+//RS         'K',
+//RS         &[id.clone(), until.to_string(), signature],
+//RS     )?;
+//RS     Ok(service_authority_delivery_for_entry(runtime, entry, false))
+//RS }
+//RS 
+//RS /// Durably acknowledge that a delivered receipt has completed its service
+//RS /// transaction. The acknowledgement is separate from mailbox enqueue so a
+//RS /// crash between durable send and worker delivery remains recoverable by
+//RS /// `retry`; an already acknowledged receipt is idempotent.
+//RS pub fn jet_services_runtime_commit(
+//RS     runtime: &JetServiceRuntime,
+//RS     delivery: &JetDelivery,
+//RS ) -> Result<(), JetServiceError> {
+//RS     service_authority_validate_runtime(runtime)?;
+//RS     service_authority_validate_delivery_runtime(runtime, delivery)?;
+//RS     let id = &delivery.id;
+//RS     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
+//RS     let _operation_lock = service_authority_operation_lock(runtime, id)?;
+//RS     let _guard = service_authority_lock()
+//RS         .lock()
+//RS         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+//RS     let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     let now = service_authority_now();
+//RS     let target_expired = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id.as_str())
+//RS         .is_some_and(|entry| service_authority_entry_expired(entry, now));
+//RS     if service_authority_cleanup_expired(runtime, &entries, now)? {
+//RS         entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
+//RS     }
+//RS     let entry = entries
+//RS         .iter()
+//RS         .find(|entry| entry.id.as_str() == id.as_str())
+//RS         .ok_or_else(|| JetServiceError::Unknown(format!("service id `{id}` is unknown")))?;
+//RS     if entry.dead {
+//RS         service_authority_remove_pending_entry(runtime, entry)?;
+//RS         if target_expired {
+//RS             return Err(JetServiceError::Expired(
+//RS                 "service receipt retention expired".to_string(),
+//RS             ));
+//RS         }
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "cannot commit a dead-lettered service receipt".to_string(),
+//RS         ));
+//RS     }
+//RS     if !entry.delivered_to_worker {
+//RS         return Err(JetServiceError::Unavailable(
+//RS             "service receipt has not reached its worker".to_string(),
+//RS         ));
+//RS     }
+//RS     if !entry.delivered {
+//RS         service_authority_append_event(
+//RS             runtime,
+//RS             entry,
+//RS             JetDeliveryState::Delivered,
+//RS             entry.attempts,
+//RS             service_authority_now(),
+//RS         )?;
+//RS     }
+//RS     service_authority_remove_pending_entry(runtime, entry)?;
+//RS     Ok(())
+//RS }
+//RS // D-DX-QUEUE1=A: the durable job queue is a database-backed state machine.
+//RS // This fragment owns the queue contract and transition rules.  A tier supplies
+//RS // only a `JetJobQueueStore` adapter; the default adapter is installed by the
+//RS // existing SQLite bridge, while alternate providers are explicit.
+//RS const JET_JOB_QUEUE_MAX_NAME: usize = 256;
+//RS const JET_JOB_QUEUE_MAX_TYPE: usize = 256;
+//RS const JET_JOB_QUEUE_MAX_KEY: usize = 1024;
+//RS const JET_JOB_QUEUE_MAX_REQUEST: usize = 1024;
+//RS const JET_JOB_QUEUE_MAX_PAYLOAD: usize = 4 * 1024 * 1024;
+//RS const JET_JOB_QUEUE_MAX_REASON: usize = 1024;
+//RS const JET_JOB_QUEUE_MAX_DETAIL: usize = 16 * 1024;
+//RS const JET_JOB_QUEUE_MAX_BULK: usize = 1024;
+//RS const JET_JOB_QUEUE_MAX_INSPECT: usize = 1024;
+//RS const JET_JOB_QUEUE_MAX_ATTEMPTS: u32 = 64;
+//RS const JET_JOB_QUEUE_MAX_LEASE_MS: i64 = 24 * 60 * 60 * 1000;
+//RS const JET_JOB_QUEUE_MAX_DELAY_MS: i64 = 365 * 24 * 60 * 60 * 1000;
+//RS 
+//RS /// Values a queue provider binds to SQLite.  Queue SQL is private to this
+//RS /// Prelude; providers never concatenate payloads into statements.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum JetJobQueueValue {
+//RS     Null,
+//RS     Int(i64),
+//RS     Text(String),
+//RS     Blob(Vec<u8>),
+//RS }
+//RS 
+//RS /// One row returned by a queue provider.  A vector keeps this carrier usable
+//RS /// by the AOT, JIT, and interpreter adapters without exposing a backend map.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueRow {
+//RS     pub values: Vec<(String, JetJobQueueValue)>,
+//RS }
+//RS 
+//RS impl JetJobQueueRow {
+//RS     pub fn new(values: Vec<(String, JetJobQueueValue)>) -> Self {
+//RS         Self { values }
+//RS     }
+//RS 
+//RS     pub fn get(&self, name: &str) -> Option<&JetJobQueueValue> {
+//RS         self.values
+//RS             .iter()
+//RS             .find(|(column, _)| column == name)
+//RS             .map(|(_, value)| value)
+//RS     }
+//RS }
+//RS 
+//RS /// The database transaction seam.  It is deliberately smaller than the
+//RS /// general DB surface: a provider only marshals typed bound values and rows;
+//RS /// enqueue, lease, retry, and authority policy remain here.
+//RS pub trait JetJobQueueStore: Send {
+//RS     fn begin(&mut self) -> Result<(), JetServiceError>;
+//RS     fn commit(&mut self) -> Result<(), JetServiceError>;
+//RS     fn rollback(&mut self);
+//RS     fn execute(
+//RS         &mut self,
+//RS         sql: &str,
+//RS         params: &[JetJobQueueValue],
+//RS     ) -> Result<i64, JetServiceError>;
+//RS     fn query(
+//RS         &mut self,
+//RS         sql: &str,
+//RS         params: &[JetJobQueueValue],
+//RS     ) -> Result<Vec<JetJobQueueRow>, JetServiceError>;
+//RS }
+//RS 
+//RS /// At-least-once is explicit.  The queue never claims exactly-once delivery.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetJobQueueDeliveryPolicy {
+//RS     AtLeastOnce,
+//RS }
+//RS 
+//RS impl JetJobQueueDeliveryPolicy {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::AtLeastOnce => "at_least_once",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetJobQueueState {
+//RS     Queued,
+//RS     Running,
+//RS     Retrying,
+//RS     Completed,
+//RS     Failed,
+//RS     DeadLettered,
+//RS     Cancelled,
+//RS }
+//RS 
+//RS impl JetJobQueueState {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Queued => "queued",
+//RS             Self::Running => "running",
+//RS             Self::Retrying => "retrying",
+//RS             Self::Completed => "completed",
+//RS             Self::Failed => "failed",
+//RS             Self::DeadLettered => "dead_lettered",
+//RS             Self::Cancelled => "cancelled",
+//RS         }
+//RS     }
+//RS 
+//RS     fn parse(value: &str) -> Result<Self, JetServiceError> {
+//RS         match value {
+//RS             "queued" => Ok(Self::Queued),
+//RS             "running" => Ok(Self::Running),
+//RS             "retrying" => Ok(Self::Retrying),
+//RS             "completed" => Ok(Self::Completed),
+//RS             "failed" => Ok(Self::Failed),
+//RS             "dead_lettered" => Ok(Self::DeadLettered),
+//RS             "cancelled" => Ok(Self::Cancelled),
+//RS             _ => Err(service_authority_error(format!(
+//RS                 "queue state `{value}` is unknown"
+//RS             ))),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl JetJobPayload {
+//RS     pub fn new(
+//RS         type_id: impl Into<String>,
+//RS         bytes: Vec<u8>,
+//RS         publish: bool,
+//RS     ) -> Result<Self, JetServiceError> {
+//RS         let payload = Self {
+//RS             type_id: type_id.into(),
+//RS             bytes,
+//RS             publish,
+//RS         };
+//RS         jet_job_queue_validate_payload(&payload)?;
+//RS         Ok(payload)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl JetJobResult {
+//RS     pub fn new(
+//RS         type_id: impl Into<String>,
+//RS         bytes: Vec<u8>,
+//RS         publish: bool,
+//RS     ) -> Result<Self, JetServiceError> {
+//RS         let result = Self {
+//RS             type_id: type_id.into(),
+//RS             bytes,
+//RS             publish,
+//RS         };
+//RS         jet_job_queue_validate_result(&result)?;
+//RS         Ok(result)
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl JetJobError {
+//RS     pub fn new(
+//RS         type_id: impl Into<String>,
+//RS         reason: impl Into<String>,
+//RS         detail: Option<String>,
+//RS     ) -> Result<Self, JetServiceError> {
+//RS         let error = Self {
+//RS             type_id: type_id.into(),
+//RS             reason: reason.into(),
+//RS             detail,
+//RS         };
+//RS         jet_job_queue_validate_error(&error)?;
+//RS         Ok(error)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobEnqueue {
+//RS     pub job_type: String,
+//RS     pub payload: JetJobPayload,
+//RS     pub idempotency_key: Option<String>,
+//RS     pub request_id: Option<String>,
+//RS     /// Relative delay in milliseconds.  Zero means immediately due.
+//RS     pub delay_ms: i64,
+//RS }
+//RS 
+//RS impl JetJobEnqueue {
+//RS     pub fn new(job_type: impl Into<String>, payload: JetJobPayload) -> Self {
+//RS         Self {
+//RS             job_type: job_type.into(),
+//RS             payload,
+//RS             idempotency_key: None,
+//RS             request_id: None,
+//RS             delay_ms: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn with_key(mut self, key: impl Into<String>) -> Self {
+//RS         self.idempotency_key = Some(key.into());
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn delayed(mut self, delay_ms: i64) -> Self {
+//RS         self.delay_ms = delay_ms;
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueuePolicy {
+//RS     pub delivery: JetJobQueueDeliveryPolicy,
+//RS     pub max_attempts: u32,
+//RS     pub lease_ms: i64,
+//RS     pub retry_delay_ms: i64,
+//RS     pub max_retry_delay_ms: i64,
+//RS     pub capacity: usize,
+//RS     pub retention_ms: i64,
+//RS     pub publish_payload: bool,
+//RS }
+//RS 
+//RS impl Default for JetJobQueuePolicy {
+//RS     fn default() -> Self {
+//RS         Self {
+//RS             delivery: JetJobQueueDeliveryPolicy::AtLeastOnce,
+//RS             max_attempts: 3,
+//RS             lease_ms: 30_000,
+//RS             retry_delay_ms: 1_000,
+//RS             max_retry_delay_ms: 60_000,
+//RS             capacity: 1_024,
+//RS             retention_ms: 7 * 24 * 60 * 60 * 1_000,
+//RS             publish_payload: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetJobQueuePolicy {
+//RS     pub fn validate(&self) -> Result<(), JetServiceError> {
+//RS         if self.delivery != JetJobQueueDeliveryPolicy::AtLeastOnce {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue delivery policy must be explicit at-least-once".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.max_attempts == 0 || self.max_attempts > JET_JOB_QUEUE_MAX_ATTEMPTS {
+//RS             return Err(JetServiceError::Policy(format!(
+//RS                 "queue max attempts must be between 1 and {JET_JOB_QUEUE_MAX_ATTEMPTS}"
+//RS             )));
+//RS         }
+//RS         if self.lease_ms <= 0 || self.lease_ms > JET_JOB_QUEUE_MAX_LEASE_MS {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue lease must be positive and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.retry_delay_ms < 0
+//RS             || self.max_retry_delay_ms < self.retry_delay_ms
+//RS             || self.max_retry_delay_ms > JET_JOB_QUEUE_MAX_DELAY_MS
+//RS         {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue retry delays are outside the supported range".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.capacity == 0 || self.capacity > JET_JOB_QUEUE_MAX_INSPECT {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue capacity must be positive and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         if self.retention_ms < 0 || self.retention_ms > JET_JOB_QUEUE_MAX_DELAY_MS {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue retention is outside the supported range".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueReceipt {
+//RS     pub id: String,
+//RS     pub authority: String,
+//RS     pub queue: String,
+//RS     pub job_type: String,
+//RS     pub state: JetJobQueueState,
+//RS     pub sequence: i64,
+//RS     pub attempts: u32,
+//RS     pub due_at_ms: i64,
+//RS     pub accepted_at_ms: i64,
+//RS     pub request_id: Option<String>,
+//RS     pub idempotency_key: Option<String>,
+//RS     pub lease_until_ms: Option<i64>,
+//RS     pub duration_ms: Option<i64>,
+//RS     pub error_reason: Option<String>,
+//RS     pub delivery: JetJobQueueDeliveryPolicy,
+//RS     pub duplicate: bool,
+//RS     pub signature: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueClaim {
+//RS     pub receipt: JetJobQueueReceipt,
+//RS     pub payload: JetJobPayload,
+//RS     pub worker: String,
+//RS     pub lease_token: String,
+//RS     pub lease_until_ms: i64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueEvent {
+//RS     pub sequence: i64,
+//RS     pub state: JetJobQueueState,
+//RS     pub attempts: u32,
+//RS     pub timestamp_ms: i64,
+//RS     pub reason: Option<String>,
+//RS     pub duration_ms: Option<i64>,
+//RS     pub worker: Option<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueRecord {
+//RS     pub receipt: JetJobQueueReceipt,
+//RS     pub payload: Option<JetJobPayload>,
+//RS     pub result: Option<JetJobResult>,
+//RS     pub error: Option<JetJobError>,
+//RS     pub started_at_ms: Option<i64>,
+//RS     pub finished_at_ms: Option<i64>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueStatus {
+//RS     pub queue: String,
+//RS     pub authority: String,
+//RS     pub queued: u64,
+//RS     pub running: u64,
+//RS     pub retrying: u64,
+//RS     pub completed: u64,
+//RS     pub failed: u64,
+//RS     pub dead_lettered: u64,
+//RS     pub cancelled: u64,
+//RS     pub depth: u64,
+//RS     pub wait_ms: u64,
+//RS     pub throughput: u64,
+//RS     pub capacity: usize,
+//RS     pub paused: bool,
+//RS     pub freshness_ms: u64,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetJobQueueWorker {
+//RS     pub id: String,
+//RS     pub concurrency: usize,
+//RS     pub heartbeat_ms: i64,
+//RS }
+//RS 
+//RS impl JetJobQueueWorker {
+//RS     pub fn new(id: impl Into<String>, concurrency: usize, heartbeat_ms: i64) -> Result<Self, JetServiceError> {
+//RS         let worker = Self {
+//RS             id: id.into(),
+//RS             concurrency,
+//RS             heartbeat_ms,
+//RS         };
+//RS         service_authority_validate_text(&worker.id, "queue worker", JET_JOB_QUEUE_MAX_NAME, false)?;
+//RS         if worker.concurrency == 0 || worker.concurrency > JET_JOB_QUEUE_MAX_INSPECT {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue worker concurrency must be positive and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         if worker.heartbeat_ms <= 0 || worker.heartbeat_ms > JET_JOB_QUEUE_MAX_LEASE_MS {
+//RS             return Err(JetServiceError::Policy(
+//RS                 "queue worker heartbeat must be positive and bounded".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(worker)
+//RS     }
+//RS 
+//RS     pub fn poll<'a>(
+//RS         &self,
+//RS         queue: &mut JetJobQueue<'a>,
+//RS     ) -> Result<Vec<JetJobQueueClaim>, JetServiceError> {
+//RS         queue.claim(&self.id, self.concurrency)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct JetJobQueueStoredRecord {
+//RS     id: String,
+//RS     authority: String,
+//RS     queue: String,
+//RS     job_type: String,
+//RS     payload_type: String,
+//RS     payload: Vec<u8>,
+//RS     payload_public: bool,
+//RS     idempotency_key: Option<String>,
+//RS     request_id: Option<String>,
+//RS     sequence: i64,
+//RS     state: JetJobQueueState,
+//RS     due_at_ms: i64,
+//RS     accepted_at_ms: i64,
+//RS     started_at_ms: Option<i64>,
+//RS     finished_at_ms: Option<i64>,
+//RS     attempts: u32,
+//RS     lease_owner: Option<String>,
+//RS     lease_token: Option<String>,
+//RS     lease_until_ms: Option<i64>,
+//RS     result_type: Option<String>,
+//RS     result: Option<Vec<u8>>,
+//RS     result_public: bool,
+//RS     error_type: Option<String>,
+//RS     error_reason: Option<String>,
+//RS     error_detail: Option<String>,
+//RS     retry_at_ms: Option<i64>,
+//RS     updated_at_ms: i64,
+//RS     signature: String,
+//RS     event_sequence: i64,
+//RS }
+//RS const JET_JOB_QUEUE_DEVTOOLS_SOURCE: &str = "job-runtime";
+//RS 
+//RS #[derive(Clone, Debug)]
+//RS struct JetJobQueueDevtoolsTransition {
+//RS     event: &'static str,
+//RS     authority: String,
+//RS     queue: String,
+//RS     job_type: String,
+//RS     job_id: String,
+//RS     sequence: i64,
+//RS     state: JetJobQueueState,
+//RS     attempts: u32,
+//RS     timestamp_ms: i64,
+//RS     reason: Option<String>,
+//RS     duration_ms: Option<i64>,
+//RS     worker: Option<String>,
+//RS     request_id: Option<String>,
+//RS }
+//RS 
+//RS impl JetJobQueueDevtoolsTransition {
+//RS     fn from_record(
+//RS         record: &JetJobQueueStoredRecord,
+//RS         state: JetJobQueueState,
+//RS         attempts: u32,
+//RS         timestamp_ms: i64,
+//RS         reason: Option<&str>,
+//RS         duration_ms: Option<i64>,
+//RS         worker: Option<&str>,
+//RS     ) -> Self {
+//RS         let event = match state {
+//RS             JetJobQueueState::Queued => "enqueue",
+//RS             JetJobQueueState::Running => "start",
+//RS             JetJobQueueState::Retrying => "retry",
+//RS             JetJobQueueState::Completed => "complete",
+//RS             JetJobQueueState::Failed
+//RS             | JetJobQueueState::DeadLettered
+//RS             | JetJobQueueState::Cancelled => "fail",
+//RS         };
+//RS         Self {
+//RS             event,
+//RS             authority: record.authority.clone(),
+//RS             queue: record.queue.clone(),
+//RS             job_type: record.job_type.clone(),
+//RS             job_id: record.id.clone(),
+//RS             sequence: record.event_sequence.saturating_add(1),
+//RS             state,
+//RS             attempts,
+//RS             timestamp_ms,
+//RS             reason: reason.map(str::to_string),
+//RS             duration_ms,
+//RS             worker: worker.map(str::to_string),
+//RS             request_id: record.request_id.clone(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn with_event(mut self, event: &'static str) -> Self {
+//RS         self.event = event;
+//RS         self
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0300 crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1792-3592
+

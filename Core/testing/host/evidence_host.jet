@@ -1,0 +1,91 @@
+// Private native authority for the canonical Foundation evidence producer.
+// Evidence.rs:1302-1380,1437-1480. No TLS, lock, codec or file-policy copy lives
+// here. Main supplies the one real provider in the frozen native tandem batch.
+// Ordinary parameters borrow, & mutates and ^ consumes the checked visitor.
+
+pub trait EvidenceExpectationSource {
+    // Native TLS only: Ordinary=false, ExpectedFailure=true. This is an
+    // effectful read, never a compile-time fact or a second stored expectation.
+    fn current(self) -> Bool Never!
+}
+
+pub fn jet_evidence_expectation_current<N: EvidenceExpectationSource>(native: N) -> Bool Never! {
+    native.current()
+}
+
+// Specialize existing generic modules before declaring monomorphic traits.
+// #4401 must preserve their exports/bounds/impl resolution. Native registration
+// checks the visitor's Run method and specialization; it never erases an R/V.
+pub module evidence_expectation_scope<R, V> {
+    pub trait Run {
+        fn run(self) -> R Never!
+    }
+    pub trait Native {
+        // Evidence.rs:1309-1322: consume/invoke once; restore previous TLS after
+        // return, stop or unwind, then propagate that exact result/control.
+        // No catching/suppression and no C callback may unwind across the ABI.
+        fn with_expectation(self, expected_failure: Bool, operation: ^V) -> R Never!
+    }
+    pub fn with_expectation<N: Native>(native: N, expected_failure: Bool, operation: ^V) -> R Never! {
+        native.with_expectation(expected_failure, operation)
+    }
+}
+
+pub trait EvidenceAppendOperation {
+    // Canonical portable frame/header/schema/IO policy lives in Foundation.
+    // The visitor may own its already-encoded frame; append only borrows it.
+    // Rust message failures retain their original owned text in canonical Err.message.
+    fn append(self) Err!
+}
+
+pub module evidence_append_scope<V: EvidenceAppendOperation> {
+    pub trait Native {
+        // Evidence.rs:1437-1446: block on ONE process-wide Mutex<()>, recover
+        // poisoned guard via into_inner, hold through exactly one append call,
+        // release on return/stop/unwind, propagate unchanged. Not create-new
+        // filesystem locking, no public guard token, no copied frame payload.
+        fn with_append_lock(self, operation: ^V) Err!
+    }
+    pub fn with_append_lock<N: Native>(native: N, operation: ^V) Err! {
+        native.with_append_lock(operation) ?? return Err(err)
+    }
+}
+
+// Ten bytes copied into an inline primitive record from Rust's stack [u8;10].
+// This transports bytes only: Foundation, not native code, interprets magic,
+// byte order, schema versions and header conflicts. No heap list is allocated.
+pub struct EvidenceHeaderBytes {
+    pub byte0: U8
+    pub byte1: U8
+    pub byte2: U8
+    pub byte3: U8
+    pub byte4: U8
+    pub byte5: U8
+    pub byte6: U8
+    pub byte7: U8
+    pub byte8: U8
+    pub byte9: U8
+}
+
+// R/W are distinct checked retained read/write file owners, not paths or
+// erased runtime values. Register their close/drop facts for every exit rail.
+pub module evidence_append_io<R, W> {
+    pub trait Native {
+        // Evidence.rs:1447-1453: write+append+create; losslessly widen the
+        // target usize metadata length to U64, never allocate an exact Int.
+        fn open_append(self, path: String) -> W Err!
+        fn length(self, writer: W) -> U64 Err!
+        // Evidence.rs:1465-1470: a separate read open at cursor zero, exactly
+        // ten bytes, raw native error spelling (including short-read failure).
+        fn open_read(self, path: String) -> R Err!
+        fn read_exact_header(self, reader: &R) -> EvidenceHeaderBytes Err!
+        // Evidence.rs:1456-1461,1478-1479: borrow the original encoded extent;
+        // write_all handles partial writes/Interrupted then flush (not fsync).
+        fn write_all(self, writer: &W, bytes: View<U8>) Err!
+        fn flush(self, writer: &W) Err!
+        // Rust File drop ignores close errors. Consume once; real registered
+        // owner drop also closes on early error/stop/unwind, never leaks.
+        fn close_read(self, reader: ^R) Never!
+        fn close_write(self, writer: ^W) Never!
+    }
+}

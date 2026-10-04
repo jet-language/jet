@@ -1,0 +1,384 @@
+// PORT-PENDING 0180 crates-jet-codegen-src-prelude-localcell-module-group: crates/jet-codegen/src/Prelude/LocalCell.rs:1-380
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-LOCALCELL1=A (card #1201): the one local-interior-mutability runtime.
+//RS // `JetCell` is deliberately `!Send`/`!Sync`: its `Rc`, `UnsafeCell`, and
+//RS // single-threaded borrow counter have no atomic or operating-system lock cost.
+//RS //
+//RS // Guards carry one shared loan token. Mapping transfers that token; splitting
+//RS // clones it. The dynamic borrow is released only after the final derived guard
+//RS // drops, including during panic unwinding.
+//RS struct JetCellInner<T> {
+//RS     value: std::cell::UnsafeCell<T>,
+//RS     borrows: std::cell::Cell<isize>,
+//RS }
+//RS 
+//RS trait JetCellLoanRoot {
+//RS     fn release(&self, write: bool);
+//RS }
+//RS 
+//RS impl<T> JetCellLoanRoot for JetCellInner<T> {
+//RS     fn release(&self, write: bool) {
+//RS         let state = self.borrows.get();
+//RS         if write {
+//RS             debug_assert_eq!(state, -1);
+//RS             self.borrows.set(0);
+//RS         } else {
+//RS             debug_assert!(state > 0);
+//RS             self.borrows.set(state - 1);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct JetCellLoan {
+//RS     root: std::rc::Rc<dyn JetCellLoanRoot>,
+//RS     write: bool,
+//RS }
+//RS 
+//RS impl Drop for JetCellLoan {
+//RS     fn drop(&mut self) {
+//RS         self.root.release(self.write);
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetCell<T> {
+//RS     inner: std::rc::Rc<JetCellInner<T>>,
+//RS }
+//RS 
+//RS impl<T> Clone for JetCell<T> {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T> std::fmt::Debug for JetCell<T> {
+//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         f.write_str("Cell(..)")
+//RS     }
+//RS }
+//RS 
+//RS impl<T> PartialEq for JetCell<T> {
+//RS     fn eq(&self, other: &Self) -> bool {
+//RS         std::rc::Rc::ptr_eq(&self.inner, &other.inner)
+//RS     }
+//RS }
+//RS 
+//RS impl<T> Eq for JetCell<T> {}
+//RS 
+//RS impl<T> std::hash::Hash for JetCell<T> {
+//RS     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//RS         std::hash::Hash::hash(&std::rc::Rc::as_ptr(&self.inner), state);
+//RS     }
+//RS }
+//RS 
+//RS impl<T: 'static> JetCell<T> {
+//RS     pub fn new(value: T) -> Self {
+//RS         Self {
+//RS             inner: std::rc::Rc::new(JetCellInner {
+//RS                 value: std::cell::UnsafeCell::new(value),
+//RS                 borrows: std::cell::Cell::new(0),
+//RS             }),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn get(&self) -> T
+//RS     where
+//RS         T: Clone,
+//RS     {
+//RS         self.read(Clone::clone)
+//RS     }
+//RS 
+//RS     pub fn set(&self, value: T) {
+//RS         self.edit(|slot| *slot = value);
+//RS     }
+//RS 
+//RS     pub fn replace(&self, value: T) -> T {
+//RS         self.edit(|slot| std::mem::replace(slot, value))
+//RS     }
+//RS 
+//RS     pub fn read<F, R>(&self, f: F) -> R
+//RS     where
+//RS         F: FnOnce(&T) -> R,
+//RS     {
+//RS         self.guard_read().read(f)
+//RS     }
+//RS 
+//RS     pub fn edit<F, R>(&self, f: F) -> R
+//RS     where
+//RS         F: FnOnce(&mut T) -> R,
+//RS     {
+//RS         self.guard_edit().edit(f)
+//RS     }
+//RS 
+//RS     pub fn guard_read(&self) -> JetCellReadGuard<T> {
+//RS         let state = self.inner.borrows.get();
+//RS         if state < 0 {
+//RS             panic!("Cell borrow conflict: cannot read while an edit guard is active");
+//RS         }
+//RS         self.inner
+//RS             .borrows
+//RS             .set(state.checked_add(1).expect("Cell borrow count overflow"));
+//RS         let root: std::rc::Rc<dyn JetCellLoanRoot> = self.inner.clone();
+//RS         JetCellReadGuard {
+//RS             loan: std::rc::Rc::new(JetCellLoan { root, write: false }),
+//RS             // SAFETY: the read loan was acquired above. The shared loan token
+//RS             // outlives this pointer and releases only after every derived guard.
+//RS             ptr: std::ptr::NonNull::from(unsafe { &*self.inner.value.get() }),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn guard_edit(&self) -> JetCellEditGuard<T> {
+//RS         if self.inner.borrows.get() != 0 {
+//RS             panic!("Cell borrow conflict: cannot edit while a guard is active");
+//RS         }
+//RS         self.inner.borrows.set(-1);
+//RS         let root: std::rc::Rc<dyn JetCellLoanRoot> = self.inner.clone();
+//RS         JetCellEditGuard {
+//RS             loan: std::rc::Rc::new(JetCellLoan { root, write: true }),
+//RS             // SAFETY: the exclusive loan was acquired above. Its token
+//RS             // outlives this pointer and forbids every competing root access.
+//RS             ptr: std::ptr::NonNull::from(unsafe { &mut *self.inner.value.get() }),
+//RS             access: std::cell::Cell::new(0),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Adapter boundary for the canonical optional-slot policy. AOT uses
+//RS /// `Option<T>`; the TIR evaluator implements this for its tagged value carrier.
+//RS pub trait JetCellOptionLike: Clone {
+//RS     type Value: Clone;
+//RS 
+//RS     fn value(&self) -> Option<&Self::Value>;
+//RS     fn store(&mut self, value: Self::Value);
+//RS }
+//RS 
+//RS // D-FAIL-CARRIER1=A: a cell holds the one carrier, so an empty cell is a clean
+//RS // absence rather than a second optional shape.
+//RS impl<T: Clone> JetCellOptionLike for JetOutcome<T, JetAbsent> {
+//RS     type Value = T;
+//RS 
+//RS     fn value(&self) -> Option<&T> {
+//RS         self.as_ref().ok()
+//RS     }
+//RS 
+//RS     fn store(&mut self, value: T) {
+//RS         *self = Ok(value);
+//RS     }
+//RS }
+//RS 
+//RS impl<T: JetCellOptionLike + 'static> JetCell<T> {
+//RS     pub fn begin_get_or_set(&self) -> JetCellGetOrSet<T> {
+//RS         let guard = self.guard_edit();
+//RS         match guard.read(|slot| slot.value().cloned()) {
+//RS             Some(value) => JetCellGetOrSet::Value(value),
+//RS             None => JetCellGetOrSet::Empty(guard),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn get_or_set<F>(&self, init: F) -> T::Value
+//RS     where
+//RS         F: FnOnce() -> T::Value,
+//RS     {
+//RS         self.try_get_or_set::<_, std::convert::Infallible>(|| Ok(init()))
+//RS             .expect("infallible Cell initializer")
+//RS     }
+//RS 
+//RS     pub fn try_get_or_set<F, E>(&self, init: F) -> Result<T::Value, E>
+//RS     where
+//RS         F: FnOnce() -> Result<T::Value, E>,
+//RS     {
+//RS         match self.begin_get_or_set() {
+//RS             JetCellGetOrSet::Value(value) => Ok(value),
+//RS             JetCellGetOrSet::Empty(guard) => {
+//RS                 let value = init()?;
+//RS                 guard.store_option_value(value.clone());
+//RS                 Ok(value)
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub enum JetCellGetOrSet<T: JetCellOptionLike + 'static> {
+//RS     Value(T::Value),
+//RS     Empty(JetCellEditGuard<T>),
+//RS }
+//RS 
+//RS impl<T: JetCellOptionLike + 'static> JetCellEditGuard<T> {
+//RS     /// Canonical completion of an empty optional slot. Runtime tiers may
+//RS     /// marshal the value, but they must call this policy instead of rebuilding
+//RS     /// the `Some` representation themselves.
+//RS     pub fn store_option_value(&self, value: T::Value) {
+//RS         self.edit(|slot| slot.store(value));
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetCellReadGuard<T: ?Sized> {
+//RS     loan: std::rc::Rc<JetCellLoan>,
+//RS     ptr: std::ptr::NonNull<T>,
+//RS }
+//RS 
+//RS impl<T: ?Sized + 'static> JetCellReadGuard<T> {
+//RS     pub fn read<F, R>(&self, f: F) -> R
+//RS     where
+//RS         F: FnOnce(&T) -> R,
+//RS     {
+//RS         // SAFETY: the guard's shared loan is live for this call.
+//RS         f(unsafe { self.ptr.as_ref() })
+//RS     }
+//RS 
+//RS     pub fn get(&self) -> T
+//RS     where
+//RS         T: Clone + Sized,
+//RS     {
+//RS         self.read(Clone::clone)
+//RS     }
+//RS 
+//RS     pub fn map<U: ?Sized + 'static, F>(self, project: F) -> JetCellReadGuard<U>
+//RS     where
+//RS         F: FnOnce(&T) -> &U,
+//RS     {
+//RS         // SAFETY: the projection runs while the original shared loan is live.
+//RS         let ptr = std::ptr::NonNull::from(project(unsafe { self.ptr.as_ref() }));
+//RS         JetCellReadGuard {
+//RS             loan: self.loan,
+//RS             ptr,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn split<A: ?Sized + 'static, B: ?Sized + 'static, F>(
+//RS         self,
+//RS         project: F,
+//RS     ) -> (JetCellReadGuard<A>, JetCellReadGuard<B>)
+//RS     where
+//RS         F: FnOnce(&T) -> (&A, &B),
+//RS     {
+//RS         // SAFETY: both projections remain under the original shared loan.
+//RS         let (a, b) = project(unsafe { self.ptr.as_ref() });
+//RS         (
+//RS             JetCellReadGuard {
+//RS                 loan: self.loan.clone(),
+//RS                 ptr: std::ptr::NonNull::from(a),
+//RS             },
+//RS             JetCellReadGuard {
+//RS                 loan: self.loan,
+//RS                 ptr: std::ptr::NonNull::from(b),
+//RS             },
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetCellEditGuard<T: ?Sized> {
+//RS     loan: std::rc::Rc<JetCellLoan>,
+//RS     ptr: std::ptr::NonNull<T>,
+//RS     access: std::cell::Cell<isize>,
+//RS }
+//RS 
+//RS struct JetCellGuardAccess<'a> {
+//RS     state: &'a std::cell::Cell<isize>,
+//RS     write: bool,
+//RS }
+//RS 
+//RS impl Drop for JetCellGuardAccess<'_> {
+//RS     fn drop(&mut self) {
+//RS         if self.write {
+//RS             debug_assert_eq!(self.state.get(), -1);
+//RS             self.state.set(0);
+//RS         } else {
+//RS             let readers = self.state.get();
+//RS             debug_assert!(readers > 0);
+//RS             self.state.set(readers - 1);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<T: ?Sized + 'static> JetCellEditGuard<T> {
+//RS     pub fn read<F, R>(&self, f: F) -> R
+//RS     where
+//RS         F: FnOnce(&T) -> R,
+//RS     {
+//RS         let state = self.access.get();
+//RS         if state < 0 {
+//RS             panic!("Cell guard conflict: cannot read during an edit callback");
+//RS         }
+//RS         self.access
+//RS             .set(state.checked_add(1).expect("Cell guard read count overflow"));
+//RS         let _access = JetCellGuardAccess {
+//RS             state: &self.access,
+//RS             write: false,
+//RS         };
+//RS         // SAFETY: this callback access is tracked above and the root edit loan
+//RS         // remains live.
+//RS         f(unsafe { self.ptr.as_ref() })
+//RS     }
+//RS 
+//RS     pub fn edit<F, R>(&self, f: F) -> R
+//RS     where
+//RS         F: FnOnce(&mut T) -> R,
+//RS     {
+//RS         if self.access.get() != 0 {
+//RS             panic!("Cell guard conflict: cannot edit during another callback");
+//RS         }
+//RS         self.access.set(-1);
+//RS         let _access = JetCellGuardAccess {
+//RS             state: &self.access,
+//RS             write: true,
+//RS         };
+//RS         // SAFETY: this callback owns the only active access under the root edit
+//RS         // loan.
+//RS         f(unsafe { &mut *self.ptr.as_ptr() })
+//RS     }
+//RS 
+//RS     pub fn get(&self) -> T
+//RS     where
+//RS         T: Clone + Sized,
+//RS     {
+//RS         self.read(Clone::clone)
+//RS     }
+//RS 
+//RS     pub fn set(&self, value: T)
+//RS     where
+//RS         T: Sized,
+//RS     {
+//RS         self.edit(|slot| *slot = value);
+//RS     }
+//RS 
+//RS     pub fn map<U: ?Sized + 'static, F>(self, project: F) -> JetCellEditGuard<U>
+//RS     where
+//RS         F: FnOnce(&mut T) -> &mut U,
+//RS     {
+//RS         // SAFETY: the original edit loan is live and transferred to the result.
+//RS         let ptr = std::ptr::NonNull::from(project(unsafe { &mut *self.ptr.as_ptr() }));
+//RS         JetCellEditGuard {
+//RS             loan: self.loan,
+//RS             ptr,
+//RS             access: std::cell::Cell::new(0),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn split<A: ?Sized + 'static, B: ?Sized + 'static, F>(
+//RS         self,
+//RS         project: F,
+//RS     ) -> (JetCellEditGuard<A>, JetCellEditGuard<B>)
+//RS     where
+//RS         F: FnOnce(&mut T) -> (&mut A, &mut B),
+//RS     {
+//RS         // SAFETY: sema proves the two projected paths disjoint. Both derived
+//RS         // guards keep the original exclusive loan live.
+//RS         let (a, b) = project(unsafe { &mut *self.ptr.as_ptr() });
+//RS         (
+//RS             JetCellEditGuard {
+//RS                 loan: self.loan.clone(),
+//RS                 ptr: std::ptr::NonNull::from(a),
+//RS                 access: std::cell::Cell::new(0),
+//RS             },
+//RS             JetCellEditGuard {
+//RS                 loan: self.loan,
+//RS                 ptr: std::ptr::NonNull::from(b),
+//RS                 access: std::cell::Cell::new(0),
+//RS             },
+//RS         )
+//RS     }
+//RS }
+// END-PORT-PENDING 0180 crates/jet-codegen/src/Prelude/LocalCell.rs:1-380
+

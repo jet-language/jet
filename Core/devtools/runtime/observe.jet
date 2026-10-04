@@ -1,0 +1,385 @@
+// RT222: Prelude/Observe.rs portable policy over the ORIGINAL native registry.
+// Internal metadata only: no registry, provider, alternate envelope or identity.
+// usize facts are losslessly widened by the held native sampler to U64. Native
+// task.control remains Option<Weak<dyn JetObserveControl>> in Observe.rs:25-35;
+// only native code upgrades/cancels it after releasing the task lock.
+use core.text.runtime.kernel_unicode_string as observe_text
+use core.text.runtime.unicode_assets as observe_asset
+use core.text.runtime.assets.unicode_general_category as observe_category
+use jet_foundation.Devtools.LiveValue as observe_value
+
+pub OBSERVE_EVENT_LIMIT :: 256
+pub OBSERVE_TASK_LIMIT :: 4096
+pub OBSERVE_SNAPSHOT_BYTES :: 1048576
+pub OBSERVE_LEDGER_BYTES :: 524288
+
+// Observe.rs:25-44. Payload-free copied metadata, not live handle ownership.
+pub struct JetObserveTask {
+    pub parent: U64
+    pub label: String
+    pub spawn_site: U64
+    pub state: String
+    pub wait: String
+    pub deadline_ms: I64?
+    pub cancelled: Bool
+}
+pub struct JetObserveChannel {
+    pub depth: U64
+    pub capacity: U64?
+    pub send_waiters: U64
+    pub recv_waiters: U64
+    pub closed: Bool
+}
+// Observe.rs:46-63; RT121 jet_event_observe:463-496. EXACT source field order.
+// Static enum strings are native facts, not payloads or new public vocabulary.
+pub struct JetObserveEvent {
+    pub sequence: U64
+    pub source: String
+    pub event_id: U64
+    pub owner_id: U64
+    pub subscription_id: U64
+    pub dispatch_id: U64
+    pub lifecycle: String
+    pub queued: I64
+    pub blocked: I64
+    pub running: I64
+    pub capacity: I64
+    pub overflow: String
+    pub priority: I64
+    pub failure: String
+    pub terminal: String
+}
+// Observe.rs:468-496: sampled process/time/atomic facts; not a clock/provider.
+// captured_ms is original SystemTime duration.as_millis() (u128), not narrowed.
+pub struct JetObserveNativeFacts {
+    pub pid: U64
+    pub start_id: String
+    pub captured_ms: Int
+    pub workers: U64
+    pub queued: U64
+    pub arenas: U64
+    pub arena_allocations: U64
+    pub arena_bytes: U64
+    pub elapsed_ns: U64
+    pub started_cpu_ns: U64?
+    pub now_cpu_ns: U64?
+    pub exit: Bool
+}
+
+// Observe.rs:328-340. Scalar cap is BEFORE escaping; only General_Category Cc
+// becomes space. Cf, combining marks, separators and supplementary scalars stay.
+pub fn jet_observe_escape(value: String) -> String Never! {
+    raw :: observe_text.utf8_bytes(value)
+    category :: observe_category.UNICODE_GENERAL_CATEGORY
+    out := [U8]{}
+    at := 0
+    count := 0
+    loop at < raw.len() && count < 160 {
+        cp :: observe_text.scalar_at(raw, at)
+        if cp == 34 || cp == 92 -> observe_text.append_cp(&out, 92)
+        if observe_asset.asset_tag(category, cp, 8) == 0 {
+            observe_text.append_cp(&out, 32)
+        } else {
+            observe_text.append_cp(&out, cp)
+        }
+        count = count + 1
+        at = at + observe_text.utf8_width_at(raw, at)
+    }
+    String.from_bytes(out) ?? panic("observe escape produced invalid UTF-8")
+}
+
+// Observe.rs:222,312,744 share Rust char::is_control (pinned Cc).
+fn observe_has_control(value: String) -> Bool Never! {
+    !observe_text.isprintable(value)
+}
+// Observe.rs:220-226: environment VALUE validation, not ambient env access.
+pub fn jet_observe_relay_value_valid(value: String) -> Bool Never! {
+    !value.is_empty() && observe_text.utf8_bytes(value).len() <= 16384 && !observe_has_control(value)
+}
+// Observe.rs:307-309. No truthy spellings or defaults.
+pub fn jet_observe_live_enabled(value: String?) -> Bool Never! {
+    if value == .Val(text) -> return text == "1"
+    false
+}
+// Observe.rs:679-687,730-747. All five required; absent env components NEVER
+// synthesize a live identity. Explicit identity has no 16KiB limit in Rust.
+pub fn jet_observe_identity_valid(session: String, source: String, build: String, revision: String, world: String) -> Bool Never! {
+    !session.is_empty() && !source.is_empty() && !build.is_empty() && !revision.is_empty() && !world.is_empty() && !observe_has_control(session) && !observe_has_control(source) && !observe_has_control(build) && !observe_has_control(revision) && !observe_has_control(world)
+}
+pub fn jet_observe_env_identity_valid(session: String?, source: String?, build: String?, revision: String?, world: String?) -> Bool Never! {
+    s :: session ?? return false
+    o :: source ?? return false
+    b :: build ?? return false
+    r :: revision ?? return false
+    w :: world ?? return false
+    jet_observe_relay_value_valid(s) && jet_observe_relay_value_valid(o) && jet_observe_relay_value_valid(b) && jet_observe_relay_value_valid(r) && jet_observe_relay_value_valid(w)
+}
+// Observe.rs:310-319. Deliberately not a JSON parser: preserve original braces,
+// byte limit and control rejection, including acceptance of malformed interiors.
+pub fn jet_observe_decision_ledger_valid(ledger: String) -> Bool Never! {
+    observe_text.utf8_bytes(ledger).len() <= OBSERVE_LEDGER_BYTES && !observe_has_control(ledger) && ledger.starts_with("{") && ledger.ends_with("}")
+}
+pub fn jet_observe_store_decision_ledger(current: &String?, ledger: String) Never! {
+    if jet_observe_decision_ledger_valid(ledger) -> current = Val(ledger)
+}
+
+// Observe.rs:413-424,446-450,469-473: optional facts remain null, never zero.
+fn observe_i64_json(value: I64?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
+}
+fn observe_u64_json(value: U64?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
+}
+pub fn jet_observe_cpu_delta(started: U64?, now: U64?) -> U64? {
+    s :: started ?? return None
+    n :: now ?? return None
+    if n < s -> return Val(U64{0})
+    Val(n - s)
+}
+pub fn jet_observe_task_json(id: U64, row: JetObserveTask) -> String Never! {
+    label :: jet_observe_escape(row.label)
+    wait :: jet_observe_escape(row.wait)
+    deadline :: observe_i64_json(row.deadline_ms)
+    "{{\"id\":{id},\"parent\":{row.parent},\"label\":\"{label}\",\"spawn_site\":{row.spawn_site},\"state\":\"{row.state}\",\"wait\":\"{wait}\",\"deadline_ms\":{deadline},\"cancelled\":{row.cancelled}}}"
+}
+pub fn jet_observe_channel_json(id: U64, channel: JetObserveChannel) -> String Never! {
+    capacity :: observe_u64_json(channel.capacity)
+    "{{\"id\":{id},\"depth\":{channel.depth},\"capacity\":{capacity},\"send_waiters\":{channel.send_waiters},\"recv_waiters\":{channel.recv_waiters},\"closed\":{channel.closed}}}"
+}
+// Observe.rs:425-431: no escaping/native-static fact reinterpretation, no
+// payload field, no sorting: preserve exact serialized source/deque order.
+pub fn jet_observe_event_json(event: JetObserveEvent) -> String Never! {
+    "{{\"sequence\":{event.sequence},\"source\":\"{event.source}\",\"event_id\":{event.event_id},\"owner_id\":{event.owner_id},\"subscription_id\":{event.subscription_id},\"dispatch_id\":{event.dispatch_id},\"lifecycle\":\"{event.lifecycle}\",\"queued\":{event.queued},\"blocked\":{event.blocked},\"running\":{event.running},\"capacity\":{event.capacity},\"overflow\":\"{event.overflow}\",\"priority\":{event.priority},\"failure\":\"{event.failure}\",\"terminal\":\"{event.terminal}\"}}"
+}
+// Observe.rs:542-551: the native lock assigns wrapping sequence BEFORE push.
+// Native deque owns eviction. This projection takes its retained tail extent;
+// it is NOT a second queue or sequence allocator, and never sorts events.
+pub fn jet_observe_events_json(events: [JetObserveEvent]) -> String Never! {
+    start := 0
+    if events.len() > OBSERVE_EVENT_LIMIT -> start = events.len() - OBSERVE_EVENT_LIMIT
+    rows := [String]{}
+    loop i in start..<events.len() -> &rows.push(jet_observe_event_json(events[i]))
+    rows.join(",")
+}
+
+// Observe.rs:393-441. Ordered keys only; no array-backed registry/map emulation.
+// Counting is after sort/truncate. Categories may overlap (channel tcp wait).
+pub fn jet_observe_tasks_json(tasks: [U64: JetObserveTask]) -> (json: String, compute: Int, waiting: Int, channel: Int, time: Int, io: Int, cancelled: Int, running: Int) Never! {
+    keys := tasks.keys().to_list()
+    &keys.sort()
+    limit := keys.len()
+    if limit > OBSERVE_TASK_LIMIT -> limit = OBSERVE_TASK_LIMIT
+    rows := [String]{}
+    blocked := 0
+    channel := 0
+    time := 0
+    io := 0
+    cancelled := 0
+    running := 0
+    loop i in 0..<limit {
+        id :: keys[i]
+        row :: tasks[id]
+        &rows.push(jet_observe_task_json(id, row))
+        if row.state == "blocked" {
+            blocked = blocked + 1
+            if row.wait.starts_with("channel ") -> channel = channel + 1
+            if row.wait.starts_with("time ") -> time = time + 1
+            if row.wait.contains("tcp") || row.wait.contains("network") || row.wait.starts_with("io ") -> io = io + 1
+        }
+        if row.cancelled -> cancelled = cancelled + 1
+        if row.state == "running" -> running = running + 1
+    }
+    (json: rows.join(","), compute: limit - blocked, waiting: blocked, channel: channel, time: time, io: io, cancelled: cancelled, running: running)
+}
+pub fn jet_observe_channels_json(channels: [U64: JetObserveChannel]) -> String Never! {
+    keys := channels.keys().to_list()
+    &keys.sort()
+    limit := keys.len()
+    if limit > OBSERVE_TASK_LIMIT -> limit = OBSERVE_TASK_LIMIT
+    rows := [String]{}
+    loop i in 0..<limit -> &rows.push(jet_observe_channel_json(keys[i], channels[keys[i]]))
+    rows.join(",")
+}
+// Observe.rs:636-656: failure identity may name unknown task; unlike LIVE
+// identity this is the original diagnostic fallback, never an ambient session.
+pub fn jet_observe_task_identity(id: U64, metadata: JetObserveTask?) -> String Never! {
+    if metadata == .Val(row) {
+        label :: jet_observe_escape(row.label)
+        return "{label} (spawn site {row.spawn_site})"
+    }
+    "task #{id}"
+}
+pub fn jet_observe_task_failure_message_for_identity(identity: String, reason: String) -> String Never! {
+    "{identity}: {reason}"
+}
+// Observe.rs:622-631,905-913: bounded metadata update, no native task registry.
+pub fn jet_observe_task_set_label(row: &JetObserveTask, id: U64, label: String) Never! {
+    if id == (U64{0}) -> return
+    trimmed := label.trim() // #4303
+    if trimmed.is_empty() -> return
+    end := label.len()
+    if end > 160 -> end = 160
+    bounded := label.slice(0, end) // #4303
+    row.label = bounded
+}
+pub fn jet_observe_task_update(row: &JetObserveTask, state: String, wait: String, deadline: I64?) Never! {
+    end := wait.len()
+    if end > 160 -> end = 160
+    bounded := wait.slice(0, end) // #4303
+    row.state = state
+    row.wait = bounded
+    row.deadline_ms = deadline
+}
+// Observe.rs:870-898: portable details only, no sleep/cancel/exit diagnostic
+// provider. Reserve 128 bytes, keep later short entries even after omission.
+pub fn jet_observe_parked_details(tasks: [U64: JetObserveTask]) -> String Never! {
+    keys := tasks.keys().to_list()
+    &keys.sort()
+    details := [U8]{}
+    omitted := 0
+    loop id in keys {
+        row :: tasks[id]
+        if row.state != "blocked" -> next
+        label :: jet_observe_escape(row.label)
+        wait := "unknown"
+        if !row.wait.is_empty() -> wait = jet_observe_escape(row.wait)
+        entry :: "\n  {label} (spawn site {row.spawn_site})\n    state: {row.state}\n    wait target: {wait}"
+        raw :: observe_text.utf8_bytes(entry)
+        if details.len() + raw.len() > 65536 - 128 {
+            omitted = omitted + 1
+        } else {
+            loop byte in raw -> &details.push(byte)
+        }
+    }
+    if omitted > 0 {
+        marker :: "\n  ... {omitted} more parked task(s) omitted by the report limit ..."
+        raw :: observe_text.utf8_bytes(marker)
+        if details.len() + raw.len() <= 65536 {
+            loop byte in raw -> &details.push(byte)
+        }
+    }
+    String.from_bytes(details) ?? panic("observe report produced invalid UTF-8")
+}
+// Observe.rs:523,159,174-181. Snapshot publication and relay have distinct caps.
+pub fn jet_observe_snapshot_fits(snapshot: String) -> Bool Never! {
+    observe_text.utf8_bytes(snapshot).len() <= OBSERVE_SNAPSHOT_BYTES
+}
+pub fn jet_observe_relay_frame_header(envelope_bytes: U64) -> (b0: U8, b1: U8, b2: U8, b3: U8)? {
+    if envelope_bytes > (U64{4194304}) -> return None
+    // The original 4MiB cap implies u32::MAX. Header is big endian, NOT JSON.
+    // host E0308 U8-list, see Main
+    // Canonical widening is inline-small after the cap, not an allocating
+    // exact-number replacement for a fixed-width arithmetic kernel.
+    length :: Int.from_u64(envelope_bytes)
+    // Original u32::to_be_bytes inline four-byte result, not a heap header list.
+    Val((b0: U8{(length >> 24) & 255}, b1: U8{(length >> 16) & 255}, b2: U8{(length >> 8) & 255}, b3: U8{length & 255}))
+}
+
+// Observe.rs:283-305: caller holds the ORIGINAL native values lock. Replacement
+// remains legal at capacity; new keys are ignored. Foundation decisions only.
+pub fn jet_observe_store_value(values: &[String: observe_value.JetLiveValueDecision], value: observe_value.JetLiveValueDecision) Never! {
+    if values.has_key(value.value_id) || values.len() < observe_value.JET_DEVTOOLS_MAX_LIVE_VALUES {
+        values[value.value_id] = value
+    }
+}
+// Observe.rs:443-461: BTreeMap String order, all five Foundation fields.
+pub fn jet_observe_value_json(value: observe_value.JetLiveValueDecision) -> String Never! {
+    id :: jet_observe_escape(value.value_id)
+    type_name :: jet_observe_escape(value.type_identity)
+    disposition :: jet_observe_escape(value.disposition)
+    reason :: jet_observe_escape(value.reason)
+    rendered := "null"
+    if value.rendered_value == .Val(text) {
+        escaped :: jet_observe_escape(text)
+        rendered = "\"{escaped}\""
+    }
+    "{{\"value_id\":\"{id}\",\"type_identity\":\"{type_name}\",\"disposition\":\"{disposition}\",\"reason\":\"{reason}\",\"rendered_value\":{rendered}}}"
+}
+pub fn jet_observe_values_json(values: [String: observe_value.JetLiveValueDecision]) -> String Never! {
+    keys := values.keys().to_list()
+    &keys.sort()
+    rows := [String]{}
+    loop key in keys -> &rows.push(jet_observe_value_json(values[key]))
+    rows.join(",")
+}
+// Observe.rs:385-498. Complete live snapshot, NOT jet.devtools.v1 relay
+// envelope. Native caller supplies atomic/clock facts + already-locked metadata.
+// Identity is five explicit original required components, no alternate public
+// identity. Return None for absent/invalid identity; no ambient fallback.
+pub fn jet_observe_snapshot(session: String?, source: String?, build: String?, revision: String?, world: String?, tasks: [U64: JetObserveTask], channels: [U64: JetObserveChannel], events: [JetObserveEvent], values: [String: observe_value.JetLiveValueDecision], ledger: String?, facts: JetObserveNativeFacts) -> String? {
+    s :: session ?? return None
+    o :: source ?? return None
+    b :: build ?? return None
+    r :: revision ?? return None
+    w :: world ?? return None
+    if !jet_observe_identity_valid(s, o, b, r, w) -> return None
+    session_json :: jet_observe_escape(s)
+    source_json :: jet_observe_escape(o)
+    build_json :: jet_observe_escape(b)
+    revision_json :: jet_observe_escape(r)
+    world_json :: jet_observe_escape(w)
+    start :: jet_observe_escape(facts.start_id)
+    task_rows :: jet_observe_tasks_json(tasks)
+    channel :: jet_observe_channels_json(channels)
+    event :: jet_observe_events_json(events)
+    value :: jet_observe_values_json(values)
+    decisions := "null"
+    if ledger == .Val(text) -> decisions = text
+    cpu :: observe_u64_json(jet_observe_cpu_delta(facts.started_cpu_ns, facts.now_cpu_ns))
+    Val("{{\"protocol\":\"jet.live.v1\",\"session_id\":\"{session_json}\",\"source_id\":\"{source_json}\",\"build_id\":\"{build_json}\",\"revision\":\"{revision_json}\",\"world_id\":\"{world_json}\",\"decisions\":{decisions},\"values\":[{value}],\"schema_version\":1,\"pid\":{facts.pid},\"start_id\":\"{start}\",\"captured_ms\":{facts.captured_ms},\"tasks\":[{task_rows.json}],\"channels\":[{channel}],\"event_observations\":[{event}],\"effects\":{{\"compute\":{task_rows.compute},\"waiting\":{task_rows.waiting},\"channel\":{task_rows.channel},\"time\":{task_rows.time},\"io\":{task_rows.io}}},\"resources\":{{\"workers\":{facts.workers},\"running\":{task_rows.running},\"queued\":{facts.queued},\"cancelled\":{task_rows.cancelled},\"arenas\":{facts.arenas},\"arena_allocations\":{facts.arena_allocations},\"arena_bytes\":{facts.arena_bytes}}},\"runtime\":{{\"elapsed_ns\":{facts.elapsed_ns},\"cpu_ns\":{cpu},\"exit\":{facts.exit}}}}}")
+}
+
+// Observe.rs:733-735: compare only a COMPLETE VALID sampled env identity.
+// Incomplete/invalid env identity is absent, never a default or partial match.
+pub fn jet_observe_identity_matches_env(session: String, source: String, build: String, revision: String, world: String, env_session: String?, env_source: String?, env_build: String?, env_revision: String?, env_world: String?) -> Bool Never! {
+    if !jet_observe_env_identity_valid(env_session, env_source, env_build, env_revision, env_world) -> return true
+    s :: env_session ?? return true
+    o :: env_source ?? return true
+    b :: env_build ?? return true
+    r :: env_revision ?? return true
+    w :: env_world ?? return true
+    session == s && source == o && build == b && revision == r && world == w
+}
+// Observe.rs:775-777: take input rows BEFORE keyed replacement. Duplicate keys
+// still consume an input slot; no second storage/registry owner is introduced.
+pub fn jet_observe_initial_values(values: &[String: observe_value.JetLiveValueDecision], initial: [observe_value.JetLiveValueDecision]) Never! {
+    limit := initial.len()
+    if limit > observe_value.JET_DEVTOOLS_MAX_LIVE_VALUES -> limit = observe_value.JET_DEVTOOLS_MAX_LIVE_VALUES
+    loop i in 0..<limit -> jet_observe_store_value(&values, initial[i])
+}
+
+// Held ORIGINAL native leaf inventory (Observe.rs; not source declarations or
+// fallback calls): Control.cancel:10-12; register_exit_drain/drain:14-24;
+// registry+OnceLock/atomics/TLS+Writer/Run.restart:87-154,262-282;
+// relay write/publish/install/env sampling:167-259; record_live_value:290-295;
+// process_start_id/CPU:342-383; publish/exit:500-540; event lock/sequence/deque:
+// 542-551; task register/weak ownership:553-617; registry label/identity/
+// failure/enter/finish:622-677; env identity sampling/start/thread:679-793;
+// locked parked snapshot/cancel/has/report:795-869,899-903; task TLS update:
+// 905-913; arena open/alloc/retain/release/memory/reset/close+probe reset/take:
+// 915-957. Native read/lock holds and weak upgrades release before callbacks;
+// publication holds run lock through atomic rename and marks exit even when
+// >1MiB or write fails; restart resets clock origins/exited, NOT sequence,
+// identity, registry or initial values. Main must preserve these exact rails.
+// RT121 original reactive/event/watch file remains unchanged: observe helper
+// :463-496 feeds native metadata; callsites :731,736,750,770,776,783,1100,1109,
+// 1175,1186,1210,1263,1292,1406,1430,1450,1492,1501,1509,1544,1822,1827,1838,
+// 1865,1870,1876,1882,1886,1893,1897,1906. Do NOT relocate CAS/once/payload/
+// cancellation semantics to this policy. Readiness :1961-1982 publishes the
+// ORIGINAL Foundation envelope, not this live snapshot. Other RT121 reactive,
+// scope/subscription/event/async/hook/watch/measurement callables :1-2433
+// stay their original native routes; no alternate evaluator or producer.
+// Assigned test inventory: tests/devtools.rs is the maintainer CLI reduce,
+// ice-report, new-example/new-ui, fixture-path and bless suite (not Observe
+// production); unchanged. tests/production_receipt.rs:40-98 proves redacted,
+// canonical development failure receipts across engines, not live identity or
+// arbitrary payload publication; unchanged. tests/event_observations.rs:
+// 121-233 sync/hook executed-only/secret-free lifecycle+Canvas projection;
+// 236-347 async pressure/drop/failure/close/cancel and one terminal;
+// 350-404 exact rejected/once subscription removals;407-436 bounded256;
+// 439-475 concurrent push-order sequence;478-509 callback tier result contract.
+// All six ORIGINAL attached-runtime tests remain unchanged and held on real
+// native feed/tier integration; ordinary typed source-policy assertions live
+// in tests/conformance/corpus/core/devtools/runtime/observe.jet.

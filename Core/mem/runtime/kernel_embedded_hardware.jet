@@ -1,0 +1,1793 @@
+// PORT-PENDING 0146 crates-jet-codegen-src-prelude-core-embeddedhardware-slice-1: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1-1789
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FOUND-BOARD1=A / I9: one target-profile hardware kernel shared by every
+//RS // execution tier.  A target adapter supplies the generated fact slices and
+//RS // chooses the register backend; this file owns width/access checks, volatile
+//RS // operations, bounded interrupt delivery, and DMA ownership transitions.
+//RS //
+//RS // The generated register types carry width, access mode, and volatility in
+//RS // their Rust type.  The target backend is the only place that performs raw
+//RS // pointer operations.  Host replay uses JetRegisterReplay with the same
+//RS // generated register type and the same JetHardwareFacts; it is not a second
+//RS // semantic implementation.
+//RS 
+//RS use core::cell::Cell;
+//RS use core::marker::PhantomData;
+//RS use core::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS // ── Target facts consumed by generated adapters ─────────────────────────────
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetRegisterWidth {
+//RS     U8,
+//RS     U16,
+//RS     U32,
+//RS     U64,
+//RS }
+//RS 
+//RS impl JetRegisterWidth {
+//RS     pub const fn bytes(self) -> u64 {
+//RS         match self {
+//RS             Self::U8 => 1,
+//RS             Self::U16 => 2,
+//RS             Self::U32 => 4,
+//RS             Self::U64 => 8,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn bits(self) -> u16 {
+//RS         (self.bytes() * 8) as u16
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetRegisterAccessMode {
+//RS     ReadOnly,
+//RS     WriteOnly,
+//RS     ReadWrite,
+//RS }
+//RS 
+//RS impl JetRegisterAccessMode {
+//RS     pub const fn can_read(self) -> bool {
+//RS         matches!(self, Self::ReadOnly | Self::ReadWrite)
+//RS     }
+//RS 
+//RS     pub const fn can_write(self) -> bool {
+//RS         matches!(self, Self::WriteOnly | Self::ReadWrite)
+//RS     }
+//RS }
+//RS 
+//RS /// The generated type uses one of these marker types for a register's access
+//RS /// mode.  A read method is not implemented for `JetWriteOnly`, and a write
+//RS /// method is not implemented for `JetReadOnly`; an invalid operation therefore
+//RS /// fails during generated Rust type checking rather than at run time.
+//RS pub trait JetRegisterAccess {
+//RS     const MODE: JetRegisterAccessMode;
+//RS }
+//RS 
+//RS pub struct JetReadOnly;
+//RS pub struct JetWriteOnly;
+//RS pub struct JetReadWrite;
+//RS 
+//RS impl JetRegisterAccess for JetReadOnly {
+//RS     const MODE: JetRegisterAccessMode = JetRegisterAccessMode::ReadOnly;
+//RS }
+//RS impl JetRegisterAccess for JetWriteOnly {
+//RS     const MODE: JetRegisterAccessMode = JetRegisterAccessMode::WriteOnly;
+//RS }
+//RS impl JetRegisterAccess for JetReadWrite {
+//RS     const MODE: JetRegisterAccessMode = JetRegisterAccessMode::ReadWrite;
+//RS }
+//RS 
+//RS pub trait JetRegisterReadable: JetRegisterAccess {}
+//RS pub trait JetRegisterWritable: JetRegisterAccess {}
+//RS 
+//RS impl JetRegisterReadable for JetReadOnly {}
+//RS impl JetRegisterReadable for JetReadWrite {}
+//RS impl JetRegisterWritable for JetWriteOnly {}
+//RS impl JetRegisterWritable for JetReadWrite {}
+//RS 
+//RS /// Values supported by generated register widths.  The conversion is bitwise,
+//RS /// so a register's unsigned representation is preserved on both target and
+//RS /// replay backends.
+//RS pub trait JetRegisterValue: Copy {
+//RS     const WIDTH: JetRegisterWidth;
+//RS 
+//RS     fn from_bits(bits: u64) -> Self;
+//RS     fn into_bits(self) -> u64;
+//RS }
+//RS 
+//RS impl JetRegisterValue for u8 {
+//RS     const WIDTH: JetRegisterWidth = JetRegisterWidth::U8;
+//RS 
+//RS     fn from_bits(bits: u64) -> Self {
+//RS         bits as u8
+//RS     }
+//RS 
+//RS     fn into_bits(self) -> u64 {
+//RS         self as u64
+//RS     }
+//RS }
+//RS 
+//RS impl JetRegisterValue for u16 {
+//RS     const WIDTH: JetRegisterWidth = JetRegisterWidth::U16;
+//RS 
+//RS     fn from_bits(bits: u64) -> Self {
+//RS         bits as u16
+//RS     }
+//RS 
+//RS     fn into_bits(self) -> u64 {
+//RS         self as u64
+//RS     }
+//RS }
+//RS 
+//RS impl JetRegisterValue for u32 {
+//RS     const WIDTH: JetRegisterWidth = JetRegisterWidth::U32;
+//RS 
+//RS     fn from_bits(bits: u64) -> Self {
+//RS         bits as u32
+//RS     }
+//RS 
+//RS     fn into_bits(self) -> u64 {
+//RS         self as u64
+//RS     }
+//RS }
+//RS 
+//RS impl JetRegisterValue for u64 {
+//RS     const WIDTH: JetRegisterWidth = JetRegisterWidth::U64;
+//RS 
+//RS     fn from_bits(bits: u64) -> Self {
+//RS         bits
+//RS     }
+//RS 
+//RS     fn into_bits(self) -> u64 {
+//RS         self
+//RS     }
+//RS }
+//RS 
+//RS /// One generated register fact.  `JetRegisterBlockSpec` and
+//RS /// `JetHardwareFacts` are emitted from the compiler's `TargetHardwareFacts`;
+//RS /// they deliberately contain no user-provided address or unsafe gate.
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetRegisterSpec<'a> {
+//RS     pub name: &'a str,
+//RS     pub offset: u64,
+//RS     pub width: JetRegisterWidth,
+//RS     pub access: JetRegisterAccessMode,
+//RS     pub volatile: bool,
+//RS }
+//RS 
+//RS impl<'a> JetRegisterSpec<'a> {
+//RS     pub const fn new(
+//RS         name: &'a str,
+//RS         offset: u64,
+//RS         width: JetRegisterWidth,
+//RS         access: JetRegisterAccessMode,
+//RS         volatile: bool,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name,
+//RS             offset,
+//RS             width,
+//RS             access,
+//RS             volatile,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetRegisterBlockSpec<'a> {
+//RS     pub name: &'a str,
+//RS     pub base: u64,
+//RS     pub size_bytes: u64,
+//RS     pub registers: &'a [JetRegisterSpec<'a>],
+//RS }
+//RS 
+//RS impl<'a> JetRegisterBlockSpec<'a> {
+//RS     pub const fn new(
+//RS         name: &'a str,
+//RS         base: u64,
+//RS         size_bytes: u64,
+//RS         registers: &'a [JetRegisterSpec<'a>],
+//RS     ) -> Self {
+//RS         Self {
+//RS             name,
+//RS             base,
+//RS             size_bytes,
+//RS             registers,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register(&self, name: &str) -> Option<&JetRegisterSpec<'a>> {
+//RS         self.registers.iter().find(|register| register.name == name)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetInterruptSpec<'a> {
+//RS     pub name: &'a str,
+//RS     pub vector: u16,
+//RS     pub forbidden_effects: &'a [&'a str],
+//RS     pub bounded: bool,
+//RS }
+//RS 
+//RS impl<'a> JetInterruptSpec<'a> {
+//RS     pub const fn new(name: &'a str, vector: u16, bounded: bool) -> Self {
+//RS         Self {
+//RS             name,
+//RS             vector,
+//RS             forbidden_effects: &[],
+//RS             bounded,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn with_effects(
+//RS         name: &'a str,
+//RS         vector: u16,
+//RS         forbidden_effects: &'a [&'a str],
+//RS         bounded: bool,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name,
+//RS             vector,
+//RS             forbidden_effects,
+//RS             bounded,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetDmaOwnership {
+//RS     Borrowed,
+//RS     Transfer,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetDmaChannelSpec<'a> {
+//RS     pub name: &'a str,
+//RS     pub channel: u16,
+//RS     pub transfer_width: JetRegisterWidth,
+//RS     pub ownership: JetDmaOwnership,
+//RS     pub max_transfer_bytes: Option<u64>,
+//RS }
+//RS 
+//RS impl<'a> JetDmaChannelSpec<'a> {
+//RS     pub const fn new(name: &'a str, channel: u16) -> Self {
+//RS         Self {
+//RS             name,
+//RS             channel,
+//RS             transfer_width: JetRegisterWidth::U8,
+//RS             ownership: JetDmaOwnership::Transfer,
+//RS             max_transfer_bytes: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn with_transfer(
+//RS         name: &'a str,
+//RS         channel: u16,
+//RS         transfer_width: JetRegisterWidth,
+//RS         ownership: JetDmaOwnership,
+//RS         max_transfer_bytes: Option<u64>,
+//RS     ) -> Self {
+//RS         Self {
+//RS             name,
+//RS             channel,
+//RS             transfer_width,
+//RS             ownership,
+//RS             max_transfer_bytes,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// The target adapter lowers the compiler's `TargetHardwareFacts` into these
+//RS /// immutable slices.  Every hardware operation below consults this same fact
+//RS /// plane, including host replay.
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetHardwareFacts<'a> {
+//RS     pub profile_id: Option<&'a str>,
+//RS     pub capabilities: &'a [&'a str],
+//RS     pub svd_source: Option<&'a str>,
+//RS     pub svd_sha256: Option<&'a str>,
+//RS     pub register_blocks: &'a [JetRegisterBlockSpec<'a>],
+//RS     pub interrupts: &'a [JetInterruptSpec<'a>],
+//RS     pub dma_channels: &'a [JetDmaChannelSpec<'a>],
+//RS }
+//RS 
+//RS impl<'a> JetHardwareFacts<'a> {
+//RS     pub const fn new(
+//RS         register_blocks: &'a [JetRegisterBlockSpec<'a>],
+//RS         interrupts: &'a [JetInterruptSpec<'a>],
+//RS         dma_channels: &'a [JetDmaChannelSpec<'a>],
+//RS     ) -> Self {
+//RS         Self {
+//RS             profile_id: None,
+//RS             capabilities: &[],
+//RS             svd_source: None,
+//RS             svd_sha256: None,
+//RS             register_blocks,
+//RS             interrupts,
+//RS             dma_channels,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn with_svd(
+//RS         svd_source: &'a str,
+//RS         svd_sha256: &'a str,
+//RS         register_blocks: &'a [JetRegisterBlockSpec<'a>],
+//RS         interrupts: &'a [JetInterruptSpec<'a>],
+//RS         dma_channels: &'a [JetDmaChannelSpec<'a>],
+//RS     ) -> Self {
+//RS         Self {
+//RS             profile_id: None,
+//RS             capabilities: &[],
+//RS             svd_source: Some(svd_source),
+//RS             svd_sha256: Some(svd_sha256),
+//RS             register_blocks,
+//RS             interrupts,
+//RS             dma_channels,
+//RS         }
+//RS     }
+//RS 
+//RS     pub const fn with_profile(
+//RS         profile_id: &'a str,
+//RS         capabilities: &'a [&'a str],
+//RS         svd_source: Option<&'a str>,
+//RS         svd_sha256: Option<&'a str>,
+//RS         register_blocks: &'a [JetRegisterBlockSpec<'a>],
+//RS         interrupts: &'a [JetInterruptSpec<'a>],
+//RS         dma_channels: &'a [JetDmaChannelSpec<'a>],
+//RS     ) -> Self {
+//RS         Self {
+//RS             profile_id: Some(profile_id),
+//RS             capabilities,
+//RS             svd_source,
+//RS             svd_sha256,
+//RS             register_blocks,
+//RS             interrupts,
+//RS             dma_channels,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn register_block(&self, name: &str) -> Option<&JetRegisterBlockSpec<'a>> {
+//RS         self.register_blocks
+//RS             .iter()
+//RS             .find(|block| block.name == name)
+//RS     }
+//RS 
+//RS     pub fn interrupt(&self, selector: &str) -> Option<&JetInterruptSpec<'a>> {
+//RS         let vector = selector.parse::<u16>().ok();
+//RS         self.interrupts.iter().find(|interrupt| {
+//RS             interrupt.name == selector || vector.is_some_and(|value| value == interrupt.vector)
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn interrupt_vector(&self, vector: u16) -> Option<&JetInterruptSpec<'a>> {
+//RS         self.interrupts
+//RS             .iter()
+//RS             .find(|interrupt| interrupt.vector == vector)
+//RS     }
+//RS 
+//RS     pub fn dma_channel(&self, name: &str) -> Option<&JetDmaChannelSpec<'a>> {
+//RS         self.dma_channels
+//RS             .iter()
+//RS             .find(|channel| channel.name == name)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetHardwareRegisterFact<'a> {
+//RS     pub block: &'a str,
+//RS     pub register: &'a str,
+//RS     pub base: u64,
+//RS     pub offset: u64,
+//RS     pub width: JetRegisterWidth,
+//RS     pub access: JetRegisterAccessMode,
+//RS     pub volatile: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetHardwareInterruptFact<'a> {
+//RS     pub name: &'a str,
+//RS     pub vector: u16,
+//RS     pub bounded: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub struct JetHardwareDmaFact<'a> {
+//RS     pub name: &'a str,
+//RS     pub channel: u16,
+//RS     pub transfer_width: JetRegisterWidth,
+//RS     pub ownership: JetDmaOwnership,
+//RS     pub max_transfer_bytes: Option<u64>,
+//RS }
+//RS 
+//RS /// Checked target facts are the only semantic input to the replay host. AOT
+//RS /// uses the emitted static facts; resident adapters implement this trait for
+//RS /// the canonical owned `TargetHardwareFacts` without copying policy.
+//RS pub trait JetHardwareFactSource {
+//RS     fn profile_id(&self) -> Option<&str> {
+//RS         None
+//RS     }
+//RS 
+//RS     fn register_fact(
+//RS         &self,
+//RS         block: &str,
+//RS         register: &str,
+//RS     ) -> Option<JetHardwareRegisterFact<'_>>;
+//RS 
+//RS     fn interrupt_fact(&self, selector: &str) -> Option<JetHardwareInterruptFact<'_>>;
+//RS 
+//RS     fn interrupt_vector_fact(&self, vector: u16) -> Option<JetHardwareInterruptFact<'_>>;
+//RS 
+//RS     fn dma_fact(&self, channel: &str) -> Option<JetHardwareDmaFact<'_>>;
+//RS }
+//RS 
+//RS impl<'a> JetHardwareFactSource for JetHardwareFacts<'a> {
+//RS     fn profile_id(&self) -> Option<&str> {
+//RS         self.profile_id
+//RS     }
+//RS 
+//RS     fn register_fact(
+//RS         &self,
+//RS         block: &str,
+//RS         register: &str,
+//RS     ) -> Option<JetHardwareRegisterFact<'_>> {
+//RS         let block_fact = self.register_block(block)?;
+//RS         let register_fact = block_fact.register(register)?;
+//RS         Some(JetHardwareRegisterFact {
+//RS             block: block_fact.name,
+//RS             register: register_fact.name,
+//RS             base: block_fact.base,
+//RS             offset: register_fact.offset,
+//RS             width: register_fact.width,
+//RS             access: register_fact.access,
+//RS             volatile: register_fact.volatile,
+//RS         })
+//RS     }
+//RS 
+//RS     fn interrupt_fact(&self, selector: &str) -> Option<JetHardwareInterruptFact<'_>> {
+//RS         self.interrupt(selector).map(|interrupt| JetHardwareInterruptFact {
+//RS             name: interrupt.name,
+//RS             vector: interrupt.vector,
+//RS             bounded: interrupt.bounded,
+//RS         })
+//RS     }
+//RS 
+//RS     fn interrupt_vector_fact(&self, vector: u16) -> Option<JetHardwareInterruptFact<'_>> {
+//RS         self.interrupt_vector(vector)
+//RS             .map(|interrupt| JetHardwareInterruptFact {
+//RS                 name: interrupt.name,
+//RS                 vector: interrupt.vector,
+//RS                 bounded: interrupt.bounded,
+//RS             })
+//RS     }
+//RS 
+//RS     fn dma_fact(&self, channel: &str) -> Option<JetHardwareDmaFact<'_>> {
+//RS         self.dma_channel(channel).map(|dma| JetHardwareDmaFact {
+//RS             name: dma.name,
+//RS             channel: dma.channel,
+//RS             transfer_width: dma.transfer_width,
+//RS             ownership: dma.ownership,
+//RS             max_transfer_bytes: dma.max_transfer_bytes,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl From<jet_foundation::TargetMachine::RegisterWidth> for JetRegisterWidth {
+//RS     fn from(width: jet_foundation::TargetMachine::RegisterWidth) -> Self {
+//RS         match width {
+//RS             jet_foundation::TargetMachine::RegisterWidth::U8 => Self::U8,
+//RS             jet_foundation::TargetMachine::RegisterWidth::U16 => Self::U16,
+//RS             jet_foundation::TargetMachine::RegisterWidth::U32 => Self::U32,
+//RS             jet_foundation::TargetMachine::RegisterWidth::U64 => Self::U64,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl From<jet_foundation::TargetMachine::TargetRegisterAccessMode> for JetRegisterAccessMode {
+//RS     fn from(mode: jet_foundation::TargetMachine::TargetRegisterAccessMode) -> Self {
+//RS         match mode {
+//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadOnly => Self::ReadOnly,
+//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::WriteOnly => Self::WriteOnly,
+//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadWrite => Self::ReadWrite,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl From<jet_foundation::TargetMachine::TargetDmaOwnership> for JetDmaOwnership {
+//RS     fn from(ownership: jet_foundation::TargetMachine::TargetDmaOwnership) -> Self {
+//RS         match ownership {
+//RS             jet_foundation::TargetMachine::TargetDmaOwnership::Borrowed => Self::Borrowed,
+//RS             jet_foundation::TargetMachine::TargetDmaOwnership::Transfer => Self::Transfer,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl JetHardwareFactSource for jet_foundation::TargetMachine::TargetHardwareFacts {
+//RS     fn register_fact(
+//RS         &self,
+//RS         block: &str,
+//RS         register: &str,
+//RS     ) -> Option<JetHardwareRegisterFact<'_>> {
+//RS         let block_fact = self.register_block(block)?;
+//RS         let register_fact = block_fact.register(register)?;
+//RS         Some(JetHardwareRegisterFact {
+//RS             block: block_fact.name.as_str(),
+//RS             register: register_fact.name.as_str(),
+//RS             base: block_fact.base,
+//RS             offset: register_fact.offset,
+//RS             width: register_fact.width.into(),
+//RS             access: register_fact.access.into(),
+//RS             volatile: register_fact.volatile,
+//RS         })
+//RS     }
+//RS 
+//RS     fn interrupt_fact(&self, selector: &str) -> Option<JetHardwareInterruptFact<'_>> {
+//RS         self.interrupt(selector).map(|interrupt| JetHardwareInterruptFact {
+//RS             name: interrupt.name.as_str(),
+//RS             vector: interrupt.vector,
+//RS             bounded: interrupt.bounded,
+//RS         })
+//RS     }
+//RS 
+//RS     fn interrupt_vector_fact(&self, vector: u16) -> Option<JetHardwareInterruptFact<'_>> {
+//RS         self.interrupts
+//RS             .iter()
+//RS             .find(|interrupt| interrupt.vector == vector)
+//RS             .map(|interrupt| JetHardwareInterruptFact {
+//RS                 name: interrupt.name.as_str(),
+//RS                 vector: interrupt.vector,
+//RS                 bounded: interrupt.bounded,
+//RS             })
+//RS     }
+//RS 
+//RS     fn dma_fact(&self, channel: &str) -> Option<JetHardwareDmaFact<'_>> {
+//RS         self.dma_channel(channel).map(|dma| JetHardwareDmaFact {
+//RS             name: dma.name.as_str(),
+//RS             channel: dma.channel,
+//RS             transfer_width: dma.transfer_width.into(),
+//RS             ownership: dma.ownership.into(),
+//RS             max_transfer_bytes: dma.max_transfer_bytes,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS // ── Typed register block ────────────────────────────────────────────────────
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetRegisterError {
+//RS     UnknownRegister,
+//RS     WidthMismatch {
+//RS         expected: JetRegisterWidth,
+//RS         actual: JetRegisterWidth,
+//RS     },
+//RS     AccessMismatch {
+//RS         expected: JetRegisterAccessMode,
+//RS         actual: JetRegisterAccessMode,
+//RS     },
+//RS     VolatileMismatch {
+//RS         expected: bool,
+//RS         actual: bool,
+//RS     },
+//RS     AddressOverflow,
+//RS     Misaligned,
+//RS }
+//RS 
+//RS /// A register backend is deliberately tiny.  The generated type supplies the
+//RS /// width and volatility as facts; the target adapter supplies only storage.
+//RS pub trait JetRegisterBackend {
+//RS     fn read(&self, address: u64, width: JetRegisterWidth, volatile_access: bool) -> u64;
+//RS 
+//RS     fn write(&self, address: u64, width: JetRegisterWidth, value: u64, volatile_access: bool);
+//RS }
+//RS 
+//RS /// A typed register.  Width and access are type parameters, and volatility is
+//RS /// a const parameter, so generated fields cannot silently widen, reverse an
+//RS /// access mode, or turn a volatile fact into an ordinary load.
+//RS pub struct JetRegister<'a, W, A, B, const VOLATILE: bool>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterAccess,
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     backend: &'a B,
+//RS     address: u64,
+//RS     marker: PhantomData<fn() -> (W, A)>,
+//RS }
+//RS 
+//RS impl<'a, W, A, B, const VOLATILE: bool> JetRegister<'a, W, A, B, VOLATILE>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterAccess,
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     pub fn new(backend: &'a B, address: u64) -> Self {
+//RS         Self {
+//RS             backend,
+//RS             address,
+//RS             marker: PhantomData,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn from_spec(
+//RS         backend: &'a B,
+//RS         base: u64,
+//RS         spec: &JetRegisterSpec<'_>,
+//RS     ) -> Result<Self, JetRegisterError> {
+//RS         if spec.width != W::WIDTH {
+//RS             return Err(JetRegisterError::WidthMismatch {
+//RS                 expected: spec.width,
+//RS                 actual: W::WIDTH,
+//RS             });
+//RS         }
+//RS         if spec.access != A::MODE {
+//RS             return Err(JetRegisterError::AccessMismatch {
+//RS                 expected: spec.access,
+//RS                 actual: A::MODE,
+//RS             });
+//RS         }
+//RS         if spec.volatile != VOLATILE {
+//RS             return Err(JetRegisterError::VolatileMismatch {
+//RS                 expected: spec.volatile,
+//RS                 actual: VOLATILE,
+//RS             });
+//RS         }
+//RS         let address = base
+//RS             .checked_add(spec.offset)
+//RS             .ok_or(JetRegisterError::AddressOverflow)?;
+//RS         if address % spec.width.bytes() != 0 {
+//RS             return Err(JetRegisterError::Misaligned);
+//RS         }
+//RS         Ok(Self::new(backend, address))
+//RS     }
+//RS 
+//RS     pub const fn address(&self) -> u64 {
+//RS         self.address
+//RS     }
+//RS }
+//RS 
+//RS impl<'a, W, A, B, const VOLATILE: bool> JetRegister<'a, W, A, B, VOLATILE>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterReadable,
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     pub fn read(&self) -> W {
+//RS         W::from_bits(self.backend.read(self.address, W::WIDTH, VOLATILE))
+//RS     }
+//RS }
+//RS 
+//RS impl<'a, W, A, B, const VOLATILE: bool> JetRegister<'a, W, A, B, VOLATILE>
+//RS where
+//RS     W: JetRegisterValue,
+//RS     A: JetRegisterWritable,
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     pub fn write(&self, value: W) {
+//RS         self.backend
+//RS             .write(self.address, W::WIDTH, value.into_bits(), VOLATILE);
+//RS     }
+//RS }
+//RS 
+//RS /// A generated block adapter can use this helper when emitting named fields.
+//RS /// The returned field still carries its generated width/access/volatile type.
+//RS pub struct JetRegisterBlock<'backend, 'spec, B>
+//RS where
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     backend: &'backend B,
+//RS     spec: &'spec JetRegisterBlockSpec<'spec>,
+//RS }
+//RS 
+//RS impl<'backend, 'spec, B> JetRegisterBlock<'backend, 'spec, B>
+//RS where
+//RS     B: JetRegisterBackend,
+//RS {
+//RS     pub fn new(backend: &'backend B, spec: &'spec JetRegisterBlockSpec<'spec>) -> Self {
+//RS         Self { backend, spec }
+//RS     }
+//RS 
+//RS     pub const fn name(&self) -> &'spec str {
+//RS         self.spec.name
+//RS     }
+//RS 
+//RS     pub const fn base(&self) -> u64 {
+//RS         self.spec.base
+//RS     }
+//RS 
+//RS     pub fn register<W, A, const VOLATILE: bool>(
+//RS         &self,
+//RS         name: &str,
+//RS     ) -> Result<JetRegister<'backend, W, A, B, VOLATILE>, JetRegisterError>
+//RS     where
+//RS         W: JetRegisterValue,
+//RS         A: JetRegisterAccess,
+//RS     {
+//RS         let spec = self
+//RS             .spec
+//RS             .register(name)
+//RS             .ok_or(JetRegisterError::UnknownRegister)?;
+//RS         JetRegister::from_spec(self.backend, self.spec.base, spec)
+//RS     }
+//RS }
+//RS 
+//RS /// The only backend that performs target MMIO.  The selected profile has
+//RS /// already validated the address, width, alignment, and volatile fact before
+//RS /// generated code reaches this kernel.  User code never enters this block.
+//RS #[derive(Clone, Copy, Debug, Default)]
+//RS pub struct JetVolatileRegisterBackend;
+//RS 
+//RS impl JetRegisterBackend for JetVolatileRegisterBackend {
+//RS     fn read(&self, address: u64, width: JetRegisterWidth, volatile_access: bool) -> u64 {
+//RS         // SAFETY: TargetMachineFacts validate the MMIO region and generated
+//RS         // register types validate width/alignment.  This is the vetted target
+//RS         // adapter seam; no user pointer or address reaches these operations.
+//RS         unsafe {
+//RS             match (width, volatile_access) {
+//RS                 (JetRegisterWidth::U8, true) => core::ptr::read_volatile(address as *const u8) as u64,
+//RS                 (JetRegisterWidth::U16, true) => {
+//RS                     core::ptr::read_volatile(address as *const u16) as u64
+//RS                 }
+//RS                 (JetRegisterWidth::U32, true) => {
+//RS                     core::ptr::read_volatile(address as *const u32) as u64
+//RS                 }
+//RS                 (JetRegisterWidth::U64, true) => core::ptr::read_volatile(address as *const u64),
+//RS                 (JetRegisterWidth::U8, false) => core::ptr::read(address as *const u8) as u64,
+//RS                 (JetRegisterWidth::U16, false) => core::ptr::read(address as *const u16) as u64,
+//RS                 (JetRegisterWidth::U32, false) => core::ptr::read(address as *const u32) as u64,
+//RS                 (JetRegisterWidth::U64, false) => core::ptr::read(address as *const u64),
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn write(&self, address: u64, width: JetRegisterWidth, value: u64, volatile_access: bool) {
+//RS         // SAFETY: see `read`; the generated profile fact owns the address and
+//RS         // width, and the operation is confined to this vetted kernel.
+//RS         unsafe {
+//RS             match (width, volatile_access) {
+//RS                 (JetRegisterWidth::U8, true) => {
+//RS                     core::ptr::write_volatile(address as *mut u8, value as u8)
+//RS                 }
+//RS                 (JetRegisterWidth::U16, true) => {
+//RS                     core::ptr::write_volatile(address as *mut u16, value as u16)
+//RS                 }
+//RS                 (JetRegisterWidth::U32, true) => {
+//RS                     core::ptr::write_volatile(address as *mut u32, value as u32)
+//RS                 }
+//RS                 (JetRegisterWidth::U64, true) => {
+//RS                     core::ptr::write_volatile(address as *mut u64, value)
+//RS                 }
+//RS                 (JetRegisterWidth::U8, false) => core::ptr::write(address as *mut u8, value as u8),
+//RS                 (JetRegisterWidth::U16, false) => {
+//RS                     core::ptr::write(address as *mut u16, value as u16)
+//RS                 }
+//RS                 (JetRegisterWidth::U32, false) => {
+//RS                     core::ptr::write(address as *mut u32, value as u32)
+//RS                 }
+//RS                 (JetRegisterWidth::U64, false) => core::ptr::write(address as *mut u64, value),
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS // The no-OS target path cannot depend on `std` or allocator-backed containers.
+//RS // Keep interrupt state in fixed storage; the hosted replay bridge below uses the
+//RS // same handler carrier and registry API.
+//RS #[cfg(target_os = "none")]
+//RS const JET_HARDWARE_INTERRUPT_CAPACITY: usize = 64;
+//RS #[cfg(target_os = "none")]
+//RS const JET_HARDWARE_PENDING_CAPACITY: usize = 64;
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetHardwareInterruptHandler {
+//RS     pub fn_ptr: i64,
+//RS     pub env: i64,
+//RS     pub has_env: bool,
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetHardwareInterruptRegistry {
+//RS     handlers: [Option<(u16, JetHardwareInterruptHandler)>; JET_HARDWARE_INTERRUPT_CAPACITY],
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS impl Default for JetHardwareInterruptRegistry {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS impl JetHardwareInterruptRegistry {
+//RS     pub const fn new() -> Self {
+//RS         Self {
+//RS             handlers: [None; JET_HARDWARE_INTERRUPT_CAPACITY],
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn clear(&mut self) {
+//RS         self.handlers = [None; JET_HARDWARE_INTERRUPT_CAPACITY];
+//RS     }
+//RS 
+//RS     pub fn register(
+//RS         &mut self,
+//RS         vector: u16,
+//RS         handler: JetHardwareInterruptHandler,
+//RS     ) -> bool {
+//RS         if self
+//RS             .handlers
+//RS             .iter()
+//RS             .flatten()
+//RS             .any(|(bound, _)| *bound == vector)
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let Some(slot) = self.handlers.iter_mut().find(|slot| slot.is_none()) else {
+//RS             return false;
+//RS         };
+//RS         *slot = Some((vector, handler));
+//RS         true
+//RS     }
+//RS 
+//RS     fn handler(&self, vector: u16) -> Option<JetHardwareInterruptHandler> {
+//RS         self.handlers
+//RS             .iter()
+//RS             .flatten()
+//RS             .find_map(|(bound, handler)| (*bound == vector).then_some(*handler))
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetHardwarePendingCallbacks {
+//RS     callbacks: [Option<JetHardwareInterruptHandler>; JET_HARDWARE_PENDING_CAPACITY],
+//RS     len: usize,
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS impl JetHardwarePendingCallbacks {
+//RS     const fn empty() -> Self {
+//RS         Self {
+//RS             callbacks: [None; JET_HARDWARE_PENDING_CAPACITY],
+//RS             len: 0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS static JET_HARDWARE_PENDING_VECTORS: [core::sync::atomic::AtomicU16; JET_HARDWARE_PENDING_CAPACITY] =
+//RS     [const { core::sync::atomic::AtomicU16::new(0) }; JET_HARDWARE_PENDING_CAPACITY];
+//RS #[cfg(target_os = "none")]
+//RS static JET_HARDWARE_PENDING_HEAD: core::sync::atomic::AtomicUsize =
+//RS     core::sync::atomic::AtomicUsize::new(0);
+//RS #[cfg(target_os = "none")]
+//RS static JET_HARDWARE_PENDING_TAIL: core::sync::atomic::AtomicUsize =
+//RS     core::sync::atomic::AtomicUsize::new(0);
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS pub fn jet_hardware_has_pending() -> bool {
+//RS     JET_HARDWARE_PENDING_HEAD.load(Ordering::Acquire)
+//RS         != JET_HARDWARE_PENDING_TAIL.load(Ordering::Acquire)
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS pub fn jet_hardware_enqueue_pending(vector: u16) {
+//RS     let tail = JET_HARDWARE_PENDING_TAIL.load(Ordering::Relaxed);
+//RS     let head = JET_HARDWARE_PENDING_HEAD.load(Ordering::Acquire);
+//RS     if tail.wrapping_sub(head) >= JET_HARDWARE_PENDING_CAPACITY {
+//RS         return;
+//RS     }
+//RS     JET_HARDWARE_PENDING_VECTORS[tail % JET_HARDWARE_PENDING_CAPACITY]
+//RS         .store(vector, Ordering::Relaxed);
+//RS     JET_HARDWARE_PENDING_TAIL.store(tail.wrapping_add(1), Ordering::Release);
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS pub fn jet_hardware_dispatch_pending(
+//RS     registry: &JetHardwareInterruptRegistry,
+//RS ) -> JetHardwarePendingCallbacks {
+//RS     let mut callbacks = JetHardwarePendingCallbacks::empty();
+//RS     let mut head = JET_HARDWARE_PENDING_HEAD.load(Ordering::Relaxed);
+//RS     let tail = JET_HARDWARE_PENDING_TAIL.load(Ordering::Acquire);
+//RS     while head != tail && callbacks.len < callbacks.callbacks.len() {
+//RS         let vector = JET_HARDWARE_PENDING_VECTORS[head % JET_HARDWARE_PENDING_CAPACITY]
+//RS             .load(Ordering::Acquire);
+//RS         if let Some(handler) = registry.handler(vector) {
+//RS             callbacks.callbacks[callbacks.len] = Some(handler);
+//RS             callbacks.len += 1;
+//RS         }
+//RS         head = head.wrapping_add(1);
+//RS     }
+//RS     JET_HARDWARE_PENDING_HEAD.store(head, Ordering::Release);
+//RS     callbacks
+//RS }
+//RS 
+//RS #[cfg(target_os = "none")]
+//RS pub fn jet_hardware_invoke_pending(callbacks: JetHardwarePendingCallbacks) -> usize {
+//RS     let delivered = callbacks.len;
+//RS     for callback in callbacks.callbacks[..callbacks.len].iter().flatten() {
+//RS         // SAFETY: generated target code inserts only checked C-ABI handlers.
+//RS         unsafe {
+//RS             if callback.has_env {
+//RS                 let invoke: extern "C" fn(i64) =
+//RS                     core::mem::transmute(callback.fn_ptr as usize);
+//RS                 invoke(callback.env);
+//RS             } else {
+//RS                 let invoke: extern "C" fn() =
+//RS                     core::mem::transmute(callback.fn_ptr as usize);
+//RS                 invoke();
+//RS             }
+//RS         }
+//RS     }
+//RS     delivered
+//RS }
+//RS 
+//RS // JET_EMBEDDED_HARDWARE_HOST_BEGIN: std-only replay and resident bridge.
+//RS // ── Erased adapter bridge ───────────────────────────────────────────────────
+//RS 
+//RS /// The typed target-adapter seam keeps checked AOT metadata as strings.
+//RS /// Resident/JIT code uses the erased companion trait below after it has
+//RS /// deliberately allocated compile-time string handles.
+//RS pub trait JetHardwareHost {
+//RS     fn setup(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         setup_kind: &str,
+//RS         item: &str,
+//RS         width_or_vector: i64,
+//RS         ownership_or_handler: &str,
+//RS     ) -> i64;
+//RS 
+//RS     fn register_read(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         block: &str,
+//RS         register: &str,
+//RS         width: i64,
+//RS     ) -> i64;
+//RS 
+//RS     fn register_write(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         block: &str,
+//RS         register: &str,
+//RS         width: i64,
+//RS         value: i64,
+//RS     ) -> i64;
+//RS 
+//RS     fn dma_start(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         channel: &str,
+//RS         address: u64,
+//RS         bytes: u64,
+//RS     ) -> i64;
+//RS 
+//RS     fn dma_wait(&mut self, profile_id: &str, channel: &str, token: i64) -> i64;
+//RS 
+//RS     fn trigger_interrupt(&mut self, _vector: u16) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS }
+//RS 
+//RS /// Erased JIT adapter seam. String handles are allocated by the resident
+//RS /// compiler and resolved by its host; this trait is never used by AOT.
+//RS pub trait JetHardwareErasedHost {
+//RS     fn setup(
+//RS         &mut self,
+//RS         profile_id: i64,
+//RS         setup_kind: i64,
+//RS         item: i64,
+//RS         width_or_vector: i64,
+//RS         ownership_or_handler: i64,
+//RS     ) -> i64;
+//RS 
+//RS     fn register_read(&mut self, profile_id: i64, block: i64, register: i64, width: i64) -> i64;
+//RS 
+//RS     fn register_write(
+//RS         &mut self,
+//RS         profile_id: i64,
+//RS         block: i64,
+//RS         register: i64,
+//RS         width: i64,
+//RS         value: i64,
+//RS     ) -> i64;
+//RS 
+//RS     fn dma_start(
+//RS         &mut self,
+//RS         profile_id: i64,
+//RS         channel: i64,
+//RS         address: i64,
+//RS         bytes: i64,
+//RS     ) -> i64;
+//RS 
+//RS     fn dma_wait(&mut self, profile_id: i64, channel: i64, token: i64) -> i64;
+//RS 
+//RS     /// Register a compile-time string handle before the first call. This is
+//RS     /// an adapter-only side channel; it never crosses the generated ABI.
+//RS     fn register_string_handle(&mut self, _handle: i64, _value: &str) {}
+//RS 
+//RS     /// Queue a canonical replay event for a bound hardware interrupt. This is
+//RS     /// adapter-only and never part of generated program ABI.
+//RS     fn trigger_interrupt(&mut self, _vector: u16) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS }
+//RS 
+//RS /// Setup kind values passed by MIR package setup installation.
+//RS pub const JET_HARDWARE_SETUP_DMA_CONFIGURE: i64 = 0;
+//RS pub const JET_HARDWARE_SETUP_INTERRUPT_BIND: i64 = 1;
+//RS /// Canonical setup tags shared by typed, erased, and evaluator adapters.
+//RS pub const JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME: &str = "dma-configure";
+//RS pub const JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME: &str = "interrupt-bind";
+//RS /// Canonical DMA ownership tags shared by typed and erased adapters.
+//RS pub const JET_HARDWARE_DMA_BORROWED_NAME: &str = "borrowed";
+//RS pub const JET_HARDWARE_DMA_TRANSFER_NAME: &str = "transfer";
+//RS 
+//RS /// Stable width tags passed through the erased ABI.
+//RS pub const JET_HARDWARE_WIDTH_U8: i64 = 1;
+//RS pub const JET_HARDWARE_WIDTH_U16: i64 = 2;
+//RS pub const JET_HARDWARE_WIDTH_U32: i64 = 4;
+//RS pub const JET_HARDWARE_WIDTH_U64: i64 = 8;
+//RS 
+//RS /// The bridge's negative status. A selected adapter may publish a richer
+//RS /// runtime stop through its own carrier, but never returns an invented value.
+//RS pub const JET_HARDWARE_UNAVAILABLE: i64 = -1;
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct JetReplayDmaConfig {
+//RS     channel: u16,
+//RS     width: JetRegisterWidth,
+//RS     ownership: JetDmaOwnership,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct JetReplayTransfer {
+//RS     handle: i64,
+//RS     channel: u16,
+//RS     address: u64,
+//RS     bytes: u64,
+//RS }
+//RS 
+//RS /// Deterministic replay policy shared by typed AOT, interpreter, and resident
+//RS /// adapters. The fact source is checked target metadata; this host owns only
+//RS /// fixed-capacity storage and state transitions.
+//RS pub struct JetHardwareReplayHost<F>
+//RS where
+//RS     F: JetHardwareFactSource,
+//RS {
+//RS     facts: F,
+//RS     registers: JetRegisterReplay<128>,
+//RS     configured_dma: [Option<JetReplayDmaConfig>; 64],
+//RS     transfers: [Option<JetReplayTransfer>; 128],
+//RS     interrupt_bindings: [Option<u16>; 64],
+//RS     next_transfer: i64,
+//RS }
+//RS 
+//RS impl<F> JetHardwareReplayHost<F>
+//RS where
+//RS     F: JetHardwareFactSource,
+//RS {
+//RS     pub fn new(facts: F) -> Self {
+//RS         Self {
+//RS             facts,
+//RS             registers: JetRegisterReplay::new(),
+//RS             configured_dma: [None; 64],
+//RS             transfers: [None; 128],
+//RS             interrupt_bindings: [None; 64],
+//RS             next_transfer: 1,
+//RS         }
+//RS     }
+//RS 
+//RS     fn profile_matches(&self, profile_id: &str) -> bool {
+//RS         self.facts
+//RS             .profile_id()
+//RS             .is_none_or(|expected| expected == profile_id)
+//RS     }
+//RS 
+//RS     fn width_tag(width: JetRegisterWidth) -> i64 {
+//RS         width.bytes() as i64
+//RS     }
+//RS 
+//RS     fn width_from_tag(tag: i64) -> Option<JetRegisterWidth> {
+//RS         match tag {
+//RS             JET_HARDWARE_WIDTH_U8 => Some(JetRegisterWidth::U8),
+//RS             JET_HARDWARE_WIDTH_U16 => Some(JetRegisterWidth::U16),
+//RS             JET_HARDWARE_WIDTH_U32 => Some(JetRegisterWidth::U32),
+//RS             JET_HARDWARE_WIDTH_U64 => Some(JetRegisterWidth::U64),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS     fn ownership_tag(ownership: JetDmaOwnership) -> &'static str {
+//RS         match ownership {
+//RS             JetDmaOwnership::Borrowed => JET_HARDWARE_DMA_BORROWED_NAME,
+//RS             JetDmaOwnership::Transfer => JET_HARDWARE_DMA_TRANSFER_NAME,
+//RS         }
+//RS     }
+//RS 
+//RS     fn ownership_from_tag(tag: &str) -> Option<JetDmaOwnership> {
+//RS         match tag {
+//RS             JET_HARDWARE_DMA_BORROWED_NAME => Some(JetDmaOwnership::Borrowed),
+//RS             JET_HARDWARE_DMA_TRANSFER_NAME => Some(JetDmaOwnership::Transfer),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn ensure_register(
+//RS         registers: &mut JetRegisterReplay<128>,
+//RS         fact: &JetHardwareRegisterFact<'_>,
+//RS     ) -> Option<u64> {
+//RS         let address = fact.base.checked_add(fact.offset)?;
+//RS         if registers.value(address, fact.width).is_none() {
+//RS             registers.define(address, fact.width, 0).ok()?;
+//RS         }
+//RS         Some(address)
+//RS     }
+//RS 
+//RS     fn dma_configured(
+//RS         &self,
+//RS         channel: u16,
+//RS         width: JetRegisterWidth,
+//RS         ownership: JetDmaOwnership,
+//RS     ) -> bool {
+//RS         self.configured_dma.iter().flatten().any(|config| {
+//RS             config.channel == channel
+//RS                 && config.width == width
+//RS                 && config.ownership == ownership
+//RS         })
+//RS     }
+//RS 
+//RS     fn interrupt_bound(&self, vector: u16) -> bool {
+//RS         self.interrupt_bindings
+//RS             .iter()
+//RS             .flatten()
+//RS             .any(|bound| *bound == vector)
+//RS     }
+//RS }
+//RS 
+//RS impl<F> JetHardwareHost for JetHardwareReplayHost<F>
+//RS where
+//RS     F: JetHardwareFactSource,
+//RS {
+//RS     fn setup(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         setup_kind: &str,
+//RS         item: &str,
+//RS         width_or_vector: i64,
+//RS         ownership_or_handler: &str,
+//RS     ) -> i64 {
+//RS         if !self.profile_matches(profile_id) {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         match setup_kind {
+//RS             JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME => {
+//RS                 let Some(width) = Self::width_from_tag(width_or_vector) else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 let Some(ownership) = Self::ownership_from_tag(ownership_or_handler) else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 let Some(fact) = self.facts.dma_fact(item) else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 if Self::width_tag(fact.transfer_width) != Self::width_tag(width)
+//RS                     || Self::ownership_tag(fact.ownership) != Self::ownership_tag(ownership)
+//RS                 {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 }
+//RS                 if self.dma_configured(fact.channel, width, ownership) {
+//RS                     return 0;
+//RS                 }
+//RS                 let Some(slot) = self.configured_dma.iter_mut().find(|slot| slot.is_none())
+//RS                 else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 *slot = Some(JetReplayDmaConfig {
+//RS                     channel: fact.channel,
+//RS                     width,
+//RS                     ownership,
+//RS                 });
+//RS                 0
+//RS             }
+//RS             JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME => {
+//RS                 let Ok(vector) = u16::try_from(width_or_vector) else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 let Some(fact) = self.facts.interrupt_fact(item) else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 if !fact.bounded
+//RS                     || fact.vector != vector
+//RS                     || ownership_or_handler.is_empty()
+//RS                 {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 }
+//RS                 if self.interrupt_bound(vector) {
+//RS                     return 0;
+//RS                 }
+//RS                 let Some(slot) = self
+//RS                     .interrupt_bindings
+//RS                     .iter_mut()
+//RS                     .find(|slot| slot.is_none())
+//RS                 else {
+//RS                     return JET_HARDWARE_UNAVAILABLE;
+//RS                 };
+//RS                 *slot = Some(vector);
+//RS                 0
+//RS             }
+//RS             _ => JET_HARDWARE_UNAVAILABLE,
+//RS         }
+//RS     }
+//RS 
+//RS     fn register_read(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         block: &str,
+//RS         register: &str,
+//RS         width: i64,
+//RS     ) -> i64 {
+//RS         if !self.profile_matches(profile_id) {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(fact) = self.facts.register_fact(block, register) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let Some(expected_width) = Self::width_from_tag(width) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         if fact.width != expected_width || !fact.access.can_read() {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(_) = Self::ensure_register(&mut self.registers, &fact) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let spec = JetRegisterSpec::new(
+//RS             fact.register,
+//RS             fact.offset,
+//RS             fact.width,
+//RS             fact.access,
+//RS             fact.volatile,
+//RS         );
+//RS         jet_replay_register_read(&self.registers, fact.base, &spec)
+//RS             .map(|value| value as i64)
+//RS             .unwrap_or(JET_HARDWARE_UNAVAILABLE)
+//RS     }
+//RS 
+//RS     fn register_write(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         block: &str,
+//RS         register: &str,
+//RS         width: i64,
+//RS         value: i64,
+//RS     ) -> i64 {
+//RS         if !self.profile_matches(profile_id) {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(fact) = self.facts.register_fact(block, register) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let Some(expected_width) = Self::width_from_tag(width) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         if fact.width != expected_width || !fact.access.can_write() {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(_) = Self::ensure_register(&mut self.registers, &fact) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let spec = JetRegisterSpec::new(
+//RS             fact.register,
+//RS             fact.offset,
+//RS             fact.width,
+//RS             fact.access,
+//RS             fact.volatile,
+//RS         );
+//RS         if jet_replay_register_write(&self.registers, fact.base, &spec, value as u64).is_some() {
+//RS             0
+//RS         } else {
+//RS             JET_HARDWARE_UNAVAILABLE
+//RS         }
+//RS     }
+//RS     fn dma_start(
+//RS         &mut self,
+//RS         profile_id: &str,
+//RS         channel: &str,
+//RS         address: u64,
+//RS         bytes: u64,
+//RS     ) -> i64 {
+//RS         if !self.profile_matches(profile_id) || address == 0 || bytes == 0 {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(fact) = self.facts.dma_fact(channel) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let width = Self::width_tag(fact.transfer_width) as u64;
+//RS         if fact.ownership != JetDmaOwnership::Transfer
+//RS             || address % width != 0
+//RS             || bytes % width != 0
+//RS             || fact
+//RS                 .max_transfer_bytes
+//RS                 .is_some_and(|limit| bytes > limit)
+//RS             || !self.dma_configured(fact.channel, fact.transfer_width, fact.ownership)
+//RS         {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let handle = self.next_transfer;
+//RS         self.next_transfer = self.next_transfer.saturating_add(1).max(1);
+//RS         let Some(slot) = self.transfers.iter_mut().find(|slot| slot.is_none()) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         *slot = Some(JetReplayTransfer {
+//RS             handle,
+//RS             channel: fact.channel,
+//RS             address,
+//RS             bytes,
+//RS         });
+//RS         handle
+//RS     }
+//RS 
+//RS     fn dma_wait(&mut self, profile_id: &str, channel: &str, token: i64) -> i64 {
+//RS         if !self.profile_matches(profile_id) || token <= 0 {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         let Some(fact) = self.facts.dma_fact(channel) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let Some(slot) = self.transfers.iter_mut().find(|slot| {
+//RS             slot.is_some_and(|entry| entry.handle == token && entry.channel == fact.channel)
+//RS         }) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         let Some(entry) = *slot else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         *slot = None;
+//RS         let _ = (entry.address, entry.bytes);
+//RS         0
+//RS     }
+//RS 
+//RS     fn trigger_interrupt(&mut self, vector: u16) -> i64 {
+//RS         let Some(fact) = self.facts.interrupt_vector_fact(vector) else {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         };
+//RS         if !fact.bounded || !self.interrupt_bound(vector) {
+//RS             return JET_HARDWARE_UNAVAILABLE;
+//RS         }
+//RS         jet_hardware_enqueue_pending(vector);
+//RS         0
+//RS     }
+//RS }
+//RS 
+//RS /// One process-wide, FIFO hardware interrupt queue shared by every tier.
+//RS static JET_HARDWARE_PENDING_INTERRUPTS: std::sync::LazyLock<
+//RS     std::sync::Mutex<std::collections::VecDeque<u16>>,
+//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
+//RS static JET_HARDWARE_PENDING_READY: AtomicBool = AtomicBool::new(false);
+//RS 
+//RS pub fn jet_hardware_has_pending() -> bool {
+//RS     JET_HARDWARE_PENDING_READY.load(Ordering::Acquire)
+//RS }
+//RS 
+//RS pub fn jet_hardware_enqueue_pending(vector: u16) {
+//RS     let mut queue = JET_HARDWARE_PENDING_INTERRUPTS
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     queue.push_back(vector);
+//RS     JET_HARDWARE_PENDING_READY.store(true, Ordering::Release);
+//RS }
+//RS 
+//RS pub fn jet_hardware_drain_pending() -> Vec<u16> {
+//RS     if !jet_hardware_has_pending() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut queue = JET_HARDWARE_PENDING_INTERRUPTS
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     let drained = queue.drain(..).collect();
+//RS     JET_HARDWARE_PENDING_READY.store(false, Ordering::Release);
+//RS     drained
+//RS }
+//RS 
+//RS pub fn jet_hardware_clear_pending() {
+//RS     let mut queue = JET_HARDWARE_PENDING_INTERRUPTS
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     queue.clear();
+//RS     JET_HARDWARE_PENDING_READY.store(false, Ordering::Release);
+//RS }
+//RS 
+//RS /// Checked callback identity retained by the resident hardware registry.
+//RS /// Handler signatures are validated before a pointer enters this carrier.
+//RS #[derive(Clone, Copy)]
+//RS pub struct JetHardwareInterruptHandler {
+//RS     pub fn_ptr: i64,
+//RS     pub env: i64,
+//RS     pub has_env: bool,
+//RS }
+//RS 
+//RS #[derive(Clone, Default)]
+//RS pub struct JetHardwareInterruptRegistry {
+//RS     handlers: std::collections::BTreeMap<u16, JetHardwareInterruptHandler>,
+//RS }
+//RS 
+//RS impl JetHardwareInterruptRegistry {
+//RS     pub fn clear(&mut self) {
+//RS         self.handlers.clear();
+//RS     }
+//RS 
+//RS     pub fn register(
+//RS         &mut self,
+//RS         vector: u16,
+//RS         handler: JetHardwareInterruptHandler,
+//RS     ) -> bool {
+//RS         self.handlers.insert(vector, handler).is_none()
+//RS     }
+//RS 
+//RS     fn handler(&self, vector: u16) -> Option<JetHardwareInterruptHandler> {
+//RS         self.handlers.get(&vector).copied()
+//RS     }
+//RS }
+//RS 
+//RS /// Drain the Foundation queue in FIFO order and resolve vectors to checked
+//RS /// callback pointers. Callers must release runtime borrows before invoking the
+//RS /// returned pointers through `jet_hardware_invoke_pending`.
+//RS pub fn jet_hardware_dispatch_pending(
+//RS     registry: &JetHardwareInterruptRegistry,
+//RS ) -> Vec<JetHardwareInterruptHandler> {
+//RS     if !jet_hardware_has_pending() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut queue = JET_HARDWARE_PENDING_INTERRUPTS
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     let mut callbacks = Vec::new();
+//RS     let mut undelivered = std::collections::VecDeque::new();
+//RS     while let Some(vector) = queue.pop_front() {
+//RS         if let Some(handler) = registry.handler(vector) {
+//RS             callbacks.push(handler);
+//RS         } else {
+//RS             undelivered.push_back(vector);
+//RS         }
+//RS     }
+//RS     *queue = undelivered;
+//RS     JET_HARDWARE_PENDING_READY.store(!queue.is_empty(), Ordering::Release);
+//RS     callbacks
+//RS }
+//RS 
+//RS /// Invoke pointers detached by `jet_hardware_dispatch_pending`. This split is
+//RS /// required because a handler may re-enter any runtime host operation.
+//RS pub fn jet_hardware_invoke_pending(
+//RS     callbacks: impl IntoIterator<Item = JetHardwareInterruptHandler>,
+//RS ) -> usize {
+//RS     let callbacks = callbacks.into_iter().collect::<Vec<_>>();
+//RS     let delivered = callbacks.len();
+//RS     for callback in callbacks {
+//RS         // SAFETY: the resident compiler inserts only a validated zero-argument
+//RS         // handler pointer (or an explicitly validated captured callback).
+//RS         unsafe {
+//RS             if callback.has_env {
+//RS                 let invoke: extern "C" fn(i64) =
+//RS                     std::mem::transmute(callback.fn_ptr as usize);
+//RS                 invoke(callback.env);
+//RS             } else {
+//RS                 let invoke: extern "C" fn() =
+//RS                     std::mem::transmute(callback.fn_ptr as usize);
+//RS                 invoke();
+//RS             }
+//RS         }
+//RS     }
+//RS     delivered
+//RS }
+//RS pub struct JetHardwareUnavailableHost;
+//RS 
+//RS impl JetHardwareHost for JetHardwareUnavailableHost {
+//RS     fn setup(
+//RS         &mut self,
+//RS         _profile_id: &str,
+//RS         _setup_kind: &str,
+//RS         _item: &str,
+//RS         _width_or_vector: i64,
+//RS         _ownership_or_handler: &str,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn register_read(
+//RS         &mut self,
+//RS         _profile_id: &str,
+//RS         _block: &str,
+//RS         _register: &str,
+//RS         _width: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn register_write(
+//RS         &mut self,
+//RS         _profile_id: &str,
+//RS         _block: &str,
+//RS         _register: &str,
+//RS         _width: i64,
+//RS         _value: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn dma_start(
+//RS         &mut self,
+//RS         _profile_id: &str,
+//RS         _channel: &str,
+//RS         _address: u64,
+//RS         _bytes: u64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn dma_wait(&mut self, _profile_id: &str, _channel: &str, _token: i64) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS }
+//RS 
+//RS impl JetHardwareErasedHost for JetHardwareUnavailableHost {
+//RS     fn setup(
+//RS         &mut self,
+//RS         _profile_id: i64,
+//RS         _setup_kind: i64,
+//RS         _item: i64,
+//RS         _width_or_vector: i64,
+//RS         _ownership_or_handler: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn register_read(
+//RS         &mut self,
+//RS         _profile_id: i64,
+//RS         _block: i64,
+//RS         _register: i64,
+//RS         _width: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn register_write(
+//RS         &mut self,
+//RS         _profile_id: i64,
+//RS         _block: i64,
+//RS         _register: i64,
+//RS         _width: i64,
+//RS         _value: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn dma_start(
+//RS         &mut self,
+//RS         _profile_id: i64,
+//RS         _channel: i64,
+//RS         _address: i64,
+//RS         _bytes: i64,
+//RS     ) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS 
+//RS     fn dma_wait(&mut self, _profile_id: i64, _channel: i64, _token: i64) -> i64 {
+//RS         JET_HARDWARE_UNAVAILABLE
+//RS     }
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JET_HARDWARE_CURRENT_HOST:
+//RS         std::cell::RefCell<Option<*mut dyn JetHardwareHost>> =
+//RS         std::cell::RefCell::new(None);
+//RS     static JET_HARDWARE_CURRENT_ERASED_HOST:
+//RS         std::cell::RefCell<Option<*mut dyn JetHardwareErasedHost>> =
+//RS         std::cell::RefCell::new(None);
+//RS     static JET_HARDWARE_DEFAULT_HOST:
+//RS         std::cell::RefCell<JetHardwareUnavailableHost> =
+//RS         std::cell::RefCell::new(JetHardwareUnavailableHost);
+//RS     static JET_HARDWARE_CURRENT_FACTS:
+//RS         std::cell::RefCell<Option<&'static JetHardwareFacts<'static>>> =
+//RS         std::cell::RefCell::new(None);
+//RS }
+//RS 
+//RS /// Guard restoring the previous ambient typed hardware adapter on drop.
+//RS struct JetHardwareHostScope {
+//RS     previous: Option<*mut dyn JetHardwareHost>,
+//RS }
+//RS 
+//RS impl Drop for JetHardwareHostScope {
+//RS     fn drop(&mut self) {
+//RS         JET_HARDWARE_CURRENT_HOST.with(|slot| {
+//RS             slot.replace(self.previous);
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// Guard restoring the previous ambient erased hardware adapter on drop.
+//RS struct JetHardwareErasedHostScope {
+//RS     previous: Option<*mut dyn JetHardwareErasedHost>,
+//RS }
+//RS 
+//RS impl Drop for JetHardwareErasedHostScope {
+//RS     fn drop(&mut self) {
+//RS         JET_HARDWARE_CURRENT_ERASED_HOST.with(|slot| {
+//RS             slot.replace(self.previous);
+//RS         });
+//RS     }
+//RS }
+//RS /// Guard restoring the previous checked static hardware facts.
+//RS pub struct JetHardwareFactsScope {
+//RS     previous: Option<&'static JetHardwareFacts<'static>>,
+//RS }
+//RS 
+//RS impl Drop for JetHardwareFactsScope {
+//RS     fn drop(&mut self) {
+//RS         JET_HARDWARE_CURRENT_FACTS.with(|slot| {
+//RS             slot.replace(self.previous);
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS /// Install the immutable checked facts used by typed AOT DMA wrappers.
+//RS pub fn jet_hardware_facts_scope(
+//RS     facts: &'static JetHardwareFacts<'static>,
+//RS ) -> JetHardwareFactsScope {
+//RS     let previous = JET_HARDWARE_CURRENT_FACTS.with(|slot| slot.replace(Some(facts)));
+//RS     JetHardwareFactsScope { previous }
+//RS }
+//RS 
+//RS pub fn jet_hardware_current_facts() -> Option<&'static JetHardwareFacts<'static>> {
+//RS     JET_HARDWARE_CURRENT_FACTS.with(|slot| *slot.borrow())
+//RS }
+//RS 
+//RS pub fn jet_hardware_with_host<R>(
+//RS     host: &mut dyn JetHardwareHost,
+//RS     body: impl FnOnce() -> R,
+//RS ) -> R {
+//RS     // SAFETY: this private guard restores TLS before the borrowed host can
+//RS     // expire, including during unwinding. Callers cannot detach the guard.
+//RS     let pointer = unsafe {
+//RS         std::mem::transmute::<*mut (dyn JetHardwareHost + '_), *mut (dyn JetHardwareHost + 'static)>(host)
+//RS     };
+//RS     let previous = JET_HARDWARE_CURRENT_HOST.with(|slot| slot.replace(Some(pointer)));
+//RS     let _scope = JetHardwareHostScope { previous };
+//RS     body()
+//RS }
+//RS 
+//RS pub fn jet_hardware_with_erased_host<R>(
+//RS     host: &mut dyn JetHardwareErasedHost,
+//RS     body: impl FnOnce() -> R,
+//RS ) -> R {
+//RS     // SAFETY: the borrow spans body(), and the private guard restores TLS
+//RS     // before that borrow ends, including during unwinding.
+//RS     let pointer = unsafe {
+//RS         std::mem::transmute::<*mut (dyn JetHardwareErasedHost + '_), *mut (dyn JetHardwareErasedHost + 'static)>(host)
+//RS     };
+//RS     let previous = JET_HARDWARE_CURRENT_ERASED_HOST.with(|slot| slot.replace(Some(pointer)));
+//RS     let _scope = JetHardwareErasedHostScope { previous };
+//RS     body()
+//RS }
+//RS 
+//RS pub fn jet_hardware_with_current_host<R>(
+//RS     body: impl FnOnce(&mut dyn JetHardwareHost) -> R,
+//RS ) -> R {
+//RS     JET_HARDWARE_CURRENT_HOST.with(|slot| {
+//RS         let current = slot.borrow_mut();
+//RS         if let Some(pointer) = *current {
+//RS             // SAFETY: the enclosing private scope keeps the host alive.
+//RS             // Holding the TLS borrow prevents a reentrant mutable alias.
+//RS             unsafe { body(&mut *pointer) }
+//RS         } else {
+//RS             JET_HARDWARE_DEFAULT_HOST.with(|host| body(&mut *host.borrow_mut()))
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_with_current_erased_host<R>(
+//RS     body: impl FnOnce(&mut dyn JetHardwareErasedHost) -> R,
+//RS ) -> R {
+//RS     JET_HARDWARE_CURRENT_ERASED_HOST.with(|slot| {
+//RS         let current = slot.borrow_mut();
+//RS         if let Some(pointer) = *current {
+//RS             // SAFETY: the enclosing private scope keeps the host alive.
+//RS             // Holding the TLS borrow prevents a reentrant mutable alias.
+//RS             unsafe { body(&mut *pointer) }
+//RS         } else {
+//RS             JET_HARDWARE_DEFAULT_HOST.with(|host| body(&mut *host.borrow_mut()))
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// Typed AOT/native wrappers. No metadata handle is invented at this layer.
+//RS pub fn jet_hardware_setup_typed(
+//RS     profile_id: &str,
+//RS     setup_kind: &str,
+//RS     item: &str,
+//RS     width_or_vector: i64,
+//RS     ownership_or_handler: &str,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_host(|host| {
+//RS         host.setup(
+//RS             profile_id,
+//RS             setup_kind,
+//RS             item,
+//RS             width_or_vector,
+//RS             ownership_or_handler,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_register_read_typed(
+//RS     profile_id: &str,
+//RS     block: &str,
+//RS     register: &str,
+//RS     width: i64,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_host(|host| host.register_read(profile_id, block, register, width))
+//RS }
+//RS 
+//RS pub fn jet_hardware_register_write_typed(
+//RS     profile_id: &str,
+//RS     block: &str,
+//RS     register: &str,
+//RS     width: i64,
+//RS     value: i64,
+//RS ) -> i64 {
+//RS     jet_hardware_with_current_host(|host| {
+//RS         host.register_write(profile_id, block, register, width, value)
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_hardware_dma_start_typed<T: JetDmaPayload>(
+//RS     profile_id: &str,
+//RS     channel: &str,
+//RS     buffer: T,
+//RS ) -> JetDmaTransfer<'static, T> {
+//RS     let Some(facts) = jet_hardware_current_facts() else {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA start requires checked static target hardware facts",
+//RS         );
+//RS     };
+//RS     if facts
+//RS         .profile_id
+//RS         .is_some_and(|expected| expected != profile_id)
+//RS     {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA start profile does not match checked target hardware facts",
+//RS         );
+//RS     }
+//RS     let address = buffer.dma_address();
+//RS     let bytes = buffer.dma_bytes();
+//RS     let mut runtime = JetDmaRuntime::new(facts);
+//RS     let mut transfer = runtime
+//RS         .start(channel, JetDmaBuffer::new(buffer, address, bytes))
+//RS         .unwrap_or_else(|_| {
+//RS             jet_panic(
+//RS                 "<core.hardware>",
+//RS                 0,
+//RS                 "DMA start payload violates checked channel facts",
+//RS             )
+//RS         });
+//RS     let host_token =
+//RS         jet_hardware_with_current_host(|host| host.dma_start(profile_id, channel, address, bytes));
+//RS     if host_token <= 0 {
+//RS         jet_panic(
+//RS             "<core.hardware>",
+//RS             0,
+//RS             "DMA start adapter reported unavailable status",
+//RS         );
+//RS     }
+//RS     transfer.set_host_token(host_token);
+//RS     transfer
+//RS }
+//RS 
+// END-PORT-PENDING 0146 crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1-1789
+

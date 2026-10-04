@@ -1,0 +1,1639 @@
+// PORT-PENDING 0293 crates-jet-codegen-src-prelude-corelib-top-openapi: crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:1-1635
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-WEBOPENAPI1=A: one typed OpenAPI projection for canonical HTTP route facts.
+//RS //
+//RS // The sema/MIR adapter supplies JetOpenApiRouteInput values, including the
+//RS // already parsed HTTP route pattern and all operation/request/response facts.
+//RS // The model validates and renders that checked graph. The router adapter below
+//RS // only marshals fields already checked by WebRouter; it never scans source or
+//RS // infers semantics from a host.
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetOpenApiHttpMethod {
+//RS     Get,
+//RS     Put,
+//RS     Post,
+//RS     Delete,
+//RS     Options,
+//RS     Head,
+//RS     Patch,
+//RS     Trace,
+//RS }
+//RS 
+//RS impl JetOpenApiHttpMethod {
+//RS     pub fn parse(value: &str) -> Result<Self, String> {
+//RS         match value.to_ascii_uppercase().as_str() {
+//RS             "GET" => Ok(Self::Get),
+//RS             "PUT" => Ok(Self::Put),
+//RS             "POST" => Ok(Self::Post),
+//RS             "DELETE" => Ok(Self::Delete),
+//RS             "OPTIONS" => Ok(Self::Options),
+//RS             "HEAD" => Ok(Self::Head),
+//RS             "PATCH" => Ok(Self::Patch),
+//RS             "TRACE" => Ok(Self::Trace),
+//RS             _ => Err(format!("unsupported OpenAPI HTTP method `{value}`")),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Get => "get",
+//RS             Self::Put => "put",
+//RS             Self::Post => "post",
+//RS             Self::Delete => "delete",
+//RS             Self::Options => "options",
+//RS             Self::Head => "head",
+//RS             Self::Patch => "patch",
+//RS             Self::Trace => "trace",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+//RS pub enum JetOpenApiParameterLocation {
+//RS     Path,
+//RS     Query,
+//RS     Header,
+//RS     Cookie,
+//RS }
+//RS 
+//RS impl JetOpenApiParameterLocation {
+//RS     pub fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Path => "path",
+//RS             Self::Query => "query",
+//RS             Self::Header => "header",
+//RS             Self::Cookie => "cookie",
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum JetOpenApiSchema {
+//RS     Any,
+//RS     Null,
+//RS     Boolean,
+//RS     Integer,
+//RS     Number,
+//RS     String,
+//RS     Array(Box<JetOpenApiSchema>),
+//RS     Object {
+//RS         properties: Vec<JetOpenApiProperty>,
+//RS         additional_properties: bool,
+//RS     },
+//RS     OneOf(Vec<JetOpenApiSchema>),
+//RS     Nullable(Box<JetOpenApiSchema>),
+//RS }
+//RS 
+//RS impl JetOpenApiSchema {
+//RS     pub fn object(properties: Vec<JetOpenApiProperty>) -> Self {
+//RS         Self::Object {
+//RS             properties,
+//RS             additional_properties: true,
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn validate_definition(&self, path: &str, errors: &mut Vec<JetOpenApiValidationError>) {
+//RS         match self {
+//RS             Self::Array(item) | Self::Nullable(item) => item.validate_definition(path, errors),
+//RS             Self::Object {
+//RS                 properties,
+//RS                 additional_properties: _,
+//RS             } => {
+//RS                 let mut names = std::collections::BTreeSet::new();
+//RS                 for property in properties {
+//RS                     if !names.insert(property.name.clone()) {
+//RS                         errors.push(JetOpenApiValidationError::new(
+//RS                             path,
+//RS                             format!("duplicate schema property `{}`", property.name),
+//RS                         ));
+//RS                     }
+//RS                     property.schema.validate_definition(
+//RS                         &format!("{path}.{}", property.name),
+//RS                         errors,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             Self::OneOf(items) => {
+//RS                 if items.is_empty() {
+//RS                     errors.push(JetOpenApiValidationError::new(
+//RS                         path,
+//RS                         "oneOf needs at least one schema",
+//RS                     ));
+//RS                 }
+//RS                 for item in items {
+//RS                     item.validate_definition(path, errors);
+//RS                 }
+//RS             }
+//RS             Self::Any | Self::Null | Self::Boolean | Self::Integer | Self::Number | Self::String => {}
+//RS         }
+//RS     }
+//RS 
+//RS     fn render_json(&self) -> String {
+//RS         match self {
+//RS             Self::Any => "{}".to_string(),
+//RS             Self::Null => "{\"type\":\"null\"}".to_string(),
+//RS             Self::Boolean => "{\"type\":\"boolean\"}".to_string(),
+//RS             Self::Integer => "{\"type\":\"integer\",\"format\":\"int64\"}".to_string(),
+//RS             Self::Number => "{\"type\":\"number\",\"format\":\"double\"}".to_string(),
+//RS             Self::String => "{\"type\":\"string\"}".to_string(),
+//RS             Self::Array(item) => format!("{{\"type\":\"array\",\"items\":{}}}", item.render_json()),
+//RS             Self::Object {
+//RS                 properties,
+//RS                 additional_properties,
+//RS             } => {
+//RS                 let rendered = properties
+//RS                     .iter()
+//RS                     .map(|property| {
+//RS                         let mut out = format!(
+//RS                             "{}:{}",
+//RS                             jet_openapi_json_string(&property.name),
+//RS                             property.schema.render_json()
+//RS                         );
+//RS                         if let Some(default) = &property.default {
+//RS                             out.pop();
+//RS                             out.push_str(&format!(
+//RS                                 ",\"default\":{}",
+//RS                                 jet_std::render_datatree_json(default, false, 0)
+//RS                             ));
+//RS                             out.push('}');
+//RS                         }
+//RS                         out
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let required = properties
+//RS                     .iter()
+//RS                     .filter(|property| property.required)
+//RS                     .map(|property| jet_openapi_json_string(&property.name))
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",");
+//RS                 let mut out = format!(
+//RS                     "{{\"type\":\"object\",\"properties\":{{{rendered}}},\"additionalProperties\":{additional_properties}"
+//RS                 );
+//RS                 if !required.is_empty() {
+//RS                     out.push_str(&format!(",\"required\":[{required}]"));
+//RS                 }
+//RS                 out.push('}');
+//RS                 out
+//RS             }
+//RS             Self::OneOf(items) => format!(
+//RS                 "{{\"oneOf\":[{}]}}",
+//RS                 items
+//RS                     .iter()
+//RS                     .map(Self::render_json)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(",")
+//RS             ),
+//RS             Self::Nullable(item) => format!(
+//RS                 "{{\"anyOf\":[{},{{\"type\":\"null\"}}]}}",
+//RS                 item.render_json()
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate_tree(&self, value: &jet_std::DataTree, path: &str) -> Vec<JetOpenApiValidationError> {
+//RS         match self {
+//RS             Self::Any => Vec::new(),
+//RS             Self::Null => {
+//RS                 if matches!(value, jet_std::DataTree::Null) {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "expected null")]
+//RS                 }
+//RS             }
+//RS             Self::Boolean => {
+//RS                 if matches!(value, jet_std::DataTree::Bool(_)) {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "expected boolean")]
+//RS                 }
+//RS             }
+//RS             Self::Integer => {
+//RS                 let valid = match value {
+//RS                     jet_std::DataTree::Int(_) => true,
+//RS                     jet_std::DataTree::Number(text) => text.parse::<i64>().is_ok(),
+//RS                     _ => false,
+//RS                 };
+//RS                 if valid {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "expected integer")]
+//RS                 }
+//RS             }
+//RS             Self::Number => {
+//RS                 let valid = match value {
+//RS                     jet_std::DataTree::Int(_) => true,
+//RS                     jet_std::DataTree::Float(number) => number.is_finite(),
+//RS                     jet_std::DataTree::Number(text) => text.parse::<f64>().map(|n| n.is_finite()).unwrap_or(false),
+//RS                     _ => false,
+//RS                 };
+//RS                 if valid {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "expected number")]
+//RS                 }
+//RS             }
+//RS             Self::String => {
+//RS                 if matches!(value, jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_)) {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "expected string")]
+//RS                 }
+//RS             }
+//RS             Self::Array(item) => match value {
+//RS                 jet_std::DataTree::Array(values) => values
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .flat_map(|(index, value)| item.validate_tree(value, &format!("{path}[{index}]")))
+//RS                     .collect(),
+//RS                 _ => vec![JetOpenApiValidationError::new(path, "expected array")],
+//RS             },
+//RS             Self::Object {
+//RS                 properties,
+//RS                 additional_properties,
+//RS             } => {
+//RS                 let jet_std::DataTree::Object(values) = value else {
+//RS                     return vec![JetOpenApiValidationError::new(path, "expected object")];
+//RS                 };
+//RS                 let mut errors = Vec::new();
+//RS                 let mut seen = std::collections::BTreeSet::new();
+//RS                 for (name, value) in values {
+//RS                     if !seen.insert(name.clone()) {
+//RS                         errors.push(JetOpenApiValidationError::new(
+//RS                             &format!("{path}.{name}"),
+//RS                             "duplicate object field",
+//RS                         ));
+//RS                         continue;
+//RS                     }
+//RS                     let Some(property) = properties.iter().find(|property| property.name == *name) else {
+//RS                         if !additional_properties {
+//RS                             errors.push(JetOpenApiValidationError::new(
+//RS                                 &format!("{path}.{name}"),
+//RS                                 "unknown object field",
+//RS                             ));
+//RS                         }
+//RS                         continue;
+//RS                     };
+//RS                     errors.extend(property.schema.validate_tree(value, &format!("{path}.{name}")));
+//RS                 }
+//RS                 for property in properties.iter().filter(|property| property.required) {
+//RS                     if !seen.contains(&property.name) {
+//RS                         errors.push(JetOpenApiValidationError::new(
+//RS                             &format!("{path}.{}", property.name),
+//RS                             "required field is missing",
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 errors
+//RS             }
+//RS             Self::OneOf(items) => {
+//RS                 let mut alternatives = Vec::new();
+//RS                 for item in items {
+//RS                     let errors = item.validate_tree(value, path);
+//RS                     if errors.is_empty() {
+//RS                         return Vec::new();
+//RS                     }
+//RS                     alternatives.extend(errors);
+//RS                 }
+//RS                 if alternatives.is_empty() {
+//RS                     vec![JetOpenApiValidationError::new(path, "value matches no schema")]
+//RS                 } else {
+//RS                     vec![JetOpenApiValidationError::new(path, "value matches no oneOf schema")]
+//RS                 }
+//RS             }
+//RS             Self::Nullable(item) => {
+//RS                 if matches!(value, jet_std::DataTree::Null) {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     item.validate_tree(value, path)
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_canonicalize_schema(schema: &mut JetOpenApiSchema) {
+//RS     match schema {
+//RS         JetOpenApiSchema::Array(item) | JetOpenApiSchema::Nullable(item) => {
+//RS             jet_openapi_canonicalize_schema(item);
+//RS         }
+//RS         JetOpenApiSchema::Object { properties, .. } => {
+//RS             properties.sort_by(|left, right| left.name.cmp(&right.name));
+//RS             for property in properties {
+//RS                 jet_openapi_canonicalize_schema(&mut property.schema);
+//RS             }
+//RS         }
+//RS         JetOpenApiSchema::OneOf(items) => {
+//RS             for item in items {
+//RS                 jet_openapi_canonicalize_schema(item);
+//RS             }
+//RS         }
+//RS         JetOpenApiSchema::Any
+//RS         | JetOpenApiSchema::Null
+//RS         | JetOpenApiSchema::Boolean
+//RS         | JetOpenApiSchema::Integer
+//RS         | JetOpenApiSchema::Number
+//RS         | JetOpenApiSchema::String => {}
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiProperty {
+//RS     pub name: String,
+//RS     pub schema: JetOpenApiSchema,
+//RS     pub required: bool,
+//RS     pub default: Option<jet_std::DataTree>,
+//RS }
+//RS 
+//RS impl JetOpenApiProperty {
+//RS     pub fn required(name: String, schema: JetOpenApiSchema) -> Self {
+//RS         Self {
+//RS             name,
+//RS             schema,
+//RS             required: true,
+//RS             default: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn optional(name: String, schema: JetOpenApiSchema, default: Option<jet_std::DataTree>) -> Self {
+//RS         Self {
+//RS             name,
+//RS             schema,
+//RS             required: false,
+//RS             default,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiParameter {
+//RS     pub location: JetOpenApiParameterLocation,
+//RS     pub name: String,
+//RS     pub schema: JetOpenApiSchema,
+//RS     pub required: bool,
+//RS     pub default: Option<jet_std::DataTree>,
+//RS     pub catch_all: bool,
+//RS }
+//RS 
+//RS impl JetOpenApiParameter {
+//RS     pub fn new(
+//RS         location: JetOpenApiParameterLocation,
+//RS         name: String,
+//RS         schema: JetOpenApiSchema,
+//RS     ) -> Self {
+//RS         Self {
+//RS             required: location == JetOpenApiParameterLocation::Path,
+//RS             location,
+//RS             name,
+//RS             schema,
+//RS             default: None,
+//RS             catch_all: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiRequestBody {
+//RS     pub schema: JetOpenApiSchema,
+//RS     pub required: bool,
+//RS     pub content_type: String,
+//RS }
+//RS 
+//RS impl JetOpenApiRequestBody {
+//RS     pub fn json(schema: JetOpenApiSchema, required: bool) -> Self {
+//RS         Self {
+//RS             schema,
+//RS             required,
+//RS             content_type: "application/json".to_string(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiResponse {
+//RS     pub status: u16,
+//RS     pub description: String,
+//RS     pub schema: Option<JetOpenApiSchema>,
+//RS     pub content_type: Option<String>,
+//RS }
+//RS 
+//RS impl JetOpenApiResponse {
+//RS     pub fn new(status: u16, description: String, schema: Option<JetOpenApiSchema>) -> Self {
+//RS         Self {
+//RS             status,
+//RS             description,
+//RS             content_type: schema.as_ref().map(|_| "application/json".to_string()),
+//RS             schema,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn ok(schema: JetOpenApiSchema) -> Self {
+//RS         Self::new(200, "OK".to_string(), Some(schema))
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiSecurityRequirement {
+//RS     pub scheme: String,
+//RS     pub scopes: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiSecurityScheme {
+//RS     pub name: String,
+//RS     pub kind: String,
+//RS     pub location: Option<String>,
+//RS     pub parameter_name: Option<String>,
+//RS     pub scheme: Option<String>,
+//RS     pub bearer_format: Option<String>,
+//RS }
+//RS 
+//RS impl JetOpenApiSecurityScheme {
+//RS     pub fn api_key(name: String, location: String, parameter_name: String) -> Self {
+//RS         Self {
+//RS             name,
+//RS             kind: "apiKey".to_string(),
+//RS             location: Some(location),
+//RS             parameter_name: Some(parameter_name),
+//RS             scheme: None,
+//RS             bearer_format: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn http(name: String, scheme: String) -> Self {
+//RS         Self {
+//RS             name,
+//RS             kind: "http".to_string(),
+//RS             location: None,
+//RS             parameter_name: None,
+//RS             scheme: Some(scheme),
+//RS             bearer_format: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiRouteInput {
+//RS     pub method: JetOpenApiHttpMethod,
+//RS     pub pattern: JetHTTPRoutePattern,
+//RS     pub operation_id: String,
+//RS     pub summary: Option<String>,
+//RS     pub parameters: Vec<JetOpenApiParameter>,
+//RS     pub request_body: Option<JetOpenApiRequestBody>,
+//RS     pub responses: Vec<JetOpenApiResponse>,
+//RS     pub security: Vec<JetOpenApiSecurityRequirement>,
+//RS     pub provenance: String,
+//RS }
+//RS 
+//RS impl JetOpenApiRouteInput {
+//RS     pub fn new(
+//RS         method: JetOpenApiHttpMethod,
+//RS         pattern: JetHTTPRoutePattern,
+//RS         operation_id: String,
+//RS         parameters: Vec<JetOpenApiParameter>,
+//RS         request_body: Option<JetOpenApiRequestBody>,
+//RS         responses: Vec<JetOpenApiResponse>,
+//RS         security: Vec<JetOpenApiSecurityRequirement>,
+//RS         provenance: String,
+//RS     ) -> Self {
+//RS         Self {
+//RS             method,
+//RS             pattern,
+//RS             operation_id,
+//RS             summary: None,
+//RS             parameters,
+//RS             request_body,
+//RS             responses,
+//RS             security,
+//RS             provenance,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiRouteFact {
+//RS     pub method: JetOpenApiHttpMethod,
+//RS     pub path: String,
+//RS     pub operation_id: String,
+//RS     pub summary: Option<String>,
+//RS     pub parameters: Vec<JetOpenApiParameter>,
+//RS     pub request_body: Option<JetOpenApiRequestBody>,
+//RS     pub responses: Vec<JetOpenApiResponse>,
+//RS     pub security: Vec<JetOpenApiSecurityRequirement>,
+//RS     pub provenance: String,
+//RS     canonical_pattern: JetHTTPRoutePattern,
+//RS }
+//RS 
+//RS fn jet_openapi_operation_id_for_path(method: JetOpenApiHttpMethod, path: &str) -> String {
+//RS     let mut hash = 14695981039346656037u64;
+//RS     for byte in b"jet-openapi-operation-v1:" {
+//RS         hash ^= u64::from(*byte);
+//RS         hash = hash.wrapping_mul(1099511628211);
+//RS     }
+//RS     for byte in method.as_str().bytes().chain(std::iter::once(b'\0')).chain(path.bytes()) {
+//RS         hash ^= u64::from(byte);
+//RS         hash = hash.wrapping_mul(1099511628211);
+//RS     }
+//RS     format!("jet_{}_{hash:016x}", method.as_str().to_ascii_lowercase())
+//RS }
+//RS 
+//RS impl JetOpenApiRouteFact {
+//RS     pub fn from_input(input: JetOpenApiRouteInput) -> Self {
+//RS         let path = jet_http_route_openapi_path(&input.pattern);
+//RS         let operation_id = if input.operation_id.is_empty() {
+//RS             jet_openapi_operation_id_for_path(input.method, &path)
+//RS         } else {
+//RS             input.operation_id
+//RS         };
+//RS         Self {
+//RS             method: input.method,
+//RS             path,
+//RS             operation_id,
+//RS             summary: input.summary,
+//RS             parameters: input.parameters,
+//RS             request_body: input.request_body,
+//RS             responses: input.responses,
+//RS             security: input.security,
+//RS             provenance: input.provenance,
+//RS             canonical_pattern: input.pattern,
+//RS         }
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS fn jet_openapi_canonicalize_route(route: &mut JetOpenApiRouteFact) {
+//RS     route.parameters.sort_by(|left, right| {
+//RS         left.location
+//RS             .cmp(&right.location)
+//RS             .then_with(|| left.name.cmp(&right.name))
+//RS     });
+//RS     route
+//RS         .responses
+//RS         .sort_by(|left, right| left.status.cmp(&right.status).then_with(|| left.description.cmp(&right.description)));
+//RS     for requirement in &mut route.security {
+//RS         requirement.scopes.sort();
+//RS     }
+//RS     route.security.sort_by(|left, right| {
+//RS         left.scheme
+//RS             .cmp(&right.scheme)
+//RS             .then_with(|| left.scopes.cmp(&right.scopes))
+//RS     });
+//RS     for parameter in &mut route.parameters {
+//RS         jet_openapi_canonicalize_schema(&mut parameter.schema);
+//RS     }
+//RS     if let Some(body) = &mut route.request_body {
+//RS         jet_openapi_canonicalize_schema(&mut body.schema);
+//RS     }
+//RS     for response in &mut route.responses {
+//RS         if let Some(schema) = &mut response.schema {
+//RS             jet_openapi_canonicalize_schema(schema);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiDocument {
+//RS     pub openapi: String,
+//RS     pub title: String,
+//RS     pub version: String,
+//RS     pub routes: Vec<JetOpenApiRouteFact>,
+//RS     pub security_schemes: Vec<JetOpenApiSecurityScheme>,
+//RS }
+//RS 
+//RS impl JetOpenApiDocument {
+//RS     pub fn new(title: String, version: String, routes: Vec<JetOpenApiRouteFact>) -> Result<Self, String> {
+//RS         Self::with_openapi("3.1.0".to_string(), title, version, routes, Vec::new())
+//RS     }
+//RS 
+//RS     pub fn with_openapi(
+//RS         openapi: String,
+//RS         title: String,
+//RS         version: String,
+//RS         routes: Vec<JetOpenApiRouteFact>,
+//RS         security_schemes: Vec<JetOpenApiSecurityScheme>,
+//RS     ) -> Result<Self, String> {
+//RS         let mut routes = routes;
+//RS         for route in &mut routes {
+//RS             jet_openapi_canonicalize_route(route);
+//RS         }
+//RS         routes.sort_by(|left, right| {
+//RS             left.path
+//RS                 .cmp(&right.path)
+//RS                 .then_with(|| left.method.cmp(&right.method))
+//RS                 .then_with(|| left.operation_id.cmp(&right.operation_id))
+//RS         });
+//RS         let mut security_schemes = security_schemes;
+//RS         security_schemes.sort_by(|left, right| {
+//RS             left.name
+//RS                 .cmp(&right.name)
+//RS                 .then_with(|| left.kind.cmp(&right.kind))
+//RS         });
+//RS 
+//RS         if openapi != "3.1.0" {
+//RS             return Err(format!("OpenAPI version must be `3.1.0`, got `{openapi}`"));
+//RS         }
+//RS         if title.is_empty() || version.is_empty() {
+//RS             return Err("OpenAPI info title and version must not be empty".to_string());
+//RS         }
+//RS         let mut errors = Vec::new();
+//RS         let mut route_keys = std::collections::BTreeSet::new();
+//RS         let mut operation_ids = std::collections::BTreeSet::new();
+//RS         let mut scheme_names = std::collections::BTreeSet::new();
+//RS         for scheme in &security_schemes {
+//RS             if scheme.name.is_empty() || !scheme_names.insert(scheme.name.clone()) {
+//RS                 errors.push(format!("duplicate or empty security scheme `{}`", scheme.name));
+//RS             }
+//RS             match scheme.kind.as_str() {
+//RS                 "apiKey" => {
+//RS                     if !matches!(scheme.location.as_deref(), Some("header" | "query" | "cookie"))
+//RS                         || scheme
+//RS                             .parameter_name
+//RS                             .as_deref()
+//RS                             .is_none_or(|value| value.is_empty())
+//RS                     {
+//RS                         errors.push(format!(
+//RS                             "apiKey security scheme `{}` needs a header, query, or cookie name",
+//RS                             scheme.name
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 "http" if scheme
+//RS                     .scheme
+//RS                     .as_deref()
+//RS                     .is_none_or(|value| value.is_empty()) =>
+//RS                 {
+//RS                     errors.push(format!("http security scheme `{}` needs a scheme", scheme.name));
+//RS                 }
+//RS                 _ => {}
+//RS             }
+//RS         }
+//RS         for route in &routes {
+//RS             let pattern = &route.canonical_pattern;
+//RS             let canonical_path = jet_http_route_openapi_path(pattern);
+//RS             if route.path != canonical_path
+//RS                 || !route.path.starts_with('/')
+//RS                 || route.path.contains('?')
+//RS                 || route.path.contains('#')
+//RS             {
+//RS                 errors.push(format!(
+//RS                     "invalid OpenAPI route path `{}` for canonical pattern `{canonical_path}`",
+//RS                     route.path
+//RS                 ));
+//RS             }
+//RS             let path_names = jet_openapi_pattern_parameter_names(pattern);
+//RS             if route.operation_id.is_empty() {
+//RS                 errors.push(format!("OpenAPI route `{}` needs an operationId", route.path));
+//RS             }
+//RS             if !operation_ids.insert(route.operation_id.clone()) {
+//RS                 errors.push(format!("duplicate OpenAPI operationId `{}`", route.operation_id));
+//RS             }
+//RS             let key = format!("{} {}", route.method.as_str(), route.path);
+//RS             if !route_keys.insert(key.clone()) {
+//RS                 errors.push(format!("duplicate OpenAPI route `{key}`"));
+//RS             }
+//RS             let mut parameter_keys = std::collections::BTreeSet::new();
+//RS             let mut declared_path_names = std::collections::BTreeSet::new();
+//RS             let mut schema_errors = Vec::new();
+//RS             for parameter in &route.parameters {
+//RS                 let parameter_key = format!("{}:{}", parameter.location.as_str(), parameter.name);
+//RS                 if !parameter_keys.insert(parameter_key) {
+//RS                     schema_errors.push(JetOpenApiValidationError::new(
+//RS                         "parameter",
+//RS                         format!(
+//RS                             "duplicate {} parameter `{}`",
+//RS                             parameter.location.as_str(),
+//RS                             parameter.name
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS                 if parameter.location == JetOpenApiParameterLocation::Path {
+//RS                     declared_path_names.insert(parameter.name.clone());
+//RS                     if !path_names.contains(&parameter.name) {
+//RS                         schema_errors.push(JetOpenApiValidationError::new(
+//RS                             &parameter.name,
+//RS                             "path parameter is not present in the route template",
+//RS                         ));
+//RS                     }
+//RS                     let is_catch_all = pattern.segments.iter().any(|segment| {
+//RS                         matches!(
+//RS                             segment,
+//RS                             JetHTTPRouteSegment::CatchAll(name) if name == &parameter.name
+//RS                         )
+//RS                     });
+//RS                     if parameter.catch_all != is_catch_all {
+//RS                         schema_errors.push(JetOpenApiValidationError::new(
+//RS                             &parameter.name,
+//RS                             "path parameter catch-all fact disagrees with the canonical route pattern",
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 parameter.schema.validate_definition(&parameter.name, &mut schema_errors);
+//RS                 if parameter.name.is_empty() {
+//RS                     schema_errors.push(JetOpenApiValidationError::new(
+//RS                         "parameter",
+//RS                         "parameter name must not be empty",
+//RS                     ));
+//RS                 }
+//RS                 if parameter.location == JetOpenApiParameterLocation::Path && !parameter.required {
+//RS                     schema_errors.push(JetOpenApiValidationError::new(
+//RS                         &parameter.name,
+//RS                         "path parameters are always required",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             for path_name in path_names {
+//RS                 if !declared_path_names.contains(&path_name) {
+//RS                     schema_errors.push(JetOpenApiValidationError::new(
+//RS                         &path_name,
+//RS                         "route template parameter has no parameter fact",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             if let Some(body) = &route.request_body {
+//RS                 body.schema.validate_definition("requestBody", &mut schema_errors);
+//RS                 if body.content_type.is_empty() {
+//RS                     schema_errors.push(JetOpenApiValidationError::new(
+//RS                         "requestBody",
+//RS                         "request body content type must not be empty",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             let mut response_statuses = std::collections::BTreeSet::new();
+//RS             for response in &route.responses {
+//RS                 if !(100..=599).contains(&response.status) {
+//RS                     errors.push(format!("response status {} is out of range", response.status));
+//RS                 }
+//RS                 if !response_statuses.insert(response.status) {
+//RS                     errors.push(format!(
+//RS                         "route `{key}` declares response status {} more than once",
+//RS                         response.status
+//RS                     ));
+//RS                 }
+//RS                 if let Some(schema) = &response.schema {
+//RS                     schema.validate_definition("response", &mut schema_errors);
+//RS                 }
+//RS             }
+//RS             if route.responses.is_empty() {
+//RS                 errors.push(format!("route `{key}` must declare a response"));
+//RS             }
+//RS             for requirement in &route.security {
+//RS                 if requirement.scheme.is_empty() {
+//RS                     errors.push(format!("route `{key}` has an empty security scheme"));
+//RS                 } else if !scheme_names.contains(&requirement.scheme) {
+//RS                     errors.push(format!(
+//RS                         "route `{key}` references unknown security scheme `{}`",
+//RS                         requirement.scheme
+//RS                     ));
+//RS                 }
+//RS             }
+//RS             errors.extend(schema_errors.into_iter().map(|error| error.to_string()));
+//RS         }
+//RS         if errors.is_empty() {
+//RS             Ok(Self {
+//RS                 openapi,
+//RS                 title,
+//RS                 version,
+//RS                 routes,
+//RS                 security_schemes,
+//RS             })
+//RS         } else {
+//RS             Err(errors.join("; "))
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn json(&self) -> String {
+//RS         let mut out = format!(
+//RS             "{{\"openapi\":{},\"info\":{{\"title\":{},\"version\":{}}},\"paths\":{{",
+//RS             jet_openapi_json_string(&self.openapi),
+//RS             jet_openapi_json_string(&self.title),
+//RS             jet_openapi_json_string(&self.version)
+//RS         );
+//RS         let mut routes = self.routes.clone();
+//RS         for route in &mut routes {
+//RS             jet_openapi_canonicalize_route(route);
+//RS         }
+//RS         routes.sort_by(|left, right| {
+//RS             left.path
+//RS                 .cmp(&right.path)
+//RS                 .then_with(|| left.method.cmp(&right.method))
+//RS                 .then_with(|| left.operation_id.cmp(&right.operation_id))
+//RS         });
+//RS         let mut security_schemes = self.security_schemes.clone();
+//RS         security_schemes.sort_by(|left, right| {
+//RS             left.name
+//RS                 .cmp(&right.name)
+//RS                 .then_with(|| left.kind.cmp(&right.kind))
+//RS         });
+//RS         let mut paths: Vec<(String, Vec<&JetOpenApiRouteFact>)> = Vec::new();
+//RS         for route in &routes {
+//RS             if let Some((_, route_rows)) = paths.iter_mut().find(|(path, _)| path == &route.path) {
+//RS                 route_rows.push(route);
+//RS             } else {
+//RS                 paths.push((route.path.clone(), vec![route]));
+//RS             }
+//RS         }
+//RS         let mut path_rows = Vec::new();
+//RS         for (path, routes) in paths {
+//RS             let methods = routes
+//RS                 .iter()
+//RS                 .map(|route| {
+//RS                     format!(
+//RS                         "{}:{}",
+//RS                         jet_openapi_json_string(route.method.as_str()),
+//RS                         jet_openapi_route_json(route)
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(",");
+//RS             path_rows.push(format!("{}:{{{methods}}}", jet_openapi_json_string(&path)));
+//RS         }
+//RS         out.push_str(&path_rows.join(","));
+//RS         out.push('}');
+//RS         if !security_schemes.is_empty() {
+//RS             out.push_str(",\"components\":{\"securitySchemes\":{");
+//RS             out.push_str(
+//RS                 &security_schemes
+//RS                     .iter()
+//RS                     .map(|scheme| {
+//RS                         format!(
+//RS                             "{}:{}",
+//RS                             jet_openapi_json_string(&scheme.name),
+//RS                             jet_openapi_security_scheme_json(scheme)
+//RS                         )
+//RS                     })
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(","),
+//RS             );
+//RS             out.push_str("}}");
+//RS         }
+//RS         out.push('}');
+//RS         out
+//RS     }
+//RS 
+//RS     pub fn validator(&self) -> JetOpenApiValidator {
+//RS         JetOpenApiValidator {
+//RS             routes: self.routes.clone(),
+//RS             security_schemes: self.security_schemes.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiValidationError {
+//RS     pub path: String,
+//RS     pub reason: String,
+//RS }
+//RS 
+//RS impl JetOpenApiValidationError {
+//RS     pub fn new(path: impl Into<String>, reason: impl Into<String>) -> Self {
+//RS         Self {
+//RS             path: path.into(),
+//RS             reason: reason.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for JetOpenApiValidationError {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         if self.path.is_empty() {
+//RS             write!(formatter, "{}", self.reason)
+//RS         } else {
+//RS             write!(formatter, "{}: {}", self.path, self.reason)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiRequest {
+//RS     pub method: JetOpenApiHttpMethod,
+//RS     pub path: String,
+//RS     pub query: std::collections::BTreeMap<String, String>,
+//RS     pub headers: std::collections::BTreeMap<String, String>,
+//RS     pub cookies: std::collections::BTreeMap<String, String>,
+//RS     pub body: Option<jet_std::DataTree>,
+//RS }
+//RS 
+//RS impl JetOpenApiRequest {
+//RS     pub fn new(method: JetOpenApiHttpMethod, path: String) -> Self {
+//RS         Self {
+//RS             method,
+//RS             path,
+//RS             query: std::collections::BTreeMap::new(),
+//RS             headers: std::collections::BTreeMap::new(),
+//RS             cookies: std::collections::BTreeMap::new(),
+//RS             body: None,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetOpenApiValidator {
+//RS     routes: Vec<JetOpenApiRouteFact>,
+//RS     security_schemes: Vec<JetOpenApiSecurityScheme>,
+//RS }
+//RS 
+//RS impl JetOpenApiValidator {
+//RS     pub fn validate(&self, request: &JetOpenApiRequest) -> Result<(), Vec<JetOpenApiValidationError>> {
+//RS         let mut candidates = self
+//RS             .routes
+//RS             .iter()
+//RS             .enumerate()
+//RS             .filter(|(_, route)| route.method == request.method)
+//RS             .filter_map(|(index, route)| {
+//RS                 jet_openapi_match_path(route, &request.path)
+//RS                     .map(|params| (index, route, params))
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         candidates.sort_by(|left, right| {
+//RS             jet_http_route_selection_cmp(
+//RS                 &left.1.canonical_pattern,
+//RS                 left.0,
+//RS                 &right.1.canonical_pattern,
+//RS                 right.0,
+//RS             )
+//RS             .reverse()
+//RS         });
+//RS         let Some((_, route, path_values)) = candidates.into_iter().next() else {
+//RS             return Err(vec![JetOpenApiValidationError::new(
+//RS                 "route",
+//RS                 format!("no OpenAPI route matches {} {}", request.method.as_str(), request.path),
+//RS             )]);
+//RS         };
+//RS         let mut errors = Vec::new();
+//RS         for parameter in &route.parameters {
+//RS             let value = match parameter.location {
+//RS                 JetOpenApiParameterLocation::Path => path_values.get(&parameter.name),
+//RS                 JetOpenApiParameterLocation::Query => request.query.get(&parameter.name),
+//RS                 JetOpenApiParameterLocation::Header => request.headers.get(&parameter.name),
+//RS                 JetOpenApiParameterLocation::Cookie => request.cookies.get(&parameter.name),
+//RS             };
+//RS             let Some(value) = value else {
+//RS                 if parameter.default.is_some() {
+//RS                     continue;
+//RS                 }
+//RS                 if parameter.required || parameter.location == JetOpenApiParameterLocation::Path {
+//RS                     errors.push(JetOpenApiValidationError::new(
+//RS                         format!("{}.{}", parameter.location.as_str(), parameter.name),
+//RS                         "required parameter is missing",
+//RS                     ));
+//RS                 }
+//RS                 continue;
+//RS             };
+//RS             if let Err(reason) = jet_openapi_validate_parameter_value(&parameter.schema, value) {
+//RS                 errors.push(JetOpenApiValidationError::new(
+//RS                     format!("{}.{}", parameter.location.as_str(), parameter.name),
+//RS                     reason,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if let Some(body) = &route.request_body {
+//RS             match request.body.as_ref() {
+//RS                 Some(value) => errors.extend(body.schema.validate_tree(value, "body")),
+//RS                 None if body.required => errors.push(JetOpenApiValidationError::new(
+//RS                     "body",
+//RS                     "required request body is missing",
+//RS                 )),
+//RS                 None => {}
+//RS             }
+//RS         }
+//RS         if !route.security.is_empty()
+//RS             && !route.security.iter().any(|requirement| {
+//RS                 self.security_schemes
+//RS                     .iter()
+//RS                     .find(|scheme| scheme.name == requirement.scheme)
+//RS                     .is_some_and(|scheme| jet_openapi_security_present(scheme, request))
+//RS             })
+//RS         {
+//RS             errors.push(JetOpenApiValidationError::new(
+//RS                 "security",
+//RS                 "no declared security requirement is satisfied",
+//RS             ));
+//RS         }
+//RS         if errors.is_empty() {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(errors)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_validate_parameter_value(schema: &JetOpenApiSchema, value: &str) -> Result<(), String> {
+//RS     match schema {
+//RS         JetOpenApiSchema::Any | JetOpenApiSchema::String => Ok(()),
+//RS         JetOpenApiSchema::Boolean => match value {
+//RS             "true" | "false" | "1" | "0" => Ok(()),
+//RS             _ => Err("expected boolean parameter".to_string()),
+//RS         },
+//RS         JetOpenApiSchema::Integer => value
+//RS             .parse::<i64>()
+//RS             .map(|_| ())
+//RS             .map_err(|_| "expected integer parameter".to_string()),
+//RS         JetOpenApiSchema::Number => value
+//RS             .parse::<f64>()
+//RS             .ok()
+//RS             .filter(|number| number.is_finite())
+//RS             .map(|_| ())
+//RS             .ok_or_else(|| "expected finite number parameter".to_string()),
+//RS         JetOpenApiSchema::Null => Err("null is not a valid parameter value".to_string()),
+//RS         JetOpenApiSchema::Nullable(item) => {
+//RS             if value == "null" {
+//RS                 Ok(())
+//RS             } else {
+//RS                 jet_openapi_validate_parameter_value(item, value)
+//RS             }
+//RS         }
+//RS         JetOpenApiSchema::Array(item) => value
+//RS             .split(',')
+//RS             .enumerate()
+//RS             .try_for_each(|(_, item_value)| jet_openapi_validate_parameter_value(item, item_value)),
+//RS         JetOpenApiSchema::Object { .. } | JetOpenApiSchema::OneOf(_) => Ok(()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_security_present(
+//RS     scheme: &JetOpenApiSecurityScheme,
+//RS     request: &JetOpenApiRequest,
+//RS ) -> bool {
+//RS     match scheme.kind.as_str() {
+//RS         "apiKey" => match (scheme.location.as_deref(), scheme.parameter_name.as_deref()) {
+//RS             (Some("header"), Some(name)) => request.headers.contains_key(name),
+//RS             (Some("query"), Some(name)) => request.query.contains_key(name),
+//RS             (Some("cookie"), Some(name)) => request.cookies.contains_key(name),
+//RS             _ => false,
+//RS         },
+//RS         "http" | "oauth2" | "openIdConnect" => request
+//RS             .headers
+//RS             .keys()
+//RS             .any(|name| name.eq_ignore_ascii_case("authorization")),
+//RS         _ => false,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_openapi_pattern_parameter_names(
+//RS     pattern: &JetHTTPRoutePattern,
+//RS ) -> std::collections::BTreeSet<String> {
+//RS     pattern
+//RS         .segments
+//RS         .iter()
+//RS         .filter_map(|segment| match segment {
+//RS             JetHTTPRouteSegment::Param(name) | JetHTTPRouteSegment::CatchAll(name) => {
+//RS                 Some(name.clone())
+//RS             }
+//RS             JetHTTPRouteSegment::Static(_) => None,
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn jet_openapi_match_path(
+//RS     route: &JetOpenApiRouteFact,
+//RS     actual: &str,
+//RS ) -> Option<std::collections::BTreeMap<String, String>> {
+//RS     let path = jet_http_route_path(actual).ok()?;
+//RS     jet_http_route_match(&route.canonical_pattern, &path)
+//RS }
+//RS fn jet_openapi_route_json(route: &JetOpenApiRouteFact) -> String {
+//RS     let mut out = format!("{{\"operationId\":{}", jet_openapi_json_string(&route.operation_id));
+//RS     if let Some(summary) = &route.summary {
+//RS         out.push_str(&format!(",\"summary\":{}", jet_openapi_json_string(summary)));
+//RS     }
+//RS     let parameters = &route.parameters;
+//RS     if !parameters.is_empty() {
+//RS         out.push_str(",\"parameters\":[");
+//RS         out.push_str(
+//RS             &parameters
+//RS                 .iter()
+//RS                 .map(jet_openapi_parameter_json)
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(","),
+//RS         );
+//RS         out.push(']');
+//RS     }
+//RS     if let Some(body) = &route.request_body {
+//RS         out.push_str(",\"requestBody\":{\"required\":");
+//RS         out.push_str(if body.required { "true" } else { "false" });
+//RS         out.push_str(",\"content\":{");
+//RS         out.push_str(&jet_openapi_json_string(&body.content_type));
+//RS         out.push_str(":{\"schema\":");
+//RS         out.push_str(&body.schema.render_json());
+//RS         out.push_str("}}}");
+//RS     }
+//RS     let responses = &route.responses;
+//RS     out.push_str(",\"responses\":{");
+//RS     out.push_str(
+//RS         &responses
+//RS             .iter()
+//RS             .map(|response| {
+//RS                 let mut rendered = format!(
+//RS                     "{}:{{\"description\":{}",
+//RS                     jet_openapi_json_string(&response.status.to_string()),
+//RS                     jet_openapi_json_string(&response.description)
+//RS                 );
+//RS                 if let (Some(schema), Some(content_type)) = (&response.schema, &response.content_type) {
+//RS                     rendered.push_str(",\"content\":{");
+//RS                     rendered.push_str(&jet_openapi_json_string(content_type));
+//RS                     rendered.push_str(":{\"schema\":");
+//RS                     rendered.push_str(&schema.render_json());
+//RS                     rendered.push_str("}}");
+//RS                 }
+//RS                 rendered.push('}');
+//RS                 rendered
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS             .join(","),
+//RS     );
+//RS     out.push('}');
+//RS     if !route.security.is_empty() {
+//RS         let security = &route.security;
+//RS         out.push_str(",\"security\":[");
+//RS         out.push_str(
+//RS             &security
+//RS                 .iter()
+//RS                 .map(|requirement| {
+//RS                     let scopes = &requirement.scopes;
+//RS                     format!(
+//RS                         "{{{}:[{}]}}",
+//RS                         jet_openapi_json_string(&requirement.scheme),
+//RS                         scopes
+//RS                             .iter()
+//RS                             .map(|scope| jet_openapi_json_string(scope))
+//RS                             .collect::<Vec<_>>()
+//RS                             .join(",")
+//RS                     )
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS                 .join(","),
+//RS         );
+//RS         out.push(']');
+//RS     }
+//RS     out.push('}');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_openapi_parameter_json(parameter: &JetOpenApiParameter) -> String {
+//RS     let mut out = format!(
+//RS         "{{\"name\":{},\"in\":{},\"required\":{},\"schema\":{}",
+//RS         jet_openapi_json_string(&parameter.name),
+//RS         jet_openapi_json_string(parameter.location.as_str()),
+//RS         parameter.required || parameter.location == JetOpenApiParameterLocation::Path,
+//RS         parameter.schema.render_json()
+//RS     );
+//RS     if let Some(default) = &parameter.default {
+//RS         out.push_str(&format!(",\"default\":{}", jet_std::render_datatree_json(default, false, 0)));
+//RS     }
+//RS     out.push('}');
+//RS     out
+//RS }
+//RS 
+//RS fn jet_openapi_security_scheme_json(scheme: &JetOpenApiSecurityScheme) -> String {
+//RS     let mut out = format!("{{\"type\":{}", jet_openapi_json_string(&scheme.kind));
+//RS     if let Some(location) = &scheme.location {
+//RS         out.push_str(&format!(",\"in\":{}", jet_openapi_json_string(location)));
+//RS     }
+//RS     if let Some(name) = &scheme.parameter_name {
+//RS         out.push_str(&format!(",\"name\":{}", jet_openapi_json_string(name)));
+//RS     }
+//RS     if let Some(value) = &scheme.scheme {
+//RS         out.push_str(&format!(",\"scheme\":{}", jet_openapi_json_string(value)));
+//RS     }
+//RS     if let Some(value) = &scheme.bearer_format {
+//RS         out.push_str(&format!(",\"bearerFormat\":{}", jet_openapi_json_string(value)));
+//RS     }
+//RS     out.push('}');
+//RS     out
+//RS }
+//RS 
+//RS 
+//RS fn jet_openapi_json_string(value: &str) -> String {
+//RS     let mut out = String::with_capacity(value.len() + 2);
+//RS     out.push('"');
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => out.push_str("\\\""),
+//RS             '\\' => out.push_str("\\\\"),
+//RS             '\n' => out.push_str("\\n"),
+//RS             '\r' => out.push_str("\\r"),
+//RS             '\t' => out.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 out.push_str(&format!("\\u{:04x}", character as u32));
+//RS             }
+//RS             character => out.push(character),
+//RS         }
+//RS     }
+//RS     out.push('"');
+//RS     out
+//RS }
+//RS 
+//RS /// Convert the typed route graph emitted by the sema/MIR adapter into the
+//RS /// projection model. The resulting document canonicalizes identity and order.
+//RS pub fn jet_web_openapi_route_facts(
+//RS     inputs: Vec<JetOpenApiRouteInput>,
+//RS ) -> Vec<JetOpenApiRouteFact> {
+//RS     inputs
+//RS         .into_iter()
+//RS         .map(JetOpenApiRouteFact::from_input)
+//RS         .collect()
+//RS }
+//RS 
+//RS pub fn jet_web_openapi_document_from_routes(
+//RS     inputs: Vec<JetOpenApiRouteInput>,
+//RS     title: String,
+//RS     version: String,
+//RS     security_schemes: Vec<JetOpenApiSecurityScheme>,
+//RS ) -> Result<JetOpenApiDocument, String> {
+//RS     JetOpenApiDocument::with_openapi(
+//RS         "3.1.0".to_string(),
+//RS         title,
+//RS         version,
+//RS         jet_web_openapi_route_facts(inputs),
+//RS         security_schemes,
+//RS     )
+//RS }
+//RS 
+//RS pub fn jet_web_openapi_from_routes(
+//RS     inputs: Vec<JetOpenApiRouteInput>,
+//RS     title: String,
+//RS     version: String,
+//RS     security_schemes: Vec<JetOpenApiSecurityScheme>,
+//RS ) -> Result<String, String> {
+//RS     Ok(jet_web_openapi_document_from_routes(inputs, title, version, security_schemes)?.json())
+//RS }
+//RS 
+//RS fn jet_openapi_contract_object(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<&[(String, jet_std::DataTree)], String> {
+//RS     match value {
+//RS         jet_std::DataTree::Object(fields) => Ok(fields),
+//RS         _ => Err("OpenAPI route contract must be an object".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_field<'a>(
+//RS     object: &'a [(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<&'a jet_std::DataTree, String> {
+//RS     object
+//RS         .iter()
+//RS         .find_map(|(field_name, value)| (field_name == name).then_some(value))
+//RS         .ok_or_else(|| format!("OpenAPI route contract is missing `{name}`"))
+//RS }
+//RS 
+//RS fn jet_openapi_contract_text(
+//RS     object: &[(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<String, String> {
+//RS     match jet_openapi_contract_field(object, name)? {
+//RS         jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => Ok(value.clone()),
+//RS         _ => Err(format!("OpenAPI route contract field `{name}` must be text")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_bool(
+//RS     object: &[(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<bool, String> {
+//RS     match jet_openapi_contract_field(object, name)? {
+//RS         jet_std::DataTree::Bool(value) => Ok(*value),
+//RS         _ => Err(format!("OpenAPI route contract field `{name}` must be boolean")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_optional_text(
+//RS     object: &[(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<Option<String>, String> {
+//RS     match jet_openapi_contract_field(object, name)? {
+//RS         jet_std::DataTree::Null => Ok(None),
+//RS         jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
+//RS             Ok(Some(value.clone()))
+//RS         }
+//RS         _ => Err(format!(
+//RS             "OpenAPI route contract field `{name}` must be text or null"
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_array<'a>(
+//RS     object: &'a [(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<&'a [jet_std::DataTree], String> {
+//RS     match jet_openapi_contract_field(object, name)? {
+//RS         jet_std::DataTree::Array(values) => Ok(values),
+//RS         _ => Err(format!("OpenAPI route contract field `{name}` must be an array")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_integer(
+//RS     object: &[(String, jet_std::DataTree)],
+//RS     name: &str,
+//RS ) -> Result<i64, String> {
+//RS     match jet_openapi_contract_field(object, name)? {
+//RS         jet_std::DataTree::Int(value) => Ok(*value),
+//RS         jet_std::DataTree::Number(value) => value
+//RS             .parse::<i64>()
+//RS             .map_err(|_| format!("OpenAPI route contract field `{name}` is out of range")),
+//RS         _ => Err(format!("OpenAPI route contract field `{name}` must be an integer")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_schema(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<JetOpenApiSchema, String> {
+//RS     let object = jet_openapi_contract_object(value)?;
+//RS     let Some(kind) = jet_openapi_contract_field(object, "type").ok() else {
+//RS         if let Some(any_of) = jet_openapi_contract_field(object, "anyOf").ok() {
+//RS             let jet_std::DataTree::Array(items) = any_of else {
+//RS                 return Err("OpenAPI schema `anyOf` must be an array".to_string());
+//RS             };
+//RS             if items.len() == 2 && matches!(items[1], jet_std::DataTree::Object(_)) {
+//RS                 let null_schema = jet_openapi_contract_schema(&items[1])?;
+//RS                 if matches!(null_schema, JetOpenApiSchema::Null) {
+//RS                     return Ok(JetOpenApiSchema::Nullable(Box::new(
+//RS                         jet_openapi_contract_schema(&items[0])?,
+//RS                     )));
+//RS                 }
+//RS             }
+//RS         }
+//RS         if let Some(one_of) = jet_openapi_contract_field(object, "oneOf").ok() {
+//RS             let jet_std::DataTree::Array(items) = one_of else {
+//RS                 return Err("OpenAPI schema `oneOf` must be an array".to_string());
+//RS             };
+//RS             return Ok(JetOpenApiSchema::OneOf(
+//RS                 items
+//RS                     .iter()
+//RS                     .map(jet_openapi_contract_schema)
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS             ));
+//RS         }
+//RS         return Ok(JetOpenApiSchema::Any);
+//RS     };
+//RS     let (jet_std::DataTree::Text(kind) | jet_std::DataTree::TypedText(kind)) = kind else {
+//RS         return Err("OpenAPI schema `type` must be text".to_string());
+//RS     };
+//RS     match kind.as_str() {
+//RS         "null" => Ok(JetOpenApiSchema::Null),
+//RS         "boolean" => Ok(JetOpenApiSchema::Boolean),
+//RS         "integer" => Ok(JetOpenApiSchema::Integer),
+//RS         "number" => Ok(JetOpenApiSchema::Number),
+//RS         "string" => Ok(JetOpenApiSchema::String),
+//RS         "array" => Ok(JetOpenApiSchema::Array(Box::new(
+//RS             jet_openapi_contract_schema(jet_openapi_contract_field(object, "items")?)?,
+//RS         ))),
+//RS         "object" => {
+//RS             let properties = match jet_openapi_contract_field(object, "properties")? {
+//RS                 jet_std::DataTree::Object(fields) => fields,
+//RS                 _ => {
+//RS                     return Err("OpenAPI object schema `properties` must be an object".to_string())
+//RS                 }
+//RS             };
+//RS             let required = match jet_openapi_contract_field(object, "required").ok() {
+//RS                 None => Vec::new(),
+//RS                 Some(jet_std::DataTree::Array(values)) => values
+//RS                     .iter()
+//RS                     .map(|value| match value {
+//RS                         jet_std::DataTree::Text(name) | jet_std::DataTree::TypedText(name) => {
+//RS                             Ok(name.clone())
+//RS                         }
+//RS                         _ => Err("OpenAPI schema `required` names must be text".to_string()),
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?,
+//RS                 Some(_) => return Err("OpenAPI schema `required` must be an array".to_string()),
+//RS             };
+//RS             let additional_properties =
+//RS                 match jet_openapi_contract_field(object, "additionalProperties")? {
+//RS                     jet_std::DataTree::Bool(value) => *value,
+//RS                     _ => {
+//RS                         return Err(
+//RS                             "OpenAPI object schema `additionalProperties` must be boolean"
+//RS                                 .to_string(),
+//RS                         )
+//RS                     }
+//RS                 };
+//RS             let properties = properties
+//RS                 .iter()
+//RS                 .map(|(name, value)| {
+//RS                     Ok(JetOpenApiProperty {
+//RS                         name: name.clone(),
+//RS                         schema: jet_openapi_contract_schema(value)?,
+//RS                         required: required.iter().any(|required| required == name),
+//RS                         default: None,
+//RS                     })
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, String>>()?;
+//RS             Ok(JetOpenApiSchema::Object {
+//RS                 properties,
+//RS                 additional_properties,
+//RS             })
+//RS         }
+//RS         other => Err(format!("unsupported OpenAPI schema type `{other}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_openapi_contract_parameter(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<JetOpenApiParameter, String> {
+//RS     let object = jet_openapi_contract_object(value)?;
+//RS     let location = match jet_openapi_contract_text(object, "in")?.as_str() {
+//RS         "path" => JetOpenApiParameterLocation::Path,
+//RS         "query" => JetOpenApiParameterLocation::Query,
+//RS         "header" => JetOpenApiParameterLocation::Header,
+//RS         "cookie" => JetOpenApiParameterLocation::Cookie,
+//RS         other => return Err(format!("unsupported OpenAPI parameter location `{other}`")),
+//RS     };
+//RS     Ok(JetOpenApiParameter {
+//RS         location,
+//RS         name: jet_openapi_contract_text(object, "name")?,
+//RS         schema: jet_openapi_contract_schema(jet_openapi_contract_field(object, "schema")?)?,
+//RS         required: jet_openapi_contract_bool(object, "required")?,
+//RS         default: None,
+//RS         catch_all: jet_openapi_contract_bool(object, "catch_all")?,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_openapi_contract_request_body(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<Option<JetOpenApiRequestBody>, String> {
+//RS     let jet_std::DataTree::Null = value else {
+//RS         let object = jet_openapi_contract_object(value)?;
+//RS         return Ok(Some(JetOpenApiRequestBody {
+//RS             required: jet_openapi_contract_bool(object, "required")?,
+//RS             content_type: jet_openapi_contract_text(object, "content_type")?,
+//RS             schema: jet_openapi_contract_schema(jet_openapi_contract_field(object, "schema")?)?,
+//RS         }));
+//RS     };
+//RS     Ok(None)
+//RS }
+//RS 
+//RS fn jet_openapi_contract_response(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<JetOpenApiResponse, String> {
+//RS     let object = jet_openapi_contract_object(value)?;
+//RS     let status = jet_openapi_contract_integer(object, "status")?;
+//RS     let status = u16::try_from(status)
+//RS         .map_err(|_| "OpenAPI response status is outside the u16 range".to_string())?;
+//RS     let schema = match jet_openapi_contract_field(object, "schema")? {
+//RS         jet_std::DataTree::Null => None,
+//RS         schema => Some(jet_openapi_contract_schema(schema)?),
+//RS     };
+//RS     Ok(JetOpenApiResponse {
+//RS         status,
+//RS         description: jet_openapi_contract_text(object, "description")?,
+//RS         schema,
+//RS         content_type: jet_openapi_contract_optional_text(object, "content_type")?,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_openapi_contract_security(
+//RS     value: &jet_std::DataTree,
+//RS ) -> Result<JetOpenApiSecurityRequirement, String> {
+//RS     let object = jet_openapi_contract_object(value)?;
+//RS     let scopes = jet_openapi_contract_array(object, "scopes")?
+//RS         .iter()
+//RS         .map(|scope| match scope {
+//RS             jet_std::DataTree::Text(scope) | jet_std::DataTree::TypedText(scope) => {
+//RS                 Ok(scope.clone())
+//RS             }
+//RS             _ => Err("OpenAPI security scopes must be text".to_string()),
+//RS         })
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(JetOpenApiSecurityRequirement {
+//RS         scheme: jet_openapi_contract_text(object, "scheme")?,
+//RS         scopes,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_openapi_contract_input(
+//RS     contract: &str,
+//RS ) -> Result<JetOpenApiRouteInput, String> {
+//RS     let value = jet_std::parse_json_strict(contract)
+//RS         .map_err(|error| format!("invalid checked OpenAPI route contract: {}", error.reason))?;
+//RS     let object = jet_openapi_contract_object(&value)?;
+//RS     let method = JetOpenApiHttpMethod::parse(&jet_openapi_contract_text(object, "method")?)?;
+//RS     let pattern_text = jet_openapi_contract_text(object, "pattern")?;
+//RS     let pattern = jet_http_route_pattern(&pattern_text)?;
+//RS     let expected_path = jet_http_route_openapi_path(&pattern);
+//RS     let path = jet_openapi_contract_text(object, "path")?;
+//RS     if path != expected_path {
+//RS         return Err("checked OpenAPI route path does not match its route pattern".to_string());
+//RS     }
+//RS     let parameters = jet_openapi_contract_array(object, "parameters")?
+//RS         .iter()
+//RS         .map(jet_openapi_contract_parameter)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let responses = jet_openapi_contract_array(object, "responses")?
+//RS         .iter()
+//RS         .map(jet_openapi_contract_response)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     if responses.is_empty() {
+//RS         return Err("checked OpenAPI route contract has no responses".to_string());
+//RS     }
+//RS     let security = jet_openapi_contract_array(object, "security")?
+//RS         .iter()
+//RS         .map(jet_openapi_contract_security)
+//RS         .collect::<Result<Vec<_>, _>>()?;
+//RS     let mut input = JetOpenApiRouteInput::new(
+//RS         method,
+//RS         pattern,
+//RS         jet_openapi_contract_text(object, "operation_id")?,
+//RS         parameters,
+//RS         jet_openapi_contract_request_body(jet_openapi_contract_field(object, "request_body")?)?,
+//RS         responses,
+//RS         security,
+//RS         jet_openapi_contract_text(object, "provenance")?,
+//RS     );
+//RS     input.summary = jet_openapi_contract_optional_text(object, "summary")?;
+//RS     Ok(input)
+//RS }
+//RS 
+//RS /// Project interpreter-held HTTPRouter route facts through the same checked
+//RS /// contract parser and OpenAPI renderer as native HTTPRouter routes.
+//RS pub fn jet_web_openapi_from_contracts(
+//RS     routes: &[(String, String, String)],
+//RS ) -> Result<String, String> {
+//RS     let mut inputs = Vec::with_capacity(routes.len());
+//RS     for (method, pattern, contract_json) in routes {
+//RS         if contract_json.is_empty() {
+//RS             return Err(format!(
+//RS                 "E2805: route `{} {}` has no checked OpenAPI contract",
+//RS                 method, pattern
+//RS             ));
+//RS         }
+//RS         let input = jet_openapi_contract_input(contract_json)?;
+//RS         if !input.method.as_str().eq_ignore_ascii_case(method) {
+//RS             return Err(format!(
+//RS                 "E2805: checked OpenAPI method `{}` does not match route method `{}`",
+//RS                 input.method.as_str(),
+//RS                 method
+//RS             ));
+//RS         }
+//RS         let route_pattern = jet_http_route_pattern(pattern)?;
+//RS         if input.pattern != route_pattern {
+//RS             return Err(format!(
+//RS                 "E2805: checked OpenAPI pattern does not match route pattern `{}`",
+//RS                 pattern
+//RS             ));
+//RS         }
+//RS         inputs.push(input);
+//RS     }
+//RS     jet_web_openapi_from_routes(
+//RS         inputs,
+//RS         "Jet HTTP Router".to_string(),
+//RS         "1".to_string(),
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn jet_openapi_router_inputs(
+//RS     router: &JetHTTPRouter,
+//RS ) -> Result<Vec<JetOpenApiRouteInput>, String> {
+//RS     let mut inputs = Vec::with_capacity(router.routes.len());
+//RS     for route in &router.routes {
+//RS         if route.contract_json.is_empty() {
+//RS             return Err(format!(
+//RS                 "E2805: route `{} {}` has no checked OpenAPI contract",
+//RS                 route.method, route.template
+//RS             ));
+//RS         }
+//RS         let input = jet_openapi_contract_input(&route.contract_json)?;
+//RS         if !input.method.as_str().eq_ignore_ascii_case(&route.method) {
+//RS             return Err(format!(
+//RS                 "E2805: checked OpenAPI method `{}` does not match route method `{}`",
+//RS                 input.method.as_str(),
+//RS                 route.method
+//RS             ));
+//RS         }
+//RS         let route_pattern = jet_http_route_pattern(&route.template)?;
+//RS         if input.pattern != route_pattern {
+//RS             return Err(format!(
+//RS                 "E2805: checked OpenAPI pattern does not match route pattern `{}`",
+//RS                 route.template
+//RS             ));
+//RS         }
+//RS         inputs.push(input);
+//RS     }
+//RS     Ok(inputs)
+//RS }
+//RS 
+//RS /// Generate OpenAPI from HTTPRouter's checked route facts. Visual WebRouter
+//RS /// routes are intentionally not accepted: they have no HTTP contract.
+//RS pub fn jet_web_openapi(router: &JetHTTPRouter) -> String {
+//RS     let inputs = match jet_openapi_router_inputs(router) {
+//RS         Ok(inputs) => inputs,
+//RS         Err(error) => jet_runtime_stop("E2805", "", 0, &error),
+//RS     };
+//RS     match jet_web_openapi_from_routes(
+//RS         inputs,
+//RS         "Jet HTTP Router".to_string(),
+//RS         "1".to_string(),
+//RS         Vec::new(),
+//RS     ) {
+//RS         Ok(document) => document,
+//RS         Err(error) => jet_runtime_stop("E2805", "", 0, &error),
+//RS     }
+//RS }
+// END-PORT-PENDING 0293 crates/jet-codegen/src/Prelude/CoreLib/Top/OpenAPI.rs:1-1635
+

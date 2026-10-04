@@ -1,0 +1,47 @@
+// FloatOrdering.rs:6–13 private policy, not the held native Ordering adapter.
+use core.math.runtime.kernel_float_ordering as float_order_kernel
+use core.math as float_order_math
+
+#Test("Float sort comparator orders finite extremes subnormals and infinities") {
+    infinity :: float_order_math.infinity()
+    values :: [Float]{-infinity, -Float{1.7976931348623157e308}, -Float{1.0}, -Float{4.9406564584124654e-324}, Float{0.0}, Float{4.9406564584124654e-324}, Float{1.0}, Float{1.7976931348623157e308}, infinity}
+    loop i in 0..<values.len() {
+        assert_eq(float_order_kernel.jet_float_sort_cmp_code(values[i], values[i]), I64{0})
+        loop j in (i + 1)..<values.len() {
+            assert_eq(float_order_kernel.jet_float_sort_cmp_code(values[i], values[j]), I64{-1})
+            assert_eq(float_order_kernel.jet_float_sort_cmp_code(values[j], values[i]), I64{1})
+        }
+    }
+}
+
+#Test("Float sort comparator puts either signed NaN last and two NaNs equal") {
+    nan :: float_order_math.nan()
+    negative_nan :: -nan
+    infinity :: float_order_math.infinity()
+    values :: [Float]{-infinity, -Float{1.0}, -Float{0.0}, Float{0.0}, Float{1.0}, infinity}
+    loop value in values {
+        assert_eq(float_order_kernel.jet_float_sort_cmp_code(nan, value), I64{1})
+        assert_eq(float_order_kernel.jet_float_sort_cmp_code(value, nan), I64{-1})
+        assert_eq(float_order_kernel.jet_float_sort_cmp_code(negative_nan, value), I64{1})
+        assert_eq(float_order_kernel.jet_float_sort_cmp_code(value, negative_nan), I64{-1})
+    }
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(nan, nan), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(nan, negative_nan), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(negative_nan, nan), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(negative_nan, negative_nan), I64{0})
+    // Collection policy must not replace IEEE ordinary comparisons.
+    assert(!(nan == nan))
+    assert(!(nan < infinity))
+    assert(!(nan > infinity))
+}
+
+#Test("Float sort comparator equates both signed zeros") {
+    positive :: Float{0.0}
+    negative :: -Float{0.0}
+    assert(float_order_math.sign_bit(negative))
+    assert(!float_order_math.sign_bit(positive))
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(negative, positive), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(positive, negative), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(negative, negative), I64{0})
+    assert_eq(float_order_kernel.jet_float_sort_cmp_code(positive, positive), I64{0})
+}

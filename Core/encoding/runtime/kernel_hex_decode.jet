@@ -1,0 +1,23 @@
+// Rust Prelude/Core/EncodingBase.rs:8–23 jet_std_hex_decode; original
+// Core/encoding/encoding.jet hex_to_bytes loop moved here, not a second engine.
+// Input borrows the original owner/window; only the decoded result is owned.
+// Internal export only: Main's private-source activation must retain this fn;
+// this module is not an ordinary public Core import or a Tools byte facade.
+// Exact output reservation/native storage and #4318/#4392 String byte retention
+// remain cutover gates; decoded values do not prove allocation/lifetime parity.
+use core.encoding as hex_decode_encoding
+
+pub fn decode(raw: View<U8>) -> [U8] hex_decode_encoding.HexError! {
+    if raw.len() %% 2 != 0 {
+        return Err(hex_decode_encoding.HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
+    }
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        hi :: hex_decode_encoding.hex_value(raw[i]) ?? return Err(hex_decode_encoding.HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
+        lo :: hex_decode_encoding.hex_value(raw[i + 1]) ?? return Err(hex_decode_encoding.HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
+        &out.push(U8{hi * 16 + lo})
+        i = i + 2
+    }
+    Ok(out)
+}

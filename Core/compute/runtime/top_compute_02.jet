@@ -1,0 +1,1860 @@
+// PORT-PENDING 0254 crates-jet-codegen-src-prelude-corelib-top-compute-slice-1795: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1795-3650
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         fn copy_from<T>(&self, context: &Context, value: &T) -> Result<(), JetComputeError> {
+//RS             let bytes = std::mem::size_of::<T>();
+//RS             context.make_current()?;
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.memcpy_htod)(
+//RS                         self.raw,
+//RS                         (value as *const T).cast::<c_void>(),
+//RS                         bytes,
+//RS                     )
+//RS                 },
+//RS                 "parameter transfer",
+//RS             )
+//RS         }
+//RS 
+//RS         fn copy_to_f32(&self, context: &Context, values: &mut [f32]) -> Result<(), JetComputeError> {
+//RS             let bytes = values
+//RS                 .len()
+//RS                 .checked_mul(std::mem::size_of::<f32>())
+//RS                 .ok_or_else(|| JetComputeError::InvalidShape("CUDA output size overflow".to_string()))?;
+//RS             context.make_current()?;
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.memcpy_dtoh)(
+//RS                         values.as_mut_ptr().cast::<c_void>(),
+//RS                         self.raw,
+//RS                         bytes,
+//RS                     )
+//RS                 },
+//RS                 "device-to-host transfer",
+//RS             )
+//RS         }
+//RS 
+//RS         fn raw(&self) -> CuDevicePtr {
+//RS             self.raw
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Buffer {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 (self.api.mem_free)(self.raw);
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn u32_value(value: usize, label: &str) -> Result<u32, JetComputeError> {
+//RS         u32::try_from(value).map_err(|_| {
+//RS             JetComputeError::InvalidShape(format!("CUDA {label} exceeds the u32 kernel limit"))
+//RS         })
+//RS     }
+//RS 
+//RS     fn run(
+//RS         function_name: &str,
+//RS         inputs: &[&[f32]],
+//RS         output_len: usize,
+//RS         params: Params,
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         if output_len == 0 {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         let api = Api::load()?;
+//RS         let context = Context::new(api.clone())?;
+//RS         let module = Module::load(&context)?;
+//RS         let function = module.function(function_name)?;
+//RS         let input_buffers = inputs
+//RS             .iter()
+//RS             .map(|values| Buffer::from_f32(&context, values))
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let output = Buffer::new(
+//RS             &context,
+//RS             output_len
+//RS                 .checked_mul(std::mem::size_of::<f32>())
+//RS                 .ok_or_else(|| JetComputeError::InvalidShape("CUDA output size overflow".to_string()))?,
+//RS         )?;
+//RS         let parameter = Buffer::new(&context, std::mem::size_of::<Params>())?;
+//RS         parameter.copy_from(&context, &params)?;
+//RS         let mut argument_values = input_buffers
+//RS             .iter()
+//RS             .map(Buffer::raw)
+//RS             .collect::<Vec<_>>();
+//RS         argument_values.push(output.raw());
+//RS         argument_values.push(parameter.raw());
+//RS         let mut arguments = argument_values
+//RS             .iter_mut()
+//RS             .map(|value| (value as *mut u64).cast::<c_void>())
+//RS             .collect::<Vec<_>>();
+//RS         let grid = output_len
+//RS             .checked_add(BLOCK_SIZE - 1)
+//RS             .and_then(|value| value.checked_div(BLOCK_SIZE))
+//RS             .and_then(|value| u32::try_from(value).ok())
+//RS             .ok_or_else(|| JetComputeError::InvalidShape("CUDA launch grid is too large".to_string()))?;
+//RS         check(
+//RS             unsafe {
+//RS                 (api.launch_kernel)(
+//RS                     function,
+//RS                     grid,
+//RS                     1,
+//RS                     1,
+//RS                     BLOCK_SIZE as u32,
+//RS                     1,
+//RS                     1,
+//RS                     0,
+//RS                     ptr::null_mut(),
+//RS                     arguments.as_mut_ptr(),
+//RS                     ptr::null_mut(),
+//RS                 )
+//RS             },
+//RS             "kernel launch",
+//RS         )?;
+//RS         context.synchronize()?;
+//RS         let mut values = vec![0.0_f32; output_len];
+//RS         output.copy_to_f32(&context, &mut values)?;
+//RS         if values.iter().any(|value| !value.is_finite()) {
+//RS             return Err(JetComputeError::Arithmetic(
+//RS                 "CUDA kernel produced a non-finite F32 value".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(values)
+//RS     }
+//RS 
+//RS     pub fn available() -> bool {
+//RS         let Ok(api) = Api::load() else {
+//RS             return false;
+//RS         };
+//RS         let mut count = 0;
+//RS         unsafe { (api.device_get_count)(&mut count) == CUDA_SUCCESS && count > 0 }
+//RS     }
+//RS 
+//RS     pub fn copy(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS         run(
+//RS             "jet_copy",
+//RS             &[values],
+//RS             values.len(),
+//RS             Params {
+//RS                 count: u32_value(values.len(), "copy count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn binary(op: u32, left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS         if left.len() != right.len() {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "CUDA binary inputs have different lengths".to_string(),
+//RS             ));
+//RS         }
+//RS         run(
+//RS             "jet_binary",
+//RS             &[left, right],
+//RS             left.len(),
+//RS             Params {
+//RS                 count: u32_value(left.len(), "binary count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn unary(op: u32, values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS         run(
+//RS             "jet_unary",
+//RS             &[values],
+//RS             values.len(),
+//RS             Params {
+//RS                 count: u32_value(values.len(), "unary count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn matmul(
+//RS         left: &[f32],
+//RS         right: &[f32],
+//RS         rows: usize,
+//RS         inner: usize,
+//RS         cols: usize,
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         let count = rows
+//RS             .checked_mul(cols)
+//RS             .ok_or_else(|| JetComputeError::InvalidShape("CUDA matmul output size overflow".to_string()))?;
+//RS         run(
+//RS             "jet_matmul",
+//RS             &[left, right],
+//RS             count,
+//RS             Params {
+//RS                 count: u32_value(count, "matmul output")?,
+//RS                 rows: u32_value(rows, "matmul rows")?,
+//RS                 inner: u32_value(inner, "matmul inner dimension")?,
+//RS                 cols: u32_value(cols, "matmul columns")?,
+//RS                 op: 0,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn sum(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS         run(
+//RS             "jet_sum",
+//RS             &[values],
+//RS             1,
+//RS             Params {
+//RS                 count: u32_value(values.len(), "sum count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn mse(left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+//RS         if left.len() != right.len() || left.is_empty() {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "CUDA MSE inputs must have the same non-empty length".to_string(),
+//RS             ));
+//RS         }
+//RS         run(
+//RS             "jet_mse",
+//RS             &[left, right],
+//RS             1,
+//RS             Params {
+//RS                 count: u32_value(left.len(), "MSE count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn mse_grad(
+//RS         left: &[f32],
+//RS         right: &[f32],
+//RS         cot: &[f32],
+//RS         positive: bool,
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         if left.len() != right.len() || left.is_empty() || cot.len() != 1 {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "CUDA MSE gradient inputs have incompatible lengths".to_string(),
+//RS             ));
+//RS         }
+//RS         run(
+//RS             "jet_mse_grad",
+//RS             &[left, right, cot],
+//RS             left.len(),
+//RS             Params {
+//RS                 count: u32_value(left.len(), "MSE gradient count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: u32::from(!positive),
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn mse_jvp(
+//RS         left: &[f32],
+//RS         right: &[f32],
+//RS         left_tangent: &[f32],
+//RS         right_tangent: &[f32],
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         if left.len() != right.len()
+//RS             || left.len() != left_tangent.len()
+//RS             || left.len() != right_tangent.len()
+//RS             || left.is_empty()
+//RS         {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "CUDA MSE JVP inputs have incompatible lengths".to_string(),
+//RS             ));
+//RS         }
+//RS         run(
+//RS             "jet_mse_jvp",
+//RS             &[left, right, left_tangent, right_tangent],
+//RS             1,
+//RS             Params {
+//RS                 count: u32_value(left.len(), "MSE JVP count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar: 0.0,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn sgd(
+//RS         parameter: &[f32],
+//RS         gradient: &[f32],
+//RS         learning_rate: f32,
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         if parameter.len() != gradient.len() {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "CUDA SGD inputs have different lengths".to_string(),
+//RS             ));
+//RS         }
+//RS         run(
+//RS             "jet_sgd",
+//RS             &[parameter, gradient],
+//RS             parameter.len(),
+//RS             Params {
+//RS                 count: u32_value(parameter.len(), "SGD count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar: learning_rate,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn scale(values: &[f32], scalar: f32) -> Result<Vec<f32>, JetComputeError> {
+//RS         run(
+//RS             "jet_scale",
+//RS             &[values],
+//RS             values.len(),
+//RS             Params {
+//RS                 count: u32_value(values.len(), "scale count")?,
+//RS                 rows: 0,
+//RS                 inner: 0,
+//RS                 cols: 0,
+//RS                 op: 0,
+//RS                 scalar,
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     pub struct StreamHandle {
+//RS         context: Context,
+//RS         stream: CuStream,
+//RS     }
+//RS 
+//RS     pub fn stream_new() -> Result<StreamHandle, JetComputeError> {
+//RS         let api = Api::load()?;
+//RS         let context = Context::new(api)?;
+//RS         let mut stream = ptr::null_mut();
+//RS         check(
+//RS             unsafe { (context.api.stream_create)(&mut stream, 0) },
+//RS             "stream creation",
+//RS         )?;
+//RS         Ok(StreamHandle { context, stream })
+//RS     }
+//RS 
+//RS     pub fn stream_sync(stream: &StreamHandle) -> Result<(), JetComputeError> {
+//RS         stream.context.make_current()?;
+//RS         check(
+//RS             unsafe { (stream.context.api.stream_synchronize)(stream.stream) },
+//RS             "stream synchronization",
+//RS         )
+//RS     }
+//RS 
+//RS     impl Drop for StreamHandle {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 (self.context.api.stream_destroy)(self.stream);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS // JET_VETTED_UNSAFE_END: jet_compute_cuda
+//RS 
+//RS #[cfg(not(target_os = "linux"))]
+//RS mod jet_compute_cuda {
+//RS     use super::JetComputeError;
+//RS 
+//RS     pub struct StreamHandle;
+//RS 
+//RS     fn unavailable<T>() -> Result<T, JetComputeError> {
+//RS         Err(JetComputeError::Unsupported(
+//RS             "CUDA backend is unavailable on this target".to_string(),
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn available() -> bool { false }
+//RS     pub fn copy(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn binary(_: u32, _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn unary(_: u32, _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn matmul(_: &[f32], _: &[f32], _: usize, _: usize, _: usize) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn sum(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse(_: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse_grad(_: &[f32], _: &[f32], _: &[f32], _: bool) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn mse_jvp(_: &[f32], _: &[f32], _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn sgd(_: &[f32], _: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn scale(_: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+//RS     pub fn stream_new() -> Result<StreamHandle, JetComputeError> { unavailable() }
+//RS     pub fn stream_sync(_: &StreamHandle) -> Result<(), JetComputeError> { unavailable() }
+//RS }
+//RS 
+//RS // JET_VETTED_UNSAFE_BEGIN: jet_compute_vulkan
+//RS // D-COMPUTE-BACKEND1=D / #1146: Vulkan is a dynamically loaded native
+//RS // bridge. It owns instance/device/queue/pipeline setup and launches the
+//RS // embedded SPIR-V kernel. The Prelude keeps the CPU oracle and accelerator
+//RS // contracts in one place; this module only marshals buffers and commands.
+//RS #[cfg(target_os = "linux")]
+//RS mod jet_compute_vulkan {
+//RS     use super::{JetComputeError, VULKAN_SHADER};
+//RS     use std::ffi::{c_char, c_int, c_void, CString};
+//RS     use std::ptr;
+//RS     use std::sync::Arc;
+//RS 
+//RS     type VkResult = i32;
+//RS     type VkInstance = *mut c_void;
+//RS     type VkPhysicalDevice = *mut c_void;
+//RS     type VkDevice = *mut c_void;
+//RS     type VkQueue = *mut c_void;
+//RS     type VkCommandBuffer = *mut c_void;
+//RS     type VkBuffer = u64;
+//RS     type VkDeviceMemory = u64;
+//RS     type VkShaderModule = u64;
+//RS     type VkDescriptorSetLayout = u64;
+//RS     type VkPipelineLayout = u64;
+//RS     type VkPipeline = u64;
+//RS     type VkDescriptorPool = u64;
+//RS     type VkDescriptorSet = u64;
+//RS     type VkCommandPool = u64;
+//RS     type VkFence = u64;
+//RS 
+//RS     const VK_SUCCESS: VkResult = 0;
+//RS     const VK_STRUCTURE_TYPE_APPLICATION_INFO: u32 = 0;
+//RS     const VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO: u32 = 1;
+//RS     const VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO: u32 = 2;
+//RS     const VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO: u32 = 3;
+//RS     const VK_STRUCTURE_TYPE_SUBMIT_INFO: u32 = 4;
+//RS     const VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO: u32 = 5;
+//RS     const VK_STRUCTURE_TYPE_FENCE_CREATE_INFO: u32 = 8;
+//RS     const VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO: u32 = 12;
+//RS     const VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO: u32 = 16;
+//RS     const VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO: u32 = 18;
+//RS     const VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO: u32 = 29;
+//RS     const VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO: u32 = 30;
+//RS     const VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO: u32 = 32;
+//RS     const VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO: u32 = 33;
+//RS     const VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO: u32 = 34;
+//RS     const VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET: u32 = 35;
+//RS     const VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO: u32 = 39;
+//RS     const VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO: u32 = 40;
+//RS     const VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO: u32 = 42;
+//RS     const VK_QUEUE_COMPUTE_BIT: u32 = 0x00000002;
+//RS     const VK_BUFFER_USAGE_STORAGE_BUFFER_BIT: u32 = 0x00000020;
+//RS     const VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT: u32 = 0x00000010;
+//RS     const VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT: u32 = 0x00000002;
+//RS     const VK_MEMORY_PROPERTY_HOST_COHERENT_BIT: u32 = 0x00000004;
+//RS     const VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER: u32 = 6;
+//RS     const VK_DESCRIPTOR_TYPE_STORAGE_BUFFER: u32 = 7;
+//RS     const VK_SHADER_STAGE_COMPUTE_BIT: u32 = 0x00000020;
+//RS     const VK_PIPELINE_BIND_POINT_COMPUTE: u32 = 1;
+//RS     const VK_COMMAND_BUFFER_LEVEL_PRIMARY: u32 = 0;
+//RS     const RTLD_NOW: c_int = 2;
+//RS     // glibc defines RTLD_LOCAL as zero; 4 is RTLD_NOLOAD and would make the
+//RS     // explicit Vulkan backend report an available system loader as missing.
+//RS     const RTLD_LOCAL: c_int = 0;
+//RS 
+//RS     #[repr(C)]
+//RS     struct ApplicationInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         p_application_name: *const c_char,
+//RS         application_version: u32,
+//RS         p_engine_name: *const c_char,
+//RS         engine_version: u32,
+//RS         api_version: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct InstanceCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         p_application_info: *const ApplicationInfo,
+//RS         enabled_layer_count: u32,
+//RS         pp_enabled_layer_names: *const *const c_char,
+//RS         enabled_extension_count: u32,
+//RS         pp_enabled_extension_names: *const *const c_char,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DeviceQueueCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         queue_family_index: u32,
+//RS         queue_count: u32,
+//RS         p_queue_priorities: *const f32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DeviceCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         queue_create_info_count: u32,
+//RS         p_queue_create_infos: *const DeviceQueueCreateInfo,
+//RS         enabled_layer_count: u32,
+//RS         pp_enabled_layer_names: *const *const c_char,
+//RS         enabled_extension_count: u32,
+//RS         pp_enabled_extension_names: *const *const c_char,
+//RS         p_enabled_features: *const c_void,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct QueueFamilyProperties {
+//RS         queue_flags: u32,
+//RS         queue_count: u32,
+//RS         timestamp_valid_bits: u32,
+//RS         min_image_transfer_granularity: [u32; 3],
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct MemoryType {
+//RS         property_flags: u32,
+//RS         heap_index: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct MemoryHeap {
+//RS         size: u64,
+//RS         flags: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct MemoryProperties {
+//RS         memory_type_count: u32,
+//RS         memory_types: [MemoryType; 32],
+//RS         memory_heap_count: u32,
+//RS         memory_heaps: [MemoryHeap; 16],
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct BufferCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         size: u64,
+//RS         usage: u32,
+//RS         sharing_mode: u32,
+//RS         queue_family_index_count: u32,
+//RS         p_queue_family_indices: *const u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Default)]
+//RS     struct MemoryRequirements {
+//RS         size: u64,
+//RS         alignment: u64,
+//RS         memory_type_bits: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct MemoryAllocateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         allocation_size: u64,
+//RS         memory_type_index: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct ShaderModuleCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         code_size: usize,
+//RS         p_code: *const u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DescriptorSetLayoutBinding {
+//RS         binding: u32,
+//RS         descriptor_type: u32,
+//RS         descriptor_count: u32,
+//RS         stage_flags: u32,
+//RS         p_immutable_samplers: *const u64,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DescriptorSetLayoutCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         binding_count: u32,
+//RS         p_bindings: *const DescriptorSetLayoutBinding,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct PipelineLayoutCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         set_layout_count: u32,
+//RS         p_set_layouts: *const VkDescriptorSetLayout,
+//RS         push_constant_range_count: u32,
+//RS         p_push_constant_ranges: *const c_void,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct PipelineShaderStageCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         stage: u32,
+//RS         module: VkShaderModule,
+//RS         p_name: *const c_char,
+//RS         p_specialization_info: *const c_void,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct ComputePipelineCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         stage: PipelineShaderStageCreateInfo,
+//RS         layout: VkPipelineLayout,
+//RS         base_pipeline_handle: VkPipeline,
+//RS         base_pipeline_index: i32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DescriptorPoolSize {
+//RS         descriptor_type: u32,
+//RS         descriptor_count: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DescriptorPoolCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         max_sets: u32,
+//RS         pool_size_count: u32,
+//RS         p_pool_sizes: *const DescriptorPoolSize,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct DescriptorSetAllocateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         descriptor_pool: VkDescriptorPool,
+//RS         descriptor_set_count: u32,
+//RS         p_set_layouts: *const VkDescriptorSetLayout,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct DescriptorBufferInfo {
+//RS         buffer: VkBuffer,
+//RS         offset: u64,
+//RS         range: u64,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct WriteDescriptorSet {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         dst_set: VkDescriptorSet,
+//RS         dst_binding: u32,
+//RS         dst_array_element: u32,
+//RS         descriptor_count: u32,
+//RS         descriptor_type: u32,
+//RS         p_image_info: *const c_void,
+//RS         p_buffer_info: *const DescriptorBufferInfo,
+//RS         p_texel_buffer_view: *const u64,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct CommandPoolCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         queue_family_index: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct CommandBufferAllocateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         command_pool: VkCommandPool,
+//RS         level: u32,
+//RS         command_buffer_count: u32,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct CommandBufferBeginInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS         p_inheritance_info: *const c_void,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct SubmitInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         wait_semaphore_count: u32,
+//RS         p_wait_semaphores: *const u64,
+//RS         p_wait_dst_stage_mask: *const u32,
+//RS         command_buffer_count: u32,
+//RS         p_command_buffers: *const VkCommandBuffer,
+//RS         signal_semaphore_count: u32,
+//RS         p_signal_semaphores: *const u64,
+//RS     }
+//RS 
+//RS     #[repr(C)]
+//RS     struct FenceCreateInfo {
+//RS         s_type: u32,
+//RS         p_next: *const c_void,
+//RS         flags: u32,
+//RS     }
+//RS 
+//RS     type CreateInstance = unsafe extern "C" fn(
+//RS         *const InstanceCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkInstance,
+//RS     ) -> VkResult;
+//RS     type DestroyInstance = unsafe extern "C" fn(VkInstance, *const c_void);
+//RS     type EnumeratePhysicalDevices = unsafe extern "C" fn(
+//RS         VkInstance,
+//RS         *mut u32,
+//RS         *mut VkPhysicalDevice,
+//RS     ) -> VkResult;
+//RS     type GetQueueFamilyProperties = unsafe extern "C" fn(
+//RS         VkPhysicalDevice,
+//RS         *mut u32,
+//RS         *mut QueueFamilyProperties,
+//RS     );
+//RS     type GetPhysicalDeviceMemoryProperties = unsafe extern "C" fn(
+//RS         VkPhysicalDevice,
+//RS         *mut MemoryProperties,
+//RS     );
+//RS     type CreateDevice = unsafe extern "C" fn(
+//RS         VkPhysicalDevice,
+//RS         *const DeviceCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkDevice,
+//RS     ) -> VkResult;
+//RS     type DestroyDevice = unsafe extern "C" fn(VkDevice, *const c_void);
+//RS     type GetDeviceQueue = unsafe extern "C" fn(VkDevice, u32, u32, *mut VkQueue);
+//RS     type DeviceWaitIdle = unsafe extern "C" fn(VkDevice) -> VkResult;
+//RS     type CreateBuffer = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const BufferCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkBuffer,
+//RS     ) -> VkResult;
+//RS     type DestroyBuffer = unsafe extern "C" fn(VkDevice, VkBuffer, *const c_void);
+//RS     type GetBufferMemoryRequirements = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         VkBuffer,
+//RS         *mut MemoryRequirements,
+//RS     );
+//RS     type AllocateMemory = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const MemoryAllocateInfo,
+//RS         *const c_void,
+//RS         *mut VkDeviceMemory,
+//RS     ) -> VkResult;
+//RS     type FreeMemory = unsafe extern "C" fn(VkDevice, VkDeviceMemory, *const c_void);
+//RS     type BindBufferMemory = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         VkBuffer,
+//RS         VkDeviceMemory,
+//RS         u64,
+//RS     ) -> VkResult;
+//RS     type MapMemory = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         VkDeviceMemory,
+//RS         u64,
+//RS         u64,
+//RS         u32,
+//RS         *mut *mut c_void,
+//RS     ) -> VkResult;
+//RS     type UnmapMemory = unsafe extern "C" fn(VkDevice, VkDeviceMemory);
+//RS     type CreateShaderModule = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const ShaderModuleCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkShaderModule,
+//RS     ) -> VkResult;
+//RS     type DestroyShaderModule = unsafe extern "C" fn(VkDevice, VkShaderModule, *const c_void);
+//RS     type CreateDescriptorSetLayout = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const DescriptorSetLayoutCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkDescriptorSetLayout,
+//RS     ) -> VkResult;
+//RS     type DestroyDescriptorSetLayout = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         VkDescriptorSetLayout,
+//RS         *const c_void,
+//RS     );
+//RS     type CreatePipelineLayout = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const PipelineLayoutCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkPipelineLayout,
+//RS     ) -> VkResult;
+//RS     type DestroyPipelineLayout = unsafe extern "C" fn(VkDevice, VkPipelineLayout, *const c_void);
+//RS     type CreateComputePipelines = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         u64,
+//RS         u32,
+//RS         *const ComputePipelineCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkPipeline,
+//RS     ) -> VkResult;
+//RS     type DestroyPipeline = unsafe extern "C" fn(VkDevice, VkPipeline, *const c_void);
+//RS     type CreateDescriptorPool = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const DescriptorPoolCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkDescriptorPool,
+//RS     ) -> VkResult;
+//RS     type DestroyDescriptorPool = unsafe extern "C" fn(VkDevice, VkDescriptorPool, *const c_void);
+//RS     type AllocateDescriptorSets = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const DescriptorSetAllocateInfo,
+//RS         *mut VkDescriptorSet,
+//RS     ) -> VkResult;
+//RS     type UpdateDescriptorSets = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         u32,
+//RS         *const WriteDescriptorSet,
+//RS         u32,
+//RS         *const c_void,
+//RS     );
+//RS     type CreateCommandPool = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const CommandPoolCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkCommandPool,
+//RS     ) -> VkResult;
+//RS     type DestroyCommandPool = unsafe extern "C" fn(VkDevice, VkCommandPool, *const c_void);
+//RS     type AllocateCommandBuffers = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const CommandBufferAllocateInfo,
+//RS         *mut VkCommandBuffer,
+//RS     ) -> VkResult;
+//RS     type FreeCommandBuffers = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         VkCommandPool,
+//RS         u32,
+//RS         *const VkCommandBuffer,
+//RS     );
+//RS     type BeginCommandBuffer = unsafe extern "C" fn(
+//RS         VkCommandBuffer,
+//RS         *const CommandBufferBeginInfo,
+//RS     ) -> VkResult;
+//RS     type EndCommandBuffer = unsafe extern "C" fn(VkCommandBuffer) -> VkResult;
+//RS     type CmdBindPipeline = unsafe extern "C" fn(VkCommandBuffer, u32, VkPipeline);
+//RS     type CmdBindDescriptorSets = unsafe extern "C" fn(
+//RS         VkCommandBuffer,
+//RS         u32,
+//RS         VkPipelineLayout,
+//RS         u32,
+//RS         u32,
+//RS         *const VkDescriptorSet,
+//RS         u32,
+//RS         *const u32,
+//RS     );
+//RS     type CmdDispatch = unsafe extern "C" fn(VkCommandBuffer, u32, u32, u32);
+//RS     type CreateFence = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         *const FenceCreateInfo,
+//RS         *const c_void,
+//RS         *mut VkFence,
+//RS     ) -> VkResult;
+//RS     type DestroyFence = unsafe extern "C" fn(VkDevice, VkFence, *const c_void);
+//RS     type QueueSubmit = unsafe extern "C" fn(VkQueue, u32, *const SubmitInfo, VkFence) -> VkResult;
+//RS     type WaitForFences = unsafe extern "C" fn(
+//RS         VkDevice,
+//RS         u32,
+//RS         *const VkFence,
+//RS         u32,
+//RS         u64,
+//RS     ) -> VkResult;
+//RS 
+//RS     #[link(name = "dl")]
+//RS     unsafe extern "C" {
+//RS         fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+//RS         fn dlclose(handle: *mut c_void) -> c_int;
+//RS         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+//RS     }
+//RS 
+//RS     struct Api {
+//RS         handle: *mut c_void,
+//RS         create_instance: CreateInstance,
+//RS         destroy_instance: DestroyInstance,
+//RS         enumerate_physical_devices: EnumeratePhysicalDevices,
+//RS         get_queue_family_properties: GetQueueFamilyProperties,
+//RS         get_physical_device_memory_properties: GetPhysicalDeviceMemoryProperties,
+//RS         create_device: CreateDevice,
+//RS         destroy_device: DestroyDevice,
+//RS         get_device_queue: GetDeviceQueue,
+//RS         device_wait_idle: DeviceWaitIdle,
+//RS         create_buffer: CreateBuffer,
+//RS         destroy_buffer: DestroyBuffer,
+//RS         get_buffer_memory_requirements: GetBufferMemoryRequirements,
+//RS         allocate_memory: AllocateMemory,
+//RS         free_memory: FreeMemory,
+//RS         bind_buffer_memory: BindBufferMemory,
+//RS         map_memory: MapMemory,
+//RS         unmap_memory: UnmapMemory,
+//RS         create_shader_module: CreateShaderModule,
+//RS         destroy_shader_module: DestroyShaderModule,
+//RS         create_descriptor_set_layout: CreateDescriptorSetLayout,
+//RS         destroy_descriptor_set_layout: DestroyDescriptorSetLayout,
+//RS         create_pipeline_layout: CreatePipelineLayout,
+//RS         destroy_pipeline_layout: DestroyPipelineLayout,
+//RS         create_compute_pipelines: CreateComputePipelines,
+//RS         destroy_pipeline: DestroyPipeline,
+//RS         create_descriptor_pool: CreateDescriptorPool,
+//RS         destroy_descriptor_pool: DestroyDescriptorPool,
+//RS         allocate_descriptor_sets: AllocateDescriptorSets,
+//RS         update_descriptor_sets: UpdateDescriptorSets,
+//RS         create_command_pool: CreateCommandPool,
+//RS         destroy_command_pool: DestroyCommandPool,
+//RS         allocate_command_buffers: AllocateCommandBuffers,
+//RS         free_command_buffers: FreeCommandBuffers,
+//RS         begin_command_buffer: BeginCommandBuffer,
+//RS         end_command_buffer: EndCommandBuffer,
+//RS         cmd_bind_pipeline: CmdBindPipeline,
+//RS         cmd_bind_descriptor_sets: CmdBindDescriptorSets,
+//RS         cmd_dispatch: CmdDispatch,
+//RS         create_fence: CreateFence,
+//RS         destroy_fence: DestroyFence,
+//RS         queue_submit: QueueSubmit,
+//RS         wait_for_fences: WaitForFences,
+//RS     }
+//RS 
+//RS     impl Api {
+//RS         fn load() -> Result<Arc<Self>, JetComputeError> {
+//RS             unsafe fn symbol<T: Copy>(handle: *mut c_void, name: &str) -> Result<T, JetComputeError> {
+//RS                 let name = CString::new(name).map_err(|_| {
+//RS                     JetComputeError::Device("Vulkan symbol name contains a NUL byte".to_string())
+//RS                 })?;
+//RS                 let pointer = dlsym(handle, name.as_ptr());
+//RS                 if pointer.is_null() {
+//RS                     return Err(JetComputeError::Unsupported(format!(
+//RS                         "Vulkan loader is missing `{name:?}`"
+//RS                     )));
+//RS                 }
+//RS                 Ok(std::mem::transmute_copy(&pointer))
+//RS             }
+//RS 
+//RS             let handle = unsafe {
+//RS                 let first = CString::new("libvulkan.so.1").unwrap();
+//RS                 let second = CString::new("libvulkan.so").unwrap();
+//RS                 let handle = dlopen(first.as_ptr(), RTLD_NOW | RTLD_LOCAL);
+//RS                 if handle.is_null() {
+//RS                     dlopen(second.as_ptr(), RTLD_NOW | RTLD_LOCAL)
+//RS                 } else {
+//RS                     handle
+//RS                 }
+//RS             };
+//RS             if handle.is_null() {
+//RS                 return Err(JetComputeError::Unsupported(
+//RS                     "Vulkan loader is unavailable on this target".to_string(),
+//RS                 ));
+//RS             }
+//RS             macro_rules! load {
+//RS                 ($name:literal, $ty:ty) => {
+//RS                     match unsafe { symbol::<$ty>(handle, $name) } {
+//RS                         Ok(value) => value,
+//RS                         Err(error) => return Err(error),
+//RS                     }
+//RS                 };
+//RS             }
+//RS             Ok(Arc::new(Self {
+//RS                 handle,
+//RS                 create_instance: load!("vkCreateInstance", CreateInstance),
+//RS                 destroy_instance: load!("vkDestroyInstance", DestroyInstance),
+//RS                 enumerate_physical_devices: load!(
+//RS                     "vkEnumeratePhysicalDevices",
+//RS                     EnumeratePhysicalDevices
+//RS                 ),
+//RS                 get_queue_family_properties: load!(
+//RS                     "vkGetPhysicalDeviceQueueFamilyProperties",
+//RS                     GetQueueFamilyProperties
+//RS                 ),
+//RS                 get_physical_device_memory_properties: load!(
+//RS                     "vkGetPhysicalDeviceMemoryProperties",
+//RS                     GetPhysicalDeviceMemoryProperties
+//RS                 ),
+//RS                 create_device: load!("vkCreateDevice", CreateDevice),
+//RS                 destroy_device: load!("vkDestroyDevice", DestroyDevice),
+//RS                 get_device_queue: load!("vkGetDeviceQueue", GetDeviceQueue),
+//RS                 device_wait_idle: load!("vkDeviceWaitIdle", DeviceWaitIdle),
+//RS                 create_buffer: load!("vkCreateBuffer", CreateBuffer),
+//RS                 destroy_buffer: load!("vkDestroyBuffer", DestroyBuffer),
+//RS                 get_buffer_memory_requirements: load!(
+//RS                     "vkGetBufferMemoryRequirements",
+//RS                     GetBufferMemoryRequirements
+//RS                 ),
+//RS                 allocate_memory: load!("vkAllocateMemory", AllocateMemory),
+//RS                 free_memory: load!("vkFreeMemory", FreeMemory),
+//RS                 bind_buffer_memory: load!("vkBindBufferMemory", BindBufferMemory),
+//RS                 map_memory: load!("vkMapMemory", MapMemory),
+//RS                 unmap_memory: load!("vkUnmapMemory", UnmapMemory),
+//RS                 create_shader_module: load!("vkCreateShaderModule", CreateShaderModule),
+//RS                 destroy_shader_module: load!("vkDestroyShaderModule", DestroyShaderModule),
+//RS                 create_descriptor_set_layout: load!(
+//RS                     "vkCreateDescriptorSetLayout",
+//RS                     CreateDescriptorSetLayout
+//RS                 ),
+//RS                 destroy_descriptor_set_layout: load!(
+//RS                     "vkDestroyDescriptorSetLayout",
+//RS                     DestroyDescriptorSetLayout
+//RS                 ),
+//RS                 create_pipeline_layout: load!("vkCreatePipelineLayout", CreatePipelineLayout),
+//RS                 destroy_pipeline_layout: load!("vkDestroyPipelineLayout", DestroyPipelineLayout),
+//RS                 create_compute_pipelines: load!(
+//RS                     "vkCreateComputePipelines",
+//RS                     CreateComputePipelines
+//RS                 ),
+//RS                 destroy_pipeline: load!("vkDestroyPipeline", DestroyPipeline),
+//RS                 create_descriptor_pool: load!("vkCreateDescriptorPool", CreateDescriptorPool),
+//RS                 destroy_descriptor_pool: load!("vkDestroyDescriptorPool", DestroyDescriptorPool),
+//RS                 allocate_descriptor_sets: load!("vkAllocateDescriptorSets", AllocateDescriptorSets),
+//RS                 update_descriptor_sets: load!("vkUpdateDescriptorSets", UpdateDescriptorSets),
+//RS                 create_command_pool: load!("vkCreateCommandPool", CreateCommandPool),
+//RS                 destroy_command_pool: load!("vkDestroyCommandPool", DestroyCommandPool),
+//RS                 allocate_command_buffers: load!("vkAllocateCommandBuffers", AllocateCommandBuffers),
+//RS                 free_command_buffers: load!("vkFreeCommandBuffers", FreeCommandBuffers),
+//RS                 begin_command_buffer: load!("vkBeginCommandBuffer", BeginCommandBuffer),
+//RS                 end_command_buffer: load!("vkEndCommandBuffer", EndCommandBuffer),
+//RS                 cmd_bind_pipeline: load!("vkCmdBindPipeline", CmdBindPipeline),
+//RS                 cmd_bind_descriptor_sets: load!("vkCmdBindDescriptorSets", CmdBindDescriptorSets),
+//RS                 cmd_dispatch: load!("vkCmdDispatch", CmdDispatch),
+//RS                 create_fence: load!("vkCreateFence", CreateFence),
+//RS                 destroy_fence: load!("vkDestroyFence", DestroyFence),
+//RS                 queue_submit: load!("vkQueueSubmit", QueueSubmit),
+//RS                 wait_for_fences: load!("vkWaitForFences", WaitForFences),
+//RS             }))
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Api {
+//RS         fn drop(&mut self) {
+//RS             if !self.handle.is_null() {
+//RS                 unsafe { dlclose(self.handle) };
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct InstanceGuard {
+//RS         api: Arc<Api>,
+//RS         instance: VkInstance,
+//RS     }
+//RS 
+//RS     impl Drop for InstanceGuard {
+//RS         fn drop(&mut self) {
+//RS             if !self.instance.is_null() {
+//RS                 unsafe { (self.api.destroy_instance)(self.instance, ptr::null()) };
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     // The shader's std430 Params block is intentionally six scalar words.
+//RS     // Keep this layout identical to the GLSL block and to the Metal/CUDA
+//RS     // adapters so the operation family has one precision contract.
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct Params {
+//RS         count: u32,
+//RS         rows: u32,
+//RS         inner: u32,
+//RS         cols: u32,
+//RS         op: u32,
+//RS         scalar: f32,
+//RS     }
+//RS 
+//RS     fn check(result: VkResult, operation: &str) -> Result<(), JetComputeError> {
+//RS         if result == VK_SUCCESS {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(JetComputeError::Device(format!(
+//RS                 "Vulkan {operation} failed with VkResult {result}"
+//RS             )))
+//RS         }
+//RS     }
+//RS 
+//RS     struct Context {
+//RS         api: Arc<Api>,
+//RS         instance: VkInstance,
+//RS         device: VkDevice,
+//RS         queue: VkQueue,
+//RS         queue_family: u32,
+//RS         memory: MemoryProperties,
+//RS         command_pool: VkCommandPool,
+//RS         descriptor_layout: VkDescriptorSetLayout,
+//RS         pipeline_layout: VkPipelineLayout,
+//RS         pipeline: VkPipeline,
+//RS         descriptor_pool: VkDescriptorPool,
+//RS     }
+//RS 
+//RS     impl Context {
+//RS         fn new(api: Arc<Api>) -> Result<Self, JetComputeError> {
+//RS             let application_name = CString::new("jet-compute").unwrap();
+//RS             let engine_name = CString::new("jet").unwrap();
+//RS             let application_info = ApplicationInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_APPLICATION_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 p_application_name: application_name.as_ptr(),
+//RS                 application_version: 1,
+//RS                 p_engine_name: engine_name.as_ptr(),
+//RS                 engine_version: 1,
+//RS                 api_version: 0,
+//RS             };
+//RS             let instance_info = InstanceCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 p_application_info: &application_info,
+//RS                 enabled_layer_count: 0,
+//RS                 pp_enabled_layer_names: ptr::null(),
+//RS                 enabled_extension_count: 0,
+//RS                 pp_enabled_extension_names: ptr::null(),
+//RS             };
+//RS             let mut instance = ptr::null_mut();
+//RS             check(
+//RS                 unsafe { (api.create_instance)(&instance_info, ptr::null(), &mut instance) },
+//RS                 "instance creation",
+//RS             )?;
+//RS 
+//RS             let mut guard = InstanceGuard {
+//RS                 api: api.clone(),
+//RS                 instance,
+//RS             };
+//RS             Self::with_instance(api, &mut guard)
+//RS         }
+//RS 
+//RS         fn with_instance(
+//RS             api: Arc<Api>,
+//RS             guard: &mut InstanceGuard,
+//RS         ) -> Result<Self, JetComputeError> {
+//RS             let instance = guard.instance;
+//RS             let mut physical_count = 0;
+//RS             check(
+//RS                 unsafe {
+//RS                     (api.enumerate_physical_devices)(instance, &mut physical_count, ptr::null_mut())
+//RS                 },
+//RS                 "physical-device enumeration",
+//RS             )?;
+//RS             if physical_count == 0 {
+//RS                 return Err(JetComputeError::Device(
+//RS                     "Vulkan reported no physical devices".to_string(),
+//RS                 ));
+//RS             }
+//RS             let mut physical_devices = vec![ptr::null_mut(); physical_count as usize];
+//RS             check(
+//RS                 unsafe {
+//RS                     (api.enumerate_physical_devices)(
+//RS                         instance,
+//RS                         &mut physical_count,
+//RS                         physical_devices.as_mut_ptr(),
+//RS                     )
+//RS                 },
+//RS                 "physical-device enumeration",
+//RS             )?;
+//RS             let mut selected = None;
+//RS             for physical in physical_devices.into_iter().take(physical_count as usize) {
+//RS                 let mut family_count = 0;
+//RS                 unsafe {
+//RS                     (api.get_queue_family_properties)(physical, &mut family_count, ptr::null_mut())
+//RS                 };
+//RS                 if family_count == 0 {
+//RS                     continue;
+//RS                 }
+//RS                 let mut families = vec![
+//RS                     QueueFamilyProperties {
+//RS                         queue_flags: 0,
+//RS                         queue_count: 0,
+//RS                         timestamp_valid_bits: 0,
+//RS                         min_image_transfer_granularity: [0; 3],
+//RS                     };
+//RS                     family_count as usize
+//RS                 ];
+//RS                 unsafe {
+//RS                     (api.get_queue_family_properties)(physical, &mut family_count, families.as_mut_ptr())
+//RS                 };
+//RS                 let Some((family_index, _)) = families
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .find(|(_, family)| {
+//RS                         family.queue_count != 0 && family.queue_flags & VK_QUEUE_COMPUTE_BIT != 0
+//RS                     })
+//RS                 else {
+//RS                     continue;
+//RS                 };
+//RS                 let mut memory = MemoryProperties {
+//RS                     memory_type_count: 0,
+//RS                     memory_types: [MemoryType {
+//RS                         property_flags: 0,
+//RS                         heap_index: 0,
+//RS                     }; 32],
+//RS                     memory_heap_count: 0,
+//RS                     memory_heaps: [MemoryHeap { size: 0, flags: 0 }; 16],
+//RS                 };
+//RS                 unsafe {
+//RS                     (api.get_physical_device_memory_properties)(physical, &mut memory)
+//RS                 };
+//RS                 selected = Some((physical, family_index as u32, memory));
+//RS                 break;
+//RS             }
+//RS             let Some((physical, queue_family, memory)) = selected else {
+//RS                 return Err(JetComputeError::Device(
+//RS                     "Vulkan reported no physical device with a compute queue".to_string(),
+//RS                 ));
+//RS             };
+//RS             let priority = 1.0_f32;
+//RS             let queue_info = DeviceQueueCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 queue_family_index: queue_family,
+//RS                 queue_count: 1,
+//RS                 p_queue_priorities: &priority,
+//RS             };
+//RS             let device_info = DeviceCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 queue_create_info_count: 1,
+//RS                 p_queue_create_infos: &queue_info,
+//RS                 enabled_layer_count: 0,
+//RS                 pp_enabled_layer_names: ptr::null(),
+//RS                 enabled_extension_count: 0,
+//RS                 pp_enabled_extension_names: ptr::null(),
+//RS                 p_enabled_features: ptr::null(),
+//RS             };
+//RS             let mut device = ptr::null_mut();
+//RS             check(
+//RS                 unsafe { (api.create_device)(physical, &device_info, ptr::null(), &mut device) },
+//RS                 "logical-device creation",
+//RS             )?;
+//RS             let mut queue = ptr::null_mut();
+//RS             unsafe { (api.get_device_queue)(device, queue_family, 0, &mut queue) };
+//RS             if queue.is_null() {
+//RS                 unsafe { (api.destroy_device)(device, ptr::null()) };
+//RS                 return Err(JetComputeError::Device(
+//RS                     "Vulkan returned a null compute queue".to_string(),
+//RS                 ));
+//RS             }
+//RS             let mut context = Self {
+//RS                 api,
+//RS                 instance,
+//RS                 device,
+//RS                 queue,
+//RS                 queue_family,
+//RS                 memory,
+//RS                 command_pool: 0,
+//RS                 descriptor_layout: 0,
+//RS                 pipeline_layout: 0,
+//RS                 pipeline: 0,
+//RS                 descriptor_pool: 0,
+//RS             };
+//RS             guard.instance = ptr::null_mut();
+//RS             let command_pool_info = CommandPoolCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 queue_family_index: context.queue_family,
+//RS             };
+//RS             check(
+//RS                 unsafe {
+//RS                     (context.api.create_command_pool)(
+//RS                         context.device,
+//RS                         &command_pool_info,
+//RS                         ptr::null(),
+//RS                         &mut context.command_pool,
+//RS                     )
+//RS                 },
+//RS                 "command-pool creation",
+//RS             )?;
+//RS             context.create_pipeline()?;
+//RS             let pool_sizes = [
+//RS                 DescriptorPoolSize {
+//RS                     descriptor_type: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+//RS                     descriptor_count: 6,
+//RS                 },
+//RS                 DescriptorPoolSize {
+//RS                     descriptor_type: VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+//RS                     descriptor_count: 1,
+//RS                 },
+//RS             ];
+//RS             let pool_info = DescriptorPoolCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 max_sets: 1,
+//RS                 pool_size_count: pool_sizes.len() as u32,
+//RS                 p_pool_sizes: pool_sizes.as_ptr(),
+//RS             };
+//RS             check(
+//RS                 unsafe {
+//RS                     (context.api.create_descriptor_pool)(
+//RS                         context.device,
+//RS                         &pool_info,
+//RS                         ptr::null(),
+//RS                         &mut context.descriptor_pool,
+//RS                     )
+//RS                 },
+//RS                 "descriptor-pool creation",
+//RS             )?;
+//RS             Ok(context)
+//RS         }
+//RS 
+//RS         fn create_pipeline(&mut self) -> Result<(), JetComputeError> {
+//RS             let bindings: [DescriptorSetLayoutBinding; 7] = std::array::from_fn(|binding| DescriptorSetLayoutBinding {
+//RS                 binding: binding as u32,
+//RS                 descriptor_type: if binding == 6 {
+//RS                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+//RS                 } else {
+//RS                     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+//RS                 },
+//RS                 descriptor_count: 1,
+//RS                 stage_flags: VK_SHADER_STAGE_COMPUTE_BIT,
+//RS                 p_immutable_samplers: ptr::null(),
+//RS             });
+//RS             let layout_info = DescriptorSetLayoutCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 binding_count: bindings.len() as u32,
+//RS                 p_bindings: bindings.as_ptr(),
+//RS             };
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.create_descriptor_set_layout)(
+//RS                         self.device,
+//RS                         &layout_info,
+//RS                         ptr::null(),
+//RS                         &mut self.descriptor_layout,
+//RS                     )
+//RS                 },
+//RS                 "descriptor-set-layout creation",
+//RS             )?;
+//RS             let layouts = [self.descriptor_layout];
+//RS             let pipeline_layout_info = PipelineLayoutCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 set_layout_count: 1,
+//RS                 p_set_layouts: layouts.as_ptr(),
+//RS                 push_constant_range_count: 0,
+//RS                 p_push_constant_ranges: ptr::null(),
+//RS             };
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.create_pipeline_layout)(
+//RS                         self.device,
+//RS                         &pipeline_layout_info,
+//RS                         ptr::null(),
+//RS                         &mut self.pipeline_layout,
+//RS                     )
+//RS                 },
+//RS                 "pipeline-layout creation",
+//RS             )?;
+//RS             let shader_info = ShaderModuleCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 code_size: VULKAN_SHADER.len() * std::mem::size_of::<u32>(),
+//RS                 p_code: VULKAN_SHADER.as_ptr(),
+//RS             };
+//RS             let mut shader = 0;
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.create_shader_module)(
+//RS                         self.device,
+//RS                         &shader_info,
+//RS                         ptr::null(),
+//RS                         &mut shader,
+//RS                     )
+//RS                 },
+//RS                 "SPIR-V shader-module creation",
+//RS             )?;
+//RS             let entry = b"main\0";
+//RS             let stage = PipelineShaderStageCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 stage: VK_SHADER_STAGE_COMPUTE_BIT,
+//RS                 module: shader,
+//RS                 p_name: entry.as_ptr().cast(),
+//RS                 p_specialization_info: ptr::null(),
+//RS             };
+//RS             let pipeline_info = ComputePipelineCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 stage,
+//RS                 layout: self.pipeline_layout,
+//RS                 base_pipeline_handle: 0,
+//RS                 base_pipeline_index: -1,
+//RS             };
+//RS             let result = check(
+//RS                 unsafe {
+//RS                     (self.api.create_compute_pipelines)(
+//RS                         self.device,
+//RS                         0,
+//RS                         1,
+//RS                         &pipeline_info,
+//RS                         ptr::null(),
+//RS                         &mut self.pipeline,
+//RS                     )
+//RS                 },
+//RS                 "compute-pipeline creation",
+//RS             );
+//RS             unsafe { (self.api.destroy_shader_module)(self.device, shader, ptr::null()) };
+//RS             result
+//RS         }
+//RS 
+//RS         fn find_memory_type(&self, type_bits: u32) -> Result<u32, JetComputeError> {
+//RS             (0..self.memory.memory_type_count as usize)
+//RS                 .find(|index| {
+//RS                     type_bits & (1 << index) != 0
+//RS                         && self.memory.memory_types[*index].property_flags
+//RS                             & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+//RS                                 | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+//RS                             == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+//RS                                 | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+//RS                 })
+//RS                 .map(|index| index as u32)
+//RS                 .ok_or_else(|| {
+//RS                     JetComputeError::Device(
+//RS                         "Vulkan has no host-visible coherent memory type for compute buffers"
+//RS                             .to_string(),
+//RS                     )
+//RS                 })
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Context {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 if !self.device.is_null() {
+//RS                     let _ = (self.api.device_wait_idle)(self.device);
+//RS                 }
+//RS                 if self.descriptor_pool != 0 {
+//RS                     (self.api.destroy_descriptor_pool)(self.device, self.descriptor_pool, ptr::null());
+//RS                 }
+//RS                 if self.pipeline != 0 {
+//RS                     (self.api.destroy_pipeline)(self.device, self.pipeline, ptr::null());
+//RS                 }
+//RS                 if self.pipeline_layout != 0 {
+//RS                     (self.api.destroy_pipeline_layout)(self.device, self.pipeline_layout, ptr::null());
+//RS                 }
+//RS                 if self.descriptor_layout != 0 {
+//RS                     (self.api.destroy_descriptor_set_layout)(
+//RS                         self.device,
+//RS                         self.descriptor_layout,
+//RS                         ptr::null(),
+//RS                     );
+//RS                 }
+//RS                 if self.command_pool != 0 {
+//RS                     (self.api.destroy_command_pool)(self.device, self.command_pool, ptr::null());
+//RS                 }
+//RS                 if !self.device.is_null() {
+//RS                     (self.api.destroy_device)(self.device, ptr::null());
+//RS                 }
+//RS                 if !self.instance.is_null() {
+//RS                     (self.api.destroy_instance)(self.instance, ptr::null());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     struct Buffer {
+//RS         api: Arc<Api>,
+//RS         device: VkDevice,
+//RS         buffer: VkBuffer,
+//RS         memory: VkDeviceMemory,
+//RS         bytes: u64,
+//RS     }
+//RS 
+//RS     impl Buffer {
+//RS         fn from_bytes(context: &Context, bytes: &[u8], usage: u32) -> Result<Self, JetComputeError> {
+//RS             let size = bytes.len().max(4) as u64;
+//RS             let info = BufferCreateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 flags: 0,
+//RS                 size,
+//RS                 usage,
+//RS                 sharing_mode: 0,
+//RS                 queue_family_index_count: 0,
+//RS                 p_queue_family_indices: ptr::null(),
+//RS             };
+//RS             let mut handle = 0;
+//RS             check(
+//RS                 unsafe {
+//RS                     (context.api.create_buffer)(
+//RS                         context.device,
+//RS                         &info,
+//RS                         ptr::null(),
+//RS                         &mut handle,
+//RS                     )
+//RS                 },
+//RS                 "buffer creation",
+//RS             )?;
+//RS             let mut requirements = MemoryRequirements::default();
+//RS             unsafe {
+//RS                 (context.api.get_buffer_memory_requirements)(
+//RS                     context.device,
+//RS                     handle,
+//RS                     &mut requirements,
+//RS                 )
+//RS             };
+//RS             let memory_type = match context.find_memory_type(requirements.memory_type_bits) {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     unsafe { (context.api.destroy_buffer)(context.device, handle, ptr::null()) };
+//RS                     return Err(error);
+//RS                 }
+//RS             };
+//RS             let allocation_info = MemoryAllocateInfo {
+//RS                 s_type: VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+//RS                 p_next: ptr::null(),
+//RS                 allocation_size: requirements.size.max(size),
+//RS                 memory_type_index: memory_type,
+//RS             };
+//RS             let mut memory = 0;
+//RS             if let Err(error) = check(
+//RS                 unsafe {
+//RS                     (context.api.allocate_memory)(
+//RS                         context.device,
+//RS                         &allocation_info,
+//RS                         ptr::null(),
+//RS                         &mut memory,
+//RS                     )
+//RS                 },
+//RS                 "buffer memory allocation",
+//RS             ) {
+//RS                 unsafe { (context.api.destroy_buffer)(context.device, handle, ptr::null()) };
+//RS                 return Err(error);
+//RS             }
+//RS             let output = Self {
+//RS                 api: context.api.clone(),
+//RS                 device: context.device,
+//RS                 buffer: handle,
+//RS                 memory,
+//RS                 bytes: size,
+//RS             };
+//RS             if let Err(error) = check(
+//RS                 unsafe { (output.api.bind_buffer_memory)(output.device, output.buffer, memory, 0) },
+//RS                 "buffer memory binding",
+//RS             ) {
+//RS                 return Err(error);
+//RS             }
+//RS             let mut mapped = ptr::null_mut();
+//RS             if let Err(error) = check(
+//RS                 unsafe {
+//RS                     (output.api.map_memory)(
+//RS                         output.device,
+//RS                         output.memory,
+//RS                         0,
+//RS                         output.bytes,
+//RS                         0,
+//RS                         &mut mapped,
+//RS                     )
+//RS                 },
+//RS                 "buffer mapping",
+//RS             ) {
+//RS                 return Err(error);
+//RS             }
+//RS             if !bytes.is_empty() {
+//RS                 unsafe {
+//RS                     ptr::copy_nonoverlapping(bytes.as_ptr(), mapped.cast(), bytes.len());
+//RS                 }
+//RS             }
+//RS             unsafe { (output.api.unmap_memory)(output.device, output.memory) };
+//RS             Ok(output)
+//RS         }
+//RS 
+//RS         fn f32(context: &Context, values: &[f32], usage: u32) -> Result<Self, JetComputeError> {
+//RS             let bytes = unsafe {
+//RS                 std::slice::from_raw_parts(
+//RS                     values.as_ptr().cast::<u8>(),
+//RS                     values.len() * std::mem::size_of::<f32>(),
+//RS                 )
+//RS             };
+//RS             Self::from_bytes(context, bytes, usage)
+//RS         }
+//RS 
+//RS         fn descriptor(&self) -> DescriptorBufferInfo {
+//RS             DescriptorBufferInfo {
+//RS                 buffer: self.buffer,
+//RS                 offset: 0,
+//RS                 range: self.bytes,
+//RS             }
+//RS         }
+//RS 
+//RS         fn read_f32(&self, length: usize) -> Result<Vec<f32>, JetComputeError> {
+//RS             let bytes = length
+//RS                 .checked_mul(std::mem::size_of::<f32>())
+//RS                 .ok_or_else(|| JetComputeError::InvalidShape("Vulkan output size overflow".to_string()))?;
+//RS             if bytes as u64 > self.bytes {
+//RS                 return Err(JetComputeError::InvalidShape(
+//RS                     "Vulkan output buffer is smaller than the requested result".to_string(),
+//RS                 ));
+//RS             }
+//RS             let mut mapped = ptr::null_mut();
+//RS             check(
+//RS                 unsafe {
+//RS                     (self.api.map_memory)(self.device, self.memory, 0, self.bytes, 0, &mut mapped)
+//RS                 },
+//RS                 "output mapping",
+//RS             )?;
+//RS             let mut output = vec![0.0_f32; length];
+//RS             if bytes != 0 {
+//RS                 unsafe {
+//RS                     ptr::copy_nonoverlapping(
+//RS                         mapped.cast::<u8>(),
+//RS                         output.as_mut_ptr().cast::<u8>(),
+//RS                         bytes,
+//RS                     );
+//RS                 }
+//RS             }
+//RS             unsafe { (self.api.unmap_memory)(self.device, self.memory) };
+//RS             if output.iter().any(|value| !value.is_finite()) {
+//RS                 return Err(JetComputeError::Arithmetic(
+//RS                     "Vulkan kernel produced a non-finite F32 value".to_string(),
+//RS                 ));
+//RS             }
+//RS             Ok(output)
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for Buffer {
+//RS         fn drop(&mut self) {
+//RS             unsafe {
+//RS                 if self.buffer != 0 {
+//RS                     (self.api.destroy_buffer)(self.device, self.buffer, ptr::null());
+//RS                 }
+//RS                 if self.memory != 0 {
+//RS                     (self.api.free_memory)(self.device, self.memory, ptr::null());
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn run(
+//RS         op: u32,
+//RS         inputs: &[&[f32]],
+//RS         output_len: usize,
+//RS         params: Params,
+//RS     ) -> Result<Vec<f32>, JetComputeError> {
+//RS         if output_len == 0 {
+//RS             return Ok(Vec::new());
+//RS         }
+//RS         if inputs.len() > 5 {
+//RS             return Err(JetComputeError::InvalidShape(
+//RS                 "Vulkan kernels accept at most five input buffers".to_string(),
+//RS             ));
+//RS         }
+//RS         let api = Api::load()?;
+//RS         let context = Context::new(api)?;
+//RS         let dummy = [0.0_f32];
+//RS         let mut input_buffers = Vec::with_capacity(5);
+//RS         for index in 0..5 {
+//RS             let values = inputs.get(index).copied().unwrap_or(&dummy);
+//RS             input_buffers.push(Buffer::f32(
+//RS                 &context,
+//RS                 values,
+//RS                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+//RS             )?);
+//RS         }
+//RS         let output = Buffer::f32(
+//RS             &context,
+//RS             &vec![0.0_f32; output_len],
+//RS             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+//RS         )?;
+//RS         let params_bytes = unsafe {
+//RS             std::slice::from_raw_parts(
+//RS                 (&params as *const Params).cast::<u8>(),
+//RS                 std::mem::size_of::<Params>(),
+//RS             )
+//RS         };
+//RS         let params_buffer = Buffer::from_bytes(
+//RS             &context,
+//RS             params_bytes,
+//RS             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+//RS         )?;
+//RS         let infos = [
+//RS             input_buffers[0].descriptor(),
+//RS             input_buffers[1].descriptor(),
+//RS             output.descriptor(),
+//RS             input_buffers[2].descriptor(),
+//RS             input_buffers[3].descriptor(),
+//RS             input_buffers[4].descriptor(),
+//RS             params_buffer.descriptor(),
+//RS         ];
+//RS         let set_layouts = [context.descriptor_layout];
+//RS         let allocation_info = DescriptorSetAllocateInfo {
+//RS             s_type: VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+//RS             p_next: ptr::null(),
+//RS             descriptor_pool: context.descriptor_pool,
+//RS             descriptor_set_count: 1,
+//RS             p_set_layouts: set_layouts.as_ptr(),
+//RS         };
+//RS         let mut descriptor_set = 0;
+//RS         check(
+//RS             unsafe {
+//RS                 (context.api.allocate_descriptor_sets)(
+//RS                     context.device,
+//RS                     &allocation_info,
+//RS                     &mut descriptor_set,
+//RS                 )
+//RS             },
+//RS             "descriptor-set allocation",
+//RS         )?;
+//RS         let writes = infos
+//RS             .iter()
+//RS             .enumerate()
+//RS             .map(|(binding, info)| WriteDescriptorSet {
+//RS                 s_type: VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+//RS                 p_next: ptr::null(),
+//RS                 dst_set: descriptor_set,
+//RS                 dst_binding: binding as u32,
+//RS                 dst_array_element: 0,
+//RS                 descriptor_count: 1,
+//RS                 descriptor_type: if binding == 6 {
+//RS                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+//RS                 } else {
+//RS                     VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+//RS                 },
+//RS                 p_image_info: ptr::null(),
+//RS                 p_buffer_info: info,
+//RS                 p_texel_buffer_view: ptr::null(),
+//RS             })
+//RS             .collect::<Vec<_>>();
+//RS         unsafe {
+//RS             (context.api.update_descriptor_sets)(
+//RS                 context.device,
+//RS                 writes.len() as u32,
+//RS                 writes.as_ptr(),
+//RS                 0,
+//RS                 ptr::null(),
+//RS             )
+//RS         };
+//RS         let pool_info = CommandBufferAllocateInfo {
+//RS             s_type: VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+//RS             p_next: ptr::null(),
+//RS             command_pool: context.command_pool,
+//RS             level: VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+//RS             command_buffer_count: 1,
+//RS         };
+//RS         let mut command_buffer = ptr::null_mut();
+//RS         check(
+//RS             unsafe {
+//RS                 (context.api.allocate_command_buffers)(
+//RS                     context.device,
+//RS                     &pool_info,
+//RS                     &mut command_buffer,
+//RS                 )
+//RS             },
+//RS             "command-buffer allocation",
+//RS         )?;
+//RS         let begin_info = CommandBufferBeginInfo {
+//RS             s_type: VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+//RS             p_next: ptr::null(),
+//RS             flags: 0,
+//RS             p_inheritance_info: ptr::null(),
+//RS         };
+//RS         check(
+//RS             unsafe { (context.api.begin_command_buffer)(command_buffer, &begin_info) },
+//RS             "command-buffer begin",
+//RS         )?;
+//RS         let descriptor_sets = [descriptor_set];
+//RS         unsafe {
+//RS             (context.api.cmd_bind_pipeline)(
+//RS                 command_buffer,
+//RS                 VK_PIPELINE_BIND_POINT_COMPUTE,
+//RS                 context.pipeline,
+//RS             );
+//RS             (context.api.cmd_bind_descriptor_sets)(
+//RS                 command_buffer,
+//RS                 VK_PIPELINE_BIND_POINT_COMPUTE,
+//RS                 context.pipeline_layout,
+//RS                 0,
+//RS                 1,
+//RS                 descriptor_sets.as_ptr(),
+//RS                 0,
+//RS                 ptr::null(),
+//RS             );
+//RS             let work_items = if matches!(op, 12 | 13 | 16) { 1 } else { output_len };
+//RS             let groups = work_items
+//RS                 .saturating_add(63)
+//RS                 .checked_div(64)
+//RS                 .and_then(|value| u32::try_from(value).ok())
+//RS                 .filter(|value| *value != 0)
+//RS                 .ok_or_else(|| {
+//RS                     JetComputeError::InvalidShape("Vulkan dispatch group count is too large".to_string())
+//RS                 })?;
+//RS             (context.api.cmd_dispatch)(command_buffer, groups, 1, 1);
+//RS         }
+//RS         check(
+//RS             unsafe { (context.api.end_command_buffer)(command_buffer) },
+//RS             "command-buffer end",
+//RS         )?;
+//RS         let command_buffers = [command_buffer];
+//RS         let submit = SubmitInfo {
+//RS             s_type: VK_STRUCTURE_TYPE_SUBMIT_INFO,
+//RS             p_next: ptr::null(),
+//RS             wait_semaphore_count: 0,
+//RS             p_wait_semaphores: ptr::null(),
+//RS             p_wait_dst_stage_mask: ptr::null(),
+//RS             command_buffer_count: 1,
+//RS             p_command_buffers: command_buffers.as_ptr(),
+//RS             signal_semaphore_count: 0,
+//RS             p_signal_semaphores: ptr::null(),
+//RS         };
+//RS         let fence_info = FenceCreateInfo {
+//RS             s_type: VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+//RS             p_next: ptr::null(),
+//RS             flags: 0,
+//RS         };
+//RS         let mut fence = 0;
+//RS         check(
+//RS             unsafe { (context.api.create_fence)(context.device, &fence_info, ptr::null(), &mut fence) },
+//RS             "fence creation",
+//RS         )?;
+//RS         let submit_result = check(
+//RS             unsafe { (context.api.queue_submit)(context.queue, 1, &submit, fence) },
+//RS             "queue submission",
+//RS         );
+//RS         if let Err(error) = submit_result {
+//RS             unsafe { (context.api.destroy_fence)(context.device, fence, ptr::null()) };
+//RS             return Err(error);
+//RS         }
+//RS         let wait_result = check(
+//RS             unsafe { (context.api.wait_for_fences)(context.device, 1, &fence, 1, u64::MAX) },
+//RS             "queue completion",
+//RS         );
+//RS         unsafe { (context.api.destroy_fence)(context.device, fence, ptr::null()) };
+//RS         wait_result?;
+//RS         output.read_f32(output_len)
+//RS     }
+//RS 
+// END-PORT-PENDING 0254 crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:1795-3650
+

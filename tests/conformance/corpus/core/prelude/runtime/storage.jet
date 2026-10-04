@@ -1,0 +1,292 @@
+// Compiled alongside the private Prelude runtime owners, not a new public API.
+// Uninit allocation/typed owners and storage_copy/access/wire native leaves are
+// inward integration prerequisites; a language-level uninit case alone is not
+// proof that the JetUninit payload owner has been ported.
+use core.mem
+
+fn storage_expect_read_error(bitmap: View<Bool>, index: Int, expected: JetUninitAccessError) {
+    _ :: jet_uninit_read(bitmap, index) ?? {
+        assert(err == expected)
+        return
+    }
+    panic("expected unreadable slot")
+}
+
+#Test("readiness distinguishes bounds from an unwritten slot and leaves valid slots alone") {
+    bits := [Bool]{false, true, false}
+    view :: bits[0..<bits.len()]
+    storage_expect_read_error(view, 0, JetUninitAccessError.Uninitialized)
+    assert_eq(jet_uninit_read(view, 1) ?? panic("valid read failed"), 1)
+    storage_expect_read_error(view, 3, JetUninitAccessError.OutOfBounds)
+    assert_eq(bits[1], true)
+}
+
+// #4388: preserve the original mutable-slice transition, not an owning bitmap
+// replacement. Direct ViewMut writes currently hit a MIR place-writability ICE.
+#Test("write returns prior readiness without copying the owner") {
+    bits := [Bool]{false, true}
+    view :: &bits[0..<bits.len()]
+    first :: jet_uninit_write(view, 0) ?? panic("write failed")
+    assert_eq(first.index, 0)
+    assert_eq(first.replaced, false)
+    second :: jet_uninit_write(view, 0) ?? panic("rewrite failed")
+    assert_eq(second.replaced, true)
+    if jet_uninit_write(view, 2) == {
+        .Err(error) -> assert(error == JetUninitAccessError.OutOfBounds)
+        .Ok(_) -> panic("out of bounds write succeeded")
+    }
+    assert_eq(bits[0], true)
+    assert_eq(bits[1], true)
+}
+
+#Test("empty and complete readiness") {
+    empty :: [Bool]{}
+    partial :: [Bool]{true, false}
+    full :: [Bool]{true, true}
+    empty_view :: empty[0..<empty.len()]
+    full_view :: full[0..<full.len()]
+    partial_view :: partial[0..<partial.len()]
+    jet_uninit_all(empty_view) ?? panic("empty must be ready")
+    jet_uninit_all(full_view) ?? panic("full must be ready")
+    if jet_uninit_all(partial_view) == {
+        .Err(error) -> assert(error == JetUninitAccessError.Uninitialized)
+        .Ok(_) -> panic("partial storage must not be ready")
+    }
+}
+
+#Test("bitmap allocation marks no slot readable") {
+    bits :: jet_uninit_bitmap(3)
+    view :: bits[0..<bits.len()]
+    assert_eq(bits.len(), 3)
+    loop index in 0..<bits.len() -> storage_expect_read_error(view, index, JetUninitAccessError.Uninitialized)
+    empty :: jet_uninit_bitmap(0)
+    empty_view :: empty[0..<empty.len()]
+    jet_uninit_all(empty_view) ?? panic("empty bitmap must be ready")
+}
+
+#Test("DataTree kind diagnostic vocabulary") {
+    tags :: ["Null", "Bool", "Int", "Float", "Number", "TypedText", "Text", "Bytes", "Array", "Object", "", "Unknown"]
+    expected :: ["null", "Bool", "Int", "Float", "number", "Text", "Text", "Bytes", "a list", "an object", "value", "value"]
+    loop i in 0..<tags.len() -> assert_eq(datatree_kind(tags[i]), expected[i])
+}
+
+fn storage_expect_view_error(length: Int, index: I64, expected: String) {
+    _ :: jet_view_address(length, index) ?? {
+        assert_eq(err.message, expected)
+        return
+    }
+    panic("expected invalid view address")
+}
+
+#Test("view bounds saturate source usize length before validation") {
+    assert_eq(jet_view_address(3, I64{2}) ?? panic("valid address rejected"), 2)
+    storage_expect_view_error(3, I64{-1}, "the list has 3 items, so position -1 doesn't exist")
+    storage_expect_view_error(3, I64{3}, "the list has 3 items, so position 3 doesn't exist")
+    storage_expect_view_error(0, I64{0}, "the list has 0 items, so position 0 doesn't exist")
+    huge :: 18446744073709551615
+    assert_eq(jet_view_address(huge, I64{9223372036854775806}) ?? panic("saturated valid address rejected"), 9223372036854775806)
+    storage_expect_view_error(huge, I64{9223372036854775807}, "the list has 9223372036854775807 items, so position 9223372036854775807 doesn't exist")
+}
+
+#Test("wire merge replaces known fields in their original positions") {
+    known :: [(key: "a", value: 11), (key: "c", value: 33), (key: "b", value: 22)]
+    original :: [(key: "unknown", value: 90), (key: "b", value: 2), (key: "a", value: 1), (key: "future", value: 91)]
+    merged :: jet_wire_order_merge<Int>(known, original)
+    assert_eq(merged.len(), 5)
+    assert_eq(merged[0].key, "unknown")
+    assert_eq(merged[0].value, 90)
+    assert_eq(merged[1].key, "b")
+    assert_eq(merged[1].value, 22)
+    assert_eq(merged[2].key, "a")
+    assert_eq(merged[2].value, 11)
+    assert_eq(merged[3].key, "future")
+    assert_eq(merged[3].value, 91)
+    assert_eq(merged[4].key, "c")
+    assert_eq(merged[4].value, 33)
+    assert_eq(original[1].value, 2)
+}
+
+#Test("wire merge retains duplicate original positions and appends duplicate new known fields") {
+    known :: [(key: "a", value: 11), (key: "a", value: 12), (key: "new", value: 31), (key: "new", value: 32)]
+    original :: [(key: "a", value: 1), (key: "a", value: 2)]
+    merged :: jet_wire_order_merge<Int>(known, original)
+    assert_eq(merged.len(), 4)
+    assert_eq(merged[0].value, 11)
+    assert_eq(merged[1].value, 11)
+    assert_eq(merged[2].value, 31)
+    assert_eq(merged[3].value, 32)
+    empty :: [(key: String, value: Int)]{}
+    assert_eq(jet_wire_order_merge<Int>(empty, empty).len(), 0)
+    assert_eq(jet_wire_order_merge<Int>(known, empty).len(), 4)
+    assert_eq(jet_wire_order_merge<Int>(empty, original)[1].value, 2)
+}
+
+// tests/view_copy_semantics.rs:237–257, owned/nested mutation expectations.
+#Test("materialized windows escape independently including nested lists") {
+    values := [1, 2]
+    window :: values[0..0]
+    copied := jet_view_copy<Int>(window)
+    values[0] = 8
+    copied[0] = 9
+    assert_eq(values[0], 8)
+    assert_eq(copied[0], 9)
+    nested := [[1, 2], [3, 4]]
+    nested_window :: nested[0..0]
+    nested_copy := jet_view_copy<[Int]>(nested_window)
+    nested[0][0] = 6
+    nested_copy[0][0] = 7
+    assert_eq(nested[0][0], 6)
+    assert_eq(nested_copy[0][0], 7)
+}
+
+// tests/view_copy_semantics.rs:259–295, empty/Unicode/Bytes/list-of-String.
+#Test("empty Unicode byte and String list materialization preserve shape") {
+    empty_text :: ""
+    empty_text_view :: empty_text.after("")
+    assert_eq(jet_string_view_copy(empty_text_view).len(), 0)
+    text :: "π🙂"
+    text_view :: text.after("")
+    assert_eq(jet_string_view_copy(text_view), "π🙂")
+    values :: [Int]{}
+    empty_view :: values[0..<values.len()]
+    assert_eq(jet_view_copy<Int>(empty_view).len(), 0)
+    bytes :: text.bytes()
+    byte_view :: bytes[0..<bytes.len()]
+    assert_eq(jet_view_copy<U8>(byte_view).len(), 6)
+    words := ["a", "b"]
+    word_view :: words[0..<words.len()]
+    copied := jet_view_copy<String>(word_view)
+    words[0] = "source"
+    copied[0] = "copy"
+    assert_eq(words[0], "source")
+    assert_eq(copied[0], "copy")
+}
+
+// tests/uninit_fixed.rs:11–21 and 207–215, fill/output and scalar readiness.
+#Test("uninitialized fixed storage fill preserves every byte and scalar value") {
+    bytes := [U8#4]{uninit}
+    bytes[0] = 65
+    bytes[1] = 66
+    bytes[2] = 67
+    bytes[3] = 68
+    assert_eq(bytes[0], U8{65})
+    assert_eq(bytes[1], U8{66})
+    assert_eq(bytes[2], U8{67})
+    assert_eq(bytes[3], U8{68})
+    flag := Bool{uninit}
+    flag = true
+    assert(flag)
+}
+
+fn storage_make_fixed() -> [U8#2] {
+    bytes := [U8#2]{uninit}
+    bytes[0] = 7
+    bytes[1] = 9
+    return bytes
+}
+fn storage_first_fixed(bytes: [U8#2]) -> U8 {
+    index :: 0
+    return bytes[index]
+}
+fn storage_set_first_fixed(bytes: &[U8#2]) { bytes[0] = 8 }
+
+// tests/uninit_fixed.rs:26–67, whole-value move and mutating borrow.
+#Test("fully initialized fixed storage is an ordinary value with writeback") {
+    bytes := storage_make_fixed()
+    assert_eq(storage_first_fixed(bytes), U8{7})
+    assert_eq(bytes[1], U8{9})
+    storage_set_first_fixed(&bytes)
+    assert_eq(bytes[0], U8{8})
+    assert_eq(storage_first_fixed(bytes), U8{8})
+}
+
+fn storage_partial_exit() -> Int {
+    bytes := [U8#4]{uninit}
+    bytes[0] = 65
+    7
+}
+// tests/fixtures/uninit_fixed_partial_exit.jet:3–10.
+#Test("partial fixed initialization can leave scope without reading unwritten bytes") {
+    assert_eq(storage_partial_exit(), 7)
+}
+
+// tests/string_source_ownership.rs:57–69: String len counts scalars, not bytes.
+#Test("String owner scalar length remains distinct from UTF8 byte extent") {
+    assert_eq("héllo".len(), 5)
+}
+
+fn storage_first_window(values: [Int]) -> View<Int> from values { values[0..0] }
+fn storage_longer_window(left: String, right: String) -> View<str> from left | right {
+    if left.len() >= right.len() {
+        result :: left.trim()
+        return result
+    }
+    result :: right.trim()
+    return result
+}
+
+#Test("returned views keep the selected caller owner and original extent") {
+    values :: [7, 8]
+    window :: storage_first_window(values)
+    assert_eq(jet_view_get_checked<Int>(window, I64{0}) ?? panic("borrowed get failed"), 7)
+    assert_eq(window.len(), 1)
+    left :: "short"
+    right :: " a longer value "
+    chosen :: storage_longer_window(left, right)
+    assert_eq(jet_string_view_copy(chosen), "a longer value")
+    assert_eq(right, " a longer value ")
+}
+
+#Test("float setter validates finiteness before bounds and preserves the owner on errors") {
+    values := [Float]{1.0, 2.0}
+    view := &values[0..<values.len()]
+    if jet_view_set_f64_checked(&view, I64{99}, Float.NAN) == {
+        .Err(error) -> assert_eq(error, "Tensor values must be finite")
+        .Ok(_) -> panic("nonfinite setter succeeded")
+    }
+    if jet_view_set_f64_checked(&view, I64{2}, Float{3.0}) == {
+        .Err(error) -> assert_eq(error, "the list has 2 items, so position 2 doesn't exist")
+        .Ok(_) -> panic("out of bounds setter succeeded")
+    }
+    jet_view_set_f64_checked(&view, I64{1}, Float{3.0}) ?? panic("valid setter failed")
+    assert_eq(values[0], Float{1.0})
+    assert_eq(values[1], Float{3.0})
+}
+
+#Test("float compute target checks index count before element validation") {
+    values := [Float]{1.0}
+    view := &values[0..<values.len()]
+    empty :: [I64]{}
+    if jet_compute_set<ViewMut<Float>>(&view, empty, Float.NAN) == {
+        .Err(error) -> assert_eq(error, "a float view set expects one index")
+        .Ok(_) -> panic("wrong rank setter succeeded")
+    }
+    indices :: [I64]{0}
+    jet_compute_set<ViewMut<Float>>(&view, indices, Float{4.0}) ?? panic("compute setter failed")
+    assert_eq(values[0], Float{4.0})
+}
+
+// tests/uninit_fixed.rs:283–292: all paths write every slot before the join.
+fn storage_all_paths_fixed(flag: Bool) -> [U8#2] {
+    bytes := [U8#2]{uninit}
+    if {
+        flag -> {
+            bytes[0] = 1
+            bytes[1] = 2
+        }
+        else -> {
+            bytes[0] = 3
+            bytes[1] = 4
+        }
+    }
+    bytes
+}
+
+#Test("initialization facts intersect correctly when every path fills every slot") {
+    first :: storage_all_paths_fixed(true)
+    second :: storage_all_paths_fixed(false)
+    assert_eq(first[0], U8{1})
+    assert_eq(first[1], U8{2})
+    assert_eq(second[0], U8{3})
+    assert_eq(second[1], U8{4})
+}

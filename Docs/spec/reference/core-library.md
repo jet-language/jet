@@ -780,6 +780,31 @@ convenience surface. `is_relative_to` is a lexical comparison; it does not
 resolve symlinks. Use `canonicalize` when the policy requires physical,
 existing-path containment.
 
+The compiler and native consumers use the private `Core/files` OS-byte component
+owner rather than the portable textual `Path.parts`/`collapse` operations.
+Its Unix paths retain arbitrary bytes; Windows paths retain WTF-8, including
+unpaired UTF-16 surrogates. Display is the only lossy boundary. Component cursors
+and prefix stripping retain byte extents into the original owner and preserve
+interior remainder spelling; equality compares parsed prefixes and whole
+components, not string prefixes. A Windows drive-relative `C:foo` and a rooted
+but prefix-free `\\foo` are not absolute; UNC and verbatim namespaces follow
+their platform prefix/root laws. These are lexical operations, not filesystem
+authority or symlink resolution.
+
+Native basename/stem/extension operations use that same component owner. A
+leading-only dot does not introduce an extension, while a trailing dot has an
+empty extension. Setting an extension removes ignored trailing separators and
+dot components with the old suffix, leaves paths without a normal basename
+unchanged, and rejects platform separators even on verbatim Windows paths.
+The retained stem bytes are never decoded or rewritten.
+
+The existing user `Path.normalize`/`collapse` law preserves unmatched leading
+`..`. Package identity normalization is deliberately different: it omits current
+directory components and pops its output for **every** parent component, even
+when that output is empty. Thus `../../a` has package identity path `a`, without
+changing the user normalization of `../../a`. Its labels use lossy OS display,
+then replace output backslashes with `/`, and spell an empty result as `.`.
+
 ### `core.net.url` — RFC 3986 URL values
 
 `core.net.url` parses, constructs, joins, normalizes, and renders the `URL`

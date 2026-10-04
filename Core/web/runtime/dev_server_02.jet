@@ -1,0 +1,984 @@
+// PORT-PENDING 0175 crates-jet-codegen-src-prelude-devserver-slice-1798: crates/jet-codegen/src/Prelude/DevServer.rs:1798-2777
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS         fn open_root(path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
+//RS             reject_reparse_components(path)?;
+//RS             let expected_path = if path.is_absolute() {
+//RS                 path.to_path_buf()
+//RS             } else {
+//RS                 std::env::current_dir()?.join(path)
+//RS             };
+//RS             let expected = normalize(expected_path.to_string_lossy().into_owned());
+//RS             let directory = open_existing_with_share(
+//RS                 path,
+//RS                 GENERIC_READ | GENERIC_WRITE,
+//RS                 false,
+//RS                 false,
+//RS                 true,
+//RS                 FILE_SHARE_ALL,
+//RS             )?;
+//RS             check_directory(&directory)?;
+//RS             if normalize(final_path(&directory)?) != expected {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver output root changed during secure open",
+//RS                 ));
+//RS             }
+//RS             Ok(JetDevServerOutputRoot::new(directory))
+//RS         }
+//RS 
+//RS         fn is_child(parent: &str, candidate: &str) -> bool {
+//RS             candidate
+//RS                 .strip_prefix(parent.trim_end_matches(['\\', '/']))
+//RS                 .is_some_and(|tail| tail.starts_with('\\'))
+//RS         }
+//RS 
+//RS         fn parent_of(path: &str) -> Option<&str> {
+//RS             path.rsplit_once('\\').map(|(parent, _)| parent)
+//RS         }
+//RS 
+//RS         fn same_object(left: &File, right: &File) -> std::io::Result<bool> {
+//RS             let (left_volume, left_index, _) = file_id(left)?;
+//RS             let (right_volume, right_index, _) = file_id(right)?;
+//RS             Ok(left_volume == right_volume && left_index == right_index)
+//RS         }
+//RS 
+//RS         fn verify_parent(
+//RS             parent_path: &Path,
+//RS             parent_final: &str,
+//RS             parent: &File,
+//RS         ) -> std::io::Result<()> {
+//RS             if normalize(final_path(parent)?) != parent_final {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver parent moved while it was held",
+//RS                 ));
+//RS             }
+//RS             reject_reparse_components(parent_path)?;
+//RS             let opened = open_existing(parent_path, GENERIC_READ, false, false, true)?;
+//RS             check_directory(&opened)?;
+//RS             if normalize(final_path(&opened)?) != parent_final || !same_object(parent, &opened)? {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver parent identity changed",
+//RS                 ));
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn open_dir_in_parent(
+//RS             parent_path: &Path,
+//RS             parent_final: &str,
+//RS             value: &OsStr,
+//RS             delete: bool,
+//RS             parent: &File,
+//RS         ) -> std::io::Result<(File, String)> {
+//RS             let path = parent_path.join(value);
+//RS             reject_reparse_components(&path)?;
+//RS             let access = GENERIC_READ | if delete { DELETE } else { 0 };
+//RS             let directory = open_existing(&path, access, false, false, true)?;
+//RS             check_directory(&directory)?;
+//RS             let actual = normalize(final_path(&directory)?);
+//RS             verify_parent(parent_path, parent_final, parent)?;
+//RS             if parent_of(&actual) != Some(parent_final) {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver directory escaped its held parent",
+//RS                 ));
+//RS             }
+//RS             Ok((directory, actual))
+//RS         }
+//RS 
+//RS         fn open_file_in_parent(
+//RS             parent_path: &Path,
+//RS             parent_final: &str,
+//RS             value: &OsStr,
+//RS             delete: bool,
+//RS             parent: &File,
+//RS         ) -> std::io::Result<(File, (u64, u64))> {
+//RS             let path = parent_path.join(value);
+//RS             reject_reparse_components(&path)?;
+//RS             let access = GENERIC_READ | if delete { DELETE } else { 0 };
+//RS             let file = open_existing(&path, access, false, false, false)?;
+//RS             let id = check_regular(&file)?;
+//RS             let actual = normalize(final_path(&file)?);
+//RS             verify_parent(parent_path, parent_final, parent)?;
+//RS             if parent_of(&actual) != Some(parent_final) {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver file escaped its held parent",
+//RS                 ));
+//RS             }
+//RS             Ok((file, id))
+//RS         }
+//RS 
+//RS         fn create_publication_journal(
+//RS             root_path: &Path,
+//RS             root_final: &str,
+//RS             root: &File,
+//RS         ) -> std::io::Result<(PathBuf, String, File, String)> {
+//RS             for _ in 0..100 {
+//RS                 let value = format!(
+//RS                     ".jet-devserver-publication-{}-{}",
+//RS                     std::process::id(),
+//RS                     JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
+//RS                 );
+//RS                 let path = root_path.join(&value);
+//RS                 match std::fs::create_dir(&path) {
+//RS                     Ok(()) => {
+//RS                         reject_reparse_components(&path)?;
+//RS                         match open_dir_in_parent(
+//RS                             root_path,
+//RS                             root_final,
+//RS                             OsStr::new(&value),
+//RS                             true,
+//RS                             root,
+//RS                         ) {
+//RS                             Ok((directory, actual)) => {
+//RS                                 return Ok((path, value, directory, actual));
+//RS                             }
+//RS                             Err(error) => {
+//RS                                 let _ = std::fs::remove_dir(&path);
+//RS                                 return Err(error);
+//RS                             }
+//RS                         }
+//RS                     }
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+//RS                     Err(error) => return Err(error),
+//RS                 }
+//RS             }
+//RS             Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::AlreadyExists,
+//RS                 "could not allocate a devserver publication journal",
+//RS             ))
+//RS         }
+//RS 
+//RS         fn clear_publication_journal(
+//RS             path: &Path,
+//RS             final_path: &str,
+//RS             directory: &File,
+//RS             names: &[&str],
+//RS         ) {
+//RS             for value in names {
+//RS                 if let Ok((file, _)) =
+//RS                     open_file_in_parent(path, final_path, OsStr::new(value), true, directory)
+//RS                 {
+//RS                     let _ = delete_handle(&file);
+//RS                 }
+//RS             }
+//RS             let _ = delete_handle(directory);
+//RS         }
+//RS 
+//RS         fn rollback_publication(
+//RS             root_path: &Path,
+//RS             root_final: &str,
+//RS             root: &File,
+//RS             journal_path: &Path,
+//RS             journal_final: &str,
+//RS             journal: &File,
+//RS             backed_up: &[&str],
+//RS             published: &[&str],
+//RS         ) {
+//RS             for value in published.iter().rev() {
+//RS                 if let Ok((file, _)) =
+//RS                     open_file_in_parent(root_path, root_final, OsStr::new(value), true, root)
+//RS                 {
+//RS                     let _ = delete_handle(&file);
+//RS                 }
+//RS             }
+//RS             for value in backed_up.iter().rev() {
+//RS                 if let Ok((file, _)) = open_file_in_parent(
+//RS                     journal_path,
+//RS                     journal_final,
+//RS                     OsStr::new(value),
+//RS                     true,
+//RS                     journal,
+//RS                 ) {
+//RS                     let _ = rename_into(&file, root, OsStr::new(value));
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         fn rename_into(source: &File, parent: &File, value: &OsStr) -> std::io::Result<()> {
+//RS             let file_name = value.encode_wide().collect::<Vec<_>>();
+//RS             let offset = std::mem::offset_of!(FileRenameInfo, file_name);
+//RS             let size = offset + file_name.len() * std::mem::size_of::<u16>();
+//RS             let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
+//RS             let info = storage.as_mut_ptr().cast::<FileRenameInfo>();
+//RS             unsafe {
+//RS                 (*info).replace_if_exists = 1;
+//RS                 (*info).root_directory = parent.as_raw_handle();
+//RS                 (*info).file_name_length = (file_name.len() * 2) as u32;
+//RS                 std::ptr::copy_nonoverlapping(
+//RS                     file_name.as_ptr(),
+//RS                     (*info).file_name.as_mut_ptr(),
+//RS                     file_name.len(),
+//RS                 );
+//RS                 if SetFileInformationByHandle(
+//RS                     source.as_raw_handle(),
+//RS                     FILE_RENAME_INFO_CLASS,
+//RS                     storage.as_mut_ptr().cast(),
+//RS                     size as u32,
+//RS                 ) == 0
+//RS                 {
+//RS                     return Err(std::io::Error::last_os_error());
+//RS                 }
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn delete_handle(file: &File) -> std::io::Result<()> {
+//RS             let mut info = FileDispositionInfo { delete_file: 1 };
+//RS             if unsafe {
+//RS                 SetFileInformationByHandle(
+//RS                     file.as_raw_handle(),
+//RS                     FILE_DISPOSITION_INFO_CLASS,
+//RS                     (&mut info as *mut FileDispositionInfo).cast(),
+//RS                     std::mem::size_of::<FileDispositionInfo>() as u32,
+//RS                 )
+//RS             } == 0
+//RS             {
+//RS                 return Err(std::io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn flush(file: &File) -> std::io::Result<()> {
+//RS             if unsafe { FlushFileBuffers(file.as_raw_handle()) } == 0 {
+//RS                 return Err(std::io::Error::last_os_error());
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn replace_file_in_parent(
+//RS             parent_path: &Path,
+//RS             parent_final: &str,
+//RS             parent: &File,
+//RS             value: &OsStr,
+//RS             bytes: &[u8],
+//RS         ) -> std::io::Result<()> {
+//RS             verify_parent(parent_path, parent_final, parent)?;
+//RS             match open_file_in_parent(parent_path, parent_final, value, false, parent) {
+//RS                 Ok(_) => {}
+//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS                 Err(error) => return Err(error),
+//RS             }
+//RS             let temporary_name = format!(
+//RS                 ".jet-devserver-output-{}-{}",
+//RS                 std::process::id(),
+//RS                 JET_DEVSERVER_STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
+//RS             );
+//RS             let temporary_path = parent_path.join(&temporary_name);
+//RS             let mut temporary = open_existing(
+//RS                 &temporary_path,
+//RS                 GENERIC_READ | GENERIC_WRITE | DELETE,
+//RS                 true,
+//RS                 true,
+//RS                 false,
+//RS             )?;
+//RS             if let Err(error) = verify_parent(parent_path, parent_final, parent) {
+//RS                 let _ = delete_handle(&temporary);
+//RS                 return Err(error);
+//RS             }
+//RS             let temporary_id = match check_regular(&temporary) {
+//RS                 Ok(id) => id,
+//RS                 Err(error) => {
+//RS                     let _ = delete_handle(&temporary);
+//RS                     return Err(error);
+//RS                 }
+//RS             };
+//RS             if let Err(error) = (|| {
+//RS                 temporary.write_all(bytes)?;
+//RS                 temporary.sync_all()?;
+//RS                 if check_regular(&temporary)? != temporary_id {
+//RS                     return Err(std::io::Error::new(
+//RS                         std::io::ErrorKind::PermissionDenied,
+//RS                         "temporary devserver output identity changed",
+//RS                     ));
+//RS                 }
+//RS                 rename_into(&temporary, parent, value)?;
+//RS                 let (published, published_id) =
+//RS                     open_file_in_parent(parent_path, parent_final, value, true, parent)?;
+//RS                 if published_id != temporary_id {
+//RS                     let _ = delete_handle(&published);
+//RS                     return Err(std::io::Error::new(
+//RS                         std::io::ErrorKind::PermissionDenied,
+//RS                         "published devserver output identity changed",
+//RS                     ));
+//RS                 }
+//RS                 Ok(())
+//RS             })() {
+//RS                 let _ = delete_handle(&temporary);
+//RS                 return Err(error);
+//RS             }
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         pub(super) fn create_staging(
+//RS             root: &JetDevServerOutputRoot,
+//RS             path: &Path,
+//RS             source_stem: &str,
+//RS         ) -> std::io::Result<JetDevServerStaging> {
+//RS             let name = path.file_name().ok_or_else(|| {
+//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "staging has no name")
+//RS             })?;
+//RS             let root_path = PathBuf::from(final_path(&root.directory)?);
+//RS             let staging_path = root_path.join(name);
+//RS             let root_final = normalize(final_path(&root.directory)?);
+//RS             verify_parent(&root_path, &root_final, &root.directory)?;
+//RS             std::fs::create_dir(&staging_path)?;
+//RS             reject_reparse_components(&staging_path)?;
+//RS             let (directory, actual) =
+//RS                 open_dir_in_parent(&root_path, &root_final, name, false, &root.directory)?;
+//RS             if !is_child(&root_final, &actual) {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver staging escaped its output root",
+//RS                 ));
+//RS             }
+//RS             Ok(JetDevServerStaging {
+//RS                 path: staging_path,
+//RS                 name: name.to_string_lossy().into_owned(),
+//RS                 source_stem: source_stem.to_string(),
+//RS                 directory,
+//RS             })
+//RS         }
+//RS 
+//RS         fn open_relative(
+//RS             mut current: File,
+//RS             mut current_path: PathBuf,
+//RS             relative: &Path,
+//RS         ) -> std::io::Result<File> {
+//RS             let mut current_final = normalize(final_path(&current)?);
+//RS             let components = relative.components().collect::<Vec<_>>();
+//RS             if components.is_empty() {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidInput,
+//RS                     "empty relative path",
+//RS                 ));
+//RS             }
+//RS             for component in &components[..components.len() - 1] {
+//RS                 let Component::Normal(value) = component else {
+//RS                     return Err(std::io::Error::new(
+//RS                         std::io::ErrorKind::InvalidInput,
+//RS                         "devserver path is not relative",
+//RS                     ));
+//RS                 };
+//RS                 let (directory, actual) =
+//RS                     open_dir_in_parent(&current_path, &current_final, value, false, &current)?;
+//RS                 current_path.push(value);
+//RS                 current = directory;
+//RS                 current_final = actual;
+//RS             }
+//RS             let Component::Normal(value) = components.last().unwrap() else {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidInput,
+//RS                     "devserver path is not relative",
+//RS                 ));
+//RS             };
+//RS             let (file, _) =
+//RS                 open_file_in_parent(&current_path, &current_final, value, false, &current)?;
+//RS             let _ = current;
+//RS             Ok(file)
+//RS         }
+//RS 
+//RS         pub(super) fn open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
+//RS             let root_handle = open_root(root)?;
+//RS             let current_path = root.to_path_buf();
+//RS             open_relative(root_handle.directory, current_path, relative)
+//RS         }
+//RS 
+//RS         pub(super) fn open_held_beneath(
+//RS             root: &JetDevServerOutputRoot,
+//RS             relative: &Path,
+//RS         ) -> std::io::Result<File> {
+//RS             let current = root.directory.try_clone()?;
+//RS             let current_path = PathBuf::from(final_path(&current)?);
+//RS             open_relative(current, current_path, relative)
+//RS         }
+//RS 
+//RS         pub(super) fn publish_build(
+//RS             root: &JetDevServerOutputRoot,
+//RS             staging: &JetDevServerStaging,
+//RS             html: Option<&[u8]>,
+//RS         ) -> std::io::Result<()> {
+//RS             let root_path = PathBuf::from(final_path(&root.directory)?);
+//RS             let root_final = normalize(final_path(&root.directory)?);
+//RS             let staging_final = normalize(final_path(&staging.directory)?);
+//RS             let build_path = staging.path.join("build");
+//RS             let (build, build_final) = open_dir_in_parent(
+//RS                 &staging.path,
+//RS                 &staging_final,
+//RS                 OsStr::new("build"),
+//RS                 false,
+//RS                 &staging.directory,
+//RS             )?;
+//RS             if let Some(bytes) = html {
+//RS                 replace_file_in_parent(
+//RS                     &build_path,
+//RS                     &build_final,
+//RS                     &build,
+//RS                     OsStr::new("index.html"),
+//RS                     bytes,
+//RS                 )?;
+//RS             }
+//RS             for value in JET_DEVSERVER_OUTPUT_FILES {
+//RS                 let _ = open_file_in_parent(
+//RS                     &build_path,
+//RS                     &build_final,
+//RS                     OsStr::new(value),
+//RS                     false,
+//RS                     &build,
+//RS                 )?;
+//RS                 match open_file_in_parent(
+//RS                     &root_path,
+//RS                     &root_final,
+//RS                     OsStr::new(value),
+//RS                     false,
+//RS                     &root.directory,
+//RS                 ) {
+//RS                     Ok(_) => {}
+//RS                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS                     Err(error) => return Err(error),
+//RS                 }
+//RS             }
+//RS             let (journal_path, journal_name, journal, journal_final) =
+//RS                 create_publication_journal(&root_path, &root_final, &root.directory)?;
+//RS             let mut backed_up = Vec::new();
+//RS             let mut published = Vec::new();
+//RS             let result = (|| {
+//RS                 for value in JET_DEVSERVER_OUTPUT_FILES {
+//RS                     match open_file_in_parent(
+//RS                         &root_path,
+//RS                         &root_final,
+//RS                         OsStr::new(value),
+//RS                         true,
+//RS                         &root.directory,
+//RS                     ) {
+//RS                         Ok((old, _)) => {
+//RS                             rename_into(&old, &journal, OsStr::new(value))?;
+//RS                             backed_up.push(value);
+//RS                         }
+//RS                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+//RS                         Err(error) => return Err(error),
+//RS                     }
+//RS                 }
+//RS                 for value in JET_DEVSERVER_OUTPUT_FILES {
+//RS                     let (source, source_id) = open_file_in_parent(
+//RS                         &build_path,
+//RS                         &build_final,
+//RS                         OsStr::new(value),
+//RS                         true,
+//RS                         &build,
+//RS                     )?;
+//RS                     rename_into(&source, &root.directory, OsStr::new(value))?;
+//RS                     published.push(value);
+//RS                     let (_, published_id) = open_file_in_parent(
+//RS                         &root_path,
+//RS                         &root_final,
+//RS                         OsStr::new(value),
+//RS                         true,
+//RS                         &root.directory,
+//RS                     )?;
+//RS                     if published_id != source_id {
+//RS                         return Err(std::io::Error::new(
+//RS                             std::io::ErrorKind::PermissionDenied,
+//RS                             "published devserver output identity changed",
+//RS                         ));
+//RS                     }
+//RS                 }
+//RS                 flush(&root.directory)
+//RS             })();
+//RS             if let Err(error) = result {
+//RS                 rollback_publication(
+//RS                     &root_path,
+//RS                     &root_final,
+//RS                     &root.directory,
+//RS                     &journal_path,
+//RS                     &journal_final,
+//RS                     &journal,
+//RS                     &backed_up,
+//RS                     &published,
+//RS                 );
+//RS                 clear_publication_journal(
+//RS                     &journal_path,
+//RS                     &journal_final,
+//RS                     &journal,
+//RS                     &JET_DEVSERVER_OUTPUT_FILES,
+//RS                 );
+//RS                 return Err(error);
+//RS             }
+//RS             clear_publication_journal(
+//RS                 &journal_path,
+//RS                 &journal_final,
+//RS                 &journal,
+//RS                 &JET_DEVSERVER_OUTPUT_FILES,
+//RS             );
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         pub(super) fn cleanup(
+//RS             root: &JetDevServerOutputRoot,
+//RS             staging: &JetDevServerStaging,
+//RS         ) -> std::io::Result<()> {
+//RS             let root_path = PathBuf::from(final_path(&root.directory)?);
+//RS             let root_final = normalize(final_path(&root.directory)?);
+//RS             let staging_final = normalize(final_path(&staging.directory)?);
+//RS             if let Ok((build, build_final)) = open_dir_in_parent(
+//RS                 &staging.path,
+//RS                 &staging_final,
+//RS                 OsStr::new("build"),
+//RS                 true,
+//RS                 &staging.directory,
+//RS             ) {
+//RS                 for value in JET_DEVSERVER_STAGING_FILES {
+//RS                     if let Ok((file, _)) = open_file_in_parent(
+//RS                         &staging.path.join("build"),
+//RS                         &build_final,
+//RS                         OsStr::new(value),
+//RS                         true,
+//RS                         &build,
+//RS                     ) {
+//RS                         let _ = delete_handle(&file);
+//RS                     }
+//RS                 }
+//RS                 let source = format!("{}.rs", staging.source_stem);
+//RS                 if let Ok((file, _)) = open_file_in_parent(
+//RS                     &staging.path.join("build"),
+//RS                     &build_final,
+//RS                     OsStr::new(&source),
+//RS                     true,
+//RS                     &build,
+//RS                 ) {
+//RS                     let _ = delete_handle(&file);
+//RS                 }
+//RS                 let _ = delete_handle(&build);
+//RS             }
+//RS             let (staging_path, _) = open_dir_in_parent(
+//RS                 &root_path,
+//RS                 &root_final,
+//RS                 OsStr::new(&staging.name),
+//RS                 true,
+//RS                 &root.directory,
+//RS             )?;
+//RS             delete_handle(&staging_path)
+//RS         }
+//RS 
+//RS         pub(super) fn prepare_build_command(
+//RS             command: &mut Command,
+//RS             staging: &JetDevServerStaging,
+//RS         ) -> std::io::Result<Option<File>> {
+//RS             let guard = open_existing_with_share(
+//RS                 &staging.path,
+//RS                 GENERIC_READ,
+//RS                 false,
+//RS                 false,
+//RS                 true,
+//RS                 FILE_SHARE_ALL,
+//RS             )?;
+//RS             check_directory(&guard)?;
+//RS             if !same_object(&guard, &staging.directory)? {
+//RS                 return Err(std::io::Error::new(
+//RS                     std::io::ErrorKind::PermissionDenied,
+//RS                     "devserver staging directory changed before the build",
+//RS                 ));
+//RS             }
+//RS             command.current_dir(&staging.path);
+//RS             Ok(Some(guard))
+//RS         }
+//RS     }
+//RS     // JET_VETTED_UNSAFE_END: jet_devserver_windows_output
+//RS 
+//RS     // I1: these helpers are the only platform boundary in the generated
+//RS     // server. Raw descriptors/handles stay inside them; callers receive only
+//RS     // owned files or held directory authorities.
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_open_output_root(path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
+//RS         jet_devserver_unix_output::open_root(path)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_create_staging(
+//RS         root: &JetDevServerOutputRoot,
+//RS         path: &Path,
+//RS         source_stem: &str,
+//RS     ) -> std::io::Result<JetDevServerStaging> {
+//RS         jet_devserver_unix_output::create_staging(root, path, source_stem)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_publish_build(
+//RS         root: &JetDevServerOutputRoot,
+//RS         staging: &JetDevServerStaging,
+//RS         html: Option<&[u8]>,
+//RS     ) -> std::io::Result<()> {
+//RS         let _publication = root.publication_lock.lock().map_err(|_| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::Other,
+//RS                 "devserver publication lock poisoned",
+//RS             )
+//RS         })?;
+//RS         jet_devserver_unix_output::publish_build(root, staging, html)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_cleanup_staging(
+//RS         root: &JetDevServerOutputRoot,
+//RS         staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<()> {
+//RS         jet_devserver_unix_output::cleanup(root, staging)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_prepare_build_command(
+//RS         command: &mut Command,
+//RS         staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<Option<File>> {
+//RS         jet_devserver_unix_output::prepare_build_command(command, staging)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         jet_devserver_unix_output::open_beneath(root, relative)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_open_held_beneath(
+//RS         root: &JetDevServerOutputRoot,
+//RS         relative: &Path,
+//RS     ) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         jet_devserver_unix_output::open_held_beneath(root, relative)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_validate_source(path: &Path) -> std::io::Result<()> {
+//RS         jet_devserver_unix_output::validate_source(path)
+//RS     }
+//RS 
+//RS     #[cfg(unix)]
+//RS     fn jet_devserver_check_opened_file(file: &File) -> std::io::Result<()> {
+//RS         jet_devserver_unix_output::check_opened_file(file)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_open_output_root(path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
+//RS         jet_devserver_windows_output::open_root(path)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_create_staging(
+//RS         root: &JetDevServerOutputRoot,
+//RS         path: &Path,
+//RS         source_stem: &str,
+//RS     ) -> std::io::Result<JetDevServerStaging> {
+//RS         jet_devserver_windows_output::create_staging(root, path, source_stem)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_publish_build(
+//RS         root: &JetDevServerOutputRoot,
+//RS         staging: &JetDevServerStaging,
+//RS         html: Option<&[u8]>,
+//RS     ) -> std::io::Result<()> {
+//RS         let _publication = root.publication_lock.lock().map_err(|_| {
+//RS             std::io::Error::new(
+//RS                 std::io::ErrorKind::Other,
+//RS                 "devserver publication lock poisoned",
+//RS             )
+//RS         })?;
+//RS         jet_devserver_windows_output::publish_build(root, staging, html)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_cleanup_staging(
+//RS         root: &JetDevServerOutputRoot,
+//RS         staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<()> {
+//RS         jet_devserver_windows_output::cleanup(root, staging)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_prepare_build_command(
+//RS         command: &mut Command,
+//RS         staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<Option<File>> {
+//RS         jet_devserver_windows_output::prepare_build_command(command, staging)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_open_beneath(root: &Path, relative: &Path) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         jet_devserver_windows_output::open_beneath(root, relative)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_open_held_beneath(
+//RS         root: &JetDevServerOutputRoot,
+//RS         relative: &Path,
+//RS     ) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         jet_devserver_windows_output::open_held_beneath(root, relative)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_validate_source(path: &Path) -> std::io::Result<()> {
+//RS         jet_devserver_windows_output::validate_source(path)
+//RS     }
+//RS 
+//RS     #[cfg(windows)]
+//RS     fn jet_devserver_check_opened_file(file: &File) -> std::io::Result<()> {
+//RS         jet_devserver_windows_output::check_opened_file(file)
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_secure_output_unavailable() -> std::io::Error {
+//RS         std::io::Error::new(
+//RS             std::io::ErrorKind::Unsupported,
+//RS             "secure devserver output is unavailable on this platform",
+//RS         )
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_open_output_root(_path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_create_staging(
+//RS         _root: &JetDevServerOutputRoot,
+//RS         _path: &Path,
+//RS         _source_stem: &str,
+//RS     ) -> std::io::Result<JetDevServerStaging> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_publish_build(
+//RS         _root: &JetDevServerOutputRoot,
+//RS         _staging: &JetDevServerStaging,
+//RS         _html: Option<&[u8]>,
+//RS     ) -> std::io::Result<()> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_cleanup_staging(
+//RS         _root: &JetDevServerOutputRoot,
+//RS         _staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<()> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_prepare_build_command(
+//RS         _command: &mut Command,
+//RS         _staging: &JetDevServerStaging,
+//RS     ) -> std::io::Result<Option<File>> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_open_beneath(_root: &Path, relative: &Path) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_open_held_beneath(
+//RS         _root: &JetDevServerOutputRoot,
+//RS         relative: &Path,
+//RS     ) -> std::io::Result<File> {
+//RS         jet_devserver_validate_relative(relative)?;
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_validate_source(_path: &Path) -> std::io::Result<()> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     #[cfg(all(not(unix), not(windows)))]
+//RS     fn jet_devserver_check_opened_file(_file: &File) -> std::io::Result<()> {
+//RS         Err(jet_devserver_secure_output_unavailable())
+//RS     }
+//RS 
+//RS     fn jet_devserver_static_relative_path(path: &str) -> Option<&str> {
+//RS         let relative = if path == "/" {
+//RS             "index.html"
+//RS         } else {
+//RS             path.trim_start_matches('/')
+//RS         };
+//RS         let bytes = relative.as_bytes();
+//RS         let windows_drive_prefix =
+//RS             bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+//RS         if path.contains("..")
+//RS             || relative.is_empty()
+//RS             || relative.starts_with('/')
+//RS             || relative.starts_with('\\')
+//RS             || relative.contains('\\')
+//RS             || windows_drive_prefix
+//RS             || Path::new(relative)
+//RS                 .components()
+//RS                 .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+//RS             || !jet_devserver_windows_components_are_safe(Path::new(relative))
+//RS         {
+//RS             None
+//RS         } else {
+//RS             Some(relative)
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_devserver_windows_component_is_safe(name: &std::ffi::OsStr) -> bool {
+//RS         let text = name.to_string_lossy();
+//RS         if text.is_empty()
+//RS             || text
+//RS                 .chars()
+//RS                 .last()
+//RS                 .is_some_and(|character| character == ' ' || character == '.')
+//RS             || text.chars().any(|character| {
+//RS                 character.is_control()
+//RS                     || matches!(character, ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*')
+//RS             })
+//RS         {
+//RS             return false;
+//RS         }
+//RS         let stem = text.split('.').next().unwrap_or_default();
+//RS         let upper = stem.to_ascii_uppercase();
+//RS         !matches!(
+//RS             upper.as_str(),
+//RS             "CON"
+//RS                 | "CONIN$"
+//RS                 | "CONOUT$"
+//RS                 | "PRN"
+//RS                 | "AUX"
+//RS                 | "NUL"
+//RS                 | "CLOCK$"
+//RS                 | "COM1"
+//RS                 | "COM2"
+//RS                 | "COM3"
+//RS                 | "COM4"
+//RS                 | "COM5"
+//RS                 | "COM6"
+//RS                 | "COM7"
+//RS                 | "COM8"
+//RS                 | "COM9"
+//RS                 | "LPT1"
+//RS                 | "LPT2"
+//RS                 | "LPT3"
+//RS                 | "LPT4"
+//RS                 | "LPT5"
+//RS                 | "LPT6"
+//RS                 | "LPT7"
+//RS                 | "LPT8"
+//RS                 | "LPT9"
+//RS                 | "COM¹"
+//RS                 | "COM²"
+//RS                 | "COM³"
+//RS                 | "LPT¹"
+//RS                 | "LPT²"
+//RS                 | "LPT³"
+//RS         )
+//RS     }
+//RS 
+//RS     fn jet_devserver_windows_components_are_safe(relative: &Path) -> bool {
+//RS         relative.components().all(|component| {
+//RS             matches!(
+//RS                 component,
+//RS                 Component::Normal(name) if jet_devserver_windows_component_is_safe(name)
+//RS             )
+//RS         })
+//RS     }
+//RS 
+//RS     fn jet_devserver_content_type_for(path: &Path) -> &'static str {
+//RS         match path.extension().and_then(|e| e.to_str()) {
+//RS             Some("html") => "text/html; charset=utf-8",
+//RS             Some("js") => "application/javascript; charset=utf-8",
+//RS             Some("wasm") => "application/wasm",
+//RS             Some("json") => "application/json; charset=utf-8",
+//RS             Some("css") => "text/css; charset=utf-8",
+//RS             _ => "application/octet-stream",
+//RS         }
+//RS     }
+//RS 
+//RS     fn jet_devserver_live_reload_script() -> String {
+//RS         format!(
+//RS             r#"<script>
+//RS (function () {{
+//RS   var jetDevVersion = null;
+//RS   setInterval(function () {{
+//RS     fetch("/__jet_dev_version", {{ cache: "no-store" }})
+//RS       .then(function (r) {{ return r.text(); }})
+//RS       .then(function (v) {{
+//RS         if (jetDevVersion === null) {{ jetDevVersion = v; return; }}
+//RS         if (v !== jetDevVersion) {{ location.reload(); }}
+//RS       }})
+//RS       .catch(function () {{}});
+//RS   }}, {poll_ms});
+//RS }})();
+//RS </script>
+//RS "#,
+//RS             poll_ms = JET_DEVSERVER_LIVE_RELOAD_POLL_MS
+//RS         )
+//RS     }
+//RS 
+//RS     fn jet_devserver_write_response(
+//RS         stream: &mut impl Write,
+//RS         status: &str,
+//RS         content_type: &str,
+//RS         body: &[u8],
+//RS     ) -> std::io::Result<()> {
+//RS         jet_devserver_write_response_parts(stream, status, content_type, &[body])
+//RS     }
+//RS 
+//RS     fn jet_devserver_write_response_parts(
+//RS         stream: &mut impl Write,
+//RS         status: &str,
+//RS         content_type: &str,
+//RS         parts: &[&[u8]],
+//RS     ) -> std::io::Result<()> {
+//RS         let body_len = parts.iter().try_fold(0usize, |total, part| {
+//RS             total.checked_add(part.len()).ok_or_else(|| {
+//RS                 std::io::Error::new(
+//RS                     std::io::ErrorKind::InvalidData,
+//RS                     "devserver response length overflow",
+//RS                 )
+//RS             })
+//RS         })?;
+//RS         if body_len > JET_DEVSERVER_MAX_RESPONSE_BYTES {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::InvalidData,
+//RS                 "devserver response exceeds the response budget",
+//RS             ));
+//RS         }
+//RS         let header = format!(
+//RS             "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+//RS             status,
+//RS             content_type,
+//RS             body_len
+//RS         );
+//RS         stream.write_all(header.as_bytes())?;
+//RS         for part in parts {
+//RS             stream.write_all(part)?;
+//RS         }
+//RS         stream.flush()
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_devserver_html(server: &JetDevServer, path: String) -> JetDevServer {
+//RS     server.html(path)
+//RS }
+//RS 
+//RS pub fn jet_devserver_port(server: &JetDevServer, port: i64) -> JetDevServer {
+//RS     server.port(port)
+//RS }
+//RS 
+//RS pub fn jet_devserver_serve(server: &JetDevServer) {
+//RS     server.serve()
+//RS }
+//RS 
+//RS pub use jet_devserver_impl::{
+//RS     jet_devserver_app, jet_devserver_for_app, JetDevServer,
+//RS };
+// END-PORT-PENDING 0175 crates/jet-codegen/src/Prelude/DevServer.rs:1798-2777
+

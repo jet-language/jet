@@ -1,0 +1,1795 @@
+// PORT-PENDING 1006 tests-comptime-core-pure-parity: tests/comptime_core_pure_parity.rs:1-1791
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! #392 Packet B: remaining deterministic Core constructors/codecs must run
+//RS //! through the public REPL/comptime path and agree with generated Rust.
+//RS 
+//RS use std::fs;
+//RS use std::process::Command;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS 
+//RS use jet::Interpreter::{dev_iteration, RunOutcome};
+//RS use jet::REPL::run_transcript;
+//RS 
+//RS mod common;
+//RS 
+//RS static SEQ: AtomicU64 = AtomicU64::new(0);
+//RS 
+//RS const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String bucket: String score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) -> \"{prefix}{row.team}\", (row) -> row.bucket, (row) -> row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
+//RS const PIVOT_EXPR: &str = "pivot_view()";
+//RS const CIVIL_FN: &str = "fn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+//RS const CIVIL_DECLS: &str = "use core.time as time\nuse core.time as date\nuse core.time as datetime\nfn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+//RS const CIVIL_EXPR: &str = "civil_view()";
+//RS const CIVIL_DEV_DECLS: &str = "use core.time as date\nuse core.time as datetime\nfn civil_dev_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+//RS const MEASUREMENT_FN: &str = "fn measurement_math() -> String {\n    a :: measurement(3.0, uncertainty: 4.0)\n    b :: measurement(0.0, uncertainty: 3.0)\n    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)\n    return \"{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+//RS const MEASUREMENT_DECLS: &str = MEASUREMENT_FN;
+//RS const MEASUREMENT_EXPR: &str = "measurement_math()";
+//RS const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) -> Measurement<Float> {
+//RS     hits += 1
+//RS     return measurement(1.0, uncertainty: 0.0)
+//RS }
+//RS fn add_argument_once_view() -> String {
+//RS     hits := 0
+//RS     measured :: measurement(2.0, uncertainty: 0.0)
+//RS     sum :: measured + counted_measurement(&hits)
+//RS     return "{sum.value()}|{hits}"
+//RS }"#;
+//RS const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
+//RS     i8 :: I8{ -12 }
+//RS     i16 :: I16{ -1234 }
+//RS     i32 :: I32{ -123456 }
+//RS     u8 :: U8{ 255 }
+//RS     u16 :: U16{ 1234 }
+//RS     u32 :: U32{ 123456 }
+//RS     u64 :: U64{ 123456789 }
+//RS     nan :: Float.parse("NaN") ?? 0.0
+//RS     infinity :: Float.parse("inf") ?? 0.0
+//RS     return "{"a@b@c".after("@")}|{"a@b@c".before("@")}|{"no-sep".after("@")}|{"no-sep".before("@")}|{"é🙂".bytes()}|{"aé🙂z".slice(1, 3)}|{nan.is_nan()}|{infinity.is_infinite()}|{1.0.is_finite()}|{i8.to_string()}|{i16.to_string()}|{i32.to_string()}|{u8.to_string()}|{u16.to_string()}|{u32.to_string()}|{u64.to_string()}"
+//RS }"#;
+//RS const SCALAR_EXPR: &str = "scalar_view()";
+//RS const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
+//RS const F32_MATH_DECLS: &str = r#"use core.math as math
+//RS fn f32_math_view() -> String {
+//RS     rounded :: F32{ 16777217.0 }
+//RS     max :: F32.MAX
+//RS     positive_overflow :: F32{ max + max }
+//RS     negative_overflow :: F32{ -max + -max }
+//RS     negative_zero :: F32{ -0.0 }
+//RS     nan :: F32.NAN
+//RS     root_input :: F32{ 2.0 }
+//RS     exponent :: F32{ 3.0 }
+//RS     low :: F32{ 1.0 }
+//RS     high :: F32{ 4.0 }
+//RS     t :: F32{ 0.25 }
+//RS     floor_input :: F32{ 1.75 }
+//RS     ceil_input :: F32{ 1.25 }
+//RS     wide :: 16777217.0
+//RS     wide_root :: 2.0
+//RS     return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{math.pow(root_input, exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(negative_zero)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
+//RS }"#;
+//RS const F32_MATH_EXPECTED: &str = "1266679808|1.4142135|8.0|1.0|2.0|0.9092974|0.5880026|3.6055512|1.75|1.0|4.0|2.0|2.0|true|true|true|true|0|2147483648|16777217.0|1.4142135623730951";
+//RS const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() -> String {
+//RS     return "{true.to_string()}|{false.to_string()}|{'e'.to_string()}|{'é'.to_string()}"
+//RS }"#;
+//RS const PRIMITIVE_INSTANCE_EXPECTED: &str = "true|false|e|é";
+//RS const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) -> U8 {
+//RS     return U8.from_int(value) ?? 0
+//RS }
+//RS fn bit_parameter(value: U8) -> Int {
+//RS     return (value).leading_zeros()
+//RS }
+//RS fn bit_inferred_local() -> Int {
+//RS     value := U8.from_int(13) ?? 0
+//RS     return value.leading_zeros()
+//RS }
+//RS fn integer_bit_queries_view() -> String {
+//RS     int :: -1
+//RS     i8 :: I8{ -2 }
+//RS     i16 :: I16{ -32768 }
+//RS     i32 :: I32{ 0 }
+//RS     u8 :: U8{ 13 }
+//RS     u16 :: U16{ 256 }
+//RS     u32 :: U32{ 2147483648 }
+//RS     u64 :: U64{ 255 }
+//RS     return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}|{bit_parameter(13)}|{bit_inferred_local()}"
+//RS }"#;
+//RS const INTEGER_BIT_QUERIES_EXPECTED: &str =
+//RS     "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4|4|4";
+//RS const BYTES_DECLS: &str = r#"fn bytes_view() -> String {
+//RS     buffer := Bytes.new()
+//RS     empty_before :: buffer.is_empty()
+//RS     buffer.write_u8(18)
+//RS     buffer.write_u16_le(13398)
+//RS     buffer.write_u16_be(30874)
+//RS     buffer.write_u32_le(16909060)
+//RS     buffer.write_u32_be(84281096)
+//RS     buffer.write_u64_le(72623859790382856)
+//RS     buffer.write_u64_be(1230066625199609624)
+//RS     buffer.write_bytes([9, 10])
+//RS     length :: buffer.len()
+//RS     bytes :: buffer.to_bytes()
+//RS     &buffer.clear()
+//RS     from := Bytes.from([255, 0])
+//RS     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
+//RS }"#;
+//RS const BYTES_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
+//RS const QUEUE_DECLS: &str = r#"fn queue_view() -> String {
+//RS     queue := Queue.new()
+//RS     empty_before :: queue.is_empty()
+//RS     missing_front :: queue.peek_front() ?? -1
+//RS     missing_back :: queue.peek_back() ?? -1
+//RS     &queue.push_back(2)
+//RS     &queue.push_front(1)
+//RS     &queue.push_back(3)
+//RS     length :: queue.len()
+//RS     front :: queue.peek_front() ?? -1
+//RS     back :: queue.peek_back() ?? -1
+//RS     popped_front :: &queue.pop_front() ?? -1
+//RS     popped_back :: &queue.pop_back() ?? -1
+//RS     remaining :: queue.peek_front() ?? -1
+//RS     &queue.clear()
+//RS     empty_pop :: &queue.pop_front() ?? -1
+//RS     return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{queue.is_empty()}|{queue.len()}|{empty_pop}"
+//RS }"#;
+//RS const QUEUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
+//RS const LRU_DECLS: &str = r#"fn lru_view() -> String {
+//RS     cache := Cache.new(2)
+//RS     empty_before :: cache.is_empty()
+//RS     first :: cache.add("a", 1) ?? -1
+//RS     added_b :: &cache.add_new("b", 2)
+//RS     duplicate_b :: &cache.add_new("b", 99)
+//RS     got_a :: cache.get("a") ?? -1
+//RS     displaced_a :: cache.add("a", 10) ?? -1
+//RS     evicted :: cache.add("c", 3) ?? -1
+//RS     keys :: cache.keys()
+//RS     removed_a :: cache.remove("a") ?? -1
+//RS     missing :: cache.remove("missing") ?? -1
+//RS     length :: cache.len()
+//RS     &cache.clear()
+//RS     zero := Cache.new(-2)
+//RS     zero_add :: zero.add("x", 7) ?? -1
+//RS     zero_add_new :: &zero.add_new("x", 7)
+//RS     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
+//RS }"#;
+//RS const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
+//RS const MAP_DECLS: &str = r#"fn add_map(values: &[String:Int], key: String, value: Int) -> Int {
+//RS     return values.add(key, value) ?? -1
+//RS }
+//RS fn counted_map(hits: &Int) -> [String:Int] {
+//RS     hits += 1
+//RS     return ["a": 1]
+//RS }
+//RS fn map_view() -> String {
+//RS     values := [String:Int]{ "b": 2, "a": 1 }
+//RS     empty_before :: values.is_empty()
+//RS     fresh_c :: values.add("c", 3) ?? -1
+//RS     displaced_b :: add_map(&values, "b", 20)
+//RS     added_d :: &values.add_new("d", 4)
+//RS     duplicate_a :: &values.add_new("a", 99)
+//RS     seen := [String]{}
+//RS     values.each((key, value) -> {
+//RS         assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
+//RS         &seen.push(key)
+//RS     })
+//RS     keys :: values.keys().to_list()
+//RS     entries :: values.values().to_list()
+//RS     got_a :: values.get("a") ?? -1
+//RS     has_a :: values.has_key("a")
+//RS     has_z :: values.has_key("z")
+//RS     removed_c :: values.remove("c") ?? -1
+//RS     length :: values.len()
+//RS     &values.clear()
+//RS     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
+//RS }"#;
+//RS const MAP_EXPECTED: &str =
+//RS     "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
+//RS const POOL_DECLS: &str = r#"fn pool_view() -> String {
+//RS     pool := Pool<String>.new()
+//RS     first :: pool.add("first")
+//RS     second :: pool.add("second")
+//RS     initial :: pool.ids()
+//RS     removed :: pool.remove(first) ?? "missing"
+//RS     stale_remove :: pool.remove(first) ?? "stale"
+//RS     replacement :: pool.add("third")
+//RS     live :: pool.ids()
+//RS     replacement_value :: pool.remove(replacement) ?? "missing"
+//RS     second_value :: pool.remove(second) ?? "missing"
+//RS     return "{removed}|{stale_remove}|{initial.len()}|{initial[0] == first}|{initial[1] == second}|{replacement == first}|{live.len()}|{live[0] == replacement}|{live[1] == second}|{replacement_value}|{second_value}|{pool.ids().len()}"
+//RS }"#;
+//RS const POOL_EXPECTED: &str = "first|stale|2|true|true|false|2|true|true|third|second|0";
+//RS const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
+//RS     values := [1, 2, 3, 4]
+//RS     each_seen := [Int]{}
+//RS     shadow := 99
+//RS     values.each((shadow: Int) -> { &each_seen.push(shadow) })
+//RS     predicate_seen := Set.from([0])
+//RS     has_three :: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
+//RS     fold_seen := [Int:Int]{ 0: 0 }
+//RS     total :: values.fold(0, (acc: Int, n: Int) -> fold_seen.add(n, n) ?? (acc + n))
+//RS     partition_seen := Set.from([0])
+//RS     partition_shadow := 88
+//RS     split :: values.partition((partition_shadow: Int) -> partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
+//RS     return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values().to_list()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
+//RS }"#;
+//RS const INLINE_HOF_EXPECTED: &str =
+//RS     "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10|88|5:true:true:true:true|[1, 3]|[2, 4]";
+//RS const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() -> String {
+//RS     receiver_hits := 0
+//RS     found :: counted_map(&receiver_hits).has_key("a")
+//RS     return "{found}|{receiver_hits}"
+//RS }"#;
+//RS const RNG_DECLS: &str = r#"use core.math.random as random
+//RS fn rng_view() -> String {
+//RS     rng := random.rng(99)
+//RS     items := ["a", "b", "c", "d"]
+//RS     weights := [1.0, 2.0, 3.0, 4.0]
+//RS     deck := [1, 2, 3, 4, 5]
+//RS     int_draw :: rng.int(1, 100)
+//RS     float_draw :: rng.float()
+//RS     range_draw :: rng.float_range(-2.0, 2.0)
+//RS     coin :: rng.bool()
+//RS     chance :: rng.bool(0.25)
+//RS     normal :: rng.normal(1.0, 2.0)
+//RS     exponential :: rng.exponential(1.5)
+//RS     bytes :: rng.bytes(4)
+//RS     picked :: rng.pick(items) ?? "none"
+//RS     weighted :: rng.weighted_pick(items, weights) ?? "none"
+//RS     sample :: rng.sample(items, 2)
+//RS     rng.shuffle(&deck)
+//RS     child := rng.split()
+//RS     child_draw :: child.int(1, 100)
+//RS     after_split :: rng.int(1, 100)
+//RS     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
+//RS }"#;
+//RS const RNG_EXPECTED: &str = "27|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[a, d]|[4, 3, 1, 5, 2]|45|6";
+//RS const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() -> String {
+//RS     first := testing.fake_rng(99)
+//RS     second := testing.fake_rng(99)
+//RS     return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
+//RS }"#;
+//RS const TESTING_FAKE_RNG_EXPECTED: &str = "27|27|0.0316577610861849|0.0316577610861849";
+//RS const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
+//RS     clock := testing.fake_clock(42)
+//RS     canonical := Clock.new(42)
+//RS     initial :: clock.now()
+//RS     ticked :: &clock.tick(8)
+//RS     after_tick :: clock.now()
+//RS     advanced :: &clock.advance(100)
+//RS     after_advance :: clock.now()
+//RS     duration :: Duration.milliseconds(25) ?? panic("duration")
+//RS     waited :: clock.wait(duration)
+//RS     canonical_ticked :: &canonical.tick(8)
+//RS     return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
+//RS }"#;
+//RS const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
+//RS const TESTING_FAKE_CLOCK_WRITEBACK_DECLS: &str = r#"struct ClockHolder { clock: Clock }
+//RS fn drive(clock: &Clock) -> String {
+//RS     ticked :: &clock.tick(1)
+//RS     advanced :: &clock.advance(10)
+//RS     duration :: Duration.milliseconds(2) ?? panic("duration")
+//RS     waited :: clock.wait(duration)
+//RS     return "{ticked}|{advanced}|{waited}|{clock.now()}"
+//RS }
+//RS fn counted_clock(hits: &Int) -> Clock {
+//RS     hits += 1
+//RS     return testing.fake_clock(7)
+//RS }
+//RS fn testing_fake_clock_writeback_view() -> String {
+//RS     clock := testing.fake_clock(5)
+//RS     borrowed :: drive(&clock)
+//RS     holder := ClockHolder{ clock: testing.fake_clock(5) }
+//RS     field_tick :: &holder.clock.tick(2)
+//RS     field_now :: holder.clock.now()
+//RS     receiver_hits := 0
+//RS     counted_now :: counted_clock(&receiver_hits).now()
+//RS     return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
+//RS }"#;
+//RS const TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED: &str = "6|10|12|12|12;7|7|7|1";
+//RS const BITS_DECLS: &str = r#"fn add_bit(values: &Bits, bit: Int) -> Bool {
+//RS     return values.add(bit)
+//RS }
+//RS fn bits_view() -> String {
+//RS     bits := Bits.new()
+//RS     empty_before :: bits.is_empty()
+//RS     negative_added :: bits.add(-1)
+//RS     added_four :: bits.add(4)
+//RS     added_one :: bits.add(1)
+//RS     duplicate_four :: bits.add(4)
+//RS     param_added :: add_bit(&bits, 9)
+//RS     before_remove :: bits.to_list()
+//RS     count_before :: bits.count()
+//RS     len_before :: bits.len()
+//RS     has_four :: bits.has(4)
+//RS     bits.remove(4)
+//RS     bits.remove(-1)
+//RS     after_remove :: bits.to_list()
+//RS     &bits.clear()
+//RS     return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
+//RS }"#;
+//RS const BITS_EXPECTED: &str =
+//RS     "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
+//RS const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
+//RS     &values.push(value)
+//RS }
+//RS fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
+//RS     hits += 1
+//RS     return PriorityQueue.from([2, 6])
+//RS }
+//RS fn priority_queue_view() -> String {
+//RS     values := PriorityQueue.from([4, 1, 7, 3, 7])
+//RS     initial_len :: values.len()
+//RS     initial_empty :: values.is_empty()
+//RS     initial_peek :: values.peek() ?? -1
+//RS     initial_sorted :: values.to_sorted_list()
+//RS     &values.push(5)
+//RS     push_priority(&values, 9)
+//RS     after_push :: values.to_sorted_list()
+//RS     after_push_len :: values.len()
+//RS     popped_nine :: &values.pop() ?? -1
+//RS     popped_seven :: &values.pop() ?? -1
+//RS     after_pop :: values.to_sorted_list()
+//RS     words := PriorityQueue.from(["a", "z", "m"])
+//RS     empty := PriorityQueue.new()
+//RS     receiver_hits := 0
+//RS     counted_values := counted_priority(&receiver_hits)
+//RS     counted_peek :: counted_values.peek() ?? -1
+//RS     &counted_values.push(8)
+//RS     &values.clear()
+//RS     return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
+//RS }"#;
+//RS const PRIORITY_QUEUE_EXPECTED: &str = "5|false|7|[7, 7, 4, 3, 1]|[9, 7, 7, 5, 4, 3, 1]|7|9|7|[7, 5, 4, 3, 1]|z|[z, m, a]|true|0|-1|-1|6|[8, 6, 2]|1";
+//RS const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() -> String {
+//RS     receiver_hits := 0
+//RS     value :: counted_priority(&receiver_hits).peek() ?? -1
+//RS     return "{value}|{receiver_hits}"
+//RS }"#;
+//RS const SET_DECLS: &str = r#"fn set_view() -> String {
+//RS     values := Set.from([3, 1, 2, 3])
+//RS     initial := values.to_list()
+//RS     &initial.sort()
+//RS     initial_len :: values.len()
+//RS     initial_empty :: values.is_empty()
+//RS     had_two :: values.has(2)
+//RS     added_four :: values.add(4)
+//RS     duplicate_two :: values.add(2)
+//RS     values.remove(2)
+//RS     has_two :: values.has(2)
+//RS     current := values.to_list()
+//RS     &current.sort()
+//RS     other := Set.from([5, 4, 0])
+//RS     combined_values :: values.union(other)
+//RS     combined := combined_values.to_list()
+//RS     &combined.sort()
+//RS     after_union := values.to_list()
+//RS     &after_union.sort()
+//RS     words := Set.from(["z", "a", "m", "a"])
+//RS     word_list := words.to_list()
+//RS     &word_list.sort()
+//RS     additional := Set.from([9, 7])
+//RS     additional_added :: additional.add(8)
+//RS     additional_list := additional.to_list()
+//RS     &additional_list.sort()
+//RS     &values.clear()
+//RS     cleared_list := values.to_list()
+//RS     &cleared_list.sort()
+//RS     return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
+//RS }"#;
+//RS const SET_EXPECTED: &str = "[1, 2, 3]|3|false|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|[]";
+//RS const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) -> Bool {
+//RS     return values.add(value)
+//RS }
+//RS fn counted_set(hits: &Int) -> Set<Int> {
+//RS     hits += 1
+//RS     return Set.from([2, 6])
+//RS }
+//RS fn set_call_receiver_view() -> String {
+//RS     values := Set.from([9, 7])
+//RS     added :: add_set(&values, 8)
+//RS     receiver_hits := 0
+//RS     value :: counted_set(&receiver_hits).has(6)
+//RS     return "{added}|{values.has(8)}|{value}|{receiver_hits}"
+//RS }"#;
+//RS const TALLY_DECLS: &str = r#"enum TallyToken {
+//RS     Red
+//RS     Blue
+//RS }
+//RS fn add_bag(values: &Tally<Int>, value: Int) -> Bool {
+//RS     return values.add(value)
+//RS }
+//RS fn counted_bag(hits: &Int) -> Tally<Int> {
+//RS     hits += 1
+//RS     values := Tally<Int>.new()
+//RS     values.add(6)
+//RS     return values
+//RS }
+//RS fn bag_view() -> String {
+//RS     values := Tally<Int>.new()
+//RS     empty_before :: values.is_empty()
+//RS     added_four :: values.add(4)
+//RS     duplicate_four :: values.add(4)
+//RS     added_two :: add_bag(&values, 2)
+//RS     length_before :: values.len()
+//RS     count_four_before :: values.count(4)
+//RS     has_two :: values.has(2)
+//RS     any_large :: values.any((value) -> value > 3)
+//RS     any_negative :: values.any((value) -> value < 0)
+//RS     values.remove(4)
+//RS     count_four_after_one :: values.count(4)
+//RS     values.remove(4)
+//RS     values.remove(99)
+//RS     words := Tally<String>.new()
+//RS     words.add("a")
+//RS     words.add("z")
+//RS     words.add("a")
+//RS     tokens := Tally<TallyToken>.new()
+//RS     tokens.add(TallyToken.Red)
+//RS     tokens.add(TallyToken.Red)
+//RS     empty := Tally<Int>.new()
+//RS     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) -> value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) -> value == 0)}"
+//RS }"#;
+//RS const TALLY_EXPECTED: &str =
+//RS     "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
+//RS const TALLY_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() -> String {
+//RS     receiver_hits := 0
+//RS     count :: counted_bag(&receiver_hits).count(6)
+//RS     return "{count}|{receiver_hits}"
+//RS }"#;
+//RS const RANK_DECLS: &str = r#"fn add_through_param(values: &Rank<Int>, value: Int) -> Bool {
+//RS     return values.add(value)
+//RS }
+//RS fn rank_view() -> String {
+//RS     values := Rank.from([3, 1, 2, 3])
+//RS     initial :: values.to_list()
+//RS     initial_len :: values.len()
+//RS     initial_empty :: values.is_empty()
+//RS     first :: values.first() ?? -1
+//RS     last :: values.last() ?? -1
+//RS     had_two :: values.has(2)
+//RS     added_four :: values.add(4)
+//RS     duplicate_two :: values.add(2)
+//RS     values.remove(2)
+//RS     has_two :: values.has(2)
+//RS     current :: values.to_list()
+//RS     other := Rank.from([5, 4, 0])
+//RS     combined :: values.union(other).to_list()
+//RS     after_union :: values.to_list()
+//RS     words := Rank.from(["z", "a", "m", "a"])
+//RS     through_param := Rank.from([9, 7])
+//RS     param_added :: add_through_param(&through_param, 8)
+//RS     &values.clear()
+//RS     empty := Rank.new()
+//RS     return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
+//RS }"#;
+//RS const RANK_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
+//RS const RANK_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: Rank<Int> }
+//RS fn rank_field_view() -> String {
+//RS     values := Rank.from([9, 7])
+//RS     holder := SortedSetHolder{ values: values }
+//RS     added :: holder.values.add(8)
+//RS     return "{added}|{holder.values.to_list()}"
+//RS }"#;
+//RS const RANK_FIELD_EXPECTED: &str = "true|[7, 8, 9]";
+//RS 
+//RS fn exact_values(inputs: &[&str]) -> Vec<String> {
+//RS     // Product compiler entry points use the sized compiler stack. Keep this
+//RS     // in-process transcript harness on the same boundary instead of relying on
+//RS     // the test runner's much smaller platform-default worker stack.
+//RS     let output = std::thread::scope(|scope| {
+//RS         std::thread::Builder::new()
+//RS             .name("comptime-core-pure-transcript".into())
+//RS             .stack_size(64 * 1024 * 1024)
+//RS             .spawn_scoped(scope, || run_transcript(inputs, None))
+//RS             .expect("spawn transcript compiler stack")
+//RS             .join()
+//RS             .expect("transcript compiler stack panicked")
+//RS     });
+//RS     assert!(!output.contains("error ["), "transcript failed:\n{output}");
+//RS     output
+//RS         .lines()
+//RS         .filter(|line| line.contains(" : "))
+//RS         .map(str::to_string)
+//RS         .collect()
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_remaining_core_pure_families() {
+//RS     let values = exact_values(&[
+//RS         "use core.net.mime as mime",
+//RS         "use core.time as time",
+//RS         "use core.time as date",
+//RS         "use core.time as datetime",
+//RS         "mime.from_extension(\".PNG\") ?? \"none\"",
+//RS         "mime.extension(\"Text/HTML; charset=UTF-8\") ?? \"none\"",
+//RS         "mime.parse(\"Text/HTML; charset=UTF-8\")",
+//RS         "time.period(1, 2, 3)",
+//RS         "time.period_days(4)",
+//RS         "time.period_months(5)",
+//RS         "time.period_years(6)",
+//RS         "time.parse_time(\"23:59:58\")",
+//RS         "time.parse_rfc3339(\"2024-02-29T12:34:56+02:30\")",
+//RS         "(500ms + 250ms).in(.Milliseconds)",
+//RS         "2s.in(.Milliseconds)",
+//RS         "date.new(2024, 13, 40)",
+//RS         "date.parse(\"2024-02-29\")",
+//RS         "datetime.from_timestamp(-1)",
+//RS         "time.from_unix_ms(-1)",
+//RS         "measurement(12.5, uncertainty: 0.25).value()",
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [
+//RS             "\"image/png\" : String",
+//RS             "\"html\" : String",
+//RS             "Mime(top: text, sub: html, params: [[charset, UTF-8]]) : Result",
+//RS             "Period(years: 1, months: 2, days: 3) : Period",
+//RS             "Period(years: 0, months: 0, days: 4) : Period",
+//RS             "Period(years: 0, months: 5, days: 0) : Period",
+//RS             "Period(years: 6, months: 0, days: 0) : Period",
+//RS             "LocalTime(hour: 23, minute: 59, second: 58) : Result",
+//RS             "DateTime(secs: 1709201096) : Result",
+//RS             "750 : Int",
+//RS             "2000 : Int",
+//RS             "LocalDate(year: 2024, month: 12, day: 31) : LocalDate",
+//RS             "LocalDate(year: 2024, month: 2, day: 29) : Result",
+//RS             "DateTime(secs: -1) : DateTime",
+//RS             "DateTime(secs: -1) : DateTime",
+//RS             "12.5 : Float",
+//RS         ]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_integer_bit_queries_exactly() {
+//RS     let values = exact_values(&[INTEGER_BIT_QUERIES_DECLS, "integer_bit_queries_view()"]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [format!("\"{INTEGER_BIT_QUERIES_EXPECTED}\" : String")]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn primitive_static_stringification_is_rejected_by_sema() {
+//RS     let source = r#"fn run() {
+//RS     print(Bool.to_string())
+//RS     print(Char.to_string())
+//RS }"#;
+//RS     let diagnostics = jet::compile(source)
+//RS         .expect_err("primitive stringification belongs to values, not static type names");
+//RS     assert_eq!(
+//RS         diagnostics
+//RS             .iter()
+//RS             .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.what.as_str()))
+//RS             .collect::<Vec<_>>(),
+//RS         [
+//RS             ("E0102", "`Bool` has no static method `to_string`"),
+//RS             ("E0102", "`Char` has no static method `to_string`"),
+//RS         ]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_keeps_checked_types_in_imported_functions() {
+//RS     let values = exact_values(&[
+//RS         "use core.math as math",
+//RS         r#"fn imported_g(x: U8) -> Int {
+//RS     y :: math.abs(-1.0)
+//RS     return (x).leading_zeros()
+//RS }"#,
+//RS         "imported_g(13)",
+//RS     ]);
+//RS     assert_eq!(values, ["4 : Int"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_composes_email_and_codecs_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.email as email",
+//RS         "use core.encoding.xml as xml",
+//RS         "sender :: email.address(\"Mara <mara@example.com>\") ?? panic(\"sender\")",
+//RS         "recipient :: email.address(\"ada@example.net\") ?? panic(\"recipient\")",
+//RS         "attachment :: email.attachment(\"note.txt\", \"Text/Plain\", [104, 105]) ?? panic(\"attachment\")",
+//RS         "message :: email.message(sender, [recipient], [Address]{}, \"Hello\", \"body\", HTML{\"\"}, [attachment]) ?? panic(\"message\")",
+//RS         "email.envelope(sender, [recipient])",
+//RS         "fn serialized(message: Message) -> Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
+//RS         "serialized(message)",
+//RS         "xml.canonical(xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\"), xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")",
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [
+//RS             "Envelope(from: Address(display: Mara, mailbox: mara@example.com), recipients: [Address(display: null, mailbox: ada@example.net)]) : Result",
+//RS             "true : Bool",
+//RS             "\"<r a=\"1\" b=\"2\"><x></x></r>\" : String",
+//RS         ]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.time as time",
+//RS         "use core.time as date",
+//RS         "use core.time as datetime",
+//RS         CIVIL_FN,
+//RS         CIVIL_EXPR,
+//RS         MEASUREMENT_FN,
+//RS         MEASUREMENT_EXPR,
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [
+//RS             "\"2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0\" : String",
+//RS             "\"3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0\" : String",
+//RS         ]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_evaluates_pure_add_arguments_once() {
+//RS     let values = exact_values(&[ADD_ARGUMENT_ONCE_DECLS, "add_argument_once_view()"]);
+//RS     assert_eq!(values, ["\"3.0|1\" : String"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_lru_methods_exactly() {
+//RS     let values = exact_values(&[LRU_DECLS, "lru_view()"]);
+//RS     assert_eq!(values, [format!("\"{LRU_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_map_methods_exactly() {
+//RS     let values = exact_values(&[MAP_DECLS, "map_view()"]);
+//RS     assert_eq!(values, [format!("\"{MAP_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_preserves_sequential_inline_hof_mutations_exactly() {
+//RS     let values = exact_values(&[INLINE_HOF_DECLS, "inline_hof_view()"]);
+//RS     assert_eq!(values, [format!("\"{INLINE_HOF_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_comptime_only_evaluates_map_call_receiver_once() {
+//RS     let values = exact_values(&[
+//RS         MAP_DECLS,
+//RS         MAP_CALL_RECEIVER_DECLS,
+//RS         "map_call_receiver_view()",
+//RS     ]);
+//RS     assert_eq!(values, ["\"true|1\" : String"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_queue_methods_exactly() {
+//RS     let values = exact_values(&[QUEUE_DECLS, "queue_view()"]);
+//RS     assert_eq!(values, [format!("\"{QUEUE_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_bits_methods_exactly() {
+//RS     let values = exact_values(&[BITS_DECLS, "bits_view()"]);
+//RS     assert_eq!(values, [format!("\"{BITS_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_testing_fake_rng_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.testing as testing",
+//RS         TESTING_FAKE_RNG_FN,
+//RS         "testing_fake_rng_view()",
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [format!("\"{TESTING_FAKE_RNG_EXPECTED}\" : String")]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_testing_fake_clock_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.testing as testing",
+//RS         "use core.time as time",
+//RS         TESTING_FAKE_CLOCK_FN,
+//RS         "testing_fake_clock_view()",
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [format!("\"{TESTING_FAKE_CLOCK_EXPECTED}\" : String")]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_testing_fake_clock_writeback_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.testing as testing",
+//RS         TESTING_FAKE_CLOCK_WRITEBACK_DECLS,
+//RS         "testing_fake_clock_writeback_view()",
+//RS     ]);
+//RS     assert_eq!(
+//RS         values,
+//RS         [format!(
+//RS             "\"{TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED}\" : String"
+//RS         )]
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_priority_queue_methods_exactly() {
+//RS     let values = exact_values(&[PRIORITY_QUEUE_DECLS, "priority_queue_view()"]);
+//RS     assert_eq!(values, [format!("\"{PRIORITY_QUEUE_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once() {
+//RS     // The public comptime/REPL evaluator supports this read-only call receiver
+//RS     // exactly once. TIR/AOT currently rejects the same nested receiver shape.
+//RS     let values = exact_values(&[
+//RS         PRIORITY_QUEUE_DECLS,
+//RS         PRIORITY_QUEUE_CALL_RECEIVER_DECLS,
+//RS         "priority_queue_call_receiver_view()",
+//RS     ]);
+//RS     assert_eq!(values, ["\"6|1\" : String"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_set_methods_exactly() {
+//RS     let values = exact_values(&[SET_DECLS, "set_view()"]);
+//RS     assert_eq!(values, [format!("\"{SET_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_comptime_only_evaluates_set_call_receiver_once() {
+//RS     // Raw Set.to_list order is intentionally unspecified. This direct read-only
+//RS     // call receiver instead proves exact public comptime evaluation count.
+//RS     let values = exact_values(&[
+//RS         SET_DECLS,
+//RS         SET_CALL_RECEIVER_DECLS,
+//RS         "set_call_receiver_view()",
+//RS     ]);
+//RS     assert_eq!(values, ["\"true|true|true|1\" : String"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_bag_methods_exactly() {
+//RS     let values = exact_values(&[TALLY_DECLS, "bag_view()"]);
+//RS     assert_eq!(values, [format!("\"{TALLY_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_comptime_only_evaluates_bag_call_receiver_once() {
+//RS     // The public comptime/REPL path supports this direct call receiver. TIR/AOT
+//RS     // retains the existing nested-receiver boundary in method_calls.rs.
+//RS     let values = exact_values(&[
+//RS         TALLY_DECLS,
+//RS         TALLY_CALL_RECEIVER_DECLS,
+//RS         "bag_call_receiver_view()",
+//RS     ]);
+//RS     assert_eq!(values, ["\"1|1\" : String"]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_rank_methods_exactly() {
+//RS     let values = exact_values(&[RANK_DECLS, "rank_view()"]);
+//RS     assert_eq!(values, [format!("\"{RANK_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_rank_field_writeback_exactly() {
+//RS     // Direct field receivers work in the public comptime path. Generated-Rust
+//RS     // lowering for this source shape remains a pre-existing TIR boundary.
+//RS     let values = exact_values(&[RANK_FIELD_DECLS, "rank_field_view()"]);
+//RS     assert_eq!(values, [format!("\"{RANK_FIELD_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS fn parity_source(expression: &str, imports: &str) -> String {
+//RS     format!(
+//RS         "{imports}\nEXPECTED :: prep {{ {expression} }}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{EXPECTED}}\")\n    print(\"{{actual}}\")\n}}\n"
+//RS     )
+//RS }
+//RS 
+//RS fn rustc_aot_stdout(label: &str, source: &str) -> String {
+//RS     assert!(common::have_rustc(), "{label} requires rustc");
+//RS     let compiled = jet::Driver::compile_generated_src(
+//RS         source,
+//RS         "comptime_core_pure_parity.jet",
+//RS         jet::Sema::CompileMode::Run,
+//RS     )
+//RS     .unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "{label} front-end failure:\n{}",
+//RS             jet::render_diagnostics("comptime_core_pure_parity.jet", source, &diags)
+//RS         )
+//RS     });
+//RS     let id = SEQ.fetch_add(1, Ordering::Relaxed);
+//RS     let dir = common::unique_tmp(&format!("jet_core_pure_{id}"));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let rust = dir.join("main.rs");
+//RS     let binary = dir.join("main");
+//RS     fs::write(&rust, &compiled.rust).unwrap();
+//RS     let mut rustc = Command::new("rustc");
+//RS     rustc
+//RS         .args(["--edition", "2021"])
+//RS         .arg(&rust)
+//RS         .arg("-o")
+//RS         .arg(&binary);
+//RS     if let Some(link) = &compiled.ffi {
+//RS         rustc
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for directory in link
+//RS             .dependency_dirs()
+//RS             .filter(|directory| directory.is_dir())
+//RS         {
+//RS             rustc
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", directory.display()));
+//RS         }
+//RS     }
+//RS     let built = rustc.output().unwrap();
+//RS     assert!(
+//RS         built.status.success(),
+//RS         "rustc rejected {label}:\n{}",
+//RS         String::from_utf8_lossy(&built.stderr)
+//RS     );
+//RS     let run = Command::new(binary).output().unwrap();
+//RS     assert!(run.status.success(), "{label} runtime failed");
+//RS     String::from_utf8(run.stdout).unwrap()
+//RS }
+//RS 
+//RS fn check_aot_comptime(label: &str, source: &str) -> String {
+//RS     let output = rustc_aot_stdout(label, source);
+//RS     let lines = output.lines().collect::<Vec<_>>();
+//RS     assert_eq!(
+//RS         lines.len(),
+//RS         2,
+//RS         "{label} emitted unexpected output: {lines:?}"
+//RS     );
+//RS     assert_eq!(lines[0], lines[1], "{label} comptime/AOT divergence");
+//RS     lines[0].to_string()
+//RS }
+//RS 
+//RS fn check_dev_tiers(label: &str, source: &str, expected: &str) {
+//RS     check_dev_tiers_with_boundary(label, source, expected, false);
+//RS }
+//RS 
+//RS fn check_dev_tiers_with_boundary(
+//RS     label: &str,
+//RS     source: &str,
+//RS     expected: &str,
+//RS     force_interpreter: bool,
+//RS ) {
+//RS     check_dev_tier_output(
+//RS         label,
+//RS         source,
+//RS         &format!("{expected}\n{expected}\n"),
+//RS         force_interpreter,
+//RS     );
+//RS }
+//RS 
+//RS fn check_dev_tier_output(label: &str, source: &str, expected: &str, force_interpreter: bool) {
+//RS     let id = SEQ.fetch_add(1, Ordering::Relaxed);
+//RS     let dir = common::unique_tmp(&format!("jet_core_pure_dev_{id}"));
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let path = dir.join(format!("{label}.jet"));
+//RS     fs::write(&path, source).unwrap();
+//RS     let path = path.to_string_lossy();
+//RS     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
+//RS         match dev_iteration(
+//RS             &path,
+//RS             force_interpreter && interpreter_only,
+//RS             interpreter_only,
+//RS         ) {
+//RS             RunOutcome::Ran {
+//RS                 stdout,
+//RS                 stderr,
+//RS                 exit_code,
+//RS             } => {
+//RS                 assert_eq!(exit_code, 0, "{label} {tier} exit");
+//RS                 assert_eq!(stderr, "", "{label} {tier} stderr");
+//RS                 assert_eq!(stdout, expected, "{label} {tier} stdout");
+//RS             }
+//RS             RunOutcome::Problems(diags) => panic!("{label} {tier} failed: {diags:?}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
+//RS     let cases = [
+//RS         (
+//RS             "option/string",
+//RS             parity_source("mime.extension(\"image/png\") ?? \"none\"", "use core.net.mime as mime"),
+//RS         ),
+//RS         (
+//RS             "result/bytes",
+//RS             parity_source(
+//RS                 "email_wire()",
+//RS                 "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() -> String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [Address]{}, \"s\", \"body\", HTML{\"\"}, [Attachment]{}) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "result/string",
+//RS             parity_source(
+//RS                 "xml_canonical()",
+//RS                 "use core.encoding.xml as xml\nfn xml_canonical() -> String {\n    tree :: xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\")\n    return xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "xml/float-shape-error",
+//RS             parity_source(
+//RS                 "xml_shape_reason(DataTree.Float(1.5))",
+//RS                 "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "mime/observable-methods",
+//RS             parity_source(
+//RS                 "mime_view()",
+//RS                 "use core.net.mime as mime\nfn mime_view() -> String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "date/observable-methods",
+//RS             parity_source(
+//RS                 "date_view()",
+//RS                 "use core.time as date\nfn date_view() -> String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "time/observable-methods",
+//RS             parity_source(
+//RS                 "time_view()",
+//RS                 "use core.time as time\nfn time_view() -> String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "measurement/observable-methods",
+//RS             parity_source(
+//RS                 "measurement_view()",
+//RS                 "fn measurement_view() -> String {\n    value :: measurement(12.5, uncertainty: 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+//RS             ),
+//RS         ),
+//RS     ];
+//RS     for (label, source) in cases {
+//RS         let _ = check_aot_comptime(label, &source);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn time_plane_comptime_matches_aot_and_dev_tiers() {
+//RS     let source = parity_source(
+//RS         "time_plane_view()",
+//RS         r#"use core.time as time
+//RS fn time_plane_view() -> String {
+//RS     wait :: 500ms
+//RS     origin :: time.instant()
+//RS     point :: origin + 5min
+//RS     delta :: point - origin
+//RS     speed :: 12meter / 2s
+//RS     return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}|{speed}"
+//RS }"#,
+//RS     );
+//RS     let expected = check_aot_comptime("time-plane-focused", &source);
+//RS     assert_eq!(expected, "500|5|6 meter/ns");
+//RS     check_dev_tiers("time-plane-focused", &source, &expected);
+//RS }
+//RS 
+//RS #[test]
+//RS fn registered_shared_kernel_edges_match_all_execution_tiers() {
+//RS     let cases = [
+//RS         (
+//RS             "mime-one-kernel",
+//RS             parity_source(
+//RS                 "mime_view()",
+//RS                 "use core.net.mime as mime\nfn mime_view() -> String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "email-one-kernel",
+//RS             parity_source(
+//RS                 "email_wire()",
+//RS                 "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() -> String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [Address]{}, \"s\", \"body\", HTML{\"\"}, [Attachment]{}) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "sketch-edge-kernel",
+//RS             parity_source(
+//RS                 "sketch_edges()",
+//RS                 r#"use core.data.sketch.hll as hll
+//RS use core.data.sketch.tdigest as tdigest
+//RS use core.data.sketch.cms as cms
+//RS use core.data.sketch.reservoir as reservoir
+//RS fn sketch_edges() -> String {
+//RS     cardinality := hll.new()
+//RS     empty_count :: cardinality.count()
+//RS     cardinality.add("same")
+//RS     cardinality.add("same")
+//RS     distribution := tdigest.new()
+//RS     empty_quantile :: distribution.quantile(0.5)
+//RS     distribution.add(-1.0)
+//RS     distribution.add(1.0)
+//RS     frequencies := cms.new()
+//RS     missing :: frequencies.count("missing")
+//RS     frequencies.add("seen")
+//RS     sample := reservoir.new(0)
+//RS     sample.add("first")
+//RS     sample.add("second")
+//RS     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
+//RS }"#,
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "time-duration-edge-kernel",
+//RS             parity_source(
+//RS                 "time_duration_edges()",
+//RS                 r#"use core.time as time
+//RS use core.time as date
+//RS fn time_duration_edges() -> String {
+//RS     clamped :: date.new(2023, 2, 31)
+//RS     leap_end :: date.new(2024, 1, 31).add_months(1)
+//RS     negative_time :: time.from_unix_ms(-1)
+//RS     fractional :: Duration.seconds(1.75) ?? panic("fractional duration")
+//RS     negative :: Duration.milliseconds(-1500) ?? panic("negative duration")
+//RS     left :: Duration.milliseconds(500) ?? panic("left")
+//RS     right :: Duration.milliseconds(1500) ?? panic("right")
+//RS     difference :: left.difference(right)
+//RS     zero :: Duration.nanoseconds(0) ?? panic("zero")
+//RS     return "{clamped.to_string()}|{leap_end.to_string()}|{negative_time.to_timestamp()}|{negative_time.to_unix_ms()}|{negative_time.format_rfc3339()}|{fractional.in(.Milliseconds) ?? panic("fractional read")}|{negative.in(.Seconds) ?? panic("negative read")}|{difference.in(.Milliseconds) ?? panic("difference read")}|{zero.is_zero()}"
+//RS                 }"#,
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "time-plane-literal-kernel",
+//RS             parity_source(
+//RS                 "time_plane_view()",
+//RS                 r#"use core.time as time
+//RS fn time_plane_view() -> String {
+//RS     wait :: 500ms
+//RS     origin :: time.instant()
+//RS     point :: origin + 5min
+//RS     delta :: point - origin
+//RS     speed :: 12meter / 2s
+//RS     return "{wait.in(.Milliseconds) ?? panic("wait")}|{delta.in(.Minutes) ?? panic("delta")}"
+//RS }"#,
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "xml-edge-kernel",
+//RS             parity_source(
+//RS                 "xml_edges()",
+//RS                 r#"use core.encoding.xml as xml
+//RS fn xml_edges() -> String {
+//RS     document :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
+//RS     root :: xml.root(document) ?? panic("root")
+//RS     root_name :: xml.expanded_name(root) ?? panic("root name")
+//RS     children :: xml.content(root) ?? panic("content")
+//RS     book_name :: xml.expanded_name(children[0]) ?? panic("book name")
+//RS     attribute :: xml.attribute(children[0], "id")
+//RS     id :: attribute ?? "missing"
+//RS     return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
+//RS }"#,
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "measurement-edge-kernel",
+//RS             parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS),
+//RS         ),
+//RS     ];
+//RS     for (label, source) in cases {
+//RS         let expected = check_aot_comptime(label, &source);
+//RS         if label == "sketch-edge-kernel" {
+//RS             assert_eq!(expected, "0|1|0.0|-1.0|1.0|0|1|1");
+//RS         }
+//RS         if label == "time-duration-edge-kernel" {
+//RS             assert_eq!(
+//RS                 expected,
+//RS                 "2023-02-28|2024-02-29|-1|-1|1969-12-31T23:59:59.999000000Z|1750|-1|-1000|true"
+//RS             );
+//RS         }
+//RS         if label == "time-plane-literal-kernel" {
+//RS             assert_eq!(expected, "500|5");
+//RS         }
+//RS         if label == "xml-edge-kernel" {
+//RS             assert_eq!(
+//RS                 expected,
+//RS                 "catalog|1|book|7|<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
+//RS             );
+//RS         }
+//RS         if label == "measurement-edge-kernel" {
+//RS             assert_eq!(expected, "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0");
+//RS         }
+//RS         check_dev_tiers(label, &source, &expected);
+//RS     }
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly() {
+//RS     let source = format!(
+//RS         "{INTEGER_BIT_QUERIES_DECLS}\nfn run() {{\n    print(\"{{integer_bit_queries_view()}}\")\n}}\n"
+//RS     );
+//RS     assert_eq!(
+//RS         rustc_aot_stdout("integer-bit-queries", &source),
+//RS         format!("{INTEGER_BIT_QUERIES_EXPECTED}\n")
+//RS     );
+//RS     check_dev_tier_output(
+//RS         "integer-bit-queries",
+//RS         &source,
+//RS         &format!("{INTEGER_BIT_QUERIES_EXPECTED}\n"),
+//RS         false,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_f32_math_is_native_width_across_comptime_and_dev() {
+//RS     let source = parity_source("f32_math_view()", F32_MATH_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("f32/native-width-math", &source),
+//RS         F32_MATH_EXPECTED
+//RS     );
+//RS     check_dev_tiers("f32-native-width-math", &source, F32_MATH_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_civil_and_measurement_methods_match_comptime_exactly() {
+//RS     let civil = "2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0";
+//RS     let measurement = "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0";
+//RS     let civil_source = parity_source(CIVIL_EXPR, CIVIL_DECLS);
+//RS     let civil_dev = "2|4|60|9|2024-03-01|2025-02-28|28|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|-60|0";
+//RS     let civil_dev_source = parity_source("civil_dev_view()", CIVIL_DEV_DECLS);
+//RS     let measurement_source = parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("civil/all-deterministic-methods", &civil_source),
+//RS         civil
+//RS     );
+//RS     assert_eq!(
+//RS         check_aot_comptime("measurement/arithmetic", &measurement_source),
+//RS         measurement
+//RS     );
+//RS     check_dev_tiers("civil", &civil_dev_source, civil_dev);
+//RS     check_dev_tiers("measurement", &measurement_source, measurement);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_datetime_and_measurement_display_are_exact() {
+//RS     assert_eq!(
+//RS         check_aot_comptime(
+//RS             "datetime/negative-unix-ms-display",
+//RS             &parity_source("time.from_unix_ms(-1).to_string()", "use core.time as time",),
+//RS         ),
+//RS         "1969-12-31 23:59:59 UTC"
+//RS     );
+//RS     assert_eq!(
+//RS         check_aot_comptime(
+//RS             "measurement/interpolation-display",
+//RS             "VALUE :: prep { measurement(12.5, uncertainty: 0.25) }\nEXPECTED :: prep { \"{VALUE}\" }\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(EXPECTED)\n    print(actual)\n}\n",
+//RS         ),
+//RS         "12.5 ± 0.25"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_pivot_sum_invokes_capturing_closures_exactly() {
+//RS     assert_eq!(
+//RS         check_aot_comptime(
+//RS             "data/pivot-sum-closures",
+//RS             &parity_source(PIVOT_EXPR, PIVOT_DECLS),
+//RS         ),
+//RS         "pA|x:2:4.0:2.0|pB|y:1:5.0:5.0"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_scalar_value_methods_match_all_execution_tiers_exactly() {
+//RS     let source = parity_source(SCALAR_EXPR, SCALAR_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("scalar/value-methods", &source),
+//RS         SCALAR_EXPECTED
+//RS     );
+//RS     check_dev_tiers("scalar", &source, SCALAR_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_primitive_instance_stringification_matches_all_execution_tiers_exactly() {
+//RS     let source = parity_source("primitive_instance_view()", PRIMITIVE_INSTANCE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("primitive-instance-stringification", &source),
+//RS         PRIMITIVE_INSTANCE_EXPECTED,
+//RS     );
+//RS     check_dev_tiers_with_boundary(
+//RS         "primitive-instance-stringification",
+//RS         &source,
+//RS         PRIMITIVE_INSTANCE_EXPECTED,
+//RS         true,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_bytes_matches_all_execution_tiers_exactly() {
+//RS     let source = parity_source("bytes_view()", BYTES_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("byte-buffer/all-methods", &source),
+//RS         BYTES_EXPECTED
+//RS     );
+//RS     check_dev_tiers("byte-buffer", &source, BYTES_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_lru_matches_all_execution_tiers_exactly() {
+//RS     let source = parity_source("lru_view()", LRU_DECLS);
+//RS     assert_eq!(check_aot_comptime("lru/all-methods", &source), LRU_EXPECTED);
+//RS     check_dev_tiers("lru", &source, LRU_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     let source = parity_source("map_view()", MAP_DECLS);
+//RS     assert_eq!(check_aot_comptime("map/all-methods", &source), MAP_EXPECTED);
+//RS     // Map remains outside the resident JIT subset: forced interpreter proves
+//RS     // its comptime execution, while default dev proves the normal AOT fallback.
+//RS     check_dev_tiers_with_boundary("map", &source, MAP_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_pool_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     let source = parity_source("pool_view()", POOL_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("pool/generations", &source),
+//RS         POOL_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("pool", &source, POOL_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+//RS ) {
+//RS     let source = parity_source("inline_hof_view()", INLINE_HOF_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("sequential-inline-hof/writeback", &source),
+//RS         INLINE_HOF_EXPECTED
+//RS     );
+//RS     // Mutable captures remain outside the resident JIT subset: force the
+//RS     // interpreter explicitly, then prove default dev's normal AOT fallback.
+//RS     check_dev_tiers_with_boundary("sequential-inline-hof", &source, INLINE_HOF_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_queue_matches_all_execution_tiers_exactly() {
+//RS     let source = parity_source("queue_view()", QUEUE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("queue/all-methods", &source),
+//RS         QUEUE_EXPECTED
+//RS     );
+//RS     check_dev_tiers("queue", &source, QUEUE_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     let source = parity_source("bits_view()", BITS_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("bit-set/all-methods", &source),
+//RS         BITS_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("bit-set", &source, BITS_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+//RS ) {
+//RS     // TIR currently rejects a nested call receiver before rustc. Materializing
+//RS     // that producer once into a named place proves the supported evaluation,
+//RS     // mutation, and caller-visible writeback path without hiding the boundary.
+//RS     let source = parity_source("priority_queue_view()", PRIORITY_QUEUE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("priority-queue/all-methods", &source),
+//RS         PRIORITY_QUEUE_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("priority-queue", &source, PRIORITY_QUEUE_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     // HashSet iteration order is unspecified, so the Jet source sorts lists
+//RS     // after to_list on both sides. Set-typed helper functions and nested call
+//RS     // receivers remain TIR boundaries and are covered by the transcript above.
+//RS     let source = parity_source("set_view()", SET_DECLS);
+//RS     assert_eq!(check_aot_comptime("set/all-methods", &source), SET_EXPECTED);
+//RS     check_dev_tiers_with_boundary("set", &source, SET_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     let source = parity_source("bag_view()", TALLY_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("tally/all-methods", &source),
+//RS         TALLY_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("tally", &source, TALLY_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+//RS     // Mutating a Rank returned directly by a call remains the existing
+//RS     // non-place receiver boundary. A named `&Rank` receiver proves one
+//RS     // mutating call result and its caller-visible writeback exactly.
+//RS     let source = parity_source("rank_view()", RANK_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("sorted-set/all-methods", &source),
+//RS         RANK_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("sorted-set", &source, RANK_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly() {
+//RS     let source = parity_source("rng_view()", RNG_DECLS);
+//RS     assert_eq!(check_aot_comptime("rng/all-methods", &source), RNG_EXPECTED);
+//RS     // Force the interpreter, then compare default dev's output with the same
+//RS     // expected bytes.
+//RS     check_dev_tiers_with_boundary("rng", &source, RNG_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_testing_fake_rng_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+//RS ) {
+//RS     let declarations = format!("use core.testing as testing\n{TESTING_FAKE_RNG_FN}");
+//RS     let source = parity_source("testing_fake_rng_view()", &declarations);
+//RS     assert_eq!(
+//RS         check_aot_comptime("testing/fake-rng", &source),
+//RS         TESTING_FAKE_RNG_EXPECTED
+//RS     );
+//RS     // Rng remains outside the resident JIT subset: force the interpreter,
+//RS     // then prove default dev's ordinary AOT fallback.
+//RS     check_dev_tiers_with_boundary("testing-fake-rng", &source, TESTING_FAKE_RNG_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+//RS ) {
+//RS     let declarations =
+//RS         format!("use core.testing as testing\nuse core.time as time\n{TESTING_FAKE_CLOCK_FN}");
+//RS     let source = parity_source("testing_fake_clock_view()", &declarations);
+//RS     assert_eq!(
+//RS         check_aot_comptime("testing/fake-clock", &source),
+//RS         TESTING_FAKE_CLOCK_EXPECTED
+//RS     );
+//RS     // Clock mutation remains outside the resident JIT subset: force the
+//RS     // interpreter, then prove default dev's ordinary AOT fallback.
+//RS     check_dev_tiers_with_boundary(
+//RS         "testing-fake-clock",
+//RS         &source,
+//RS         TESTING_FAKE_CLOCK_EXPECTED,
+//RS         true,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+//RS ) {
+//RS     let declarations = format!("use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}");
+//RS     let source = parity_source("testing_fake_clock_writeback_view()", &declarations);
+//RS     assert_eq!(
+//RS         check_aot_comptime("testing/fake-clock-writeback", &source),
+//RS         TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED
+//RS     );
+//RS     // Clock mutation remains outside the resident JIT subset: force the
+//RS     // interpreter, then prove default dev's ordinary AOT fallback.
+//RS     check_dev_tiers_with_boundary(
+//RS         "testing-fake-clock-writeback",
+//RS         &source,
+//RS         TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED,
+//RS         true,
+//RS     );
+//RS }
+//RS 
+//RS const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
+//RS     a :: Vec3(1.0, 2.0, 3.0)
+//RS     b :: Vec3(4.0, 5.0, 6.0)
+//RS     sum :: Vec3{ a + b }
+//RS     crossed :: Vec3{ a.cross(b) }
+//RS     scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+//RS     scaled :: Vec3{ scale * Vec3(1.0, 2.0, 3.0) }
+//RS     v :: F32x4(1.0, 2.0, 3.0, 4.0)
+//RS     w :: F32x4(10.0, 20.0, 30.0, 40.0)
+//RS     added :: F32x4{ v + w }
+//RS     d :: F64x2.from_array([1.5, 2.5])
+//RS     return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(.Max)}|{v.reduce(.Mul)}|{v.reduce(.Avg)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}|{d.reduce(.Avg)}"
+//RS }"#;
+//RS const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|2.5|[3.0, 5.0]|4.0|3.75|1.5|2.5|2.0";
+//RS const SIMD_WIDE_DECLS: &str = r#"fn simd_wide_view() -> String {
+//RS     wide32 :: F32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0)
+//RS     wide64 :: F64x4(1.5, 2.5, 3.5, 4.5)
+//RS     return "{(wide32 + wide32).to_array()}|{(wide64 * F64x4.splat(2.0)).to_array()}|{wide32.sum()}|{wide64.reduce(.Add)}"
+//RS }"#;
+//RS const SIMD_WIDE_EXPECTED: &str =
+//RS     "[2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0]|[3.0, 5.0, 7.0, 9.0]|36.0|12.0";
+//RS const SIMD_INSTANCE_DECLS: &str = r#"fn lane_sum(value: F32x8) -> Float {
+//RS     return value.sum()
+//RS }
+//RS fn simd_instance_view() -> String {
+//RS     return "retained"
+//RS }"#;
+//RS const SIMD_INSTANCE_EXPECTED: &str = "retained";
+//RS const SIMD_SCALAR_DECLS: &str = r#"#Scalar fn scalar_marker(value: Float) -> Float {
+//RS     total := 0.0
+//RS     loop i in 0..<4 {
+//RS         total += value
+//RS     }
+//RS     return total
+//RS }
+//RS fn simd_scalar_view() -> String {
+//RS     return "{scalar_marker(2.0)}"
+//RS }"#;
+//RS const SIMD_SCALAR_EXPECTED: &str = "8.0";
+//RS 
+//RS const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
+//RS     hi :: U8{ 200 }
+//RS     lo :: U8{ 100 }
+//RS     fallback :: U8{ 0 }
+//RS     wrapped :: wrapping(hi + lo)
+//RS     saturated :: saturating(hi + lo)
+//RS     checked_miss :: checked(hi + lo) ?? fallback
+//RS     scratch :: 1
+//RS     consume(scratch)
+//RS     return "{wrapped}|{saturated}|{checked_miss}"
+//RS }"#;
+//RS const OVERFLOW_EXPECTED: &str = "44|255|0";
+//RS const EXPECT_DECLS: &str = r#"fn expect_view() -> String {
+//RS     holder :: expect("ok")
+//RS     consume(holder)
+//RS     return "expect-ok"
+//RS }"#;
+//RS const EXPECT_EXPECTED: &str = "expect-ok";
+//RS 
+//RS #[test]
+//RS fn rustc_backed_linalg_simd_matches_all_execution_tiers_exactly() {
+//RS     // Linalg + SIMD tier matrix blows the default test thread stack under
+//RS     // debug builds (same class as pin/interpreter fixtures).
+//RS     std::thread::Builder::new()
+//RS         .name("linalg-simd-parity".into())
+//RS         .stack_size(8 * 1024 * 1024)
+//RS         .spawn(|| {
+//RS             let source = parity_source("linalg_view()", LINALG_DECLS);
+//RS             assert_eq!(
+//RS                 check_aot_comptime("linalg/simd-direct", &source),
+//RS                 LINALG_EXPECTED
+//RS             );
+//RS             check_dev_tiers("linalg-simd-direct", &source, LINALG_EXPECTED);
+//RS         })
+//RS         .expect("spawn linalg-simd-parity")
+//RS         .join()
+//RS         .expect("linalg-simd-parity thread");
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_wide_simd_matches_all_execution_tiers_exactly() {
+//RS     let source = parity_source("simd_wide_view()", SIMD_WIDE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("simd/wide-lanes", &source),
+//RS         SIMD_WIDE_EXPECTED
+//RS     );
+//RS     check_dev_tiers("simd-wide-lanes", &source, SIMD_WIDE_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_simd_instance_method_retains_math_prelude_across_tiers() {
+//RS     // The helper is unused at runtime, so its typed parameter and inferred
+//RS     // receiver method are the only reachability facts available to CoreUsage.
+//RS     let source = parity_source("simd_instance_view()", SIMD_INSTANCE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("simd/instance-method", &source),
+//RS         SIMD_INSTANCE_EXPECTED
+//RS     );
+//RS     check_dev_tiers("simd-instance-method", &source, SIMD_INSTANCE_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_scalar_marker_retains_barrier_prelude_across_tiers() {
+//RS     let source = parity_source("simd_scalar_view()", SIMD_SCALAR_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("simd/scalar-marker", &source),
+//RS         SIMD_SCALAR_EXPECTED
+//RS     );
+//RS     check_dev_tiers("simd-scalar-marker", &source, SIMD_SCALAR_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn rustc_backed_overflow_opt_and_consume_match_aot_comptime() {
+//RS     let source = parity_source("overflow_view()", OVERFLOW_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("overflow/opt-ins", &source),
+//RS         OVERFLOW_EXPECTED
+//RS     );
+//RS     check_dev_tiers("overflow-opt-ins", &source, OVERFLOW_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
+//RS     let values = exact_values(&[LINALG_DECLS, "linalg_view()"]);
+//RS     assert_eq!(values, [format!("\"{LINALG_EXPECTED}\" : String")]);
+//RS     let values = exact_values(&[OVERFLOW_DECLS, "overflow_view()"]);
+//RS     assert_eq!(values, [format!("\"{OVERFLOW_EXPECTED}\" : String")]);
+//RS     // `expect` is test-harness-shaped in AOT (JetExpect + snapshot); comptime
+//RS     // constructs the wrapper and `consume` discards it — prove via REPL only.
+//RS     let values = exact_values(&[EXPECT_DECLS, "expect_view()"]);
+//RS     assert_eq!(values, [format!("\"{EXPECT_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS const SOLVER_FN: &str = r#"fn solver_view() -> String {
+//RS     empty := solve.Solver.new(-1)
+//RS     ok_solver := solve.Solver.new(7)
+//RS     ok_solver.require(true)
+//RS     ok_solver.require(1 == 1)
+//RS     bad := solve.Solver.new(42)
+//RS     bad.require(true)
+//RS     bad.require(false)
+//RS     bad.require(false)
+//RS     bad.require(true)
+//RS     return "{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
+//RS }"#;
+//RS const SOLVER_DECLS: &str = "use core.compute.solve as solve\nfn solver_view() -> String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+//RS const SOLVER_EXPECTED: &str = "ok|0|ok|0|failed|2";
+//RS 
+//RS #[test]
+//RS fn registered_solver_edges_match_aot_comptime_and_dev_tiers() {
+//RS     let source = parity_source("solver_view()", SOLVER_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("solver/require-status", &source),
+//RS         SOLVER_EXPECTED
+//RS     );
+//RS     check_dev_tiers("solver-require-status", &source, SOLVER_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn public_transcript_covers_solver_exactly() {
+//RS     let values = exact_values(&[
+//RS         "use core.compute.solve as solve",
+//RS         SOLVER_FN,
+//RS         "solver_view()",
+//RS     ]);
+//RS     assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
+//RS }
+//RS 
+//RS const ARCHIVE_DECLS: &str = r#"use core.archive as archive
+//RS fn archive_view() -> String {
+//RS     bytes :: [U8]{ 72, 101, 108, 108, 111 }
+//RS     zipped :: archive.create("hello.txt", bytes) ?? [U8]{}
+//RS     empty :: [U8]{}
+//RS     tarred := archive.tar_add(empty, "hello.txt", bytes) ?? [U8]{}
+//RS     tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116]) ?? [U8]{}
+//RS     zip_bytes :: archive.zip_decompress(zipped) ?? [U8]{}
+//RS     tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt") ?? [U8]{}
+//RS     names_json :: archive.tar_names_json(tarred) ?? ""
+//RS     missing :: archive.tar_get(tarred, "missing") ?? [U8]{}
+//RS     return "{zip_bytes}|{tar_bytes}|{names_json}|{missing.len()}"
+//RS }"#;
+//RS const ARCHIVE_EXPECTED: &str =
+//RS     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
+//RS const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
+//RS fn invalid_tar_name_view(name: String) -> String {
+//RS     empty :: [U8]{}
+//RS     valid :: archive.tar_add(empty, "keep.txt", [1]) ?? [U8]{}
+//RS     refused :: if archive.tar_add(valid, name, [2]) == {
+//RS         .Ok(_) -> "accepted"
+//RS         .Err(_) -> "refused"
+//RS     }
+//RS     names_json :: archive.tar_names_json(valid) ?? ""
+//RS     kept :: archive.tar_get(valid, "keep.txt") ?? [U8]{}
+//RS     rejected :: archive.tar_get(valid, name) ?? [U8]{}
+//RS     return "{refused}|{names_json}|{kept}|{rejected}"
+//RS }"#;
+//RS const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "refused|[\"keep.txt\"]|[1]|[]";
+//RS 
+//RS #[test]
+//RS fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {
+//RS     let source = parity_source("archive_view()", ARCHIVE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("archive/all-pure-calls", &source),
+//RS         ARCHIVE_EXPECTED
+//RS     );
+//RS     check_dev_tiers("archive-all-pure-calls", &source, ARCHIVE_EXPECTED);
+//RS }
+//RS 
+//RS #[test]
+//RS fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter() {
+//RS     for (label, name) in [
+//RS         ("empty", "\"\""),
+//RS         ("parent", "\"../x\""),
+//RS         ("absolute", "\"/x\""),
+//RS     ] {
+//RS         let source = parity_source(
+//RS             &format!("invalid_tar_name_view({name})"),
+//RS             ARCHIVE_INVALID_TAR_NAME_DECLS,
+//RS         );
+//RS         assert_eq!(
+//RS             check_aot_comptime(&format!("archive/invalid-tar-name/{label}"), &source),
+//RS             ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+//RS         );
+//RS         check_dev_tiers_with_boundary(
+//RS             &format!("archive-invalid-tar-name-{label}"),
+//RS             &source,
+//RS             ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+//RS             true,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS const UI_DECLS: &str = r##"use core.ui as ui
+//RS fn ui_value_view() -> String {
+//RS     point :: ui.point(1.5, -2.0)
+//RS     size :: ui.size(80.0, 24.0)
+//RS     rect :: ui.rect(1.0, 2.0, 3.0, 4.0)
+//RS     constraint :: ui.constraint(0.0, 1.0, 80.0, 24.0)
+//RS     plain :: ui.node("plain", 5.0, 2.0)
+//RS     role :: ui.node_role("save", 8.0, 1.0, ui.aria_role_button())
+//RS     colored :: ui.node_color("blue", 4.0, 1.0, "#0000ff")
+//RS     row :: ui.box([ui.text("hi"), ui.button("Save")])
+//RS     return "{point.x}:{point.y}|{size.width}:{size.height}|{rect.width}:{rect.height}|{constraint.min_height}:{constraint.max_width}|{plain.label}:{plain.width}:{plain.height}|{role.label}:{role.width}|{colored.label}:{colored.width}|{row.width}:{row.height}"
+//RS }"##;
+//RS 
+//RS const UI_EXPECTED: &str =
+//RS     "1.5:-2.0|80.0:24.0|3.0:4.0|1.0:80.0|plain:5.0:2.0|save:8.0|blue:4.0|8.0:2.0";
+//RS 
+//RS #[test]
+//RS fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
+//RS     let source = parity_source("ui_value_view()", UI_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("ui/value-constructors", &source),
+//RS         UI_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("ui-value-constructors", &source, UI_EXPECTED, true);
+//RS }
+//RS 
+//RS const CRYPTO_DECLS: &str = r#"use core.crypto.expert as expert
+//RS fn crypto_value_view() -> String {
+//RS     ikm :: [U8]{ 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11 }
+//RS     salt :: [U8]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }
+//RS     info :: [U8]{ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249 }
+//RS     x_secret :: [U8]{ 119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42 }
+//RS     x_public :: [U8]{ 222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79 }
+//RS     ed_public :: [U8]{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+//RS     ed_signature :: [U8]{ 229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11 }
+//RS     output := ""
+//RS     #Unsafe("fixed RFC interop vectors") {
+//RS         derived :: expert.hkdf_sha256_raw(ikm, salt, info, 42) ?? panic("hkdf")
+//RS         shared :: expert.x25519_raw(x_secret, x_public) ?? panic("x25519")
+//RS         valid :: expert.ed25519_verify_strict(ed_public, [], ed_signature) ?? false
+//RS         invalid :: expert.ed25519_verify_strict(ed_public, [1], ed_signature) ?? true
+//RS         output = "{expert.secret_bytes(derived)}|{expert.secret_bytes(shared)}|{valid}|{invalid}"
+//RS     }
+//RS     return output
+//RS }"#;
+//RS 
+//RS const CRYPTO_EXPECTED: &str = "[60, 178, 95, 37, 250, 172, 213, 122, 144, 67, 79, 100, 208, 54, 47, 42, 45, 45, 10, 144, 207, 26, 90, 76, 93, 176, 45, 86, 236, 196, 197, 191, 52, 0, 114, 8, 213, 184, 135, 24, 88, 101]|[74, 93, 157, 91, 164, 206, 45, 225, 114, 142, 59, 244, 128, 53, 15, 37, 224, 126, 33, 201, 71, 209, 158, 51, 118, 240, 155, 60, 30, 22, 23, 66]|true|false";
+//RS 
+//RS #[test]
+//RS fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
+//RS     let source = parity_source("crypto_value_view()", CRYPTO_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("crypto/expert-pure-values", &source),
+//RS         CRYPTO_EXPECTED
+//RS     );
+//RS     check_dev_tiers_with_boundary("crypto-expert-pure-values", &source, CRYPTO_EXPECTED, true);
+//RS }
+//RS 
+//RS #[test]
+//RS fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
+//RS     // New #722 ports: AOT path (no EXPECTED :: — TIR still Todo for
+//RS     // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
+//RS     let source = r#"use core.crypto.expert as expert
+//RS fn run() {
+//RS     ed_seed :: [U8]{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
+//RS     ed_public :: [U8]{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+//RS     key :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+//RS     nonce :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+//RS     msg :: [U8]{ 97, 98, 99 }
+//RS     #Unsafe("fixed RFC interop vectors") {
+//RS         signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
+//RS         sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
+//RS         plain :: expert.aes256gcm_open(key, nonce, sealed, []) ?? panic("open")
+//RS         password :: expert.hkdf_sha256_raw([112], [], [], 4) ?? panic("pw")
+//RS         derived :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7], 8192, 1, 1, 16) ?? panic("argon")
+//RS         print("{expert.ed25519_verify_strict(ed_public, [], signed.bytes()) ?? false}|{plain}|{expert.secret_bytes(derived).len()}")
+//RS     }
+//RS }
+//RS "#;
+//RS     let output = rustc_aot_stdout("crypto/expert-aead-sign-argon", source);
+//RS     assert_eq!(output.trim(), "true|[97, 98, 99]|16");
+//RS }
+//RS 
+//RS const NET_STYLE_DECLS: &str = r#"use core.term as io
+//RS use core.net as net
+//RS fn net_style_view() -> String {
+//RS     ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
+//RS     ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
+//RS     socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")
+//RS     return "{net.ip_to_string(ip4)}:{net.ip_is_ipv4(ip4)}|{net.ip_to_string(ip6)}:{net.ip_is_ipv4(ip6)}|{net.socket_host(socket)}:{net.socket_port(socket)}:{net.socket_to_string(socket)}|{io.style_force("red", "x").len()}:{io.style_force("unknown", "plain")}"
+//RS }"#;
+//RS 
+//RS const NET_STYLE_EXPECTED: &str =
+//RS     "127.0.0.1:true|2001:db8::1:false|2001:db8::1:443:[2001:db8::1]:443|10:plain";
+//RS 
+//RS #[test]
+//RS fn net_and_forced_style_values_match_all_execution_tiers_exactly() {
+//RS     let source = parity_source("net_style_view()", NET_STYLE_DECLS);
+//RS     assert_eq!(
+//RS         check_aot_comptime("net/pure-values-and-style-force", &source),
+//RS         NET_STYLE_EXPECTED
+//RS     );
+//RS     check_dev_tiers(
+//RS         "net-pure-values-and-style-force",
+//RS         &source,
+//RS         NET_STYLE_EXPECTED,
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
+//RS     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+//RS     let read = |path: &str| {
+//RS         fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
+//RS     };
+//RS 
+//RS     let random = read("crates/jet-codegen/src/Prelude/Core/SeededRandom.rs");
+//RS     assert!(random.contains("if high <= low"));
+//RS     assert!(random.contains("probability.is_nan()"));
+//RS     assert!(random.contains("std::f64::consts::TAU"));
+//RS     assert!(read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs")
+//RS         .contains("seeded_random_kernel::jet_seeded_rng_normal"));
+//RS     assert!(read("crates/jet-jit/src/Random.rs")
+//RS         .contains("include!(\"../../jet-codegen/src/Prelude/Core/SeededRandom.rs\")"));
+//RS 
+//RS     let path = read("crates/jet-codegen/src/Prelude/Core/Path.rs");
+//RS     assert!(path.contains("ParentDir if normal_depth > 0"));
+//RS     assert!(path.contains("ParentDir if !rooted"));
+//RS     assert!(read("crates/jet-jit/src/CoreHost.rs").contains("path_kernel::jet_std_path_normalize"));
+//RS 
+//RS     let fmt = read("crates/jet-codegen/src/Prelude/Core/Fmt.rs");
+//RS     assert!(fmt.contains("precision.clamp(0, 9)"));
+//RS     assert!(fmt.contains("11..=13"));
+//RS     assert!(fmt.contains("fill.is_empty()"));
+//RS     assert!(
+//RS         read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+//RS             .contains("fmt_kernel::jet_fmt_percent")
+//RS     );
+//RS 
+//RS     let net = read("crates/jet-codegen/src/Prelude/Core/NetPure.rs");
+//RS     assert!(net.contains("text.parse()"));
+//RS     assert!(net.contains("address.is_ipv4()"));
+//RS     assert!(read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+//RS         .contains("super::net_pure_kernel::jet_net_pure_parse_socket_addr"));
+//RS 
+//RS     let math = read("crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
+//RS     assert!(math.contains("if value < 0"));
+//RS     assert!(math.contains("value.unsigned_abs()"));
+//RS     assert!(math.contains("x.is_nan()"));
+//RS     assert!(read("crates/jet-jit/build.rs").contains("MathLibPure.rs"));
+//RS     assert!(
+//RS         read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+//RS             .contains("math_lib_pure::jet_std_math_gcd")
+//RS     );
+//RS 
+//RS     let loadable = read("crates/jet-codegen/src/Prelude/Core/Loadable.rs");
+//RS     assert!(loadable.contains("JET_LOADABLE_FAILED: u8 = 3"));
+//RS     assert!(loadable.contains("jet_loadable_has_value"));
+//RS     assert!(
+//RS         read("crates/jet-jit/src/Reactive.rs").contains("loadable_kernel::jet_loadable_has_value")
+//RS     );
+//RS 
+//RS     let encoding = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
+//RS     assert!(encoding.contains("while out.len() % 8 != 0"));
+//RS     assert!(encoding.contains("s.len() % 2 != 0"));
+//RS     assert!(
+//RS         read("crates/jet-jit/src/Encoding.rs").contains("encoding_base_rt::jet_std_base32_encode")
+//RS     );
+//RS 
+//RS     let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
+//RS     assert!(text.contains("UnicodeTables.rs"));
+//RS     assert!(text.contains("UnicodeString.rs"));
+//RS     assert!(text.contains("CoreLib/Top/Text.rs"));
+//RS     assert!(!text.contains("fn nfd_inner"));
+//RS 
+//RS     let url = read("crates/jet-comptime/src/Comptime/UrlLite.rs");
+//RS     assert!(url.contains("CoreLib/JetStd/UrlMime.rs"));
+//RS     assert!(url.contains("jet_url_percent_decode_str"));
+//RS     assert!(!url.contains("fn url_valid_scheme"));
+//RS }
+// END-PORT-PENDING 1006 tests/comptime_core_pure_parity.rs:1-1791
+

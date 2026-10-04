@@ -1,0 +1,1009 @@
+use core.prelude.runtime.std_common_types_02.[JetBigInt, BI_BASE, jet_limb_decimal_digits, jet_ratio_limbs_to_f64, jet_decimal_power10_limbs]
+use core.prelude.runtime.std_common_types_04.[JetDecimal, jet_std_raw_to_exact, jet_std_exact_to_raw, jet_int_exact_shl, jet_int_exact_shr, jet_int_exact_div_rem, jet_int_exact_div_rem_euclid, jet_int_exact_floor_div, jet_int_exact_mod, jet_int_exact_pow, jet_int_exact_checked_pow, jet_int_exact_div_mod]
+use core.prelude.runtime.std_common_types.[JetOutcome, AllocError]
+use core.prelude.runtime.kernel_values.[JetShow]
+use jet_foundation.Numeric.[JetInt, CtBigInt]
+use jet_codegen.[jet_numeric_checked_widen_parts, jet_numeric_fixed_from_i128, jet_arithmetic_stop, JET_NUMERIC_WIDEN_TRAP, JET_NUMERIC_CONVERSION_ERROR, JET_NUMERIC_CONVERSION_TRAP, jet_inline_range_from_int, jet_fmt_decimal_int, jet_fmt_grouped_int, jet_fmt_hex_decimal, jet_fmt_bin_decimal, jet_fmt_oct_decimal]
+use jet_codegen.[jet_exact_numeric]
+use std.cmp.[Ordering]
+use std.char.[from_digit]
+use std.mem.[ManuallyDrop]
+
+impl JetBigInt {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3586
+    pub fn checked_widen(self, target_f32: Bool) -> F64? Never! {
+        significant :: self.bit_width()
+        trailing := 0
+        value := self.abs()
+        while !value.is_zero() {
+            (next, remainder) :: value.div_rem_small(2)
+            if remainder != 0 -> break
+            trailing += 1
+            value = ^next
+        }
+        jet_numeric_checked_widen_parts(significant, trailing, self.to_f64(), target_f32)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3606
+    fn shift_count(self) -> Int? Never! {
+        count :: self.try_i64() ?? return None
+        if count >= 0 { Val(count as Int) } else { None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3611
+    pub fn shl(self, count: JetBigInt) -> JetBigInt? Never! {
+        shifts :: count.shift_count() ?? return None
+        value := self.clone()
+        loop _ in 0..<shifts { value = value.mul_small(2) }
+        Val(^value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3620
+    pub fn shr(self, count: JetBigInt) -> JetBigInt? Never! {
+        shifts :: count.shift_count() ?? return None
+        value := self.clone()
+        loop _ in 0..<shifts {
+            (quotient, remainder) :: value.abs().div_rem_small(2)
+            value = if self.negative && remainder != 0 { quotient.add_small(1).neg() } else { quotient.with_sign(self.negative) }
+        }
+        Val(^value)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3634
+    pub fn is_even(self) -> Bool Never! { self.div_rem_small(2).1 == 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3638
+    pub fn is_odd(self) -> Bool Never! { !self.is_even() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3642
+    pub fn digits(self) -> I64 Never! { I64.try_from(self.decimal_digit_count()) ?? I64.MAX }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3646
+    pub fn leading_ones(self) -> I64 Never! {
+        width :: 64.max(self.bit_width().saturating_add(1))
+        bits :: self.twos_complement(width)
+        count := 0
+        index := bits.len()
+        while index > 0 {
+            index -= 1
+            if !bits[index] -> break
+            count += 1
+        }
+        I64.try_from(count) ?? I64.MAX
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3657
+    pub fn trailing_ones(self) -> I64 Never! {
+        width :: 64.max(self.bit_width().saturating_add(1))
+        bits :: self.twos_complement(width)
+        count := 0
+        loop bit in bits {
+            if !bit -> break
+            count += 1
+        }
+        I64.try_from(count) ?? I64.MAX
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3667
+    pub fn isqrt(self) -> JetBigInt? Never! {
+        if self.negative -> return None
+        if self.is_zero() -> return Val(self.clone())
+        one :: JetBigInt.from_int(1)
+        two :: JetBigInt.from_int(2)
+        root := one.clone()
+        loop _ in 0..<(self.bit_width().saturating_add(1) / 2) { root = root.mul_small(2) }
+        loop {
+            quotient :: (self.div_rem(root) ?? return None).0
+            next :: (root.add(quotient).div_rem(two) ?? return None).0
+            if next.compare(root) != .Less -> break
+            root = ^next
+        }
+        while root.mul(root).compare(self) == .Greater { root = root.sub(one) }
+        loop {
+            next :: root.add(one)
+            if next.mul(next).compare(self) == .Greater -> break
+            root = ^next
+        }
+        Val(^root)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3701
+    pub fn pow(self, exponent: JetBigInt) -> JetBigInt? Never! {
+        if exponent.negative -> return None
+        remaining := exponent.clone()
+        base := self.clone()
+        result := JetBigInt.from_int(1)
+        while !remaining.is_zero() {
+            (next, bit) :: remaining.div_rem_small(2)
+            if bit != 0 { result = result.mul(base) }
+            remaining = ^next
+            if !remaining.is_zero() { base = base.mul(base) }
+        }
+        Val(^result)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3721
+    pub fn gcd(left: JetBigInt, right: JetBigInt) -> JetBigInt Never! {
+        a := left.abs()
+        b := right.abs()
+        while !b.is_zero() {
+            (_, remainder) :: a.div_rem(b).expect("gcd divisor is nonzero")
+            a = ^b
+            b = remainder.abs()
+        }
+        ^a
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3732
+    pub fn lcm(left: JetBigInt, right: JetBigInt) -> JetBigInt Never! {
+        if left.is_zero() || right.is_zero() -> return JetBigInt.from_int(0)
+        divisor :: JetBigInt.gcd(left, right)
+        quotient :: left.abs().div_rem(divisor).expect("lcm gcd is nonzero").0
+        quotient.mul(right.abs())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3741
+    pub fn binomial(n: JetBigInt, k: JetBigInt) -> JetBigInt? Never! {
+        if n.negative || k.negative || k.compare(n) == .Greater -> return None
+        other :: n.sub(k)
+        limit :: if k.compare(other) == .Greater { ^other } else { k.clone() }
+        one :: JetBigInt.from_int(1)
+        index := one.clone()
+        result := one.clone()
+        while index.compare(limit) != .Greater {
+            numerator :: n.sub(limit).add(index)
+            result = (result.mul(numerator).div_rem(index) ?? return None).0
+            index = index.add(one)
+        }
+        Val(^result)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3762
+    pub fn compare(self, other: JetBigInt) -> Ordering Never! {
+        match (self.negative, other.negative) {
+            (false, true) => .Greater,
+            (true, false) => .Less,
+            (false, false) => match self.cmp_abs(other) { 1 => .Greater, -1 => .Less, _ => .Equal },
+            (true, true) => match self.cmp_abs(other) { 1 => .Less, -1 => .Greater, _ => .Equal },
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3779
+    pub fn is_zero(self) -> Bool Never! { self.limbs.len() == 1 && self.limbs[0] == 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3784
+    pub fn try_i64(self) -> I64? Never! {
+        value: U128 = 0
+        index := self.limbs.len()
+        while index > 0 {
+            index -= 1
+            value = value.checked_mul(BI_BASE as U128) ?? return None
+            value = value.checked_add(self.limbs[index] as U128) ?? return None
+        }
+        magnitude :: I128.try_from(value) ?? return None
+        signed :: if self.negative { -magnitude } else { magnitude }
+        I64.try_from(signed)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3798
+    pub fn try_i128(self) -> I128? Never! {
+        value: U128 = 0
+        index := self.limbs.len()
+        while index > 0 {
+            index -= 1
+            value = value.checked_mul(BI_BASE as U128) ?? return None
+            value = value.checked_add(self.limbs[index] as U128) ?? return None
+        }
+        magnitude :: I128.try_from(value) ?? return None
+        Val(if self.negative { -magnitude } else { magnitude })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3810
+    // Bounded stack magnitude; binary64 projection with ties-to-even rounding.
+    pub fn to_f64(self) -> F64 Never! {
+        if self.is_zero() -> return 0.0
+        if value :: self.try_i128() -> return value as F64
+        if self.decimal_digit_count() > 309 -> return if self.negative { F64.NEG_INFINITY } else { F64.INFINITY }
+        limbs: [U32; 35] = [0; 35]
+        limb_count := self.limbs.len()
+        loop index in 0..<limb_count { limbs[index] = self.limbs[index] }
+        top: U64 = 0
+        bit_index := 0
+        guard := false
+        sticky := false
+        while limb_count > 1 || limbs[0] != 0 {
+            remainder: U64 = 0
+            index := limb_count
+            while index > 0 {
+                index -= 1
+                current :: remainder * BI_BASE + limbs[index] as U64
+                limbs[index] = (current / 2) as U32
+                remainder = current % 2
+            }
+            while limb_count > 1 && limbs[limb_count - 1] == 0 { limb_count -= 1 }
+            bit :: remainder != 0
+            if bit_index < 53 {
+                top |= (if bit { 1 as U64 } else { 0 as U64 }) << bit_index
+            } else {
+                sticky = sticky || guard
+                guard = (top & 1) != 0
+                top = (top >> 1) | ((if bit { 1 as U64 } else { 0 as U64 }) << 52)
+            }
+            bit_index += 1
+        }
+        exponent := bit_index - 1
+        if bit_index > 53 && guard && (sticky || (top & 1) != 0) {
+            top += 1
+            if top == (1 as U64) << 53 { top >>= 1; exponent += 1 }
+        }
+        if exponent > 1023 -> return if self.negative { F64.NEG_INFINITY } else { F64.INFINITY }
+        bits := if bit_index <= 53 { (top as F64).to_bits() } else { ((exponent as U64 + 1023) << 52) | (top & (((1 as U64) << 52) - 1)) }
+        if self.negative { bits |= (1 as U64) << 63 }
+        F64.from_bits(bits)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3883
+    fn decimal_digit_count(self) -> Int Never! { jet_limb_decimal_digits(self.limbs) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3888
+    fn ratio_to_f64(self, denominator: JetBigInt) -> F64 Never! { jet_ratio_limbs_to_f64(self.limbs, denominator.limbs, self.negative != denominator.negative) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3896
+    fn scaled_to_f64(self, scale: U32) -> F64 Never! {
+        denominator :: jet_decimal_power10_limbs(scale)
+        jet_ratio_limbs_to_f64(self.limbs, denominator, false)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3904
+    // Truncating quotient: remainder has the dividend's sign.
+    pub fn div_rem(self, other: JetBigInt) -> (JetBigInt, JetBigInt)? Never! {
+        if other.is_zero() -> return None
+        divisor :: other.abs()
+        dividend :: self.abs()
+        if dividend.cmp_abs(divisor) < 0 -> return Val((JetBigInt.from_int(0), self.clone()))
+        quotient := [U32].repeat(0, dividend.limbs.len())
+        remainder := JetBigInt.from_int(0)
+        index := dividend.limbs.len()
+        while index > 0 {
+            index -= 1
+            &remainder.limbs.insert(0, dividend.limbs[index])
+            remainder = remainder.normalize()
+            low: U32 = 0
+            high: U32 = (BI_BASE - 1) as U32
+            while low < high {
+                middle :: low + (high - low) / 2 + 1
+                if divisor.mul_small(middle).cmp_abs(remainder) <= 0 { low = middle } else { high = middle - 1 }
+            }
+            quotient[index] = low
+            if low != 0 { remainder = remainder.sub_abs(divisor.mul_small(low)) }
+        }
+        result :: JetBigInt{negative: self.negative != other.negative, limbs: ^quotient}.normalize()
+        remainder.negative = self.negative && !remainder.is_zero()
+        Val((^result, remainder.normalize()))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3946
+    pub fn div_rem_euclid(self, other: JetBigInt) -> (JetBigInt, JetBigInt)? Never! {
+        pair :: self.div_rem(other) ?? return None
+        quotient := pair.0
+        remainder := pair.1
+        if remainder.negative {
+            remainder = remainder.add(other.abs())
+            one :: JetBigInt.from_int(1)
+            quotient = if other.negative { quotient.add(one) } else { quotient.sub(one) }
+        }
+        Val((^quotient, ^remainder))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3960
+    pub fn abs(self) -> JetBigInt Never! { JetBigInt{negative: false, limbs: self.limbs.clone()} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3967
+    pub fn to_radix(self, radix: U32) -> String Err! {
+        if radix < 2 || radix > 36 -> return Err("integer radix must be between 2 and 36, got {radix}")
+        value := self.abs()
+        digits := [Char]{}
+        while !value.is_zero() {
+            (next, digit) :: value.div_rem_small(radix)
+            &digits.push(from_digit(digit, radix).expect("div_rem_small remainder is below the radix"))
+            value = ^next
+        }
+        if digits.is_empty() { &digits.push('0') } else { &digits.reverse() }
+        body :: String.from_chars(digits)
+        if self.negative { "-{body}" } else { ^body }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:3995
+    pub fn to_string_rep(self) -> String Never! {
+        if self.limbs.len() == 1 && self.limbs[0] == 0 -> return "0"
+        s := self.limbs.last().unwrap().to_string()
+        index := self.limbs.len() - 1
+        while index > 0 {
+            index -= 1
+            limb :: self.limbs[index]
+            &s.push_str("{limb:09}")
+        }
+        if self.negative { "-{s}" } else { ^s }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4013
+impl JetBigInt.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4014
+    fn jet_show(self) -> String Never! { self.to_string_rep() }
+}
+// Exact Int is a retained, owned, one-word Foundation carrier.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4022
+pub JET_INT_SMALL_MIN: I64 = JetInt.inline_min()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4023
+pub JET_INT_SMALL_MAX: I64 = JetInt.inline_max()
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4025
+fn jet_int_owned_from_raw(value: I64) -> JetInt Never! {
+    // GATE #4494: borrowed raw carrier; retain before returning an owner.
+    #Unsafe("clone the borrowed exact-Int carrier owner") { JetInt.clone_from_raw(value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4031
+pub fn jet_int_clone_from_raw(value: I64) -> JetInt Never! { jet_int_owned_from_raw(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4037
+#Inline(Always)
+pub fn jet_int_is_inline(value: I64) -> Bool Never! { !jet_int_is_tagged(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4045
+#Inline(Always)
+pub fn jet_int_is_small(value: I64) -> Bool Never! { value >= JET_INT_SMALL_MIN && value <= JET_INT_SMALL_MAX }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4050
+#Inline(Always)
+fn jet_int_is_tagged(value: I64) -> Bool Never! {
+    if jet_int_is_small(value) -> return false
+    // GATE #4494: this borrowed view must not release or retain the caller's owner.
+    word :: ManuallyDrop.new(#Unsafe("classify a borrowed raw carrier without dropping its owner") { JetInt.from_raw_owned(value) })
+    !word.is_inline()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4064
+#Inline(Always)
+fn jet_int_small_pair(left: I64, right: I64) -> Bool Never! { jet_int_is_small(left) & jet_int_is_small(right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4068
+fn jet_int_big_value(value: I64) -> JetBigInt? Never! {
+    owner :: jet_int_owned_from_raw(value)
+    if owner.is_inline() -> return None
+    big :: owner.to_big()
+    Val(JetBigInt{negative: big.negative, limbs: ^big.limbs})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4081
+fn jet_int_value(value: I64) -> JetBigInt Never! { jet_int_big_value(value) ?? JetBigInt.from_int(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4085
+fn jet_int_pack(^value: JetBigInt) -> I64 Never! {
+    exact :: CtBigInt{negative: value.negative, limbs: ^value.limbs}
+    JetInt.from_big(^exact).into_raw()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4093
+pub fn jet_int_try_new(value: I64) -> JetOutcome<I64, AllocError> Never! { JetInt.try_from_i64(value).map(fn(^value: JetInt) -> I64 Never! { value.into_raw() }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4099
+pub fn jet_int_try_add(left: I64, right: I64) -> JetOutcome<I64, AllocError> Never! {
+    a :: jet_int_owned_from_raw(left)
+    b :: jet_int_owned_from_raw(right)
+    a.add(b).map(fn(^value: JetInt) -> I64 Never! { value.into_raw() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4109
+pub fn jet_int_from_i64(value: I64) -> I64 Never! { if jet_int_is_small(value) { value } else { jet_int_pack(JetBigInt.from_int(value)) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4117
+pub fn jet_int_from_u64(value: U64) -> I64 Never! { if value <= JET_INT_SMALL_MAX as U64 { value as I64 } else { jet_int_pack(JetBigInt.from_u64(value)) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4125
+pub fn jet_int_from_str(value: String) -> I64 Err! { jet_int_pack(JetBigInt.from_str(value)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4129
+pub fn jet_int_parse(value: String) -> I64 Err! {
+    text := value.trim() // #4303
+    jet_int_from_str(text).map_err(fn(_) -> String Never! { "cannot parse `{value}` as an integer" })?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4132
+pub fn jet_float_parse(value: String) -> F64 Err! {
+    text := value.trim() // #4303
+    text.parse<F64>().map_err(fn(_) -> String Never! { "cannot parse `{value}` as a float" })?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4140
+pub fn jet_int_to_radix(value: I64, radix: I64) -> String Err! {
+    base :: U32.try_from(radix) ?? return Err("integer radix must be between 2 and 36, got {radix}")
+    jet_int_value(value).to_radix(base)?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4146
+pub fn jet_int_from_radix(text: String, radix: I64) -> I64 Err! {
+    base :: U32.try_from(radix) ?? return Err("integer radix must be between 2 and 36, got {radix}")
+    jet_int_pack(JetBigInt.from_radix(text, base)?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4152
+pub fn jet_int_to_i64(value: I64) -> I64? Never! { if !jet_int_is_tagged(value) { Val(value) } else { (jet_int_big_value(value) ?? return None).try_i64() } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4160
+pub fn jet_int_to_i128(value: I64) -> I128? Never! { if !jet_int_is_tagged(value) { Val(value as I128) } else { (jet_int_big_value(value) ?? return None).try_i128() } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4168
+pub fn jet_int_is_zero(value: I64) -> Bool Never! {
+    if !jet_int_is_tagged(value) -> return value == 0
+    if big :: jet_int_big_value(value) { big.is_zero() } else { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4176
+pub fn jet_int_is_negative(value: I64) -> Bool Never! {
+    if !jet_int_is_tagged(value) -> return value < 0
+    if big :: jet_int_big_value(value) { big.negative } else { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4184
+pub fn jet_int_to_string(value: I64) -> String Never! {
+    if !jet_int_is_tagged(value) -> return value.to_string()
+    if big :: jet_int_big_value(value) { big.to_string_rep() } else { value.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4194
+pub fn jet_int_to_f64(value: I64) -> F64 Never! {
+    if !jet_int_is_tagged(value) -> return value as F64
+    if big :: jet_int_big_value(value) { big.to_f64() } else { if jet_int_is_negative(value) { F64.NEG_INFINITY } else { F64.INFINITY } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4209
+pub fn jet_int_checked_widen(value: I64, target_f32: Bool, file: String, line: U32) -> F64 Never! {
+    jet_int_value(value).checked_widen(target_f32) ?? jet_arithmetic_stop(file, line, JET_NUMERIC_WIDEN_TRAP)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4215
+pub fn jet_int_bit_count(value: I64, width: U32, method: String) -> I64 Never! {
+    if !jet_int_is_tagged(value) {
+        magnitude :: value.unsigned_abs()
+        match method {
+            "bit_count" => return magnitude.count_ones() as I64,
+            "bit_length" => return (64 - magnitude.leading_zeros()) as I64,
+            _ => {},
+        }
+    }
+    jet_int_value(value).bit_count(width, method) ?? 0
+}
+// Rust macros become always-inline functions: each argument is evaluated once.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4233
+#Inline(Always)
+pub fn jet_int_compare_hot(left: I64, right: I64) -> I64 Never! { jet_int_compare(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4241
+#Inline(Always)
+pub fn jet_int_add_hot(left: I64, right: I64) -> I64 Never! { jet_int_add(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4249
+#Inline(Always)
+pub fn jet_int_sub_hot(left: I64, right: I64) -> I64 Never! { jet_int_sub(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4257
+#Inline(Always)
+pub fn jet_int_mul_hot(left: I64, right: I64) -> I64 Never! { jet_int_mul(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4264
+#Inline(Always)
+pub fn jet_int_div_hot(left: I64, right: I64, file: String, line: U32) -> I64 Never! { jet_int_div(left, right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4272
+#Inline(Always)
+pub fn jet_int_rem_hot(left: I64, right: I64, file: String, line: U32) -> I64 Never! { jet_int_rem(left, right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4279
+#Inline(Always)
+pub fn jet_int_floor_div_hot(left: I64, right: I64, file: String, line: U32) -> I64 Never! { jet_int_floor_div(left, right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4287
+#Inline(Always)
+pub fn jet_int_mod_hot(left: I64, right: I64, file: String, line: U32) -> I64 Never! { jet_int_mod(left, right, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4295
+#Inline(Always)
+pub fn jet_int_shl_hot(value: I64, count: I64, file: String, line: U32) -> I64 Never! { jet_int_shl(value, count, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4303
+#Inline(Always)
+pub fn jet_int_shr_hot(value: I64, count: I64, file: String, line: U32) -> I64 Never! { jet_int_shr(value, count, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4314
+#Inline(Always)
+pub fn jet_int_add_inline(left: I64, right: I64) -> I64 Never! { jet_int_add(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4322
+#Inline(Always)
+pub fn jet_int_sub_inline(left: I64, right: I64) -> I64 Never! { jet_int_sub(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4329
+#Inline(Always)
+pub fn jet_int_mul_inline(left: I64, right: I64) -> I64 Never! { jet_int_mul(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4337
+#Inline(Always)
+pub fn jet_int_compare_inline(left: I64, right: I64) -> I64 Never! { jet_int_compare(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4345
+#Inline(Always)
+pub fn jet_int_neg_inline(value: I64) -> I64 Never! { jet_int_neg(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4353
+#Inline(Always)
+pub fn jet_int_bit_and_hot(left: I64, right: I64) -> I64 Never! { jet_int_bit_and(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4361
+#Inline(Always)
+pub fn jet_int_bit_or_hot(left: I64, right: I64) -> I64 Never! { jet_int_bit_or(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4368
+#Inline(Always)
+pub fn jet_int_bit_xor_hot(left: I64, right: I64) -> I64 Never! { jet_int_bit_xor(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4376
+#Inline(Always)
+pub fn jet_int_compare(left: I64, right: I64) -> I64 Never! {
+    if jet_int_small_pair(left, right) -> return (if left > right { 1 } else { 0 }) - (if left < right { 1 } else { 0 })
+    jet_int_compare_slow(left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4385
+pub fn jet_int_compare_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_compare(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4390
+#Inline(Always)
+pub fn jet_int_add(left: I64, right: I64) -> I64 Never! {
+    if jet_int_small_pair(left, right) {
+        sum :: left.wrapping_add(right)
+        if jet_int_is_small(sum) -> return sum
+    }
+    jet_int_add_slow(left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4403
+pub fn jet_int_add_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_add(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4409
+#Inline(Always)
+pub fn jet_int_sub(left: I64, right: I64) -> I64 Never! {
+    if jet_int_small_pair(left, right) {
+        difference :: left.wrapping_sub(right)
+        if jet_int_is_small(difference) -> return difference
+    }
+    jet_int_sub_slow(left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4421
+pub fn jet_int_sub_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_sub(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4426
+#Inline(Always)
+pub fn jet_int_mul(left: I64, right: I64) -> I64 Never! {
+    if jet_int_small_pair(left, right) {
+        if product :: left.checked_mul(right) {
+            if jet_int_is_small(product) -> return product
+        }
+    }
+    jet_int_mul_slow(left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4439
+pub fn jet_int_mul_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_mul(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4446
+#Inline(Always)
+pub fn jet_int_bit_and(left: I64, right: I64) -> I64 Never! { if jet_int_small_pair(left, right) { left & right } else { jet_int_bit_and_slow(left, right) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4455
+pub fn jet_int_bit_and_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_bit_and(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4460
+#Inline(Always)
+pub fn jet_int_bit_or(left: I64, right: I64) -> I64 Never! { if jet_int_small_pair(left, right) { left | right } else { jet_int_bit_or_slow(left, right) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4469
+pub fn jet_int_bit_or_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_bit_or(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4474
+#Inline(Always)
+pub fn jet_int_bit_xor(left: I64, right: I64) -> I64 Never! { if jet_int_small_pair(left, right) { left ^ right } else { jet_int_bit_xor_slow(left, right) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4483
+pub fn jet_int_bit_xor_slow(left: I64, right: I64) -> I64 Never! { jet_int_exact_bit_xor(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4488
+#Inline(Always)
+pub fn jet_int_neg(value: I64) -> I64 Never! {
+    negated :: value.wrapping_neg()
+    if jet_int_is_small(value) && jet_int_is_small(negated) -> return negated
+    jet_int_neg_slow(value)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4497
+fn jet_int_neg_slow(value: I64) -> I64 Never! { jet_int_exact_neg(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4501
+pub fn jet_int_abs(value: I64) -> I64 Never! {
+    if jet_int_is_negative(value) { jet_int_neg(value) } else if jet_int_is_tagged(value) { jet_int_owned_from_raw(value).into_raw() } else { value }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4513
+pub fn jet_int_try_from(value: I64, kind: I64) -> I128? Never! { jet_numeric_fixed_from_i128(jet_int_to_i128(value) ?? return None, kind) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4518
+pub fn jet_int_try_from_checked(value: I64, kind: I64) -> I128 Err! { jet_int_try_from(value, kind) ?? return Err(JET_NUMERIC_CONVERSION_ERROR.to_string()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4523
+pub fn jet_int_checked_fixed(value: I64, kind: I64, file: String, line: U32) -> I128 Never! { jet_int_try_from(value, kind) ?? jet_arithmetic_stop(file, line, JET_NUMERIC_CONVERSION_TRAP) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4531
+#Inline(Always)
+pub fn jet_int_not(value: I64) -> I64 Never! { if jet_int_is_small(value) { !value } else { jet_int_exact_not(value) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4541
+pub fn jet_int_shl_slow(value: I64, count: I64, file: String, line: U32) -> I64 Never! { jet_int_exact_shl(value, count, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4546
+#Inline(Always)
+pub fn jet_int_shl(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
+    if jet_int_is_small(value) && count >= 0 && count < 63 {
+        shifted :: value << count
+        if shifted >> count == value && jet_int_is_small(shifted) -> return shifted
+    }
+    jet_int_shl_slow(value, count, file, line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4558
+pub fn jet_int_shr_slow(value: I64, count: I64, file: String, line: U32) -> I64 Never! { jet_int_exact_shr(value, count, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4563
+#Inline(Always)
+pub fn jet_int_shr(value: I64, count: I64, file: String, line: U32) -> I64 Never! {
+    if jet_int_is_small(value) && count >= 0 && count <= JET_INT_SMALL_MAX -> return value >> count.min(63)
+    jet_int_shr_slow(value, count, file, line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4576
+#Inline(Always)
+fn jet_int_small_div_rem(value: I64, divisor: I64) -> (I64, I64)? Never! {
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        quotient :: value.wrapping_div(divisor)
+        if jet_int_is_small(quotient) -> return Val((quotient, value.wrapping_rem(divisor)))
+    }
+    None
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4589
+#Inline(Always)
+fn jet_int_small_div_mod(value: I64, divisor: I64) -> (I64, I64)? Never! {
+    (quotient, remainder) :: jet_int_small_div_rem(value, divisor) ?? return None
+    if remainder != 0 && (remainder ^ divisor) < 0 {
+        adjusted :: quotient.wrapping_sub(1)
+        if jet_int_is_small(adjusted) { return Val((adjusted, remainder.wrapping_add(divisor))) }
+        return None
+    }
+    Val((quotient, remainder))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4600
+pub fn jet_int_div_rem_slow(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! { jet_int_exact_div_rem(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4605
+#Inline(Always)
+pub fn jet_int_div_rem(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! { jet_int_small_div_rem(value, divisor) ?? jet_int_div_rem_slow(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4613
+#Inline(Always)
+pub fn jet_int_rem(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
+    if jet_int_small_pair(value, divisor) && divisor != 0 -> return value.wrapping_rem(divisor)
+    jet_int_div_rem_slow(value, divisor, file, line).1
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4622
+#Inline(Always)
+pub fn jet_int_div(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
+    if pair :: jet_int_small_div_rem(value, divisor) { pair.0 } else { jet_int_div_rem_slow(value, divisor, file, line).0 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4630
+#Inline(Always)
+fn jet_int_div_rem_euclid(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! {
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        quotient :: value.wrapping_div_euclid(divisor)
+        if jet_int_is_small(quotient) -> return (quotient, value.wrapping_rem_euclid(divisor))
+    }
+    jet_int_div_rem_euclid_slow(value, divisor, file, line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4642
+fn jet_int_div_rem_euclid_slow(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! { jet_int_exact_div_rem_euclid(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4646
+pub fn jet_int_div_euclid(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! { jet_int_div_rem_euclid(value, divisor, file, line).0 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4650
+pub fn jet_int_rem_euclid(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! { jet_int_div_rem_euclid(value, divisor, file, line).1 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4656
+pub fn jet_int_floor_div_slow(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! { jet_int_exact_floor_div(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4661
+#Inline(Always)
+pub fn jet_int_floor_div(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! { if pair :: jet_int_small_div_mod(value, divisor) { pair.0 } else { jet_int_floor_div_slow(value, divisor, file, line) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4670
+pub fn jet_int_mod_slow(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! { jet_int_exact_mod(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4675
+#Inline(Always)
+pub fn jet_int_mod(value: I64, divisor: I64, file: String, line: U32) -> I64 Never! {
+    if jet_int_small_pair(value, divisor) && divisor != 0 {
+        remainder :: value.wrapping_rem(divisor)
+        if remainder != 0 && (remainder ^ divisor) < 0 -> return remainder.wrapping_add(divisor)
+        return remainder
+    }
+    jet_int_mod_slow(value, divisor, file, line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4688
+pub fn jet_int_pow(value: I64, exponent: I64, file: String, line: U32) -> I64 Never! { jet_int_exact_pow(value, exponent, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4692
+pub fn jet_int_factorial(value: I64) -> I64? Never! {
+    if jet_int_is_negative(value) -> return None
+    current := jet_int_from_i64(2)
+    result := jet_int_from_i64(1)
+    while jet_int_compare(current, value) <= 0 {
+        result = jet_int_mul(result, current)
+        current = jet_int_add(current, jet_int_from_i64(1))
+    }
+    Val(result)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4705
+pub fn jet_int_is_even(value: I64) -> Bool Never! { if jet_int_is_small(value) { (value & 1) == 0 } else { jet_int_value(value).is_even() } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4712
+pub fn jet_int_is_odd(value: I64) -> Bool Never! { !jet_int_is_even(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4716
+pub fn jet_int_isqrt(value: I64) -> I64? Never! { Val(jet_int_pack(jet_int_value(value).isqrt() ?? return None)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4720
+pub fn jet_int_binomial(n: I64, k: I64) -> I64? Never! {
+    a :: jet_int_value(n)
+    b :: jet_int_value(k)
+    Val(jet_int_pack(JetBigInt.binomial(a, b) ?? return None))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4726
+pub fn jet_int_digits(value: I64) -> I64 Never! { jet_int_value(value).digits() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4730
+pub fn jet_int_leading_ones(value: I64) -> I64 Never! { jet_int_value(value).leading_ones() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4734
+pub fn jet_int_trailing_ones(value: I64) -> I64 Never! { jet_int_value(value).trailing_ones() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4738
+pub fn jet_int_checked_abs(value: I64) -> I64? Never! { Val(jet_int_abs(value)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4742
+pub fn jet_int_checked_neg(value: I64) -> I64? Never! { Val(jet_int_neg(value)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4746
+pub fn jet_int_checked_add(left: I64, right: I64) -> I64? Never! { Val(jet_int_add(left, right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4750
+pub fn jet_int_checked_sub(left: I64, right: I64) -> I64? Never! { Val(jet_int_sub(left, right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4754
+pub fn jet_int_checked_mul(left: I64, right: I64) -> I64? Never! { Val(jet_int_mul(left, right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4758
+pub fn jet_int_checked_div(left: I64, right: I64, file: String, line: U32) -> I64? Never! { if jet_int_is_zero(right) { None } else { Val(jet_int_div(left, right, file, line)) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4765
+pub fn jet_int_checked_rem(left: I64, right: I64, file: String, line: U32) -> I64? Never! { if jet_int_is_zero(right) { None } else { Val(jet_int_rem(left, right, file, line)) } }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4772
+pub fn jet_int_checked_pow(left: I64, right: I64) -> I64? Never! { jet_int_exact_checked_pow(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4776
+pub fn jet_int_saturating_add(left: I64, right: I64) -> I64 Never! { jet_int_add(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4780
+pub fn jet_int_saturating_sub(left: I64, right: I64) -> I64 Never! { jet_int_sub(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4784
+pub fn jet_int_saturating_mul(left: I64, right: I64) -> I64 Never! { jet_int_mul(left, right) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4788
+pub fn jet_int_int_pow(left: I64, right: I64) -> I64 Never! { jet_int_checked_pow(left, right) ?? jet_int_from_i64(0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4792
+pub fn jet_int_gcd(left: I64, right: I64) -> I64 Never! { jet_int_pack(JetBigInt.gcd(jet_int_value(left), jet_int_value(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4799
+pub fn jet_int_div_mod(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! { jet_int_exact_div_mod(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4803
+pub fn jet_int_div_rem_pair(value: I64, divisor: I64, file: String, line: U32) -> (I64, I64) Never! { jet_int_div_rem(value, divisor, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4809
+pub trait JetNativeIntResult { fn into_owned_int(^self) -> JetInt Never! }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4813
+impl I64.JetNativeIntResult {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4815
+    #Inline(Always)
+    fn into_owned_int(^self) -> JetInt Never! { JetInt.from_i64(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4820
+impl JetInt.JetNativeIntResult {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4822
+    #Inline(Always)
+    fn into_owned_int(^self) -> JetInt Never! { ^self }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4828
+#Inline(Always)
+pub fn jet_int_owned_from_native_result<T: JetNativeIntResult>(^value: T) -> JetInt Never! { value.into_owned_int() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4835
+pub trait JetNativeIntArgument { fn from_owned_int(^value: JetInt) -> Self Err! }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4840
+impl I64.JetNativeIntArgument {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4842
+    #Inline(Always)
+    fn from_owned_int(^value: JetInt) -> I64 Err! { jet_int_owned_to_i64(value)? }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4847
+impl JetInt.JetNativeIntArgument {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4849
+    #Inline(Always)
+    fn from_owned_int(^value: JetInt) -> JetInt Err! { ^value }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4855
+#Inline(Always)
+pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(^value: JetInt) -> T Err! { T.from_owned_int(^value)? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4863
+pub trait JetNativeIntMapResult<K> { fn into_owned_int_map(^self) -> [K: JetInt] Never! }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4867
+impl [K: I64].JetNativeIntMapResult<K> where K: Ord + Clone {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4869
+    fn into_owned_int_map(^self) -> [K: JetInt] Never! {
+        result := [K: JetInt]{}
+        loop (key, value) in self { result[key.clone()] = JetInt.from_i64(value) }
+        ^result
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4876
+impl [K: JetInt].JetNativeIntMapResult<K> {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4878
+    #Inline(Always)
+    fn into_owned_int_map(^self) -> [K: JetInt] Never! { ^self }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4884
+#Inline(Always)
+pub fn jet_int_map_owned_from_native_result<K, T: JetNativeIntMapResult<K>>(^value: T) -> [K: JetInt] Never! { value.into_owned_int_map() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4891
+#Inline(Always)
+pub fn jet_int_owned_from_raw_result(value: I64) -> JetInt Never! {
+    // GATE #4494: adopt only freshly owned arithmetic adapter results.
+    #Unsafe("raw arithmetic result transfers one exact-Int owner") { JetInt.from_raw_owned(value) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4897
+#Inline(Always)
+fn jet_int_owned_raw(value: JetInt) -> I64 Never! { value.to_raw() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4901
+pub fn jet_int_owned_from_i64(value: I64) -> JetInt Never! { JetInt.from_i64(value) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4906
+#Inline(Always)
+pub fn jet_int_owned_from_i128(value: I128) -> JetInt Never! {
+    if small :: I64.try_from(value) -> return JetInt.from_i64(small)
+    negative :: value < 0
+    magnitude :: value.unsigned_abs()
+    high :: (magnitude >> 64) as U64
+    low :: magnitude as U64
+    big := CtBigInt.from_u64(high)
+    if high != 0 {
+        radix :: CtBigInt.from_u64(U64.MAX).add(CtBigInt.from_int(1))
+        big = big.mul(radix)
+    }
+    big = big.add(CtBigInt.from_u64(low))
+    if negative { big = big.neg() }
+    JetInt.from_big(^big)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4927
+pub fn jet_int_owned_from_u64(value: U64) -> JetInt Never! { JetInt.from_big(CtBigInt.from_u64(value)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4933
+pub fn jet_int_owned_from_str(value: String) -> JetInt Err! { JetInt.from_big(CtBigInt.from_str(value)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4940
+pub fn jet_int_owned_parse(value: String) -> JetInt Err! {
+    text := value.trim() // #4303
+    jet_int_owned_from_str(text).map_err(fn(_) -> String Never! { "cannot parse `{value}` as an integer" })?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4947
+pub fn jet_int_owned_to_radix(value: JetInt, radix: JetInt) -> String Err! { jet_int_to_radix(jet_int_owned_raw(value), jet_int_owned_to_i64(radix)?)? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4954
+pub fn jet_int_owned_from_radix(value: String, radix: JetInt) -> JetInt Err! { jet_int_owned_from_raw_result(jet_int_from_radix(value, jet_int_owned_to_i64(radix)?)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4962
+pub fn jet_int_owned_to_i64(value: JetInt) -> I64 Err! { jet_int_to_i64(jet_int_owned_raw(value)) ?? return Err("exact Int does not fit the native i64 ABI") }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4969
+pub fn jet_int_owned_to_f64(value: JetInt) -> F64 Never! { jet_int_to_f64(jet_int_owned_raw(value)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4974
+#Inline(Always)
+pub fn jet_int_owned_compare(left: JetInt, right: JetInt) -> I64 Never! { jet_int_compare(jet_int_owned_raw(left), jet_int_owned_raw(right)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4981
+// The Rust owned-binary macro is expanded to the six declarations below.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4992
+#Inline(Always)
+pub fn jet_int_owned_add(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_add(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4993
+#Inline(Always)
+pub fn jet_int_owned_sub(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_sub(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4994
+#Inline(Always)
+pub fn jet_int_owned_mul(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_mul(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4995
+#Inline(Always)
+pub fn jet_int_owned_bit_and(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_bit_and(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4996
+#Inline(Always)
+pub fn jet_int_owned_bit_or(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_bit_or(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:4997
+#Inline(Always)
+pub fn jet_int_owned_bit_xor(left: JetInt, right: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_bit_xor(jet_int_owned_raw(left), jet_int_owned_raw(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5000
+#Inline(Always)
+pub fn jet_int_owned_neg(value: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_neg(jet_int_owned_raw(value))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5006
+pub fn jet_int_owned_abs(value: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_abs(jet_int_owned_raw(value))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5013
+#Inline(Always)
+pub fn jet_int_owned_not(value: JetInt) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_not(jet_int_owned_raw(value))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5019
+// The Rust owned-binary-context macro is expanded below.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5037
+#Inline(Always)
+pub fn jet_int_owned_div(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_div(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5038
+#Inline(Always)
+pub fn jet_int_owned_rem(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_rem(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5039
+#Inline(Always)
+pub fn jet_int_owned_div_euclid(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_div_euclid(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5040
+#Inline(Always)
+pub fn jet_int_owned_rem_euclid(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_rem_euclid(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5041
+#Inline(Always)
+pub fn jet_int_owned_floor_div(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_floor_div(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5042
+#Inline(Always)
+pub fn jet_int_owned_mod(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_mod(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5043
+#Inline(Always)
+pub fn jet_int_owned_pow(left: JetInt, right: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_pow(jet_int_owned_raw(left), jet_int_owned_raw(right), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5046
+#Inline(Always)
+pub fn jet_int_owned_shl(value: JetInt, count: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_shl(jet_int_owned_raw(value), jet_int_owned_raw(count), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5061
+#Inline(Always)
+pub fn jet_int_owned_shr(value: JetInt, count: JetInt, file: String, line: U32) -> JetInt Never! { jet_int_owned_from_raw_result(jet_int_shr(jet_int_owned_raw(value), jet_int_owned_raw(count), file, line)) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5075
+pub fn jet_int_owned_checked_widen(value: JetInt, target_f32: Bool, file: String, line: U32) -> F64 Never! { jet_int_checked_widen(jet_int_owned_raw(value), target_f32, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5084
+pub fn jet_int_owned_bit_count(value: JetInt, operation: I64, width: I64) -> I64 Never! {
+    method :: match operation {
+        0 => "count_ones", 1 => "count_zeros", 2 => "leading_zeros", 3 => "trailing_zeros", 4 => "bit_count", 5 => "bit_length",
+        _ => panic("checked integer population operation"),
+    }
+    jet_int_bit_count(jet_int_owned_raw(value), width as U32, method)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5101
+pub fn jet_int_owned_try_from_checked(value: JetInt, kind: I64) -> I128 Err! { jet_int_try_from_checked(jet_int_owned_raw(value), kind)? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5108
+pub fn jet_int_owned_checked_fixed(value: JetInt, kind: I64, file: String, line: U32) -> I128 Never! { jet_int_checked_fixed(jet_int_owned_raw(value), kind, file, line) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5117
+pub fn jet_int_owned_inline_range(value: JetInt, lo: I64, hi: I64) -> JetInt Err! { jet_int_owned_from_i64(jet_inline_range_from_int(jet_int_owned_to_i64(value)?, lo, hi)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5125
+pub fn jet_fmt_decimal_int_owned(value: JetInt, precision: JetInt) -> String Never! {
+    text :: value.to_string_rep()
+    jet_fmt_decimal_int(text, jet_int_owned_to_i64(precision).unwrap_or_else(fn(error: String) -> I64 Never! { panic("{error}") }))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5133
+pub fn jet_fmt_grouped_int_owned(value: JetInt, precision: JetInt) -> String Never! {
+    text :: value.to_string_rep()
+    jet_fmt_grouped_int(text, jet_int_owned_to_i64(precision).unwrap_or_else(fn(error: String) -> I64 Never! { panic("{error}") }))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5141
+pub fn jet_fmt_hex_owned(value: JetInt, width: JetInt) -> String Never! {
+    text :: value.to_string_rep()
+    jet_fmt_hex_decimal(text, jet_int_owned_to_i64(width).unwrap_or_else(fn(error: String) -> I64 Never! { panic("{error}") }))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5149
+pub fn jet_fmt_bin_owned(value: JetInt) -> String Never! { jet_fmt_bin_decimal(value.to_string_rep()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5154
+pub fn jet_fmt_oct_owned(value: JetInt) -> String Never! { jet_fmt_oct_decimal(value.to_string_rep()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5163
+// Reduced exact ratio with positive denominator.
+#Clone
+#Debug
+#Equatable
+pub struct JetFraction { numerator: JetBigInt, denominator: JetBigInt }
+impl JetFraction {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5169
+    pub fn partial_cmp(self, other: JetFraction) -> Ordering? Never! { Val(self.cmp(other)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5175
+    pub fn cmp(self, other: JetFraction) -> Ordering Never! { self.numerator.mul(other.denominator).compare(other.numerator.mul(self.denominator)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5183
+    pub fn new(numerator: I64, denominator: I64) -> JetFraction? Never! { JetFraction.from_bigints(jet_int_value(numerator), jet_int_value(denominator)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5187
+    pub fn from_bigints(^numerator: JetBigInt, ^denominator: JetBigInt) -> JetFraction? Never! {
+        if denominator.is_zero() -> return None
+        n := ^numerator
+        d := ^denominator
+        if d.negative { n = n.neg(); d = d.neg() }
+        divisor :: JetBigInt.gcd(n, d)
+        Val(JetFraction{numerator: (n.div_rem(divisor) ?? return None).0, denominator: (d.div_rem(divisor) ?? return None).0})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5204
+    fn from_reduced_bigints(^numerator: JetBigInt, ^denominator: JetBigInt) -> JetFraction? Never! {
+        if denominator.is_zero() -> return None
+        n := ^numerator
+        d := ^denominator
+        if d.negative { n = n.neg(); d = d.neg() }
+        Val(JetFraction{numerator: ^n, denominator: ^d})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5218
+    pub fn add(self, other: JetFraction) -> JetFraction? Never! {
+        left :: self.numerator.mul(other.denominator)
+        right :: other.numerator.mul(self.denominator)
+        JetFraction.from_bigints(left.add(right), self.denominator.mul(other.denominator))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5224
+    pub fn sub(self, other: JetFraction) -> JetFraction? Never! {
+        left :: self.numerator.mul(other.denominator)
+        right :: other.numerator.mul(self.denominator)
+        JetFraction.from_bigints(left.sub(right), self.denominator.mul(other.denominator))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5230
+    pub fn mul(self, other: JetFraction) -> JetFraction? Never! { JetFraction.from_bigints(self.numerator.mul(other.numerator), self.denominator.mul(other.denominator)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5237
+    pub fn div(self, other: JetFraction) -> JetFraction? Never! { JetFraction.from_bigints(self.numerator.mul(other.denominator), self.denominator.mul(other.numerator)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5244
+    pub fn from_int(value: I64) -> JetFraction? Never! { JetFraction.from_bigints(jet_int_value(value), JetBigInt.from_int(1)) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5248
+    pub fn from_float(value: F64) -> JetFraction? Never! {
+        if !value.is_finite() -> return None
+        if value == 0.0 -> return JetFraction.new(0, 1)
+        bits :: value.to_bits()
+        negative :: (bits >> 63) != 0
+        exponent :: ((bits >> 52) & 0x7ff) as I32
+        fraction :: bits & (((1 as U64) << 52) - 1)
+        (significand, power) :: if exponent == 0 { (fraction, -1074) } else { (fraction | ((1 as U64) << 52), exponent - 1023 - 52) }
+        numerator := JetBigInt.from_u64(significand)
+        denominator := JetBigInt.from_int(1)
+        if power >= 0 {
+            count :: U32.try_from(power) ?? return None
+            loop _ in 0..<count { numerator = numerator.mul(JetBigInt.from_int(2)) }
+        } else {
+            count :: U32.try_from(-power) ?? return None
+            loop _ in 0..<count { denominator = denominator.mul(JetBigInt.from_int(2)) }
+        }
+        if negative { numerator = numerator.neg() }
+        JetFraction.from_bigints(^numerator, ^denominator)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5283
+    pub fn from_decimal(value: JetDecimal) -> JetFraction? Never! { value.to_fraction() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5287
+    pub fn to_int_exact(self) -> I64? Never! { if self.denominator == JetBigInt.from_int(1) { Val(jet_int_pack(self.numerator.clone())) } else { None } }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5291
+    pub fn to_decimal(self) -> JetDecimal? Never! { JetDecimal.from_fraction(self) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5295
+    pub fn to_float(self) -> F64 Never! { self.numerator.ratio_to_f64(self.denominator) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5299
+    pub fn is_zero(self) -> Bool Never! { self.numerator.is_zero() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5303
+    pub fn to_string_rep(self) -> String Never! {
+        if decimal :: JetDecimal.from_fraction(self) -> return decimal.to_string_rep()
+        "{self.numerator.to_string_rep()}/{self.denominator.to_string_rep()}"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5314
+    pub fn numerator_value(self) -> I64 Never! { jet_int_pack(self.numerator.clone()) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5318
+    pub fn denominator_value(self) -> I64 Never! { jet_int_pack(self.denominator.clone()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5323
+pub fn jet_int_exact_compare(left: I64, right: I64) -> I64 Never! {
+    match jet_exact_numeric.compare(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right)) { .Less => -1, .Equal => 0, .Greater => 1 }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5334
+pub fn jet_int_exact_add(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.add(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5341
+pub fn jet_int_exact_sub(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.sub(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5348
+pub fn jet_int_exact_mul(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.mul(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5355
+pub fn jet_int_exact_bit_and(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.bit_and(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5362
+pub fn jet_int_exact_bit_or(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.bit_or(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5369
+pub fn jet_int_exact_bit_xor(left: I64, right: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.bit_xor(jet_std_raw_to_exact(left), jet_std_raw_to_exact(right))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5376
+pub fn jet_int_exact_neg(value: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.neg(jet_std_raw_to_exact(value))) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:5380
+pub fn jet_int_exact_not(value: I64) -> I64 Never! { jet_std_exact_to_raw(jet_exact_numeric.bit_not(jet_std_raw_to_exact(value))) }

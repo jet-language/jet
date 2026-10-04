@@ -1,0 +1,849 @@
+// PORT-PENDING 1042 tests-encoding-hostile-io: tests/encoding_hostile_io.rs:1-845
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-ENCSTREAM-SURFACE1 hostile streaming I/O matrix (card #711).
+//RS //! Exercises the std-only encoding FileReader/FileWriter seam across JSON,
+//RS //! JSONL, CSV, and CBOR without changing the public Jet surface.
+//RS 
+//RS use std::fs;
+//RS use std::path::PathBuf;
+//RS use std::process::Command;
+//RS 
+//RS mod common;
+//RS 
+//RS fn build_and_run(
+//RS     dir: &PathBuf,
+//RS     name: &str,
+//RS     src: &str,
+//RS     env: &[(&str, &str)],
+//RS ) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let mut cmd = Command::new(&bin);
+//RS     cmd.current_dir(dir);
+//RS     for (k, v) in env {
+//RS         cmd.env(k, v);
+//RS     }
+//RS     let run = cmd.output().unwrap();
+//RS     (
+//RS         run.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS fn hostile_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
+//RS     let mut env = vec![("JET_ENC_HOSTILE_IO".to_string(), "1".to_string())];
+//RS     env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+//RS     env
+//RS }
+//RS 
+//RS fn run_with_env(
+//RS     dir: &PathBuf,
+//RS     name: &str,
+//RS     src: &str,
+//RS     env: &[(String, String)],
+//RS ) -> (i32, String, String) {
+//RS     let path = dir.join(format!("{name}.jet"));
+//RS     fs::write(&path, src).unwrap();
+//RS     let shown = path.to_string_lossy();
+//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+//RS         panic!(
+//RS             "front end rejected fixture:\n{}",
+//RS             jet::render_diagnostics(&shown, src, &diags)
+//RS         )
+//RS     });
+//RS     let rs = dir.join(format!("{name}.rs"));
+//RS     let bin = dir.join(name);
+//RS     fs::write(&rs, &out.rust).unwrap();
+//RS     let mut rustc_cmd = Command::new("rustc");
+//RS     rustc_cmd.args([
+//RS         "--edition",
+//RS         "2021",
+//RS         rs.to_str().unwrap(),
+//RS         "-o",
+//RS         bin.to_str().unwrap(),
+//RS     ]);
+//RS     if let Some(link) = &out.ffi {
+//RS         rustc_cmd
+//RS             .arg("--extern")
+//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+//RS             rustc_cmd
+//RS                 .arg("-L")
+//RS                 .arg(format!("dependency={}", deps_dir.display()));
+//RS         }
+//RS     }
+//RS     let rustc = rustc_cmd.output().unwrap();
+//RS     assert!(
+//RS         rustc.status.success(),
+//RS         "rustc rejected generated code:\n{}",
+//RS         String::from_utf8_lossy(&rustc.stderr)
+//RS     );
+//RS     let mut cmd = Command::new(&bin);
+//RS     cmd.current_dir(dir);
+//RS     for (k, v) in env {
+//RS         cmd.env(k, v);
+//RS     }
+//RS     let run = cmd.output().unwrap();
+//RS     (
+//RS         run.status.code().unwrap_or(-1),
+//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
+//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
+//RS     )
+//RS }
+//RS 
+//RS fn json_reader_fixture(input_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{input_path}") ?? panic("open")
+//RS     reader :: json.reader(^input) ?? panic("reader")
+//RS     count := 0
+//RS     loop count < 32 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == None {{ break }}
+//RS                 count += 1
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS     print(count)
+//RS     print("eof")
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn json_writer_fixture(output_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output_path}") ?? panic("create")
+//RS     writer :: json.writer(^output) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+//RS     writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+//RS     writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+//RS     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+//RS     if writer.finish() == {{
+//RS         .Ok(_) -> {{ print("finish-ok") }}
+//RS         .Err(first) -> {{
+//RS             again :: writer.finish()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("finish-not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                     }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS     print(files.read("{output_path}") ?? panic("read"))
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn jsonl_reader_fixture(input_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{input_path}") ?? panic("open")
+//RS     reader :: jsonl.reader(^input) ?? panic("reader")
+//RS     first :: reader.next() ?? panic("first")
+//RS     if first == {{
+//RS         Val(v) -> print(v.text() ?? "bad")
+//RS         None -> print("none")
+//RS     }}
+//RS     second :: reader.next() ?? panic("second")
+//RS     if second == {{
+//RS         Val(v) -> print(v.int() ?? -1)
+//RS         None -> print("none2")
+//RS     }}
+//RS     eof :: reader.next() ?? panic("eof")
+//RS     if eof == None {{ print("eof") }} else {{ print("bad-eof") }}
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn malformed_reader_fixture(codec: &str, input_path: &str) -> String {
+//RS     let reader = match codec {
+//RS         "json" => "json.reader(^input)",
+//RS         "jsonl" => "jsonl.reader(^input)",
+//RS         "csv" => "csv.reader(^input)",
+//RS         "cbor" => "cbor.reader(^input)",
+//RS         _ => unreachable!(),
+//RS     };
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.encoding.jsonl as jsonl
+//RS use core.encoding.csv as csv
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{input_path}") ?? panic("open")
+//RS     reader :: {reader} ?? panic("reader")
+//RS     loop {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == None {{
+//RS                     print("eof-missed")
+//RS                     break
+//RS                 }}
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn jsonl_writer_fixture(output_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output_path}") ?? panic("create")
+//RS     writer :: jsonl.writer(^output) ?? panic("writer")
+//RS     writer.write(DataTree.Text("alpha")) ?? panic("write")
+//RS     writer.write(DataTree.Int(7)) ?? panic("write2")
+//RS     writer.finish() ?? panic("finish")
+//RS     print(files.read("{output_path}") ?? panic("read"))
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn csv_reader_fixture(input_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.csv as csv
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{input_path}") ?? panic("open")
+//RS     reader :: csv.reader(^input) ?? panic("reader")
+//RS     first :: reader.next() ?? panic("first")
+//RS     if first == {{
+//RS         Val(row) -> {{
+//RS             print(row.fields[0])
+//RS             print(row.fields[1])
+//RS         }}
+//RS         None -> print("none")
+//RS     }}
+//RS     eof :: reader.next() ?? panic("eof")
+//RS     if eof == None {{ print("eof") }} else {{ print("bad") }}
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn csv_writer_fixture(output_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.csv as csv
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output_path}") ?? panic("create")
+//RS     writer :: csv.writer(^output) ?? panic("writer")
+//RS     writer.write(["x", "y"]) ?? panic("write")
+//RS     writer.finish() ?? panic("finish")
+//RS     print(files.read("{output_path}") ?? panic("read"))
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn cbor_reader_fixture(input_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     input :: files.open("{input_path}") ?? panic("open")
+//RS     reader :: cbor.reader(^input) ?? panic("reader")
+//RS     count := 0
+//RS     loop count < 16 {{
+//RS         result :: reader.next()
+//RS         if result == {{
+//RS             .Ok(maybe) -> {{
+//RS                 if maybe == None {{ break }}
+//RS                 count += 1
+//RS             }}
+//RS             .Err(first) -> {{
+//RS                 again :: reader.next()
+//RS                 if again == {{
+//RS                     .Ok(_) -> {{ print("not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                     }}
+//RS                 }}
+//RS                 break
+//RS             }}
+//RS         }}
+//RS     }}
+//RS     print(count)
+//RS     print("eof")
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS fn cbor_writer_fixture(output_path: &str) -> String {
+//RS     format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     output :: files.create("{output_path}") ?? panic("create")
+//RS     writer :: cbor.writer(^output) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     writer.write(encoding.DataEvent.Int(3)) ?? panic("int")
+//RS     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("end")
+//RS     if writer.finish() == {{
+//RS         .Ok(_) -> {{ print("finish-ok") }}
+//RS         .Err(first) -> {{
+//RS             again :: writer.finish()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("not-latched") }}
+//RS                     .Err(second) -> {{
+//RS                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+//RS                     }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS     writer.finish() ?? panic("finish")
+//RS     print("done")
+//RS }}
+//RS "#
+//RS     )
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_one_byte_reads_match_baseline_for_all_codecs() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile one-byte read matrix (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_read1_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let json_in = dir.join("json.in");
+//RS     fs::write(&json_in, r#"{"a":[1,true]}"#).unwrap();
+//RS     let jsonl_in = dir.join("jsonl.in");
+//RS     fs::write(&jsonl_in, "\"one\"\n7\n").unwrap();
+//RS     let csv_in = dir.join("csv.in");
+//RS     fs::write(&csv_in, "p,q\r\n").unwrap();
+//RS     let cbor_in = dir.join("cbor.in");
+//RS     fs::write(&cbor_in, [0x82, 0x01, 0x02]).unwrap();
+//RS 
+//RS     let cases: [(&str, String, &str); 4] = [
+//RS         (
+//RS             "json",
+//RS             json_reader_fixture(&json_in.to_string_lossy().replace('\\', "\\\\")),
+//RS             "7\neof\n",
+//RS         ),
+//RS         (
+//RS             "jsonl",
+//RS             jsonl_reader_fixture(&jsonl_in.to_string_lossy().replace('\\', "\\\\")),
+//RS             "one\n7\neof\n",
+//RS         ),
+//RS         (
+//RS             "csv",
+//RS             csv_reader_fixture(&csv_in.to_string_lossy().replace('\\', "\\\\")),
+//RS             "p\nq\neof\n",
+//RS         ),
+//RS         (
+//RS             "cbor",
+//RS             cbor_reader_fixture(&cbor_in.to_string_lossy().replace('\\', "\\\\")),
+//RS             "4\neof\n",
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (name, source, expected) in cases {
+//RS         let (base_code, base_out, base_err) =
+//RS             build_and_run(&dir, &format!("{name}_base"), &source, &[]);
+//RS         assert_eq!(
+//RS             (base_code, base_err.as_str()),
+//RS             (0, ""),
+//RS             "{name} baseline stderr"
+//RS         );
+//RS         assert_eq!(base_out, expected, "{name} baseline stdout");
+//RS 
+//RS         let (host_code, host_out, host_err) = run_with_env(
+//RS             &dir,
+//RS             &format!("{name}_read1"),
+//RS             &source,
+//RS             &hostile_env(&[("JET_ENC_HOSTILE_READ_ONE", "1")]),
+//RS         );
+//RS         assert_eq!(
+//RS             (host_code, host_err.as_str()),
+//RS             (0, ""),
+//RS             "{name} hostile stderr"
+//RS         );
+//RS         assert_eq!(host_out, expected, "{name} one-byte read drift");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_short_writes_match_baseline_for_all_codecs() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile short-write matrix (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_write1_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let json_out = dir.join("json.out");
+//RS     let jsonl_out = dir.join("jsonl.out");
+//RS     let csv_out = dir.join("csv.out");
+//RS     let cbor_out = dir.join("cbor.out");
+//RS 
+//RS     let cases: [(&str, String, &str); 4] = [
+//RS         (
+//RS             "json",
+//RS             json_writer_fixture(&json_out.to_string_lossy().replace('\\', "\\\\")),
+//RS             "finish-ok\n{\"a\":1}\n",
+//RS         ),
+//RS         (
+//RS             "jsonl",
+//RS             jsonl_writer_fixture(&jsonl_out.to_string_lossy().replace('\\', "\\\\")),
+//RS             "\"alpha\"\n7\n\n",
+//RS         ),
+//RS         (
+//RS             "csv",
+//RS             csv_writer_fixture(&csv_out.to_string_lossy().replace('\\', "\\\\")),
+//RS             "x,y\r\n\n",
+//RS         ),
+//RS         (
+//RS             "cbor",
+//RS             cbor_writer_fixture(&cbor_out.to_string_lossy().replace('\\', "\\\\")),
+//RS             "finish-ok\ndone\n",
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (name, source, expected) in cases {
+//RS         let (base_code, base_out, base_err) =
+//RS             build_and_run(&dir, &format!("{name}_base"), &source, &[]);
+//RS         assert_eq!((base_code, base_err.as_str()), (0, ""), "{name} baseline");
+//RS         assert_eq!(base_out, expected, "{name} baseline stdout");
+//RS 
+//RS         let (host_code, host_out, host_err) = run_with_env(
+//RS             &dir,
+//RS             &format!("{name}_chunk1"),
+//RS             &source,
+//RS             &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
+//RS         );
+//RS         assert_eq!(
+//RS             (host_code, host_err.as_str()),
+//RS             (0, ""),
+//RS             "{name} hostile stderr"
+//RS         );
+//RS         assert_eq!(host_out, expected, "{name} short-write drift");
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_io_failures_latch_terminal_for_read_and_write() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile interrupt matrix (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_intr_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let directory = dir.to_string_lossy().replace('\\', "\\\\");
+//RS     let source_read = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     directory_input :: files.open("{directory}") ?? panic("open dir")
+//RS     directory_reader := cbor.reader(^directory_input) ?? panic("reader")
+//RS     result :: directory_reader.next()
+//RS     if result == {{
+//RS         .Ok(_) -> {{ print("read-ok-missed") }}
+//RS         .Err(first) -> {{
+//RS             again :: directory_reader.next()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("not-latched") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.kind == encoding.EncodingErrorKind.IO)
+//RS                     print(first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let json_out = dir.join("json.out");
+//RS     let _ = json_out;
+//RS     let (code, stdout, stderr) =
+//RS         run_with_env(&dir, "json_intr_read", &source_read, &hostile_env(&[]));
+//RS     assert_eq!((code, stderr.as_str()), (0, ""));
+//RS     assert!(stdout.contains("true"), "expected IO error, got: {stdout}");
+//RS 
+//RS     let source_write = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
+//RS     repeated :: &writer.flush()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     full_output :: files.create("/dev/full") ?? panic("full open")
+//RS     full_writer := cbor.writer(^full_output) ?? panic("full writer")
+//RS     write_result :: full_writer.write(encoding.DataEvent.Null)
+//RS     if write_result == {{
+//RS         .Err(first) -> {{
+//RS             print(first.kind == encoding.EncodingErrorKind.IO)
+//RS             flush_again :: &full_writer.flush()
+//RS             if flush_again == {{
+//RS                 .Err(second) -> print(first.reason == second.reason)
+//RS                 .Ok(done) -> print(false)
+//RS             }}
+//RS         }}
+//RS         .Ok(_) -> {{
+//RS             flush_result :: &full_writer.flush()
+//RS             if flush_result == {{
+//RS                 .Err(io_error) -> print(writer_io(&full_writer))
+//RS                 .Ok(done) -> print(false)
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = run_with_env(
+//RS         &dir,
+//RS         "json_intr_write",
+//RS         &source_write,
+//RS         &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
+//RS     );
+//RS     assert_eq!((code, stderr.as_str()), (0, ""));
+//RS     assert!(
+//RS         stdout.contains("true"),
+//RS         "expected IO on write, got: {stdout}"
+//RS     );
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_fail_after_write_preserves_prefix_without_duplication() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile fail-after write test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_failw_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let output = dir.join("partial.json");
+//RS     let output_text = output.to_string_lossy().replace('\\', "\\\\");
+//RS     let limits_source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.json as json
+//RS use core.files as files
+//RS 
+//RS fn run() {{
+//RS     limits := encoding.EncodingLimits.safe()
+//RS     limits.max_item_bytes = 1
+//RS     output :: files.create("{output_text}") ?? panic("create")
+//RS     writer :: json.writer(^output, limits) ?? panic("writer")
+//RS     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+//RS     result :: writer.write(encoding.DataEvent.Text("ab"))
+//RS     if result == {{
+//RS         .Ok(_) -> {{ print("missed-limit") }}
+//RS         .Err(first) -> {{
+//RS             again :: writer.finish()
+//RS             if again == {{
+//RS                 .Ok(_) -> {{ print("finish-after-limit-missed") }}
+//RS                 .Err(second) -> {{
+//RS                     print(first.kind == encoding.EncodingErrorKind.Limit)
+//RS                     print(first.reason == second.reason)
+//RS                 }}
+//RS             }}
+//RS         }}
+//RS     }}
+//RS     wire := files.read("{output_text}") ?? panic("read")
+//RS     print(wire)
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "fail_limit", &limits_source, &[]);
+//RS     assert_eq!((code, stderr.as_str()), (0, ""));
+//RS     assert!(stdout.contains("true"), "limit latch: {stdout}");
+//RS     let wire = fs::read_to_string(&output).unwrap();
+//RS     assert_eq!(wire, "[", "prefix only: {wire}");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_malformed_and_truncated_corpora_latch_under_chunked_io() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile malformed corpus (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_mal_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS 
+//RS     let corpora: [(&str, &str, Vec<u8>, &str); 8] = [
+//RS         ("json_trunc", "json", b"{\"a\":\"".to_vec(), "Truncated"),
+//RS         ("json_bad", "json", b"{\"a\":}".to_vec(), "Syntax"),
+//RS         (
+//RS             "jsonl_bad",
+//RS             "jsonl",
+//RS             b"{\"a\":1}\n[2,]\n".to_vec(),
+//RS             "Syntax",
+//RS         ),
+//RS         ("csv_bad", "csv", b"\"unclosed\r\n".to_vec(), "Truncated"),
+//RS         ("csv_utf8", "csv", vec![b'a', b',', 0xff], "Syntax"),
+//RS         ("cbor_trunc", "cbor", vec![0x81], "Truncated"),
+//RS         ("cbor_tag", "cbor", vec![0xC0, 0x00], "Unsupported"),
+//RS         (
+//RS             "cbor_dup",
+//RS             "cbor",
+//RS             vec![0xA2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02],
+//RS             "Unsupported",
+//RS         ),
+//RS     ];
+//RS 
+//RS     for (label, codec, bytes, _kind) in corpora {
+//RS         let path = dir.join(format!("{label}.in"));
+//RS         fs::write(&path, bytes).unwrap();
+//RS         let path_text = path.to_string_lossy().replace('\\', "\\\\");
+//RS         let source = malformed_reader_fixture(codec, &path_text);
+//RS         let (base_code, base_out, _) = build_and_run(&dir, &format!("{label}_base"), &source, &[]);
+//RS         assert_eq!(base_code, 0, "{label} baseline failed");
+//RS         let (host_code, host_out, _) = run_with_env(
+//RS             &dir,
+//RS             &format!("{label}_hostile"),
+//RS             &source,
+//RS             &hostile_env(&[("JET_ENC_HOSTILE_READ_ONE", "1")]),
+//RS         );
+//RS         assert_eq!(host_code, 0, "{label} hostile failed");
+//RS         assert!(
+//RS             base_out.contains("true") && host_out.contains("true"),
+//RS             "{label}: base={base_out} host={host_out} expected terminal latch"
+//RS         );
+//RS         assert!(
+//RS             !base_out.contains("not-latched") && !host_out.contains("not-latched"),
+//RS             "{label}: latch failure base={base_out} host={host_out}"
+//RS         );
+//RS     }
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[test]
+//RS fn encoding_hostile_drop_scope_emits_no_false_success() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping hostile drop test (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_drop_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let partial = dir.join("partial.jsonl");
+//RS     let partial_text = partial.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.jsonl as jsonl
+//RS use core.files as files
+//RS 
+//RS fn write_partial(path: String) {{
+//RS     output :: files.create(path) ?? panic("create")
+//RS     writer :: jsonl.writer(^output) ?? panic("writer")
+//RS     writer.write(DataTree.Text("kept")) ?? panic("write")
+//RS     &writer.flush() ?? panic("flush")
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     write_partial("{partial_text}")
+//RS     leftover :: files.read("{partial_text}") ?? panic("read")
+//RS     print(leftover == "\"kept\"")
+//RS     print(leftover.contains("\n") == false)
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = run_with_env(
+//RS         &dir,
+//RS         "drop_scope",
+//RS         &source,
+//RS         &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
+//RS     );
+//RS     assert_eq!((code, stderr.as_str()), (0, ""));
+//RS     assert_eq!(stdout, "true\ntrue\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+//RS 
+//RS #[cfg(target_os = "linux")]
+//RS #[test]
+//RS fn encoding_hostile_retains_real_file_and_dev_full_probes() {
+//RS     if !common::have_rustc() {
+//RS         eprintln!("note: skipping /dev/full probe (need rustc)");
+//RS         return;
+//RS     }
+//RS     let dir = std::env::temp_dir().join(format!("jet_enc_hostile_full_{}", std::process::id()));
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS     fs::create_dir_all(&dir).unwrap();
+//RS     let directory = dir.to_string_lossy().replace('\\', "\\\\");
+//RS     let source = format!(
+//RS         r#"
+//RS use core.encoding as encoding
+//RS use core.encoding.cbor as cbor
+//RS use core.files as files
+//RS 
+//RS fn reader_io(reader: &cbor.CBORReader) -[IO]> Bool {{
+//RS     repeated :: reader.next()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn writer_io(writer: &cbor.CBORWriter) -[IO]> Bool {{
+//RS     repeated :: &writer.flush()
+//RS     if repeated == {{
+//RS         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+//RS         .Ok(_) -> return false
+//RS     }}
+//RS     return false
+//RS }}
+//RS 
+//RS fn run() {{
+//RS     directory_input :: files.open("{directory}") ?? panic("open dir")
+//RS     directory_reader := cbor.reader(^directory_input) ?? panic("reader")
+//RS     print(reader_io(&directory_reader))
+//RS 
+//RS     full_output :: files.create("/dev/full") ?? panic("full")
+//RS     full_writer := cbor.writer(^full_output) ?? panic("writer")
+//RS     write_result :: full_writer.write(encoding.DataEvent.Null)
+//RS     if write_result == {{
+//RS         .Err(io_error) -> print(writer_io(&full_writer))
+//RS         .Ok(wrote) -> {{
+//RS             flush_result :: &full_writer.flush()
+//RS             if flush_result == {{
+//RS                 .Err(io_error) -> print(writer_io(&full_writer))
+//RS                 .Ok(done) -> print(false)
+//RS             }}
+//RS         }}
+//RS     }}
+//RS }}
+//RS "#
+//RS     );
+//RS     let (code, stdout, stderr) = build_and_run(&dir, "full_probe", &source, &[]);
+//RS     assert_eq!(
+//RS         (code, stdout.as_str(), stderr.as_str()),
+//RS         (0, "true\ntrue\n", "")
+//RS     );
+//RS     let (host_code, host_stdout, host_stderr) = run_with_env(
+//RS         &dir,
+//RS         "full_probe_hostile",
+//RS         &source,
+//RS         &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
+//RS     );
+//RS     assert_eq!((host_code, host_stderr.as_str()), (0, ""));
+//RS     assert_eq!(host_stdout, "true\ntrue\n");
+//RS     let _ = fs::remove_dir_all(&dir);
+//RS }
+// END-PORT-PENDING 1042 tests/encoding_hostile_io.rs:1-845
+

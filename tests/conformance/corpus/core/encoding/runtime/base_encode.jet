@@ -1,0 +1,227 @@
+// EncodingBase.rs:117–237; RFC 4648 §10 and tests/fixtures/encoding/rfc4648/vectors.tsv.
+// Decoder edition/error union and DataTree.Bytes (#4452) are intentionally unchanged.
+use core.encoding.base64 as base_encode_test64
+use core.encoding.base32 as base_encode_test32
+use core.encoding.runtime.kernel_base_encode as base_encode_test_kernel
+
+#Test("RFC4648 empty") {
+    input :: [U8]{}
+    assert_eq(base_encode_test64.encode(input), "")
+    assert_eq(base_encode_test64.encode_url(input), "")
+    assert_eq(base_encode_test64.encode_url_padded(input), "")
+    assert_eq(base_encode_test32.encode(input), "")
+    assert_eq(base_encode_test32.b32hexencode(input), "")
+    assert_eq(base_encode_test64.encodebytes(input), "")
+}
+
+#Test("RFC4648 f") {
+    input :: [U8]{102}
+    assert_eq(base_encode_test64.encode(input), "Zg==")
+    assert_eq(base_encode_test64.encode_url(input), "Zg")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zg==")
+    assert_eq(base_encode_test32.encode(input), "MY======")
+    assert_eq(base_encode_test32.b32hexencode(input), "CO======")
+    assert_eq(base_encode_test64.encodebytes(input), "Zg==\n")
+}
+
+#Test("RFC4648 fo") {
+    input :: [U8]{102, 111}
+    assert_eq(base_encode_test64.encode(input), "Zm8=")
+    assert_eq(base_encode_test64.encode_url(input), "Zm8")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zm8=")
+    assert_eq(base_encode_test32.encode(input), "MZXQ====")
+    assert_eq(base_encode_test32.b32hexencode(input), "CPNG====")
+    assert_eq(base_encode_test64.encodebytes(input), "Zm8=\n")
+}
+
+#Test("RFC4648 foo") {
+    input :: [U8]{102, 111, 111}
+    assert_eq(base_encode_test64.encode(input), "Zm9v")
+    assert_eq(base_encode_test64.encode_url(input), "Zm9v")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zm9v")
+    assert_eq(base_encode_test32.encode(input), "MZXW6===")
+    assert_eq(base_encode_test32.b32hexencode(input), "CPNMU===")
+    assert_eq(base_encode_test64.encodebytes(input), "Zm9v\n")
+}
+
+#Test("RFC4648 foob") {
+    input :: [U8]{102, 111, 111, 98}
+    assert_eq(base_encode_test64.encode(input), "Zm9vYg==")
+    assert_eq(base_encode_test64.encode_url(input), "Zm9vYg")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zm9vYg==")
+    assert_eq(base_encode_test32.encode(input), "MZXW6YQ=")
+    assert_eq(base_encode_test32.b32hexencode(input), "CPNMUOG=")
+    assert_eq(base_encode_test64.encodebytes(input), "Zm9vYg==\n")
+}
+
+#Test("RFC4648 fooba") {
+    input :: [U8]{102, 111, 111, 98, 97}
+    assert_eq(base_encode_test64.encode(input), "Zm9vYmE=")
+    assert_eq(base_encode_test64.encode_url(input), "Zm9vYmE")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zm9vYmE=")
+    assert_eq(base_encode_test32.encode(input), "MZXW6YTB")
+    assert_eq(base_encode_test32.b32hexencode(input), "CPNMUOJ1")
+    assert_eq(base_encode_test64.encodebytes(input), "Zm9vYmE=\n")
+}
+
+#Test("RFC4648 foobar") {
+    input :: [U8]{102, 111, 111, 98, 97, 114}
+    assert_eq(base_encode_test64.encode(input), "Zm9vYmFy")
+    assert_eq(base_encode_test64.encode_url(input), "Zm9vYmFy")
+    assert_eq(base_encode_test64.encode_url_padded(input), "Zm9vYmFy")
+    assert_eq(base_encode_test32.encode(input), "MZXW6YTBOI======")
+    assert_eq(base_encode_test32.b32hexencode(input), "CPNMUOJ1E8======")
+    assert_eq(base_encode_test64.encodebytes(input), "Zm9vYmFy\n")
+}
+
+#Test("high bytes and tails 1") {
+    input :: [U8]{255}
+    assert_eq(base_encode_test64.encode(input), "/w==")
+    assert_eq(base_encode_test64.encode_url(input), "_w")
+    assert_eq(base_encode_test64.encode_url_padded(input), "_w==")
+    assert_eq(base_encode_test32.encode(input), "74======")
+    assert_eq(base_encode_test32.b32hexencode(input), "VS======")
+}
+
+#Test("high bytes and tails 2") {
+    input :: [U8]{251, 255}
+    assert_eq(base_encode_test64.encode(input), "+/8=")
+    assert_eq(base_encode_test64.encode_url(input), "-_8")
+    assert_eq(base_encode_test64.encode_url_padded(input), "-_8=")
+    assert_eq(base_encode_test32.encode(input), "7P7Q====")
+    assert_eq(base_encode_test32.b32hexencode(input), "VFVG====")
+}
+
+#Test("high bytes and tails 3") {
+    input :: [U8]{0, 128, 255}
+    assert_eq(base_encode_test64.encode(input), "AID/")
+    assert_eq(base_encode_test64.encode_url(input), "AID_")
+    assert_eq(base_encode_test64.encode_url_padded(input), "AID_")
+    assert_eq(base_encode_test32.encode(input), "ACAP6===")
+    assert_eq(base_encode_test32.b32hexencode(input), "020FU===")
+}
+
+#Test("high bytes and tails 4") {
+    input :: [U8]{0, 127, 128, 254}
+    assert_eq(base_encode_test64.encode(input), "AH+A/g==")
+    assert_eq(base_encode_test64.encode_url(input), "AH-A_g")
+    assert_eq(base_encode_test64.encode_url_padded(input), "AH-A_g==")
+    assert_eq(base_encode_test32.encode(input), "AB7YB7Q=")
+    assert_eq(base_encode_test32.b32hexencode(input), "01VO1VG=")
+}
+
+#Test("high bytes and tails 5") {
+    input :: [U8]{255, 254, 253, 252, 251}
+    assert_eq(base_encode_test64.encode(input), "//79/Ps=")
+    assert_eq(base_encode_test64.encode_url(input), "__79_Ps")
+    assert_eq(base_encode_test64.encode_url_padded(input), "__79_Ps=")
+    assert_eq(base_encode_test32.encode(input), "777P37H3")
+    assert_eq(base_encode_test32.b32hexencode(input), "VVVFRV7R")
+}
+
+#Test("high bytes and tails 256") {
+    input :: [U8]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255}
+    assert_eq(base_encode_test64.encode(input), "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==")
+    assert_eq(base_encode_test64.encode_url(input), "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w")
+    assert_eq(base_encode_test64.encode_url_padded(input), "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w==")
+    assert_eq(base_encode_test32.encode(input), "AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYPSAIJCEMSCKJRHFAUSUKZMFUXC6MBRGIZTINJWG44DSOR3HQ6T4P2AIFBEGRCFIZDUQSKKJNGE2TSPKBIVEU2UKVLFOWCZLJNVYXK6L5QGCYTDMRSWMZ3INFVGW3DNNZXXA4LSON2HK5TXPB4XU634PV7H7AEBQKBYJBMGQ6EITCULRSGY5D4QSGJJHFEVS2LZRGM2TOOJ3HU7UCQ2FI5EUWTKPKFJVKV2ZLNOV6YLDMVTWS23NN5YXG5LXPF5X274BQOCYPCMLRWHZDE4VS6MZXHM7UGR2LJ5JVOW27MNTWW33TO55X7A4HROHZHF43T6R2PK5PWO33XP6DY7F47U6X3PP6HZ7L57Z7P674======")
+    assert_eq(base_encode_test32.b32hexencode(input), "000G40O40K30E209185GO38E1S8124GJ2GAHC5OO34D1M70T3OFI08924CI2A9H750KIKAPC5KN2UC1H68PJ8D9M6SS3IEHR7GUJSFQ085146H258P3KGIAA9D64QJIFA18L4KQKALB5EM2PB9DLONAUBTG62OJ3CHIMCPR8D5L6MR3DDPNN0SBIEDQ7ATJNF1SNKURSFLV7V041GA1O91C6GU48J2KBHI6OT3SGI699754LIQBPH6CQJEE9R7KVK2GQ58T4KMJAFA59LALQPBDELUOB3CLJMIQRDDTON6TBNF5TNQVS1GE2OF2CBHM7P34SLIUCPN7CVK6HQB9T9LEMQVCDJMMRRJETTNV0S7HE7P75SRJUHQFATFMERRNFU3OV5SVKUNRFFU7PVBTVPVFUVS======")
+}
+
+#Test("encodebytes 76-byte LF boundary 1") {
+    input := [U8]{}
+    loop _ in 0..<1 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "Zg==\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 2") {
+    input := [U8]{}
+    loop _ in 0..<2 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmY=\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 3") {
+    input := [U8]{}
+    loop _ in 0..<3 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZm\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 56") {
+    input := [U8]{}
+    loop _ in 0..<56 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY=\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 57") {
+    input := [U8]{}
+    loop _ in 0..<57 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 58") {
+    input := [U8]{}
+    loop _ in 0..<58 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\nZg==\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 114") {
+    input := [U8]{}
+    loop _ in 0..<114 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\nZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\n")
+}
+
+#Test("encodebytes 76-byte LF boundary 115") {
+    input := [U8]{}
+    loop _ in 0..<115 -> &input.push(U8{102})
+    assert_eq(base_encode_test64.encodebytes(input), "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\nZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm\nZg==\n")
+}
+
+#Test("padding uses UTF-8 bytes and unpad removes every trailing equals") {
+    assert_eq(base_encode_test64.pad(""), "")
+    assert_eq(base_encode_test64.pad("a"), "a===")
+    assert_eq(base_encode_test64.pad("ab"), "ab==")
+    assert_eq(base_encode_test64.pad("abc"), "abc=")
+    assert_eq(base_encode_test64.pad("abcd"), "abcd")
+    assert_eq(base_encode_test64.pad("é"), "é==")
+    assert_eq(base_encode_test64.pad("€"), "€=")
+    assert_eq(base_encode_test64.pad("😀"), "😀")
+    assert_eq(base_encode_test64.pad("é="), "é==")
+    assert_eq(base_encode_test64.unpad(""), "")
+    assert_eq(base_encode_test64.unpad("======"), "")
+    assert_eq(base_encode_test64.unpad("Zg======"), "Zg")
+    assert_eq(base_encode_test64.unpad("a=b=="), "a=b")
+    assert_eq(base_encode_test64.unpad("a= "), "a= ")
+    assert_eq(base_encode_test64.unpad("é😀=="), "é😀")
+    assert_eq(base_encode_test64.unpad("😀"), "😀")
+}
+
+#Test("public encoder aliases use the canonical owner") {
+    input :: [U8]{102, 111, 111}
+    assert_eq(base_encode_test64.b64encode(input), "Zm9v")
+    assert_eq(base_encode_test64.standard_b64encode(input), "Zm9v")
+    assert_eq(base_encode_test64.urlsafe_b64encode(input), "Zm9v")
+    assert_eq(base_encode_test64.b32encode(input), "MZXW6===")
+    assert_eq(base_encode_test64.b32hexencode(input), "CPNMU===")
+    assert_eq(base_encode_test32.b32encode(input), "MZXW6===")
+    assert_eq(base_encode_test64.b2a_base64(input), "Zm9v\n")
+    empty :: [U8]{}
+    assert_eq(base_encode_test64.b2a_base64(empty), "\n")
+}
+
+#Test("borrowed extent excludes prefix and suffix and preserves original input") {
+    input :: [U8]{255, 102, 111, 111, 128}
+    window :: input[1..<4]
+    assert_eq(base_encode_test_kernel.encode64(window), "Zm9v")
+    assert_eq(base_encode_test_kernel.encode32(window), "MZXW6===")
+    assert_eq(base_encode_test_kernel.encode32_hex(window), "CPNMU===")
+    assert_eq(base_encode_test_kernel.encode64_url(window), "Zm9v")
+    assert_eq(base_encode_test_kernel.encode64_bytes(window), "Zm9v\n")
+    // Preserve element reads while the view is live: a whole-owner final
+    // assert_eq moves input before the emitted view drop (#4421, E0502).
+    assert_eq(input.len(), 5)
+    assert_eq(input[0], U8{255})
+    assert_eq(input[1], U8{102})
+    assert_eq(input[2], U8{111})
+    assert_eq(input[3], U8{111})
+    assert_eq(input[4], U8{128})
+}

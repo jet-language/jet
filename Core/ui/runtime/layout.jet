@@ -1,0 +1,801 @@
+// PORT-PENDING 0179 crates-jet-codegen-src-prelude-layout-module-group-slice-1: crates/jet-codegen/src/Prelude/Layout.rs:1-797
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS mod jet_layout {
+//RS     // D-LAYOUT1 / D-LAYOUT-CTOR1: a Cassowary-style
+//RS     // linear constraint solver backing `name :: Layout.{ … }`. I6: zero external
+//RS     // crates — a hand-rolled two-phase primal simplex, plain std Rust only.
+//RS     //
+//RS     // Design (the sema/codegen half lives in Sema/CheckerCoreLib.rs,
+//RS     // Sema/CheckerInfer/{binary,calls}.rs, Codegen/TIR/{mod,lower,emit}.rs):
+//RS     //   * `HVar`/`VVar`/`LengthVar` all erase to `LinExpr` here — the
+//RS     //     horizontal/vertical/neutral axis distinction is checked entirely at
+//RS     //     compile time (GATE 1/2); there is nothing to represent at runtime.
+//RS     //   * A `Layout.{ … }` body's `box.anchor` / `self.anchor` reads desugar
+//RS     //     (parser, D-LAYOUT-CTOR1) to `NAME.h(box, anchor)` / `NAME.v(box, anchor)`
+//RS     //     — both call the SAME internal `var()`, since the axis distinction is erased.
+//RS     //   * `>=`/`<=`/`==` between layout values (GATE 1) lower to the free
+//RS     //     functions `ge`/`le`/`eq_` below (Rust operator overloading can't
+//RS     //     return a non-`bool` type via `>=`/`==` syntax).
+//RS     //   * Layout values are assumed NON-NEGATIVE (widths, positions, gaps —
+//RS     //     the universal case for UI layout; a signed-variable extension via
+//RS     //     the standard `x = x+ - x-` split is a contained follow-up, not
+//RS     //     needed for the ratified surface).
+//RS     //   * Every constraint is REQUIRED by default; `.weak()`/`.medium()`/
+//RS     //     `.strong()` (Cassowary-style priorities, collapsed to one weighted
+//RS     //     objective rather than the paper's lexicographic objective stack —
+//RS     //     see `Strength::weight`) turn it into a soft goal a conflicting
+//RS     //     required constraint always wins against. Soft constraints use the
+//RS     //     classic Cassowary "error variable" technique, which doubles as the
+//RS     //     row's phase-1-feasible seed (no artificial ever needed for a soft
+//RS     //     row); required rows use a standard two-phase artificial-variable
+//RS     //     seed. This is a real, from-scratch re-solve on every `.add()`/
+//RS     //     `.suggest()` (not Cassowary's incremental dual-simplex update) —
+//RS     //     correct and fine at UI scale; true incrementality is a performance
+//RS     //     follow-up, not a correctness requirement.
+//RS     use std::cell::RefCell;
+//RS     use std::collections::HashMap;
+//RS     use std::rc::Rc;
+//RS 
+//RS     const EPS: f64 = 1e-7;
+//RS 
+//RS     // ---------------------------------------------------------------------
+//RS     // Linear expressions — what `HVar`/`VVar`/`LengthVar` erase to.
+//RS     // ---------------------------------------------------------------------
+//RS 
+//RS     /// Max distinct box-anchor variables one constraint EXPRESSION (one side
+//RS     /// of a `>=`/`<=`/`==`, built by chaining `+`/`-`) can reference. Real
+//RS     /// layout lines stay well under this (2-4 terms); generous headroom, not
+//RS     /// a hard language limit — `combine` panics with a clear message if it's
+//RS     /// ever exceeded (would mean a genuinely unusual expression, worth
+//RS     /// surfacing loudly rather than silently truncating).
+//RS     const MAX_TERMS: usize = 16;
+//RS 
+//RS     /// `LinExpr` is what `HVar`/`VVar`/`LengthVar` erase to — and it needs to
+//RS     /// be `Copy`: a `layout {}` line routinely reuses a captured variable
+//RS     /// (`xv :: form.h("x","width"); form.suggest(xv, 100.0); form.value(xv)`),
+//RS     /// and Jet's general non-Copy-reuse clone-insertion doesn't (yet) know
+//RS     /// about this closed type family, so a `Vec`/`Rc`-backed representation
+//RS     /// would hit a real "use of moved value" in the generated Rust the first
+//RS     /// time a variable was captured and used twice. A fixed-size term array
+//RS     /// (no `Vec`) plus a `u32` handle INDEX into a thread-local registry (not
+//RS     /// an `Rc` directly — `Rc` isn't `Copy`) keeps every field `Copy`.
+//RS     #[derive(Clone, Copy)]
+//RS     pub struct LinExpr {
+//RS         terms: [(usize, f64); MAX_TERMS],
+//RS         n_terms: u8,
+//RS         constant: f64,
+//RS         handle: Option<u32>,
+//RS     }
+//RS 
+//RS     thread_local! {
+//RS         /// The handle registry `LinExpr` indexes into (see `MAX_TERMS` doc).
+//RS         /// Handles are never removed — a `layout {}` block's solver state
+//RS         /// lives for the rest of the program, same as any other value.
+//RS         static HANDLE_REGISTRY: RefCell<Vec<Rc<RefCell<Inner>>>> = RefCell::new(Vec::new());
+//RS     }
+//RS 
+//RS     fn register_handle(inner: Rc<RefCell<Inner>>) -> u32 {
+//RS         HANDLE_REGISTRY.with(|r| {
+//RS             let mut r = r.borrow_mut();
+//RS             r.push(inner);
+//RS             (r.len() - 1) as u32
+//RS         })
+//RS     }
+//RS 
+//RS     fn handle_by_id(id: u32) -> Rc<RefCell<Inner>> {
+//RS         HANDLE_REGISTRY.with(|r| r.borrow()[id as usize].clone())
+//RS     }
+//RS 
+//RS     impl LinExpr {
+//RS         /// A plain number used where a layout value is expected (a bare
+//RS         /// `Int`/`Float` operand — axis-neutral, elaborates to `LengthVar`).
+//RS         pub fn from_const(c: f64) -> LinExpr {
+//RS             LinExpr {
+//RS                 terms: [(0, 0.0); MAX_TERMS],
+//RS                 n_terms: 0,
+//RS                 constant: c,
+//RS                 handle: None,
+//RS             }
+//RS         }
+//RS 
+//RS         fn from_var(idx: usize, handle_id: u32) -> LinExpr {
+//RS             let mut terms = [(0, 0.0); MAX_TERMS];
+//RS             terms[0] = (idx, 1.0);
+//RS             LinExpr {
+//RS                 terms,
+//RS                 n_terms: 1,
+//RS                 constant: 0.0,
+//RS                 handle: Some(handle_id),
+//RS             }
+//RS         }
+//RS 
+//RS         fn combine(&self, other: &LinExpr, sign: f64) -> LinExpr {
+//RS             let mut terms = self.terms;
+//RS             let mut n = self.n_terms as usize;
+//RS             for &(idx, coeff) in &other.terms[..other.n_terms as usize] {
+//RS                 if let Some(slot) = terms[..n].iter_mut().find(|(i, _)| *i == idx) {
+//RS                     slot.1 += sign * coeff;
+//RS                 } else {
+//RS                     assert!(
+//RS                         n < MAX_TERMS,
+//RS                         "layout constraint expression has more than {MAX_TERMS} distinct terms"
+//RS                     );
+//RS                     terms[n] = (idx, sign * coeff);
+//RS                     n += 1;
+//RS                 }
+//RS             }
+//RS             LinExpr {
+//RS                 terms,
+//RS                 n_terms: n as u8,
+//RS                 constant: self.constant + sign * other.constant,
+//RS                 handle: self.handle.or(other.handle),
+//RS             }
+//RS         }
+//RS 
+//RS         fn eval(&self, solution: &[f64]) -> f64 {
+//RS             let mut v = self.constant;
+//RS             for &(idx, coeff) in &self.terms[..self.n_terms as usize] {
+//RS                 v += coeff * solution.get(idx).copied().unwrap_or(0.0);
+//RS             }
+//RS             v
+//RS         }
+//RS 
+//RS         fn terms(&self) -> &[(usize, f64)] {
+//RS             &self.terms[..self.n_terms as usize]
+//RS         }
+//RS     }
+//RS 
+//RS     // `codegen` emits plain `(lhs) + (rhs)` for a layout `+`/`-` (mirroring
+//RS     // D-SIMD2's element-wise operators) — the operand ownership shape it
+//RS     // renders isn't something this prelude module controls, so all four
+//RS     // owned/borrowed combinations are provided.
+//RS     impl From<&LinExpr> for LinExpr {
+//RS         fn from(v: &LinExpr) -> LinExpr {
+//RS             v.clone()
+//RS         }
+//RS     }
+//RS 
+//RS     impl std::ops::Add for LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn add(self, rhs: LinExpr) -> LinExpr {
+//RS             self.combine(&rhs, 1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Add<&LinExpr> for LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn add(self, rhs: &LinExpr) -> LinExpr {
+//RS             self.combine(rhs, 1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Add<LinExpr> for &LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn add(self, rhs: LinExpr) -> LinExpr {
+//RS             self.combine(&rhs, 1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Add<&LinExpr> for &LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn add(self, rhs: &LinExpr) -> LinExpr {
+//RS             self.combine(rhs, 1.0)
+//RS         }
+//RS     }
+//RS 
+//RS     impl std::ops::Sub for LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn sub(self, rhs: LinExpr) -> LinExpr {
+//RS             self.combine(&rhs, -1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Sub<&LinExpr> for LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn sub(self, rhs: &LinExpr) -> LinExpr {
+//RS             self.combine(rhs, -1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Sub<LinExpr> for &LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn sub(self, rhs: LinExpr) -> LinExpr {
+//RS             self.combine(&rhs, -1.0)
+//RS         }
+//RS     }
+//RS     impl std::ops::Sub<&LinExpr> for &LinExpr {
+//RS         type Output = LinExpr;
+//RS         fn sub(self, rhs: &LinExpr) -> LinExpr {
+//RS             self.combine(rhs, -1.0)
+//RS         }
+//RS     }
+//RS 
+//RS     // ---------------------------------------------------------------------
+//RS     // Constraint rows
+//RS     // ---------------------------------------------------------------------
+//RS 
+//RS     #[derive(Clone, Copy, PartialEq, Eq)]
+//RS     enum RelOp {
+//RS         Le,
+//RS         Ge,
+//RS         Eq,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, PartialEq, Eq)]
+//RS     enum Strength {
+//RS         Required,
+//RS         Strong,
+//RS         Medium,
+//RS         Weak,
+//RS     }
+//RS 
+//RS     impl Strength {
+//RS         fn weight(self) -> f64 {
+//RS             match self {
+//RS                 Strength::Required => 0.0, // unused — required rows never carry an error column
+//RS                 Strength::Strong => 1_000_000.0,
+//RS                 Strength::Medium => 1_000.0,
+//RS                 Strength::Weak => 1.0,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone)]
+//RS     struct RowSpec {
+//RS         terms: Vec<(usize, f64)>,
+//RS         rhs: f64,
+//RS         op: RelOp,
+//RS         strength: Strength,
+//RS         label: String,
+//RS     }
+//RS 
+//RS     /// Normalize so `rhs >= 0` (flip the row and the op otherwise) — every
+//RS     /// downstream column allocation assumes a non-negative RHS.
+//RS     fn normalize_row(mut row: RowSpec) -> RowSpec {
+//RS         if row.rhs < 0.0 {
+//RS             row.rhs = -row.rhs;
+//RS             for t in row.terms.iter_mut() {
+//RS                 t.1 = -t.1;
+//RS             }
+//RS             row.op = match row.op {
+//RS                 RelOp::Le => RelOp::Ge,
+//RS                 RelOp::Ge => RelOp::Le,
+//RS                 RelOp::Eq => RelOp::Eq,
+//RS             };
+//RS         }
+//RS         row
+//RS     }
+//RS 
+//RS     fn build_row(
+//RS         lhs: &LinExpr,
+//RS         rhs: &LinExpr,
+//RS         op: RelOp,
+//RS         strength: Strength,
+//RS         label: String,
+//RS     ) -> RowSpec {
+//RS         // `lhs OP rhs` → `(lhs - rhs) OP 0` → `terms · x OP (-constant)`.
+//RS         let combined = lhs.combine(rhs, -1.0);
+//RS         normalize_row(RowSpec {
+//RS             terms: combined.terms().to_vec(),
+//RS             rhs: -combined.constant,
+//RS             op,
+//RS             strength,
+//RS             label,
+//RS         })
+//RS     }
+//RS 
+//RS     // ---------------------------------------------------------------------
+//RS     // The solver
+//RS     // ---------------------------------------------------------------------
+//RS 
+//RS     pub struct Inner {
+//RS         #[allow(dead_code)]
+//RS         name: String,
+//RS         boxes: HashMap<String, HashMap<String, usize>>,
+//RS         var_names: Vec<String>,
+//RS         rows: Vec<RowSpec>,
+//RS         edits: HashMap<usize, f64>,
+//RS         solution: Vec<f64>,
+//RS         dirty: bool,
+//RS         infeasible: Option<Vec<String>>,
+//RS     }
+//RS 
+//RS     /// One row of the dense simplex tableau: `n_cols` coefficients + RHS.
+//RS     struct Tableau {
+//RS         n_cols: usize,
+//RS         rows: Vec<Vec<f64>>, // each of length n_cols + 1 (last slot = RHS)
+//RS         basis: Vec<usize>,
+//RS     }
+//RS 
+//RS     impl Tableau {
+//RS         /// Minimize `cost` (length `n_cols`) over this tableau, Bland's rule
+//RS         /// throughout (guarantees termination on these small problems).
+//RS         /// `ineligible[j]` columns are never chosen as the entering variable
+//RS         /// (used to keep phase-1 artificials out of the phase-2 basis).
+//RS         fn minimize(&mut self, cost: &[f64], ineligible: &[bool]) -> f64 {
+//RS             let n = self.n_cols;
+//RS             let m = self.rows.len();
+//RS             let mut obj = vec![0.0f64; n + 1];
+//RS             obj[..n].copy_from_slice(cost);
+//RS             for i in 0..m {
+//RS                 let bcol = self.basis[i];
+//RS                 let c = cost[bcol];
+//RS                 if c.abs() > EPS {
+//RS                     for k in 0..=n {
+//RS                         obj[k] -= c * self.rows[i][k];
+//RS                     }
+//RS                 }
+//RS             }
+//RS             loop {
+//RS                 let mut enter: Option<usize> = None;
+//RS                 for j in 0..n {
+//RS                     if ineligible[j] {
+//RS                         continue;
+//RS                     }
+//RS                     if obj[j] < -EPS {
+//RS                         enter = Some(j);
+//RS                         break; // Bland's rule: first eligible negative column
+//RS                     }
+//RS                 }
+//RS                 let Some(j) = enter else { break };
+//RS                 let mut leave: Option<usize> = None;
+//RS                 let mut best_ratio = f64::INFINITY;
+//RS                 for i in 0..m {
+//RS                     let a = self.rows[i][j];
+//RS                     if a > EPS {
+//RS                         let ratio = self.rows[i][n] / a;
+//RS                         let better = ratio < best_ratio - EPS;
+//RS                         let tied = (ratio - best_ratio).abs() <= EPS;
+//RS                         if better || (tied && leave.map_or(true, |l| self.basis[i] < self.basis[l]))
+//RS                         {
+//RS                             best_ratio = ratio;
+//RS                             leave = Some(i);
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 let Some(i) = leave else { break }; // unbounded — shouldn't happen for this problem family
+//RS                 let piv = self.rows[i][j];
+//RS                 for v in self.rows[i].iter_mut() {
+//RS                     *v /= piv;
+//RS                 }
+//RS                 for k in 0..m {
+//RS                     if k == i {
+//RS                         continue;
+//RS                     }
+//RS                     let factor = self.rows[k][j];
+//RS                     if factor.abs() > EPS {
+//RS                         for c in 0..=n {
+//RS                             let rv = self.rows[i][c];
+//RS                             self.rows[k][c] -= factor * rv;
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 let factor = obj[j];
+//RS                 if factor.abs() > EPS {
+//RS                     for c in 0..=n {
+//RS                         let rv = self.rows[i][c];
+//RS                         obj[c] -= factor * rv;
+//RS                     }
+//RS                 }
+//RS                 self.basis[i] = j;
+//RS             }
+//RS             -obj[n]
+//RS         }
+//RS     }
+//RS 
+//RS     /// Column kinds allocated per row, beyond the real (box-anchor) vars.
+//RS     enum Extra {
+//RS         /// Required `<=`: one slack, cost 0 always, initial basis.
+//RS         Slack { col: usize },
+//RS         /// Required `>=`: surplus (cost 0) + artificial (phase-1 cost 1,
+//RS         /// phase-2 ineligible), artificial is initial basis.
+//RS         SurplusArtificial { surplus: usize, artificial: usize },
+//RS         /// Required `==`: one artificial, initial basis.
+//RS         Artificial { col: usize },
+//RS         /// Soft (any op): error pair, `e_minus` is initial basis. Exactly one
+//RS         /// of the pair carries the row's strength weight in phase 2,
+//RS         /// depending on the original op (`Eq` weights both).
+//RS         ErrorPair { e_plus: usize, e_minus: usize },
+//RS     }
+//RS 
+//RS     fn solve(inner: &mut Inner) {
+//RS         let n_vars = inner.var_names.len();
+//RS         let mut specs: Vec<RowSpec> = inner.rows.clone();
+//RS         for (&idx, &val) in inner.edits.iter() {
+//RS             specs.push(normalize_row(RowSpec {
+//RS                 terms: vec![(idx, 1.0)],
+//RS                 rhs: val,
+//RS                 op: RelOp::Eq,
+//RS                 strength: Strength::Medium,
+//RS                 label: format!(
+//RS                     "suggest({})",
+//RS                     inner.var_names.get(idx).cloned().unwrap_or_default()
+//RS                 ),
+//RS             }));
+//RS         }
+//RS         if specs.is_empty() {
+//RS             inner.solution = vec![0.0; n_vars];
+//RS             inner.infeasible = None;
+//RS             return;
+//RS         }
+//RS         // Allocate extra columns.
+//RS         let mut next_col = n_vars;
+//RS         let mut extras: Vec<Extra> = Vec::with_capacity(specs.len());
+//RS         for s in &specs {
+//RS             let extra = if s.strength == Strength::Required {
+//RS                 match s.op {
+//RS                     RelOp::Le => {
+//RS                         let col = next_col;
+//RS                         next_col += 1;
+//RS                         Extra::Slack { col }
+//RS                     }
+//RS                     RelOp::Ge => {
+//RS                         let surplus = next_col;
+//RS                         let artificial = next_col + 1;
+//RS                         next_col += 2;
+//RS                         Extra::SurplusArtificial {
+//RS                             surplus,
+//RS                             artificial,
+//RS                         }
+//RS                     }
+//RS                     RelOp::Eq => {
+//RS                         let col = next_col;
+//RS                         next_col += 1;
+//RS                         Extra::Artificial { col }
+//RS                     }
+//RS                 }
+//RS             } else {
+//RS                 let e_plus = next_col;
+//RS                 let e_minus = next_col + 1;
+//RS                 next_col += 2;
+//RS                 Extra::ErrorPair { e_plus, e_minus }
+//RS             };
+//RS             extras.push(extra);
+//RS         }
+//RS         let n_cols = next_col;
+//RS         let m = specs.len();
+//RS         let mut rows = vec![vec![0.0f64; n_cols + 1]; m];
+//RS         let mut basis = vec![0usize; m];
+//RS         let mut has_artificial = vec![false; m];
+//RS         for (i, (s, extra)) in specs.iter().zip(extras.iter()).enumerate() {
+//RS             for &(idx, coeff) in &s.terms {
+//RS                 rows[i][idx] += coeff;
+//RS             }
+//RS             rows[i][n_cols] = s.rhs;
+//RS             match *extra {
+//RS                 Extra::Slack { col } => {
+//RS                     rows[i][col] = 1.0;
+//RS                     basis[i] = col;
+//RS                 }
+//RS                 Extra::SurplusArtificial {
+//RS                     surplus,
+//RS                     artificial,
+//RS                 } => {
+//RS                     rows[i][surplus] = -1.0;
+//RS                     rows[i][artificial] = 1.0;
+//RS                     basis[i] = artificial;
+//RS                     has_artificial[i] = true;
+//RS                 }
+//RS                 Extra::Artificial { col } => {
+//RS                     rows[i][col] = 1.0;
+//RS                     basis[i] = col;
+//RS                     has_artificial[i] = true;
+//RS                 }
+//RS                 Extra::ErrorPair { e_plus, e_minus } => {
+//RS                     rows[i][e_plus] = -1.0;
+//RS                     rows[i][e_minus] = 1.0;
+//RS                     basis[i] = e_minus;
+//RS                 }
+//RS             }
+//RS         }
+//RS         let mut tab = Tableau {
+//RS             n_cols,
+//RS             rows,
+//RS             basis,
+//RS         };
+//RS         // Phase 1: minimize the sum of the required-row artificials.
+//RS         let any_artificial = has_artificial.iter().any(|&b| b);
+//RS         if any_artificial {
+//RS             let mut cost1 = vec![0.0f64; n_cols];
+//RS             for (extra, present) in extras.iter().zip(has_artificial.iter()) {
+//RS                 if !present {
+//RS                     continue;
+//RS                 }
+//RS                 match *extra {
+//RS                     Extra::SurplusArtificial { artificial, .. } => cost1[artificial] = 1.0,
+//RS                     Extra::Artificial { col } => cost1[col] = 1.0,
+//RS                     _ => {}
+//RS                 }
+//RS             }
+//RS             let ineligible1 = vec![false; n_cols]; // nothing barred in phase 1
+//RS             let phase1_obj = tab.minimize(&cost1, &ineligible1);
+//RS             if phase1_obj > 1e-5 {
+//RS                 // Infeasible: report every required row whose artificial is
+//RS                 // still basic with a positive value — a real, if imperfect,
+//RS                 // conflict trace straight from the simplex tableau.
+//RS                 let mut names = Vec::new();
+//RS                 for (i, extra) in extras.iter().enumerate() {
+//RS                     let art_col = match *extra {
+//RS                         Extra::SurplusArtificial { artificial, .. } => Some(artificial),
+//RS                         Extra::Artificial { col } => Some(col),
+//RS                         _ => None,
+//RS                     };
+//RS                     if let Some(art) = art_col {
+//RS                         if tab.basis[i] == art && tab.rows[i][n_cols] > EPS {
+//RS                             names.push(specs[i].label.clone());
+//RS                         }
+//RS                     }
+//RS                 }
+//RS                 if names.is_empty() {
+//RS                     names.push("(layout has no feasible solution)".to_string());
+//RS                 }
+//RS                 inner.infeasible = Some(names);
+//RS                 inner.solution = vec![0.0; n_vars];
+//RS                 return;
+//RS             }
+//RS         }
+//RS         // Phase 2: minimize the weighted sum of soft-constraint violations.
+//RS         // Artificials are barred from re-entering the basis.
+//RS         let mut cost2 = vec![0.0f64; n_cols];
+//RS         let mut ineligible2 = vec![false; n_cols];
+//RS         for (extra, s) in extras.iter().zip(specs.iter()) {
+//RS             match *extra {
+//RS                 Extra::SurplusArtificial { artificial, .. } => ineligible2[artificial] = true,
+//RS                 Extra::Artificial { col } => ineligible2[col] = true,
+//RS                 Extra::ErrorPair { e_plus, e_minus } => {
+//RS                     let w = s.strength.weight();
+//RS                     match s.op {
+//RS                         RelOp::Eq => {
+//RS                             cost2[e_plus] = w;
+//RS                             cost2[e_minus] = w;
+//RS                         }
+//RS                         RelOp::Le => cost2[e_plus] = w,
+//RS                         RelOp::Ge => cost2[e_minus] = w,
+//RS                     }
+//RS                 }
+//RS                 Extra::Slack { .. } => {}
+//RS             }
+//RS         }
+//RS         tab.minimize(&cost2, &ineligible2);
+//RS         let mut solution = vec![0.0f64; n_vars];
+//RS         for i in 0..m {
+//RS             if tab.basis[i] < n_vars {
+//RS                 solution[tab.basis[i]] = tab.rows[i][n_cols];
+//RS             }
+//RS         }
+//RS         inner.infeasible = None;
+//RS         inner.solution = solution;
+//RS     }
+//RS 
+//RS     // ---------------------------------------------------------------------
+//RS     // Public handle / constraint API — every method name here IS the Jet
+//RS     // method name (`Codegen/TIR/mod.rs` `THandleOp::LayoutMethod` is a pure
+//RS     // passthrough).
+//RS     // ---------------------------------------------------------------------
+//RS 
+//RS     #[derive(Clone)]
+//RS     pub struct Handle(Rc<RefCell<Inner>>, u32);
+//RS 
+//RS     impl Handle {
+//RS         pub fn new(name: &str) -> Handle {
+//RS             let inner = Rc::new(RefCell::new(Inner {
+//RS                 name: name.to_string(),
+//RS                 boxes: HashMap::new(),
+//RS                 var_names: Vec::new(),
+//RS                 rows: Vec::new(),
+//RS                 edits: HashMap::new(),
+//RS                 solution: Vec::new(),
+//RS                 dirty: false,
+//RS                 infeasible: None,
+//RS             }));
+//RS             let id = register_handle(inner.clone());
+//RS             Handle(inner, id)
+//RS         }
+//RS 
+//RS         // `box_name`/`anchor` accept `impl AsRef<str>` (not `&str`) because
+//RS         // this prelude module doesn't control whether Jet's general
+//RS         // call-argument lowering hands a method a `String` (Read convention
+//RS         // on a non-scalar, its usual choice) or a `&str`/`&String` — tolerate
+//RS         // either.
+//RS         fn var(&self, box_name: impl AsRef<str>, anchor: impl AsRef<str>) -> LinExpr {
+//RS             let box_name = box_name.as_ref();
+//RS             let anchor = anchor.as_ref();
+//RS             let idx;
+//RS             {
+//RS                 let mut inner = self.0.borrow_mut();
+//RS                 let existing = inner
+//RS                     .boxes
+//RS                     .get(box_name)
+//RS                     .and_then(|m| m.get(anchor))
+//RS                     .copied();
+//RS                 idx = match existing {
+//RS                     Some(i) => i,
+//RS                     None => {
+//RS                         let i = inner.var_names.len();
+//RS                         inner.var_names.push(format!("{}.{}", box_name, anchor));
+//RS                         inner
+//RS                             .boxes
+//RS                             .entry(box_name.to_string())
+//RS                             .or_insert_with(HashMap::new)
+//RS                             .insert(anchor.to_string(), i);
+//RS                         inner.dirty = true;
+//RS                         i
+//RS                     }
+//RS                 };
+//RS             }
+//RS             LinExpr::from_var(idx, self.1)
+//RS         }
+//RS 
+//RS         /// D-LAYOUT1: horizontal box anchors (`left`/`right`/`width`) — the
+//RS         /// `NAME.h(box, anchor)` a `box.anchor` read desugars to.
+//RS         pub fn h(&self, box_name: impl AsRef<str>, anchor: impl AsRef<str>) -> LinExpr {
+//RS             self.var(box_name, anchor)
+//RS         }
+//RS 
+//RS         /// D-LAYOUT1: vertical box anchors (`top`/`bottom`/`height`).
+//RS         pub fn v(&self, box_name: impl AsRef<str>, anchor: impl AsRef<str>) -> LinExpr {
+//RS             self.var(box_name, anchor)
+//RS         }
+//RS 
+//RS         /// Read the solved value of a layout variable (re-solves if dirty).
+//RS         /// `impl Into<LinExpr>` (with the `From<&LinExpr>` impl below) accepts
+//RS         /// either an owned or a borrowed argument — the call-argument
+//RS         /// ownership convention Jet's general method-call lowering picks for
+//RS         /// a bare `Infer`-convention argument isn't something this prelude
+//RS         /// module controls, so the API tolerates either shape.
+//RS         /// Panics (loudly, with the conflicting constraints named) if the
+//RS         /// layout is infeasible — a silent wrong number is a worse footgun
+//RS         /// than a clear panic (I1). Check `is_feasible()`/`conflict()` first
+//RS         /// if infeasibility is an expected, handled case rather than a bug.
+//RS         pub fn value(&self, v: impl Into<LinExpr>) -> f64 {
+//RS             self.resolve();
+//RS             let v = v.into();
+//RS             let inner = self.0.borrow();
+//RS             if let Some(conflict) = &inner.infeasible {
+//RS                 // Build the whole panic message (which borrows `conflict`,
+//RS                 // itself borrowed from `inner`) BEFORE dropping `inner` —
+//RS                 // dropping first and using `conflict` after doesn't work,
+//RS                 // `conflict` is a reference INTO `inner`'s storage.
+//RS                 let msg = format!(
+//RS                     "layout \"{}\" has no feasible solution — conflicting constraints: {}",
+//RS                     inner.name,
+//RS                     conflict.join(", ")
+//RS                 );
+//RS                 drop(inner);
+//RS                 panic!("{}", msg);
+//RS             }
+//RS             v.eval(&inner.solution)
+//RS         }
+//RS 
+//RS         /// Cassowary "edit variable": suggest a preferred value for a single
+//RS         /// layout variable without adding a permanent required constraint.
+//RS         /// Calling it again on the same variable REPLACES the previous
+//RS         /// suggestion (keyed by variable index, not accumulated).
+//RS         pub fn suggest(&self, v: impl Into<LinExpr>, value: f64) {
+//RS             let v = v.into();
+//RS             let mut inner = self.0.borrow_mut();
+//RS             if let [(idx, coeff)] = v.terms() {
+//RS                 if (coeff - 1.0).abs() < EPS {
+//RS                     inner.edits.insert(*idx, value - v.constant);
+//RS                     inner.dirty = true;
+//RS                 }
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn is_feasible(&self) -> bool {
+//RS             self.resolve();
+//RS             self.0.borrow().infeasible.is_none()
+//RS         }
+//RS 
+//RS         /// Labels of the required constraints the simplex identified as
+//RS         /// mutually contradictory (empty when feasible).
+//RS         pub fn conflict(&self) -> Vec<String> {
+//RS             self.resolve();
+//RS             self.0.borrow().infeasible.clone().unwrap_or_default()
+//RS         }
+//RS 
+//RS         fn resolve(&self) {
+//RS             let mut inner = self.0.borrow_mut();
+//RS             if !inner.dirty {
+//RS                 return;
+//RS             }
+//RS             solve(&mut inner);
+//RS             inner.dirty = false;
+//RS         }
+//RS 
+//RS         fn push_row(&self, row: RowSpec) -> usize {
+//RS             let mut inner = self.0.borrow_mut();
+//RS             inner.rows.push(row);
+//RS             inner.dirty = true;
+//RS             inner.rows.len() - 1
+//RS         }
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1: a registered, prioritizable constraint handle. Chains
+//RS     /// `.required()`/`.strong()`/`.medium()`/`.weak()` to change its priority
+//RS     /// after the fact (mutates the shared handle's stored row in place).
+//RS     #[derive(Clone)]
+//RS     pub struct Constraint {
+//RS         handle: Rc<RefCell<Inner>>,
+//RS         idx: usize,
+//RS     }
+//RS 
+//RS     impl Constraint {
+//RS         fn set_strength(self, s: Strength) -> Constraint {
+//RS             {
+//RS                 let mut inner = self.handle.borrow_mut();
+//RS                 if let Some(row) = inner.rows.get_mut(self.idx) {
+//RS                     row.strength = s;
+//RS                 }
+//RS                 inner.dirty = true;
+//RS             }
+//RS             self
+//RS         }
+//RS 
+//RS         pub fn required(self) -> Constraint {
+//RS             self.set_strength(Strength::Required)
+//RS         }
+//RS 
+//RS         pub fn strong(self) -> Constraint {
+//RS             self.set_strength(Strength::Strong)
+//RS         }
+//RS 
+//RS         pub fn medium(self) -> Constraint {
+//RS             self.set_strength(Strength::Medium)
+//RS         }
+//RS 
+//RS         pub fn weak(self) -> Constraint {
+//RS             self.set_strength(Strength::Weak)
+//RS         }
+//RS     }
+//RS 
+//RS     fn make_constraint(lhs: LinExpr, rhs: LinExpr, op: RelOp) -> Constraint {
+//RS         // Either side's `handle` id resolves the SAME registered `Inner` —
+//RS         // both ultimately came from the same `layout {}` block's handle.
+//RS         let handle_id = lhs
+//RS             .handle
+//RS             .or(rhs.handle)
+//RS             .unwrap_or_else(|| Handle::new("").1);
+//RS         let handle = handle_by_id(handle_id);
+//RS         let row = build_row(&lhs, &rhs, op, Strength::Required, String::new());
+//RS         let idx = Handle(handle.clone(), handle_id).push_row(row);
+//RS         {
+//RS             // Fill in a readable label now that we know the row's index.
+//RS             let mut inner = handle.borrow_mut();
+//RS             if let Some(r) = inner.rows.get_mut(idx) {
+//RS                 let op_str = match op {
+//RS                     RelOp::Le => "<=",
+//RS                     RelOp::Ge => ">=",
+//RS                     RelOp::Eq => "==",
+//RS                 };
+//RS                 r.label = format!("constraint#{} ({})", idx, op_str);
+//RS             }
+//RS         }
+//RS         Constraint { handle, idx }
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1: add two layout expressions while preserving their slot
+//RS     /// identity in the resident JIT representation.
+//RS     pub fn add(lhs: LinExpr, rhs: LinExpr) -> LinExpr {
+//RS         lhs + rhs
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1: subtract two layout expressions while preserving their slot
+//RS     /// identity in the resident JIT representation.
+//RS     pub fn sub(lhs: LinExpr, rhs: LinExpr) -> LinExpr {
+//RS         lhs - rhs
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1 (GATE 1): `lhs >= rhs` between layout values.
+//RS     pub fn ge(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
+//RS         make_constraint(lhs.into(), rhs.into(), RelOp::Ge)
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1 (GATE 1): `lhs <= rhs` between layout values.
+//RS     pub fn le(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
+//RS         make_constraint(lhs.into(), rhs.into(), RelOp::Le)
+//RS     }
+//RS 
+//RS     /// D-LAYOUT1 (GATE 1): `lhs == rhs` between layout values.
+//RS     /// Named `eq_` (not `eq`) to stay clear of `PartialEq::eq`.
+//RS     pub fn eq_(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
+//RS         make_constraint(lhs.into(), rhs.into(), RelOp::Eq)
+//RS     }
+//RS }
+// END-PORT-PENDING 0179 crates/jet-codegen/src/Prelude/Layout.rs:1-797
+

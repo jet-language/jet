@@ -1,0 +1,706 @@
+// DevtoolsDatabasePanel.rs:1-1409. Typed, payload-free database facts only.
+// No driver, SQL, binding values, connection URLs, credentials or native handles.
+// Publication dependency: packet0176 owns devtools.JetDevtoolsEvent.from_parts
+// and JET_DEVTOOLS_MAX_TEXT_BYTES. Never substitute a private event envelope.
+// #4318/#4392: text.utf8_bytes must become a retained byte loan for allocation parity.
+// #4392: borrowed scalar/optional-field result loans below retain their fact owner.
+// Shared typed capacity storage is gated on its canonical producer, not emulated.
+use kernel_storage_leaves as db_storage
+use core.devtools.runtime.devtools as devtools
+use core.text.runtime.kernel_unicode_string as db_text
+use core.text.runtime.unicode_assets as db_assets
+use core.text.runtime.assets.unicode_white_space as db_space
+use core.text.runtime.assets.unicode_general_category as db_category
+
+pub JET_DEVTOOLS_DATABASE_PANEL_ID :: "database"
+pub JET_DEVTOOLS_DATABASE_EXPLAIN_CAPABILITY :: "DB.Explain"
+pub JET_DEVTOOLS_DATABASE_CREDENTIAL_CAPABILITY :: "DB.Credentials"
+pub JET_DEVTOOLS_DATABASE_MAX_HISTORY :: 256
+pub JET_DEVTOOLS_DATABASE_MAX_BINDINGS :: 256
+pub JET_DEVTOOLS_DATABASE_MAX_PLAN_ROWS :: 256
+pub JET_DEVTOOLS_DATABASE_MAX_EXPLAIN_TIMEOUT_MS :: U64{30000}
+
+#Error
+#Equatable
+pub enum JetDevtoolsDatabaseFactError {
+    EmptyField(field: String)
+    OversizedField(field: String)
+    InvalidIdentity(field: String)
+    InvalidLimit(field: String)
+    InvalidPoolCounts
+    DuplicateIdentity(field: String)
+    UnsupportedStatement
+    MissingExplainAuthority
+    MismatchedExplainAuthority
+    InvalidTimestamp
+    InvalidPlanRow
+    Protocol(message: String)
+}
+impl JetDevtoolsDatabaseFactError {
+    pub fn message(self) -> String Never! {
+        if self == {
+            .EmptyField { field } -> return "database {field} must not be empty"
+            .OversizedField { field } -> return "database {field} exceeds the Prelude text limit"
+            .InvalidIdentity { field } -> return "database {field} must be a stable identity"
+            .InvalidLimit { field } -> return "database {field} is outside its limit"
+            .InvalidPoolCounts -> return "database pool counts exceed the configured maximum"
+            .DuplicateIdentity { field } -> return "database {field} identity is duplicated"
+            .UnsupportedStatement -> return "database EXPLAIN requires a read-only statement"
+            .MissingExplainAuthority -> return "database EXPLAIN requires an explicit DB.Explain grant"
+            .MismatchedExplainAuthority -> return "database EXPLAIN grant does not match the requested capability and query identity"
+            .InvalidTimestamp -> return "database EXPLAIN timestamps must be monotonic"
+            .InvalidPlanRow -> return "database EXPLAIN plan row is invalid"
+            .Protocol { message } -> return ~message
+        }
+    }
+}
+fn jet_devtools_database_validate_text(value: String, field: String) JetDevtoolsDatabaseFactError! {
+    if value.is_empty() -> return Err(JetDevtoolsDatabaseFactError.EmptyField(field))
+    raw :: db_text.utf8_bytes(value)
+    if raw.len() > devtools.JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err(JetDevtoolsDatabaseFactError.OversizedField(field))
+    at := 0
+    loop at < raw.len() {
+        if db_assets.asset_tag(db_category.UNICODE_GENERAL_CATEGORY, db_text.scalar_at(raw, at), 8) == 0 -> return Err(JetDevtoolsDatabaseFactError.InvalidIdentity(field))
+        at = at + db_text.utf8_width_at(raw, at)
+    }
+}
+fn jet_devtools_database_validate_identity(value: String, field: String) JetDevtoolsDatabaseFactError! {
+    jet_devtools_database_validate_text(value, field) ?? return Err(err)
+    raw :: db_text.utf8_bytes(value)
+    at := 0
+    loop at < raw.len() {
+        if db_assets.asset_contains(db_space.UNICODE_WHITE_SPACE, db_text.scalar_at(raw, at)) -> return Err(JetDevtoolsDatabaseFactError.InvalidIdentity(field))
+        at = at + db_text.utf8_width_at(raw, at)
+    }
+}
+fn jet_devtools_database_validate_optional_text(value: String?, field: String) JetDevtoolsDatabaseFactError! {
+    if value == .Val(text) -> jet_devtools_database_validate_text(text, field) ?? return Err(err)
+}
+fn db_hex_nibble(n: Int) -> U8 Never! {
+    U8{if n < 10 -> 48 + n else -> 87 + n}
+}
+fn jet_devtools_database_json_string(value: String) -> String Never! {
+    raw :: db_text.utf8_bytes(value)
+    out := db_storage.jet_storage_list_with_capacity<U8>(raw.len() + 2)
+    &out.push(U8{34})
+    at := 0
+    loop at < raw.len() {
+        cp :: db_text.scalar_at(raw, at)
+        if cp == 34 { &out.push(U8{92}); &out.push(U8{34}) }
+        else if cp == 92 { &out.push(U8{92}); &out.push(U8{92}) }
+        else if cp == 10 { &out.push(U8{92}); &out.push(U8{110}) }
+        else if cp == 13 { &out.push(U8{92}); &out.push(U8{114}) }
+        else if cp == 9 { &out.push(U8{92}); &out.push(U8{116}) }
+        else if db_assets.asset_tag(db_category.UNICODE_GENERAL_CATEGORY, cp, 8) == 0 {
+            &out.push(U8{92})
+            &out.push(U8{117})
+            &out.push(db_hex_nibble((cp >> 12) & 15))
+            &out.push(db_hex_nibble((cp >> 8) & 15))
+            &out.push(db_hex_nibble((cp >> 4) & 15))
+            &out.push(db_hex_nibble(cp & 15))
+        } else -> db_text.append_cp(&out, cp)
+        at = at + db_text.utf8_width_at(raw, at)
+    }
+    &out.push(U8{34})
+    String.from_bytes(^out) ?? panic("database JSON must be UTF-8")
+}
+fn jet_devtools_database_json_optional(value: String?) -> String Never! {
+    if value == .Val(text) -> return jet_devtools_database_json_string(text)
+    "null"
+}
+fn db_json_number(value: U64?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
+}
+// Fixed-width saturating laws; no widened/host-sized arithmetic or overflow.
+fn db_sat_add(a: U64, b: U64) -> U64 Never! {
+    max :: U64{18446744073709551615}
+    if b > max - a -> return max
+    a + b
+}
+fn db_sat_sub(a: U64, b: U64) -> U64 Never! { if b > a -> U64{0} else -> a - b }
+fn db_sat_mul_1000(a: U64) -> U64 Never! {
+    max :: U64{18446744073709551615}
+    if a > max /% U64{1000} -> return max
+    a * U64{1000}
+}
+
+#Equatable
+pub enum JetDevtoolsDatabasePoolLifecycle { Open Draining Drained }
+impl JetDevtoolsDatabasePoolLifecycle {
+    pub fn as_str(self) -> String Never! {
+        if self == .Open -> return "open"
+        if self == .Draining -> return "draining"
+        "drained"
+    }
+    fn discriminant(self) -> Int Never! {
+        if self == .Open -> return 0
+        if self == .Draining -> return 1
+        2
+    }
+    // Rust derived Ord/PartialOrd use declaration order, NOT rendered labels.
+    pub fn compare(self, other: JetDevtoolsDatabasePoolLifecycle) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub enum JetDevtoolsDatabasePoolPressure { Idle Normal Elevated Saturated Exhausted Draining Drained }
+impl JetDevtoolsDatabasePoolPressure {
+    pub fn as_str(self) -> String Never! {
+        if self == .Idle -> return "idle"
+        if self == .Normal -> return "normal"
+        if self == .Elevated -> return "elevated"
+        if self == .Saturated -> return "saturated"
+        if self == .Exhausted -> return "exhausted"
+        if self == .Draining -> return "draining"
+        "drained"
+    }
+    fn discriminant(self) -> Int Never! {
+        if self == .Idle -> return 0
+        if self == .Normal -> return 1
+        if self == .Elevated -> return 2
+        if self == .Saturated -> return 3
+        if self == .Exhausted -> return 4
+        if self == .Draining -> return 5
+        6
+    }
+    pub fn compare(self, other: JetDevtoolsDatabasePoolPressure) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub struct JetDevtoolsDatabasePoolStats {
+    pub pool_id: String
+    pub lifecycle: JetDevtoolsDatabasePoolLifecycle
+    pub max_connections: U64
+    pub available_connections: U64
+    pub leased_connections: U64
+    pub opening_connections: U64
+    pub waiting_requests: U64
+    pub timed_out_requests: U64
+    pub acquire_count: U64
+    pub release_count: U64
+    pub open_failures: U64
+    pub unhealthy_connections: U64
+    pub replacement_count: U64
+    pub replacement_failures: U64
+    pub observed_at_ms: U64
+}
+impl JetDevtoolsDatabasePoolStats {
+    pub fn new(pool_id: String, lifecycle: JetDevtoolsDatabasePoolLifecycle, max_connections: U64, available_connections: U64, leased_connections: U64, opening_connections: U64, waiting_requests: U64, timed_out_requests: U64, acquire_count: U64, release_count: U64, open_failures: U64, unhealthy_connections: U64, replacement_count: U64, replacement_failures: U64, observed_at_ms: U64) -> JetDevtoolsDatabasePoolStats JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(pool_id, "pool_id") ?? return Err(err)
+        if max_connections == U64{0} -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("max_connections"))
+        if db_sat_add(db_sat_add(available_connections, leased_connections), opening_connections) > max_connections -> return Err(JetDevtoolsDatabaseFactError.InvalidPoolCounts)
+        JetDevtoolsDatabasePoolStats{pool_id, lifecycle, max_connections, available_connections, leased_connections, opening_connections, waiting_requests, timed_out_requests, acquire_count, release_count, open_failures, unhealthy_connections, replacement_count, replacement_failures, observed_at_ms}
+    }
+    pub fn reserved_connections(self) -> U64 Never! { db_sat_add(db_sat_add(self.available_connections, self.leased_connections), self.opening_connections) }
+    pub fn available_capacity(self) -> U64 Never! { db_sat_sub(self.max_connections, self.reserved_connections()) }
+    pub fn utilization_milli(self) -> U64 Never! {
+        if self.max_connections == U64{0} -> return U64{1000}
+        value :: db_sat_mul_1000(self.reserved_connections()) /% self.max_connections
+        if value > U64{1000} -> U64{1000} else -> value
+    }
+    pub fn pressure(self) -> JetDevtoolsDatabasePoolPressure Never! {
+        if self.lifecycle == .Draining -> return JetDevtoolsDatabasePoolPressure.Draining
+        if self.lifecycle == .Drained -> return JetDevtoolsDatabasePoolPressure.Drained
+        if self.available_capacity() == U64{0} {
+            if self.waiting_requests > U64{0} -> return JetDevtoolsDatabasePoolPressure.Exhausted
+            return JetDevtoolsDatabasePoolPressure.Saturated
+        }
+        if self.waiting_requests > U64{0} || self.utilization_milli() >= U64{750} -> return JetDevtoolsDatabasePoolPressure.Elevated
+        if self.reserved_connections() == U64{0} -> return JetDevtoolsDatabasePoolPressure.Idle
+        JetDevtoolsDatabasePoolPressure.Normal
+    }
+    pub fn freshness_ms(self, now_ms: U64) -> U64 Never! { db_sat_sub(now_ms, self.observed_at_ms) }
+    pub fn render_json(self) -> String Never! { self.render_json_at(self.observed_at_ms) }
+    pub fn render_json_at(self, now_ms: U64) -> String Never! {
+        id :: jet_devtools_database_json_string(self.pool_id)
+        lifecycle :: jet_devtools_database_json_string(self.lifecycle.as_str())
+        reserved :: self.reserved_connections()
+        available :: self.available_capacity()
+        utilization :: self.utilization_milli()
+        pressure :: jet_devtools_database_json_string(self.pressure().as_str())
+        freshness :: self.freshness_ms(now_ms)
+        "{{\"pool_id\":{id},\"lifecycle\":{lifecycle},\"max_connections\":{self.max_connections},\"available_connections\":{self.available_connections},\"leased_connections\":{self.leased_connections},\"opening_connections\":{self.opening_connections},\"waiting_requests\":{self.waiting_requests},\"timed_out_requests\":{self.timed_out_requests},\"acquire_count\":{self.acquire_count},\"release_count\":{self.release_count},\"open_failures\":{self.open_failures},\"unhealthy_connections\":{self.unhealthy_connections},\"replacement_count\":{self.replacement_count},\"replacement_failures\":{self.replacement_failures},\"reserved_connections\":{reserved},\"available_capacity\":{available},\"utilization_milli\":{utilization},\"pressure\":{pressure},\"observed_at_ms\":{self.observed_at_ms},\"freshness_ms\":{freshness}}}"
+    }
+    pub fn to_protocol_event(self, source: String) -> devtools.JetDevtoolsEvent JetDevtoolsDatabaseFactError! {
+        devtools.JetDevtoolsEvent.from_parts(self.observed_at_ms, source, "DatabasePool", ~self.pool_id, self.render_json()) ?? return Err(JetDevtoolsDatabaseFactError.Protocol(err))
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseTableUsage { pub table_id: String, pub rows_read: U64, pub rows_written: U64 }
+impl JetDevtoolsDatabaseTableUsage {
+    pub fn new(table_id: String, rows_read: U64, rows_written: U64) -> JetDevtoolsDatabaseTableUsage JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(table_id, "table_id") ?? return Err(err)
+        JetDevtoolsDatabaseTableUsage{table_id, rows_read, rows_written}
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseIndexUsage { pub index_id: String, pub used: Bool, pub rows_examined: U64 }
+impl JetDevtoolsDatabaseIndexUsage {
+    pub fn new(index_id: String, used: Bool, rows_examined: U64) -> JetDevtoolsDatabaseIndexUsage JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(index_id, "index_id") ?? return Err(err)
+        JetDevtoolsDatabaseIndexUsage{index_id, used, rows_examined}
+    }
+}
+#Equatable
+pub enum JetDevtoolsDatabaseQueryStatus { Succeeded Failed TimedOut Cancelled }
+impl JetDevtoolsDatabaseQueryStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == .Succeeded -> return "succeeded"
+        if self == .Failed -> return "failed"
+        if self == .TimedOut -> return "timed_out"
+        "cancelled"
+    }
+    fn discriminant(self) -> Int Never! {
+        if self == .Succeeded -> return 0
+        if self == .Failed -> return 1
+        if self == .TimedOut -> return 2
+        3
+    }
+    pub fn compare(self, other: JetDevtoolsDatabaseQueryStatus) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseQueryStats {
+    pub query_id: String
+    pub statement_identity: String
+    pub status: JetDevtoolsDatabaseQueryStatus
+    pub duration_ms: U64
+    pub source: String
+    pub source_span: (start: U64, end: U64)?
+    pub request_id: String?
+    pub rows_returned: U64?
+    pub rows_affected: U64?
+    pub table_usage: [JetDevtoolsDatabaseTableUsage]
+    pub index_usage: [JetDevtoolsDatabaseIndexUsage]
+    pub slow_threshold_ms: U64
+    pub observed_at_ms: U64
+}
+impl JetDevtoolsDatabaseQueryStats {
+    pub fn new(query_id: String, statement_identity: String, status: JetDevtoolsDatabaseQueryStatus, duration_ms: U64, source: String, request_id: String?, table_usage: ^[JetDevtoolsDatabaseTableUsage], index_usage: ^[JetDevtoolsDatabaseIndexUsage], slow_threshold_ms: U64, observed_at_ms: U64) -> JetDevtoolsDatabaseQueryStats JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(query_id, "query_id") ?? return Err(err)
+        jet_devtools_database_validate_identity(statement_identity, "statement_identity") ?? return Err(err)
+        jet_devtools_database_validate_text(source, "source") ?? return Err(err)
+        jet_devtools_database_validate_optional_text(request_id, "request_id") ?? return Err(err)
+        if request_id == .Val(text) && text.is_empty() -> return Err(JetDevtoolsDatabaseFactError.EmptyField("request_id"))
+        if slow_threshold_ms == U64{0} -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("slow_threshold_ms"))
+        if table_usage.len() > JET_DEVTOOLS_DATABASE_MAX_HISTORY -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("table_usage"))
+        if index_usage.len() > JET_DEVTOOLS_DATABASE_MAX_HISTORY -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("index_usage"))
+        tables := ^table_usage
+        indexes := ^index_usage
+        &tables.sort_by((left: JetDevtoolsDatabaseTableUsage, right: JetDevtoolsDatabaseTableUsage) -> left.table_id <=> right.table_id)
+        &indexes.sort_by((left: JetDevtoolsDatabaseIndexUsage, right: JetDevtoolsDatabaseIndexUsage) -> left.index_id <=> right.index_id)
+        loop i in 1..<tables.len() {
+            if tables[i - 1].table_id == tables[i].table_id -> return Err(JetDevtoolsDatabaseFactError.DuplicateIdentity("table_id"))
+        }
+        loop i in 1..<indexes.len() {
+            if indexes[i - 1].index_id == indexes[i].index_id -> return Err(JetDevtoolsDatabaseFactError.DuplicateIdentity("index_id"))
+        }
+        JetDevtoolsDatabaseQueryStats{query_id, statement_identity, status, duration_ms, source, source_span: None, request_id, rows_returned: None, rows_affected: None, table_usage: ^tables, index_usage: ^indexes, slow_threshold_ms, observed_at_ms}
+    }
+    pub fn with_runtime_facts(^self, source_span: (start: U64, end: U64)?, rows_returned: U64?, rows_affected: U64?) -> JetDevtoolsDatabaseQueryStats JetDevtoolsDatabaseFactError! {
+        if source_span == .Val(span) && span.end < span.start -> return Err(JetDevtoolsDatabaseFactError.InvalidTimestamp)
+        query := ^self
+        query.source_span = source_span
+        query.rows_returned = rows_returned
+        query.rows_affected = rows_affected
+        ^query
+    }
+    pub fn is_slow(self) -> Bool Never! { self.duration_ms >= self.slow_threshold_ms }
+    pub fn freshness_ms(self, now_ms: U64) -> U64 Never! { db_sat_sub(now_ms, self.observed_at_ms) }
+    pub fn request_link(self) -> View<str>? from self {
+        if self.request_id == .Val(text) -> return Val(text.slice(0, text.len()))
+        None
+    }
+    pub fn render_json(self) -> String Never! { self.render_json_at(self.observed_at_ms) }
+    pub fn render_json_at(self, now_ms: U64) -> String Never! {
+        tables := db_storage.jet_storage_list_with_capacity<String>(self.table_usage.len())
+        loop usage in self.table_usage {
+            id :: jet_devtools_database_json_string(usage.table_id)
+            &tables.push("{{\"table_id\":{id},\"rows_read\":{usage.rows_read},\"rows_written\":{usage.rows_written}}}")
+        }
+        indexes := db_storage.jet_storage_list_with_capacity<String>(self.index_usage.len())
+        loop usage in self.index_usage {
+            id :: jet_devtools_database_json_string(usage.index_id)
+            &indexes.push("{{\"index_id\":{id},\"used\":{usage.used},\"rows_examined\":{usage.rows_examined}}}")
+        }
+        table_json :: tables.join(",")
+        index_json :: indexes.join(",")
+        span_json := "null"
+        if self.source_span == .Val(span) -> span_json = "{{\"start\":{span.start},\"end\":{span.end}}}"
+        id :: jet_devtools_database_json_string(self.query_id)
+        statement :: jet_devtools_database_json_string(self.statement_identity)
+        status :: jet_devtools_database_json_string(self.status.as_str())
+        source :: jet_devtools_database_json_string(self.source)
+        request :: jet_devtools_database_json_optional(self.request_id)
+        returned :: db_json_number(self.rows_returned)
+        affected :: db_json_number(self.rows_affected)
+        slow :: self.is_slow()
+        freshness :: self.freshness_ms(now_ms)
+        "{{\"query_id\":{id},\"statement_identity\":{statement},\"status\":{status},\"duration_ms\":{self.duration_ms},\"source\":{source},\"source_span\":{span_json},\"request_id\":{request},\"rows_returned\":{returned},\"rows_affected\":{affected},\"table_usage\":[{table_json}],\"index_usage\":[{index_json}],\"slow_threshold_ms\":{self.slow_threshold_ms},\"slow\":{slow},\"observed_at_ms\":{self.observed_at_ms},\"freshness_ms\":{freshness}}}"
+    }
+    pub fn to_protocol_event(self, source: String) -> devtools.JetDevtoolsEvent JetDevtoolsDatabaseFactError! {
+        devtools.JetDevtoolsEvent.from_parts(self.observed_at_ms, source, "DatabaseQuery", ~self.query_id, self.render_json()) ?? return Err(JetDevtoolsDatabaseFactError.Protocol(err))
+    }
+}
+
+// VecDeque's bounded FIFO law with an in-place circular buffer. No front
+// removal/shifting or query copy on push. entries exposes two retained slices
+// in logical FIFO order; callers iterate first then second (not physical order).
+pub struct JetDevtoolsDatabaseQueryHistory {
+    limit: Int
+    rows: [JetDevtoolsDatabaseQueryStats]
+    head: Int
+}
+impl JetDevtoolsDatabaseQueryHistory {
+    pub fn new(capacity: U64) -> JetDevtoolsDatabaseQueryHistory Never! {
+        limit := JET_DEVTOOLS_DATABASE_MAX_HISTORY
+        if capacity < U64{256} -> limit = Int.from_u64(capacity)
+        if limit < 1 -> limit = 1
+        JetDevtoolsDatabaseQueryHistory{limit, rows: db_storage.jet_storage_list_with_capacity<JetDevtoolsDatabaseQueryStats>(limit), head: 0}
+    }
+    pub fn capacity(self) -> Int Never! { self.limit }
+    pub fn len(self) -> Int Never! { self.rows.len() }
+    pub fn is_empty(self) -> Bool Never! { self.rows.is_empty() }
+    pub fn push(&self, entry: ^JetDevtoolsDatabaseQueryStats) JetDevtoolsDatabaseFactError! {
+        loop known in self.rows {
+            if known.query_id == entry.query_id -> return Err(JetDevtoolsDatabaseFactError.DuplicateIdentity("query_id"))
+        }
+        if self.rows.len() < self.limit -> &self.rows.push(^entry)
+        else {
+            self.rows[self.head] = ^entry
+            self.head = (self.head + 1) %% self.limit
+        }
+    }
+    pub fn latest(self) -> View<JetDevtoolsDatabaseQueryStats>? from self {
+        if self.is_empty() -> return None
+        index :: (self.head + self.rows.len() - 1) %% self.rows.len()
+        Val(self.rows[index..<index + 1])
+    }
+    pub fn entries(self) -> (first: View<JetDevtoolsDatabaseQueryStats>, second: View<JetDevtoolsDatabaseQueryStats>) from self {
+        (first: self.rows[self.head..<self.rows.len()], second: self.rows[0..<self.head])
+    }
+    // Rust derived Eq compares VecDeque logical order, not physical ring layout.
+    pub fn equals(self, other: JetDevtoolsDatabaseQueryHistory) -> Bool Never! {
+        if self.limit != other.limit || self.rows.len() != other.rows.len() -> return false
+        loop i in 0..<self.rows.len() {
+            left :: (self.head + i) %% self.rows.len()
+            right :: (other.head + i) %% other.rows.len()
+            if self.rows[left] != other.rows[right] -> return false
+        }
+        true
+    }
+    pub fn snapshot(self) -> [JetDevtoolsDatabaseQueryStats] Never! {
+        entries :: self.entries()
+        snapshot := db_storage.jet_storage_list_with_capacity<JetDevtoolsDatabaseQueryStats>(self.rows.len())
+        loop row in entries.first -> &snapshot.push(~row)
+        loop row in entries.second -> &snapshot.push(~row)
+        &snapshot.sort_by((left: JetDevtoolsDatabaseQueryStats, right: JetDevtoolsDatabaseQueryStats) -> db_query_order(left, right))
+        ^snapshot
+    }
+}
+fn db_query_order(left: JetDevtoolsDatabaseQueryStats, right: JetDevtoolsDatabaseQueryStats) -> Ordering Never! {
+    time :: left.observed_at_ms <=> right.observed_at_ms
+    if time != Ordering.Equal -> return time
+    left.query_id <=> right.query_id
+}
+
+#Equatable
+pub enum JetDevtoolsDatabaseStatementClass { ReadOnly Mutation Unknown }
+impl JetDevtoolsDatabaseStatementClass {
+    pub fn as_str(self) -> String Never! {
+        if self == .ReadOnly -> return "read_only"
+        if self == .Mutation -> return "mutation"
+        "unknown"
+    }
+    pub fn is_read_only(self) -> Bool Never! { self == .ReadOnly }
+    fn discriminant(self) -> Int Never! {
+        if self == .ReadOnly -> return 0
+        if self == .Mutation -> return 1
+        2
+    }
+    pub fn compare(self, other: JetDevtoolsDatabaseStatementClass) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub enum JetDevtoolsDatabaseBindingKind { Null Boolean Integer Float Text Bytes Other }
+impl JetDevtoolsDatabaseBindingKind {
+    pub fn as_str(self) -> String Never! {
+        if self == .Null -> return "null"
+        if self == .Boolean -> return "boolean"
+        if self == .Integer -> return "integer"
+        if self == .Float -> return "float"
+        if self == .Text -> return "text"
+        if self == .Bytes -> return "bytes"
+        "other"
+    }
+    fn discriminant(self) -> Int Never! {
+        if self == .Null -> return 0
+        if self == .Boolean -> return 1
+        if self == .Integer -> return 2
+        if self == .Float -> return 3
+        if self == .Text -> return 4
+        if self == .Bytes -> return 5
+        6
+    }
+    pub fn compare(self, other: JetDevtoolsDatabaseBindingKind) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseRedactedBinding { pub ordinal: U64, pub kind: JetDevtoolsDatabaseBindingKind }
+impl JetDevtoolsDatabaseRedactedBinding {
+    pub fn new(ordinal: U64, kind: JetDevtoolsDatabaseBindingKind) -> JetDevtoolsDatabaseRedactedBinding Never! { JetDevtoolsDatabaseRedactedBinding{ordinal, kind} }
+    pub fn is_redacted(self) -> Bool Never! { true }
+    pub fn compare(self, other: JetDevtoolsDatabaseRedactedBinding) -> Ordering Never! {
+        ordinal :: self.ordinal <=> other.ordinal
+        if ordinal != Ordering.Equal -> return ordinal
+        self.kind.compare(other.kind)
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseCapabilityFact { pub capability: String, pub resource: String, pub granted: Bool }
+impl JetDevtoolsDatabaseCapabilityFact {
+    pub fn new(capability: String, resource: String, granted: Bool) -> JetDevtoolsDatabaseCapabilityFact JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(capability, "capability") ?? return Err(err)
+        jet_devtools_database_validate_identity(resource, "resource") ?? return Err(err)
+        JetDevtoolsDatabaseCapabilityFact{capability, resource, granted}
+    }
+    pub fn for_explain(resource: String, granted: Bool) -> JetDevtoolsDatabaseCapabilityFact JetDevtoolsDatabaseFactError! { JetDevtoolsDatabaseCapabilityFact.new(JET_DEVTOOLS_DATABASE_EXPLAIN_CAPABILITY, resource, granted) }
+    pub fn for_credentials(resource: String, granted: Bool) -> JetDevtoolsDatabaseCapabilityFact JetDevtoolsDatabaseFactError! { JetDevtoolsDatabaseCapabilityFact.new(JET_DEVTOOLS_DATABASE_CREDENTIAL_CAPABILITY, resource, granted) }
+    pub fn matches_credentials(self, resource: String) -> Bool Never! { self.granted && self.capability == JET_DEVTOOLS_DATABASE_CREDENTIAL_CAPABILITY && self.resource == resource }
+    pub fn matches_explain(self, query_id: String) -> Bool Never! { self.granted && self.capability == JET_DEVTOOLS_DATABASE_EXPLAIN_CAPABILITY && self.resource == query_id }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseExplainFactRequest {
+    pub query_id: String
+    pub statement_identity: String
+    pub statement_class: JetDevtoolsDatabaseStatementClass
+    pub source: String
+    pub request_id: String?
+    pub bindings: [JetDevtoolsDatabaseRedactedBinding]
+    pub timeout_ms: U64
+    pub max_rows: U64
+    required: JetDevtoolsDatabaseCapabilityFact
+}
+impl JetDevtoolsDatabaseExplainFactRequest {
+    pub fn new(query_id: String, statement_identity: String, statement_class: JetDevtoolsDatabaseStatementClass, source: String, request_id: String?, bindings: ^[JetDevtoolsDatabaseRedactedBinding], timeout_ms: U64, max_rows: U64) -> JetDevtoolsDatabaseExplainFactRequest JetDevtoolsDatabaseFactError! {
+        if !statement_class.is_read_only() -> return Err(JetDevtoolsDatabaseFactError.UnsupportedStatement)
+        jet_devtools_database_validate_identity(query_id, "query_id") ?? return Err(err)
+        jet_devtools_database_validate_identity(statement_identity, "statement_identity") ?? return Err(err)
+        jet_devtools_database_validate_text(source, "source") ?? return Err(err)
+        jet_devtools_database_validate_optional_text(request_id, "request_id") ?? return Err(err)
+        if request_id == .Val(text) && text.is_empty() -> return Err(JetDevtoolsDatabaseFactError.EmptyField("request_id"))
+        if timeout_ms == U64{0} || timeout_ms > JET_DEVTOOLS_DATABASE_MAX_EXPLAIN_TIMEOUT_MS -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("timeout_ms"))
+        if max_rows == U64{0} || max_rows > U64{256} -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("max_rows"))
+        if bindings.len() > JET_DEVTOOLS_DATABASE_MAX_BINDINGS -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("bindings"))
+        sorted := ^bindings
+        &sorted.sort_by((left: JetDevtoolsDatabaseRedactedBinding, right: JetDevtoolsDatabaseRedactedBinding) -> left.ordinal <=> right.ordinal)
+        loop i in 1..<sorted.len() {
+            if sorted[i - 1].ordinal == sorted[i].ordinal -> return Err(JetDevtoolsDatabaseFactError.DuplicateIdentity("binding ordinal"))
+        }
+        required :: JetDevtoolsDatabaseCapabilityFact.for_explain(~query_id, false) ?? return Err(err)
+        JetDevtoolsDatabaseExplainFactRequest{query_id, statement_identity, statement_class, source, request_id, bindings: ^sorted, timeout_ms, max_rows, required}
+    }
+    // Rust :807-809 required_capability returns a SHARED scalar field loan
+    // of self.required, not &mutable, an owned copy, or a one-element heap list.
+    // HELD #4392: View supports retained list/text extents, but no canonical
+    // scalar-field loan return surface is published. The required implementation
+    // is exactly `return borrow(self.required)` retaining this request owner.
+    // Do not publish an invented borrowing API or a cloned projection here.
+    pub fn binding_count(self) -> Int Never! { self.bindings.len() }
+    pub fn render_json(self, started_at_ms: U64) -> String Never! {
+        rows := db_storage.jet_storage_list_with_capacity<String>(self.bindings.len())
+        loop binding in self.bindings {
+            kind :: jet_devtools_database_json_string(binding.kind.as_str())
+            &rows.push("{{\"ordinal\":{binding.ordinal},\"kind\":{kind},\"redacted\":true}}")
+        }
+        bindings :: rows.join(",")
+        id :: jet_devtools_database_json_string(self.query_id)
+        statement :: jet_devtools_database_json_string(self.statement_identity)
+        class :: jet_devtools_database_json_string(self.statement_class.as_str())
+        source :: jet_devtools_database_json_string(self.source)
+        request :: jet_devtools_database_json_optional(self.request_id)
+        count :: self.binding_count()
+        capability :: jet_devtools_database_json_string(JET_DEVTOOLS_DATABASE_EXPLAIN_CAPABILITY)
+        "{{\"query_id\":{id},\"statement_identity\":{statement},\"statement_class\":{class},\"source\":{source},\"request_id\":{request},\"binding_count\":{count},\"bindings\":[{bindings}],\"timeout_ms\":{self.timeout_ms},\"max_rows\":{self.max_rows},\"capability\":{capability},\"started_at_ms\":{started_at_ms}}}"
+    }
+    pub fn authorize(self, grant: JetDevtoolsDatabaseCapabilityFact, started_at_ms: U64) -> JetDevtoolsDatabaseAuthorizedExplainRequest JetDevtoolsDatabaseFactError! {
+        if !grant.granted -> return Err(JetDevtoolsDatabaseFactError.MissingExplainAuthority)
+        if !grant.matches_explain(self.query_id) -> return Err(JetDevtoolsDatabaseFactError.MismatchedExplainAuthority)
+        JetDevtoolsDatabaseAuthorizedExplainRequest{request: ~self, grant: ~grant, started_at_ms}
+    }
+    pub fn to_protocol_event(self, started_at_ms: U64, source: String) -> devtools.JetDevtoolsEvent JetDevtoolsDatabaseFactError! {
+        devtools.JetDevtoolsEvent.from_parts(started_at_ms, source, "DatabaseExplainRequest", ~self.query_id, self.render_json(started_at_ms)) ?? return Err(JetDevtoolsDatabaseFactError.Protocol(err))
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseAuthorizedExplainRequest {
+    pub request: JetDevtoolsDatabaseExplainFactRequest
+    pub grant: JetDevtoolsDatabaseCapabilityFact
+    pub started_at_ms: U64
+}
+impl JetDevtoolsDatabaseAuthorizedExplainRequest {
+    pub fn deadline_ms(self) -> U64 Never! { db_sat_add(self.started_at_ms, self.request.timeout_ms) }
+    pub fn finish(^self, finished_at_ms: U64, plan_rows: ^[JetDevtoolsDatabasePlanRow]) -> JetDevtoolsDatabaseExplainFactResult JetDevtoolsDatabaseFactError! {
+        owned := ^self
+        ^owned.finish_with_status(finished_at_ms, ^plan_rows, false, false)
+    }
+    pub fn finish_with_status(^self, finished_at_ms: U64, plan_rows: ^[JetDevtoolsDatabasePlanRow], timed_out: Bool, driver_truncated: Bool) -> JetDevtoolsDatabaseExplainFactResult JetDevtoolsDatabaseFactError! {
+        if finished_at_ms < self.started_at_ms -> return Err(JetDevtoolsDatabaseFactError.InvalidTimestamp)
+        if plan_rows.len() > JET_DEVTOOLS_DATABASE_MAX_PLAN_ROWS -> return Err(JetDevtoolsDatabaseFactError.InvalidLimit("plan_rows"))
+        rows := ^plan_rows
+        &rows.sort_by((left: JetDevtoolsDatabasePlanRow, right: JetDevtoolsDatabasePlanRow) -> left.ordinal <=> right.ordinal)
+        loop i in 1..<rows.len() {
+            if rows[i - 1].ordinal == rows[i].ordinal -> return Err(JetDevtoolsDatabaseFactError.DuplicateIdentity("plan ordinal"))
+        }
+        max_rows :: Int.from_u64(self.request.max_rows)
+        truncated :: driver_truncated || rows.len() > max_rows
+        // Pop only discarded tail rows; never copy/materialize retained rows.
+        loop rows.len() > max_rows -> _ :: &rows.pop()
+        duration_ms :: db_sat_sub(finished_at_ms, self.started_at_ms)
+        expired :: timed_out || duration_ms > self.request.timeout_ms
+        deadline_ms :: self.deadline_ms()
+        owned := ^self
+        JetDevtoolsDatabaseExplainFactResult{query_id: ^owned.request.query_id, statement_identity: ^owned.request.statement_identity, source: ^owned.request.source, request_id: ^owned.request.request_id, capability: ^owned.grant, duration_ms, deadline_ms, finished_at_ms, timed_out: expired, truncated, rows: ^rows}
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabasePlanRow {
+    pub ordinal: U64
+    pub node_id: String
+    pub parent_id: String?
+    pub depth: U64
+    pub operation: String
+    pub relation: String?
+    pub index_name: String?
+    pub estimated_rows: U64?
+    pub actual_rows: U64?
+}
+impl JetDevtoolsDatabasePlanRow {
+    pub fn new(ordinal: U64, node_id: String, parent_id: String?, depth: U64, operation: String, relation: String?, index_name: String?, estimated_rows: U64?, actual_rows: U64?) -> JetDevtoolsDatabasePlanRow JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(node_id, "node_id") ?? return Err(err)
+        jet_devtools_database_validate_text(operation, "operation") ?? return Err(err)
+        jet_devtools_database_validate_optional_text(parent_id, "parent_id") ?? return Err(err)
+        jet_devtools_database_validate_optional_text(relation, "relation") ?? return Err(err)
+        jet_devtools_database_validate_optional_text(index_name, "index_name") ?? return Err(err)
+        if parent_id == .Val(text) && text.is_empty() -> return Err(JetDevtoolsDatabaseFactError.InvalidPlanRow)
+        if relation == .Val(text) && text.is_empty() -> return Err(JetDevtoolsDatabaseFactError.InvalidPlanRow)
+        if index_name == .Val(text) && text.is_empty() -> return Err(JetDevtoolsDatabaseFactError.InvalidPlanRow)
+        JetDevtoolsDatabasePlanRow{ordinal, node_id, parent_id, depth, operation, relation, index_name, estimated_rows, actual_rows}
+    }
+    fn render_json(self) -> String Never! {
+        node :: jet_devtools_database_json_string(self.node_id)
+        parent :: jet_devtools_database_json_optional(self.parent_id)
+        operation :: jet_devtools_database_json_string(self.operation)
+        relation :: jet_devtools_database_json_optional(self.relation)
+        index :: jet_devtools_database_json_optional(self.index_name)
+        estimated :: db_json_number(self.estimated_rows)
+        actual :: db_json_number(self.actual_rows)
+        "{{\"ordinal\":{self.ordinal},\"node_id\":{node},\"parent_id\":{parent},\"depth\":{self.depth},\"operation\":{operation},\"relation\":{relation},\"index_name\":{index},\"estimated_rows\":{estimated},\"actual_rows\":{actual}}}"
+    }
+}
+#Equatable
+pub enum JetDevtoolsDatabaseExplainStatus { Complete TimedOut RowLimitReached }
+impl JetDevtoolsDatabaseExplainStatus {
+    pub fn as_str(self) -> String Never! {
+        if self == .Complete -> return "complete"
+        if self == .TimedOut -> return "timed_out"
+        "row_limit_reached"
+    }
+    fn discriminant(self) -> Int Never! {
+        if self == .Complete -> return 0
+        if self == .TimedOut -> return 1
+        2
+    }
+    pub fn compare(self, other: JetDevtoolsDatabaseExplainStatus) -> Ordering Never! { self.discriminant() <=> other.discriminant() }
+}
+#Equatable
+pub struct JetDevtoolsDatabaseExplainFactResult {
+    pub query_id: String
+    pub statement_identity: String
+    pub source: String
+    pub request_id: String?
+    pub capability: JetDevtoolsDatabaseCapabilityFact
+    pub duration_ms: U64
+    pub deadline_ms: U64
+    pub finished_at_ms: U64
+    pub timed_out: Bool
+    pub truncated: Bool
+    pub rows: [JetDevtoolsDatabasePlanRow]
+}
+impl JetDevtoolsDatabaseExplainFactResult {
+    pub fn status(self) -> JetDevtoolsDatabaseExplainStatus Never! {
+        if self.timed_out -> return JetDevtoolsDatabaseExplainStatus.TimedOut
+        if self.truncated -> return JetDevtoolsDatabaseExplainStatus.RowLimitReached
+        JetDevtoolsDatabaseExplainStatus.Complete
+    }
+    pub fn render_json(self) -> String Never! { self.render_json_at(self.finished_at_ms) }
+    pub fn render_json_at(self, now_ms: U64) -> String Never! {
+        rows := db_storage.jet_storage_list_with_capacity<String>(self.rows.len())
+        loop row in self.rows -> &rows.push(row.render_json())
+        plans :: rows.join(",")
+        id :: jet_devtools_database_json_string(self.query_id)
+        statement :: jet_devtools_database_json_string(self.statement_identity)
+        source :: jet_devtools_database_json_string(self.source)
+        request :: jet_devtools_database_json_optional(self.request_id)
+        capability :: jet_devtools_database_json_string(self.capability.capability)
+        freshness :: db_sat_sub(now_ms, self.finished_at_ms)
+        status :: jet_devtools_database_json_string(self.status().as_str())
+        count :: self.rows.len()
+        "{{\"query_id\":{id},\"statement_identity\":{statement},\"source\":{source},\"request_id\":{request},\"capability\":{capability},\"authority_granted\":{self.capability.granted},\"duration_ms\":{self.duration_ms},\"deadline_ms\":{self.deadline_ms},\"finished_at_ms\":{self.finished_at_ms},\"freshness_ms\":{freshness},\"status\":{status},\"timed_out\":{self.timed_out},\"truncated\":{self.truncated},\"row_count\":{count},\"plan_rows\":[{plans}]}}"
+    }
+    pub fn to_protocol_event(self, source: String) -> devtools.JetDevtoolsEvent JetDevtoolsDatabaseFactError! {
+        devtools.JetDevtoolsEvent.from_parts(self.finished_at_ms, source, "DatabaseExplainResult", ~self.query_id, self.render_json()) ?? return Err(JetDevtoolsDatabaseFactError.Protocol(err))
+    }
+}
+#Equatable
+pub struct JetDevtoolsDatabasePanelFacts {
+    pub panel_id: String
+    pub captured_at_ms: U64
+    pub pool: JetDevtoolsDatabasePoolStats
+    pub queries: [JetDevtoolsDatabaseQueryStats]
+    pub latest_explain: JetDevtoolsDatabaseExplainFactResult?
+}
+impl JetDevtoolsDatabasePanelFacts {
+    pub fn new(panel_id: String, captured_at_ms: U64, pool: ^JetDevtoolsDatabasePoolStats, history: JetDevtoolsDatabaseQueryHistory) -> JetDevtoolsDatabasePanelFacts JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_identity(panel_id, "panel_id") ?? return Err(err)
+        JetDevtoolsDatabasePanelFacts{panel_id, captured_at_ms, pool: ^pool, queries: history.snapshot(), latest_explain: None}
+    }
+    pub fn with_latest_explain(^self, result: ^JetDevtoolsDatabaseExplainFactResult) -> JetDevtoolsDatabasePanelFacts JetDevtoolsDatabaseFactError! {
+        found := false
+        loop query in self.queries {
+            if query.query_id == result.query_id { found = true; break }
+        }
+        if !found -> return Err(JetDevtoolsDatabaseFactError.InvalidPlanRow)
+        panel := ^self
+        panel.latest_explain = Val(^result)
+        ^panel
+    }
+    pub fn query(self, query_id: String) -> View<JetDevtoolsDatabaseQueryStats>? from self {
+        loop i in 0..<self.queries.len() {
+            if self.queries[i].query_id == query_id -> return Val(self.queries[i..<i + 1])
+        }
+        None
+    }
+    pub fn pressure(self) -> JetDevtoolsDatabasePoolPressure Never! { self.pool.pressure() }
+    pub fn render_json(self) -> String Never! {
+        rows := db_storage.jet_storage_list_with_capacity<String>(self.queries.len())
+        loop query in self.queries -> &rows.push(query.render_json_at(self.captured_at_ms))
+        queries :: rows.join(",")
+        explain := "null"
+        if self.latest_explain == .Val(result) -> explain = result.render_json_at(self.captured_at_ms)
+        id :: jet_devtools_database_json_string(self.panel_id)
+        pool :: self.pool.render_json_at(self.captured_at_ms)
+        "{{\"panel_id\":{id},\"captured_at_ms\":{self.captured_at_ms},\"pool\":{pool},\"queries\":[{queries}],\"latest_explain\":{explain}}}"
+    }
+    pub fn to_protocol_events(self, source: String) -> [devtools.JetDevtoolsEvent] JetDevtoolsDatabaseFactError! {
+        jet_devtools_database_validate_text(source, "source") ?? return Err(err)
+        extra :: if self.latest_explain == None -> 0 else -> 1
+        events := db_storage.jet_storage_list_with_capacity<devtools.JetDevtoolsEvent>(1 + self.queries.len() + extra)
+        pool :: self.pool.to_protocol_event(~source) ?? return Err(err)
+        &events.push(pool)
+        loop query in self.queries {
+            event :: query.to_protocol_event(~source) ?? return Err(err)
+            &events.push(event)
+        }
+        if self.latest_explain == .Val(result) {
+            event :: result.to_protocol_event(source) ?? return Err(err)
+            &events.push(event)
+        }
+        ^events
+    }
+}

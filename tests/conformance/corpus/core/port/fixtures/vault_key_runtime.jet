@@ -1,0 +1,1118 @@
+// PORT-PENDING 1057 tests-fixtures-vault-key-runtime-module-group: tests/fixtures/vault_key_runtime.rs:1-592
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[allow(non_snake_case)]
+//RS mod RuntimeDiagnosticCore { include!("../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs"); }
+//RS include!("../../crates/jet-foundation/src/Outcome.rs");
+//RS include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+//RS include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
+//RS include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+//RS include!("../../crates/jet-pkg-model/src/Prelude/VaultNfc.rs");
+//RS include!("../../crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs");
+//RS 
+//RS #[cfg(test)]
+//RS mod vault_key_tests {
+//RS     use super::*;
+//RS 
+//RS     fn scratch(tag: &str) -> std::path::PathBuf {
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jet-vault-key-{tag}-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(path.join(".jet")).unwrap();
+//RS         path
+//RS     }
+//RS 
+//RS     fn provision(root: &std::path::Path) {
+//RS         let keys = root.join("keys");
+//RS         std::fs::create_dir(&keys).unwrap();
+//RS         let (identity, recipient) = jet_vault_keygen_impl();
+//RS         std::fs::write(keys.join("secrets.identity"), identity).unwrap();
+//RS         std::fs::write(root.join(".jet/secrets-recipients"), format!("{recipient}\n")).unwrap();
+//RS     }
+//RS 
+//RS     fn decoded_store(root: &std::path::Path) -> JetVaultStore {
+//RS         let identity = std::fs::read_to_string(root.join("keys/secrets.identity")).unwrap();
+//RS         let ciphertext = std::fs::read(root.join(".jet/secrets.age")).unwrap();
+//RS         let plaintext = jet_vault_decrypt_impl(&identity, &ciphertext).unwrap();
+//RS         jet_vault_decode_v2(&plaintext).unwrap()
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn absent_store_reads_do_not_require_mutation_recipients() {
+//RS         let root = scratch("absent-read");
+//RS         assert_eq!(jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap(), None);
+//RS         assert!(jet_vault_versions_at::<JetSigningKey>(&root, "release").unwrap().is_empty());
+//RS         let missing = JetVaultKeyRef::<JetSigningKey> {
+//RS             provider: JetVaultProvider::Repo,
+//RS             repo_uuid: [1; 16],
+//RS             name: "release".into(),
+//RS             generation: 1,
+//RS             opaque_id: [2; 16],
+//RS             record_hash: [3; 32],
+//RS             marker: std::marker::PhantomData,
+//RS         };
+//RS         assert!(matches!(jet_vault_load_at(&root, &missing), Err(JetVaultError::NotFound)));
+//RS         assert_eq!(jet_vault_status_at(&root, &missing).unwrap_err(), JetVaultError::NotFound);
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn typed_generate_rotate_retire_revoke_and_conflict() {
+//RS         let root = scratch("lifecycle");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS 
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let stale = jet_vault_prepare_generate_at::<JetX25519SecretKey>(&root, "transport").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial release key").unwrap();
+//RS         let first = jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         assert_eq!(first.generation(), 1);
+//RS         assert_eq!(jet_vault_status_at(&root, &first).unwrap(), JetVaultKeyStatus::Active);
+//RS         assert!(jet_vault_load_at(&root, &first).is_ok());
+//RS 
+//RS         let stale_write = jet_vault_authorize_write_impl(&stale, "stale write").unwrap();
+//RS         assert_eq!(
+//RS             jet_vault_commit_generate_at(&root, stale, stale_write).unwrap_err(),
+//RS             JetVaultError::Conflict
+//RS         );
+//RS 
+//RS         let rotate = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&rotate, "quarterly rotation").unwrap();
+//RS         let rotated = jet_vault_commit_rotate_at(&root, rotate, write).unwrap();
+//RS         assert_eq!(rotated.previous, first);
+//RS         assert_eq!(rotated.current.generation(), 2);
+//RS         assert_eq!(jet_vault_status_at(&root, &first).unwrap(), JetVaultKeyStatus::Retired);
+//RS         assert!(jet_vault_load_at(&root, &first).is_ok(), "retired exact refs remain loadable");
+//RS 
+//RS         let revoke = jet_vault_prepare_revoke_at(&root, &first, "suspected exposure").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&revoke, "incident response").unwrap();
+//RS         jet_vault_commit_revoke_at(&root, revoke, write).unwrap();
+//RS         assert_eq!(jet_vault_status_at(&root, &first).unwrap(), JetVaultKeyStatus::Revoked);
+//RS         assert!(matches!(jet_vault_load_at(&root, &first), Err(JetVaultError::Revoked)));
+//RS 
+//RS         let current = jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap().unwrap();
+//RS         assert_eq!(current, rotated.current);
+//RS         assert_eq!(jet_vault_versions_at::<JetSigningKey>(&root, "release").unwrap().len(), 2);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn authority_is_exact_and_denial_generates_no_key() {
+//RS         let root = scratch("authority");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|preview| {
+//RS             assert!(preview.contains("generate SigningKey release"));
+//RS             false
+//RS         });
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         assert_eq!(
+//RS             jet_vault_authorize_write_impl(&plan, "unapproved").unwrap_err(),
+//RS             JetVaultError::AuthorityDenied
+//RS         );
+//RS         assert!(!root.join(".jet/secrets.age").exists());
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn jvlt2_codec_is_canonical_bounded_and_preserves_legacy_strings() {
+//RS         let mut store = JetVaultStore::new([7; 16]);
+//RS         store.revision = 1;
+//RS         store.strings.push(("db_password".into(), "hunter2".into()));
+//RS         let bytes = jet_vault_encode_v2(&store).unwrap();
+//RS         assert_eq!(bytes.len(), 100);
+//RS         assert_eq!(&bytes[..4], b"JVLT");
+//RS         assert_eq!(bytes[4], 2);
+//RS         assert_eq!(&bytes[68..], &vault_hash(&[b"JVLT2 payload", &bytes[..68]]));
+//RS         assert_eq!(jet_vault_decode_v2(&bytes).unwrap(), store);
+//RS 
+//RS         let mut trailing = bytes.clone();
+//RS         trailing.push(0);
+//RS         assert_eq!(jet_vault_decode_v2(&trailing).unwrap_err(), JetVaultError::InvalidEncoding);
+//RS         assert_eq!(
+//RS             jet_vault_validate_name(" ../secret ").unwrap_err(),
+//RS             JetVaultError::InvalidName
+//RS         );
+//RS         assert_eq!(jet_vault_validate_name("e\u{301}").unwrap_err(), JetVaultError::InvalidName);
+//RS         assert!(jet_vault_validate_name("é").is_ok());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn decoder_rejects_a_downgraded_current_generation() {
+//RS         let root = scratch("downgrade");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "first").unwrap();
+//RS         jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "second").unwrap();
+//RS         jet_vault_commit_rotate_at(&root, plan, write).unwrap();
+//RS         let mut bytes = jet_vault_encode_v2(&decoded_store(&root)).unwrap();
+//RS         let current_at = 44 + 1 + 2 + "release".len();
+//RS         bytes[current_at..current_at + 8].copy_from_slice(&1u64.to_le_bytes());
+//RS         let hash_at = bytes.len() - 32;
+//RS         let hash = vault_hash(&[b"JVLT2 payload", &bytes[..hash_at]]);
+//RS         bytes[hash_at..].copy_from_slice(&hash);
+//RS         assert_eq!(jet_vault_decode_v2(&bytes).unwrap_err(), JetVaultError::InvalidEncoding);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn exact_operation_preview_provider_and_session_are_bound() {
+//RS         let root = scratch("binding");
+//RS         provision(&root);
+//RS         let key = jet_crypto_signing_generate_impl().unwrap();
+//RS         let plan = jet_vault_prepare_store_at(&root, "release", key).unwrap();
+//RS         let mut operation = Vec::new();
+//RS         operation.extend_from_slice(b"JVLT2 operation");
+//RS         operation.extend_from_slice(&plan.repo_uuid);
+//RS         operation.extend_from_slice(&plan.start_revision.to_le_bytes());
+//RS         operation.extend_from_slice(&plan.start_hash);
+//RS         operation.extend_from_slice(&plan.provider_hash);
+//RS         operation.extend_from_slice(&[2, 1]);
+//RS         operation.extend_from_slice(&7u16.to_le_bytes());
+//RS         operation.extend_from_slice(b"release");
+//RS         operation.push(0);
+//RS         operation.extend_from_slice(&[0; 16]);
+//RS         operation.extend_from_slice(&0u64.to_le_bytes());
+//RS         operation.extend_from_slice(&[0; 16]);
+//RS         operation.extend_from_slice(&[0; 32]);
+//RS         operation.extend_from_slice(&0u16.to_le_bytes());
+//RS         operation.extend_from_slice(&plan.public_key_hash);
+//RS         operation.extend_from_slice(&plan.key_digest);
+//RS         operation.extend_from_slice(&[0; 32]);
+//RS         assert_eq!(plan.operation_hash, vault_hash(&[&operation]));
+//RS 
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let mut write = jet_vault_authorize_write_impl(&plan, "approved release signer").unwrap();
+//RS         let mut preview = Vec::new();
+//RS         preview.extend_from_slice(b"JVLT2 authority preview");
+//RS         preview.extend_from_slice(&plan.operation_hash);
+//RS         preview.extend_from_slice(&[2, 1]);
+//RS         preview.extend_from_slice(&plan.repo_uuid);
+//RS         preview.extend_from_slice(&0u64.to_le_bytes());
+//RS         preview.extend_from_slice(&7u16.to_le_bytes());
+//RS         preview.extend_from_slice(b"release");
+//RS         preview.extend_from_slice(&0u64.to_le_bytes());
+//RS         preview.extend_from_slice(&1u64.to_le_bytes());
+//RS         preview.extend_from_slice(&0u16.to_le_bytes());
+//RS         preview.extend_from_slice(&23u16.to_le_bytes());
+//RS         preview.extend_from_slice(b"approved release signer");
+//RS         preview.extend_from_slice(&plan.expires_unix_ms.to_le_bytes());
+//RS         assert_eq!(write.preview_hash, vault_hash(&[&preview]));
+//RS         write.session = write.session.wrapping_add(1);
+//RS         assert_eq!(jet_vault_commit_store_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
+//RS 
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let uuid = vault_uuid_hex(&plan.repo_uuid);
+//RS         let trust = root.join("trust");
+//RS         std::fs::write(&trust, format!("grant:user:vault.write:{uuid}\n")).unwrap();
+//RS         jet_vault_set_test_trust_path(Some(trust));
+//RS         assert!(vault_headless_granted(&plan.repo_uuid));
+//RS         jet_vault_set_test_trust_path(None);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn historical_pairs_migrate_with_the_previewed_uuid_and_exact_start_hash() {
+//RS         let root = scratch("migration");
+//RS         provision(&root);
+//RS         let identity = std::fs::read_to_string(root.join("keys/secrets.identity")).unwrap();
+//RS         let recipient = std::fs::read_to_string(root.join(".jet/secrets-recipients")).unwrap();
+//RS         let pairs = vec![("token".to_string(), "secret".to_string())];
+//RS         let legacy = jet_vault_encode_pairs(&pairs);
+//RS         let encrypted = jet_vault_encrypt_impl(&vec![recipient.trim().to_string()], &legacy).unwrap();
+//RS         std::fs::write(root.join(".jet/secrets.age"), encrypted).unwrap();
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let (_, canonical) = vault_canonical_pairs(pairs.clone()).unwrap();
+//RS         assert_eq!(plan.start_revision, 0);
+//RS         assert_eq!(plan.start_hash, vault_hash(&[b"JVLT1 starting store", &canonical]));
+//RS         let previewed_uuid = plan.repo_uuid;
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let write = jet_vault_authorize_write_impl(&plan, "migrate and provision").unwrap();
+//RS         let reference = jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         let store = decoded_store(&root);
+//RS         assert_eq!(store.revision, 1);
+//RS         assert_eq!(store.repo_uuid, previewed_uuid);
+//RS         assert_eq!(reference.repo_uuid, previewed_uuid);
+//RS         assert_eq!(store.strings, pairs);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS         let _ = identity;
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn linux_install_cancellation_and_durability_boundaries_are_literal() {
+//RS         let root = scratch("faults");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         jet_vault_set_test_fault(Some("cancel-before-install"));
+//RS         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
+//RS         assert!(!root.join(".jet/secrets.age").exists());
+//RS         assert!(!std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| {
+//RS             let name = entry.unwrap().file_name();
+//RS             let name = name.to_string_lossy();
+//RS             name.contains(".next.") || name == ".secrets.age.backup"
+//RS         }));
+//RS 
+//RS         jet_vault_set_test_fault(Some("cancel-after-install"));
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         let first = jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         assert_eq!(first.generation(), 1);
+//RS 
+//RS         let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "rotate with durability fault").unwrap();
+//RS         jet_vault_set_test_fault(Some("durability-after-install"));
+//RS         assert_eq!(jet_vault_commit_rotate_at(&root, plan, write).unwrap_err(), JetVaultError::DurabilityUnknown);
+//RS         assert_eq!(decoded_store(&root).revision, 2, "installed revision is visible");
+//RS         assert!(root.join(".jet/.secrets.age.backup").exists(), "authenticated old inode remains as recovery backup");
+//RS         std::fs::write(root.join(".jet/secrets.age"), b"substituted").unwrap();
+//RS         assert_eq!(jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap(), Some(first));
+//RS         assert_eq!(decoded_store(&root).revision, 1, "next open restores authenticated backup");
+//RS         assert!(!root.join(".jet/.secrets.age.backup").exists());
+//RS         jet_vault_set_test_fault(None);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn concurrent_reader_defers_backup_recovery_until_writer_releases_lock() {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         let root = scratch("reader-writer-backup");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "concurrent rotation").unwrap();
+//RS         let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         jet_vault_set_test_backup_barrier(Some((root.clone(), entered.clone(), release.clone())));
+//RS         let writer_root = root.clone();
+//RS         let writer = std::thread::spawn(move || {
+//RS             jet_vault_set_test_fault(Some("durability-after-install"));
+//RS             let result = jet_vault_commit_rotate_at(&writer_root, plan, write);
+//RS             jet_vault_set_test_fault(None);
+//RS             result
+//RS         });
+//RS         entered.wait();
+//RS         let backup = root.join(".jet/.secrets.age.backup");
+//RS         let backup_inode = std::fs::metadata(&backup).unwrap().ino();
+//RS         assert!(matches!(
+//RS             jet_vault_current_at::<JetSigningKey>(&root, "release"),
+//RS             Err(JetVaultError::Conflict)
+//RS         ));
+//RS         assert_eq!(std::fs::metadata(&backup).unwrap().ino(), backup_inode);
+//RS         release.wait();
+//RS         assert!(matches!(writer.join().unwrap(), Err(JetVaultError::DurabilityUnknown)));
+//RS         jet_vault_set_test_backup_barrier(None);
+//RS         assert_eq!(std::fs::metadata(&backup).unwrap().ino(), backup_inode);
+//RS         let backup_bytes = std::fs::read(&backup).unwrap();
+//RS         assert_eq!(vault_decode_ciphertext_at(&root, &backup_bytes).unwrap().0.revision, 1);
+//RS         assert_eq!(decoded_store(&root).revision, 2);
+//RS         assert_eq!(jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap().unwrap().generation(), 2);
+//RS         assert!(!backup.exists());
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn linux_openat2_rejects_a_symlinked_vault_directory() {
+//RS         use std::os::unix::fs::symlink;
+//RS         let root = scratch("symlink");
+//RS         let actual = root.join("actual");
+//RS         std::fs::create_dir(&actual).unwrap();
+//RS         std::fs::remove_dir(root.join(".jet")).unwrap();
+//RS         symlink(&actual, root.join(".jet")).unwrap();
+//RS         let error = match jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release") {
+//RS             Ok(_) => panic!("symlinked .jet directory was accepted"),
+//RS             Err(error) => error,
+//RS         };
+//RS         assert_eq!(error, JetVaultError::UnsupportedProvider);
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn provider_change_invalidates_an_authorized_plan() {
+//RS         let root = scratch("provider-change");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         let (_, other_recipient) = jet_vault_keygen_impl();
+//RS         std::fs::write(root.join(".jet/secrets-recipients"), format!("{other_recipient}\n")).unwrap();
+//RS         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
+//RS         assert!(!root.join(".jet/secrets.age").exists());
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn string_updates_preserve_typed_rows_in_the_shared_atomic_store() {
+//RS         let root = scratch("hybrid-store");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         let reference = jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         jet_vault_replace_strings_at(&root, vec![("token".into(), "secret".into())]).unwrap();
+//RS         let store = decoded_store(&root);
+//RS         assert_eq!(store.revision, 2);
+//RS         assert_eq!(store.strings, vec![("token".into(), "secret".into())]);
+//RS         assert_eq!(store.keys.len(), 1);
+//RS         assert!(jet_vault_load_at(&root, &reference).is_ok());
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store() {
+//RS         let root = scratch("stale-lock");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let lock = root.join(".jet/.secrets.age.lock");
+//RS         std::fs::write(
+//RS             &lock,
+//RS             format!(
+//RS                 "repo={} revision=0 pid=999999 process-start=1 nonce=11111111111111111111111111111111 hash={}\n",
+//RS                 vault_uuid_hex(&plan.repo_uuid),
+//RS                 hex_bytes(&plan.start_hash)
+//RS             ),
+//RS         )
+//RS         .unwrap();
+//RS         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(601);
+//RS         std::fs::File::open(&lock)
+//RS             .unwrap()
+//RS             .set_times(std::fs::FileTimes::new().set_modified(old))
+//RS             .unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "recover stale lock").unwrap();
+//RS         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap().generation(), 1);
+//RS         assert!(!lock.exists());
+//RS         assert!(!std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().contains("lock.stale")));
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lock_drop_never_unlinks_an_inode_substituted_after_its_check() {
+//RS         use std::os::unix::fs::MetadataExt;
+//RS         let root = scratch("lock-substitution");
+//RS         provision(&root);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let guard = vault_acquire_lock(&root, plan.repo_uuid, plan.start_revision, plan.start_hash).unwrap();
+//RS         let lock = root.join(".jet/.secrets.age.lock");
+//RS         jet_vault_set_test_fault(Some("substitute-lock-after-check"));
+//RS         drop(guard);
+//RS         jet_vault_set_test_fault(None);
+//RS         let replacement_inode = std::fs::metadata(&lock).unwrap().ino();
+//RS         assert_eq!(std::fs::read(&lock).unwrap(), b"replacement");
+//RS         assert_eq!(std::fs::metadata(&lock).unwrap().ino(), replacement_inode);
+//RS         let acquired = root.join(".jet/.secrets.age.lock.acquired");
+//RS         assert_ne!(std::fs::metadata(&acquired).unwrap().ino(), replacement_inode);
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn anonymous_temp_substitution_never_reaches_the_visible_store() {
+//RS         let root = scratch("temp-substitution");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         jet_vault_set_test_fault(Some("substitute-temp-before-install"));
+//RS         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
+//RS         assert!(!root.join(".jet/secrets.age").exists());
+//RS         jet_vault_set_test_fault(None);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back() {
+//RS         let root = scratch("clock-rollback");
+//RS         provision(&root);
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+//RS         jet_vault_commit_generate_at(&root, plan, write).unwrap();
+//RS         let before = decoded_store(&root).keys[0].created_unix_ms;
+//RS         let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "rollback rotation").unwrap();
+//RS         jet_vault_set_test_fault(Some("clock-rollback"));
+//RS         jet_vault_commit_rotate_at(&root, plan, write).unwrap();
+//RS         let store = decoded_store(&root);
+//RS         assert!(store.keys[0].status_unix_ms >= before);
+//RS         assert!(store.keys[1].created_unix_ms >= store.keys[0].status_unix_ms);
+//RS         jet_vault_set_test_fault(None);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn imported_origin_round_trips_and_invalid_combinations_reject() {
+//RS         let key = jet_crypto_signing_generate_impl().unwrap();
+//RS         let key_bytes = key.into_bytes();
+//RS         let public_key_hash = vault_public_hash(1, &key_bytes).unwrap();
+//RS         let origin = JetVaultOrigin {
+//RS             repo_uuid: [3; 16],
+//RS             name: "source".into(),
+//RS             generation: 4,
+//RS             opaque_id: [5; 16],
+//RS             record_hash: [6; 32],
+//RS         };
+//RS         let mut record = JetVaultRecord {
+//RS             name: "release".into(),
+//RS             key_type: 1,
+//RS             generation: 1,
+//RS             status: JetVaultKeyStatus::Active,
+//RS             provenance: JetVaultProvenance::Imported,
+//RS             opaque_id: [2; 16],
+//RS             created_unix_ms: 10,
+//RS             status_unix_ms: 10,
+//RS             record_hash: [0; 32],
+//RS             public_key_hash,
+//RS             reason_hash: [0; 32],
+//RS             origin: Some(origin.clone()),
+//RS             key: key_bytes,
+//RS         };
+//RS         record.record_hash = vault_record_hash(&record);
+//RS         let mut store = JetVaultStore::new([1; 16]);
+//RS         store.revision = 1;
+//RS         let record_hash = record.record_hash;
+//RS         store.keys.push(record);
+//RS         let decoded = jet_vault_decode_v2(&jet_vault_encode_v2(&store).unwrap()).unwrap();
+//RS         assert_eq!(decoded.keys[0].origin, Some(origin));
+//RS         assert_eq!(decoded.keys[0].record_hash, record_hash);
+//RS         store.keys[0].provenance = JetVaultProvenance::Generated;
+//RS         store.keys[0].record_hash = vault_record_hash(&store.keys[0]);
+//RS         assert_eq!(jet_vault_encode_v2(&store).unwrap_err(), JetVaultError::InvalidEncoding);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn errors_and_handles_are_redacted() {
+//RS         let errors = [
+//RS             JetVaultError::InvalidName,
+//RS             JetVaultError::NotFound,
+//RS             JetVaultError::WrongType,
+//RS             JetVaultError::Revoked,
+//RS             JetVaultError::Locked,
+//RS             JetVaultError::AuthorityDenied,
+//RS             JetVaultError::Conflict,
+//RS             JetVaultError::UnsupportedProvider,
+//RS             JetVaultError::InvalidEncoding,
+//RS             JetVaultError::DurabilityUnknown,
+//RS             JetVaultError::Crypto(JetCryptoError::OpenFailed),
+//RS             JetVaultError::IO { operation: "read", redacted_path: "<vault-store>" },
+//RS             JetVaultError::Internal { incident_id: "vault-17" },
+//RS         ];
+//RS         let tags = errors.iter().map(|error| match error {
+//RS             JetVaultError::InvalidName => "invalid-name",
+//RS             JetVaultError::NotFound => "not-found",
+//RS             JetVaultError::WrongType => "wrong-type",
+//RS             JetVaultError::Revoked => "revoked",
+//RS             JetVaultError::Locked => "locked",
+//RS             JetVaultError::AuthorityDenied => "authority-denied",
+//RS             JetVaultError::Conflict => "conflict",
+//RS             JetVaultError::UnsupportedProvider => "unsupported-provider",
+//RS             JetVaultError::InvalidEncoding => "invalid-encoding",
+//RS             JetVaultError::DurabilityUnknown => "durability-unknown",
+//RS             JetVaultError::Crypto(_) => "crypto",
+//RS             JetVaultError::IO { .. } => "io",
+//RS             JetVaultError::Internal { .. } => "internal",
+//RS         }).collect::<Vec<_>>();
+//RS         assert_eq!(tags, ["invalid-name", "not-found", "wrong-type", "revoked", "locked", "authority-denied", "conflict", "unsupported-provider", "invalid-encoding", "durability-unknown", "crypto", "io", "internal"]);
+//RS         let display = errors.iter().map(ToString::to_string).collect::<Vec<_>>();
+//RS         assert_eq!(display, [
+//RS             "invalid vault key name",
+//RS             "vault key not found",
+//RS             "vault key has a different type",
+//RS             "vault key is revoked",
+//RS             "vault is locked",
+//RS             "vault write authority denied",
+//RS             "vault changed since this write was prepared",
+//RS             "vault provider is unsupported on this platform",
+//RS             "vault store has invalid encoding",
+//RS             "vault write visibility is known but durability is uncertain",
+//RS             "vault cryptography failed: encrypted data could not be opened",
+//RS             "vault read failed at <vault-store>",
+//RS             "internal vault failure; incident vault-17",
+//RS         ]);
+//RS         let shown = errors.iter().zip(display).map(|(error, display)| format!("{error:?} {display}")).collect::<Vec<_>>().join("\n");
+//RS         for forbidden in ["secrets.age", "AGE-SECRET", "/home/", "hunter2", "ciphertext sentinel"] {
+//RS             assert!(!shown.contains(forbidden), "vault error leaked `{forbidden}`: {shown}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn stored_key_bytes_are_redacted_and_zeroized_on_drop() {
+//RS         let key_bytes = vec![0x5a; 32];
+//RS         let public_key_hash = vault_public_hash(2, &key_bytes).unwrap();
+//RS         let mut record = JetVaultRecord {
+//RS             name: "transport".into(),
+//RS             key_type: 2,
+//RS             generation: 1,
+//RS             status: JetVaultKeyStatus::Active,
+//RS             provenance: JetVaultProvenance::Imported,
+//RS             opaque_id: [2; 16],
+//RS             created_unix_ms: 10,
+//RS             status_unix_ms: 10,
+//RS             record_hash: [0; 32],
+//RS             public_key_hash,
+//RS             reason_hash: [0; 32],
+//RS             origin: None,
+//RS             key: key_bytes,
+//RS         };
+//RS         record.record_hash = vault_record_hash(&record);
+//RS         let shown = format!("{record:?}");
+//RS         assert!(shown.contains("<redacted>"));
+//RS         assert!(!shown.contains("90, 90"));
+//RS         let observed = std::rc::Rc::new(std::cell::Cell::new(false));
+//RS         let witness = observed.clone();
+//RS         jet_crypto_set_zeroize_test_observer(move |bytes| {
+//RS             if bytes.len() == 32 && bytes.iter().all(|byte| *byte == 0) {
+//RS                 witness.set(true);
+//RS             }
+//RS         });
+//RS         drop(record);
+//RS         jet_crypto_clear_zeroize_test_observer();
+//RS         assert!(observed.get());
+//RS     }
+//RS }
+// END-PORT-PENDING 1057 tests/fixtures/vault_key_runtime.rs:1-592
+
+// PORT-PENDING 1057 tests-fixtures-vault-key-runtime-module-group: tests/fixtures/vault_key_wrap_runtime.rs:1-518
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS #[allow(non_snake_case)]
+//RS mod RuntimeDiagnosticCore { include!("../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs"); }
+//RS use jet_codegen::scheduler::*;
+//RS include!("../../crates/jet-foundation/src/Outcome.rs");
+//RS include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+//RS include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
+//RS include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+//RS include!("../../crates/jet-pkg-model/src/Prelude/VaultNfc.rs");
+//RS include!("../../crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs");
+//RS include!("../../crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
+//RS 
+//RS #[cfg(test)]
+//RS mod vault_key_wrap_tests {
+//RS     use super::*;
+//RS     static STRESS_CANCEL:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+//RS     fn stress_cancelled()->bool{STRESS_CANCEL.load(std::sync::atomic::Ordering::SeqCst)}
+//RS 
+//RS     fn scratch(tag: &str) -> std::path::PathBuf {
+//RS         let path = std::env::temp_dir().join(format!(
+//RS             "jet-vault-key-wrap-{tag}-{}-{}",
+//RS             std::process::id(),
+//RS             std::time::SystemTime::now()
+//RS                 .duration_since(std::time::UNIX_EPOCH)
+//RS                 .unwrap()
+//RS                 .as_nanos()
+//RS         ));
+//RS         std::fs::create_dir_all(path.join(".jet")).unwrap();
+//RS         path
+//RS     }
+//RS 
+//RS     fn provision(root: &std::path::Path) {
+//RS         let keys = root.join("keys");
+//RS         std::fs::create_dir(&keys).unwrap();
+//RS         let (identity, recipient) = jet_vault_keygen_impl();
+//RS         std::fs::write(keys.join("secrets.identity"), identity).unwrap();
+//RS         std::fs::write(root.join(".jet/secrets-recipients"), format!("{recipient}\n")).unwrap();
+//RS     }
+//RS 
+//RS     fn decoded_store(root: &std::path::Path) -> JetVaultStore {
+//RS         let identity = std::fs::read_to_string(root.join("keys/secrets.identity")).unwrap();
+//RS         let ciphertext = std::fs::read(root.join(".jet/secrets.age")).unwrap();
+//RS         let plaintext = jet_vault_decrypt_impl(&identity, &ciphertext).unwrap();
+//RS         jet_vault_decode_v2(&plaintext).unwrap()
+//RS     }
+//RS 
+//RS     fn generate<T: JetVaultKey>(root: &std::path::Path, name: &str) -> JetVaultKeyRef<T> {
+//RS         jet_vault_set_test_authorizer(|_| true);
+//RS         let plan = jet_vault_prepare_generate_at::<T>(root, name).unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&plan, "provision test key").unwrap();
+//RS         jet_vault_commit_generate_at(root, plan, write).unwrap()
+//RS     }
+//RS 
+//RS     fn import<T: JetVaultKey>(
+//RS         root: &std::path::Path,
+//RS         name: &str,
+//RS         wrapped: JetWrappedVaultKey,
+//RS         unlock: JetVaultKeyUnlock<'_>,
+//RS     ) -> Result<JetVaultKeyRef<T>, JetVaultKeyWrapError> {
+//RS         let plan = jet_vault_prepare_import_wrapped_at::<T>(root, name, wrapped, unlock)?;
+//RS         let write = jet_vault_authorize_wrapped_import_impl(&plan, "restore wrapped key")?;
+//RS         jet_vault_commit_import_wrapped_at(root, write, plan)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn key_wrap_error_projection_is_exhaustive_and_redacted() {
+//RS         let errors = [
+//RS             JetVaultKeyWrapError::InvalidEncoding,
+//RS             JetVaultKeyWrapError::UnsupportedVersion,
+//RS             JetVaultKeyWrapError::UnsupportedMode,
+//RS             JetVaultKeyWrapError::UnsupportedKeyType,
+//RS             JetVaultKeyWrapError::InvalidLength,
+//RS             JetVaultKeyWrapError::WeakPassphrase,
+//RS             JetVaultKeyWrapError::OpenFailed,
+//RS             JetVaultKeyWrapError::EntropyUnavailable,
+//RS             JetVaultKeyWrapError::ResourceUnavailable,
+//RS             JetVaultKeyWrapError::Vault(JetVaultError::NotFound),
+//RS             JetVaultKeyWrapError::Internal { incident_id: "key-wrap-17" },
+//RS         ];
+//RS         let tags = errors.iter().map(|error| match error {
+//RS             JetVaultKeyWrapError::InvalidEncoding => "invalid-encoding",
+//RS             JetVaultKeyWrapError::UnsupportedVersion => "unsupported-version",
+//RS             JetVaultKeyWrapError::UnsupportedMode => "unsupported-mode",
+//RS             JetVaultKeyWrapError::UnsupportedKeyType => "unsupported-key-type",
+//RS             JetVaultKeyWrapError::InvalidLength => "invalid-length",
+//RS             JetVaultKeyWrapError::WeakPassphrase => "weak-passphrase",
+//RS             JetVaultKeyWrapError::OpenFailed => "open-failed",
+//RS             JetVaultKeyWrapError::EntropyUnavailable => "entropy-unavailable",
+//RS             JetVaultKeyWrapError::ResourceUnavailable => "resource-unavailable",
+//RS             JetVaultKeyWrapError::Vault(_) => "vault",
+//RS             JetVaultKeyWrapError::Internal { .. } => "internal",
+//RS         }).collect::<Vec<_>>();
+//RS         assert_eq!(tags, ["invalid-encoding", "unsupported-version", "unsupported-mode", "unsupported-key-type", "invalid-length", "weak-passphrase", "open-failed", "entropy-unavailable", "resource-unavailable", "vault", "internal"]);
+//RS         let display = errors.iter().map(ToString::to_string).collect::<Vec<_>>();
+//RS         assert_eq!(display, [
+//RS             "invalid wrapped vault key encoding",
+//RS             "unsupported wrapped vault key version",
+//RS             "unsupported wrapped vault key mode",
+//RS             "unsupported wrapped vault key type",
+//RS             "invalid wrapped vault key length",
+//RS             "recovery passphrase must contain 16..=1048576 bytes",
+//RS             "open failed",
+//RS             "the operating system could not provide cryptographic randomness",
+//RS             "cryptographic resource unavailable",
+//RS             "vault key not found",
+//RS             "internal key-wrap failure; incident key-wrap-17",
+//RS         ]);
+//RS         let shown = errors.iter().zip(display).map(|(error, display)| format!("{error:?} {display}")).collect::<Vec<_>>().join("\n");
+//RS         for forbidden in ["secrets.age", "AGE-SECRET", "/home/", "hunter2", "ciphertext sentinel"] {
+//RS             assert!(!shown.contains(forbidden), "key-wrap error leaked `{forbidden}`: {shown}");
+//RS         }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn recipient_and_passphrase_round_trip_both_key_types() {
+//RS         let source = scratch("roundtrip-source");
+//RS         let destination = scratch("roundtrip-destination");
+//RS         provision(&source);
+//RS         provision(&destination);
+//RS         let signing = generate::<JetSigningKey>(&source, "release");
+//RS         let transport = generate::<JetX25519SecretKey>(&source, "transport");
+//RS         let recovery = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let recovery_public = jet_crypto_x25519_public_typed_impl(&recovery);
+//RS         let passphrase = Secret(b"sixteen-byte recovery phrase".to_vec());
+//RS 
+//RS         let signing_wrapped = jet_vault_export_to_recipients_at(&source, &signing, &vec![recovery_public.clone()]).unwrap();
+//RS         let signing_restored = import::<JetSigningKey>(&destination, "release-restored", signing_wrapped.clone(), JetVaultKeyUnlock::Recipient(&recovery)).unwrap();
+//RS         assert_eq!(jet_vault_load_at(&source, &signing).unwrap().public_bytes(), jet_vault_load_at(&destination, &signing_restored).unwrap().public_bytes());
+//RS         assert_eq!(signing_wrapped.mode(), JetVaultKeyWrapMode::Recipient);
+//RS         assert_eq!(signing_wrapped.key_type(), 1);
+//RS         assert_eq!(jet_vault_wrapped_bytes_impl(&signing_wrapped), signing_wrapped.bytes());
+//RS 
+//RS         let transport_wrapped = jet_vault_export_to_passphrase_at(&source, &transport, &passphrase).unwrap();
+//RS         let transport_restored = import::<JetX25519SecretKey>(&destination, "transport-restored", transport_wrapped.clone(), JetVaultKeyUnlock::Passphrase(&passphrase)).unwrap();
+//RS         assert_eq!(jet_vault_load_at(&source, &transport).unwrap().public_bytes(), jet_vault_load_at(&destination, &transport_restored).unwrap().public_bytes());
+//RS         assert_eq!(transport_wrapped.mode(), JetVaultKeyWrapMode::Passphrase);
+//RS         assert_eq!(transport_wrapped.key_type(), 2);
+//RS         assert_eq!(JetWrappedVaultKey::from_bytes(transport_wrapped.bytes()).unwrap(), transport_wrapped);
+//RS 
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(source).unwrap();
+//RS         std::fs::remove_dir_all(destination).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn canonical_vectors_cover_one_and_sixteen_recipients_and_both_types() {
+//RS         let signing_bytes = vec![0x11; 32];
+//RS         let signing_public: [u8; 32] = JetSigningKey::from_bytes(signing_bytes.clone()).unwrap().public_bytes().try_into().unwrap();
+//RS         let x25519_bytes = vec![0x22; 32];
+//RS         let x25519_public: [u8; 32] = JetX25519SecretKey::from_bytes(x25519_bytes.clone()).unwrap().public_bytes().try_into().unwrap();
+//RS         let signing_origin = JetVaultOrigin { repo_uuid: [1; 16], name: "release".into(), generation: 3, opaque_id: [2; 16], record_hash: [3; 32] };
+//RS         let x25519_origin = JetVaultOrigin { repo_uuid: [4; 16], name: "transport".into(), generation: 7, opaque_id: [5; 16], record_hash: [6; 32] };
+//RS         let recipients: Vec<_> = (1..=16).map(|byte| {
+//RS             let secret = JetX25519SecretKey(vec![byte; 32]);
+//RS             jet_crypto_x25519_public_typed_impl(&secret)
+//RS         }).collect();
+//RS         let passphrase = Secret(b"deterministic recovery phrase".to_vec());
+//RS         let counter = std::rc::Rc::new(std::cell::Cell::new(0u8));
+//RS         let next = counter.clone();
+//RS         jet_crypto_entropy_set_test_provider(move |out| {
+//RS             let start = next.get();
+//RS             for (offset, byte) in out.iter_mut().enumerate() { *byte = start.wrapping_add(offset as u8).wrapping_add(1); }
+//RS             next.set(start.wrapping_add(out.len() as u8));
+//RS             JetCryptoEntropyStep::Filled(out.len())
+//RS         });
+//RS         let one = jvkw_export_to_recipients::<JetSigningKey>(signing_origin.clone(), Zeroizing(signing_bytes.clone()), signing_public, 1_700_000_000_123, &vec![recipients[0].clone()]).unwrap();
+//RS         let sixteen = jvkw_export_to_recipients::<JetX25519SecretKey>(x25519_origin.clone(), Zeroizing(x25519_bytes.clone()), x25519_public, 1_700_000_000_123, &recipients).unwrap();
+//RS         let pass_signing = jvkw_export_to_passphrase::<JetSigningKey>(signing_origin, Zeroizing(signing_bytes), signing_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop).unwrap();
+//RS         let pass_x25519 = jvkw_export_to_passphrase::<JetX25519SecretKey>(x25519_origin, Zeroizing(x25519_bytes), x25519_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop).unwrap();
+//RS         let hashes: Vec<String> = [&one, &sixteen, &pass_signing, &pass_x25519].into_iter()
+//RS             .map(|wrapped| hex_bytes(&vault_hash(&[&wrapped.bytes()])))
+//RS             .collect();
+//RS         assert_eq!(hashes, vec![
+//RS             "4c853abf88a98887d39fa97d4bac2989e1aeffa50f23cd99450993f48a02f055",
+//RS             "0ee8b1798d9297317989c7bce4bc629235637602fa3d5d27f4b268555b3c45d9",
+//RS             "f230f5f36d00777f50926c44a656a2ffa9ff66a76b7cb3d049d77d11bc51c095",
+//RS             "641432fbff634bfa49ad1b2637dcb6bf947a60dec19750e0dd20e07e3656a95d",
+//RS         ]);
+//RS         assert_eq!(sixteen.bytes().len(), 16 + sixteen.header_len() + 80);
+//RS         let mut epoch_created = one.bytes();
+//RS         let created_at = 16 + 16 + 2 + "release".len() + 8 + 16 + 32;
+//RS         epoch_created[created_at..created_at + 8].copy_from_slice(&0u64.to_le_bytes());
+//RS         assert!(JetWrappedVaultKey::from_bytes(epoch_created).is_ok(), "created_unix_ms=0 is canonical");
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn parser_rejects_noncanonical_framing_before_secret_work() {
+//RS         let root = scratch("parser");
+//RS         provision(&root);
+//RS         let reference = generate::<JetSigningKey>(&root, "release");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
+//RS         assert_eq!(jet_vault_export_to_recipients_at(&root, &reference, &vec![]).unwrap_err(), JetVaultKeyWrapError::InvalidLength);
+//RS         let duplicate = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         assert_eq!(jet_vault_export_to_recipients_at(&root, &reference, &vec![duplicate.clone(), duplicate]).unwrap_err(), JetVaultKeyWrapError::InvalidEncoding);
+//RS         let too_many: Vec<_> = (1..=17).map(|byte| JetX25519PublicKey([byte; 32])).collect();
+//RS         assert_eq!(jet_vault_export_to_recipients_at(&root, &reference, &too_many).unwrap_err(), JetVaultKeyWrapError::InvalidLength);
+//RS         let bytes = wrapped.bytes();
+//RS         let mut cases = Vec::new();
+//RS         let mut bad = bytes.clone(); bad[0] ^= 1; cases.push((bad, JetVaultKeyWrapError::InvalidEncoding));
+//RS         let mut bad = bytes.clone(); bad[4] = 2; cases.push((bad, JetVaultKeyWrapError::UnsupportedVersion));
+//RS         let mut bad = bytes.clone(); bad[5] = 3; cases.push((bad, JetVaultKeyWrapError::UnsupportedMode));
+//RS         let mut bad = bytes.clone(); bad[6] = 3; cases.push((bad, JetVaultKeyWrapError::UnsupportedKeyType));
+//RS         let mut bad = bytes.clone(); bad[7] = 1; cases.push((bad, JetVaultKeyWrapError::InvalidEncoding));
+//RS         let mut bad = bytes.clone(); bad[8..12].copy_from_slice(&0u32.to_le_bytes()); cases.push((bad, JetVaultKeyWrapError::InvalidLength));
+//RS         let mut bad = bytes.clone(); bad[12..16].copy_from_slice(&63u32.to_le_bytes()); cases.push((bad, JetVaultKeyWrapError::InvalidLength));
+//RS         let mut bad = bytes.clone(); bad.push(0); cases.push((bad, JetVaultKeyWrapError::InvalidLength));
+//RS         for (bytes, expected) in cases { assert_eq!(JetWrappedVaultKey::from_bytes(bytes).unwrap_err(), expected); }
+//RS         assert_eq!(JetWrappedVaultKey::from_bytes(vec![0; 8193]).unwrap_err(), JetVaultKeyWrapError::InvalidLength);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn wrong_unlock_and_authenticated_tamper_collapse_to_open_failed() {
+//RS         let root = scratch("open-failed");
+//RS         provision(&root);
+//RS         let reference = generate::<JetSigningKey>(&root, "release");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let wrong = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
+//RS         jet_vault_keywrap_reset_test_crypto_counts();
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&wrong)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+//RS         assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 1, "no-match executes exactly one dummy X25519/HKDF/AEAD path");
+//RS         assert_eq!(jet_vault_keywrap_test_x25519_count(), 1);
+//RS         assert_eq!(jet_vault_keywrap_test_hkdf_count(), 2);
+//RS         assert_eq!(jet_vault_keywrap_test_aead_count(), 1);
+//RS         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetX25519SecretKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+//RS         let mut tampered = wrapped.bytes();
+//RS         tampered[20] ^= 1;
+//RS         let tampered = JetWrappedVaultKey::from_bytes(tampered).unwrap();
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", tampered, JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn same_repo_is_idempotent_but_revocation_never_reactivates() {
+//RS         let root = scratch("idempotent");
+//RS         provision(&root);
+//RS         let reference = generate::<JetSigningKey>(&root, "release");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
+//RS         let expected_export = format!("JVLA1 action=export mode=recipient outcome=BearerCopy key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=- bearer_copy=true source_revocation_recall=false mutation=false", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
+//RS         assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap().lines().last().unwrap(), expected_export);
+//RS         let revision = decoded_store(&root).revision;
+//RS         let existing = import::<JetSigningKey>(&root, "ignored", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
+//RS         assert_eq!(existing, reference);
+//RS         assert_eq!(decoded_store(&root).revision, revision);
+//RS         let expected_idempotent = format!("JVLA1 action=import mode=recipient outcome=AlreadyPresent key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=69676e6f726564 bearer_copy=false source_revocation_recall=false mutation=false", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
+//RS         assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap().lines().last().unwrap(), expected_idempotent);
+//RS 
+//RS         let retire = jet_vault_prepare_retire_at(&root, &reference, "archive").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&retire, "retire archived key").unwrap();
+//RS         jet_vault_commit_retire_at(&root, retire, write).unwrap();
+//RS         let retired_wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![jet_crypto_x25519_public_typed_impl(&recipient)]).unwrap();
+//RS         let retired_revision = decoded_store(&root).revision;
+//RS         assert_eq!(import::<JetSigningKey>(&root, "ignored", retired_wrapped, JetVaultKeyUnlock::Recipient(&recipient)).unwrap(), reference);
+//RS         assert_eq!(decoded_store(&root).revision, retired_revision);
+//RS 
+//RS         let revoke = jet_vault_prepare_revoke_at(&root, &reference, "compromised").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&revoke, "revoke compromised key").unwrap();
+//RS         jet_vault_commit_revoke_at(&root, revoke, write).unwrap();
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "release-restored", wrapped, JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::Vault(JetVaultError::Revoked));
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn cross_repo_import_gets_new_identity_and_preserves_origin() {
+//RS         let source = scratch("cross-source");
+//RS         let destination = scratch("cross-destination");
+//RS         provision(&source);
+//RS         provision(&destination);
+//RS         let reference = generate::<JetX25519SecretKey>(&source, "transport");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let wrapped = jet_vault_export_to_recipients_at(&source, &reference, &vec![public]).unwrap();
+//RS         let revoke = jet_vault_prepare_revoke_at(&source, &reference, "source compromised after export").unwrap();
+//RS         let write = jet_vault_authorize_write_impl(&revoke, "revoke source").unwrap();
+//RS         jet_vault_commit_revoke_at(&source, revoke, write).unwrap();
+//RS         let restored = import::<JetX25519SecretKey>(&destination, "restored", wrapped, JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
+//RS         assert_ne!(restored.repo_uuid, reference.repo_uuid);
+//RS         assert_ne!(restored.opaque_id, reference.opaque_id);
+//RS         let store = decoded_store(&destination);
+//RS         let origin = store.keys[0].origin.as_ref().unwrap();
+//RS         assert_eq!(origin.repo_uuid, reference.repo_uuid);
+//RS         assert_eq!(origin.name, "transport");
+//RS         assert_eq!(origin.generation, reference.generation);
+//RS         assert_eq!(origin.opaque_id, reference.opaque_id);
+//RS         assert_eq!(origin.record_hash, reference.record_hash);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(source).unwrap();
+//RS         std::fs::remove_dir_all(destination).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn authorized_plan_binds_destination_and_substitution() {
+//RS         let source = scratch("binding-source");
+//RS         let destination = scratch("binding-destination");
+//RS         provision(&source);
+//RS         provision(&destination);
+//RS         let reference = generate::<JetSigningKey>(&source, "release");
+//RS         let recipient = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let public = jet_crypto_x25519_public_typed_impl(&recipient);
+//RS         let wrapped = jet_vault_export_to_recipients_at(&source, &reference, &vec![public]).unwrap();
+//RS         let plan = jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&destination, "restored", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
+//RS         let write = jet_vault_authorize_wrapped_import_impl(&plan, "approved restore").unwrap();
+//RS         generate::<JetX25519SecretKey>(&destination, "concurrent");
+//RS         assert_eq!(jet_vault_commit_import_wrapped_at(&destination, write, plan).unwrap_err(), JetVaultKeyWrapError::Vault(JetVaultError::Conflict));
+//RS 
+//RS         let first = jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&destination, "one", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
+//RS         let second = jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&destination, "two", wrapped, JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
+//RS         let first_write = jet_vault_authorize_wrapped_import_impl(&first, "first").unwrap();
+//RS         assert_eq!(jet_vault_commit_import_wrapped_at(&destination, first_write, second).unwrap_err(), JetVaultKeyWrapError::Vault(JetVaultError::Conflict));
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(source).unwrap();
+//RS         std::fs::remove_dir_all(destination).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn weak_passphrases_entropy_failure_cleanup_and_redaction_are_explicit() {
+//RS         let root = scratch("failures");
+//RS         provision(&root);
+//RS         let reference = generate::<JetSigningKey>(&root, "release");
+//RS         let weak = Secret(b"too short".to_vec());
+//RS         assert_eq!(jet_vault_export_to_passphrase_at(&root, &reference, &weak).unwrap_err(), JetVaultKeyWrapError::WeakPassphrase);
+//RS         jet_crypto_entropy_set_test_provider(|_| JetCryptoEntropyStep::Failed);
+//RS         let recipient = JetX25519PublicKey([9; 32]);
+//RS         let audit_before = std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap_or_default();
+//RS         assert_eq!(jet_vault_export_to_recipients_at(&root, &reference, &vec![recipient]).unwrap_err(), JetVaultKeyWrapError::EntropyUnavailable);
+//RS         assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap_or_default(), audit_before, "failed export records no BearerCopy success");
+//RS         jet_crypto_entropy_clear_test_provider();
+//RS 
+//RS         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
+//RS         let wrapped = jet_vault_export_to_passphrase_at(&root, &reference, &phrase).unwrap();
+//RS         let wrong_phrase = Secret(b"different recovery phrase".to_vec());
+//RS         jet_vault_keywrap_reset_test_crypto_counts();
+//RS         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "wrong", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&wrong_phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+//RS         assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 1, "wrong passphrase executes one admitted Argon2 class");
+//RS         assert_eq!(jet_pwhash_test_runs(), 1, "counter sits on actual Argon2 backend invocation");
+//RS         let shown = format!("{wrapped:?} {wrapped}");
+//RS         assert!(shown.contains("mode:passphrase"));
+//RS         assert!(shown.contains("type:signing"));
+//RS         assert!(!shown.contains("sixteen-byte"));
+//RS         assert!(!shown.contains("ciphertext"));
+//RS 
+//RS         let observed = std::rc::Rc::new(std::cell::Cell::new(false));
+//RS         let witness = observed.clone();
+//RS         jet_crypto_set_zeroize_test_observer(move |bytes| {
+//RS             if bytes.len() == 32 && bytes.iter().all(|byte| *byte == 0) { witness.set(true); }
+//RS         });
+//RS         let plan = jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "restored", wrapped, JetVaultKeyUnlock::Passphrase(&phrase)).unwrap();
+//RS         drop(plan);
+//RS         jet_crypto_clear_zeroize_test_observer();
+//RS         assert!(observed.get(), "prepared plaintext key is zeroized when abandoned");
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(root).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn unsupported_provider_preflight_precedes_all_secret_work() {
+//RS         use std::os::unix::fs::symlink;
+//RS         let source = scratch("preflight-source");
+//RS         let destination = scratch("preflight-destination");
+//RS         provision(&source);
+//RS         provision(&destination);
+//RS         let reference = generate::<JetSigningKey>(&source, "release");
+//RS         let identity = jet_crypto_x25519_generate_impl().unwrap();
+//RS         let wrapped = jet_vault_export_to_recipients_at(
+//RS             &source,
+//RS             &reference,
+//RS             &vec![jet_crypto_x25519_public_typed_impl(&identity)],
+//RS         ).unwrap();
+//RS         std::fs::remove_dir_all(destination.join(".jet")).unwrap();
+//RS         symlink(destination.join("keys"), destination.join(".jet")).unwrap();
+//RS         jet_vault_keywrap_reset_test_crypto_counts();
+//RS         assert_eq!(
+//RS             jet_vault_prepare_import_wrapped_at::<JetSigningKey>(
+//RS                 &destination,
+//RS                 "restored",
+//RS                 wrapped,
+//RS                 JetVaultKeyUnlock::Recipient(&identity),
+//RS             ).unwrap_err(),
+//RS             JetVaultKeyWrapError::Vault(JetVaultError::UnsupportedProvider),
+//RS         );
+//RS         assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 0);
+//RS         assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 0);
+//RS         assert_eq!(jet_vault_keywrap_test_x25519_count(), 0);
+//RS         assert_eq!(jet_vault_keywrap_test_hkdf_count(), 0);
+//RS         assert_eq!(jet_vault_keywrap_test_aead_count(), 0);
+//RS         assert_eq!(jet_pwhash_test_runs(), 0);
+//RS         jet_vault_clear_test_authorizer();
+//RS         std::fs::remove_dir_all(source).unwrap();
+//RS         std::fs::remove_dir_all(destination).unwrap();
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn provider_platform_allowlist_is_exact() {
+//RS         assert!(jvkw_provider_platform_supported("linux","gnu","64","x86_64"));
+//RS         assert!(jvkw_provider_platform_supported("linux","gnu","64","aarch64"));
+//RS         for target in [("linux","musl","64","x86_64"),("linux","gnu","32","x86"),("linux","gnu","64","riscv64"),("none","","64","x86_64")] { assert!(!jvkw_provider_platform_supported(target.0,target.1,target.2,target.3),"unsupported target admitted: {target:?}"); }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pwhash_pool_proves_fifo_cancellation_exhaustion_and_exact_release() {
+//RS         struct ResetBudget;
+//RS         impl Drop for ResetBudget { fn drop(&mut self) { jet_pwhash_test_set_budget(0); } }
+//RS         let _reset = ResetBudget;
+//RS         assert_eq!(jet_pwhash_weight_kib(65_536, 1_048_576).unwrap(), 77_824);
+//RS         assert_eq!(JET_PWHASH_BUDGET_KIB / 77_824, 4, "canonical budget admits exactly four maximum-password default jobs");
+//RS         let weight = jet_pwhash_weight_kib(8_192, 16).unwrap();
+//RS         jet_pwhash_test_set_budget(weight);
+//RS 
+//RS         let first_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let first_entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let first_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let first = {
+//RS             let cancel = first_cancel.clone();
+//RS             let entered = first_entered.clone();
+//RS             let release = first_release.clone();
+//RS             std::thread::spawn(move || jet_pwhash_test_run(cancel, Some((entered, release))))
+//RS         };
+//RS         first_entered.wait();
+//RS         let (_, _, admitted_runs) = jet_pwhash_test_snapshot();
+//RS 
+//RS         let queued_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let queued = {
+//RS             let cancel = queued_cancel.clone();
+//RS             std::thread::spawn(move || jet_pwhash_test_run(cancel, None))
+//RS         };
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS         while jet_pwhash_test_snapshot().1 != 1 && std::time::Instant::now() < deadline { std::thread::yield_now(); }
+//RS         assert_eq!(jet_pwhash_test_snapshot().1, 1, "second request waits at the FIFO head");
+//RS         queued_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+//RS         assert!(matches!(queued.join().unwrap(), Err(JetPwhashRunError::Cancelled)));
+//RS         assert_eq!(jet_pwhash_test_snapshot().2, admitted_runs, "queued cancellation performs no Argon2 work");
+//RS         first_release.wait();
+//RS         assert!(first.join().unwrap().is_ok());
+//RS         assert_eq!(jet_pwhash_test_snapshot().0, 0, "admitted weight is released exactly once");
+//RS 
+//RS         let running_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let running_entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let running_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let running = {
+//RS             let cancel = running_cancel.clone();
+//RS             let entered = running_entered.clone();
+//RS             let release = running_release.clone();
+//RS             std::thread::spawn(move || jet_pwhash_test_run(cancel, Some((entered, release))))
+//RS         };
+//RS         running_entered.wait();
+//RS         running_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+//RS         running_release.wait();
+//RS         assert!(matches!(running.join().unwrap(), Err(JetPwhashRunError::Cancelled)), "admitted cancellation finishes then discards the backend result");
+//RS         assert_eq!(jet_pwhash_test_snapshot().0, 0, "cancelled admitted weight is released exactly once");
+//RS 
+//RS         let before_exhaustion = jet_pwhash_test_snapshot().2;
+//RS         jet_pwhash_test_set_budget(weight - 1_024);
+//RS         assert!(matches!(jet_pwhash_test_run(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), None), Err(JetPwhashRunError::ResourceUnavailable)));
+//RS         assert_eq!(jet_pwhash_test_snapshot(), (0, 0, before_exhaustion), "budget exhaustion allocates no Argon2 arena");
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn pwhash_wait_compensates_one_worker_and_arbitrates_cancel_with_shield() {
+//RS         std::env::set_var("JET_SCHEDULER_THREADS", "1");
+//RS         STRESS_CANCEL.store(false,std::sync::atomic::Ordering::SeqCst);let mut waits=Vec::new();let mut releases=Vec::new();
+//RS         for _ in 0..4 {
+//RS             let entered=std::sync::Arc::new(std::sync::Barrier::new(2));let release=std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS             waits.push(jet_scheduler_spawn_blocking({let entered=entered.clone();let release=release.clone();move||jet_pwhash_test_run_with(stress_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)}));
+//RS             entered.wait();releases.push(release);
+//RS         }
+//RS         for _ in 4..9 { waits.push(jet_scheduler_spawn_blocking(move||jet_pwhash_test_run_with(stress_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave))); }
+//RS         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+//RS         while (jet_pwhash_test_snapshot().1,jet_scheduler_blocking_wait_stats().0)!=(5,9) { assert!(std::time::Instant::now()<deadline,"nine waiters must reach four admitted plus five queued jobs: pwhash={:?}, scheduler={:?}",jet_pwhash_test_snapshot(),jet_scheduler_blocking_wait_stats());std::thread::sleep(std::time::Duration::from_millis(1)); }
+//RS         assert_eq!(jet_pwhash_test_queued_secrets(),5,"queued jobs retain only bounded caller-owned secret copies");
+//RS         let overflows:Vec<_>=(0..3).map(|_|jet_scheduler_spawn_blocking(move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave))).collect();
+//RS         let(progress_tx,progress_rx)=std::sync::mpsc::channel();
+//RS         let progress=jet_scheduler_spawn(move||progress_tx.send(()).unwrap());
+//RS         progress_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("reserved compensation worker must defer recursive Argon jobs and run unrelated work after saturation");
+//RS         let(_,current,peak)=jet_scheduler_blocking_wait_stats();assert!(current<=9&&peak<=9,"compensation thread peak must stay globally bounded: current={current}, peak={peak}");
+//RS         STRESS_CANCEL.store(true,std::sync::atomic::Ordering::SeqCst);
+//RS         for release in releases { release.wait(); }
+//RS         for wait in waits { assert!(matches!(wait.join(),Err(JetPwhashRunError::Cancelled))); }progress.join();
+//RS         for overflow in overflows { assert!(overflow.join().is_ok(),"deferred Argon caller completes after saturation clears"); }
+//RS         STRESS_CANCEL.store(false,std::sync::atomic::Ordering::SeqCst);
+//RS         assert_eq!(jet_pwhash_test_snapshot().0,0,"cancelled admitted jobs release the full Argon arena budget");assert_eq!(jet_pwhash_test_snapshot().1,0,"cancel/release drains queued Argon jobs");assert_eq!(jet_pwhash_test_queued_secrets(),0,"cancel/release drains queued secret copies");
+//RS         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+//RS         while jet_scheduler_blocking_wait_stats().0!=0||jet_scheduler_blocking_wait_stats().1!=0 { assert!(std::time::Instant::now()<deadline,"all waits and compensation threads must drain");std::thread::yield_now(); }
+//RS 
+//RS         let race_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let race_release=std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let race_control=JetTaskControl::new();
+//RS         let race=jet_scheduler_spawn_with_control({let entered=race_entered.clone();let release=race_release.clone();move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,Some((entered,release)),jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)},race_control.clone());
+//RS         race_entered.wait();race_control.cancel();race_release.wait();
+//RS         assert!(matches!(race.join(),Err(JetPwhashRunError::Cancelled)),"cancellation observed before final return beats completed success");
+//RS 
+//RS         let shield_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let shield_release=std::sync::Arc::new(std::sync::Barrier::new(2));
+//RS         let shield_completed=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let shield_after=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let(exit_tx,exit_rx)=std::sync::mpsc::channel();
+//RS         struct ExitNotice(std::sync::mpsc::Sender<()>);impl Drop for ExitNotice{fn drop(&mut self){let _=self.0.send(());}}
+//RS         let shield_control=JetTaskControl::new();
+//RS         let _shield=jet_scheduler_spawn_with_control({let entered=shield_entered.clone();let release=shield_release.clone();let completed=shield_completed.clone();let after=shield_after.clone();move||{let _exit=ExitNotice(exit_tx);jet_scheduler_shield_enter();let result=jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave);assert!(result.is_ok());completed.store(true,std::sync::atomic::Ordering::SeqCst);jet_scheduler_shield_leave();after.store(true,std::sync::atomic::Ordering::SeqCst);}},shield_control.clone());
+//RS         shield_entered.wait();shield_control.cancel();shield_release.wait();
+//RS         exit_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("shielded task must exit at deferred cancellation");
+//RS         assert!(shield_completed.load(std::sync::atomic::Ordering::SeqCst),"shielded KDF completes before deferred cancellation lands");
+//RS         assert!(!shield_after.load(std::sync::atomic::Ordering::SeqCst),"deferred cancellation lands at shield exit");
+//RS         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+//RS         while jet_scheduler_blocking_wait_stats().0!=0||jet_scheduler_blocking_wait_stats().1!=0 { assert!(std::time::Instant::now()<deadline,"later race and shield waits must leave no compensation threads");std::thread::yield_now(); }
+//RS     }
+//RS }
+// END-PORT-PENDING 1057 tests/fixtures/vault_key_wrap_runtime.rs:1-518
+

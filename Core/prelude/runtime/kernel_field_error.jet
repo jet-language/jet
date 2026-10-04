@@ -1,0 +1,12 @@
+// One FieldError path/reason rendering for every execution tier.
+// Rust: crates/jet-codegen/src/Prelude/Core/FieldError.rs:10
+pub fn jet_field_error_kernel_show(path: String, reason: String) -> String Never! {
+    if path.is_empty() { reason.to_string() }
+    else { "at `{path}`: {reason}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FieldError.rs:18
+pub fn jet_field_error_kernel_under(segment: String, path: String) -> String Never! {
+    if path.is_empty() { segment.to_string() }
+    else if path.starts_with("[") { "{segment}{path}" }
+    else { "{segment}.{path}" }
+}

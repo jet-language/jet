@@ -1,0 +1,23 @@
+// std 1.97.1 commit8bab26f4f68e0e26f0bb7960be334d5b520ea452,
+// std/sys/thread/unix.rs:199–208. Physical selected native unit: Apple LP64
+// ONLY; Main's checked target/provider row selects this source.
+// No Linux glibc OS module or Linux nominal storage is imported here.
+use core.sys.runtime.hardware_facts as hardware_policy
+use core.mem as hardware_mem
+use core.sys.host.darwin_os_imports as hardware_darwin
+use c.c as hardware_libc
+
+// Apple sysconf branch has no cgroups or affinity. Darwin errno is __error;
+// the actual selected native c_long is64, never widened from a 32-bit target.
+pub fn darwin64_parallelism() -[Env]> hardware_policy.ParallelismResult Never! {
+    #Unsafe("selected Apple LP64 sysconf processor selector58; capture actual __error immediately on -1") {
+        online :: hardware_libc.sysconf(hardware_darwin.DARWIN_LP64_SC_NPROCESSORS_ONLN)
+        if online == (I64{-1}) {
+            code :: hardware_mem.volatile_read(hardware_libc.darwin_errno_location())
+            return hardware_policy.ParallelismResult.OsError(code)
+        }
+        if online == (I64{0}) -> return hardware_policy.ParallelismResult.UnknownThreadCount
+        count :: U64.from_i64(online) ?? panic("invalid native sysconf processor count")
+        return hardware_policy.ParallelismResult.Count(count)
+    }
+}

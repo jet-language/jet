@@ -1,0 +1,1351 @@
+// PORT-PENDING 0313 crates-jet-codegen-src-prelude-corelib-top-webstore: crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:1-1347
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-STORE1=A / #2476: typed Store over the canonical reactive signal.
+//RS //
+//RS // Store state has one JetSignal<T> reactive/read path; JetShared is the
+//RS // owner-bound opaque revision ticket for optimistic operations. Transactions
+//RS // publish one signal write and append one bounded, monotonic history entry.
+//RS // Scrubbing reads a historical snapshot; it never changes the live signal.
+//RS //
+//RS // The event stream is host-neutral metadata. A renderer or devtools adapter can
+//RS // marshal it into the canonical Store event without reimplementing store
+//RS // semantics. History and events are retained in development, and in the
+//RS // explicitly inspected read-only release profile only.
+//RS 
+//RS use std::any::{Any as JetWebStoreAny, TypeId as JetWebStoreTypeId};
+//RS use std::collections::HashMap as JetWebStoreMap;
+//RS use std::collections::VecDeque as JetWebStoreDeque;
+//RS use std::sync::{
+//RS     Arc as JetWebStoreArc,
+//RS     Condvar as JetWebStoreCondvar,
+//RS     LazyLock as JetWebStoreLazyLock,
+//RS     Mutex as JetWebStoreMutex,
+//RS };
+//RS use jet_foundation::Devtools::JetDevtoolsEvent as JetWebStoreDevtoolsEvent;
+//RS use std::time::{
+//RS     SystemTime as JetWebStoreSystemTime,
+//RS     UNIX_EPOCH as JetWebStoreUnixEpoch,
+//RS };
+//RS 
+//RS const JET_WEB_STORE_DEFAULT_HISTORY_LIMIT: usize = 1000;
+//RS // Store metadata is bounded independently from typed state. These limits keep
+//RS // registry keys, field labels, and retained timelines finite in every tier.
+//RS const JET_WEB_STORE_MAX_NAME: usize = 256;
+//RS const JET_WEB_STORE_MAX_REGISTRY: usize = 256;
+//RS const JET_WEB_STORE_MAX_HISTORY_LIMIT: usize = 1000;
+//RS fn jet_web_store_now_ms() -> u64 {
+//RS     JetWebStoreSystemTime::now()
+//RS         .duration_since(JetWebStoreUnixEpoch)
+//RS         .ok()
+//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_web_store_json(value: &str) -> String {
+//RS     format!("{value:?}")
+//RS }
+//RS 
+//RS fn jet_web_store_event_entity(name: &str) -> String {
+//RS     if !name.is_empty()
+//RS         && name.len() <= JET_WEB_STORE_MAX_NAME
+//RS         && !name.chars().any(char::is_control)
+//RS     {
+//RS         name.to_string()
+//RS     } else {
+//RS         "store".to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_store_publish_event(name: &str, event: &JetWebStoreEvent) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let fields = format!(
+//RS         "{{\"name\":{},\"transaction\":{},\"diff\":{},\"cursor\":{},\"generation\":{},\"kind\":{}}}",
+//RS         jet_web_store_json(name),
+//RS         jet_web_store_json(&event.transaction_label()),
+//RS         event.diff_json(),
+//RS         event.cursor,
+//RS         event.generation,
+//RS         jet_web_store_json(event.kind.as_str()),
+//RS     );
+//RS     if let Ok(protocol_event) = JetWebStoreDevtoolsEvent::from_parts(
+//RS         jet_web_store_now_ms(),
+//RS         "core.web.store",
+//RS         "Store",
+//RS         jet_web_store_event_entity(name),
+//RS         fields,
+//RS     ) {
+//RS         jet_devtools_publish_event(protocol_event);
+//RS     }
+//RS }
+//RS 
+//RS const JET_WEB_STORE_MAX_FIELD: usize = 256;
+//RS const JET_WEB_STORE_MAX_FIELDS: usize = 256;
+//RS 
+//RS /// The release policy's read-only inspection profile is the only release mode
+//RS /// that keeps the store timeline. Local inspection has no Store panel code, so
+//RS /// retaining a private history there would be both waste and a policy leak.
+//RS #[inline(always)]
+//RS fn jet_web_store_history_capture_enabled() -> bool {
+//RS     jet_web_runtime_history_enabled()
+//RS }
+//RS 
+//RS type JetWebStoreRegistry = JetWebStoreMap<
+//RS     (JetWebStoreTypeId, String),
+//RS     Box<dyn JetWebStoreAny + Send + Sync>,
+//RS >;
+//RS 
+//RS static JET_WEB_STORE_REGISTRY: JetWebStoreLazyLock<JetWebStoreMutex<JetWebStoreRegistry>> =
+//RS     JetWebStoreLazyLock::new(|| JetWebStoreMutex::new(JetWebStoreMap::new()));
+//RS 
+//RS fn jet_web_store_registry() -> &'static JetWebStoreMutex<JetWebStoreRegistry> {
+//RS     &JET_WEB_STORE_REGISTRY
+//RS }
+//RS 
+//RS /// A re-entrant per-store publication gate. The outermost holder drains
+//RS /// deferred events after the signal write, so nested actions cannot expose
+//RS /// half-published state or reorder one transaction's receipt.
+//RS struct JetWebStoreGate {
+//RS     state: JetWebStoreMutex<JetWebStoreGateState>,
+//RS     wake: JetWebStoreCondvar,
+//RS }
+//RS 
+//RS struct JetWebStoreGateState {
+//RS     owner: Option<std::thread::ThreadId>,
+//RS     depth: usize,
+//RS     events: Vec<(String, JetWebStoreEvent)>,
+//RS }
+//RS 
+//RS struct JetWebStoreGateGuard {
+//RS     gate: JetWebStoreArc<JetWebStoreGate>,
+//RS }
+//RS 
+//RS impl JetWebStoreGate {
+//RS     fn new() -> Self {
+//RS         Self {
+//RS             state: JetWebStoreMutex::new(JetWebStoreGateState {
+//RS                 owner: None,
+//RS                 depth: 0,
+//RS                 events: Vec::new(),
+//RS             }),
+//RS             wake: JetWebStoreCondvar::new(),
+//RS         }
+//RS     }
+//RS 
+//RS     fn lock(self: &JetWebStoreArc<Self>) -> JetWebStoreGateGuard {
+//RS         let owner = std::thread::current().id();
+//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS         loop {
+//RS             match state.owner {
+//RS                 None => {
+//RS                     state.owner = Some(owner);
+//RS                     state.depth = 1;
+//RS                     break;
+//RS                 }
+//RS                 Some(current) if current == owner => {
+//RS                     state.depth += 1;
+//RS                     break;
+//RS                 }
+//RS                 Some(_) => {
+//RS                     state = self
+//RS                         .wake
+//RS                         .wait(state)
+//RS                         .unwrap_or_else(|error| error.into_inner());
+//RS                 }
+//RS             }
+//RS         }
+//RS         JetWebStoreGateGuard { gate: self.clone() }
+//RS     }
+//RS 
+//RS     fn defer_event(&self, name: String, event: JetWebStoreEvent) {
+//RS         let owner = std::thread::current().id();
+//RS         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+//RS         debug_assert_eq!(state.owner, Some(owner));
+//RS         state.events.push((name, event));
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetWebStoreGateGuard {
+//RS     fn drop(&mut self) {
+//RS         let owner = std::thread::current().id();
+//RS         let events = {
+//RS             let mut state = self
+//RS                 .gate
+//RS                 .state
+//RS                 .lock()
+//RS                 .unwrap_or_else(|error| error.into_inner());
+//RS             debug_assert_eq!(state.owner, Some(owner));
+//RS             if state.depth > 1 {
+//RS                 state.depth -= 1;
+//RS                 Vec::new()
+//RS             } else {
+//RS                 state.owner = None;
+//RS                 state.depth = 0;
+//RS                 let events = std::mem::take(&mut state.events);
+//RS                 self.gate.wake.notify_all();
+//RS                 events
+//RS             }
+//RS         };
+//RS         for (name, event) in events {
+//RS             jet_web_store_publish_event(&name, &event);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct JetWebStoreTransaction<T> {
+//RS     pub generation: u64,
+//RS     pub action: String,
+//RS     pub changed_fields: Vec<String>,
+//RS     pub before: T,
+//RS     pub after: T,
+//RS }
+//RS 
+//RS impl<T> JetWebStoreTransaction<T> {
+//RS     /// The generic state stays typed; this deterministic metadata projection is
+//RS     /// the diff representation used by host/devtools adapters.
+//RS     pub fn diff_json(&self) -> String {
+//RS         let fields = self
+//RS             .changed_fields
+//RS             .iter()
+//RS             .map(|field| format!("\"{}\"", jet_web_store_json_escape(field)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"generation\":{},\"action\":\"{}\",\"changed_fields\":[{}]}}",
+//RS             self.generation,
+//RS             jet_web_store_json_escape(&self.action),
+//RS             fields,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebStoreEventKind {
+//RS     Transaction,
+//RS     Navigation,
+//RS     Rollback,
+//RS }
+//RS 
+//RS impl JetWebStoreEventKind {
+//RS     pub const fn as_str(self) -> &'static str {
+//RS         match self {
+//RS             Self::Transaction => "transaction",
+//RS             Self::Navigation => "navigation",
+//RS             Self::Rollback => "rollback",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Bounded, deterministic metadata emitted for every observable store change.
+//RS /// It intentionally does not erase or serialize the typed state.
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebStoreEvent {
+//RS     pub sequence: u64,
+//RS     pub generation: u64,
+//RS     pub action: String,
+//RS     pub changed_fields: Vec<String>,
+//RS     pub cursor: u64,
+//RS     pub kind: JetWebStoreEventKind,
+//RS }
+//RS 
+//RS impl JetWebStoreEvent {
+//RS     pub fn transaction_label(&self) -> String {
+//RS         format!("{}#{}", self.action, self.generation)
+//RS     }
+//RS 
+//RS     pub fn diff_json(&self) -> String {
+//RS         let fields = self
+//RS             .changed_fields
+//RS             .iter()
+//RS             .map(|field| format!("\"{}\"", jet_web_store_json_escape(field)))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         format!(
+//RS             "{{\"kind\":\"{}\",\"generation\":{},\"action\":\"{}\",\"changed_fields\":[{}]}}",
+//RS             self.kind.as_str(),
+//RS             self.generation,
+//RS             jet_web_store_json_escape(&self.action),
+//RS             fields,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebStoreInspection<T> {
+//RS     pub value: T,
+//RS     pub generation: u64,
+//RS     pub cursor: u64,
+//RS     pub history: Vec<JetWebStoreTransaction<T>>,
+//RS     pub events: Vec<JetWebStoreEvent>,
+//RS     pub history_limit: usize,
+//RS     pub history_enabled: bool,
+//RS }
+//RS 
+//RS struct JetWebStoreLedger<T> {
+//RS     /// State before the first retained transaction. It is replaced when the
+//RS     /// timeline is explicitly cleared or disabled, so a fresh timeline remains
+//RS     /// navigable without retaining an unbounded prefix.
+//RS     initial: T,
+//RS     history: JetWebStoreDeque<JetWebStoreTransaction<T>>,
+//RS     events: JetWebStoreDeque<JetWebStoreEvent>,
+//RS     /// Cursor is a point between entries: zero is `initial`, len is the live
+//RS     /// tip. A normal write truncates the future branch before appending.
+//RS     cursor: usize,
+//RS     /// Public generation labels are event-sequence metadata; the opaque
+//RS     /// Shared revision remains the authority for stale snapshot checks.
+//RS     current_generation: u64,
+//RS     next_event_sequence: u64,
+//RS     history_limit: usize,
+//RS }
+//RS 
+//RS impl<T: Clone> JetWebStoreLedger<T> {
+//RS     fn new(initial: T, history_limit: usize) -> Self {
+//RS         Self {
+//RS             initial,
+//RS             history: JetWebStoreDeque::new(),
+//RS             events: JetWebStoreDeque::new(),
+//RS             cursor: 0,
+//RS             current_generation: 0,
+//RS             next_event_sequence: 0,
+//RS             history_limit,
+//RS         }
+//RS     }
+//RS 
+//RS     fn trim_history(&mut self) {
+//RS         while self.history.len() > self.history_limit {
+//RS             if let Some(removed) = self.history.pop_front() {
+//RS                 // The evicted transaction's `after` is the state immediately
+//RS                 // before the first retained entry, so navigation still has a
+//RS                 // correct bounded base.
+//RS                 self.initial = removed.after;
+//RS                 self.cursor = self.cursor.saturating_sub(1);
+//RS             }
+//RS         }
+//RS         self.cursor = self.cursor.min(self.history.len());
+//RS         while self.events.len() > self.history_limit {
+//RS             self.events.pop_front();
+//RS         }
+//RS     }
+//RS 
+//RS     fn push_transaction(&mut self, transaction: JetWebStoreTransaction<T>) {
+//RS         if !jet_web_store_history_capture_enabled() || self.history_limit == 0 {
+//RS             return;
+//RS         }
+//RS         // A write after `back()` starts a new branch. Generations remain
+//RS         // monotonic; only the unreachable future snapshots are discarded.
+//RS         while self.history.len() > self.cursor {
+//RS             self.history.pop_back();
+//RS         }
+//RS         self.history.push_back(transaction);
+//RS         self.cursor = self.history.len();
+//RS         self.trim_history();
+//RS     }
+//RS 
+//RS     fn reserve_sequence(&mut self) -> u64 {
+//RS         self.next_event_sequence = self
+//RS             .next_event_sequence
+//RS             .checked_add(1)
+//RS             .expect("Store event sequence exhausted");
+//RS         self.next_event_sequence
+//RS     }
+//RS 
+//RS     fn record_event(
+//RS         &mut self,
+//RS         sequence: u64,
+//RS         kind: JetWebStoreEventKind,
+//RS         generation: u64,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS     ) -> Option<JetWebStoreEvent> {
+//RS         let retain = jet_web_store_history_capture_enabled() && self.history_limit > 0;
+//RS         if !retain && !jet_web_runtime_devtools_enabled() {
+//RS             return None;
+//RS         }
+//RS         let event = JetWebStoreEvent {
+//RS             sequence,
+//RS             generation,
+//RS             action,
+//RS             changed_fields,
+//RS             cursor: self.cursor as u64,
+//RS             kind,
+//RS         };
+//RS         if retain {
+//RS             self.events.push_back(event.clone());
+//RS             while self.events.len() > self.history_limit {
+//RS                 self.events.pop_front();
+//RS             }
+//RS         }
+//RS         Some(event)
+//RS     }
+//RS 
+//RS     fn generation_at_cursor(&self) -> u64 {
+//RS         self.cursor
+//RS             .checked_sub(1)
+//RS             .and_then(|index| self.history.get(index))
+//RS             .map(|transaction| transaction.generation)
+//RS             .unwrap_or(0)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebStore<T> {
+//RS     pub name: String,
+//RS     signal: jet_std::JetSignal<T>,
+//RS     /// Shared owns the opaque monotonic revision used by optimistic tickets.
+//RS     /// The signal remains the sole reactive state/read path.
+//RS     shared: jet_std::JetShared<T>,
+//RS     ledger: JetWebStoreArc<JetWebStoreMutex<JetWebStoreLedger<T>>>,
+//RS     transaction_lock: JetWebStoreArc<JetWebStoreGate>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebStoreSubscription {
+//RS     effect: jet_std::JetReactiveEffect,
+//RS }
+//RS 
+//RS impl JetWebStoreSubscription {
+//RS     pub fn unsubscribe(&self) {
+//RS         self.effect.unsubscribe();
+//RS     }
+//RS 
+//RS     pub fn active(&self) -> bool {
+//RS         self.effect.active()
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetWebStorePatch<T: 'static> {
+//RS     store: JetWebStore<T>,
+//RS     transaction: JetWebStoreTransaction<T>,
+//RS     /// Consuming this owner-bound snapshot makes stale rollback impossible.
+//RS     snapshot: Option<jet_std::JetSharedSnapshot<T, T>>,
+//RS     active: bool,
+//RS }
+//RS impl<T: Clone + Send + Sync + 'static> JetWebStorePatch<T> {
+//RS     pub fn generation(&self) -> u64 {
+//RS         self.transaction.generation
+//RS     }
+//RS 
+//RS     pub fn transaction(&self) -> JetWebStoreTransaction<T> {
+//RS         self.transaction.clone()
+//RS     }
+//RS 
+//RS     pub fn active(&self) -> bool {
+//RS         self.active
+//RS     }
+//RS 
+//RS     /// Confirm the optimistic write. The transaction is already published;
+//RS     /// commit only closes the patch handle and returns its receipt.
+//RS     pub fn commit(mut self) -> JetWebStoreTransaction<T> {
+//RS         self.active = false;
+//RS         self.transaction
+//RS     }
+//RS 
+//RS     /// Roll back only if this patch is still the current timeline head. A
+//RS     /// stale patch cannot clobber a later transaction or a time-travel move.
+//RS     pub fn rollback(mut self) -> Option<T> {
+//RS         if !self.active {
+//RS             return None;
+//RS         }
+//RS         self.active = false;
+//RS         let snapshot = self.snapshot.take()?;
+//RS         self.store.rollback_patch(&self.transaction, snapshot)
+//RS     }
+//RS }
+//RS 
+//RS impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
+//RS     pub fn new(name: String, initial: T, history_limit: i64) -> Self {
+//RS         let history_limit = jet_web_store_clamp_history_limit(history_limit);
+//RS         Self {
+//RS             name,
+//RS             signal: jet_std::JetSignal::new(initial.clone()),
+//RS             shared: jet_std::JetShared::new(initial.clone()),
+//RS             ledger: JetWebStoreArc::new(JetWebStoreMutex::new(JetWebStoreLedger::new(
+//RS                 initial,
+//RS                 history_limit,
+//RS             ))),
+//RS             transaction_lock: JetWebStoreArc::new(JetWebStoreGate::new()),
+//RS         }
+//RS     }
+//RS 
+//RS     /// The current root value. Reads inside an Effect/Computed automatically
+//RS     /// subscribe to the same canonical reactive signal as every store update.
+//RS     pub fn value(&self) -> T {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         self.signal.get()
+//RS     }
+//RS 
+//RS     pub fn signal(&self) -> jet_std::JetSignal<T> {
+//RS         self.signal.clone()
+//RS     }
+//RS 
+//RS     pub fn state_signal(&self) -> jet_std::JetSignal<T> {
+//RS         self.signal()
+//RS     }
+//RS 
+//RS     pub fn history_enabled(&self) -> bool {
+//RS         jet_web_store_history_capture_enabled()
+//RS     }
+//RS 
+//RS     pub fn history_limit(&self) -> i64 {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         i64::try_from(ledger.history_limit).unwrap_or(i64::MAX)
+//RS     }
+//RS 
+//RS     pub fn set_history_limit(&self, history_limit: i64) {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let history_limit = jet_web_store_clamp_history_limit(history_limit);
+//RS         let current = self.signal.get();
+//RS         let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.history_limit = history_limit;
+//RS         if history_limit == 0 || !jet_web_store_history_capture_enabled() {
+//RS             ledger.initial = current;
+//RS             ledger.history.clear();
+//RS             ledger.events.clear();
+//RS             ledger.cursor = 0;
+//RS         } else {
+//RS             // A limit change while the cursor is in the past must not leave a
+//RS             // retained future whose `before` state is no longer reachable.
+//RS             // Keep the current point and drop that unreachable branch before
+//RS             // applying front eviction.
+//RS             if ledger.cursor < ledger.history.len() && history_limit < ledger.history.len() {
+//RS                 while ledger.history.len() > ledger.cursor {
+//RS                     ledger.history.pop_back();
+//RS                 }
+//RS             }
+//RS             ledger.trim_history();
+//RS         }
+//RS     }
+//RS 
+//RS     /// Apply one update and publish exactly one reactive write. The canonical
+//RS     /// signal transaction exposes staged reads to the callback, while Shared
+//RS     /// owns the opaque revision used by optimistic snapshots.
+//RS     pub fn transact<F>(
+//RS         &self,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS         update: F,
+//RS     ) -> JetWebStoreTransaction<T>
+//RS     where
+//RS         F: FnOnce(&mut T),
+//RS     {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let normalized_action = jet_web_store_action(action);
+//RS         let normalized_fields = jet_web_store_fields(changed_fields);
+//RS         let (_, (transaction, event)) = jet_std::jet_reactive_transaction(
+//RS             &self.signal,
+//RS             |state| {
+//RS                 let before = state.clone();
+//RS                 update(state);
+//RS                 let after = state.clone();
+//RS                 self.shared.replace(after.clone());
+//RS                 let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS                 let sequence = ledger.reserve_sequence();
+//RS                 ledger.current_generation = sequence;
+//RS                 let transaction = JetWebStoreTransaction {
+//RS                     generation: sequence,
+//RS                     action: normalized_action.clone(),
+//RS                     changed_fields: normalized_fields.clone(),
+//RS                     before,
+//RS                     after,
+//RS                 };
+//RS                 ledger.push_transaction(transaction.clone());
+//RS                 let event = ledger.record_event(
+//RS                     sequence,
+//RS                     JetWebStoreEventKind::Transaction,
+//RS                     transaction.generation,
+//RS                     transaction.action.clone(),
+//RS                     transaction.changed_fields.clone(),
+//RS                 );
+//RS                 (transaction, event)
+//RS             },
+//RS         );
+//RS         if let Some(event) = event {
+//RS             self.transaction_lock
+//RS                 .defer_event(self.name.clone(), event);
+//RS         }
+//RS         transaction
+//RS     }
+//RS 
+//RS     pub fn update<F>(
+//RS         &self,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS         update: F,
+//RS     ) -> JetWebStoreTransaction<T>
+//RS     where
+//RS         F: FnOnce(&mut T),
+//RS     {
+//RS         self.transact(action, changed_fields, update)
+//RS     }
+//RS 
+//RS     pub fn batch<F>(
+//RS         &self,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS         update: F,
+//RS     ) -> JetWebStoreTransaction<T>
+//RS     where
+//RS         F: FnOnce(&mut T),
+//RS     {
+//RS         self.transact(action, changed_fields, update)
+//RS     }
+//RS 
+//RS     pub fn set(&self, value: T) -> JetWebStoreTransaction<T> {
+//RS         self.transact("set".to_string(), Vec::new(), |state| *state = value)
+//RS     }
+//RS 
+//RS     pub fn set_state(&self, value: T) -> JetWebStoreTransaction<T> {
+//RS         self.set(value)
+//RS     }
+//RS 
+//RS     pub fn optimistic<F>(
+//RS         &self,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS         update: F,
+//RS     ) -> JetWebStorePatch<T>
+//RS     where
+//RS         F: FnOnce(&mut T),
+//RS     {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let transaction = self.transact(action, changed_fields, update);
+//RS         let snapshot = self.shared.capture();
+//RS         JetWebStorePatch {
+//RS             store: self.clone(),
+//RS             transaction,
+//RS             snapshot: Some(snapshot),
+//RS             active: true,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn patch<F>(
+//RS         &self,
+//RS         action: String,
+//RS         changed_fields: Vec<String>,
+//RS         update: F,
+//RS     ) -> JetWebStorePatch<T>
+//RS     where
+//RS         F: FnOnce(&mut T),
+//RS     {
+//RS         self.optimistic(action, changed_fields, update)
+//RS     }
+//RS 
+//RS     fn rollback_patch(
+//RS         &self,
+//RS         transaction: &JetWebStoreTransaction<T>,
+//RS         snapshot: jet_std::JetSharedSnapshot<T, T>,
+//RS     ) -> Option<T> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let (value, event) = {
+//RS             let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS             if ledger.current_generation != transaction.generation {
+//RS                 return None;
+//RS             }
+//RS             let latest_is_patch = ledger
+//RS                 .history
+//RS                 .back()
+//RS                 .map(|latest| latest.generation == transaction.generation)
+//RS                 .unwrap_or(true);
+//RS             if !latest_is_patch {
+//RS                 return None;
+//RS             }
+//RS             let value = transaction.before.clone();
+//RS             let replaced = self
+//RS                 .shared
+//RS                 .try_replace(snapshot, value.clone())
+//RS                 .unwrap_or(false);
+//RS             if !replaced {
+//RS                 return None;
+//RS             }
+//RS             if ledger
+//RS                 .history
+//RS                 .back()
+//RS                 .map(|latest| latest.generation == transaction.generation)
+//RS                 .unwrap_or(false)
+//RS             {
+//RS                 ledger.history.pop_back();
+//RS                 ledger.cursor = ledger.cursor.min(ledger.history.len());
+//RS             }
+//RS             ledger.current_generation = ledger.generation_at_cursor();
+//RS             let action = format!("rollback:{}", transaction.action);
+//RS             let fields = transaction.changed_fields.clone();
+//RS             let sequence = ledger.reserve_sequence();
+//RS             let generation = ledger.current_generation;
+//RS             let event = ledger.record_event(
+//RS                 sequence,
+//RS                 JetWebStoreEventKind::Rollback,
+//RS                 generation,
+//RS                 action,
+//RS                 fields,
+//RS             );
+//RS             (value, event)
+//RS         };
+//RS         self.signal.set(value.clone());
+//RS         if let Some(event) = event {
+//RS             self.transaction_lock
+//RS                 .defer_event(self.name.clone(), event);
+//RS         }
+//RS         Some(value)
+//RS     }
+//RS 
+//RS     /// Read a retained snapshot without changing the live signal. Generation
+//RS     /// zero denotes the base of the current retained timeline.
+//RS     pub fn scrub(&self, generation: u64) -> Option<T> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         if generation == 0 {
+//RS             return (jet_web_store_history_capture_enabled() && !ledger.history.is_empty())
+//RS                 .then(|| ledger.initial.clone());
+//RS         }
+//RS         ledger
+//RS             .history
+//RS             .iter()
+//RS             .find(|transaction| transaction.generation == generation)
+//RS             .map(|transaction| transaction.after.clone())
+//RS     }
+//RS 
+//RS     pub fn history_at(&self, index: i64) -> Option<JetWebStoreTransaction<T>> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         let index = usize::try_from(index).ok()?;
+//RS         ledger.history.get(index).cloned()
+//RS     }
+//RS 
+//RS     pub fn history(&self) -> Vec<JetWebStoreTransaction<T>> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.history.iter().cloned().collect()
+//RS     }
+//RS 
+//RS     pub fn events(&self) -> Vec<JetWebStoreEvent> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.events.iter().cloned().collect()
+//RS     }
+//RS 
+//RS     pub fn events_since(&self, sequence: u64) -> Vec<JetWebStoreEvent> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger
+//RS             .events
+//RS             .iter()
+//RS             .filter(|event| event.sequence > sequence)
+//RS             .cloned()
+//RS             .collect()
+//RS     }
+//RS 
+//RS     pub fn clear_history(&self) {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let current = self.signal.get();
+//RS         let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.initial = current;
+//RS         ledger.history.clear();
+//RS         ledger.events.clear();
+//RS         ledger.cursor = 0;
+//RS         // Keep the opaque Shared revision and its public generation label
+//RS         // unchanged while making the live value the new retained base.
+//RS     }
+//RS 
+//RS     pub fn cursor(&self) -> u64 {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.cursor as u64
+//RS     }
+//RS 
+//RS     pub fn current_generation(&self) -> u64 {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         ledger.current_generation
+//RS     }
+//RS 
+//RS     pub fn back(&self) -> Option<T> {
+//RS         self.navigate(JetWebStoreNavigation::Back)
+//RS     }
+//RS 
+//RS     pub fn forward(&self) -> Option<T> {
+//RS         self.navigate(JetWebStoreNavigation::Forward)
+//RS     }
+//RS 
+//RS     pub fn jump(&self, generation: u64) -> Option<T> {
+//RS         self.navigate(JetWebStoreNavigation::Jump(generation))
+//RS     }
+//RS 
+//RS     /// Explicit live navigation. Unlike `scrub`, this changes the signal and
+//RS     /// therefore invalidates subscribers exactly once, without a new tx entry.
+//RS     fn navigate(&self, navigation: JetWebStoreNavigation) -> Option<T> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let (value, event) = {
+//RS             let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS             if !jet_web_store_history_capture_enabled()
+//RS                 || ledger.history_limit == 0
+//RS                 || ledger.history.is_empty()
+//RS             {
+//RS                 return None;
+//RS             }
+//RS             let current_cursor = ledger.cursor;
+//RS             let (target_cursor, value, generation, action) = match navigation {
+//RS                 JetWebStoreNavigation::Back => {
+//RS                     let target_cursor = current_cursor.checked_sub(1)?;
+//RS                     let value = if target_cursor == 0 {
+//RS                         ledger.initial.clone()
+//RS                     } else {
+//RS                         ledger.history.get(target_cursor - 1)?.after.clone()
+//RS                     };
+//RS                     let generation = if target_cursor == 0 {
+//RS                         0
+//RS                     } else {
+//RS                         ledger.history.get(target_cursor - 1)?.generation
+//RS                     };
+//RS                     (target_cursor, value, generation, "back".to_string())
+//RS                 }
+//RS                 JetWebStoreNavigation::Forward => {
+//RS                     let transaction = ledger.history.get(current_cursor)?;
+//RS                     (
+//RS                         current_cursor + 1,
+//RS                         transaction.after.clone(),
+//RS                         transaction.generation,
+//RS                         "forward".to_string(),
+//RS                     )
+//RS                 }
+//RS                 JetWebStoreNavigation::Jump(generation) => {
+//RS                     if generation == 0 {
+//RS                         (0, ledger.initial.clone(), 0, "jump:0".to_string())
+//RS                     } else {
+//RS                         let (index, transaction) = ledger
+//RS                             .history
+//RS                             .iter()
+//RS                             .enumerate()
+//RS                             .find(|(_, transaction)| transaction.generation == generation)?;
+//RS                         (
+//RS                             index + 1,
+//RS                             transaction.after.clone(),
+//RS                             transaction.generation,
+//RS                             format!("jump:{generation}"),
+//RS                         )
+//RS                     }
+//RS                 }
+//RS             };
+//RS             if target_cursor == current_cursor {
+//RS                 return Some(value);
+//RS             }
+//RS             self.shared.replace(value.clone());
+//RS             ledger.cursor = target_cursor;
+//RS             ledger.current_generation = generation;
+//RS             let sequence = ledger.reserve_sequence();
+//RS             let event = ledger.record_event(
+//RS                 sequence,
+//RS                 JetWebStoreEventKind::Navigation,
+//RS                 generation,
+//RS                 action,
+//RS                 Vec::new(),
+//RS             );
+//RS             (value, event)
+//RS         };
+//RS         self.signal.set(value.clone());
+//RS         if let Some(event) = event {
+//RS             self.transaction_lock
+//RS                 .defer_event(self.name.clone(), event);
+//RS         }
+//RS         Some(value)
+//RS     }
+//RS 
+//RS     /// Restore is the explicit live counterpart to `scrub` and follows the
+//RS     /// retained timeline cursor rather than creating a synthetic transaction.
+//RS     pub fn restore(&self, generation: u64) -> Option<T> {
+//RS         self.jump(generation)
+//RS     }
+//RS 
+//RS     pub fn subscribe<F>(&self, callback: F) -> JetWebStoreSubscription
+//RS     where
+//RS         F: Fn(T) + Send + Sync + 'static,
+//RS     {
+//RS         let signal = self.signal.clone();
+//RS         let effect = jet_std::jet_reactive_effect(move || callback(signal.get()));
+//RS         JetWebStoreSubscription { effect }
+//RS     }
+//RS 
+//RS     pub fn subscribe_selector<U, Select, F>(
+//RS         &self,
+//RS         selector: Select,
+//RS         callback: F,
+//RS     ) -> JetWebStoreSubscription
+//RS     where
+//RS         U: Send + 'static,
+//RS         Select: Fn(T) -> U + Send + Sync + 'static,
+//RS         F: Fn(U) + Send + Sync + 'static,
+//RS     {
+//RS         let signal = self.signal.clone();
+//RS         let effect = jet_std::jet_reactive_effect(move || callback(selector(signal.get())));
+//RS         JetWebStoreSubscription { effect }
+//RS     }
+//RS 
+//RS     pub fn derived<U, F>(&self, compute: F) -> jet_std::JetDerived<U>
+//RS     where
+//RS         U: Clone + Send + Sync + 'static,
+//RS         F: Fn(T) -> U + Send + Sync + 'static,
+//RS     {
+//RS         let signal = self.signal.clone();
+//RS         jet_std::JetDerived::new(move || compute(signal.get()))
+//RS     }
+//RS 
+//RS     pub fn selector<U, F>(&self, compute: F) -> jet_std::JetDerived<U>
+//RS     where
+//RS         U: Clone + Send + Sync + 'static,
+//RS         F: Fn(T) -> U + Send + Sync + 'static,
+//RS     {
+//RS         self.derived(compute)
+//RS     }
+//RS 
+//RS     pub fn inspect(&self) -> JetWebStoreInspection<T> {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let value = self.signal.get();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         JetWebStoreInspection {
+//RS             value,
+//RS             generation: ledger.current_generation,
+//RS             cursor: ledger.cursor as u64,
+//RS             history: ledger.history.iter().cloned().collect(),
+//RS             events: ledger.events.iter().cloned().collect(),
+//RS             history_limit: ledger.history_limit,
+//RS             history_enabled: jet_web_store_history_capture_enabled(),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Facts are deliberately payload-free. `event_json` gives the canonical
+//RS     /// Store body shape without serializing the generic root state.
+//RS     pub fn facts_json(&self) -> String {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         format!(
+//RS             "{{\"name\":\"{}\",\"generation\":{},\"cursor\":{},\"history_length\":{},\"history_limit\":{},\"event_length\":{},\"history_enabled\":{}}}",
+//RS             jet_web_store_json_escape(&self.name),
+//RS             ledger.current_generation,
+//RS             ledger.cursor,
+//RS             ledger.history.len(),
+//RS             ledger.history_limit,
+//RS             ledger.events.len(),
+//RS             jet_web_store_history_capture_enabled(),
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn event_json(&self) -> String {
+//RS         let _transaction_lock = self.transaction_lock.lock();
+//RS         let ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
+//RS         let Some(event) = ledger.events.back() else {
+//RS             return format!(
+//RS                 "{{\"name\":\"{}\",\"transaction\":\"\",\"diff\":\"{{}}\",\"cursor\":{}}}",
+//RS                 jet_web_store_json_escape(&self.name),
+//RS                 ledger.cursor,
+//RS             );
+//RS         };
+//RS         let diff = jet_web_store_json_escape(&event.diff_json());
+//RS         format!(
+//RS             "{{\"name\":\"{}\",\"transaction\":\"{}\",\"diff\":\"{}\",\"cursor\":{}}}",
+//RS             jet_web_store_json_escape(&self.name),
+//RS             jet_web_store_json_escape(&event.transaction_label()),
+//RS             diff,
+//RS             event.cursor,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS enum JetWebStoreNavigation {
+//RS     Back,
+//RS     Forward,
+//RS     Jump(u64),
+//RS }
+//RS 
+//RS /// Named construction is the state-preserving path used by compatible reloads.
+//RS /// The key includes the concrete row type, so a type-changing edit never
+//RS /// reuses an incompatible value.
+//RS pub fn jet_web_store<T: Clone + Send + Sync + 'static>(
+//RS     name: String,
+//RS     initial: T,
+//RS ) -> JetWebStore<T> {
+//RS     jet_web_store_with_history(name, initial, jet_web_store_default_history_limit())
+//RS }
+//RS 
+//RS pub fn jet_web_store_with_history<T: Clone + Send + Sync + 'static>(
+//RS     name: String,
+//RS     initial: T,
+//RS     history_limit: i64,
+//RS ) -> JetWebStore<T> {
+//RS     let retain = !name.is_empty()
+//RS         && name.len() <= JET_WEB_STORE_MAX_NAME
+//RS         && !name.chars().any(|character| character.is_control());
+//RS     let key = (JetWebStoreTypeId::of::<T>(), name.clone());
+//RS     let mut registry = jet_web_store_registry()
+//RS         .lock()
+//RS         .unwrap_or_else(|error| error.into_inner());
+//RS     if let Some(existing) = registry
+//RS         .get(&key)
+//RS         .and_then(|value| value.downcast_ref::<JetWebStore<T>>())
+//RS     {
+//RS         return existing.clone();
+//RS     }
+//RS     if !retain || registry.len() >= JET_WEB_STORE_MAX_REGISTRY {
+//RS         drop(registry);
+//RS         return JetWebStore::new(name, initial, history_limit);
+//RS     }
+//RS     let store = JetWebStore::new(name, initial, history_limit);
+//RS     registry.insert(key, Box::new(store.clone()));
+//RS     store
+//RS }
+//RS 
+//RS pub fn jet_web_store_transaction<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     action: String,
+//RS     changed_fields: Vec<String>,
+//RS     update: F,
+//RS ) -> JetWebStoreTransaction<T>
+//RS where
+//RS     F: FnOnce(&mut T),
+//RS {
+//RS     store.transact(action, changed_fields, update)
+//RS }
+//RS pub fn jet_web_store_value<T: Clone + Send + Sync + 'static>(store: &JetWebStore<T>) -> T {
+//RS     store.value()
+//RS }
+//RS 
+//RS pub fn jet_web_store_update<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     action: String,
+//RS     changed_fields: Vec<String>,
+//RS     update: F,
+//RS ) -> JetWebStoreTransaction<T>
+//RS where
+//RS     F: FnOnce(&mut T),
+//RS {
+//RS     store.update(action, changed_fields, update)
+//RS }
+//RS 
+//RS pub fn jet_web_store_batch<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     action: String,
+//RS     changed_fields: Vec<String>,
+//RS     update: F,
+//RS ) -> JetWebStoreTransaction<T>
+//RS where
+//RS     F: FnOnce(&mut T),
+//RS {
+//RS     store.batch(action, changed_fields, update)
+//RS }
+//RS 
+//RS pub fn jet_web_store_set<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     value: T,
+//RS ) -> JetWebStoreTransaction<T> {
+//RS     store.set(value)
+//RS }
+//RS 
+//RS pub fn jet_web_store_set_state<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     value: T,
+//RS ) -> JetWebStoreTransaction<T> {
+//RS     store.set_state(value)
+//RS }
+//RS 
+//RS pub fn jet_web_store_optimistic<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     action: String,
+//RS     changed_fields: Vec<String>,
+//RS     update: F,
+//RS ) -> JetWebStorePatch<T>
+//RS where
+//RS     F: FnOnce(&mut T),
+//RS {
+//RS     store.optimistic(action, changed_fields, update)
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     action: String,
+//RS     changed_fields: Vec<String>,
+//RS     update: F,
+//RS ) -> JetWebStorePatch<T>
+//RS where
+//RS     F: FnOnce(&mut T),
+//RS {
+//RS     store.patch(action, changed_fields, update)
+//RS }
+//RS 
+//RS pub fn jet_web_store_back<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> Option<T> {
+//RS     store.back()
+//RS }
+//RS 
+//RS pub fn jet_web_store_forward<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> Option<T> {
+//RS     store.forward()
+//RS }
+//RS 
+//RS pub fn jet_web_store_jump<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     generation: i64,
+//RS ) -> Option<T> {
+//RS     u64::try_from(generation).ok().and_then(|generation| store.jump(generation))
+//RS }
+//RS 
+//RS pub fn jet_web_store_scrub<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     generation: i64,
+//RS ) -> Option<T> {
+//RS     u64::try_from(generation).ok().and_then(|generation| store.scrub(generation))
+//RS }
+//RS 
+//RS pub fn jet_web_store_restore<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     generation: i64,
+//RS ) -> Option<T> {
+//RS     u64::try_from(generation)
+//RS         .ok()
+//RS         .and_then(|generation| store.restore(generation))
+//RS }
+//RS 
+//RS pub fn jet_web_store_history<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> Vec<JetWebStoreTransaction<T>> {
+//RS     store.history()
+//RS }
+//RS 
+//RS pub fn jet_web_store_history_at<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     index: i64,
+//RS ) -> Option<JetWebStoreTransaction<T>> {
+//RS     store.history_at(index)
+//RS }
+//RS 
+//RS pub fn jet_web_store_events<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> Vec<JetWebStoreEvent> {
+//RS     store.events()
+//RS }
+//RS 
+//RS pub fn jet_web_store_events_since<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     sequence: i64,
+//RS ) -> Vec<JetWebStoreEvent> {
+//RS     u64::try_from(sequence)
+//RS         .ok()
+//RS         .map_or_else(Vec::new, |sequence| store.events_since(sequence))
+//RS }
+//RS 
+//RS pub fn jet_web_store_clear_history<T: Clone + Send + Sync + 'static>(store: &JetWebStore<T>) {
+//RS     store.clear_history()
+//RS }
+//RS 
+//RS pub fn jet_web_store_history_enabled<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> bool {
+//RS     store.history_enabled()
+//RS }
+//RS 
+//RS pub fn jet_web_store_history_limit<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> i64 {
+//RS     store.history_limit()
+//RS }
+//RS 
+//RS pub fn jet_web_store_set_history_limit<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS     history_limit: i64,
+//RS ) {
+//RS     store.set_history_limit(history_limit)
+//RS }
+//RS 
+//RS pub fn jet_web_store_cursor<T: Clone + Send + Sync + 'static>(store: &JetWebStore<T>) -> i64 {
+//RS     i64::try_from(store.cursor()).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS pub fn jet_web_store_current_generation<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> i64 {
+//RS     i64::try_from(store.current_generation()).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS pub fn jet_web_store_subscribe<T: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     callback: F,
+//RS ) -> JetWebStoreSubscription
+//RS where
+//RS     F: Fn(T) + Send + Sync + 'static,
+//RS {
+//RS     store.subscribe(callback)
+//RS }
+//RS 
+//RS pub fn jet_web_store_subscribe_selector<
+//RS     T: Clone + Send + Sync + 'static,
+//RS     U: Send + 'static,
+//RS     Select,
+//RS     F,
+//RS >(
+//RS     store: &JetWebStore<T>,
+//RS     selector: Select,
+//RS     callback: F,
+//RS ) -> JetWebStoreSubscription
+//RS where
+//RS     Select: Fn(T) -> U + Send + Sync + 'static,
+//RS     F: Fn(U) + Send + Sync + 'static,
+//RS {
+//RS     store.subscribe_selector(selector, callback)
+//RS }
+//RS 
+//RS pub fn jet_web_store_derived<T: Clone + Send + Sync + 'static, U: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     compute: F,
+//RS ) -> jet_std::JetDerived<U>
+//RS where
+//RS     F: Fn(T) -> U + Send + Sync + 'static,
+//RS {
+//RS     store.derived(compute)
+//RS }
+//RS 
+//RS pub fn jet_web_store_selector<T: Clone + Send + Sync + 'static, U: Clone + Send + Sync + 'static, F>(
+//RS     store: &JetWebStore<T>,
+//RS     compute: F,
+//RS ) -> jet_std::JetDerived<U>
+//RS where
+//RS     F: Fn(T) -> U + Send + Sync + 'static,
+//RS {
+//RS     store.selector(compute)
+//RS }
+//RS 
+//RS pub fn jet_web_store_inspect<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> JetWebStoreInspection<T> {
+//RS     store.inspect()
+//RS }
+//RS 
+//RS pub fn jet_web_store_facts_json<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> String {
+//RS     store.facts_json()
+//RS }
+//RS 
+//RS pub fn jet_web_store_event_json<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> String {
+//RS     store.event_json()
+//RS }
+//RS pub fn jet_web_store_signal<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> jet_std::JetSignal<T> {
+//RS     store.signal()
+//RS }
+//RS 
+//RS pub fn jet_web_store_state_signal<T: Clone + Send + Sync + 'static>(
+//RS     store: &JetWebStore<T>,
+//RS ) -> jet_std::JetSignal<T> {
+//RS     store.state_signal()
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch_generation<T: Clone + Send + Sync + 'static>(
+//RS     patch: &JetWebStorePatch<T>,
+//RS ) -> i64 {
+//RS     i64::try_from(patch.generation()).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch_transaction<T: Clone + Send + Sync + 'static>(
+//RS     patch: &JetWebStorePatch<T>,
+//RS ) -> JetWebStoreTransaction<T> {
+//RS     patch.transaction()
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch_active<T: Clone + Send + Sync + 'static>(
+//RS     patch: &JetWebStorePatch<T>,
+//RS ) -> bool {
+//RS     patch.active()
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch_commit<T: Clone + Send + Sync + 'static>(
+//RS     patch: JetWebStorePatch<T>,
+//RS ) -> JetWebStoreTransaction<T> {
+//RS     patch.commit()
+//RS }
+//RS 
+//RS pub fn jet_web_store_patch_rollback<T: Clone + Send + Sync + 'static>(
+//RS     patch: JetWebStorePatch<T>,
+//RS ) -> Option<T> {
+//RS     patch.rollback()
+//RS }
+//RS 
+//RS pub fn jet_web_store_subscription_unsubscribe(subscription: &JetWebStoreSubscription) {
+//RS     subscription.unsubscribe()
+//RS }
+//RS 
+//RS pub fn jet_web_store_subscription_active(subscription: &JetWebStoreSubscription) -> bool {
+//RS     subscription.active()
+//RS }
+//RS 
+//RS fn jet_web_store_default_history_limit() -> i64 {
+//RS     JET_WEB_STORE_DEFAULT_HISTORY_LIMIT as i64
+//RS }
+//RS 
+//RS fn jet_web_store_clamp_history_limit(value: i64) -> usize {
+//RS     value
+//RS         .max(0)
+//RS         .try_into()
+//RS         .unwrap_or(usize::MAX)
+//RS         .min(JET_WEB_STORE_MAX_HISTORY_LIMIT)
+//RS }
+//RS 
+//RS fn jet_web_store_fields(fields: Vec<String>) -> Vec<String> {
+//RS     let mut result = Vec::new();
+//RS     for field in fields.into_iter().take(JET_WEB_STORE_MAX_FIELDS) {
+//RS         if !field.is_empty()
+//RS             && field.len() <= JET_WEB_STORE_MAX_FIELD
+//RS             && !field.chars().any(|character| character.is_control())
+//RS             && !result.iter().any(|existing| existing == &field)
+//RS         {
+//RS             result.push(field);
+//RS         }
+//RS     }
+//RS     // Changed-field order is a protocol fact, not caller-dependent presentation.
+//RS     result.sort_unstable();
+//RS     result
+//RS }
+//RS fn jet_web_store_action(action: String) -> String {
+//RS     let action = if action.is_empty() {
+//RS         "update".to_string()
+//RS     } else {
+//RS         action
+//RS     };
+//RS     let mut sanitized = String::new();
+//RS     for character in action.chars().filter(|character| !character.is_control()) {
+//RS         if sanitized.len() + character.len_utf8() > JET_WEB_STORE_MAX_FIELD {
+//RS             break;
+//RS         }
+//RS         sanitized.push(character);
+//RS     }
+//RS     if sanitized.is_empty() {
+//RS         "update".to_string()
+//RS     } else {
+//RS         sanitized
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_web_store_json_escape(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len());
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => escaped.push_str("\\\""),
+//RS             '\\' => escaped.push_str("\\\\"),
+//RS             '\n' => escaped.push_str("\\n"),
+//RS             '\r' => escaped.push_str("\\r"),
+//RS             '\t' => escaped.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
+//RS             }
+//RS             character => escaped.push(character),
+//RS         }
+//RS     }
+//RS     escaped
+//RS }
+// END-PORT-PENDING 0313 crates/jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs:1-1347
+

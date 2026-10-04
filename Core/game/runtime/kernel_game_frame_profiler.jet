@@ -1,0 +1,1061 @@
+use core.text.runtime.kernel_unicode_string as unicode
+use core.files.runtime.kernel_path_components as native_path
+use core.sys.runtime.hardware_facts as target_numbers
+
+// GameFrameProfiler.rs:7-13. Private runtime owner; Main publishes this module.
+@MAX_HISTORY :: 256
+@MAX_RECEIPTS :: 256
+@MAX_BOTTLENECKS :: 128
+@MAX_CALL_GRAPH :: 64
+@MAX_CRASH_STACKS :: 32
+@MAX_CRASH_LOGS :: 256
+@CRASH_REPORTER_ABI :: "jet-game-crash-reporter-v1"
+@MAX_PERSISTED :: 1
+@MAX_TEXT :: 4096
+
+pub struct JetGameTraceIdentity {
+    pub build: String
+    pub revision: String
+    pub trace_id: String
+    fn new(build: String, revision: String, trace_id: String) -> JetGameTraceIdentity Never! {
+        JetGameTraceIdentity{build: build, revision: revision, trace_id: trace_id}
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.build, "build")
+        require_text(self.revision, "revision")
+        require_text(self.trace_id, "trace id")
+    }
+}
+pub struct JetGameTraceContext {
+    pub session_id: String
+    pub scene: String
+    pub target: String
+    pub backend: String
+    pub viewport_width: U32
+    pub viewport_height: U32
+    pub settings: String
+    fn new(session_id: String, scene: String, target: String, backend: String, viewport_width: U32, viewport_height: U32, settings: String) -> JetGameTraceContext Never! {
+        JetGameTraceContext{session_id: session_id, scene: scene, target: target, backend: backend, viewport_width: viewport_width, viewport_height: viewport_height, settings: settings}
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.session_id, "session id")
+        require_text(self.scene, "trace scene")
+        require_text(self.target, "trace target")
+        require_text(self.backend, "trace backend")
+        require_text(self.settings, "trace settings")
+        if self.viewport_width == U32{0} || self.viewport_height == U32{0} -> return Err(JetGameFrameProfilerError.InvalidTraceContext("trace viewport must be non-zero"))
+        Ok(())
+    }
+    fn render_json(self) -> String Never! {
+        "{{\"session_id\":{json_string(self.session_id)},\"scene\":{json_string(self.scene)},\"target\":{json_string(self.target)},\"backend\":{json_string(self.backend)},\"viewport\":{{\"width\":{self.viewport_width},\"height\":{self.viewport_height}}},\"settings\":{json_string(self.settings)}}}"
+    }
+}
+pub struct JetGameSourceSpan {
+    pub source_id: String
+    pub file: String
+    pub start_line: U32
+    pub start_column: U32
+    pub end_line: U32
+    pub end_column: U32
+    fn new(source_id: String, file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetGameSourceSpan Never! {
+        JetGameSourceSpan{source_id: source_id, file: file, start_line: start_line, start_column: start_column, end_line: end_line, end_column: end_column}
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.source_id, "source id")
+        require_text(self.file, "source file")
+        if self.start_line == U32{0} || self.start_column == U32{0} -> return Err(JetGameFrameProfilerError.InvalidSourceSpan("source span starts at zero"))
+        if self.end_line == U32{0} || self.end_column == U32{0} -> return Err(JetGameFrameProfilerError.InvalidSourceSpan("source span ends at zero"))
+        if self.end_line < self.start_line || (self.end_line == self.start_line && self.end_column < self.start_column) -> return Err(JetGameFrameProfilerError.InvalidSourceSpan("source span ends before it starts"))
+        Ok(())
+    }
+}
+pub struct JetGameFunctionIdentity {
+    pub function_id: String
+    pub name: String
+    pub source: JetGameSourceSpan
+    fn new(function_id: String, name: String, source: JetGameSourceSpan) -> JetGameFunctionIdentity Never! {
+        JetGameFunctionIdentity{function_id: function_id, name: name, source: source}
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.function_id, "function id")
+        require_text(self.name, "function name")
+        self.source.validate()
+    }
+}
+pub struct JetGameFrameIdentity {
+    pub frame_id: U64
+    pub scene: String
+    pub frame_index: U64
+    pub build: String
+    pub revision: String
+    pub trace_id: String
+    fn new(scene: String, frame_index: U64, build: String, revision: String, trace_id: String) -> JetGameFrameIdentity Never! {
+        id :: frame_id(scene, frame_index, build, revision)
+        JetGameFrameIdentity{frame_id: id, scene: scene, frame_index: frame_index, build: build, revision: revision, trace_id: trace_id}
+    }
+    fn trace_identity(self) -> JetGameTraceIdentity Never! { JetGameTraceIdentity.new(~self.build, ~self.revision, ~self.trace_id) }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        require_text(self.scene, "scene")
+        require_text(self.build, "build")
+        require_text(self.revision, "revision")
+        require_text(self.trace_id, "trace id")
+        expected :: frame_id(self.scene, self.frame_index, self.build, self.revision)
+        if self.frame_id != expected -> return Err(JetGameFrameProfilerError.InvalidFrameIdentity(expected, self.frame_id))
+        Ok(())
+    }
+}
+pub enum JetGameTimeDomain {
+    Cpu
+    Gpu
+    fn as_str(self) -> String Never! { if self == { .Cpu -> "cpu" .Gpu -> "gpu" } }
+}
+pub enum JetGameFramePhase {
+    Input
+    Update
+    Physics
+    Animation
+    Script
+    Render
+    Draw
+    Present
+    Audio
+    Ui
+    Network
+    Asset
+    Cook
+    Memory
+    Custom(String)
+    fn fixed_as_str(self) -> String? Never! {
+        if self == {
+            .Input -> Val("input")
+            .Update -> Val("update")
+            .Physics -> Val("physics")
+            .Animation -> Val("animation")
+            .Script -> Val("script")
+            .Render -> Val("render")
+            .Draw -> Val("draw")
+            .Present -> Val("present")
+            .Audio -> Val("audio")
+            .Ui -> Val("ui")
+            .Network -> Val("network")
+            .Asset -> Val("asset")
+            .Cook -> Val("cook")
+            .Memory -> Val("memory")
+            .Custom(_) -> None
+        }
+    }
+    fn as_str(self) -> String Never! {
+        if self == .Custom(value) -> return value
+        self.fixed_as_str() ?? ""
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        if self == .Custom(value) -> require_text(value, "custom phase")
+        Ok(())
+    }
+}
+pub enum JetGameSampleKind {
+    Frame
+    Phase
+    Function
+    Draw
+    fn as_str(self) -> String Never! { if self == { .Frame -> "frame" .Phase -> "phase" .Function -> "function" .Draw -> "draw" } }
+}
+pub struct JetGameFrameSample {
+    pub sequence: U64
+    pub frame: JetGameFrameIdentity
+    pub start_ns: U64
+    pub cpu_ns: U64
+    pub gpu_ns: U64?
+    pub responsible_function: JetGameFunctionIdentity?
+    fn new(frame: JetGameFrameIdentity, start_ns: U64, cpu_ns: U64, gpu_ns: U64?) -> JetGameFrameSample Never! {
+        JetGameFrameSample{sequence: U64{0}, frame: frame, start_ns: start_ns, cpu_ns: cpu_ns, gpu_ns: gpu_ns, responsible_function: None}
+    }
+    fn with_responsible_function(^self, function: JetGameFunctionIdentity) -> JetGameFrameSample Never! {
+        out := self
+        out.responsible_function = Val(function)
+        out
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        if self.responsible_function == .Val(function) -> function.validate()
+        Ok(())
+    }
+}
+pub struct JetGamePhaseSample {
+    pub sequence: U64
+    pub frame: JetGameFrameIdentity
+    pub phase: JetGameFramePhase
+    pub domain: JetGameTimeDomain
+    pub start_ns: U64
+    pub duration_ns: U64
+    fn new(frame: JetGameFrameIdentity, phase: JetGameFramePhase, domain: JetGameTimeDomain, start_ns: U64, duration_ns: U64) -> JetGamePhaseSample Never! {
+        JetGamePhaseSample{sequence: U64{0}, frame: frame, phase: phase, domain: domain, start_ns: start_ns, duration_ns: duration_ns}
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        self.phase.validate()
+    }
+}
+pub struct JetGameFunctionSample {
+    pub sequence: U64
+    pub frame: JetGameFrameIdentity
+    pub function: JetGameFunctionIdentity
+    pub phase: JetGameFramePhase
+    pub domain: JetGameTimeDomain
+    pub start_ns: U64
+    pub duration_ns: U64
+    pub callers: [JetGameFunctionIdentity]
+    pub callees: [JetGameFunctionIdentity]
+    fn new(frame: JetGameFrameIdentity, function: JetGameFunctionIdentity, phase: JetGameFramePhase, domain: JetGameTimeDomain, start_ns: U64, duration_ns: U64) -> JetGameFunctionSample Never! {
+        JetGameFunctionSample{sequence: U64{0}, frame: frame, function: function, phase: phase, domain: domain, start_ns: start_ns, duration_ns: duration_ns, callers: [JetGameFunctionIdentity]{}, callees: [JetGameFunctionIdentity]{}}
+    }
+    fn with_call_graph(^self, callers: [JetGameFunctionIdentity], callees: [JetGameFunctionIdentity]) -> JetGameFunctionSample Never! {
+        out := self
+        out.callers = callers
+        out.callees = callees
+        out
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        self.function.validate()
+        self.phase.validate()
+        if self.callers.len() > @MAX_CALL_GRAPH || self.callees.len() > @MAX_CALL_GRAPH -> return Err(JetGameFrameProfilerError.CallGraphTooLarge(@MAX_CALL_GRAPH))
+        loop function in self.callers -> function.validate()
+        loop function in self.callees -> function.validate()
+        Ok(())
+    }
+}
+pub struct JetGameDrawEvent {
+    pub sequence: U64
+    pub frame: JetGameFrameIdentity
+    pub event_index: U64
+    pub event_id: U64
+    pub function: JetGameFunctionIdentity
+    pub phase: JetGameFramePhase
+    pub domain: JetGameTimeDomain
+    pub start_ns: U64
+    pub duration_ns: U64
+    pub object_id: String?
+    pub resource_id: String?
+    fn new(frame: JetGameFrameIdentity, event_index: U64, function: JetGameFunctionIdentity, phase: JetGameFramePhase, domain: JetGameTimeDomain, start_ns: U64, duration_ns: U64) -> JetGameDrawEvent Never! {
+        id :: draw_id(frame.frame_id, event_index)
+        JetGameDrawEvent{sequence: U64{0}, frame: frame, event_index: event_index, event_id: id, function: function, phase: phase, domain: domain, start_ns: start_ns, duration_ns: duration_ns, object_id: None, resource_id: None}
+    }
+    fn with_links(^self, object_id: String?, resource_id: String?) -> JetGameDrawEvent Never! {
+        out := self
+        out.object_id = object_id
+        out.resource_id = resource_id
+        out
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        self.function.validate()
+        self.phase.validate()
+        if self.object_id == .Val(value) -> require_text(value, "draw object id")
+        if self.resource_id == .Val(value) -> require_text(value, "draw resource id")
+        expected :: draw_id(self.frame.frame_id, self.event_index)
+        if self.event_id != expected -> return Err(JetGameFrameProfilerError.InvalidDrawIdentity(expected, self.event_id))
+        Ok(())
+    }
+}
+pub enum JetGameSampleFact {
+    Frame(JetGameFrameSample)
+    Phase(JetGamePhaseSample)
+    Function(JetGameFunctionSample)
+    Draw(JetGameDrawEvent)
+    fn kind(self) -> JetGameSampleKind Never! {
+        if self == { .Frame(_) -> JetGameSampleKind.Frame .Phase(_) -> JetGameSampleKind.Phase .Function(_) -> JetGameSampleKind.Function .Draw(_) -> JetGameSampleKind.Draw }
+    }
+    fn frame_identity(self) -> JetGameFrameIdentity Never! {
+        if self == { .Frame(s) -> s.frame .Phase(s) -> s.frame .Function(s) -> s.frame .Draw(s) -> s.frame }
+    }
+    fn sequence(self) -> U64 Never! { if self == { .Frame(s) -> s.sequence .Phase(s) -> s.sequence .Function(s) -> s.sequence .Draw(s) -> s.sequence } }
+    fn timestamp_ns(self) -> U64 Never! { if self == { .Frame(s) -> s.start_ns .Phase(s) -> s.start_ns .Function(s) -> s.start_ns .Draw(s) -> s.start_ns } }
+    fn validate(self) -> Unit JetGameFrameProfilerError! { if self == { .Frame(s) -> s.validate() .Phase(s) -> s.validate() .Function(s) -> s.validate() .Draw(s) -> s.validate() } }
+    fn with_sequence(^self, sequence: U64) -> JetGameSampleFact Never! {
+        if self == {
+            .Frame(s) -> {
+                out := s
+                out.sequence = sequence
+                JetGameSampleFact.Frame(out)
+            }
+            .Phase(s) -> {
+                out := s
+                out.sequence = sequence
+                JetGameSampleFact.Phase(out)
+            }
+            .Function(s) -> {
+                out := s
+                out.sequence = sequence
+                JetGameSampleFact.Function(out)
+            }
+            .Draw(s) -> {
+                out := s
+                out.sequence = sequence
+                JetGameSampleFact.Draw(out)
+            }
+        }
+    }
+}
+
+#Error
+pub enum JetGameFrameProfilerError {
+    EmptyIdentity(String)
+    InvalidSourceSpan(String)
+    InvalidTraceContext(String)
+    InvalidFrameIdentity(U64, U64)
+    CallGraphTooLarge(Int)
+    CrashBundleTooLarge(String, Int)
+    InvalidDrawIdentity(U64, U64)
+    InvalidSampleSequence(U64)
+    BuildMismatch(String, String)
+    RevisionMismatch(String, String)
+    TraceMismatch(String, String)
+    FrameMismatch(JetGameFrameIdentity, JetGameFrameIdentity)
+    NonMonotonicTimestamp(U64, U64)
+    NonMonotonicFrame(U64, U64)
+    DuplicateDrawEvent(U64, U64)
+    DrawEventsOutOfOrder(U64, U64)
+    CursorPositionOutOfBounds(Int, Int)
+    SequenceExhausted(String)
+    ProfilerPaused
+    ProfilerNotPaused
+    FrameNotRetained(U64)
+    InvalidErrorPause(String)
+    fn message(self) -> String Never! {
+        if self == {
+            .EmptyIdentity(field) -> "game frame profiler {field} must not be empty"
+            .InvalidSourceSpan(reason) -> "game frame profiler source span {reason}"
+            .InvalidTraceContext(reason) -> "game frame profiler trace context {reason}"
+            .InvalidFrameIdentity(expected, actual) -> "game frame profiler frame id {actual} does not match stable id {expected}"
+            .CallGraphTooLarge(max) -> "game frame profiler call graph exceeds {max} functions"
+            .CrashBundleTooLarge(field, max) -> "game frame profiler crash bundle {field} exceeds {max} entries"
+            .InvalidDrawIdentity(expected, actual) -> "game frame profiler draw id {actual} does not match stable id {expected}"
+            .InvalidSampleSequence(actual) -> "game frame profiler sample sequence {actual} is not allocator-owned"
+            .BuildMismatch(expected, actual) -> "game frame profiler build changed from {expected} to {actual}"
+            .RevisionMismatch(expected, actual) -> "game frame profiler source revision changed from {expected} to {actual}"
+            .TraceMismatch(expected, actual) -> "game frame profiler trace changed from {expected} to {actual}"
+            .FrameMismatch(expected, actual) -> "game frame profiler cursor expected frame {expected.frame_id} but received {actual.frame_id}"
+            .NonMonotonicTimestamp(previous, actual) -> "game frame profiler timestamp moved backward from {previous} to {actual}"
+            .NonMonotonicFrame(previous, actual) -> "game frame profiler frame index moved backward from {previous} to {actual}"
+            .DuplicateDrawEvent(frame, index) -> "game frame profiler frame {frame} repeats draw event {index}"
+            .DrawEventsOutOfOrder(previous, actual) -> "game frame profiler draw event {actual} follows event {previous} out of order"
+            .CursorPositionOutOfBounds(position, len) -> "game frame profiler cursor position {position} exceeds {len} draw events"
+            .SequenceExhausted(kind) -> "game frame profiler {kind} sequence is exhausted"
+            .ProfilerPaused -> "game frame profiler is paused"
+            .ProfilerNotPaused -> "game frame profiler draw cursor requires a paused frame"
+            .FrameNotRetained(frame) -> "game frame profiler frame {frame} is not retained"
+            .InvalidErrorPause(field) -> "game frame profiler error pause {field} is invalid"
+        }
+    }
+    fn to_string(self) -> String Never! { self.message() }
+}
+
+pub struct JetGameFrameHistory {
+    pub trace_identity: JetGameTraceIdentity
+    pub capacity: Int
+    pub facts: Queue<JetGameSampleFact>
+    pub next_sequence: U64
+    pub dropped_samples: U64
+    last_timestamp_ns: U64?
+    last_frame_index: U64?
+    fn new(trace_identity: JetGameTraceIdentity) -> JetGameFrameHistory Never! { JetGameFrameHistory.with_capacity(trace_identity, @MAX_HISTORY) }
+    fn with_capacity(trace_identity: JetGameTraceIdentity, capacity: Int) -> JetGameFrameHistory Never! {
+        cap := capacity
+        if cap < 1 -> cap = 1
+        if cap > @MAX_HISTORY -> cap = @MAX_HISTORY
+        JetGameFrameHistory{trace_identity: trace_identity, capacity: cap, facts: Queue.new(), next_sequence: U64{1}, dropped_samples: U64{0}, last_timestamp_ns: None, last_frame_index: None}
+    }
+    fn len(self) -> Int Never! { self.facts.len() }
+    fn is_empty(self) -> Bool Never! { self.facts.is_empty() }
+    fn latest(self) -> JetGameSampleFact? Never! { self.facts.peek_back() }
+    fn append(&self, fact: JetGameSampleFact) -> U64 JetGameFrameProfilerError! {
+        fact.validate()
+        if fact.sequence() != U64{0} -> return Err(JetGameFrameProfilerError.InvalidSampleSequence(fact.sequence()))
+        frame :: fact.frame_identity()
+        check_trace_fields(self.trace_identity, frame.build, frame.revision, frame.trace_id)
+        timestamp :: fact.timestamp_ns()
+        if self.last_timestamp_ns == .Val(previous) {
+            if timestamp < previous -> return Err(JetGameFrameProfilerError.NonMonotonicTimestamp(previous, timestamp))
+        }
+        if self.last_frame_index == .Val(previous) {
+            if frame.frame_index < previous -> return Err(JetGameFrameProfilerError.NonMonotonicFrame(previous, frame.frame_index))
+        }
+        if fact == .Draw(event) {
+            loop retained in self.facts {
+                if retained == .Draw(previous) {
+                    if same_frame(previous.frame, event.frame) && previous.event_index == event.event_index -> return Err(JetGameFrameProfilerError.DuplicateDrawEvent(event.frame.frame_id, event.event_index))
+                }
+            }
+        }
+        if self.next_sequence == U64{0xffffffffffffffff} -> return Err(JetGameFrameProfilerError.SequenceExhausted("sample"))
+        sequence :: self.next_sequence
+        index :: frame.frame_index
+        self.next_sequence += U64{1}
+        if self.facts.len() == self.capacity {
+            _ :: &self.facts.pop_front()
+            self.dropped_samples = sat_add(self.dropped_samples, U64{1})
+        }
+        self.last_timestamp_ns = Val(timestamp)
+        self.last_frame_index = Val(index)
+        &self.facts.push_back(fact.with_sequence(sequence))
+        Ok(sequence)
+    }
+    fn frame_facts(self, frame: JetGameFrameIdentity) -> [JetGameSampleFact] JetGameFrameProfilerError! {
+        frame.validate()
+        check_trace_fields(self.trace_identity, frame.build, frame.revision, frame.trace_id)
+        out := [JetGameSampleFact]{}
+        loop fact in self.facts {
+            if same_frame(fact.frame_identity(), frame) -> &out.push(~fact)
+        }
+        Ok(out)
+    }
+    fn draw_events_for(self, frame: JetGameFrameIdentity) -> [JetGameDrawEvent] JetGameFrameProfilerError! {
+        frame.validate()
+        check_trace_fields(self.trace_identity, frame.build, frame.revision, frame.trace_id)
+        out := [JetGameDrawEvent]{}
+        loop fact in self.facts {
+            if fact == .Draw(event) {
+                if same_frame(event.frame, frame) -> &out.push(~event)
+            }
+        }
+        &out.sort_by((left: JetGameDrawEvent, right: JetGameDrawEvent) -> (left.event_index <=> right.event_index).then(left.sequence <=> right.sequence))
+        Ok(out)
+    }
+    // #4499: composite map keys require the exact equality/hash law of domain
+    // and ALL function/source fields. No display-id encoding or linear table.
+    fn hot_paths(self) -> [JetGameHotPath] Never! {
+        accumulators := [(domain: JetGameTimeDomain, function: JetGameFunctionIdentity): Int]{}
+        values := [JetGameHotPathAccumulator]{}
+        loop fact in self.facts {
+            if fact == .Function(sample) {
+                key :: (domain: sample.domain, function: sample.function)
+                index := accumulators.get(key) ?? -1
+                if index < 0 {
+                    index = values.len()
+                    accumulators[key] = index
+                    &values.push(JetGameHotPathAccumulator{function: ~sample.function, domain: sample.domain, sample_count: U64{0}, total_ns: U64{0}, max_ns: U64{0}, frames: [U64: Bool]{}})
+                }
+                values[index].sample_count = sat_add(values[index].sample_count, U64{1})
+                values[index].total_ns = sat_add(values[index].total_ns, sample.duration_ns)
+                if sample.duration_ns > values[index].max_ns -> values[index].max_ns = sample.duration_ns
+                values[index].frames[sample.frame.frame_id] = true
+            }
+        }
+        out := [JetGameHotPath]{}
+        loop !values.is_empty() {
+            acc :: &values.pop() ?? break
+            &out.push(acc.finish())
+        }
+        // Rust's stable score sort retains BTreeMap's full key order on score
+        // ties. Spell that final key order explicitly, independent of Map order.
+        &out.sort_by((left: JetGameHotPath, right: JetGameHotPath) -> (right.total_ns <=> left.total_ns).then(right.max_ns <=> left.max_ns).then(right.sample_count <=> left.sample_count).then(left.function.function_id <=> right.function.function_id).then(domain_order(left.domain) <=> domain_order(right.domain)).then(function_order(left.function, right.function)))
+        out
+    }
+    fn bottleneck(self, limit: Int) -> JetGameBottleneckProjection Never! {
+        paths := self.hot_paths()
+        total := U64{0}
+        loop path in paths -> total = sat_add(total, path.total_ns)
+        keep := limit
+        if keep > @MAX_BOTTLENECKS -> keep = @MAX_BOTTLENECKS
+        if keep < 0 -> keep = 0
+        loop paths.len() > keep -> _ :: &paths.pop()
+        JetGameBottleneckProjection{trace_identity: ~self.trace_identity, retained_samples: self.facts.len(), capacity: self.capacity, dropped_samples: self.dropped_samples, total_function_ns: total, hot_paths: paths}
+    }
+}
+struct JetGameHotPathAccumulator {
+    function: JetGameFunctionIdentity
+    domain: JetGameTimeDomain
+    sample_count: U64
+    total_ns: U64
+    max_ns: U64
+    frames: [U64: Bool]
+    fn finish(^self) -> JetGameHotPath Never! {
+        JetGameHotPath{function: self.function, domain: self.domain, sample_count: self.sample_count, frame_count: U64.from_int(self.frames.len()), total_ns: self.total_ns, max_ns: self.max_ns}
+    }
+}
+pub struct JetGameHotPath {
+    pub function: JetGameFunctionIdentity
+    pub domain: JetGameTimeDomain
+    pub sample_count: U64
+    pub frame_count: U64
+    pub total_ns: U64
+    pub max_ns: U64
+}
+pub struct JetGameBottleneckProjection {
+    pub trace_identity: JetGameTraceIdentity
+    pub retained_samples: Int
+    pub capacity: Int
+    pub dropped_samples: U64
+    pub total_function_ns: U64
+    pub hot_paths: [JetGameHotPath]
+}
+pub struct JetGameDrawCursor {
+    pub frame: JetGameFrameIdentity
+    pub position: Int
+    fn new(frame: JetGameFrameIdentity) -> JetGameDrawCursor Never! { JetGameDrawCursor{frame: frame, position: 0} }
+    fn frame_identity(self) -> JetGameFrameIdentity Never! { self.frame }
+    fn at_start(self) -> Bool Never! { self.position == 0 }
+    fn validate_events(self, events: [JetGameDrawEvent]) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        previous: U64? = None
+        loop event in events {
+            event.validate()
+            check_frame(self.frame, event.frame)
+            if previous == .Val(index) {
+                if event.event_index <= index -> return Err(JetGameFrameProfilerError.DrawEventsOutOfOrder(index, event.event_index))
+            }
+            previous = Val(event.event_index)
+        }
+        Ok(())
+    }
+    fn check_position(self, len: Int) -> Unit JetGameFrameProfilerError! {
+        if self.position > len -> return Err(JetGameFrameProfilerError.CursorPositionOutOfBounds(self.position, len))
+        Ok(())
+    }
+    fn at_end(self, events: [JetGameDrawEvent]) -> Bool JetGameFrameProfilerError! {
+        self.validate_events(events)
+        self.check_position(events.len())
+        Ok(self.position == events.len())
+    }
+    fn current(self, events: [JetGameDrawEvent]) -> JetGameDrawEvent? JetGameFrameProfilerError! {
+        self.validate_events(events)
+        self.check_position(events.len())
+        Ok(events.get(self.position))
+    }
+    fn step_forward(&self, events: [JetGameDrawEvent]) -> JetGameDrawEvent? JetGameFrameProfilerError! {
+        self.validate_events(events)
+        self.check_position(events.len())
+        event :: events.get(self.position) ?? return Ok(None)
+        self.position += 1
+        Ok(Val(event))
+    }
+    fn step_backward(&self, events: [JetGameDrawEvent]) -> JetGameDrawEvent? JetGameFrameProfilerError! {
+        self.validate_events(events)
+        self.check_position(events.len())
+        if self.position == 0 -> return Ok(None)
+        self.position -= 1
+        Ok(events.get(self.position))
+    }
+}
+pub enum JetGameFrameProfilerState {
+    Running
+    Paused
+    ErrorPaused
+    fn as_str(self) -> String Never! { if self == { .Running -> "running" .Paused -> "paused" .ErrorPaused -> "error_paused" } }
+}
+pub enum JetGameFrameReceiptKind {
+    Frame
+    Phase
+    Function
+    Draw
+    Paused
+    Resumed
+    ErrorPaused
+    fn as_str(self) -> String Never! { if self == { .Frame -> "frame" .Phase -> "phase" .Function -> "function" .Draw -> "draw" .Paused -> "paused" .Resumed -> "resumed" .ErrorPaused -> "error_paused" } }
+}
+pub enum JetGameReloadStatus {
+    Kept
+    Reset
+    Unsupported
+    fn as_str(self) -> String Never! { if self == { .Kept -> "kept" .Reset -> "reset" .Unsupported -> "unsupported" } }
+}
+pub struct JetGameReloadFact {
+    pub frame: JetGameFrameIdentity
+    pub domain: String
+    pub status: JetGameReloadStatus
+    pub reason: String
+    fn new(frame: JetGameFrameIdentity, domain: String, status: JetGameReloadStatus, reason: String) -> JetGameReloadFact JetGameFrameProfilerError! {
+        fact :: JetGameReloadFact{frame: frame, domain: domain, status: status, reason: reason}
+        fact.validate()
+        Ok(fact)
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        require_error_pause_text(self.domain, "reload domain")
+        require_error_pause_text(self.reason, "reload reason")
+    }
+    fn render_json(self) -> String Never! { "{{\"frame\":{trace_frame_json(self.frame)},\"domain\":{json_string(self.domain)},\"status\":{json_string(self.status.as_str())},\"reason\":{json_string(self.reason)}}}" }
+}
+pub struct JetGameErrorPause {
+    pub source: JetGameSourceSpan
+    pub code: String
+    pub message: String
+    fn new(source: JetGameSourceSpan, code: String, message: String) -> JetGameErrorPause JetGameFrameProfilerError! {
+        pause :: JetGameErrorPause{source: source, code: code, message: message}
+        pause.validate()
+        Ok(pause)
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.source.validate()
+        require_error_pause_text(self.code, "code")
+        require_error_pause_text(self.message, "message")
+    }
+}
+pub enum JetGameCrashUploadPolicy {
+    Never
+    LoopbackOnly
+    Explicit(String)
+    fn as_str(self) -> String Never! { if self == { .Never -> "never" .LoopbackOnly -> "loopback-only" .Explicit(_) -> "explicit" } }
+    fn render_json(self) -> String Never! {
+        if self == .Explicit(endpoint) -> return "{{\"mode\":{json_string(self.as_str())},\"endpoint\":{json_string(endpoint)}}}"
+        json_string(self.as_str())
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        if self == .Explicit(endpoint) -> require_error_pause_text(endpoint, "crash upload endpoint")
+        Ok(())
+    }
+}
+pub struct JetGameCrashBundle {
+    pub frame: JetGameFrameIdentity
+    pub context: JetGameTraceContext?
+    pub reason: String
+    pub target: String
+    pub stacks: [String]
+    pub logs: [String]
+    pub upload_policy: JetGameCrashUploadPolicy
+    fn new(frame: JetGameFrameIdentity, reason: String, target: String, upload_policy: JetGameCrashUploadPolicy) -> JetGameCrashBundle JetGameFrameProfilerError! {
+        bundle :: JetGameCrashBundle{frame: frame, context: None, reason: reason, target: target, stacks: [String]{}, logs: [String]{}, upload_policy: upload_policy}
+        bundle.validate()
+        Ok(bundle)
+    }
+    fn with_context(^self, context: JetGameTraceContext) -> JetGameCrashBundle JetGameFrameProfilerError! {
+        context.validate()
+        out := self
+        out.context = Val(context)
+        out.validate()
+        Ok(out)
+    }
+    fn add_stack(&self, stack: String) -> Unit JetGameFrameProfilerError! {
+        if self.stacks.len() >= @MAX_CRASH_STACKS -> return Err(JetGameFrameProfilerError.CrashBundleTooLarge("stacks", @MAX_CRASH_STACKS))
+        require_error_pause_text(stack, "crash stack")
+        &self.stacks.push(stack)
+        Ok(())
+    }
+    fn add_log(&self, log: String) -> Unit JetGameFrameProfilerError! {
+        if self.logs.len() >= @MAX_CRASH_LOGS -> return Err(JetGameFrameProfilerError.CrashBundleTooLarge("logs", @MAX_CRASH_LOGS))
+        require_error_pause_text(log, "crash log")
+        &self.logs.push(log)
+        Ok(())
+    }
+    fn validate(self) -> Unit JetGameFrameProfilerError! {
+        self.frame.validate()
+        if self.context == .Val(context) {
+            context.validate()
+            if context.scene != self.frame.scene -> return Err(JetGameFrameProfilerError.InvalidTraceContext("crash context scene does not match frame"))
+        }
+        require_error_pause_text(self.reason, "crash reason")
+        require_error_pause_text(self.target, "crash target")
+        if self.stacks.len() > @MAX_CRASH_STACKS || self.logs.len() > @MAX_CRASH_LOGS -> return Err(JetGameFrameProfilerError.CrashBundleTooLarge("contents", @MAX_CRASH_LOGS))
+        self.upload_policy.validate()
+    }
+    fn render_json(self) -> String Never! {
+        stacks := [String]{}
+        logs := [String]{}
+        loop stack in self.stacks -> &stacks.push(json_string(stack))
+        loop log in self.logs -> &logs.push(json_string(log))
+        context := "null"
+        if self.context == .Val(value) -> context = value.render_json()
+        "{{\"frame\":{trace_frame_json(self.frame)},\"context\":{context},\"reason\":{json_string(self.reason)},\"target\":{json_string(self.target)},\"stacks\":[{stacks.join(",")}],\"logs\":[{logs.join(",")}],\"upload_policy\":{self.upload_policy.render_json()}}}"
+    }
+}
+pub struct JetGameFrameReceipt {
+    pub sequence: U64
+    pub kind: JetGameFrameReceiptKind
+    pub before: JetGameFrameProfilerState
+    pub after: JetGameFrameProfilerState
+    pub trace_identity: JetGameTraceIdentity
+    pub frame: JetGameFrameIdentity?
+    pub sample_sequence: U64?
+    pub error_pause: JetGameErrorPause?
+    pub dropped_samples: U64
+}
+pub struct JetGameFrameProfiler {
+    pub trace_identity: JetGameTraceIdentity
+    pub context: JetGameTraceContext?
+    pub history: JetGameFrameHistory
+    pub state: JetGameFrameProfilerState
+    pub last_frame: JetGameFrameIdentity?
+    pub error_pause: JetGameErrorPause?
+    pub receipts: Queue<JetGameFrameReceipt>
+    next_receipt_sequence: U64
+    fn new(identity: JetGameTraceIdentity) -> JetGameFrameProfiler Never! { JetGameFrameProfiler.with_capacity(identity, @MAX_HISTORY) }
+    fn with_capacity(identity: JetGameTraceIdentity, history_capacity: Int) -> JetGameFrameProfiler Never! {
+        JetGameFrameProfiler{trace_identity: ~identity, context: None, history: JetGameFrameHistory.with_capacity(identity, history_capacity), state: JetGameFrameProfilerState.Running, last_frame: None, error_pause: None, receipts: Queue.new(), next_receipt_sequence: U64{1}}
+    }
+    fn set_context(&self, context: JetGameTraceContext) -> Unit JetGameFrameProfilerError! {
+        context.validate()
+        if self.last_frame == .Val(frame) {
+            if frame.scene != context.scene -> return Err(JetGameFrameProfilerError.InvalidTraceContext("trace scene does not match the profiler frame stream"))
+        }
+        self.context = Val(context)
+        Ok(())
+    }
+    fn paused_frame(self) -> JetGameFrameIdentity? Never! {
+        if self.state == JetGameFrameProfilerState.Running -> return None
+        self.last_frame
+    }
+    fn active_error_pause(self) -> JetGameErrorPause? Never! { self.error_pause }
+    fn record(&self, fact: JetGameSampleFact) -> JetGameFrameReceipt JetGameFrameProfilerError! {
+        if self.state != JetGameFrameProfilerState.Running -> return Err(JetGameFrameProfilerError.ProfilerPaused)
+        kind :: if fact.kind() == {
+            .Frame -> JetGameFrameReceiptKind.Frame
+            .Phase -> JetGameFrameReceiptKind.Phase
+            .Function -> JetGameFrameReceiptKind.Function
+            .Draw -> JetGameFrameReceiptKind.Draw
+        }
+        frame :: ~fact.frame_identity()
+        sequence :: &self.history.append(fact)
+        self.last_frame = Val(~frame)
+        Ok(&self.push_receipt(kind, self.state, self.state, Val(frame), Val(sequence), ~self.error_pause))
+    }
+    fn record_frame(&self, sample: JetGameFrameSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.record(JetGameSampleFact.Frame(sample)) }
+    fn record_phase(&self, sample: JetGamePhaseSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.record(JetGameSampleFact.Phase(sample)) }
+    fn record_function(&self, sample: JetGameFunctionSample) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.record(JetGameSampleFact.Function(sample)) }
+    fn record_draw(&self, sample: JetGameDrawEvent) -> JetGameFrameReceipt JetGameFrameProfilerError! { &self.record(JetGameSampleFact.Draw(sample)) }
+    fn pause(&self) -> JetGameFrameReceipt Never! {
+        before :: self.state
+        if self.state == JetGameFrameProfilerState.Running -> self.state = JetGameFrameProfilerState.Paused
+        &self.push_receipt(JetGameFrameReceiptKind.Paused, before, self.state, ~self.last_frame, None, ~self.error_pause)
+    }
+    fn resume(&self) -> JetGameFrameReceipt Never! {
+        before :: self.state
+        self.state = JetGameFrameProfilerState.Running
+        self.error_pause = None
+        &self.push_receipt(JetGameFrameReceiptKind.Resumed, before, self.state, ~self.last_frame, None, None)
+    }
+    fn pause_on_error(&self, source: JetGameSourceSpan, code: String, message: String) -> JetGameFrameReceipt JetGameFrameProfilerError! {
+        pause :: JetGameErrorPause.new(source, code, message)
+        before :: self.state
+        self.state = JetGameFrameProfilerState.ErrorPaused
+        self.error_pause = Val(~pause)
+        Ok(&self.push_receipt(JetGameFrameReceiptKind.ErrorPaused, before, self.state, ~self.last_frame, None, Val(pause)))
+    }
+    fn draw_cursor(self, frame: JetGameFrameIdentity) -> JetGameDrawCursor JetGameFrameProfilerError! {
+        if self.state == JetGameFrameProfilerState.Running -> return Err(JetGameFrameProfilerError.ProfilerNotPaused)
+        frame.validate()
+        check_trace_fields(self.trace_identity, frame.build, frame.revision, frame.trace_id)
+        retained := false
+        loop fact in self.history.facts {
+            if same_frame(fact.frame_identity(), frame) {
+                retained = true
+                break
+            }
+        }
+        if !retained -> return Err(JetGameFrameProfilerError.FrameNotRetained(frame.frame_id))
+        Ok(JetGameDrawCursor.new(frame))
+    }
+    fn bottleneck(self, limit: Int) -> JetGameBottleneckProjection Never! { self.history.bottleneck(limit) }
+    fn push_receipt(&self, kind: JetGameFrameReceiptKind, before: JetGameFrameProfilerState, after: JetGameFrameProfilerState, frame: JetGameFrameIdentity?, sample_sequence: U64?, error_pause: JetGameErrorPause?) -> JetGameFrameReceipt Never! {
+        sequence :: self.next_receipt_sequence
+        self.next_receipt_sequence = sat_add(sequence, U64{1})
+        receipt :: JetGameFrameReceipt{sequence: sequence, kind: kind, before: before, after: after, trace_identity: ~self.trace_identity, frame: frame, sample_sequence: sample_sequence, error_pause: error_pause, dropped_samples: self.history.dropped_samples}
+        if self.receipts.len() == @MAX_RECEIPTS -> _ :: &self.receipts.pop_front()
+        &self.receipts.push_back(~receipt)
+        receipt
+    }
+}
+
+fn require_text(value: String, field: String) -> Unit JetGameFrameProfilerError! {
+    if value.count_bytes() == 0 -> return Err(JetGameFrameProfilerError.EmptyIdentity(field))
+    Ok(())
+}
+fn require_error_pause_text(value: String, field: String) -> Unit JetGameFrameProfilerError! {
+    if value.count_bytes() == 0 -> return Err(JetGameFrameProfilerError.InvalidErrorPause(field))
+    Ok(())
+}
+fn check_trace_fields(expected: JetGameTraceIdentity, build: String, revision: String, trace_id: String) -> Unit JetGameFrameProfilerError! {
+    if expected.build != build -> return Err(JetGameFrameProfilerError.BuildMismatch(~expected.build, ~build))
+    if expected.revision != revision -> return Err(JetGameFrameProfilerError.RevisionMismatch(~expected.revision, ~revision))
+    if expected.trace_id != trace_id -> return Err(JetGameFrameProfilerError.TraceMismatch(~expected.trace_id, ~trace_id))
+    Ok(())
+}
+fn check_trace(expected: JetGameTraceIdentity, actual: JetGameTraceIdentity) -> Unit JetGameFrameProfilerError! { check_trace_fields(expected, actual.build, actual.revision, actual.trace_id) }
+fn same_frame(left: JetGameFrameIdentity, right: JetGameFrameIdentity) -> Bool Never! {
+    left.frame_id == right.frame_id && left.scene == right.scene && left.frame_index == right.frame_index && left.build == right.build && left.revision == right.revision && left.trace_id == right.trace_id
+}
+fn check_frame(expected: JetGameFrameIdentity, actual: JetGameFrameIdentity) -> Unit JetGameFrameProfilerError! {
+    check_trace_fields(expected.trace_identity(), actual.build, actual.revision, actual.trace_id)
+    if !same_frame(expected, actual) -> return Err(JetGameFrameProfilerError.FrameMismatch(~expected, ~actual))
+    Ok(())
+}
+fn sat_add(left: U64, right: U64) -> U64 Never! {
+    if right > U64{0xffffffffffffffff} - left -> return U64{0xffffffffffffffff}
+    left + right
+}
+fn domain_order(domain: JetGameTimeDomain) -> Int Never! { if domain == .Cpu -> 0 else -> 1 }
+fn hash_byte(hash: U64, byte: U8) -> U64 Never! { (hash ~| U64.from_u8(byte)).wrapping_mul(U64{0x100000001b3}) }
+fn hash_bytes(hash: U64, bytes: [U8]) -> U64 Never! {
+    out := hash
+    loop byte in bytes -> out = hash_byte(out, byte)
+    out
+}
+fn hash_u64(hash: U64, value: U64) -> U64 Never! {
+    out := hash
+    shift := 0
+    loop shift < 64 {
+        out = hash_byte(out, U8{Int.from_u64((value >> shift) & U64{255})})
+        shift += 8
+    }
+    out
+}
+pub fn frame_id(scene: String, frame_index: U64, build: String, revision: String) -> U64 Never! {
+    hash := hash_bytes(U64{0xcbf29ce484222325}, "jet.game.frame.profiler.v1".bytes())
+    hash = hash_byte(hash, U8{0})
+    hash = hash_u64(hash, U64.from_int(scene.count_bytes()))
+    hash = hash_bytes(hash, scene.bytes())
+    hash = hash_u64(hash, U64.from_int(build.count_bytes()))
+    hash = hash_bytes(hash, build.bytes())
+    hash = hash_u64(hash, U64.from_int(revision.count_bytes()))
+    hash = hash_bytes(hash, revision.bytes())
+    hash_u64(hash, frame_index)
+}
+pub fn draw_id(frame_id: U64, event_index: U64) -> U64 Never! {
+    hash := hash_bytes(U64{0xcbf29ce484222325}, "jet.game.draw.v1".bytes())
+    hash = hash_byte(hash, U8{0})
+    hash_u64(hash_u64(hash, frame_id), event_index)
+}
+fn append_bytes(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
+pub fn json_string(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{U8{34}}
+    at := 0
+    hex :: "0123456789abcdef".bytes()
+    loop at < raw.len() {
+        cp :: unicode.scalar_at(raw, at)
+        width :: unicode.utf8_width_at(raw, at)
+        if cp == 34 -> append_bytes(&out, "\\\"")
+        else if cp == 92 -> append_bytes(&out, "\\\\")
+        else if cp == 10 -> append_bytes(&out, "\\n")
+        else if cp == 13 -> append_bytes(&out, "\\r")
+        else if cp == 9 -> append_bytes(&out, "\\t")
+        else if cp < 32 || (cp >= 127 && cp <= 159) {
+            append_bytes(&out, "\\u")
+            &out.push(hex[(cp >> 12) & 15])
+            &out.push(hex[(cp >> 8) & 15])
+            &out.push(hex[(cp >> 4) & 15])
+            &out.push(hex[cp & 15])
+        } else {
+            loop i in at..<(at + width) -> &out.push(raw[i])
+        }
+        at += width
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? panic("game frame profiler JSON encoder produced invalid UTF-8")
+}
+pub fn trace_frame_json(frame: JetGameFrameIdentity) -> String Never! {
+    "{{\"frame_id\":{frame.frame_id},\"scene\":{json_string(frame.scene)},\"frame_index\":{frame.frame_index},\"build\":{json_string(frame.build)},\"revision\":{json_string(frame.revision)},\"trace_id\":{json_string(frame.trace_id)}}}"
+}
+
+pub struct JetGameCrashReporterConfig {
+    pub reporter: String
+    pub consent: String
+    pub target: String
+    pub build: String
+    pub revision: String
+    pub development_stripping: Bool
+    pub upload_policy: JetGameCrashUploadPolicy
+    pub retention_mode: String
+    pub retention_path: String
+    pub retention_limit: U64
+    fn new(reporter: String, consent: String, target: String, build: String, revision: String, development_stripping: Bool, upload_policy: JetGameCrashUploadPolicy, retention_mode: String, retention_path: String, retention_limit: U64) -> JetGameCrashReporterConfig Never! {
+        JetGameCrashReporterConfig{reporter: reporter, consent: consent, target: target, build: build, revision: revision, development_stripping: development_stripping, upload_policy: upload_policy, retention_mode: retention_mode, retention_path: retention_path, retention_limit: retention_limit}
+    }
+    fn active(self) -> Bool Never! { self.reporter != "off" && self.consent == "granted" }
+    fn validate(self, platform: native_path.PathPlatform) -> Unit Err! {
+        if self.reporter != "off" && self.reporter != "on" && self.reporter != "opt-in" -> return Err("unknown game crash reporter `{self.reporter}`")
+        if self.consent != "not-requested" && self.consent != "granted" && self.consent != "denied" -> return Err("unknown game crash consent `{self.consent}`")
+        if self.reporter == "on" && self.consent != "granted" -> return Err("game crash reporter `on` requires granted consent")
+        if self.reporter == "off" && self.consent == "granted" -> return Err("game crash consent cannot be granted when the reporter is off")
+        self.upload_policy.validate() ?? return Err(err.message())
+        require_text(self.target, "crash target") ?? return Err(err.message())
+        require_text(self.build, "crash build") ?? return Err(err.message())
+        require_text(self.revision, "crash revision") ?? return Err(err.message())
+        if !self.active() -> return Ok(())
+        if self.upload_policy != .Never -> return Err("game crash upload requires an explicit transport adapter; package runtime stays local")
+        if self.retention_mode != "bounded-persisted" -> return Err("active game crash reporter requires bounded persisted retention")
+        if self.retention_limit != U64{1} -> return Err("game crash reporter retention must keep exactly {@MAX_PERSISTED} report")
+        validate_relative_path(self.retention_path, platform)
+    }
+}
+pub fn crash_reporter_route(policy: JetGameCrashUploadPolicy) -> String Never! { if policy == { .Never -> "local" .LoopbackOnly -> "loopback" .Explicit(_) -> "explicit" } }
+pub fn crash_reporter_truncate(value: String, max_chars: Int) -> String Never! {
+    raw :: value.bytes()
+    end := 0
+    count := 0
+    loop end < raw.len() && count < max_chars {
+        end += unicode.utf8_width_at(raw, end)
+        count += 1
+    }
+    // #4303: mutable view binding until borrowed String call lowering is fixed.
+    prefix := value.slice(0, count)
+    ~prefix
+}
+// Native reporter bodies at Rust1910-1958,2005-2103,2132-2166 are NOT
+// callable declarations here: #4494/#4500 gate once-only process-static state,
+// poison-aware mutex loans, panic payload/location hook chaining/catch-unwind,
+// and forced native backtrace. No Rust bridge or success fallback is installed.
+// Persistence requires SAME retained_descriptor create_dir_all/write/rename,
+// os_path_ingress current_exe/current_dir/var_os and native process id; discovery
+// requires SAME read_dir stream, flatten-errors/take32, original OsPath equality,
+// parent/join (including ../Resources), and deterministic resource cleanup.
+// #4409 additionally gates read_text invalid-UTF8 InvalidData fidelity.
+// #4483 gates Path::is_absolute semantics and manifest usize overflow below.
+
+// Rust2113: target Path law comes from the canonical path owner. The target
+// platform is a required fact, not inferred from the running host (#4483).
+pub fn validate_relative_path(path: String, platform: native_path.PathPlatform) -> Unit Err! {
+    raw :: path.bytes()
+    invalid := raw.len() == 0 || native_path.is_absolute(native_path.from_text(path, platform))
+    at := 0
+    part_start := 0
+    loop at < raw.len() {
+        cp :: unicode.scalar_at(raw, at)
+        if cp == 92 || cp < 32 || (cp >= 127 && cp <= 159) -> invalid = true
+        if cp == 47 {
+            size :: at - part_start
+            if size == 0 || (size == 1 && raw[part_start] == U8{46}) || (size == 2 && raw[part_start] == U8{46} && raw[part_start + 1] == U8{46}) -> invalid = true
+            part_start = at + 1
+        }
+        at += unicode.utf8_width_at(raw, at)
+    }
+    size :: raw.len() - part_start
+    if size == 0 || (size == 1 && raw[part_start] == U8{46}) || (size == 2 && raw[part_start] == U8{46} && raw[part_start + 1] == U8{46}) -> invalid = true
+    if invalid -> return Err("game crash retention path `{path}` is not a safe relative path")
+    Ok(())
+}
+
+// Preserve the source's deliberately small manifest scanner; this is NOT a
+// full JSON parser (unknown escaped characters pass through unchanged).
+// Byte offsets are into the original UTF8 String. #4303 mutable slice views.
+fn manifest_value(source: String, key: String) -> String? Never! {
+    needle :: "\"{key}\""
+    parts :: unicode.split_once(source, needle) ?? return None
+    tail := parts.after.trim_start() // #4303
+    if !tail.starts_with(":") -> return None
+    value := tail.slice(1, tail.len()).trim_start() // #4303
+    Val(value)
+}
+pub fn crash_manifest_string(source: String, key: String) -> String? Never! {
+    value := manifest_value(source, key) ?? return None // #4303
+    if !value.starts_with("\"") -> return None
+    raw :: value.bytes()
+    out := [U8]{}
+    escaped := false
+    at := 1
+    loop at < raw.len() {
+        byte :: raw[at]
+        if escaped {
+            if byte == U8{110} -> &out.push(U8{10})
+            else if byte == U8{114} -> &out.push(U8{13})
+            else if byte == U8{116} -> &out.push(U8{9})
+            else -> &out.push(byte)
+            escaped = false
+        } else if byte == U8{92} -> escaped = true
+        else if byte == U8{34} -> return Val(String.from_bytes(out) ?? panic("manifest scanner broke UTF-8"))
+        else -> &out.push(byte)
+        at += 1
+    }
+    None
+}
+pub fn crash_manifest_integer(source: String, key: String, usize_max: U64) -> U64? Never! {
+    value := manifest_value(source, key) ?? return None // #4303
+    raw :: value.bytes()
+    end := 0
+    loop end < raw.len() && raw[end] >= U8{48} && raw[end] <= U8{57} -> end += 1
+    if end == 0 -> return None
+    // Canonical selected-width decimal overflow, no signed Int narrowing.
+    target_numbers.parse_usize_decimal(raw[0..<end], usize_max)
+}
+pub fn crash_manifest_bool(source: String, key: String) -> Bool? Never! {
+    value := manifest_value(source, key) ?? return None // #4303
+    if value.starts_with("true") -> return Val(true)
+    if value.starts_with("false") -> return Val(false)
+    None
+}
+pub fn crash_reporter_config_from_manifest(manifest: String, usize_max: U64) -> JetGameCrashReporterConfig? Never! {
+    runtime_parts :: unicode.split_once(manifest, "\"crash_runtime\"") ?? return None
+    runtime := runtime_parts.after // #4303
+    if (crash_manifest_string(runtime, "abi") ?? return None) != @CRASH_REPORTER_ABI -> return None
+    if (crash_manifest_string(runtime, "installation") ?? return None) != "installed" -> return None
+    reporter :: crash_manifest_string(manifest, "crash_reporter") ?? return None
+    consent :: crash_manifest_string(manifest, "crash_consent") ?? return None
+    if (crash_manifest_string(runtime, "routing") ?? return None) != "local" -> return None
+    target :: crash_manifest_string(manifest, "target") ?? return None
+    build :: crash_manifest_string(manifest, "build_identity") ?? return None
+    revision :: crash_manifest_string(manifest, "source_revision") ?? return None
+    stripping :: crash_manifest_bool(manifest, "development_stripping") ?? return None
+    policy_name :: crash_manifest_string(runtime, "upload_policy") ?? return None
+    policy :: if policy_name == {
+        "never" -> JetGameCrashUploadPolicy.Never
+        "loopback-only" -> JetGameCrashUploadPolicy.LoopbackOnly
+        "explicit" -> JetGameCrashUploadPolicy.Explicit(crash_manifest_string(runtime, "upload_endpoint") ?? return None)
+        else -> return None
+    }
+    retention_parts :: unicode.split_once(runtime, "\"retention\"") ?? return None
+    retention := retention_parts.after // #4303
+    mode :: crash_manifest_string(retention, "mode") ?? return None
+    path :: crash_manifest_string(retention, "path") ?? return None
+    limit :: crash_manifest_integer(retention, "max_reports", usize_max) ?? return None
+    Val(JetGameCrashReporterConfig.new(reporter, consent, target, build, revision, stripping, policy, mode, path, limit))
+}
+
+fn function_order(left: JetGameFunctionIdentity, right: JetGameFunctionIdentity) -> Ordering Never! {
+    (left.function_id <=> right.function_id)
+        .then(left.name <=> right.name)
+        .then(left.source.source_id <=> right.source.source_id)
+        .then(left.source.file <=> right.source.file)
+        .then(left.source.start_line <=> right.source.start_line)
+        .then(left.source.start_column <=> right.source.start_column)
+        .then(left.source.end_line <=> right.source.end_line)
+        .then(left.source.end_column <=> right.source.end_column)
+}
+
+// Rust2054-2074: serialization is independent of the native panic hook and
+// stays in the canonical owner. Native capture must pass its actual bundle.
+fn persisted_crash_json(config: JetGameCrashReporterConfig, bundle: JetGameCrashBundle) -> String Never! {
+    "{{\"runtime\":{json_string(@CRASH_REPORTER_ABI)},\"reporter\":{json_string(config.reporter)},\"consent\":{json_string(config.consent)},\"target\":{json_string(config.target)},\"memory\":{{\"max_stacks\":{@MAX_CRASH_STACKS},\"max_logs\":{@MAX_CRASH_LOGS}}},\"retention\":{{\"mode\":{json_string(config.retention_mode)},\"path\":{json_string(config.retention_path)},\"max_reports\":{config.retention_limit}}},\"upload\":{{\"policy\":{config.upload_policy.render_json()},\"routing\":{json_string(crash_reporter_route(config.upload_policy))}}},\"bundle\":{bundle.render_json()}}}"
+}
+
+// Exact native capability request / original branch contract:
+// Rust1910-1942: canonical typed Once<Mutex<JetGameCrashReporterConfig>>,
+// const/static address, poison-aware lock guard and retained payload loans;
+// second once flag installs one panic hook. validate precedes active check;
+// inactive success must NOT initialize either once or touch hooks. Same config
+// is accepted; differing config is Err! with the exact string
+// "game crash reporter was already installed with different package facts".
+// Poisoned install lock is Err!("game crash reporter state is poisoned").
+// Required panic owner APIs: take_hook()->owned callback; set_hook(^callback);
+// callback accepts borrowed PanicHookInfo (typed str/String payload and optional
+// location); catch_unwind executes capture and discards only capture failure,
+// then previous hook runs once outside catch. No canonical producer exists.
+// Rust2005-2076: missing state returns; poisoned capture lock recovers inner
+// config rather than refusing. Actual panic frame is scene="runtime", index0,
+// trace="crash-runtime"; bundle reason="panic". Missing payload/location use
+// "panic payload unavailable"/"panic location unavailable". Location is
+// "panic at line {line}, column {column}". Log is "{location}: {panic_text}";
+// text/log/backtrace each truncate to4096 SCALARS, NOT bytes. force_capture is
+// called only when !development_stripping; empty backtrace adds no stack.
+// Rust2078-2103: only mode bounded-persisted and limit1 proceeds. Base is actual
+// current_exe.parent, then actual current_dir on failure/missing parent. No
+// base returns. Join original retention_path; create_dir_all failure returns;
+// write ".latest-{actual pid}.tmp", rename to "latest.json" only on write Ok;
+// rename error ignored; do NOT clean temporary or add sync/retry behavior.
+// Rust1947-1958: candidate read_text failure/config None continues; first parsed
+// config calls install (discarding error) then returns, not only first success.
+// Rust2132-2166: APPDIR usr/share entries.flatten().take(32) first, then
+// APPDIR/jet/jet-game.json; current_exe.parent/jet-game.json, parent/jet/
+// jet-game.json, parent/../Resources/jet-game.json, parent.parent/share entries
+// flatten().take(32); current_dir/jet-game.json last. Deduplicate by original
+// Path equality, not canonicalize/display. Failed read_dir is skipped, and
+// entry failures do NOT consume the32 successful-entry budget.
+// Required retained ABI additions: os_path_ingress.current_exe()->OSPath IOError!,
+// SAME native process id()->U32 Never!, and actual caller-retained DirectoryEntries
+// read_dir/next/close plus retained_descriptor.read_text/create_dir_all/write/rename.
+// Existing kernel_path_components owns parent/join/equality; no second codec.
+// #4392: zero-copy String UTF8 bytes and borrowed fact/frame/queue projections
+// still need canonical lending lowering. Current String.bytes/Queue.peek clone
+// cannot establish the reference's allocation/ownership parity.
+// Manifest split_once uses the canonical Unicode owner, so non-ASCII prefixes
+// do not reinterpret scalar indices as bytes. A borrowed split_once suffix
+// (without copying its unused prefix) remains part of the #4392 request.

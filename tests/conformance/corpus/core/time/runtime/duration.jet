@@ -1,0 +1,127 @@
+// Duration.rs scalar policy, including the duration rows of
+// tests/comptime_core_pure_parity.rs (fractional 1750ms, negative -1s,
+// difference -1000ms and zero). Signed128 rounding acceptance is retained in
+// the blocked carrier repro corpus; it is not claimed by these scalar tests.
+use core.time.runtime.kernel_duration as duration_kernel
+use core.math as duration_test_math
+
+fn duration_test_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+fn duration_test_max() -> I64 Never! { I64{9223372036854775807} }
+
+#Test("duration checked integer constructors preserve i64 bounds") {
+    assert_eq(duration_kernel.jet_duration_kernel_from_int(I64{1750}, I64{1000000}) ?? I64{0}, I64{1750000000})
+    assert_eq(duration_kernel.jet_duration_kernel_from_int(duration_test_min(), I64{1}) ?? I64{0}, duration_test_min())
+    assert_eq(duration_kernel.jet_duration_kernel_from_int(duration_test_max(), I64{1}) ?? I64{0}, duration_test_max())
+    assert(duration_kernel.jet_duration_kernel_from_int(duration_test_max(), I64{2}) == None)
+    assert(duration_kernel.jet_duration_kernel_from_int(duration_test_min(), I64{-1}) == None)
+    assert_eq(duration_kernel.jet_duration_kernel_from_int(duration_test_min(), I64{0}) ?? I64{1}, I64{0})
+    assert_eq(duration_kernel.jet_duration_kernel_from_int(I64{-3}, I64{-1000}) ?? I64{0}, I64{3000})
+}
+
+#Test("duration float constructors check finiteness and exclusive positive bound") {
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(1.75, I64{1000000000}) ?? I64{0}, I64{1750000000})
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(-1.75, I64{1}) ?? I64{0}, I64{-1})
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(-0.9, I64{1}) ?? I64{1}, I64{0})
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(-9223372036854775808.0, I64{1}) ?? I64{0}, duration_test_min())
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(9223372036854774784.0, I64{1}) ?? I64{0}, I64{9223372036854774784})
+    assert(duration_kernel.jet_duration_kernel_from_float(9223372036854775808.0, I64{1}) == None)
+    assert(duration_kernel.jet_duration_kernel_from_float(-9223372036854777856.0, I64{1}) == None)
+    infinity :: duration_test_math.from_bits(9218868437227405312)
+    nan :: duration_test_math.from_bits(9221120237041090560)
+    assert(duration_kernel.jet_duration_kernel_from_float(infinity, I64{1}) == None)
+    assert(duration_kernel.jet_duration_kernel_from_float(-infinity, I64{1}) == None)
+    assert(duration_kernel.jet_duration_kernel_from_float(nan, I64{1}) == None)
+    assert(duration_kernel.jet_duration_kernel_from_float(infinity, I64{0}) == None)
+    assert_eq(duration_kernel.jet_duration_kernel_from_float(1.75, I64{-1000}) ?? I64{0}, I64{-1750})
+}
+
+#Test("duration scale and checked divide are checked and truncate toward zero") {
+    assert_eq(duration_kernel.jet_duration_kernel_scale(I64{-5}, I64{3}) ?? I64{0}, I64{-15})
+    assert(duration_kernel.jet_duration_kernel_scale(duration_test_max(), I64{2}) == None)
+    assert(duration_kernel.jet_duration_kernel_scale(duration_test_min(), I64{-1}) == None)
+    assert_eq(duration_kernel.jet_duration_kernel_divide(I64{-7}, I64{3}) ?? I64{0}, I64{-2})
+    assert_eq(duration_kernel.jet_duration_kernel_divide(I64{7}, I64{-3}) ?? I64{0}, I64{-2})
+    assert_eq(duration_kernel.jet_duration_kernel_divide(I64{-7}, I64{-3}) ?? I64{0}, I64{2})
+    assert_eq(duration_kernel.jet_duration_kernel_divide(duration_test_min(), I64{1}) ?? I64{0}, duration_test_min())
+    assert(duration_kernel.jet_duration_kernel_divide(duration_test_min(), I64{-1}) == None)
+    assert(duration_kernel.jet_duration_kernel_divide(I64{1}, I64{0}) == None)
+}
+
+#Test("duration constructor and scaling errors are exact") {
+    assert_eq(duration_kernel.jet_duration_kernel_scale_error_reason(), "duration scaling overflowed or divided by zero")
+    assert_eq(duration_kernel.jet_duration_kernel_int_error_reason(), "duration is outside the supported range")
+    assert_eq(duration_kernel.jet_duration_kernel_float_error_reason(), "duration must be finite and inside the supported range")
+}
+
+#Test("duration whole unit reads truncate negative fractions") {
+    assert_eq(duration_kernel.jet_duration_kernel_in(I64{1750000000}, I64{1000000}), I64{1750})
+    assert_eq(duration_kernel.jet_duration_kernel_in(I64{-1500000000}, I64{1000000000}), I64{-1})
+    assert_eq(duration_kernel.jet_duration_kernel_in(I64{7}, I64{-3}), I64{-2})
+    assert_eq(duration_kernel.jet_duration_kernel_in(I64{-7}, I64{-3}), I64{2})
+    assert_eq(duration_kernel.jet_duration_kernel_total_seconds(I64{-999999999}), I64{0})
+    assert_eq(duration_kernel.jet_duration_kernel_total_seconds(I64{-1500000000}), I64{-1})
+    assert_eq(duration_kernel.jet_duration_kernel_seconds_value(I64{-1500000000}), -1.5)
+    assert(duration_kernel.jet_duration_kernel_is_zero(I64{0}))
+    assert(!duration_kernel.jet_duration_kernel_is_zero(I64{-1}))
+    difference :: duration_kernel.jet_duration_kernel_difference(I64{500000000}, I64{1500000000})
+    assert_eq(duration_kernel.jet_duration_kernel_in(difference, I64{1000000}), I64{-1000})
+}
+
+#Test("duration fixed units recognize every Rust spelling and no others") {
+    cases :: [(unit: String, ns: I64)]{
+        (unit: "nanosecond", ns: I64{1}), (unit: "nanoseconds", ns: I64{1}), (unit: "ns", ns: I64{1}),
+        (unit: "microsecond", ns: I64{1000}), (unit: "microseconds", ns: I64{1000}), (unit: "us", ns: I64{1000}), (unit: "µs", ns: I64{1000}),
+        (unit: "millisecond", ns: I64{1000000}), (unit: "milliseconds", ns: I64{1000000}), (unit: "ms", ns: I64{1000000}),
+        (unit: "second", ns: I64{1000000000}), (unit: "seconds", ns: I64{1000000000}), (unit: "s", ns: I64{1000000000}),
+        (unit: "minute", ns: I64{60000000000}), (unit: "minutes", ns: I64{60000000000}), (unit: "min", ns: I64{60000000000}),
+        (unit: "hour", ns: I64{3600000000000}), (unit: "hours", ns: I64{3600000000000}), (unit: "h", ns: I64{3600000000000}),
+        (unit: "day", ns: I64{86400000000000}), (unit: "days", ns: I64{86400000000000}), (unit: "d", ns: I64{86400000000000}),
+        (unit: "week", ns: I64{604800000000000}), (unit: "weeks", ns: I64{604800000000000}), (unit: "w", ns: I64{604800000000000}),
+    }
+    loop item in cases {
+        assert_eq(duration_kernel.jet_duration_kernel_unit_nanoseconds(item.unit) ?? I64{0}, item.ns)
+    }
+    assert(duration_kernel.jet_duration_kernel_unit_nanoseconds("month") == None)
+    assert(duration_kernel.jet_duration_kernel_unit_nanoseconds("MS") == None)
+    assert(duration_kernel.jet_duration_kernel_unit_nanoseconds("") == None)
+    assert_eq(duration_kernel.jet_duration_kernel_total_in(I64{1500000000}, "seconds"), 1.5)
+    assert_eq(duration_kernel.jet_duration_kernel_total_in(I64{-1500000000}, "s"), -1.5)
+    assert_eq(duration_kernel.jet_duration_kernel_total_in(I64{1000}, "µs"), 1.0)
+    assert_eq(duration_kernel.jet_duration_kernel_total_in(I64{1}, "month"), 0.0)
+}
+
+#Test("duration abs negation sign and arithmetic saturate only at i64 boundary") {
+    assert_eq(duration_kernel.jet_duration_kernel_abs(duration_test_min()), duration_test_max())
+    assert_eq(duration_kernel.jet_duration_kernel_abs(I64{-17}), I64{17})
+    assert_eq(duration_kernel.jet_duration_kernel_abs(I64{17}), I64{17})
+    assert_eq(duration_kernel.jet_duration_kernel_negated(duration_test_min()), duration_test_max())
+    assert_eq(duration_kernel.jet_duration_kernel_negated(duration_test_max()), I64{-9223372036854775807})
+    assert_eq(duration_kernel.jet_duration_kernel_sign(duration_test_min()), I64{-1})
+    assert_eq(duration_kernel.jet_duration_kernel_sign(I64{0}), I64{0})
+    assert_eq(duration_kernel.jet_duration_kernel_sign(duration_test_max()), I64{1})
+    assert_eq(duration_kernel.jet_duration_kernel_add(duration_test_max(), I64{1}), duration_test_max())
+    assert_eq(duration_kernel.jet_duration_kernel_add(duration_test_min(), I64{-1}), duration_test_min())
+    assert_eq(duration_kernel.jet_duration_kernel_add(duration_test_min(), duration_test_max()), I64{-1})
+    assert_eq(duration_kernel.jet_duration_kernel_sub(duration_test_min(), I64{1}), duration_test_min())
+    assert_eq(duration_kernel.jet_duration_kernel_sub(duration_test_max(), I64{-1}), duration_test_max())
+    assert_eq(duration_kernel.jet_duration_kernel_difference(duration_test_min(), duration_test_max()), duration_test_min())
+    assert_eq(duration_kernel.jet_duration_kernel_difference(duration_test_max(), duration_test_min()), duration_test_max())
+}
+
+#Test("duration show uses the canonical ns suffix") {
+    assert_eq(duration_kernel.jet_duration_kernel_show(I64{0}), "0ns")
+    assert_eq(duration_kernel.jet_duration_kernel_show(I64{-17}), "-17ns")
+    assert_eq(duration_kernel.jet_duration_kernel_show(duration_test_min()), "-9223372036854775808ns")
+    assert_eq(duration_kernel.jet_duration_kernel_show(duration_test_max()), "9223372036854775807ns")
+}
+
+// The harness asserts that these primitive divisions stop; it does not
+// assert Rust's engine-specific panic text or source location.
+#Test("duration infallible whole-unit division traps on zero and signed overflow") {
+    .expect_fail {
+        _ :: duration_kernel.jet_duration_kernel_in(I64{1}, I64{0})
+    }
+    .expect_fail {
+        _ :: duration_kernel.jet_duration_kernel_in(duration_test_min(), I64{-1})
+    }
+}

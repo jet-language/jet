@@ -1,0 +1,110 @@
+// Source-bound scalar arithmetic assertions, NOT native timestamp/IO proof.
+// Oracle: Rust 1.97.1 commit 8bab26f4f68e0e26f0bb7960be334d5b520ea452,
+// library/core/src/time.rs Duration::{ZERO,MAX,as_nanos}, coretests/tests/time.rs
+// const_duration NANOS, std/src/sys/{time,pal/*/time} epoch/subtraction laws.
+// Literal expectations use independent decimal seconds*1e9+nanos or delta*100
+// split at 18446744073709551616, not this kernel's limb recurrence.
+use core.time.runtime.kernel_wide_time as wide_time
+
+fn assert_wide_parts(value: wide_time.UInt128Parts, hi: U64, lo: U64) Never! {
+    assert_eq(value.hi, hi)
+    assert_eq(value.lo, lo)
+}
+
+fn assert_epoch_parts(value: wide_time.UInt128Parts?, hi: U64, lo: U64) Never! {
+    present :: value ?? panic("expected exact post-epoch nanoseconds, not None")
+    assert_wide_parts(present, hi, lo)
+}
+
+#Test("wide epoch equality compares both unsigned words") {
+    left :: wide_time.UInt128Parts{hi: U64{1}, lo: U64{18446744073709551615}}
+    same :: wide_time.UInt128Parts{hi: U64{1}, lo: U64{18446744073709551615}}
+    other_high :: wide_time.UInt128Parts{hi: U64{0}, lo: U64{18446744073709551615}}
+    other_low :: wide_time.UInt128Parts{hi: U64{1}, lo: U64{9223372036854775808}}
+    assert(wide_time.equals(&left, &same))
+    assert(wide_time.equals(&same, &left))
+    assert(!wide_time.equals(&left, &other_high))
+    assert(!wide_time.equals(&left, &other_low))
+    assert(left == same)
+    assert(left != other_high)
+    assert(left != other_low)
+}
+
+#Test("Duration as_nanos original ZERO SECOND documentation and MAX assertions") {
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{0}, U32{0}), U64{0}, U64{0})
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{1}, U32{0}), U64{0}, U64{1000000000})
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{5}, U32{730023852}), U64{0}, U64{5730023852})
+    // Duration::MAX = Duration::new(u64::MAX,999_999_999).as_nanos().
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{18446744073709551615}, U32{999999999}), U64{999999999}, U64{18446744073709551615})
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{18446744073709551615}, U32{0}), U64{999999999}, U64{18446744072709551616})
+}
+
+#Test("Duration full unsigned seconds retain both input limbs") {
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{4294967295}, U32{999999999}), U64{0}, U64{4294967295999999999})
+    assert_wide_parts(wide_time.duration_nanoseconds(U64{4294967296}, U32{999999999}), U64{0}, U64{4294967296999999999})
+}
+
+#Test("Unix epoch and subsecond boundaries are exact") {
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{0}, I64{0}), U64{0}, U64{0})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{0}, I64{1}), U64{0}, U64{1})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{0}, I64{999999999}), U64{0}, U64{999999999})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{1}, I64{0}), U64{0}, U64{1000000000})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{1}, I64{1}), U64{0}, U64{1000000001})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{1}, I64{999999999}), U64{0}, U64{1999999999})
+}
+
+#Test("Unix duration_since before epoch stays None without clamping") {
+    assert(wide_time.unix_epoch_nanoseconds(I64{-1}, I64{999999999}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(I64{-1}, I64{0}) == None)
+    minimum :: I64{-9223372036854775807} - I64{1}
+    assert(wide_time.unix_epoch_nanoseconds(minimum, I64{0}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(minimum, I64{999999999}) == None)
+}
+
+#Test("Timespec new invalid nanoseconds preserve modified ok None") {
+    // Actual Timespec::new accepts precisely 0 <= ns < 1e9 on selected Linux.
+    assert(wide_time.unix_epoch_nanoseconds(I64{0}, I64{-1}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(I64{1}, I64{-1}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(I64{0}, I64{-1000000000}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(I64{0}, I64{1000000000}) == None)
+    assert(wide_time.unix_epoch_nanoseconds(I64{1}, I64{9223372036854775807}) == None)
+    minimum :: I64{-9223372036854775807} - I64{1}
+    assert(wide_time.unix_epoch_nanoseconds(I64{0}, minimum) == None)
+}
+
+#Test("Unix subsecond addition carries across a 32 bit limb") {
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{4}, I64{294967295}), U64{0}, U64{4294967295})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{4}, I64{294967296}), U64{0}, U64{4294967296})
+}
+
+#Test("Unix nanoseconds cross U64 maximum without truncation") {
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{18446744073}, I64{709551615}), U64{0}, U64{18446744073709551615})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{18446744073}, I64{709551616}), U64{1}, U64{0})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{18446744073}, I64{709551617}), U64{1}, U64{1})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{18446744074}, I64{0}), U64{1}, U64{290448384})
+}
+
+#Test("Unix Timespec MAX retains all 93 result bits") {
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{9223372036854775807}, I64{0}), U64{499999999}, U64{18446744072709551616})
+    assert_epoch_parts(wide_time.unix_epoch_nanoseconds(I64{9223372036854775807}, I64{999999999}), U64{499999999}, U64{18446744073709551615})
+}
+
+#Test("Windows FILETIME original epoch and adjacent ticks") {
+    assert(wide_time.windows_epoch_nanoseconds(U64{0}) == None)
+    assert(wide_time.windows_epoch_nanoseconds(U64{116444735999999999}) == None)
+    assert_epoch_parts(wide_time.windows_epoch_nanoseconds(U64{116444736000000000}), U64{0}, U64{0})
+    assert_epoch_parts(wide_time.windows_epoch_nanoseconds(U64{116444736000000001}), U64{0}, U64{100})
+    assert_epoch_parts(wide_time.windows_epoch_nanoseconds(U64{116444736010000000}), U64{0}, U64{1000000000})
+}
+
+#Test("Windows epoch subtraction carries borrow across native limbs") {
+    assert_epoch_parts(wide_time.windows_epoch_nanoseconds(U64{116444736717324288}), U64{0}, U64{71732428800})
+}
+
+#Test("Windows original signed interval limit does not invent unsigned future times") {
+    // SystemTime::MAX is from_intervals(i64::MAX); raw FILETIME highbit/MAX
+    // survive metadata marshaling but intervals() sees them as negative.
+    assert_epoch_parts(wide_time.windows_epoch_nanoseconds(U64{9223372036854775807}), U64{49}, U64{6802270473709551516})
+    assert(wide_time.windows_epoch_nanoseconds(U64{9223372036854775808}) == None)
+    assert(wide_time.windows_epoch_nanoseconds(U64{18446744073709551615}) == None)
+}

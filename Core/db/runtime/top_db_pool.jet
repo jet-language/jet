@@ -1,0 +1,778 @@
+// PORT-PENDING 0269 crates-jet-codegen-src-prelude-corelib-top-dbpool: crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:1-774
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DBPOOL1: one bounded connection pool state machine for every execution tier.
+//RS // The backend supplies driver construction, health, reset, and close hooks; pool
+//RS // admission, lease ownership, deadlines, and draining stay in this Prelude.
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum JetDbPoolLifecycle {
+//RS     Open,
+//RS     Draining,
+//RS     Drained,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct JetDbPoolReceipt {
+//RS     pub lifecycle: JetDbPoolLifecycle,
+//RS     pub max: i64,
+//RS     pub available: i64,
+//RS     pub leased: i64,
+//RS     pub opening: i64,
+//RS     pub ready: bool,
+//RS     pub acquires: i64,
+//RS     pub releases: i64,
+//RS     pub timeouts: i64,
+//RS     pub open_failures: i64,
+//RS     pub unhealthy: i64,
+//RS     pub replacements: i64,
+//RS     pub replacement_failures: i64,
+//RS }
+//RS 
+//RS impl JetDbPoolReceipt {
+//RS     pub fn render(&self) -> String {
+//RS         let lifecycle = match self.lifecycle {
+//RS             JetDbPoolLifecycle::Open => "open",
+//RS             JetDbPoolLifecycle::Draining => "draining",
+//RS             JetDbPoolLifecycle::Drained => "drained",
+//RS         };
+//RS         format!(
+//RS             "db.pool lifecycle={} max={} available={} leased={} opening={} ready={} acquires={} releases={} timeouts={} open_failures={} unhealthy={} replacements={} replacement_failures={}",
+//RS             lifecycle,
+//RS             self.max,
+//RS             self.available,
+//RS             self.leased,
+//RS             self.opening,
+//RS             if self.ready { 1 } else { 0 },
+//RS             self.acquires,
+//RS             self.releases,
+//RS             self.timeouts,
+//RS             self.open_failures,
+//RS             self.unhealthy,
+//RS             self.replacements,
+//RS             self.replacement_failures,
+//RS         )
+//RS     }
+//RS }
+//RS 
+//RS impl JetShow for JetDbPoolReceipt {
+//RS     fn jet_show(&self) -> String {
+//RS         self.render()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDisplay for JetDbPoolReceipt {
+//RS     fn jet_display(&self) -> String {
+//RS         self.render()
+//RS     }
+//RS }
+//RS 
+//RS impl JetDebug for JetDbPoolReceipt {
+//RS     fn jet_debug(&self) -> String {
+//RS         self.render()
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS pub struct JetDbPoolHooks<D> {
+//RS     pub open: Box<dyn Fn(&str) -> Result<D, jet_std::DBError> + Send + Sync>,
+//RS     pub health: Box<dyn Fn(&mut D) -> bool + Send + Sync>,
+//RS     pub reset: Box<dyn Fn(&mut D) -> bool + Send + Sync>,
+//RS     pub close: Box<dyn Fn(D) + Send + Sync>,
+//RS }
+//RS 
+//RS impl<D> JetDbPoolHooks<D> {
+//RS     pub fn new<O, H, R, C>(open: O, health: H, reset: R, close: C) -> Self
+//RS     where
+//RS         O: Fn(&str) -> Result<D, jet_std::DBError> + Send + Sync + 'static,
+//RS         H: Fn(&mut D) -> bool + Send + Sync + 'static,
+//RS         R: Fn(&mut D) -> bool + Send + Sync + 'static,
+//RS         C: Fn(D) + Send + Sync + 'static,
+//RS     {
+//RS         Self {
+//RS             open: Box::new(open),
+//RS             health: Box::new(health),
+//RS             reset: Box::new(reset),
+//RS             close: Box::new(close),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct JetDbPoolState<D> {
+//RS     lifecycle: JetDbPoolLifecycle,
+//RS     max: usize,
+//RS     available: Vec<D>,
+//RS     leased: usize,
+//RS     opening: usize,
+//RS     waiters: std::collections::VecDeque<u64>,
+//RS     next_ticket: u64,
+//RS     acquires: u64,
+//RS     releases: u64,
+//RS     timeouts: u64,
+//RS     open_failures: u64,
+//RS     unhealthy: u64,
+//RS     replacements: u64,
+//RS     replacement_failures: u64,
+//RS }
+//RS 
+//RS impl<D> JetDbPoolState<D> {
+//RS     fn new(max: usize) -> Self {
+//RS         Self {
+//RS             lifecycle: JetDbPoolLifecycle::Open,
+//RS             max,
+//RS             available: Vec::new(),
+//RS             leased: 0,
+//RS             opening: 0,
+//RS             waiters: std::collections::VecDeque::new(),
+//RS             next_ticket: 0,
+//RS             acquires: 0,
+//RS             releases: 0,
+//RS             timeouts: 0,
+//RS             open_failures: 0,
+//RS             unhealthy: 0,
+//RS             replacements: 0,
+//RS             replacement_failures: 0,
+//RS         }
+//RS     }
+//RS 
+//RS     fn reserved(&self) -> usize {
+//RS         self.available
+//RS             .len()
+//RS             .saturating_add(self.leased)
+//RS             .saturating_add(self.opening)
+//RS     }
+//RS 
+//RS     fn enqueue_waiter(&mut self) -> u64 {
+//RS         let ticket = self.next_ticket;
+//RS         self.next_ticket = self.next_ticket.wrapping_add(1);
+//RS         self.waiters.push_back(ticket);
+//RS         ticket
+//RS     }
+//RS 
+//RS     fn waiter_is_turn(&self, ticket: u64) -> bool {
+//RS         self.waiters.front().copied() == Some(ticket)
+//RS     }
+//RS 
+//RS     fn claim_waiter(&mut self, ticket: u64) {
+//RS         debug_assert!(self.waiter_is_turn(ticket));
+//RS         let _ = self.waiters.pop_front();
+//RS     }
+//RS 
+//RS     fn remove_waiter(&mut self, ticket: u64) {
+//RS         if let Some(index) = self.waiters.iter().position(|queued| *queued == ticket) {
+//RS             let _ = self.waiters.remove(index);
+//RS         }
+//RS     }
+//RS 
+//RS     fn mark_drained(&mut self) {
+//RS         if self.lifecycle == JetDbPoolLifecycle::Draining
+//RS             && self.available.is_empty()
+//RS             && self.leased == 0
+//RS             && self.opening == 0
+//RS         {
+//RS             self.lifecycle = JetDbPoolLifecycle::Drained;
+//RS         }
+//RS     }
+//RS 
+//RS     fn receipt(&self) -> JetDbPoolReceipt {
+//RS         fn count(value: usize) -> i64 {
+//RS             i64::try_from(value).unwrap_or(i64::MAX)
+//RS         }
+//RS         fn events(value: u64) -> i64 {
+//RS             i64::try_from(value).unwrap_or(i64::MAX)
+//RS         }
+//RS         JetDbPoolReceipt {
+//RS             lifecycle: self.lifecycle,
+//RS             max: count(self.max),
+//RS             available: count(self.available.len()),
+//RS             leased: count(self.leased),
+//RS             opening: count(self.opening),
+//RS             ready: self.lifecycle == JetDbPoolLifecycle::Open
+//RS                 && self.available.len().saturating_add(self.leased) > 0,
+//RS             acquires: events(self.acquires),
+//RS             releases: events(self.releases),
+//RS             timeouts: events(self.timeouts),
+//RS             open_failures: events(self.open_failures),
+//RS             unhealthy: events(self.unhealthy),
+//RS             replacements: events(self.replacements),
+//RS             replacement_failures: events(self.replacement_failures),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct JetDbPoolInner<D: Send + 'static> {
+//RS     url: String,
+//RS     hooks: JetDbPoolHooks<D>,
+//RS     state: std::sync::Mutex<JetDbPoolState<D>>,
+//RS     wake: std::sync::Condvar,
+//RS }
+//RS 
+//RS pub struct JetDbPool<D: Send + 'static> {
+//RS     inner: std::sync::Arc<JetDbPoolInner<D>>,
+//RS }
+//RS 
+//RS impl<D: Send + 'static> Clone for JetDbPool<D> {
+//RS     fn clone(&self) -> Self {
+//RS         Self {
+//RS             inner: self.inner.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct JetDbLease<D: Send + 'static> {
+//RS     pool: std::sync::Arc<JetDbPoolInner<D>>,
+//RS     // `close()` borrows the lease like every other resource close, so the
+//RS     // driver slot is emptied through a shared reference.
+//RS     driver: std::sync::Mutex<Option<D>>,
+//RS     healthy: bool,
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetDbLease<D> {
+//RS     pub fn driver_mut(&mut self) -> &mut D {
+//RS         self.driver
+//RS             .get_mut()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS             .as_mut()
+//RS             .expect("database lease already released")
+//RS     }
+//RS 
+//RS     pub fn mark_unhealthy(&mut self) {
+//RS         self.healthy = false;
+//RS     }
+//RS 
+//RS     pub fn with_driver<R, F>(&mut self, operation: F) -> Result<R, jet_std::DBError>
+//RS     where
+//RS         F: FnOnce(&mut D) -> Result<R, jet_std::DBError>,
+//RS     {
+//RS         let result = {
+//RS             let driver = self.driver_mut();
+//RS             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(driver)))
+//RS         };
+//RS         match result {
+//RS             Ok(Ok(value)) => Ok(value),
+//RS             Ok(Err(error)) => Err(error),
+//RS             Err(_) => {
+//RS                 self.mark_unhealthy();
+//RS                 Err(jet_db_pool_error("database driver operation panicked"))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     /// Return the driver to its pool now. Releasing twice, or dropping a
+//RS     /// released lease, is a no-op.
+//RS     pub fn release(&self) {
+//RS         let driver = self
+//RS             .driver
+//RS             .lock()
+//RS             .unwrap_or_else(std::sync::PoisonError::into_inner)
+//RS             .take();
+//RS         if let Some(driver) = driver {
+//RS             self.pool.release(driver, self.healthy);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> Drop for JetDbLease<D> {
+//RS     fn drop(&mut self) {
+//RS         self.release();
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetShow for JetDbLease<D> {
+//RS     fn jet_show(&self) -> String {
+//RS         "db.lease".to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetDisplay for JetDbLease<D> {
+//RS     fn jet_display(&self) -> String {
+//RS         "db.lease".to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetDebug for JetDbLease<D> {
+//RS     fn jet_debug(&self) -> String {
+//RS         "db.lease".to_string()
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetDbPoolInner<D> {
+//RS     fn lock_state(&self) -> std::sync::MutexGuard<'_, JetDbPoolState<D>> {
+//RS         self.state
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS     }
+//RS 
+//RS     fn open_driver(&self) -> Result<D, jet_std::DBError> {
+//RS         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.hooks.open)(&self.url)))
+//RS             .unwrap_or_else(|_| {
+//RS                 Err(jet_db_pool_error(
+//RS                     "database pool backend open operation panicked",
+//RS                 ))
+//RS             })
+//RS     }
+//RS 
+//RS     fn health_driver(&self, driver: &mut D) -> bool {
+//RS         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.hooks.health)(driver)))
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     fn reset_driver(&self, driver: &mut D) -> bool {
+//RS         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.hooks.reset)(driver)))
+//RS             .unwrap_or(false)
+//RS     }
+//RS 
+//RS     fn close_driver(&self, driver: D) {
+//RS         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.hooks.close)(driver)));
+//RS     }
+//RS 
+//RS     fn state_error(lifecycle: JetDbPoolLifecycle) -> jet_std::DBError {
+//RS         match lifecycle {
+//RS             JetDbPoolLifecycle::Open => jet_db_pool_error("database pool is unavailable"),
+//RS             JetDbPoolLifecycle::Draining => jet_db_pool_error("database pool is draining"),
+//RS             JetDbPoolLifecycle::Drained => jet_db_pool_error("database pool is drained"),
+//RS         }
+//RS     }
+//RS 
+//RS     fn acquire(
+//RS         self: &std::sync::Arc<Self>,
+//RS         deadline_ms: Option<i64>,
+//RS     ) -> Result<JetDbLease<D>, jet_std::DBError> {
+//RS         let deadline = jet_db_pool_effective_deadline(deadline_ms);
+//RS         let mut ticket = None;
+//RS         let mut state = self.lock_state();
+//RS         loop {
+//RS             if state.lifecycle != JetDbPoolLifecycle::Open {
+//RS                 if let Some(ticket) = ticket.take() {
+//RS                     state.remove_waiter(ticket);
+//RS                     self.wake.notify_all();
+//RS                 }
+//RS                 return Err(Self::state_error(state.lifecycle));
+//RS             }
+//RS 
+//RS             let can_claim = ticket
+//RS                 .map(|ticket| state.waiter_is_turn(ticket))
+//RS                 .unwrap_or(state.waiters.is_empty());
+//RS             if can_claim {
+//RS                 if let Some(mut driver) = state.available.pop() {
+//RS                     if let Some(ticket) = ticket.take() {
+//RS                         state.claim_waiter(ticket);
+//RS                     }
+//RS                     state.leased = state.leased.saturating_add(1);
+//RS                     drop(state);
+//RS                     let healthy = self.health_driver(&mut driver);
+//RS                     let expired = jet_db_pool_expired(deadline);
+//RS                     if healthy && !expired {
+//RS                         state = self.lock_state();
+//RS                         let lifecycle = state.lifecycle;
+//RS                         if lifecycle == JetDbPoolLifecycle::Open {
+//RS                             state.acquires = state.acquires.saturating_add(1);
+//RS                             drop(state);
+//RS                             return Ok(JetDbLease {
+//RS                                 pool: self.clone(),
+//RS                                 driver: std::sync::Mutex::new(Some(driver)),
+//RS                                 healthy: true,
+//RS                             });
+//RS                         }
+//RS                         state.leased = state.leased.saturating_sub(1);
+//RS                         state.mark_drained();
+//RS                         self.wake.notify_all();
+//RS                         drop(state);
+//RS                         self.close_driver(driver);
+//RS                         return Err(Self::state_error(lifecycle));
+//RS                     }
+//RS                     self.close_driver(driver);
+//RS                     state = self.lock_state();
+//RS                     state.leased = state.leased.saturating_sub(1);
+//RS                     if !healthy {
+//RS                         state.unhealthy = state.unhealthy.saturating_add(1);
+//RS                     }
+//RS                     state.mark_drained();
+//RS                     let lifecycle = state.lifecycle;
+//RS                     if expired {
+//RS                         state.timeouts = state.timeouts.saturating_add(1);
+//RS                     }
+//RS                     self.wake.notify_all();
+//RS                     drop(state);
+//RS                     if lifecycle != JetDbPoolLifecycle::Open {
+//RS                         return Err(Self::state_error(lifecycle));
+//RS                     }
+//RS                     if expired {
+//RS                         return Err(jet_db_pool_error(
+//RS                             "database pool acquisition deadline exceeded",
+//RS                         ));
+//RS                     }
+//RS                     state = self.lock_state();
+//RS                     continue;
+//RS                 }
+//RS 
+//RS                 if state.reserved() < state.max {
+//RS                     if let Some(ticket) = ticket.take() {
+//RS                         state.claim_waiter(ticket);
+//RS                     }
+//RS                     state.opening = state.opening.saturating_add(1);
+//RS                     drop(state);
+//RS                     let opened = self.open_driver();
+//RS                     let mut driver = match opened {
+//RS                         Ok(driver) => driver,
+//RS                         Err(error) => {
+//RS                             let expired = jet_db_pool_expired(deadline);
+//RS                             state = self.lock_state();
+//RS                             state.opening = state.opening.saturating_sub(1);
+//RS                             state.open_failures = state.open_failures.saturating_add(1);
+//RS                             if expired {
+//RS                                 state.timeouts = state.timeouts.saturating_add(1);
+//RS                             }
+//RS                             state.mark_drained();
+//RS                             let lifecycle = state.lifecycle;
+//RS                             self.wake.notify_all();
+//RS                             drop(state);
+//RS                             if lifecycle != JetDbPoolLifecycle::Open {
+//RS                                 return Err(Self::state_error(lifecycle));
+//RS                             }
+//RS                             if expired {
+//RS                                 return Err(jet_db_pool_error(
+//RS                                     "database pool acquisition deadline exceeded",
+//RS                                 ));
+//RS                             }
+//RS                             return Err(error);
+//RS                         }
+//RS                     };
+//RS                     let healthy = self.health_driver(&mut driver);
+//RS                     let expired = jet_db_pool_expired(deadline);
+//RS                     state = self.lock_state();
+//RS                     state.opening = state.opening.saturating_sub(1);
+//RS                     let lifecycle = state.lifecycle;
+//RS                     if lifecycle != JetDbPoolLifecycle::Open || !healthy || expired {
+//RS                         if !healthy {
+//RS                             state.unhealthy = state.unhealthy.saturating_add(1);
+//RS                         }
+//RS                         if expired {
+//RS                             state.timeouts = state.timeouts.saturating_add(1);
+//RS                         }
+//RS                         state.mark_drained();
+//RS                         self.wake.notify_all();
+//RS                         drop(state);
+//RS                         self.close_driver(driver);
+//RS                         if lifecycle != JetDbPoolLifecycle::Open {
+//RS                             return Err(Self::state_error(lifecycle));
+//RS                         }
+//RS                         if expired {
+//RS                             return Err(jet_db_pool_error(
+//RS                                 "database pool acquisition deadline exceeded",
+//RS                             ));
+//RS                         }
+//RS                         return Err(jet_db_pool_error(
+//RS                             "database pool opened an unhealthy connection",
+//RS                         ));
+//RS                     }
+//RS                     state.leased = state.leased.saturating_add(1);
+//RS                     state.acquires = state.acquires.saturating_add(1);
+//RS                     drop(state);
+//RS                     return Ok(JetDbLease {
+//RS                         pool: self.clone(),
+//RS                         driver: std::sync::Mutex::new(Some(driver)),
+//RS                         healthy: true,
+//RS                     });
+//RS                 }
+//RS             }
+//RS 
+//RS             if ticket.is_none() {
+//RS                 ticket = Some(state.enqueue_waiter());
+//RS             }
+//RS             match jet_db_pool_remaining(deadline) {
+//RS                 Some(duration) if duration.is_zero() => {
+//RS                     if let Some(ticket) = ticket.take() {
+//RS                         state.remove_waiter(ticket);
+//RS                     }
+//RS                     state.timeouts = state.timeouts.saturating_add(1);
+//RS                     self.wake.notify_all();
+//RS                     return Err(jet_db_pool_error(
+//RS                         "database pool acquisition deadline exceeded",
+//RS                     ));
+//RS                 }
+//RS                 Some(duration) => {
+//RS                     state = match self.wake.wait_timeout(state, duration) {
+//RS                         Ok((guard, _)) => guard,
+//RS                         Err(poisoned) => poisoned.into_inner().0,
+//RS                     };
+//RS                 }
+//RS                 None => {
+//RS                     state = match self.wake.wait(state) {
+//RS                         Ok(guard) => guard,
+//RS                         Err(poisoned) => poisoned.into_inner(),
+//RS                     };
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn ready(self: &std::sync::Arc<Self>) -> Result<bool, jet_std::DBError> {
+//RS         loop {
+//RS             let state = self.lock_state();
+//RS             if state.lifecycle != JetDbPoolLifecycle::Open {
+//RS                 return Ok(false);
+//RS             }
+//RS             if state.leased > 0 {
+//RS                 return Ok(true);
+//RS             }
+//RS             if state.available.is_empty() && state.opening > 0 {
+//RS                 let state = match self.wake.wait(state) {
+//RS                     Ok(guard) => guard,
+//RS                     Err(poisoned) => poisoned.into_inner(),
+//RS                 };
+//RS                 drop(state);
+//RS                 continue;
+//RS             }
+//RS             drop(state);
+//RS             let lease = self.acquire(None)?;
+//RS             drop(lease);
+//RS             return Ok(true);
+//RS         }
+//RS     }
+//RS 
+//RS     fn drain(
+//RS         self: &std::sync::Arc<Self>,
+//RS         deadline_ms: Option<i64>,
+//RS     ) -> Result<JetDbPoolReceipt, jet_std::DBError> {
+//RS         let deadline = jet_db_pool_effective_deadline(deadline_ms);
+//RS         {
+//RS             let mut state = self.lock_state();
+//RS             if state.lifecycle == JetDbPoolLifecycle::Open {
+//RS                 state.lifecycle = JetDbPoolLifecycle::Draining;
+//RS                 self.wake.notify_all();
+//RS             }
+//RS         }
+//RS 
+//RS         loop {
+//RS             let mut close_now = Vec::new();
+//RS             let mut state = self.lock_state();
+//RS             if !state.available.is_empty() {
+//RS                 close_now.append(&mut state.available);
+//RS             }
+//RS             state.mark_drained();
+//RS             if state.lifecycle == JetDbPoolLifecycle::Drained {
+//RS                 let receipt = state.receipt();
+//RS                 self.wake.notify_all();
+//RS                 drop(state);
+//RS                 for driver in close_now {
+//RS                     self.close_driver(driver);
+//RS                 }
+//RS                 return Ok(receipt);
+//RS             }
+//RS             match jet_db_pool_remaining(deadline) {
+//RS                 Some(duration) if duration.is_zero() => {
+//RS                     state.timeouts = state.timeouts.saturating_add(1);
+//RS                     self.wake.notify_all();
+//RS                     drop(state);
+//RS                     for driver in close_now {
+//RS                         self.close_driver(driver);
+//RS                     }
+//RS                     return Err(jet_db_pool_error(
+//RS                         "database pool drain deadline exceeded",
+//RS                     ));
+//RS                 }
+//RS                 Some(duration) => {
+//RS                     if close_now.is_empty() {
+//RS                         state = match self.wake.wait_timeout(state, duration) {
+//RS                             Ok((guard, _)) => guard,
+//RS                             Err(poisoned) => poisoned.into_inner().0,
+//RS                         };
+//RS                     } else {
+//RS                         drop(state);
+//RS                         for driver in close_now {
+//RS                             self.close_driver(driver);
+//RS                         }
+//RS                         self.wake.notify_all();
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS                 None => {
+//RS                     if close_now.is_empty() {
+//RS                         state = match self.wake.wait(state) {
+//RS                             Ok(guard) => guard,
+//RS                             Err(poisoned) => poisoned.into_inner(),
+//RS                         };
+//RS                     } else {
+//RS                         drop(state);
+//RS                         for driver in close_now {
+//RS                             self.close_driver(driver);
+//RS                         }
+//RS                         self.wake.notify_all();
+//RS                         continue;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             drop(state);
+//RS         }
+//RS     }
+//RS 
+//RS     fn release(&self, mut driver: D, mut healthy: bool) {
+//RS         if healthy {
+//RS             healthy = self.reset_driver(&mut driver);
+//RS         }
+//RS 
+//RS         let mut replace = false;
+//RS         {
+//RS             let mut state = self.lock_state();
+//RS             state.leased = state.leased.saturating_sub(1);
+//RS             state.releases = state.releases.saturating_add(1);
+//RS             if state.lifecycle == JetDbPoolLifecycle::Open && healthy {
+//RS                 state.available.push(driver);
+//RS                 self.wake.notify_all();
+//RS                 return;
+//RS             }
+//RS             if !healthy {
+//RS                 state.unhealthy = state.unhealthy.saturating_add(1);
+//RS                 replace = state.lifecycle == JetDbPoolLifecycle::Open;
+//RS             }
+//RS             state.mark_drained();
+//RS             self.wake.notify_all();
+//RS         }
+//RS 
+//RS         self.close_driver(driver);
+//RS         if replace {
+//RS             self.replace_one();
+//RS         }
+//RS     }
+//RS 
+//RS     fn replace_one(&self) {
+//RS         {
+//RS             let mut state = self.lock_state();
+//RS             if state.lifecycle != JetDbPoolLifecycle::Open || state.reserved() >= state.max {
+//RS                 return;
+//RS             }
+//RS             state.opening = state.opening.saturating_add(1);
+//RS         }
+//RS 
+//RS         let opened = self.open_driver();
+//RS         let mut driver = match opened {
+//RS             Ok(driver) => driver,
+//RS             Err(_) => {
+//RS                 let mut state = self.lock_state();
+//RS                 state.opening = state.opening.saturating_sub(1);
+//RS                 if state.lifecycle == JetDbPoolLifecycle::Open {
+//RS                     state.replacement_failures = state.replacement_failures.saturating_add(1);
+//RS                 }
+//RS 
+//RS                 state.mark_drained();
+//RS                 self.wake.notify_all();
+//RS                 return;
+//RS             }
+//RS         };
+//RS         let healthy = self.health_driver(&mut driver);
+//RS         let mut driver = Some(driver);
+//RS         let mut state = self.lock_state();
+//RS         state.opening = state.opening.saturating_sub(1);
+//RS         if !healthy {
+//RS             state.unhealthy = state.unhealthy.saturating_add(1);
+//RS             if state.lifecycle == JetDbPoolLifecycle::Open {
+//RS                 state.replacement_failures = state.replacement_failures.saturating_add(1);
+//RS             }
+//RS         } else if state.lifecycle == JetDbPoolLifecycle::Open && state.reserved() < state.max {
+//RS             if let Some(driver) = driver.take() {
+//RS                 state.available.push(driver);
+//RS             }
+//RS             state.replacements = state.replacements.saturating_add(1);
+//RS         }
+//RS         state.mark_drained();
+//RS         self.wake.notify_all();
+//RS         drop(state);
+//RS         if let Some(driver) = driver {
+//RS             self.close_driver(driver);
+//RS         }
+//RS     }
+//RS }
+//RS impl<D: Send + 'static> Drop for JetDbPoolInner<D> {
+//RS     fn drop(&mut self) {
+//RS         let available = {
+//RS             let state = self
+//RS                 .state
+//RS                 .get_mut()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             std::mem::take(&mut state.available)
+//RS         };
+//RS         for driver in available {
+//RS             self.close_driver(driver);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl<D: Send + 'static> JetDbPool<D> {
+//RS     pub fn new(
+//RS         url: String,
+//RS         max: i64,
+//RS         hooks: JetDbPoolHooks<D>,
+//RS     ) -> Result<Self, jet_std::DBError> {
+//RS         if max <= 0 {
+//RS             return Err(jet_db_pool_error(
+//RS                 "database pool max must be greater than zero",
+//RS             ));
+//RS         }
+//RS         let max = usize::try_from(max).map_err(|_| {
+//RS             jet_db_pool_error("database pool max is outside the supported range")
+//RS         })?;
+//RS         Ok(Self {
+//RS             inner: std::sync::Arc::new(JetDbPoolInner {
+//RS                 url,
+//RS                 hooks,
+//RS                 state: std::sync::Mutex::new(JetDbPoolState::new(max)),
+//RS                 wake: std::sync::Condvar::new(),
+//RS             }),
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn acquire(&self, deadline_ms: Option<i64>) -> Result<JetDbLease<D>, jet_std::DBError> {
+//RS         self.inner.acquire(deadline_ms)
+//RS     }
+//RS 
+//RS     pub fn ready(&self) -> Result<bool, jet_std::DBError> {
+//RS         self.inner.ready()
+//RS     }
+//RS 
+//RS     pub fn drain(
+//RS         &self,
+//RS         deadline_ms: Option<i64>,
+//RS     ) -> Result<JetDbPoolReceipt, jet_std::DBError> {
+//RS         self.inner.drain(deadline_ms)
+//RS     }
+//RS 
+//RS     pub fn receipt(&self) -> JetDbPoolReceipt {
+//RS         self.inner.lock_state().receipt()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_db_pool_error(message: &str) -> jet_std::DBError {
+//RS     jet_std::DBError {
+//RS         message: message.to_string(),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS const JET_DB_POOL_DEFAULT_TIMEOUT_MS: i64 = 30_000;
+//RS fn jet_db_pool_effective_deadline(deadline: Option<i64>) -> Option<i64> {
+//RS     match (deadline, jet_ctx_deadline_ms()) {
+//RS         (Some(explicit), Some(context)) => Some(explicit.min(context)),
+//RS         (Some(explicit), None) => Some(explicit),
+//RS         (None, Some(context)) => Some(context),
+//RS         (None, None) => Some(
+//RS             jet_std_time_now().saturating_add(JET_DB_POOL_DEFAULT_TIMEOUT_MS),
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_db_pool_expired(deadline: Option<i64>) -> bool {
+//RS     deadline.is_some_and(|deadline| deadline <= jet_std_time_now())
+//RS }
+//RS 
+//RS fn jet_db_pool_remaining(deadline: Option<i64>) -> Option<std::time::Duration> {
+//RS     deadline.map(|deadline| {
+//RS         let remaining = deadline.saturating_sub(jet_std_time_now());
+//RS         if remaining <= 0 {
+//RS             std::time::Duration::from_millis(0)
+//RS         } else {
+//RS             std::time::Duration::from_millis(remaining as u64)
+//RS         }
+//RS     })
+//RS }
+// END-PORT-PENDING 0269 crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:1-774
+

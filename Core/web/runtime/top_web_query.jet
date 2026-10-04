@@ -1,0 +1,1729 @@
+// PORT-PENDING 0310 crates-jet-codegen-src-prelude-corelib-top-webquery: crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:1-1725
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-DX-QUERY1=A (#2473): one Query lifecycle over app.live and core.reactive.
+//RS //
+//RS // Live database reads keep their normalized DB.Read footprint in LiveQuery.
+//RS // Non-database sources use the explicit ext: identity installed by app.subscribe.
+//RS // This module owns query state, mutation rollback, offline replay, and dev facts;
+//RS // execution tiers only marshal the resulting handles and values.
+//RS 
+//RS use std::collections::VecDeque;
+//RS use std::path::PathBuf;
+//RS use std::sync::{Arc as JetWebQueryArc, LazyLock, Mutex as JetWebQueryMutex};
+//RS use std::time::{SystemTime, UNIX_EPOCH};
+//RS use jet_foundation::Devtools::{
+//RS     JetDevtoolsEvent,
+//RS     JetDevtoolsMutationLifecycle,
+//RS };
+//RS 
+//RS const JET_WEB_QUERY_MAX_VALUE: usize = 4 * 1024 * 1024;
+//RS const JET_WEB_QUERY_MAX_QUEUE: usize = 1024;
+//RS const JET_WEB_QUERY_MAX_KEY: usize = 512;
+//RS const JET_WEB_QUERY_MAX_CONTEXT: usize = 512;
+//RS const JET_WEB_QUERY_MAX_INVALIDATIONS: usize = 64;
+//RS const JET_WEB_QUERY_MAX_INVALIDATION_TARGET: usize = 512;
+//RS const JET_WEB_QUERY_QUEUE_FORMAT: &str = "jet-web-query-queue-v1";
+//RS 
+//RS type JetWebQueryFetch = JetWebQueryArc<dyn Fn() -> Result<String, String> + Send + Sync + 'static>;
+//RS 
+//RS type JetWebQueryOfflineQueue = VecDeque<JetWebQueryQueuedMutation>;
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS struct JetWebQueryQueuedMutation {
+//RS     sequence: u64,
+//RS     key: String,
+//RS     payload: String,
+//RS     invalidations: Vec<String>,
+//RS }
+//RS 
+//RS #[derive(Default)]
+//RS struct JetWebQueryQueueState {
+//RS     loaded: bool,
+//RS     load_error: Option<String>,
+//RS     next_sequence: u64,
+//RS     entries: JetWebQueryOfflineQueue,
+//RS }
+//RS 
+//RS static JET_WEB_QUERY_OFFLINE_QUEUE: LazyLock<JetWebQueryMutex<JetWebQueryQueueState>> =
+//RS     LazyLock::new(|| JetWebQueryMutex::new(JetWebQueryQueueState::default()));
+//RS 
+//RS fn jet_web_query_now_ms() -> u64 {
+//RS     SystemTime::now()
+//RS         .duration_since(UNIX_EPOCH)
+//RS         .ok()
+//RS         .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+//RS         .unwrap_or(0)
+//RS }
+//RS fn jet_web_query_queue_path() -> Option<PathBuf> {
+//RS     if let Some(path) = std::env::var_os("JET_WEB_QUERY_QUEUE_PATH") {
+//RS         if !path.is_empty() {
+//RS             return Some(PathBuf::from(path));
+//RS         }
+//RS     }
+//RS     let base = std::env::var_os("XDG_STATE_HOME")
+//RS         .map(PathBuf::from)
+//RS         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))?;
+//RS     Some(base.join("jet").join("web-query-queue.v1"))
+//RS }
+//RS 
+//RS fn jet_web_query_hex(value: &str) -> String {
+//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
+//RS     let mut encoded = String::with_capacity(value.len().saturating_mul(2));
+//RS     for byte in value.as_bytes() {
+//RS         encoded.push(HEX[(byte >> 4) as usize] as char);
+//RS         encoded.push(HEX[(byte & 0x0f) as usize] as char);
+//RS     }
+//RS     encoded
+//RS }
+//RS 
+//RS fn jet_web_query_unhex(value: &str) -> Option<String> {
+//RS     fn nibble(byte: u8) -> Option<u8> {
+//RS         match byte {
+//RS             b'0'..=b'9' => Some(byte - b'0'),
+//RS             b'a'..=b'f' => Some(byte - b'a' + 10),
+//RS             b'A'..=b'F' => Some(byte - b'A' + 10),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS     if value.len() % 2 != 0 {
+//RS         return None;
+//RS     }
+//RS     let mut bytes = Vec::with_capacity(value.len() / 2);
+//RS     for pair in value.as_bytes().chunks_exact(2) {
+//RS         bytes.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
+//RS     }
+//RS     String::from_utf8(bytes).ok()
+//RS }
+//RS 
+//RS fn jet_web_query_durability_error(detail: impl std::fmt::Display) -> String {
+//RS     format!("offline mutation durability unavailable: {detail}")
+//RS }
+//RS 
+//RS fn jet_web_query_queue_load(queue: &mut JetWebQueryQueueState) -> Result<(), String> {
+//RS     if queue.loaded {
+//RS         return queue
+//RS             .load_error
+//RS             .clone()
+//RS             .map_or(Ok(()), Err);
+//RS     }
+//RS     queue.loaded = true;
+//RS     let Some(path) = jet_web_query_queue_path() else {
+//RS         let error = jet_web_query_durability_error("no state directory is available");
+//RS         queue.load_error = Some(error.clone());
+//RS         return Err(error);
+//RS     };
+//RS     let contents = match std::fs::read_to_string(&path) {
+//RS         Ok(contents) => contents,
+//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+//RS         Err(error) => {
+//RS             let error = jet_web_query_durability_error(error);
+//RS             queue.load_error = Some(error.clone());
+//RS             return Err(error);
+//RS         }
+//RS     };
+//RS     let parsed = (|| -> Result<(), String> {
+//RS         let mut lines = contents.lines();
+//RS         if lines.next() != Some(JET_WEB_QUERY_QUEUE_FORMAT) {
+//RS             return Err(jet_web_query_durability_error(
+//RS                 "queue file has an unknown format",
+//RS             ));
+//RS         }
+//RS         for line in lines.filter(|line| !line.is_empty()) {
+//RS             let fields: Vec<&str> = line.split('\t').collect();
+//RS             match fields.as_slice() {
+//RS                 ["next", sequence] => {
+//RS                     queue.next_sequence = sequence.parse::<u64>().map_err(|_| {
+//RS                         jet_web_query_durability_error("queue sequence is not an integer")
+//RS                     })?;
+//RS                 }
+//RS                 ["entry", sequence, key, payload, invalidations] => {
+//RS                     if queue.entries.len() >= JET_WEB_QUERY_MAX_QUEUE {
+//RS                         return Err(jet_web_query_durability_error(
+//RS                             "queue file exceeds the entry limit",
+//RS                         ));
+//RS                     }
+//RS                     let sequence = sequence.parse::<u64>().map_err(|_| {
+//RS                         jet_web_query_durability_error(
+//RS                             "queued mutation sequence is not an integer",
+//RS                         )
+//RS                     })?;
+//RS                     let key = jet_web_query_unhex(key).ok_or_else(|| {
+//RS                         jet_web_query_durability_error(
+//RS                             "queued mutation key is not valid UTF-8",
+//RS                         )
+//RS                     })?;
+//RS                     let payload = jet_web_query_unhex(payload).ok_or_else(|| {
+//RS                         jet_web_query_durability_error(
+//RS                             "queued mutation payload is not valid UTF-8",
+//RS                         )
+//RS                     })?;
+//RS                     let invalidations = if invalidations.is_empty() {
+//RS                         Vec::new()
+//RS                     } else {
+//RS                         invalidations
+//RS                             .split(',')
+//RS                             .map(|target| {
+//RS                                 jet_web_query_unhex(target).ok_or_else(|| {
+//RS                                     jet_web_query_durability_error(
+//RS                                         "queued invalidation target is not valid UTF-8",
+//RS                                     )
+//RS                                 })
+//RS                             })
+//RS                             .collect::<Result<Vec<_>, _>>()?
+//RS                     };
+//RS                     queue.next_sequence = queue.next_sequence.max(sequence);
+//RS                     queue.entries.push_back(JetWebQueryQueuedMutation {
+//RS                         sequence,
+//RS                         key,
+//RS                         payload,
+//RS                         invalidations,
+//RS                     });
+//RS                 }
+//RS                 _ => {
+//RS                     return Err(jet_web_query_durability_error(
+//RS                         "queue file contains an invalid row",
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     })();
+//RS     if let Err(error) = parsed {
+//RS         queue.load_error = Some(error.clone());
+//RS         return Err(error);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_web_query_queue_persist(queue: &JetWebQueryQueueState) -> Result<(), String> {
+//RS     let Some(path) = jet_web_query_queue_path() else {
+//RS         return Err(jet_web_query_durability_error("no state directory is available"));
+//RS     };
+//RS     let mut contents = format!("{JET_WEB_QUERY_QUEUE_FORMAT}\nnext\t{}\n", queue.next_sequence);
+//RS     for entry in &queue.entries {
+//RS         let invalidations = entry
+//RS             .invalidations
+//RS             .iter()
+//RS             .map(|target| jet_web_query_hex(target))
+//RS             .collect::<Vec<_>>()
+//RS             .join(",");
+//RS         contents.push_str(&format!(
+//RS             "entry\t{}\t{}\t{}\t{}\n",
+//RS             entry.sequence,
+//RS             jet_web_query_hex(&entry.key),
+//RS             jet_web_query_hex(&entry.payload),
+//RS             invalidations,
+//RS         ));
+//RS     }
+//RS     if let Some(parent) = path.parent() {
+//RS         std::fs::create_dir_all(parent)
+//RS             .map_err(jet_web_query_durability_error)?;
+//RS     }
+//RS     let temp = path.with_extension(format!("v1.tmp.{}", std::process::id()));
+//RS     std::fs::write(&temp, contents).map_err(jet_web_query_durability_error)?;
+//RS     if let Err(error) = std::fs::rename(&temp, &path) {
+//RS         let _ = std::fs::remove_file(&temp);
+//RS         return Err(jet_web_query_durability_error(error));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn jet_web_query_json(value: &str) -> String {
+//RS     format!("{value:?}")
+//RS }
+//RS 
+//RS fn jet_web_query_bound_error(error: String) -> String {
+//RS     if error.len() <= JET_WEB_QUERY_MAX_VALUE {
+//RS         error
+//RS     } else {
+//RS         "query error exceeds the payload limit".to_string()
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_query_valid_key(key: &str) -> bool {
+//RS     !key.trim().is_empty()
+//RS         && key.len() <= JET_WEB_QUERY_MAX_KEY
+//RS         && key.chars().all(|character| !character.is_control())
+//RS }
+//RS fn jet_web_query_targets(targets: Vec<String>) -> Result<Vec<String>, String> {
+//RS     if targets.len() > JET_WEB_QUERY_MAX_INVALIDATIONS {
+//RS         return Err(format!(
+//RS             "query invalidation list exceeds {} entries",
+//RS             JET_WEB_QUERY_MAX_INVALIDATIONS
+//RS         ));
+//RS     }
+//RS     let mut normalized: Vec<String> = Vec::with_capacity(targets.len());
+//RS     for target in targets {
+//RS         let target = target.trim();
+//RS         if target.is_empty()
+//RS             || target.len() > JET_WEB_QUERY_MAX_INVALIDATION_TARGET
+//RS             || target.chars().any(char::is_control)
+//RS         {
+//RS             return Err("query invalidation target is invalid".to_string());
+//RS         }
+//RS         if target
+//RS             .strip_prefix("key:")
+//RS             .is_some_and(|key| key.trim().is_empty())
+//RS         {
+//RS             return Err("query invalidation target is invalid".to_string());
+//RS         }
+//RS         if !normalized.iter().any(|existing| existing.as_str() == target) {
+//RS             normalized.push(target.to_string());
+//RS         }
+//RS     }
+//RS     Ok(normalized)
+//RS }
+//RS 
+//RS fn jet_web_query_valid_source(source: &str) -> bool {
+//RS     !source.trim().is_empty()
+//RS         && source.len() <= JET_WEB_QUERY_MAX_KEY
+//RS         && source.chars().all(|character| !character.is_control())
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebMutationStatus {
+//RS     Idle,
+//RS     Pending,
+//RS     Success,
+//RS     Error,
+//RS     Settled,
+//RS }
+//RS 
+//RS impl JetWebMutationStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Idle => "idle",
+//RS             Self::Pending => "pending",
+//RS             Self::Success => "success",
+//RS             Self::Error => "error",
+//RS             Self::Settled => "settled",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebMutationState {
+//RS     pub status: JetWebMutationStatus,
+//RS     pub generation: u64,
+//RS     pub optimistic: bool,
+//RS     pub value: String,
+//RS     pub result: String,
+//RS     pub error: String,
+//RS     pub context: String,
+//RS     pub rollback: bool,
+//RS     pub paused: bool,
+//RS     pub queued: usize,
+//RS     pub replayed: u64,
+//RS }
+//RS 
+//RS impl JetWebMutationState {
+//RS     fn idle() -> Self {
+//RS         Self {
+//RS             status: JetWebMutationStatus::Idle,
+//RS             generation: 0,
+//RS             optimistic: false,
+//RS             value: String::new(),
+//RS             result: String::new(),
+//RS             error: String::new(),
+//RS             context: String::new(),
+//RS             rollback: false,
+//RS             paused: false,
+//RS             queued: 0,
+//RS             replayed: 0,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebQueryStatus {
+//RS     Pending,
+//RS     Fresh,
+//RS     Stale,
+//RS     Fetching,
+//RS     Error,
+//RS     Offline,
+//RS }
+//RS 
+//RS impl JetWebQueryStatus {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Pending => "pending",
+//RS             Self::Fresh => "fresh",
+//RS             Self::Stale => "stale",
+//RS             Self::Fetching => "fetching",
+//RS             Self::Error => "error",
+//RS             Self::Offline => "offline",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+//RS pub enum JetWebQueryNetworkMode {
+//RS     Online,
+//RS     Always,
+//RS     OfflineFirst,
+//RS }
+//RS 
+//RS impl JetWebQueryNetworkMode {
+//RS     pub fn name(self) -> &'static str {
+//RS         match self {
+//RS             Self::Online => "online",
+//RS             Self::Always => "always",
+//RS             Self::OfflineFirst => "offlineFirst",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, Eq, PartialEq)]
+//RS pub struct JetWebQueryState {
+//RS     pub status: JetWebQueryStatus,
+//RS     pub value: String,
+//RS     pub error: String,
+//RS     pub generation: u64,
+//RS     pub queued: usize,
+//RS     pub offline: bool,
+//RS }
+//RS 
+//RS impl JetWebQueryState {
+//RS     fn fresh(value: String) -> Self {
+//RS         Self {
+//RS             status: JetWebQueryStatus::Fresh,
+//RS             value,
+//RS             error: String::new(),
+//RS             generation: 1,
+//RS             queued: 0,
+//RS             offline: false,
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct JetWebQuery {
+//RS     key: String,
+//RS     footprint: String,
+//RS     state: jet_std::JetSignal<JetWebQueryState>,
+//RS     mutation: jet_std::JetSignal<JetWebMutationState>,
+//RS     live: Option<JetLiveQuery>,
+//RS     fetch: Option<JetWebQueryFetch>,
+//RS     mode: JetWebQueryArc<JetWebQueryMutex<JetWebQueryNetworkMode>>,
+//RS     online: JetWebQueryArc<JetWebQueryMutex<bool>>,
+//RS     mutation_lock: JetWebQueryArc<JetWebQueryMutex<()>>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JetWebQueryPanelFact {
+//RS     key: String,
+//RS     footprint: String,
+//RS     state: jet_std::JetSignal<JetWebQueryState>,
+//RS     mutation: jet_std::JetSignal<JetWebMutationState>,
+//RS     live: Option<JetLiveQuery>,
+//RS     mode: JetWebQueryArc<JetWebQueryMutex<JetWebQueryNetworkMode>>,
+//RS }
+//RS 
+//RS static JET_WEB_QUERY_PANEL_FACTS: LazyLock<JetWebQueryMutex<Vec<JetWebQueryPanelFact>>> =
+//RS     LazyLock::new(|| JetWebQueryMutex::new(Vec::new()));
+//RS 
+//RS fn jet_web_query_register_panel_fact(query: &JetWebQuery) {
+//RS     let Ok(mut facts) = JET_WEB_QUERY_PANEL_FACTS.lock() else {
+//RS         return;
+//RS     };
+//RS     if let Some(fact) = facts.iter_mut().find(|fact| fact.key == query.key) {
+//RS         fact.footprint = query.footprint.clone();
+//RS         fact.state = query.state.clone();
+//RS         fact.mutation = query.mutation.clone();
+//RS         fact.live = query.live.clone();
+//RS         fact.mode = query.mode.clone();
+//RS         return;
+//RS     }
+//RS     facts.push(JetWebQueryPanelFact {
+//RS         key: query.key.clone(),
+//RS         footprint: query.footprint.clone(),
+//RS         state: query.state.clone(),
+//RS         mutation: query.mutation.clone(),
+//RS         live: query.live.clone(),
+//RS         mode: query.mode.clone(),
+//RS     });
+//RS }
+//RS 
+//RS fn jet_web_query_html_attr(value: &str) -> String {
+//RS     value
+//RS         .replace('&', "&amp;")
+//RS         .replace('"', "&quot;")
+//RS         .replace('<', "&lt;")
+//RS         .replace('>', "&gt;")
+//RS }
+//RS 
+//RS /// Development-only query facts. Values and errors stay in the signal; the
+//RS /// panel exposes only identity, lifecycle, and byte/count metadata.
+//RS pub(crate) fn jet_web_query_dev_panel() -> String {
+//RS     let Ok(facts) = JET_WEB_QUERY_PANEL_FACTS.lock() else {
+//RS         return String::new();
+//RS     };
+//RS     let mut rows = Vec::new();
+//RS     for fact in facts.iter() {
+//RS         let state = fact.state.get();
+//RS         let mutation = fact.mutation.get();
+//RS         let mode = fact
+//RS             .mode
+//RS             .lock()
+//RS             .map(|mode| mode.name())
+//RS             .unwrap_or("unknown");
+//RS         let (generation, observers, freshness_ms, cause) = fact
+//RS             .live
+//RS             .as_ref()
+//RS             .and_then(|live| {
+//RS                 let Ok(registry) = jet_live_registry().lock() else {
+//RS                     return None;
+//RS                 };
+//RS                 let stored = registry.queries.get(&live.id)?;
+//RS                 Some((
+//RS                     stored.lifecycle.generation,
+//RS                     if stored.sink.is_some() { 1 } else { 0 },
+//RS                     jet_live_age_ms(stored.lifecycle.fresh_at_ms),
+//RS                     stored.lifecycle.invalidation_cause.clone(),
+//RS                 ))
+//RS             })
+//RS             .unwrap_or((state.generation, 0, 0, "none".to_string()));
+//RS         let facts_text = format!(
+//RS             "key={},footprint={},state={},generation={},freshness_ms={},observers={},cause={},mode={},mutation={},queued={},value_bytes={},error_bytes={}",
+//RS             fact.key,
+//RS             fact.footprint,
+//RS             jet_web_query_dev_state(state.status),
+//RS             generation,
+//RS             freshness_ms,
+//RS             observers,
+//RS             cause,
+//RS             mode,
+//RS             mutation.status.name(),
+//RS             state.queued,
+//RS             state.value.len(),
+//RS             state.error.len(),
+//RS         );
+//RS         rows.push(format!(
+//RS             "<li data-jet-query-key=\"{}\"><code>{}</code><pre>{}</pre></li>",
+//RS             jet_web_query_html_attr(&fact.key),
+//RS             jet_web_query_html_attr(&fact.key),
+//RS             jet_web_query_html_attr(&facts_text),
+//RS         ));
+//RS     }
+//RS     if rows.is_empty() {
+//RS         return String::new();
+//RS     }
+//RS     format!(
+//RS         "<aside id=\"jet-dev-queries\" data-jet-devtools=\"queries\"><h2>Queries</h2><ul>{}</ul></aside>",
+//RS         rows.join("")
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn jet_web_query_facts_json() -> String {
+//RS     let Ok(facts) = JET_WEB_QUERY_PANEL_FACTS.lock() else {
+//RS         return "[]".to_string();
+//RS     };
+//RS     let items = facts
+//RS         .iter()
+//RS         .map(|fact| {
+//RS             let kind = if fact.footprint.starts_with("ext:") {
+//RS                 "subscribe"
+//RS             } else {
+//RS                 "live"
+//RS             };
+//RS             format!(
+//RS                 "{{\"key\":{},\"footprint\":{},\"source\":\"runtime\",\"kind\":{}}}",
+//RS                 jet_web_query_json(&fact.key),
+//RS                 jet_web_query_json(&fact.footprint),
+//RS                 jet_web_query_json(kind),
+//RS             )
+//RS         })
+//RS         .collect::<Vec<_>>()
+//RS         .join(",");
+//RS     format!("[{items}]")
+//RS }
+//RS 
+//RS fn jet_web_query_dev_state(status: JetWebQueryStatus) -> &'static str {
+//RS     match status {
+//RS         JetWebQueryStatus::Pending => "pending",
+//RS         JetWebQueryStatus::Fresh => "fresh",
+//RS         JetWebQueryStatus::Stale => "stale",
+//RS         JetWebQueryStatus::Fetching => "fetching",
+//RS         JetWebQueryStatus::Error => "error",
+//RS         JetWebQueryStatus::Offline => "offline",
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_query_publish_state(
+//RS     key: &str,
+//RS     footprint: &str,
+//RS     state: &JetWebQueryState,
+//RS     observers: i64,
+//RS     cause: &str,
+//RS     mutation: JetWebMutationStatus,
+//RS     freshness_ms: u64,
+//RS ) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let state_name = jet_web_query_dev_state(state.status);
+//RS     let fields = format!(
+//RS         "{{\"name\":{},\"state\":{},\"footprint\":{},\"freshness_ms\":{},\"observers\":{},\"invalidation_cause\":{},\"mutation_state\":{}}}",
+//RS         jet_web_query_json(key),
+//RS         jet_web_query_json(state_name),
+//RS         jet_web_query_json(footprint),
+//RS         freshness_ms,
+//RS         observers.max(0),
+//RS         jet_web_query_json(cause),
+//RS         jet_web_query_json(mutation.name()),
+//RS     );
+//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
+//RS         jet_web_query_now_ms(),
+//RS         "core.web.query",
+//RS         "Query",
+//RS         key.to_string(),
+//RS         fields,
+//RS     ) {
+//RS         jet_devtools_publish_event(event);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_query_publish_mutation(
+//RS     key: &str,
+//RS     lifecycle: JetDevtoolsMutationLifecycle,
+//RS     rollback: bool,
+//RS ) {
+//RS     if !jet_web_runtime_devtools_enabled() {
+//RS         return;
+//RS     }
+//RS     let lifecycle_name = match lifecycle {
+//RS         JetDevtoolsMutationLifecycle::Started => "started",
+//RS         JetDevtoolsMutationLifecycle::Committed => "committed",
+//RS         JetDevtoolsMutationLifecycle::Failed => "failed",
+//RS         JetDevtoolsMutationLifecycle::RolledBack => "rolled_back",
+//RS     };
+//RS     let fields = format!(
+//RS         "{{\"name\":{},\"lifecycle\":{},\"rollback\":{}}}",
+//RS         jet_web_query_json(key),
+//RS         jet_web_query_json(lifecycle_name),
+//RS         rollback,
+//RS     );
+//RS     if let Ok(event) = JetDevtoolsEvent::from_parts(
+//RS         jet_web_query_now_ms(),
+//RS         "core.web.query",
+//RS         "Mutation",
+//RS         key.to_string(),
+//RS         fields,
+//RS     ) {
+//RS         jet_devtools_publish_event(event);
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_query_queue_count(key: &str) -> usize {
+//RS     let Ok(mut queue) = JET_WEB_QUERY_OFFLINE_QUEUE.lock() else {
+//RS         return 0;
+//RS     };
+//RS     if jet_web_query_queue_load(&mut queue).is_err() {
+//RS         return 0;
+//RS     }
+//RS     queue.entries.iter().filter(|entry| entry.key == key).count()
+//RS }
+//RS 
+//RS fn jet_web_query_enqueue(
+//RS     key: &str,
+//RS     payload: String,
+//RS     invalidations: Vec<String>,
+//RS ) -> Result<usize, String> {
+//RS     let mut queue = JET_WEB_QUERY_OFFLINE_QUEUE
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     jet_web_query_queue_load(&mut queue)?;
+//RS     let key_count = queue.entries.iter().filter(|entry| entry.key == key).count();
+//RS     if queue.entries.len() >= JET_WEB_QUERY_MAX_QUEUE || key_count >= JET_WEB_QUERY_MAX_QUEUE {
+//RS         return Err("offline query queue is full".to_string());
+//RS     }
+//RS     let previous_sequence = queue.next_sequence;
+//RS     queue.next_sequence = queue.next_sequence.saturating_add(1).max(1);
+//RS     let sequence = queue.next_sequence;
+//RS     queue.entries.push_back(JetWebQueryQueuedMutation {
+//RS         sequence,
+//RS         key: key.to_string(),
+//RS         payload,
+//RS         invalidations,
+//RS     });
+//RS     if let Err(error) = jet_web_query_queue_persist(&queue) {
+//RS         let _ = queue.entries.pop_back();
+//RS         queue.next_sequence = previous_sequence;
+//RS         return Err(error);
+//RS     }
+//RS     Ok(key_count.saturating_add(1))
+//RS }
+//RS 
+//RS fn jet_web_query_queued(key: &str) -> Result<Vec<JetWebQueryQueuedMutation>, String> {
+//RS     let mut queue = JET_WEB_QUERY_OFFLINE_QUEUE
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     jet_web_query_queue_load(&mut queue)?;
+//RS     Ok(queue
+//RS         .entries
+//RS         .iter()
+//RS         .filter(|entry| entry.key == key)
+//RS         .cloned()
+//RS         .collect())
+//RS }
+//RS 
+//RS fn jet_web_query_remove_queued(key: &str, sequence: u64) -> Result<(), String> {
+//RS     let mut queue = JET_WEB_QUERY_OFFLINE_QUEUE
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     jet_web_query_queue_load(&mut queue)?;
+//RS     let Some(index) = queue
+//RS         .entries
+//RS         .iter()
+//RS         .position(|entry| entry.key == key && entry.sequence == sequence)
+//RS     else {
+//RS         return Ok(());
+//RS     };
+//RS     let removed = queue.entries.remove(index);
+//RS     if let Err(error) = jet_web_query_queue_persist(&queue) {
+//RS         if let Some(removed) = removed {
+//RS             queue.entries.insert(index, removed);
+//RS         }
+//RS         return Err(error);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl JetWebQuery {
+//RS     pub fn new(key: String, initial: String) -> Self {
+//RS         let invalid_key = !jet_web_query_valid_key(&key);
+//RS         let oversized = initial.len() > JET_WEB_QUERY_MAX_VALUE;
+//RS         let value = if oversized { String::new() } else { initial };
+//RS         let mut initial_state = JetWebQueryState::fresh(value);
+//RS         if invalid_key {
+//RS             initial_state.status = JetWebQueryStatus::Error;
+//RS             initial_state.error = format!(
+//RS                 "query key is empty, exceeds {} bytes, or contains control characters",
+//RS                 JET_WEB_QUERY_MAX_KEY
+//RS             );
+//RS         } else if oversized {
+//RS             initial_state.status = JetWebQueryStatus::Error;
+//RS             initial_state.error = format!(
+//RS                 "query payload exceeds {} bytes",
+//RS                 JET_WEB_QUERY_MAX_VALUE
+//RS             );
+//RS         }
+//RS         Self {
+//RS             key,
+//RS             footprint: String::new(),
+//RS             state: jet_std::JetSignal::new(initial_state),
+//RS             mutation: jet_std::JetSignal::new(JetWebMutationState::idle()),
+//RS             live: None,
+//RS             fetch: None,
+//RS             mode: JetWebQueryArc::new(JetWebQueryMutex::new(JetWebQueryNetworkMode::Online)),
+//RS             online: JetWebQueryArc::new(JetWebQueryMutex::new(true)),
+//RS             mutation_lock: JetWebQueryArc::new(JetWebQueryMutex::new(())),
+//RS         }
+//RS     }
+//RS     fn bind_live_state(&self, live: &JetLiveQuery) -> JetLiveQuery {
+//RS         let signal = self.state.clone();
+//RS         let key = self.key.clone();
+//RS         let footprint = self.footprint.clone();
+//RS         jet_app_live_bind_sink(
+//RS             live,
+//RS             JetWebQueryArc::new(move |value| {
+//RS                 let before = signal.get();
+//RS                 let state = JetWebQueryState {
+//RS                     status: if before.offline {
+//RS                         JetWebQueryStatus::Offline
+//RS                     } else {
+//RS                         JetWebQueryStatus::Fresh
+//RS                     },
+//RS                     value,
+//RS                     error: String::new(),
+//RS                     generation: before.generation.saturating_add(1),
+//RS                     ..before
+//RS                 };
+//RS                 signal.set(state.clone());
+//RS                 jet_web_query_publish_state(
+//RS                     &key,
+//RS                     &footprint,
+//RS                     &state,
+//RS                     0,
+//RS                     "live-push",
+//RS                     JetWebMutationStatus::Idle,
+//RS                     0,
+//RS                 );
+//RS             }),
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     pub fn live<F>(key: String, footprint: String, initial: String, fetch: F) -> Self
+//RS     where
+//RS         F: Fn() -> Result<String, String> + Send + Sync + 'static,
+//RS     {
+//RS         let query = Self::new(key, initial);
+//RS         if !query.state.get().error.is_empty() {
+//RS             jet_web_query_register_panel_fact(&query);
+//RS             return query;
+//RS         }
+//RS         let initial_fetch = query.state.get().value.is_empty();
+//RS         let signal = query.state.clone();
+//RS         let key_for_fetch = query.key.clone();
+//RS         if initial_fetch {
+//RS             let mut pending = query.state.get();
+//RS             pending.status = JetWebQueryStatus::Pending;
+//RS             query.state.set(pending);
+//RS         }
+//RS         let footprint_for_fetch = footprint.clone();
+//RS         let fetch: JetWebQueryFetch = JetWebQueryArc::new(fetch);
+//RS         let fetch_for_live = fetch.clone();
+//RS         let live = jet_app_live_keyed_query(
+//RS             query.key.clone(),
+//RS             footprint.clone(),
+//RS             signal.get().value.clone(),
+//RS             move || {
+//RS                 let before = signal.get();
+//RS                 let fetching = JetWebQueryState {
+//RS                     status: JetWebQueryStatus::Fetching,
+//RS                     error: String::new(),
+//RS                     ..before
+//RS                 };
+//RS                 signal.set(fetching.clone());
+//RS                 jet_web_query_publish_state(
+//RS                     &key_for_fetch,
+//RS                     &footprint_for_fetch,
+//RS                     &fetching,
+//RS                     0,
+//RS                     "fetch-start",
+//RS                     JetWebMutationStatus::Idle,
+//RS                     0,
+//RS                 );
+//RS                 match fetch_for_live() {
+//RS                     Ok(value) if value.len() <= JET_WEB_QUERY_MAX_VALUE => {
+//RS                         let before = signal.get();
+//RS                         let fresh = JetWebQueryState {
+//RS                             status: JetWebQueryStatus::Fresh,
+//RS                             value: value.clone(),
+//RS                             error: String::new(),
+//RS                             generation: before.generation.saturating_add(1),
+//RS                             ..before
+//RS                         };
+//RS                         signal.set(fresh.clone());
+//RS                         jet_web_query_publish_state(
+//RS                             &key_for_fetch,
+//RS                             &footprint_for_fetch,
+//RS                             &fresh,
+//RS                             0,
+//RS                             "fetch-success",
+//RS                             JetWebMutationStatus::Idle,
+//RS                             0,
+//RS                         );
+//RS                         Ok(value)
+//RS                     }
+//RS                     Ok(_) => {
+//RS                         let error = format!(
+//RS                             "query payload exceeds {} bytes",
+//RS                             JET_WEB_QUERY_MAX_VALUE
+//RS                         );
+//RS                         let before = signal.get();
+//RS                         let failed = JetWebQueryState {
+//RS                             status: JetWebQueryStatus::Error,
+//RS                             error: error.clone(),
+//RS                             ..before
+//RS                         };
+//RS                         signal.set(failed.clone());
+//RS                         jet_web_query_publish_state(
+//RS                             &key_for_fetch,
+//RS                             &footprint_for_fetch,
+//RS                             &failed,
+//RS                             0,
+//RS                             "fetch-error",
+//RS                             JetWebMutationStatus::Idle,
+//RS                             0,
+//RS                         );
+//RS                         Err(error)
+//RS                     }
+//RS                     Err(error) => {
+//RS                         let error = jet_web_query_bound_error(error);
+//RS                         let before = signal.get();
+//RS                         let failed = JetWebQueryState {
+//RS                             status: JetWebQueryStatus::Error,
+//RS                             error: error.clone(),
+//RS                             ..before
+//RS                         };
+//RS                         signal.set(failed.clone());
+//RS                         jet_web_query_publish_state(
+//RS                             &key_for_fetch,
+//RS                             &footprint_for_fetch,
+//RS                             &failed,
+//RS                             0,
+//RS                             "fetch-error",
+//RS                             JetWebMutationStatus::Idle,
+//RS                             0,
+//RS                         );
+//RS                         Err(error)
+//RS                     }
+//RS                 }
+//RS             },
+//RS         );
+//RS         let signal_for_sink = query.state.clone();
+//RS         let key_for_sink = query.key.clone();
+//RS         let footprint_for_sink = footprint.clone();
+//RS         let live = jet_app_live_bind_sink(
+//RS             &live,
+//RS             JetWebQueryArc::new(move |value| {
+//RS                 let before = signal_for_sink.get();
+//RS                 let state = JetWebQueryState {
+//RS                     status: if before.offline {
+//RS                         JetWebQueryStatus::Offline
+//RS                     } else {
+//RS                         JetWebQueryStatus::Fresh
+//RS                     },
+//RS                     value,
+//RS                     error: String::new(),
+//RS                     generation: before.generation.saturating_add(1),
+//RS                     ..before
+//RS                 };
+//RS                 signal_for_sink.set(state.clone());
+//RS                 jet_web_query_publish_state(
+//RS                     &key_for_sink,
+//RS                     &footprint_for_sink,
+//RS                     &state,
+//RS                     0,
+//RS                     "live-commit",
+//RS                     JetWebMutationStatus::Idle,
+//RS                     0,
+//RS                 );
+//RS             }),
+//RS         );
+//RS         let mut result = query;
+//RS         result.footprint = footprint;
+//RS         result.live = Some(live);
+//RS         result.fetch = Some(fetch);
+//RS         result.sync_live_state();
+//RS         if initial_fetch {
+//RS             let _ = result.refresh();
+//RS         }
+//RS         jet_web_query_register_panel_fact(&result);
+//RS         result
+//RS     }
+//RS 
+//RS     pub fn subscribe(source: String) -> Self {
+//RS         let query = Self::new(source.clone(), String::new());
+//RS         if !jet_web_query_valid_source(&source) {
+//RS             let mut state = query.state.get();
+//RS             state.status = JetWebQueryStatus::Error;
+//RS             state.error = "subscription source is empty, too large, or contains control characters".to_string();
+//RS             query.state.set(state);
+//RS             jet_web_query_register_panel_fact(&query);
+//RS             return query;
+//RS         }
+//RS         let live = jet_app_subscribe(source.clone());
+//RS         let mut query = query;
+//RS         query.footprint = format!("ext:{source}");
+//RS         let live = query.bind_live_state(&live);
+//RS         query.live = Some(live);
+//RS         query.sync_live_state();
+//RS         jet_web_query_register_panel_fact(&query);
+//RS         query
+//RS     }
+//RS 
+//RS     pub fn key(&self) -> String {
+//RS         self.key.clone()
+//RS     }
+//RS 
+//RS     pub fn footprint(&self) -> String {
+//RS         self.footprint.clone()
+//RS     }
+//RS 
+//RS     pub fn state(&self) -> JetWebQueryState {
+//RS         self.sync_live_state();
+//RS         self.state.get()
+//RS     }
+//RS 
+//RS     pub fn state_signal(&self) -> jet_std::JetSignal<JetWebQueryState> {
+//RS         self.state.clone()
+//RS     }
+//RS 
+//RS     pub fn mutation_state(&self) -> JetWebMutationState {
+//RS         self.mutation.get()
+//RS     }
+//RS 
+//RS     pub fn mutation_signal(&self) -> jet_std::JetSignal<JetWebMutationState> {
+//RS         self.mutation.clone()
+//RS     }
+//RS 
+//RS     pub fn mode(&self) -> JetWebQueryNetworkMode {
+//RS         self.mode
+//RS             .lock()
+//RS             .map(|mode| *mode)
+//RS             .unwrap_or(JetWebQueryNetworkMode::Online)
+//RS     }
+//RS 
+//RS     pub fn set_mode(&self, mode: JetWebQueryNetworkMode) {
+//RS         if let Ok(mut current) = self.mode.lock() {
+//RS             *current = mode;
+//RS         }
+//RS         let state = self.state();
+//RS         self.publish_state(&state, "policy-changed");
+//RS     }
+//RS 
+//RS     pub fn is_online(&self) -> bool {
+//RS         self.online.lock().map(|online| *online).unwrap_or(false)
+//RS     }
+//RS 
+//RS     pub fn set_online(&self, online: bool) {
+//RS         if let Ok(mut current) = self.online.lock() {
+//RS             *current = online;
+//RS         }
+//RS         let mut state = self.state.get();
+//RS         let queued = jet_web_query_queue_count(&self.key);
+//RS         state.queued = queued;
+//RS         state.offline = !online || queued > 0;
+//RS         state.status = if queued > 0 || !online {
+//RS             JetWebQueryStatus::Offline
+//RS         } else if !state.error.is_empty() {
+//RS             JetWebQueryStatus::Error
+//RS         } else {
+//RS             match state.status {
+//RS                 JetWebQueryStatus::Stale | JetWebQueryStatus::Fetching => state.status,
+//RS                 JetWebQueryStatus::Pending if state.value.is_empty() => JetWebQueryStatus::Pending,
+//RS                 _ if state.value.is_empty() => JetWebQueryStatus::Pending,
+//RS                 _ => JetWebQueryStatus::Fresh,
+//RS             }
+//RS         };
+//RS         self.set_state(state, "connectivity-changed");
+//RS         self.sync_live_state();
+//RS     }
+//RS     fn invalidate_targets(&self, targets: &[String]) {
+//RS         for target in targets {
+//RS             if let Some(key) = target.strip_prefix("key:") {
+//RS                 let _ = jet_app_invalidate_key(key.to_string());
+//RS             } else {
+//RS                 let _ = jet_app_invalidate(target.clone());
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     pub fn mutate<F>(
+//RS         &self,
+//RS         payload: String,
+//RS         optimistic: Option<String>,
+//RS         action: F,
+//RS     ) -> JetWebMutationState
+//RS     where
+//RS         F: Fn(String) -> Result<String, String>,
+//RS     {
+//RS         self.mutate_with_invalidations(payload, optimistic, Vec::new(), action)
+//RS     }
+//RS 
+//RS     pub fn mutate_with_invalidations<F>(
+//RS         &self,
+//RS         payload: String,
+//RS         optimistic: Option<String>,
+//RS         invalidations: Vec<String>,
+//RS         action: F,
+//RS     ) -> JetWebMutationState
+//RS     where
+//RS         F: Fn(String) -> Result<String, String>,
+//RS     {
+//RS         let _mutation_lock = self
+//RS             .mutation_lock
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         let previous = self.state();
+//RS         let generation = self.mutation.get().generation.saturating_add(1);
+//RS         let optimistic_present = optimistic.is_some();
+//RS         if payload.len() > JET_WEB_QUERY_MAX_VALUE {
+//RS             return self.finish_mutation_error(
+//RS                 generation,
+//RS                 false,
+//RS                 String::new(),
+//RS                 "mutation payload exceeds the payload limit".to_string(),
+//RS                 false,
+//RS                 0,
+//RS             );
+//RS         }
+//RS         if let Some(value) = optimistic.as_ref() {
+//RS             if value.len() > JET_WEB_QUERY_MAX_VALUE {
+//RS                 return self.finish_mutation_error(
+//RS                     generation,
+//RS                     false,
+//RS                     String::new(),
+//RS                     "optimistic query value exceeds the payload limit".to_string(),
+//RS                     false,
+//RS                     0,
+//RS                 );
+//RS             }
+//RS         }
+//RS         let targets = if invalidations.is_empty() {
+//RS             // A query's declared footprint is the dependency set for its
+//RS             // mutation. Invalidate that set by default so every query that
+//RS             // read the affected data refreshes, while unrelated footprints
+//RS             // remain untouched. Plain `new` handles have no dependency
+//RS             // metadata, so they retain the explicit-key fallback.
+//RS             if self.footprint.trim().is_empty() {
+//RS                 if self.key.is_empty() {
+//RS                     Vec::new()
+//RS                 } else {
+//RS                     vec![format!("key:{}", self.key)]
+//RS                 }
+//RS             } else {
+//RS                 vec![self.footprint.clone()]
+//RS             }
+//RS         } else {
+//RS             invalidations
+//RS         };
+//RS         let targets = match jet_web_query_targets(targets) {
+//RS             Ok(targets) => targets,
+//RS             Err(error) => {
+//RS                 return self.finish_mutation_error(
+//RS                     generation,
+//RS                     optimistic_present,
+//RS                     self.mutation_context(previous.generation),
+//RS                     error,
+//RS                     false,
+//RS                     0,
+//RS                 )
+//RS             }
+//RS         };
+//RS         let mode = self.mode();
+//RS         if !self.is_online() && mode == JetWebQueryNetworkMode::OfflineFirst {
+//RS             let queue_count = match jet_web_query_enqueue(&self.key, payload, targets.clone()) {
+//RS                 Ok(count) => count,
+//RS                 Err(error) => {
+//RS                     return self.finish_mutation_error(
+//RS                         generation,
+//RS                         false,
+//RS                         String::new(),
+//RS                         error,
+//RS                         false,
+//RS                         0,
+//RS                     )
+//RS                 }
+//RS             };
+//RS             if let Some(value) = optimistic.clone() {
+//RS                 let state = JetWebQueryState {
+//RS                     status: JetWebQueryStatus::Offline,
+//RS                     value,
+//RS                     error: String::new(),
+//RS                     generation: previous.generation.saturating_add(1),
+//RS                     queued: queue_count,
+//RS                     offline: true,
+//RS                 };
+//RS                 self.set_state(state, "optimistic-paused");
+//RS             }
+//RS             let pending = JetWebMutationState {
+//RS                 status: JetWebMutationStatus::Pending,
+//RS                 generation,
+//RS                 optimistic: optimistic_present,
+//RS                 value: self.state().value,
+//RS                 result: String::new(),
+//RS                 error: String::new(),
+//RS                 context: self.mutation_context(previous.generation),
+//RS                 rollback: false,
+//RS                 paused: true,
+//RS                 queued: queue_count,
+//RS                 replayed: self.mutation.get().replayed,
+//RS             };
+//RS             self.set_mutation(pending.clone());
+//RS             return pending;
+//RS         }
+//RS         if !self.is_online() && mode == JetWebQueryNetworkMode::Online {
+//RS             return self.finish_mutation_error(
+//RS                 generation,
+//RS                 optimistic_present,
+//RS                 self.mutation_context(previous.generation),
+//RS                 "query is offline".to_string(),
+//RS                 false,
+//RS                 0,
+//RS             );
+//RS         }
+//RS         let context = self.mutation_context(previous.generation);
+//RS         let optimistic_value = optimistic.clone().unwrap_or_else(|| previous.value.clone());
+//RS         let pending = JetWebMutationState {
+//RS             status: JetWebMutationStatus::Pending,
+//RS             generation,
+//RS             optimistic: optimistic_present,
+//RS             value: optimistic_value,
+//RS             result: String::new(),
+//RS             error: String::new(),
+//RS             context: context.clone(),
+//RS             rollback: false,
+//RS             paused: false,
+//RS             queued: 0,
+//RS             replayed: self.mutation.get().replayed,
+//RS         };
+//RS         self.set_mutation(pending);
+//RS         if let Some(value) = optimistic.clone() {
+//RS             let state = JetWebQueryState {
+//RS                 status: if previous.offline {
+//RS                     JetWebQueryStatus::Offline
+//RS                 } else {
+//RS                     JetWebQueryStatus::Stale
+//RS                 },
+//RS                 value,
+//RS                 error: String::new(),
+//RS                 generation: previous.generation.saturating_add(1),
+//RS                 ..previous.clone()
+//RS             };
+//RS             self.set_state(state, "optimistic-applied");
+//RS         }
+//RS         let outcome = action(payload);
+//RS         let (status, result, error, rollback) = match outcome {
+//RS             Ok(result) if result.len() <= JET_WEB_QUERY_MAX_VALUE => {
+//RS                 (JetWebMutationStatus::Success, result, String::new(), false)
+//RS             }
+//RS             Ok(_) => (
+//RS                 JetWebMutationStatus::Error,
+//RS                 String::new(),
+//RS                 "mutation result exceeds the payload limit".to_string(),
+//RS                 optimistic_present,
+//RS             ),
+//RS             Err(error) => (
+//RS                 JetWebMutationStatus::Error,
+//RS                 String::new(),
+//RS                 jet_web_query_bound_error(error),
+//RS                 optimistic_present,
+//RS             ),
+//RS         };
+//RS         if status == JetWebMutationStatus::Error {
+//RS             if rollback {
+//RS                 self.set_state(previous.clone(), "optimistic-rollback");
+//RS                 jet_web_query_publish_mutation(
+//RS                     &self.key,
+//RS                     JetDevtoolsMutationLifecycle::RolledBack,
+//RS                     true,
+//RS                 );
+//RS             }
+//RS         } else {
+//RS             self.invalidate_targets(&targets);
+//RS             self.sync_live_state();
+//RS         }
+//RS         let value = self.state().value;
+//RS         let visible = JetWebMutationState {
+//RS             status,
+//RS             generation,
+//RS             optimistic: optimistic_present,
+//RS             value: value.clone(),
+//RS             result,
+//RS             error: error.clone(),
+//RS             context: context.clone(),
+//RS             rollback,
+//RS             paused: false,
+//RS             queued: 0,
+//RS             replayed: self.mutation.get().replayed,
+//RS         };
+//RS         self.set_mutation(visible);
+//RS         let settled = JetWebMutationState {
+//RS             status: JetWebMutationStatus::Settled,
+//RS             generation,
+//RS             optimistic: optimistic_present,
+//RS             value,
+//RS             result: self.mutation.get().result.clone(),
+//RS             error,
+//RS             context,
+//RS             rollback,
+//RS             paused: false,
+//RS             queued: 0,
+//RS             replayed: self.mutation.get().replayed,
+//RS         };
+//RS         self.set_mutation(settled.clone());
+//RS         settled
+//RS     }
+//RS 
+//RS     fn finish_mutation_error(
+//RS         &self,
+//RS         generation: u64,
+//RS         optimistic: bool,
+//RS         context: String,
+//RS         error: String,
+//RS         rollback: bool,
+//RS         queued: usize,
+//RS     ) -> JetWebMutationState {
+//RS         let error = jet_web_query_bound_error(error);
+//RS         let failed = JetWebMutationState {
+//RS             status: JetWebMutationStatus::Error,
+//RS             generation,
+//RS             optimistic,
+//RS             value: self.state().value,
+//RS             result: String::new(),
+//RS             error: error.clone(),
+//RS             context: context.clone(),
+//RS             rollback,
+//RS             paused: false,
+//RS             queued,
+//RS             replayed: self.mutation.get().replayed,
+//RS         };
+//RS         self.set_mutation(failed);
+//RS         jet_web_query_publish_mutation(&self.key, JetDevtoolsMutationLifecycle::Failed, rollback);
+//RS         let settled = JetWebMutationState {
+//RS             status: JetWebMutationStatus::Settled,
+//RS             generation,
+//RS             optimistic,
+//RS             value: self.state().value,
+//RS             result: String::new(),
+//RS             error,
+//RS             context,
+//RS             rollback,
+//RS             paused: false,
+//RS             queued,
+//RS             replayed: self.mutation.get().replayed,
+//RS         };
+//RS         self.set_mutation(settled.clone());
+//RS         settled
+//RS     }
+//RS 
+//RS     fn mutation_context(&self, before_generation: u64) -> String {
+//RS         let context = format!("query:{};before_generation:{before_generation}", self.key);
+//RS         if context.len() <= JET_WEB_QUERY_MAX_CONTEXT {
+//RS             context
+//RS         } else {
+//RS             "query mutation context exceeds the payload limit".to_string()
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn get(&self) -> String {
+//RS         self.state().value
+//RS     }
+//RS 
+//RS     pub fn invalidate(&self) -> i64 {
+//RS         let before = self.state.get();
+//RS         let state = JetWebQueryState {
+//RS             status: if before.offline {
+//RS                 JetWebQueryStatus::Offline
+//RS             } else {
+//RS                 JetWebQueryStatus::Stale
+//RS             },
+//RS             error: String::new(),
+//RS             ..before
+//RS         };
+//RS         self.set_state(state, "manual-invalidate");
+//RS         let result = self
+//RS             .live
+//RS             .as_ref()
+//RS             .map(|live| jet_app_invalidate_key(live.key.clone()))
+//RS             .unwrap_or(0);
+//RS         self.sync_live_state();
+//RS         result
+//RS     }
+//RS 
+//RS     pub fn refresh(&self) -> Result<(), String> {
+//RS         let Some(fetch) = self.fetch.as_ref() else {
+//RS             return Err("query has no fetcher".to_string());
+//RS         };
+//RS         if !self.is_online() && self.mode() == JetWebQueryNetworkMode::OfflineFirst {
+//RS             let mut state = self.state.get();
+//RS             state.status = JetWebQueryStatus::Offline;
+//RS             state.offline = true;
+//RS             state.queued = jet_web_query_queue_count(&self.key);
+//RS             self.set_state(state, "refresh-paused");
+//RS             return Err("query refresh paused while offline".to_string());
+//RS         }
+//RS         let before = self.state.get();
+//RS         self.set_state(
+//RS             JetWebQueryState {
+//RS                 status: JetWebQueryStatus::Fetching,
+//RS                 error: String::new(),
+//RS                 ..before
+//RS             },
+//RS             "refresh-start",
+//RS         );
+//RS         if self.live.is_some() {
+//RS             let _ = jet_app_live_refresh(self.live.as_ref().unwrap());
+//RS             let state = self.state();
+//RS             if state.status == JetWebQueryStatus::Error {
+//RS                 return Err(state.error);
+//RS             }
+//RS             return Ok(());
+//RS         }
+//RS         match fetch() {
+//RS             Ok(value) if value.len() <= JET_WEB_QUERY_MAX_VALUE => {
+//RS                 let before = self.state.get();
+//RS                 self.set_state(
+//RS                     JetWebQueryState {
+//RS                         status: JetWebQueryStatus::Fresh,
+//RS                         value,
+//RS                         error: String::new(),
+//RS                         generation: before.generation.saturating_add(1),
+//RS                         ..before
+//RS                     },
+//RS                     "refresh-success",
+//RS                 );
+//RS                 Ok(())
+//RS             }
+//RS             Ok(_) => {
+//RS                 let error = format!("query payload exceeds {} bytes", JET_WEB_QUERY_MAX_VALUE);
+//RS                 self.set_query_error(error.clone(), "refresh-error");
+//RS                 Err(error)
+//RS             }
+//RS             Err(error) => {
+//RS                 let error = jet_web_query_bound_error(error);
+//RS                 self.set_query_error(error.clone(), "refresh-error");
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn cancel(&self) -> bool {
+//RS         let Some(live) = self.live.as_ref() else {
+//RS             return false;
+//RS         };
+//RS         let cancelled = jet_app_live_cancel(live);
+//RS         let state = self.state.get();
+//RS         self.set_state(
+//RS             JetWebQueryState {
+//RS                 status: if state.offline {
+//RS                     JetWebQueryStatus::Offline
+//RS                 } else {
+//RS                     JetWebQueryStatus::Stale
+//RS                 },
+//RS                 ..state
+//RS             },
+//RS             "cancelled",
+//RS         );
+//RS         cancelled.lifecycle.active
+//RS     }
+//RS 
+//RS     pub fn transact_invalidate(&self, write_set: String) -> i64 {
+//RS         let result = jet_app_transact_invalidate(write_set);
+//RS         self.sync_live_state();
+//RS         result
+//RS     }
+//RS 
+//RS     pub fn queue(&self, payload: String) -> Result<usize, String> {
+//RS         if payload.len() > JET_WEB_QUERY_MAX_VALUE {
+//RS             return Err(format!(
+//RS                 "queued query payload exceeds {} bytes",
+//RS                 JET_WEB_QUERY_MAX_VALUE
+//RS             ));
+//RS         }
+//RS         let count = jet_web_query_enqueue(&self.key, payload, Vec::new())?;
+//RS         let mut state = self.state.get();
+//RS         state.queued = count;
+//RS         state.offline = true;
+//RS         state.status = JetWebQueryStatus::Offline;
+//RS         state.error.clear();
+//RS         self.set_state(state, "queued");
+//RS         Ok(count)
+//RS     }
+//RS 
+//RS     fn retry_with<F>(&self, send: F) -> Result<usize, String>
+//RS     where
+//RS         F: Fn(String) -> Result<(), String>,
+//RS     {
+//RS         if !self.is_online() {
+//RS             return Err("query replay paused while offline".to_string());
+//RS         }
+//RS         let entries = jet_web_query_queued(&self.key)?;
+//RS         let mut sent = 0usize;
+//RS         for entry in entries {
+//RS             if let Err(error) = send(entry.payload.clone()) {
+//RS                 let error = jet_web_query_bound_error(error);
+//RS                 let mut mutation = self.mutation.get();
+//RS                 mutation.status = JetWebMutationStatus::Error;
+//RS                 mutation.error = error.clone();
+//RS                 mutation.paused = true;
+//RS                 mutation.queued = jet_web_query_queue_count(&self.key);
+//RS                 self.set_mutation(mutation.clone());
+//RS                 let mut settled = mutation;
+//RS                 settled.status = JetWebMutationStatus::Settled;
+//RS                 self.set_mutation(settled);
+//RS                 let mut state = self.state.get();
+//RS                 state.queued = jet_web_query_queue_count(&self.key);
+//RS                 state.offline = true;
+//RS                 state.status = JetWebQueryStatus::Offline;
+//RS                 state.error = error.clone();
+//RS                 self.set_state(state, "replay-error");
+//RS                 return Err(error);
+//RS             }
+//RS             if let Err(error) = jet_web_query_remove_queued(&self.key, entry.sequence) {
+//RS                 let error = jet_web_query_bound_error(error);
+//RS                 let mut mutation = self.mutation.get();
+//RS                 mutation.status = JetWebMutationStatus::Error;
+//RS                 mutation.error = error.clone();
+//RS                 mutation.paused = true;
+//RS                 mutation.queued = jet_web_query_queue_count(&self.key);
+//RS                 self.set_mutation(mutation.clone());
+//RS                 let mut settled = mutation;
+//RS                 settled.status = JetWebMutationStatus::Settled;
+//RS                 self.set_mutation(settled);
+//RS                 let mut state = self.state.get();
+//RS                 state.queued = jet_web_query_queue_count(&self.key);
+//RS                 state.offline = true;
+//RS                 state.status = JetWebQueryStatus::Offline;
+//RS                 state.error = error.clone();
+//RS                 self.set_state(state, "replay-persist-error");
+//RS                 return Err(error);
+//RS             }
+//RS             self.invalidate_targets(&entry.invalidations);
+//RS             sent = sent.saturating_add(1);
+//RS             let queued = jet_web_query_queue_count(&self.key);
+//RS             let mut mutation = self.mutation.get();
+//RS             mutation.status = JetWebMutationStatus::Success;
+//RS             mutation.paused = false;
+//RS             mutation.queued = queued;
+//RS             mutation.replayed = mutation.replayed.saturating_add(1);
+//RS             mutation.error.clear();
+//RS             self.set_mutation(mutation.clone());
+//RS             let mut settled = mutation;
+//RS             settled.status = JetWebMutationStatus::Settled;
+//RS             self.set_mutation(settled);
+//RS             let mut state = self.state.get();
+//RS             state.queued = queued;
+//RS             state.offline = queued > 0;
+//RS             state.status = if state.offline {
+//RS                 JetWebQueryStatus::Offline
+//RS             } else {
+//RS                 JetWebQueryStatus::Fresh
+//RS             };
+//RS             state.error.clear();
+//RS             self.set_state(state, "replayed");
+//RS         }
+//RS         Ok(sent)
+//RS     }
+//RS 
+//RS     pub fn show(&self) -> String {
+//RS         let state = self.state();
+//RS         let mutation = self.mutation_state();
+//RS         format!(
+//RS             "Query(key={},footprint={},status={},generation={},queued={},offline={},mode={},freshness_ms={},observers={},cause={},value_bytes={},error_bytes={},mutation={},rollback={},paused={},replayed={})",
+//RS             self.key,
+//RS             self.footprint,
+//RS             state.status.name(),
+//RS             state.generation,
+//RS             state.queued,
+//RS             state.offline,
+//RS             self.mode().name(),
+//RS             self.live
+//RS                 .as_ref()
+//RS                 .map(jet_app_live_freshness_ms)
+//RS                 .unwrap_or(0),
+//RS             self.live
+//RS                 .as_ref()
+//RS                 .map(jet_app_live_observers)
+//RS                 .unwrap_or(0),
+//RS             self.live
+//RS                 .as_ref()
+//RS                 .map(jet_app_live_invalidation_cause)
+//RS                 .unwrap_or_else(|| "".to_string()),
+//RS             state.value.len(),
+//RS             state.error.len(),
+//RS             mutation.status.name(),
+//RS             mutation.rollback,
+//RS             mutation.paused,
+//RS             mutation.replayed,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn facts(&self) -> String {
+//RS         self.show()
+//RS     }
+//RS 
+//RS     fn set_state(&self, state: JetWebQueryState, cause: &str) {
+//RS         self.state.set(state.clone());
+//RS         self.publish_state(&state, cause);
+//RS     }
+//RS 
+//RS     fn set_query_error(&self, error: String, cause: &str) {
+//RS         let before = self.state.get();
+//RS         self.set_state(
+//RS             JetWebQueryState {
+//RS                 status: JetWebQueryStatus::Error,
+//RS                 error,
+//RS                 ..before
+//RS             },
+//RS             cause,
+//RS         );
+//RS     }
+//RS 
+//RS     fn set_mutation(&self, state: JetWebMutationState) {
+//RS         self.mutation.set(state.clone());
+//RS         if state.status == JetWebMutationStatus::Pending {
+//RS             jet_web_query_publish_mutation(&self.key, JetDevtoolsMutationLifecycle::Started, state.rollback);
+//RS         } else if state.status == JetWebMutationStatus::Success {
+//RS             jet_web_query_publish_mutation(&self.key, JetDevtoolsMutationLifecycle::Committed, state.rollback);
+//RS         } else if state.status == JetWebMutationStatus::Error {
+//RS             jet_web_query_publish_mutation(&self.key, JetDevtoolsMutationLifecycle::Failed, state.rollback);
+//RS         }
+//RS     }
+//RS 
+//RS     fn publish_state(&self, state: &JetWebQueryState, cause: &str) {
+//RS         let observers = self
+//RS             .live
+//RS             .as_ref()
+//RS             .map(jet_app_live_observers)
+//RS             .unwrap_or(0);
+//RS         jet_web_query_publish_state(
+//RS             &self.key,
+//RS             &self.footprint,
+//RS             state,
+//RS             observers,
+//RS             cause,
+//RS             self.mutation.get().status,
+//RS             self.live
+//RS                 .as_ref()
+//RS                 .map(jet_app_live_freshness_ms)
+//RS                 .unwrap_or(0),
+//RS         );
+//RS     }
+//RS 
+//RS     fn sync_live_state(&self) {
+//RS         let Some(live) = self.live.as_ref() else {
+//RS             return;
+//RS         };
+//RS         let live = jet_app_live_snapshot(live);
+//RS         let mut state = self.state.get();
+//RS         state.value = live.value.clone();
+//RS         state.generation = live.lifecycle.generation;
+//RS         state.queued = jet_web_query_queue_count(&self.key);
+//RS         if !live.lifecycle.error.is_empty() {
+//RS             state.status = JetWebQueryStatus::Error;
+//RS             state.error = live.lifecycle.error;
+//RS         } else if live.lifecycle.refreshing {
+//RS             state.status = JetWebQueryStatus::Fetching;
+//RS             state.error.clear();
+//RS         } else if live.lifecycle.dirty {
+//RS             state.status = if state.offline {
+//RS                 JetWebQueryStatus::Offline
+//RS             } else {
+//RS                 JetWebQueryStatus::Stale
+//RS             };
+//RS         } else if !state.offline && (state.status != JetWebQueryStatus::Pending || !live.value.is_empty()) {
+//RS             state.status = JetWebQueryStatus::Fresh;
+//RS             state.error.clear();
+//RS         }
+//RS         if state != self.state.get() {
+//RS             self.set_state(state, "live-sync");
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_web_query_new(key: String, live: &JetLiveQuery) -> JetWebQuery {
+//RS     let snapshot = jet_app_live_snapshot(live);
+//RS     let mut query = JetWebQuery::new(key, snapshot.value);
+//RS     if !query.state.get().error.is_empty() {
+//RS         jet_web_query_register_panel_fact(&query);
+//RS         return query;
+//RS     }
+//RS     query.footprint = snapshot.footprint.display();
+//RS     query.fetch = snapshot.rerun;
+//RS     query.live = Some(query.bind_live_state(live));
+//RS     jet_web_query_register_panel_fact(&query);
+//RS     query
+//RS }
+//RS 
+//RS pub fn jet_web_query_live<F>(
+//RS     key: String,
+//RS     footprint: String,
+//RS     initial: String,
+//RS     fetch: F,
+//RS ) -> JetWebQuery
+//RS where
+//RS     F: Fn() -> Result<String, String> + Send + Sync + 'static,
+//RS {
+//RS     JetWebQuery::live(key, footprint, initial, fetch)
+//RS }
+//RS 
+//RS pub fn jet_web_query_subscribe(source: String) -> JetWebQuery {
+//RS     JetWebQuery::subscribe(source)
+//RS }
+//RS 
+//RS pub fn jet_web_query_invalidate(query: &JetWebQuery) -> i64 {
+//RS     query.invalidate()
+//RS }
+//RS 
+//RS pub fn jet_web_query_get(query: &JetWebQuery) -> String {
+//RS     query.get()
+//RS }
+//RS 
+//RS pub fn jet_web_query_state(query: &JetWebQuery) -> JetWebQueryState {
+//RS     query.state()
+//RS }
+//RS 
+//RS pub fn jet_web_query_state_signal(
+//RS     query: &JetWebQuery,
+//RS ) -> jet_std::JetSignal<JetWebQueryState> {
+//RS     query.state_signal()
+//RS }
+//RS 
+//RS pub fn jet_web_query_mutation_signal(
+//RS     query: &JetWebQuery,
+//RS ) -> jet_std::JetSignal<JetWebMutationState> {
+//RS     query.mutation_signal()
+//RS }
+//RS 
+//RS pub fn jet_web_query_show(query: &JetWebQuery) -> String {
+//RS     query.show()
+//RS }
+//RS 
+//RS pub fn jet_web_query_facts(query: &JetWebQuery) -> String {
+//RS     query.facts()
+//RS }
+//RS 
+//RS pub fn jet_web_query_queue(query: &JetWebQuery, payload: String) -> Result<i64, String> {
+//RS     query.queue(payload).map(|count| count as i64)
+//RS }
+//RS 
+//RS pub fn jet_web_query_refresh(query: &JetWebQuery) -> Result<(), String> {
+//RS     query.refresh()
+//RS }
+//RS 
+//RS pub fn jet_web_query_cancel(query: &JetWebQuery) -> bool {
+//RS     query.cancel()
+//RS }
+//RS 
+//RS pub fn jet_web_query_set_online(query: &JetWebQuery, online: bool) {
+//RS     query.set_online(online);
+//RS }
+//RS 
+//RS pub fn jet_web_query_set_mode(query: &JetWebQuery, mode: JetWebQueryNetworkMode) {
+//RS     query.set_mode(mode);
+//RS }
+//RS 
+//RS pub fn jet_web_query_mutation_state(query: &JetWebQuery) -> JetWebMutationState {
+//RS     query.mutation_state()
+//RS }
+//RS 
+//RS /// Run one typed mutation through the canonical optimistic/offline lifecycle.
+//RS pub fn jet_web_query_mutate<F>(
+//RS     query: &JetWebQuery,
+//RS     payload: String,
+//RS     optimistic: Option<String>,
+//RS     action: F,
+//RS ) -> JetWebMutationState
+//RS where
+//RS     F: Fn(String) -> Result<String, String>,
+//RS {
+//RS     query.mutate(payload, optimistic, action)
+//RS }
+//RS 
+//RS /// Run one mutation and invalidate the explicitly declared query/source keys
+//RS /// after a successful commit.
+//RS pub fn jet_web_query_mutate_with_invalidations<F>(
+//RS     query: &JetWebQuery,
+//RS     payload: String,
+//RS     optimistic: Option<String>,
+//RS     invalidations: Vec<String>,
+//RS     action: F,
+//RS ) -> JetWebMutationState
+//RS where
+//RS     F: Fn(String) -> Result<String, String>,
+//RS {
+//RS     query.mutate_with_invalidations(payload, optimistic, invalidations, action)
+//RS }
+//RS 
+//RS /// Replay queued offline-first mutation payloads in deterministic sequence
+//RS /// order.  The sender owns the transport; queue removal and lifecycle state
+//RS /// remain in the canonical query implementation.
+//RS pub fn jet_web_query_retry<F>(
+//RS     query: &JetWebQuery,
+//RS     send: F,
+//RS ) -> Result<i64, String>
+//RS where
+//RS     F: Fn(String) -> Result<(), String>,
+//RS {
+//RS     query.retry_with(send).map(|count| count as i64)
+//RS }
+// END-PORT-PENDING 0310 crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs:1-1725
+

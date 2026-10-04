@@ -1,0 +1,839 @@
+// PORT-PENDING 0181 crates-jet-codegen-src-prelude-mem: crates/jet-codegen/src/Prelude/Mem.rs:1-835
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): real bump-allocated arena +
+//RS     // scope-bound regions. The c05 upgrade — replaces the owned-clone stub where
+//RS     // `alloc(v)` just returned `v` with a real shared bump buffer.
+//RS     //
+//RS     // Soundness contract (the runtime half; the sema half lives in
+//RS     // Source/Sema/CheckerOwnership.rs as E0631/E0632):
+//RS     //   * `alloc(&self, v) -> &'arena mut T` hands out a reference *into* the
+//RS     //     arena's storage, tied to the arena's borrow — the typed-arena pattern.
+//RS     //     Chunks live in a `RefCell` (interior mutability) so `alloc` takes
+//RS     //     `&self` and many live views may coexist.
+//RS     //   * `reset(&mut self)` reuses storage; terminal release is the shared
+//RS     //     compiler-owned `close(^resource)` protocol,
+//RS     //     so rustc itself forbids reset/close while any view is live: a borrow
+//RS     //     held by an outstanding `&'arena mut T` view conflicts with the
+//RS     //     `&mut`/`move`. Jet's sema rejects first (E0632) so I2 holds — rustc
+//RS     //     never speaks — but the signatures are the backstop.
+//RS     //
+//RS     // I6: zero external crates — plain std Rust only.
+//RS     // The one vetted lifetime-extension lives here, inside the core.mem
+//RS     // helper module; it never leaks into user-visible generated code.
+//RS     use std::cell::{Cell, RefCell};
+//RS     use std::ptr::NonNull;
+//RS 
+//RS     pub use super::AllocError;
+//RS     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
+//RS 
+//RS     const DEFAULT_ARENA_BYTES: usize = 4096;
+//RS     const DEFAULT_BUMP_BYTES: usize = 64 * 1024;
+//RS     const DEFAULT_POOL_SLOTS: usize = 64;
+//RS     const BASE_ALIGNMENT: usize = 4096;
+//RS 
+//RS     // D-MEM-SENTRY1: policy and state live in the exact foundation source
+//RS     // embedded by `Codegen::push_mem_prelude`; these wrappers only marshal Rust
+//RS     // pointers and report facts into the generated runtime.
+//RS     use self::jet_sentry as sentry_kernel;
+//RS 
+//RS     pub use self::jet_sentry::{
+//RS         jet_memory_ledger_record, jet_sentry_current_frame, jet_sentry_fenced_scope,
+//RS         jet_sentry_frame, jet_sentry_policy_scope, jet_sentry_reset, jet_sentry_scope,
+//RS         jet_sentry_set_hardened, JetSentryFrame, JetSentryGuard, MemoryLedgerWitness,
+//RS     };
+//RS 
+//RS     pub fn jet_sentry_register_allocation(ptr: *mut u8, bytes: usize) {
+//RS         sentry_kernel::jet_sentry_register_allocation(ptr as usize, bytes);
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_register_stack_allocation(ptr: *mut u8, bytes: usize) {
+//RS         sentry_kernel::jet_sentry_register_stack_allocation(ptr as usize, bytes);
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_register_owned_allocation(owner: usize, ptr: *mut u8, bytes: usize) {
+//RS         sentry_kernel::jet_sentry_register_owned_allocation(owner, ptr as usize, bytes);
+//RS     }
+//RS 
+//RS     fn jet_sentry_quarantine(ptr: *mut u8, bytes: usize) {
+//RS         sentry_kernel::jet_sentry_quarantine(ptr as usize, bytes);
+//RS     }
+//RS 
+//RS     fn jet_sentry_quarantine_owner(owner: usize) {
+//RS         sentry_kernel::jet_sentry_quarantine_owner(owner);
+//RS     }
+//RS 
+//RS     fn jet_sentry_runtime_stop(fault: sentry_kernel::JetSentryFault) -> ! {
+//RS         super::jet_sentry_runtime_stop(
+//RS             fault.code,
+//RS             &fault.file,
+//RS             fault.line,
+//RS             &fault.gate,
+//RS             &fault.operation,
+//RS             &fault.obligation,
+//RS             fault.obligation_status.as_str(),
+//RS             fault.foreign_component.as_deref(),
+//RS             fault.foreign_fenced,
+//RS             &fault.detail,
+//RS         )
+//RS     }
+//RS 
+//RS     fn jet_sentry_check<T>(ptr: *const T, operation: &str, obligation: &str) {
+//RS         let Some(fault) = sentry_kernel::jet_sentry_check(
+//RS             ptr as usize,
+//RS             std::mem::size_of::<T>(),
+//RS             std::mem::align_of::<T>(),
+//RS             operation,
+//RS             obligation,
+//RS         ) else {
+//RS             return;
+//RS         };
+//RS         jet_sentry_runtime_stop(fault);
+//RS     }
+//RS 
+//RS     fn jet_sentry_check_foreign<T>(
+//RS         ptr: *const T,
+//RS         operation: &str,
+//RS         obligation: &str,
+//RS         component: &str,
+//RS     ) {
+//RS         let Some(fault) = sentry_kernel::jet_sentry_check_foreign_with_component(
+//RS             ptr as usize,
+//RS             std::mem::size_of::<T>(),
+//RS             std::mem::align_of::<T>(),
+//RS             operation,
+//RS             obligation,
+//RS             component,
+//RS         ) else {
+//RS             return;
+//RS         };
+//RS         jet_sentry_runtime_stop(fault);
+//RS     }
+//RS 
+//RS     fn jet_sentry_check_foreign_strict<T>(
+//RS         ptr: *const T,
+//RS         operation: &str,
+//RS         obligation: &str,
+//RS         component: &str,
+//RS     ) {
+//RS         let Some(fault) = sentry_kernel::jet_sentry_check_foreign_strict(
+//RS             ptr as usize,
+//RS             std::mem::size_of::<T>(),
+//RS             std::mem::align_of::<T>(),
+//RS             operation,
+//RS             obligation,
+//RS             component,
+//RS         ) else {
+//RS             return;
+//RS         };
+//RS         jet_sentry_runtime_stop(fault);
+//RS     }
+//RS 
+//RS     /// Validate an exclusive Jet value before a foreign call. Foreign-owned
+//RS     /// storage is valid input even when Jet did not register its allocation;
+//RS     /// tracked storage still gets the shared liveness, range, and alignment
+//RS     /// witness.
+//RS     pub fn jet_sentry_foreign_ref<'a, T>(ptr: &'a mut T, component: &str) -> &'a mut T {
+//RS         jet_sentry_check_foreign(ptr as *const T, "ffi_write", "ffi_contract", component);
+//RS         ptr
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_address_of<T>(ptr: *const T) -> i64 {
+//RS         jet_sentry_register_allocation(ptr.cast_mut().cast::<u8>(), std::mem::size_of::<T>());
+//RS         ptr as usize as i64
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_stack_address_of<T>(ptr: *const T) -> i64 {
+//RS         jet_sentry_register_stack_allocation(ptr.cast_mut().cast::<u8>(), std::mem::size_of::<T>());
+//RS         ptr as usize as i64
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_read<T>(ptr: *const T, obligation: &str) -> T {
+//RS         jet_sentry_check(ptr, "read", obligation);
+//RS         // SAFETY: the source gate owns the raw operation; the shared sentry
+//RS         // kernel has already observed the active allocation when on.
+//RS         unsafe { ptr.read() }
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_volatile_read<T>(ptr: *const T, obligation: &str) -> T {
+//RS         jet_sentry_check(ptr, "volatile_read", obligation);
+//RS         // SAFETY: the source gate owns the raw operation and the shared kernel
+//RS         // applies the same provenance rule to volatile access.
+//RS         unsafe { std::ptr::read_volatile(ptr) }
+//RS     }
+//RS 
+//RS     pub fn jet_sentry_volatile_write<T>(ptr: *mut T, value: T, obligation: &str) {
+//RS         jet_sentry_check(ptr.cast_const(), "volatile_write", obligation);
+//RS         // SAFETY: the source gate owns the raw operation and the shared kernel
+//RS         // applies the same provenance rule to volatile access.
+//RS         unsafe { std::ptr::write_volatile(ptr, value) };
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug)]
+//RS     pub struct AllocatorFacts {
+//RS         pub live_allocations: usize,
+//RS         pub live_bytes: usize,
+//RS         pub retained_bytes: usize,
+//RS         pub high_water_bytes: usize,
+//RS     }
+//RS 
+//RS     struct DropEntry {
+//RS         ptr: *mut u8,
+//RS         drop_fn: Option<unsafe fn(*mut u8)>,
+//RS         bytes: usize,
+//RS     }
+//RS 
+//RS     unsafe fn drop_at<T>(ptr: *mut u8) {
+//RS         // SAFETY: callers register exactly one entry after writing one T at ptr.
+//RS         unsafe { std::ptr::drop_in_place(ptr.cast::<T>()) };
+//RS     }
+//RS 
+//RS     struct RawBlock {
+//RS         ptr: NonNull<u8>,
+//RS         layout: std::alloc::Layout,
+//RS         used: usize,
+//RS     }
+//RS 
+//RS     impl RawBlock {
+//RS         fn try_new(bytes: usize, alignment: usize, allocator: &str) -> Result<Self, AllocError> {
+//RS             let size = bytes.max(1);
+//RS             let align = alignment.max(1).next_power_of_two();
+//RS             let layout = match std::alloc::Layout::from_size_align(size, align) {
+//RS                 Ok(layout) => layout,
+//RS                 Err(_) => return Err(super::jet_alloc_error(size, allocator)),
+//RS             };
+//RS             // SAFETY: layout is non-zero and valid. Null becomes a value error.
+//RS             let raw = unsafe { std::alloc::alloc(layout) };
+//RS             let Some(ptr) = NonNull::new(raw) else {
+//RS                 return Err(super::jet_alloc_error(size, allocator));
+//RS             };
+//RS             super::jet_observe_arena_retain(layout.size());
+//RS             Ok(RawBlock { ptr, layout, used: 0 })
+//RS         }
+//RS 
+//RS         fn new(bytes: usize, alignment: usize) -> Self {
+//RS             let size = bytes.max(1);
+//RS             let align = alignment.max(1).next_power_of_two();
+//RS             let layout = std::alloc::Layout::from_size_align(size, align)
+//RS                 .expect("allocator capacity/alignment overflow");
+//RS             // SAFETY: layout is non-zero and valid. Null is handled as allocation failure.
+//RS             let raw = unsafe { std::alloc::alloc(layout) };
+//RS             let ptr = NonNull::new(raw).unwrap_or_else(|| std::alloc::handle_alloc_error(layout));
+//RS             super::jet_observe_arena_retain(layout.size());
+//RS             RawBlock { ptr, layout, used: 0 }
+//RS         }
+//RS 
+//RS         fn capacity(&self) -> usize {
+//RS             self.layout.size()
+//RS         }
+//RS 
+//RS         fn aligned_offset(&self, align: usize, bytes: usize) -> Option<usize> {
+//RS             if align > self.layout.align() {
+//RS                 return None;
+//RS             }
+//RS             let address = self.ptr.as_ptr() as usize + self.used;
+//RS             let padding = (align - address % align) % align;
+//RS             let start = self.used.checked_add(padding)?;
+//RS             let end = start.checked_add(bytes.max(1))?;
+//RS             (end <= self.capacity()).then_some(start)
+//RS         }
+//RS 
+//RS         unsafe fn write<T>(&mut self, val: T) -> Option<*mut T> {
+//RS             let offset = self.aligned_offset(std::mem::align_of::<T>(), std::mem::size_of::<T>())?;
+//RS             // SAFETY: aligned_offset proved the typed write fits this live block.
+//RS             let ptr = unsafe { self.ptr.as_ptr().add(offset).cast::<T>() };
+//RS             unsafe { ptr.write(val) };
+//RS             self.used = offset + std::mem::size_of::<T>().max(1);
+//RS             Some(ptr)
+//RS         }
+//RS 
+//RS         unsafe fn try_write<T>(
+//RS             &mut self,
+//RS             val: T,
+//RS             allocator: &str,
+//RS         ) -> Result<*mut T, AllocError> {
+//RS             let size = std::mem::size_of::<T>().max(1);
+//RS             let Some(offset) = self.aligned_offset(std::mem::align_of::<T>(), size) else {
+//RS                 return Err(super::jet_alloc_error(size, allocator));
+//RS             };
+//RS             let padding = offset.saturating_sub(self.used);
+//RS             let (val, next_used) = super::jet_try_alloc_value(
+//RS                 val,
+//RS                 self.used,
+//RS                 self.capacity(),
+//RS                 size,
+//RS                 allocator,
+//RS                 padding,
+//RS             )?;
+//RS             // SAFETY: aligned_offset and the shared capacity check proved the typed write fits.
+//RS             let ptr = unsafe { self.ptr.as_ptr().add(offset).cast::<T>() };
+//RS             unsafe { ptr.write(val) };
+//RS             self.used = next_used;
+//RS             Ok(ptr)
+//RS         }
+//RS 
+//RS         fn rewind(&mut self) {
+//RS             self.used = 0;
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for RawBlock {
+//RS         fn drop(&mut self) {
+//RS             super::jet_observe_arena_release(self.layout.size());
+//RS             // SAFETY: ptr was allocated with this exact layout and values were dropped first.
+//RS             unsafe { std::alloc::dealloc(self.ptr.as_ptr(), self.layout) };
+//RS         }
+//RS     }
+//RS 
+//RS     fn drop_entries(entries: &mut Vec<DropEntry>) {
+//RS         for entry in entries.drain(..).rev() {
+//RS             // SAFETY: each entry corresponds to one initialized, still-live value.
+//RS             if let Some(drop_fn) = entry.drop_fn {
+//RS                 unsafe { drop_fn(entry.ptr) };
+//RS             }
+//RS             jet_sentry_quarantine(entry.ptr, entry.bytes);
+//RS         }
+//RS     }
+//RS 
+//RS     fn observe_alloc<T>() -> usize {
+//RS         let bytes = std::mem::size_of::<T>();
+//RS         super::jet_observe_arena_alloc(bytes);
+//RS         bytes
+//RS     }
+//RS 
+//RS     fn record_drop<T>(drops: &mut Vec<DropEntry>, ptr: *mut T) {
+//RS         let ptr = ptr.cast::<u8>();
+//RS         let bytes = std::mem::size_of::<T>();
+//RS         jet_sentry_register_allocation(ptr, bytes);
+//RS         drops.push(DropEntry {
+//RS             ptr,
+//RS             drop_fn: std::mem::needs_drop::<T>().then_some(drop_at::<T>),
+//RS             bytes,
+//RS         });
+//RS     }
+//RS 
+//RS     struct ArenaState {
+//RS         blocks: Vec<RawBlock>,
+//RS         current_block: usize,
+//RS         drops: Vec<DropEntry>,
+//RS         live_allocations: usize,
+//RS         live_bytes: usize,
+//RS         high_water_bytes: usize,
+//RS         next_block_bytes: usize,
+//RS     }
+//RS 
+//RS     /// General arena: heterogeneous allocations grow across retained chunks.
+//RS     pub struct JetArena {
+//RS         state: RefCell<ArenaState>,
+//RS     }
+//RS 
+//RS     impl JetArena {
+//RS         pub fn new() -> Self {
+//RS             Self::with_capacity(DEFAULT_ARENA_BYTES)
+//RS         }
+//RS 
+//RS         pub fn with_capacity(cap: usize) -> Self {
+//RS             super::jet_observe_arena_open();
+//RS             let first = cap.max(1);
+//RS             JetArena {
+//RS                 state: RefCell::new(ArenaState {
+//RS                     blocks: vec![RawBlock::new(first, BASE_ALIGNMENT)],
+//RS                     current_block: 0,
+//RS                     drops: Vec::new(),
+//RS                     live_allocations: 0,
+//RS                     live_bytes: 0,
+//RS                     high_water_bytes: 0,
+//RS                     next_block_bytes: first.saturating_mul(2),
+//RS                 }),
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+//RS             let mut state = self.state.borrow_mut();
+//RS             let required = std::mem::size_of::<T>().max(1)
+//RS                 .saturating_add(std::mem::align_of::<T>());
+//RS             let selected = (state.current_block..state.blocks.len()).find(|index| {
+//RS                 state.blocks[*index]
+//RS                     .aligned_offset(std::mem::align_of::<T>(), std::mem::size_of::<T>())
+//RS                     .is_some()
+//RS             });
+//RS             let selected = if let Some(index) = selected {
+//RS                 index
+//RS             } else {
+//RS                 let bytes = state.next_block_bytes.max(required);
+//RS                 state.blocks.push(RawBlock::new(bytes, BASE_ALIGNMENT.max(std::mem::align_of::<T>())));
+//RS                 state.next_block_bytes = bytes.saturating_mul(2);
+//RS                 state.blocks.len() - 1
+//RS             };
+//RS             state.current_block = selected;
+//RS             // SAFETY: the selected block was sized/aligned above and owns the value until reset.
+//RS             let ptr = unsafe { state.blocks[selected].write(val).unwrap() };
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let bytes = observe_alloc::<T>();
+//RS             state.live_allocations += 1;
+//RS             state.live_bytes = state.live_bytes.saturating_add(bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             // SAFETY: ptr remains in a retained block; &self ties the view to this arena.
+//RS             unsafe { &mut *ptr }
+//RS         }
+//RS 
+//RS         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+//RS             if super::jet_fault_should_fail_allocation() {
+//RS                 return Err(super::jet_alloc_error(
+//RS                     std::mem::size_of::<T>().max(1),
+//RS                     "Arena",
+//RS                 ));
+//RS             }
+//RS             let mut state = self.state.borrow_mut();
+//RS             let required = std::mem::size_of::<T>().max(1)
+//RS                 .saturating_add(std::mem::align_of::<T>());
+//RS             let selected = (state.current_block..state.blocks.len()).find(|index| {
+//RS                 state.blocks[*index]
+//RS                     .aligned_offset(std::mem::align_of::<T>(), std::mem::size_of::<T>())
+//RS                     .is_some()
+//RS             });
+//RS             let selected = if let Some(index) = selected {
+//RS                 index
+//RS             } else {
+//RS                 let bytes = state.next_block_bytes.max(required);
+//RS                 state.blocks.push(RawBlock::try_new(
+//RS                     bytes,
+//RS                     BASE_ALIGNMENT.max(std::mem::align_of::<T>()),
+//RS                     "Arena",
+//RS                 )?);
+//RS                 state.next_block_bytes = bytes.saturating_mul(2);
+//RS                 state.blocks.len() - 1
+//RS             };
+//RS             state.current_block = selected;
+//RS             // SAFETY: the selected block was sized/aligned above and owns the value until reset.
+//RS             let ptr = unsafe { state.blocks[selected].try_write(val, "Arena")? };
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let bytes = observe_alloc::<T>();
+//RS             state.live_allocations += 1;
+//RS             state.live_bytes = state.live_bytes.saturating_add(bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             // SAFETY: ptr remains in a retained block; &self ties the view to this arena.
+//RS             Ok(unsafe { &mut *ptr })
+//RS         }
+//RS 
+//RS         pub fn facts(&self) -> AllocatorFacts {
+//RS             let state = self.state.borrow();
+//RS             AllocatorFacts {
+//RS                 live_allocations: state.live_allocations,
+//RS                 live_bytes: state.live_bytes,
+//RS                 retained_bytes: state.blocks.iter().map(RawBlock::capacity).sum(),
+//RS                 high_water_bytes: state.high_water_bytes,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn reset(&mut self) {
+//RS             let state = self.state.get_mut();
+//RS             drop_entries(&mut state.drops);
+//RS             super::jet_observe_arena_reset(state.live_allocations, state.live_bytes);
+//RS             state.live_allocations = 0;
+//RS             state.live_bytes = 0;
+//RS             for block in &mut state.blocks {
+//RS                 block.rewind();
+//RS             }
+//RS             state.current_block = 0;
+//RS         }
+//RS 
+//RS     }
+//RS 
+//RS     impl Drop for JetArena {
+//RS         fn drop(&mut self) {
+//RS             self.reset();
+//RS             super::jet_observe_arena_close();
+//RS         }
+//RS     }
+//RS 
+//RS     struct BumpState {
+//RS         block: RawBlock,
+//RS         drops: Vec<DropEntry>,
+//RS         live_allocations: usize,
+//RS         live_bytes: usize,
+//RS         high_water_bytes: usize,
+//RS     }
+//RS 
+//RS     /// Bump allocator: one caller-sized contiguous buffer, monotonic until reset.
+//RS     pub struct JetBump {
+//RS         state: RefCell<BumpState>,
+//RS     }
+//RS 
+//RS     impl JetBump {
+//RS         pub fn new() -> Self {
+//RS             Self::with_capacity(DEFAULT_BUMP_BYTES)
+//RS         }
+//RS 
+//RS         pub fn with_capacity(cap: usize) -> Self {
+//RS             super::jet_observe_arena_open();
+//RS             JetBump {
+//RS                 state: RefCell::new(BumpState {
+//RS                     block: RawBlock::new(cap.max(1), BASE_ALIGNMENT),
+//RS                     drops: Vec::new(),
+//RS                     live_allocations: 0,
+//RS                     live_bytes: 0,
+//RS                     high_water_bytes: 0,
+//RS                 }),
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+//RS             let mut state = self.state.borrow_mut();
+//RS             // SAFETY: RawBlock validates capacity and alignment before writing.
+//RS             let ptr = unsafe { state.block.write(val) }
+//RS                 .unwrap_or_else(|| panic!("Bump allocator exhausted its contiguous buffer"));
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let bytes = observe_alloc::<T>();
+//RS             state.live_allocations += 1;
+//RS             state.live_bytes = state.live_bytes.saturating_add(bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             // SAFETY: ptr remains in the single retained block until reset/close.
+//RS             unsafe { &mut *ptr }
+//RS         }
+//RS 
+//RS         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+//RS             if super::jet_fault_should_fail_allocation() {
+//RS                 return Err(super::jet_alloc_error(
+//RS                     std::mem::size_of::<T>().max(1),
+//RS                     "Bump",
+//RS                 ));
+//RS             }
+//RS             let mut state = self.state.borrow_mut();
+//RS             let ptr = unsafe { state.block.try_write(val, "Bump")? };
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let bytes = observe_alloc::<T>();
+//RS             state.live_allocations += 1;
+//RS             state.live_bytes = state.live_bytes.saturating_add(bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             Ok(unsafe { &mut *ptr })
+//RS         }
+//RS 
+//RS         pub fn facts(&self) -> AllocatorFacts {
+//RS             let state = self.state.borrow();
+//RS             AllocatorFacts {
+//RS                 live_allocations: state.live_allocations,
+//RS                 live_bytes: state.live_bytes,
+//RS                 retained_bytes: state.block.capacity(),
+//RS                 high_water_bytes: state.high_water_bytes,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn reset(&mut self) {
+//RS             let state = self.state.get_mut();
+//RS             drop_entries(&mut state.drops);
+//RS             super::jet_observe_arena_reset(state.live_allocations, state.live_bytes);
+//RS             state.live_allocations = 0;
+//RS             state.live_bytes = 0;
+//RS             state.block.rewind();
+//RS         }
+//RS 
+//RS     }
+//RS 
+//RS     impl Drop for JetBump {
+//RS         fn drop(&mut self) {
+//RS             self.reset();
+//RS             super::jet_observe_arena_close();
+//RS         }
+//RS     }
+//RS 
+//RS     struct PoolSlot {
+//RS         block: Option<RawBlock>,
+//RS         occupied: bool,
+//RS     }
+//RS 
+//RS     struct PoolState {
+//RS         slots: Vec<PoolSlot>,
+//RS         generation: u64,
+//RS         drops: Vec<DropEntry>,
+//RS         live_bytes: usize,
+//RS         high_water_bytes: usize,
+//RS     }
+//RS 
+//RS     /// Pool allocator: a fixed slot count with retained size/alignment classes.
+//RS     pub struct JetPool {
+//RS         state: RefCell<PoolState>,
+//RS     }
+//RS 
+//RS     impl JetPool {
+//RS         pub fn new() -> Self {
+//RS             Self::with_slots(DEFAULT_POOL_SLOTS)
+//RS         }
+//RS 
+//RS         pub fn with_slots(slots: usize) -> Self {
+//RS             super::jet_observe_arena_open();
+//RS             JetPool {
+//RS                 state: RefCell::new(PoolState {
+//RS                     slots: (0..slots)
+//RS                         .map(|_| PoolSlot { block: None, occupied: false })
+//RS                         .collect(),
+//RS                     generation: 1,
+//RS                     drops: Vec::new(),
+//RS                     live_bytes: 0,
+//RS                     high_water_bytes: 0,
+//RS                 }),
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+//RS             let mut state = self.state.borrow_mut();
+//RS             let bytes = std::mem::size_of::<T>().max(1);
+//RS             let align = std::mem::align_of::<T>();
+//RS             let compatible = state.slots.iter().position(|slot| {
+//RS                 !slot.occupied
+//RS                     && slot.block.as_ref().is_some_and(|block| {
+//RS                         block.capacity() >= bytes && block.layout.align() >= align
+//RS                     })
+//RS             });
+//RS             let selected = compatible
+//RS                 .or_else(|| state.slots.iter().position(|slot| !slot.occupied && slot.block.is_none()))
+//RS                 .or_else(|| state.slots.iter().position(|slot| !slot.occupied))
+//RS                 .unwrap_or_else(|| panic!("Pool allocator exhausted its slab slots"));
+//RS             let slot = &mut state.slots[selected];
+//RS             let replace = slot.block.as_ref().map_or(true, |block| {
+//RS                 block.capacity() < bytes || block.layout.align() < align
+//RS             });
+//RS             if replace {
+//RS                 slot.block = Some(RawBlock::new(bytes, align));
+//RS             }
+//RS             let block = slot.block.as_mut().unwrap();
+//RS             block.rewind();
+//RS             // SAFETY: the retained slot class is capacity/alignment compatible and unique.
+//RS             let ptr = unsafe { block.write(val).unwrap() };
+//RS             slot.occupied = true;
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let live_bytes = observe_alloc::<T>();
+//RS             state.live_bytes = state.live_bytes.saturating_add(live_bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             // SAFETY: ptr remains in the retained slab until reset/close.
+//RS             unsafe { &mut *ptr }
+//RS         }
+//RS 
+//RS         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+//RS             if super::jet_fault_should_fail_allocation() {
+//RS                 return Err(super::jet_alloc_error(
+//RS                     std::mem::size_of::<T>().max(1),
+//RS                     "Pool",
+//RS                 ));
+//RS             }
+//RS             let mut state = self.state.borrow_mut();
+//RS             let bytes = std::mem::size_of::<T>().max(1);
+//RS             let align = std::mem::align_of::<T>();
+//RS             let compatible = state.slots.iter().position(|slot| {
+//RS                 !slot.occupied
+//RS                     && slot.block.as_ref().is_some_and(|block| {
+//RS                         block.capacity() >= bytes && block.layout.align() >= align
+//RS                     })
+//RS             });
+//RS             let selected = compatible
+//RS                 .or_else(|| state.slots.iter().position(|slot| !slot.occupied && slot.block.is_none()))
+//RS                 .or_else(|| state.slots.iter().position(|slot| !slot.occupied))
+//RS                 .ok_or_else(|| super::jet_alloc_error(bytes, "Pool"))?;
+//RS             let slot = &mut state.slots[selected];
+//RS             let replace = slot.block.as_ref().map_or(true, |block| {
+//RS                 block.capacity() < bytes || block.layout.align() < align
+//RS             });
+//RS             if replace {
+//RS                 slot.block = Some(RawBlock::try_new(bytes, align, "Pool")?);
+//RS             }
+//RS             let block = slot.block.as_mut().expect("pool slot has a block");
+//RS             block.rewind();
+//RS             // SAFETY: the retained slot class is capacity/alignment compatible and unique.
+//RS             let ptr = unsafe { block.try_write(val, "Pool")? };
+//RS             slot.occupied = true;
+//RS             record_drop(&mut state.drops, ptr);
+//RS             let live_bytes = observe_alloc::<T>();
+//RS             state.live_bytes = state.live_bytes.saturating_add(live_bytes);
+//RS             state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
+//RS             Ok(unsafe { &mut *ptr })
+//RS         }
+//RS 
+//RS         pub fn facts(&self) -> AllocatorFacts {
+//RS             let state = self.state.borrow();
+//RS             AllocatorFacts {
+//RS                 live_allocations: state.slots.iter().filter(|slot| slot.occupied).count(),
+//RS                 live_bytes: state.live_bytes,
+//RS                 retained_bytes: state
+//RS                     .slots
+//RS                     .iter()
+//RS                     .filter_map(|slot| slot.block.as_ref())
+//RS                     .map(RawBlock::capacity)
+//RS                     .sum(),
+//RS                 high_water_bytes: state.high_water_bytes,
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn generation(&self) -> u64 {
+//RS             self.state.borrow().generation
+//RS         }
+//RS 
+//RS         pub fn reset(&mut self) {
+//RS             let state = self.state.get_mut();
+//RS             drop_entries(&mut state.drops);
+//RS             let allocations = state.slots.iter().filter(|slot| slot.occupied).count();
+//RS             super::jet_observe_arena_reset(allocations, state.live_bytes);
+//RS             for slot in &mut state.slots {
+//RS                 slot.occupied = false;
+//RS                 if let Some(block) = &mut slot.block {
+//RS                     block.rewind();
+//RS                 }
+//RS             }
+//RS             state.live_bytes = 0;
+//RS             state.generation = state.generation.wrapping_add(1).max(1);
+//RS         }
+//RS 
+//RS     }
+//RS 
+//RS     impl Drop for JetPool {
+//RS         fn drop(&mut self) {
+//RS             self.reset();
+//RS             super::jet_observe_arena_close();
+//RS         }
+//RS     }
+//RS 
+//RS     /// The canonical Fixed header/state/drop implementation is emitted once
+//RS     /// at the generated crate root (`jet_fixed_kernel`). This hosted adapter
+//RS     /// contributes only the inline backing constructors and sentry/metrics
+//RS     /// observations; allocation semantics stay in that shared kernel.
+//RS     pub struct JetFixed {
+//RS         state: RefCell<super::jet_fixed_kernel::FixedState>,
+//RS         _thread_confined: std::marker::PhantomData<std::rc::Rc<()>>,
+//RS     }
+//RS 
+//RS     impl JetFixed {
+//RS         pub fn over(bytes: &mut [u8]) -> Self {
+//RS             // SAFETY: initialized bytes are also valid MaybeUninit<u8> storage.
+//RS             Self::over_raw(bytes.as_mut_ptr(), bytes.len())
+//RS         }
+//RS 
+//RS         pub fn over_uninit(bytes: &mut [std::mem::MaybeUninit<u8>]) -> Self {
+//RS             Self::over_raw(bytes.as_mut_ptr().cast::<u8>(), bytes.len())
+//RS         }
+//RS 
+//RS         pub fn over_uninit_fixed<const N: usize>(
+//RS             bytes: &mut JetUninitFixed<u8, N>,
+//RS         ) -> Self {
+//RS             Self::over_uninit(bytes.uninit_bytes())
+//RS         }
+//RS 
+//RS         fn over_raw(ptr: *mut u8, capacity: usize) -> Self {
+//RS             assert!(capacity > 0, "Fixed allocator needs a non-empty backing buffer");
+//RS             super::jet_observe_arena_open();
+//RS             super::jet_observe_arena_retain(capacity);
+//RS             // SAFETY: the constructor checks the non-empty backing contract;
+//RS             // the source-level sema contract keeps it live for this handle.
+//RS             let state = unsafe {
+//RS                 super::jet_fixed_kernel::FixedState::from_raw(ptr, capacity)
+//RS             };
+//RS             JetFixed {
+//RS                 state: RefCell::new(state),
+//RS                 _thread_confined: std::marker::PhantomData,
+//RS             }
+//RS         }
+//RS 
+//RS         fn finish_alloc<T: 'static>(&self, ptr: *mut T) -> &mut T {
+//RS             let bytes = std::mem::size_of::<T>();
+//RS             jet_sentry_register_allocation(ptr.cast::<u8>(), bytes);
+//RS             super::jet_observe_arena_alloc(bytes);
+//RS             // SAFETY: the shared kernel placed `T` in this live backing span;
+//RS             // the sema contract ties the returned view to this allocator.
+//RS             unsafe { &mut *ptr }
+//RS         }
+//RS 
+//RS         pub fn alloc<T: 'static>(&self, value: T) -> &mut T {
+//RS             let ptr = {
+//RS                 let mut state = self.state.borrow_mut();
+//RS                 state
+//RS                     .try_alloc(value)
+//RS                     .unwrap_or_else(|_| panic!("Fixed allocator exhausted its inline backing buffer"))
+//RS             };
+//RS             self.finish_alloc(ptr)
+//RS         }
+//RS 
+//RS         pub fn try_alloc<T: 'static>(&self, value: T) -> Result<&mut T, AllocError> {
+//RS             if super::jet_fault_should_fail_allocation() {
+//RS                 return Err(super::jet_alloc_error(
+//RS                     std::mem::size_of::<T>().max(1),
+//RS                     "Fixed",
+//RS                 ));
+//RS             }
+//RS             let size = std::mem::size_of::<T>().max(1);
+//RS             let ptr = {
+//RS                 let mut state = self.state.borrow_mut();
+//RS                 state
+//RS                     .try_alloc(value)
+//RS                     .map_err(|_| super::jet_alloc_error(size, "Fixed"))?
+//RS             };
+//RS             Ok(self.finish_alloc(ptr))
+//RS         }
+//RS 
+//RS         pub fn facts(&self) -> AllocatorFacts {
+//RS             let state = self.state.borrow();
+//RS             AllocatorFacts {
+//RS                 live_allocations: state.live_allocations(),
+//RS                 live_bytes: state.live_bytes(),
+//RS                 retained_bytes: state.capacity(),
+//RS                 high_water_bytes: state.high_water_bytes(),
+//RS             }
+//RS         }
+//RS 
+//RS         pub fn capacity(&self) -> usize {
+//RS             self.state.borrow().capacity()
+//RS         }
+//RS 
+//RS         pub fn used(&self) -> usize {
+//RS             self.state.borrow().used()
+//RS         }
+//RS 
+//RS         pub fn reset(&mut self) {
+//RS             let stats = unsafe {
+//RS                 self.state
+//RS                     .get_mut()
+//RS                     .reset(|ptr, bytes| jet_sentry_quarantine(ptr, bytes))
+//RS             };
+//RS             super::jet_observe_arena_reset(stats.live_allocations, stats.live_bytes);
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for JetFixed {
+//RS         fn drop(&mut self) {
+//RS             self.reset();
+//RS             super::jet_observe_arena_release(self.state.get_mut().capacity());
+//RS             super::jet_observe_arena_close();
+//RS         }
+//RS     }
+//RS 
+//RS     // ── Smart Context runtime ───────────────────────────────────────────────
+//RS     //
+//RS     // `#Context(allocator: a) { … }` compiles to a `JetContextGuard` RAII value
+//RS     // that saves the old ambient allocator pointer and restores it on Drop.
+//RS     // Restore fires on all exit paths: normal exit, `return`, `break`, `?`,
+//RS     // and panic unwind — satisfying Q2 = Cβ (per-block restore).
+//RS     //
+//RS     // The thread-local holds a raw `*const u8` (type-erased allocator pointer).
+//RS     // Safety: Jet sema guarantees the allocator variable is declared before the
+//RS     // `#Context` block and lives for at least the block's duration, so the
+//RS     // pointer is always valid while the guard is live. This is the same
+//RS     // lifetime-extension trust as the `alloc` helper above.
+//RS     //
+//RS     // I1: no `unsafe` leaks to user-visible generated Rust — this module is the
+//RS     // one audited exception (stripped from the I1 golden-test check in golden.rs).
+//RS 
+//RS     thread_local! {
+//RS         // Raw pointer to the current ambient allocator (None = use default heap).
+//RS         static JET_CTX_ALLOC: std::cell::Cell<Option<*const u8>> =
+//RS             std::cell::Cell::new(None);
+//RS     }
+//RS 
+//RS     /// RAII guard: pushes a new ambient allocator on construction, pops it on Drop.
+//RS     /// Drop is called on all exit paths (return, break, ?, panic unwind).
+//RS     pub struct JetContextGuard {
+//RS         saved: Option<*const u8>,
+//RS     }
+//RS 
+//RS     impl Drop for JetContextGuard {
+//RS         fn drop(&mut self) {
+//RS             JET_CTX_ALLOC.with(|c| c.set(self.saved));
+//RS         }
+//RS     }
+// END-PORT-PENDING 0181 crates/jet-codegen/src/Prelude/Mem.rs:1-835
+

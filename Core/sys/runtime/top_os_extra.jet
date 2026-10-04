@@ -1,0 +1,842 @@
+// PORT-PENDING 0294 crates-jet-codegen-src-prelude-corelib-top-osextra-module-group-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:1-3
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // core.sys identity, facts, and POSIX control (ledger #1465 / D-OSFACTS1).
+//RS // Included after FSIoEnvOsTesting.rs at crate root (same level as jet_std).
+//RS 
+// END-PORT-PENDING 0294 crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:1-3
+
+// PORT-PENDING 0294 crates-jet-codegen-src-prelude-corelib-top-osextra-module-group-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:15-688
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn jet_std_os_temp_dir() -> String {
+//RS     std::env::temp_dir().to_string_lossy().to_string()
+//RS }
+//RS pub(crate) fn jet_std_os_executable() -> String {
+//RS     std::env::current_exe()
+//RS         .map(|p| p.to_string_lossy().to_string())
+//RS         .unwrap_or_default()
+//RS }
+//RS pub(crate) fn jet_std_os_pid() -> i64 {
+//RS     std::process::id() as i64
+//RS }
+//RS pub(crate) fn jet_std_os_hostname() -> String {
+//RS     std::env::var("HOSTNAME")
+//RS         .ok()
+//RS         .filter(|s| !s.is_empty())
+//RS         .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
+//RS         .unwrap_or_else(|| "localhost".to_string())
+//RS }
+//RS pub(crate) fn jet_std_os_username() -> String {
+//RS     std::env::var("USER")
+//RS         .ok()
+//RS         .or_else(|| std::env::var("USERNAME").ok())
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn jet_os_unsupported(op: &str) -> jet_std::IOError {
+//RS     jet_std::IOError::other(
+//RS         jet_std::IOOperation::Resolve,
+//RS         None,
+//RS         std::io::Error::new(std::io::ErrorKind::Unsupported, format!("{op} is POSIX-only")),
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_os_release() -> String {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         if let Ok(text) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+//RS             let trimmed = text.trim();
+//RS             if !trimmed.is_empty() {
+//RS                 return trimmed.to_string();
+//RS             }
+//RS         }
+//RS         if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+//RS             for line in text.lines() {
+//RS                 if let Some(value) = line.strip_prefix("VERSION_ID=") {
+//RS                     return value.trim_matches('"').to_string();
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     #[cfg(target_os = "macos")]
+//RS     {
+//RS         if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
+//RS             if let Ok(s) = String::from_utf8(output.stdout) {
+//RS                 let trimmed = s.trim();
+//RS                 if !trimmed.is_empty() {
+//RS                     return trimmed.to_string();
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     #[cfg(windows)]
+//RS     {
+//RS         if let Ok(v) = std::env::var("OS") {
+//RS             if !v.is_empty() {
+//RS                 return v;
+//RS             }
+//RS         }
+//RS     }
+//RS     String::new()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_os_version() -> String {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+//RS             for line in text.lines() {
+//RS                 if let Some(value) = line.strip_prefix("PRETTY_NAME=") {
+//RS                     return value.trim_matches('"').to_string();
+//RS                 }
+//RS             }
+//RS         }
+//RS         return jet_std_os_release();
+//RS     }
+//RS     #[cfg(target_os = "macos")]
+//RS     {
+//RS         if let Ok(output) = std::process::Command::new("sw_vers")
+//RS             .arg("-productVersion")
+//RS             .output()
+//RS         {
+//RS             if let Ok(s) = String::from_utf8(output.stdout) {
+//RS                 let trimmed = s.trim();
+//RS                 if !trimmed.is_empty() {
+//RS                     return format!("macOS {trimmed}");
+//RS                 }
+//RS             }
+//RS         }
+//RS         return jet_std_os_release();
+//RS     }
+//RS     #[cfg(windows)]
+//RS     {
+//RS         return std::env::var("OS").unwrap_or_default();
+//RS     }
+//RS     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+//RS     {
+//RS         String::new()
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_os_getpid() -> i64 {
+//RS     jet_std_os_pid()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_os_expand(template: &String) -> String {
+//RS     let mut out = String::with_capacity(template.len());
+//RS     let bytes = template.as_bytes();
+//RS     let mut i = 0;
+//RS     while i < bytes.len() {
+//RS         if bytes[i] == b'$' {
+//RS             i += 1;
+//RS             if i < bytes.len() && bytes[i] == b'{' {
+//RS                 i += 1;
+//RS                 let start = i;
+//RS                 while i < bytes.len() && bytes[i] != b'}' {
+//RS                     i += 1;
+//RS                 }
+//RS                 let name = &template[start..i];
+//RS                 if i < bytes.len() {
+//RS                     i += 1;
+//RS                 }
+//RS                 out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
+//RS             } else {
+//RS                 let start = i;
+//RS                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+//RS                     i += 1;
+//RS                 }
+//RS                 let name = &template[start..i];
+//RS                 out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
+//RS             }
+//RS         } else {
+//RS             out.push(bytes[i] as char);
+//RS             i += 1;
+//RS         }
+//RS     }
+//RS     out
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[repr(C)]
+//RS struct JetOsUtimbuf {
+//RS     actime: i64,
+//RS     modtime: i64,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS #[repr(C)]
+//RS struct JetOsTms {
+//RS     tms_utime: i64,
+//RS     tms_stime: i64,
+//RS     tms_cutime: i64,
+//RS     tms_cstime: i64,
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS mod jet_os_sys {
+//RS     use super::{JetOsTms, JetOsUtimbuf};
+//RS     pub const _SC_CLK_TCK: i32 = 2;
+//RS     extern "C" {
+//RS         pub fn getppid() -> i32;
+//RS         pub fn getuid() -> u32;
+//RS         pub fn geteuid() -> u32;
+//RS         pub fn getgid() -> u32;
+//RS         pub fn getegid() -> u32;
+//RS         pub fn getgroups(size: i32, list: *mut u32) -> i32;
+//RS         pub fn getpgid(pid: i32) -> i32;
+//RS         pub fn getpgrp() -> i32;
+//RS         pub fn getsid(pid: i32) -> i32;
+//RS         pub fn fork() -> i32;
+//RS         pub fn setuid(uid: u32) -> i32;
+//RS         pub fn setgid(gid: u32) -> i32;
+//RS         pub fn setpgid(pid: i32, pgid: i32) -> i32;
+//RS         pub fn setpgrp() -> i32;
+//RS         pub fn setsid() -> i32;
+//RS         pub fn initgroups(user: *const std::ffi::c_char, group: u32) -> i32;
+//RS         pub fn kill(pid: i32, sig: i32) -> i32;
+//RS         pub fn wait(status: *mut i32) -> i32;
+//RS         pub fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+//RS         pub fn pipe(fds: *mut i32) -> i32;
+//RS         pub fn mkfifo(path: *const std::ffi::c_char, mode: u32) -> i32;
+//RS         pub fn sync();
+//RS         pub fn umask(mask: u32) -> u32;
+//RS         pub fn getpriority(which: i32, who: u32) -> i32;
+//RS         pub fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+//RS         pub fn getloadavg(loadavg: *mut f64, nelem: i32) -> i32;
+//RS         pub fn utime(path: *const std::ffi::c_char, times: *const JetOsUtimbuf) -> i32;
+//RS         pub fn close(fd: i32) -> i32;
+//RS         pub fn times(buf: *mut JetOsTms) -> i64;
+//RS         pub fn sysconf(name: i32) -> i64;
+//RS         pub fn atexit(cb: extern "C" fn()) -> i32;
+//RS         #[cfg(target_os = "linux")]
+//RS         pub fn __errno_location() -> *mut i32;
+//RS         #[cfg(target_os = "macos")]
+//RS         pub fn __error() -> *mut i32;
+//RS     }
+//RS     pub unsafe fn errno_ptr() -> *mut i32 {
+//RS         #[cfg(target_os = "linux")]
+//RS         {
+//RS             __errno_location()
+//RS         }
+//RS         #[cfg(target_os = "macos")]
+//RS         {
+//RS             __error()
+//RS         }
+//RS         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+//RS         {
+//RS             static mut FALLBACK: i32 = 0;
+//RS             &raw mut FALLBACK
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_os_last_err(op: jet_std::IOOperation, path: Option<String>) -> jet_std::IOError {
+//RS     let errno = unsafe { *jet_os_sys::errno_ptr() };
+//RS     jet_std::IOError::other(op, path, std::io::Error::from_raw_os_error(errno))
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_os_getppid() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::getppid() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getuid() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::getuid() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_geteuid() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::geteuid() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getgid() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::getgid() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getegid() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::getegid() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getgroups() -> Vec<i64> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         unsafe {
+//RS             let n = jet_os_sys::getgroups(0, std::ptr::null_mut());
+//RS             if n < 0 {
+//RS                 return Vec::new();
+//RS             }
+//RS             let mut buf = vec![0u32; n as usize];
+//RS             let got = jet_os_sys::getgroups(n, buf.as_mut_ptr());
+//RS             if got < 0 {
+//RS                 return Vec::new();
+//RS             }
+//RS             return buf.into_iter().take(got as usize).map(|g| g as i64).collect();
+//RS         }
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Vec::new()
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let out = unsafe { jet_os_sys::getpgid(pid as i32) };
+//RS         if out < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+//RS         }
+//RS         return Ok(out as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = pid;
+//RS         Err(jet_os_unsupported("getpgid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getpgrp() -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::getpgrp() as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let out = unsafe { jet_os_sys::getsid(pid as i32) };
+//RS         if out < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+//RS         }
+//RS         return Ok(out as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = pid;
+//RS         Err(jet_os_unsupported("getsid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_fork() -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let pid = unsafe { jet_os_sys::fork() };
+//RS         if pid < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+//RS         }
+//RS         return Ok(pid as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Err(jet_os_unsupported("fork"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setuid(uid: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::setuid(uid as u32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = uid;
+//RS         Err(jet_os_unsupported("setuid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setgid(gid: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::setgid(gid as u32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = gid;
+//RS         Err(jet_os_unsupported("setgid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setpgid(pid: i64, pgid: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::setpgid(pid as i32, pgid as i32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (pid, pgid);
+//RS         Err(jet_os_unsupported("setpgid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setpgrp() -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::setpgrp() } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Err(jet_os_unsupported("setpgrp"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let out = unsafe { jet_os_sys::setsid() };
+//RS         if out < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS         }
+//RS         return Ok(out as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Err(jet_os_unsupported("setsid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let c_user = std::ffi::CString::new(user.as_str()).map_err(|_| {
+//RS             jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 None,
+//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "username contains NUL"),
+//RS             )
+//RS         })?;
+//RS         if unsafe { jet_os_sys::initgroups(c_user.as_ptr(), group as u32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (user, group);
+//RS         Err(jet_os_unsupported("initgroups"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_kill(pid: i64, sig: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::kill(pid as i32, sig as i32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (pid, sig);
+//RS         Err(jet_os_unsupported("kill"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_wait() -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut status = 0i32;
+//RS         let got = unsafe { jet_os_sys::wait(&mut status) };
+//RS         if got < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Close, None));
+//RS         }
+//RS         return Ok(status as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Err(jet_os_unsupported("wait"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_waitpid(pid: i64, options: i64) -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut status = 0i32;
+//RS         let got = unsafe { jet_os_sys::waitpid(pid as i32, &mut status, options as i32) };
+//RS         if got < 0 {
+//RS             return Err(jet_os_last_err(jet_std::IOOperation::Close, None));
+//RS         }
+//RS         return Ok(status as i64);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (pid, options);
+//RS         Err(jet_os_unsupported("waitpid"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_pipe() -> Result<Vec<i64>, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut fds = [0i32; 2];
+//RS         if unsafe { jet_os_sys::pipe(fds.as_mut_ptr()) } == 0 {
+//RS             return Ok(vec![fds[0] as i64, fds[1] as i64]);
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         Err(jet_os_unsupported("pipe"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_close_fd(fd: i64) {
+//RS     #[cfg(unix)]
+//RS     unsafe {
+//RS         let _ = jet_os_sys::close(fd as i32);
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = fd;
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
+//RS             jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Resolve,
+//RS                 Some(path.clone()),
+//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
+//RS             )
+//RS         })?;
+//RS         if unsafe { jet_os_sys::mkfifo(c_path.as_ptr(), mode as u32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Resolve, Some(path.clone())));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (path, mode);
+//RS         Err(jet_os_unsupported("mkfifo"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_sync() {
+//RS     #[cfg(unix)]
+//RS     unsafe {
+//RS         jet_os_sys::sync();
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_umask(mask: i64) -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         return unsafe { jet_os_sys::umask(mask as u32) as i64 };
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = mask;
+//RS         0
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_getpriority(who: i64) -> Result<i64, jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         unsafe {
+//RS             *jet_os_sys::errno_ptr() = 0;
+//RS             let got = jet_os_sys::getpriority(0, who as u32);
+//RS             if got == -1 && *jet_os_sys::errno_ptr() != 0 {
+//RS                 return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+//RS             }
+//RS             return Ok(got as i64);
+//RS         }
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = who;
+//RS         Err(jet_os_unsupported("getpriority"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_setpriority(who: i64, prio: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         if unsafe { jet_os_sys::setpriority(0, who as u32, prio as i32) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (who, prio);
+//RS         Err(jet_os_unsupported("setpriority"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_loadavg() -> Vec<f64> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut avg = [0.0f64; 3];
+//RS         let n = unsafe { jet_os_sys::getloadavg(avg.as_mut_ptr(), 3) };
+//RS         if n < 0 {
+//RS             return vec![0.0, 0.0, 0.0];
+//RS         }
+//RS         return avg[..n as usize].to_vec();
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         vec![0.0, 0.0, 0.0]
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
+//RS             jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 Some(path.clone()),
+//RS                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
+//RS             )
+//RS         })?;
+//RS         let times = JetOsUtimbuf {
+//RS             actime: atime,
+//RS             modtime: mtime,
+//RS         };
+//RS         if unsafe { jet_os_sys::utime(c_path.as_ptr(), &times) } == 0 {
+//RS             return Ok(());
+//RS         }
+//RS         return Err(jet_os_last_err(jet_std::IOOperation::Write, Some(path.clone())));
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (path, atime, mtime);
+//RS         Err(jet_os_unsupported("utime"))
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_exitcode(status: i64) -> i64 {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let s = status as i32;
+//RS         if (s & 0x7f) == 0 {
+//RS             return ((s >> 8) & 0xff) as i64;
+//RS         }
+//RS         return -1;
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         status
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_times() -> Vec<f64> {
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let mut t = unsafe { std::mem::zeroed::<JetOsTms>() };
+//RS         let elapsed = unsafe { jet_os_sys::times(&mut t) };
+//RS         let ticks = unsafe { jet_os_sys::sysconf(jet_os_sys::_SC_CLK_TCK) }.max(1) as f64;
+//RS         return vec![
+//RS             t.tms_utime as f64 / ticks,
+//RS             t.tms_stime as f64 / ticks,
+//RS             t.tms_cutime as f64 / ticks,
+//RS             t.tms_cstime as f64 / ticks,
+//RS             if elapsed < 0 {
+//RS                 0.0
+//RS             } else {
+//RS                 elapsed as f64 / ticks
+//RS             },
+//RS         ];
+//RS     }
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         vec![0.0, 0.0, 0.0, 0.0, 0.0]
+//RS     }
+//RS }
+//RS pub(crate) fn jet_std_os_uptime() -> f64 {
+//RS     #[cfg(target_os = "linux")]
+//RS     {
+//RS         if let Ok(text) = std::fs::read_to_string("/proc/uptime") {
+//RS             if let Some(first) = text.split_whitespace().next() {
+//RS                 if let Ok(v) = first.parse::<f64>() {
+//RS                     return v;
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     0.0
+//RS }
+//RS pub(crate) fn jet_std_os_stop(code: i64) {
+//RS     jet_std_process_exit(code);
+//RS }
+// END-PORT-PENDING 0294 crates/jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs:15-688
+
+// PORT-PENDING 0294 crates-jet-codegen-src-prelude-corelib-top-osextra-module-group-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs:1-5
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Shared core.sys platform-family fact for AOT, resident JIT, and ambient interpreter.
+//RS 
+//RS pub(crate) fn jet_std_os_family() -> String {
+//RS     std::env::consts::FAMILY.to_string()
+//RS }
+// END-PORT-PENDING 0294 crates/jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs:1-5
+
+// PORT-PENDING 0294 crates-jet-codegen-src-prelude-corelib-top-osextra-module-group-slice-1: crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:1-144
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // #1480: line/byte stdin primitives, split out of
+//RS // FSIoEnvOsTesting.rs so the JIT host (`crates/jet-jit/src/IO.rs`) can
+//RS // `include!` this exact source instead of re-encoding the logic in Rust a
+//RS // second time (I9 — semantics live only in Prelude/**; JIT hosts marshal
+//RS // args/results and call the same Prelude function).
+//RS fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
+//RS     if let Some(p) = prompt {
+//RS         if jet_fault_should_fail("IO.Write") {
+//RS             return Err(jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Write,
+//RS                 Some("stdout".to_string()),
+//RS                 "fault injected: IO.Write",
+//RS             ));
+//RS         }
+//RS         if jet_fault_should_fail("IO.Flush") {
+//RS             return Err(jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Flush,
+//RS                 Some("stdout".to_string()),
+//RS                 "fault injected: IO.Flush",
+//RS             ));
+//RS         }
+//RS         jet_term_write_stdout(p, true)
+//RS             .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Flush, None, e))?;
+//RS     }
+//RS     if jet_fault_should_fail("IO.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             "fault injected: IO.Read",
+//RS         ));
+//RS     }
+//RS     // #2009: the shared reader owns the line read and the trailing-newline
+//RS     // trim. `io.input` answers with text, so a closed stream reads as an empty
+//RS     // line here; the prompt kernels take the sharper `JetTermRead` fact.
+//RS     let line = jet_term_read_stdin_line().map_err(|e| {
+//RS         jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e)
+//RS     })?;
+//RS     Ok(jet_term_read_text(line))
+//RS }
+//RS 
+//RS // #1480: free-function spellings the Core surface ledger scores against peers.
+//RS fn jet_std_io_readline() -> Result<String, jet_std::IOError> {
+//RS     jet_std_io_input(None)
+//RS }
+//RS 
+//RS fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
+//RS     use std::io::Read;
+//RS     if jet_fault_should_fail("IO.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             "fault injected: IO.Read",
+//RS         ));
+//RS     }
+//RS     let mut input = String::new();
+//RS     std::io::stdin()
+//RS         .read_to_string(&mut input)
+//RS         .map_err(|error| {
+//RS             jet_std::IOError::other(
+//RS                 jet_std::IOOperation::Read,
+//RS                 Some("stdin".to_string()),
+//RS                 error,
+//RS             )
+//RS         })?;
+//RS     Ok(input)
+//RS }
+//RS 
+//RS fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
+//RS     use std::io::Read;
+//RS     if delim.is_empty() {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty delimiter"),
+//RS         ));
+//RS     }
+//RS     if jet_fault_should_fail("IO.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             "fault injected: IO.Read",
+//RS         ));
+//RS     }
+//RS     let needle = delim.as_bytes();
+//RS     let mut stdin = std::io::stdin().lock();
+//RS     let mut out = Vec::new();
+//RS     let mut window = Vec::new();
+//RS     let mut buf = [0u8; 1];
+//RS     loop {
+//RS         match stdin.read(&mut buf) {
+//RS             Ok(0) => break,
+//RS             Ok(_) => {
+//RS                 out.push(buf[0]);
+//RS                 window.push(buf[0]);
+//RS                 if window.len() > needle.len() {
+//RS                     window.remove(0);
+//RS                 }
+//RS                 if window.as_slice() == needle {
+//RS                     out.truncate(out.len() - needle.len());
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             Err(e) => {
+//RS                 return Err(jet_std::IOError::other(
+//RS                     jet_std::IOOperation::Read,
+//RS                     Some("stdin".to_string()),
+//RS                     e,
+//RS                 ))
+//RS             }
+//RS         }
+//RS     }
+//RS     String::from_utf8(out).map_err(|e| {
+//RS         jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_std_io_take(n: i64) -> Result<Vec<u8>, jet_std::IOError> {
+//RS     use std::io::Read;
+//RS     if n < 0 {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             std::io::Error::new(std::io::ErrorKind::InvalidInput, "negative take"),
+//RS         ));
+//RS     }
+//RS     if jet_fault_should_fail("IO.Read") {
+//RS         return Err(jet_std::IOError::other(
+//RS             jet_std::IOOperation::Read,
+//RS             Some("stdin".to_string()),
+//RS             "fault injected: IO.Read",
+//RS         ));
+//RS     }
+//RS     let mut buf = vec![0u8; n as usize];
+//RS     let read = std::io::stdin()
+//RS         .lock()
+//RS         .read(&mut buf)
+//RS         .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
+//RS     buf.truncate(read);
+//RS     Ok(buf)
+//RS }
+// END-PORT-PENDING 0294 crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs:1-144
+

@@ -1,0 +1,957 @@
+// PORT-PENDING 0191 crates-jet-codegen-src-prelude-term-module-group: crates/jet-codegen/src/Prelude/Term.rs:1-953
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-IO-TERM1=A: terminal policy shared by AOT, resident JIT, and the
+//RS // interpreter. Engines marshal its decisions, frames, and errors; terminal
+//RS // detection, stream flushing, prompts, and progress line endings live here.
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub(crate) enum JetTermSecretError {
+//RS     NonTerminal,
+//RS     Echo,
+//RS     Flush(String),
+//RS     Read(String),
+//RS }
+//RS 
+//RS impl JetTermSecretError {
+//RS     pub(crate) fn message(&self) -> String {
+//RS         match self {
+//RS             Self::NonTerminal => "secret input needs a terminal".to_string(),
+//RS             Self::Echo => "could not disable terminal echo".to_string(),
+//RS             Self::Flush(message) | Self::Read(message) => message.clone(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub(crate) enum JetTermSecretErrorKind {
+//RS     InvalidInput,
+//RS     Other,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub(crate) enum JetTermSecretErrorOperation {
+//RS     Read,
+//RS     Flush,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub(crate) struct JetTermSecretErrorProjection {
+//RS     pub(crate) kind: JetTermSecretErrorKind,
+//RS     pub(crate) operation: JetTermSecretErrorOperation,
+//RS     pub(crate) resource: &'static str,
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_secret_error_projection(
+//RS     error: &JetTermSecretError,
+//RS ) -> JetTermSecretErrorProjection {
+//RS     match error {
+//RS         JetTermSecretError::NonTerminal => JetTermSecretErrorProjection {
+//RS             kind: JetTermSecretErrorKind::InvalidInput,
+//RS             operation: JetTermSecretErrorOperation::Read,
+//RS             resource: "stdin",
+//RS         },
+//RS         JetTermSecretError::Echo => JetTermSecretErrorProjection {
+//RS             kind: JetTermSecretErrorKind::Other,
+//RS             operation: JetTermSecretErrorOperation::Read,
+//RS             resource: "stdin",
+//RS         },
+//RS         JetTermSecretError::Flush(_) => JetTermSecretErrorProjection {
+//RS             kind: JetTermSecretErrorKind::Other,
+//RS             operation: JetTermSecretErrorOperation::Flush,
+//RS             resource: "stdout",
+//RS         },
+//RS         JetTermSecretError::Read(_) => JetTermSecretErrorProjection {
+//RS             kind: JetTermSecretErrorKind::Other,
+//RS             operation: JetTermSecretErrorOperation::Read,
+//RS             resource: "stdin",
+//RS         },
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_stdin_is_terminal() -> bool {
+//RS     use std::io::IsTerminal;
+//RS     std::io::stdin().is_terminal()
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_stdout_is_terminal() -> bool {
+//RS     use std::io::IsTerminal;
+//RS     std::io::stdout().is_terminal()
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_stderr_is_terminal() -> bool {
+//RS     use std::io::IsTerminal;
+//RS     std::io::stderr().is_terminal()
+//RS }
+//RS 
+//RS /// The name of the one process-wide fact below. The CLI sets it; every mirror
+//RS /// of this file reads it, so no tier carries a second switch to keep in step.
+//RS pub(crate) const JET_TERM_PROGRAM_OWNS_STREAMS: &str = "JET_PROGRAM_OWNS_STREAMS";
+//RS /// Machine mode is set by the CLI before an in-process tier starts.  Human
+//RS /// progress and decoration must never enter that stream.
+//RS pub(crate) const JET_TERM_MACHINE_OUTPUT: &str = "JET_MACHINE_OUTPUT";
+//RS 
+//RS pub(crate) fn jet_term_machine_output() -> bool {
+//RS     std::env::var_os(JET_TERM_MACHINE_OUTPUT).is_some_and(|value| value == "1")
+//RS }
+//RS 
+//RS 
+//RS /// Does the running program own the process's stdout and stderr?
+//RS ///
+//RS /// An AOT program always does: it writes its own streams and nothing reads them
+//RS /// back. The two in-process tiers do not by default, because an embedder — the
+//RS /// REPL, a notebook cell, `dev_iteration` in a golden harness — consumes the
+//RS /// run's output from `RunOutcome` as data, so their adapters must accumulate it
+//RS /// instead of writing it. The one-shot `jet run` / `jet dev` verbs are not
+//RS /// embedders: they re-print that buffer verbatim and nothing else consumes it,
+//RS /// so they hand the streams to the program and say so here.
+//RS ///
+//RS /// Terminal detection alone could not answer this. It said "not mine" for every
+//RS /// piped run, so the in-process tiers withheld a piped program's output until
+//RS /// the run ENDED: a program that prints and keeps running — a server, a watch
+//RS /// loop, anything with a `loop` — printed nothing that an AOT build of the same
+//RS /// source printed immediately, and nothing outside the process could ever
+//RS /// synchronise with a program while it ran.
+//RS pub(crate) fn jet_term_program_owns_streams() -> bool {
+//RS     *JET_TERM_PROGRAM_OWNS_STREAMS_FACT
+//RS }
+//RS 
+//RS /// The fact is read once: the CLI decides it before the program starts, and a
+//RS /// run cannot change hands halfway through its own output.
+//RS static JET_TERM_PROGRAM_OWNS_STREAMS_FACT: std::sync::LazyLock<bool> =
+//RS     std::sync::LazyLock::new(|| {
+//RS         std::env::var_os(JET_TERM_PROGRAM_OWNS_STREAMS).is_some_and(|value| value == "1")
+//RS     });
+//RS 
+//RS /// Where a program write goes: the real stream, or the caller's buffer. Framing
+//RS /// decisions keep asking `jet_term_*_is_terminal` — a pipe still gets no
+//RS /// carriage-return progress frames when the program owns it.
+//RS pub(crate) fn jet_term_stdout_is_program_stream() -> bool {
+//RS     jet_term_stdout_is_terminal() || jet_term_program_owns_streams()
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_stderr_is_program_stream() -> bool {
+//RS     jet_term_stderr_is_terminal() || jet_term_program_owns_streams()
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_write_stdout(text: &str, flush: bool) -> std::io::Result<()> {
+//RS     jet_term_write_stdout_bytes(text.as_bytes(), flush)
+//RS }
+//RS 
+//RS #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+//RS #[link(wasm_import_module = "env")]
+//RS unsafe extern "C" {
+//RS     fn jet_web_print(pointer: *const u8, length: usize);
+//RS }
+//RS 
+//RS #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+//RS pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], _flush: bool) -> std::io::Result<()> {
+//RS     // The host copies this borrowed frame before returning.
+//RS     unsafe { jet_web_print(bytes.as_ptr(), bytes.len()) };
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+//RS pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], flush: bool) -> std::io::Result<()> {
+//RS     use std::io::Write;
+//RS     let mut out = std::io::stdout().lock();
+//RS     out.write_all(bytes)?;
+//RS     // stdout and stderr may share one non-TTY sink. Flush byte-bearing writes
+//RS     // so their Prelude order remains observable after the adapters marshal it.
+//RS     if flush || !bytes.is_empty() || jet_term_stdout_is_terminal() {
+//RS         out.flush()?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_write_stderr(text: &str, flush: bool) -> std::io::Result<()> {
+//RS     jet_term_write_stderr_bytes(text.as_bytes(), flush)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_write_stderr_bytes(bytes: &[u8], flush: bool) -> std::io::Result<()> {
+//RS     use std::io::Write;
+//RS     let mut out = std::io::stderr().lock();
+//RS     out.write_all(bytes)?;
+//RS     // stdout and stderr may share one non-TTY sink. Flush byte-bearing writes
+//RS     // so their Prelude order remains observable after the adapters marshal it.
+//RS     if flush || !bytes.is_empty() || jet_term_stderr_is_terminal() {
+//RS         out.flush()?;
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// D-VERDICT-1321-1: one print value becomes one line frame. Display
+//RS /// conversion happens at the caller's typed boundary; line framing belongs to
+//RS /// this shared terminal kernel so AOT, JIT, interpreter, and comptime sinks do
+//RS /// not each invent a trailing-newline rule.
+//RS pub(crate) fn jet_term_print_frame(text: &str) -> String {
+//RS     format!("{text}\n")
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_write_stdout_line(text: &str, flush: bool) -> std::io::Result<()> {
+//RS     let frame = jet_term_print_frame(text);
+//RS     jet_term_write_stdout(&frame, flush)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_write_stderr_line(text: &str, flush: bool) -> std::io::Result<()> {
+//RS     let frame = jet_term_print_frame(text);
+//RS     jet_term_write_stderr(&frame, flush)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_width(get: impl Fn(&str) -> Option<String>) -> i64 {
+//RS     jet_term_positive_env_int(get("COLUMNS"))
+//RS         .or_else(|| jet_term_size_from_stty().map(|(width, _)| width))
+//RS         .unwrap_or(80)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_height(get: impl Fn(&str) -> Option<String>) -> i64 {
+//RS     jet_term_positive_env_int(get("LINES"))
+//RS         .or_else(|| jet_term_size_from_stty().map(|(_, height)| height))
+//RS         .unwrap_or(24)
+//RS }
+//RS 
+//RS // D-CLI-GLOBAL1=E: the Standard CLI pack supplies one process-local color
+//RS // override. The terminal policy remains here so AOT, JIT, and interpreter
+//RS // adapters do not each invent a color decision.
+//RS thread_local! {
+//RS     static JET_TERM_COLOR_MODE: std::cell::Cell<u8> = std::cell::Cell::new(0);
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_set_color_mode(mode: &str) {
+//RS     let value = match mode {
+//RS         "always" => 1,
+//RS         "never" => 2,
+//RS         _ => 0,
+//RS     };
+//RS     JET_TERM_COLOR_MODE.with(|current| current.set(value));
+//RS }
+//RS 
+//RS fn jet_term_positive_env_int(value: Option<String>) -> Option<i64> {
+//RS     value?.parse::<i64>().ok().filter(|value| *value > 0)
+//RS }
+//RS 
+//RS fn jet_term_size_from_stty() -> Option<(i64, i64)> {
+//RS     let output = std::process::Command::new("stty")
+//RS         .arg("size")
+//RS         .output()
+//RS         .ok()?;
+//RS     if !output.status.success() {
+//RS         return None;
+//RS     }
+//RS     let text = String::from_utf8(output.stdout).ok()?;
+//RS     let mut parts = text.split_whitespace();
+//RS     let rows = parts.next()?.parse::<i64>().ok()?;
+//RS     let columns = parts.next()?.parse::<i64>().ok()?;
+//RS     (rows > 0 && columns > 0).then_some((columns, rows))
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_style_enabled(
+//RS     no_color: bool,
+//RS     force_color: bool,
+//RS     stdout_is_terminal: bool,
+//RS ) -> bool {
+//RS     JET_TERM_COLOR_MODE.with(|mode| match mode.get() {
+//RS         1 => true,
+//RS         2 => false,
+//RS         _ => {
+//RS             if no_color {
+//RS                 false
+//RS             } else if force_color {
+//RS                 true
+//RS             } else {
+//RS                 stdout_is_terminal
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_style(style: &str, text: &str, enabled: bool) -> String {
+//RS     if enabled {
+//RS         jet_term_style_force(style, text)
+//RS     } else {
+//RS         text.to_string()
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_style_force(style: &str, text: &str) -> String {
+//RS     let code = match style {
+//RS         "black" => Some("30"),
+//RS         "red" => Some("31"),
+//RS         "green" => Some("32"),
+//RS         "yellow" => Some("33"),
+//RS         "blue" => Some("34"),
+//RS         "magenta" => Some("35"),
+//RS         "cyan" => Some("36"),
+//RS         "white" => Some("37"),
+//RS         "bold" => Some("1"),
+//RS         "dim" => Some("2"),
+//RS         _ => None,
+//RS     };
+//RS     code.map_or_else(|| text.to_string(), |code| format!("\x1b[{code}m{text}\x1b[0m"))
+//RS }
+//RS 
+//RS // D-IO-PROMPT1=A: one prompt reader for every tier. A read that returns no
+//RS // bytes means the stream is closed and will never answer again, which is a
+//RS // different fact from an answer this kernel can reject and ask about a second
+//RS // time. Only a rejected answer may re-prompt. Engines marshal this outcome;
+//RS // they never re-derive it, so no engine can spin where another one stops.
+//RS pub(crate) enum JetTermRead {
+//RS     Line(String),
+//RS     EndOfInput,
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+//RS     let mut line = String::new();
+//RS     if std::io::stdin().read_line(&mut line)? == 0 {
+//RS         return Ok(JetTermRead::EndOfInput);
+//RS     }
+//RS     jet_term_trim_line(&mut line);
+//RS     Ok(JetTermRead::Line(line))
+//RS }
+//RS 
+//RS /// The `io.input` text surface answers with a String, and a closed stream
+//RS /// answers with an empty line there. Prompt loops need the sharper fact above,
+//RS /// so both surfaces stay on this one reader.
+//RS pub(crate) fn jet_term_read_text(read: JetTermRead) -> String {
+//RS     match read {
+//RS         JetTermRead::Line(line) => line,
+//RS         JetTermRead::EndOfInput => String::new(),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_secret_closed_error() -> &'static str {
+//RS     "the input stream closed before the secret arrived"
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_secret_preflight(
+//RS     stdin_is_terminal: bool,
+//RS     stdout_is_terminal: bool,
+//RS ) -> Result<(), JetTermSecretError> {
+//RS     (stdin_is_terminal && stdout_is_terminal)
+//RS         .then_some(())
+//RS         .ok_or(JetTermSecretError::NonTerminal)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_input_secret(
+//RS     prompt: &str,
+//RS     mut write: impl FnMut(&str) -> Result<(), String>,
+//RS     mut read: impl FnMut() -> Result<JetTermRead, String>,
+//RS ) -> Result<String, JetTermSecretError> {
+//RS     jet_term_secret_preflight(
+//RS         jet_term_stdin_is_terminal(),
+//RS         jet_term_stdout_is_terminal(),
+//RS     )?;
+//RS     write(prompt).map_err(JetTermSecretError::Flush)?;
+//RS     if !jet_term_mode_enter(false) {
+//RS         let _ = write("\n");
+//RS         return Err(JetTermSecretError::Echo);
+//RS     }
+//RS     let guard = JetTermModeGuard;
+//RS     let secret = read().map_err(JetTermSecretError::Read);
+//RS     drop(guard);
+//RS     let _ = write("\n");
+//RS     // A terminal that closes before the secret arrives is a read failure, not
+//RS     // an empty secret: `Ok("")` would hand the caller a credential nobody
+//RS     // typed.
+//RS     match secret? {
+//RS         JetTermRead::Line(secret) => Ok(secret),
+//RS         JetTermRead::EndOfInput => Err(JetTermSecretError::Read(
+//RS             jet_term_secret_closed_error().to_string(),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS struct JetTermModeGuard;
+//RS 
+//RS impl Drop for JetTermModeGuard {
+//RS     fn drop(&mut self) {
+//RS         jet_term_mode_leave();
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_confirm_prompt(prompt: &str) -> String {
+//RS     format!("{prompt} [y/N] ")
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_confirm_with_io<E>(
+//RS     prompt: &str,
+//RS     mut write: impl FnMut(&str) -> Result<(), E>,
+//RS     mut read: impl FnMut() -> Result<JetTermRead, E>,
+//RS ) -> bool {
+//RS     let prompt = jet_term_confirm_prompt(prompt);
+//RS     // The safe default answers for a stream that says nothing, so a piped or
+//RS     // closed input ends the prompt instead of holding the program.
+//RS     let answer = match write(&prompt).and_then(|_| read()) {
+//RS         Ok(JetTermRead::Line(line)) => line,
+//RS         Ok(JetTermRead::EndOfInput) | Err(_) => return false,
+//RS     };
+//RS     matches!(
+//RS         answer.trim().to_ascii_lowercase().as_str(),
+//RS         "y" | "yes"
+//RS     )
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_choose_menu(prompt: &str, items: &[String]) -> String {
+//RS     let mut menu = format!("{prompt}\n");
+//RS     for (index, item) in items.iter().enumerate() {
+//RS         menu.push_str(&format!("  {}) {item}\n", index + 1));
+//RS     }
+//RS     menu
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_choose_invalid(item_count: usize) -> String {
+//RS     format!("Enter a number from 1 to {item_count}.\n")
+//RS }
+//RS 
+//RS /// D-IO-PROMPT1=A: a rejected answer may be asked about again, but not without
+//RS /// end. Ten retries is the whole budget for one `choose` call, so a reader that
+//RS /// keeps answering with nonsense stops with one reported error instead of an
+//RS /// unbounded prompt log.
+//RS pub(crate) const JET_TERM_CHOOSE_RETRY_LIMIT: usize = 10;
+//RS 
+//RS pub(crate) fn jet_term_choose_empty_error() -> &'static str {
+//RS     "choose needs at least one item"
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_choose_closed_error() -> &'static str {
+//RS     "the input stream closed before a choice arrived"
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_choose_retry_error() -> String {
+//RS     format!("no valid choice after {JET_TERM_CHOOSE_RETRY_LIMIT} retries")
+//RS }
+//RS 
+//RS /// `stop` builds the caller's error type from one Prelude-owned reason, so the
+//RS /// empty-item, closed-stream, and retry-budget stops are one mechanism rather
+//RS /// than three per-engine spellings.
+//RS pub(crate) fn jet_term_choose_with_io<E>(
+//RS     prompt: &str,
+//RS     items: &[String],
+//RS     mut write: impl FnMut(&str) -> Result<(), E>,
+//RS     mut read: impl FnMut() -> Result<JetTermRead, E>,
+//RS     stop: impl Fn(&str) -> E,
+//RS ) -> Result<String, E> {
+//RS     if items.is_empty() {
+//RS         return Err(stop(jet_term_choose_empty_error()));
+//RS     }
+//RS     write(&jet_term_choose_menu(prompt, items))?;
+//RS     for _ in 0..=JET_TERM_CHOOSE_RETRY_LIMIT {
+//RS         let answer = match write("> ").and_then(|_| read())? {
+//RS             JetTermRead::Line(answer) => answer,
+//RS             JetTermRead::EndOfInput => return Err(stop(jet_term_choose_closed_error())),
+//RS         };
+//RS         if let Ok(index) = answer.trim().parse::<usize>() {
+//RS             if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
+//RS                 return Ok(item.clone());
+//RS 
+//RS             }
+//RS         }
+//RS         write(&jet_term_choose_invalid(items.len()))?;
+//RS     }
+//RS     Err(stop(&jet_term_choose_retry_error()))
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_trim_line(line: &mut String) {
+//RS     while line.ends_with('\n') || line.ends_with('\r') {
+//RS         line.pop();
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_progress_frame(is_terminal: bool, text: &str) -> String {
+//RS     if is_terminal {
+//RS         format!("\r{text}")
+//RS     } else {
+//RS         format!("{text}\n")
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_progress_finish(is_terminal: bool) -> &'static str {
+//RS     if is_terminal { "\n" } else { "" }
+//RS }
+//RS /// Progress is a human-only terminal affordance. Redirected streams and
+//RS /// machine output stay byte-clean; callers that need a status record serialize
+//RS /// it through their structured output channel instead.
+//RS pub(crate) fn jet_term_progress_enabled() -> bool {
+//RS     jet_term_stderr_is_terminal() && !jet_term_machine_output()
+//RS }
+//RS 
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd",
+//RS ))]
+//RS mod jet_term_mode {
+//RS     const TCSANOW: i32 = 0;
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     type TermFlag = u32;
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     type TermFlag = std::os::raw::c_ulong;
+//RS     #[cfg(any(
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     type TermFlag = u32;
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const ECHO: TermFlag = 0o0000010;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const ECHO: TermFlag = 0x0008;
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const ICANON: TermFlag = 0o0000002;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const ICANON: TermFlag = 0x0100;
+//RS 
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const VMIN: usize = 6;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const VMIN: usize = 16;
+//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS     const VTIME: usize = 5;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const VTIME: usize = 17;
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     const NCCS: usize = 32;
+//RS     #[cfg(target_os = "android")]
+//RS     const NCCS: usize = 19;
+//RS     #[cfg(any(
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const NCCS: usize = 20;
+//RS 
+//RS     #[cfg(any(
+//RS         target_os = "linux",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS     ))]
+//RS     type TermSpeed = TermFlag;
+//RS     #[cfg(any(target_os = "openbsd", target_os = "netbsd"))]
+//RS     type TermSpeed = i32;
+//RS 
+//RS     #[repr(C)]
+//RS     #[derive(Clone, Copy)]
+//RS     struct Termios {
+//RS         c_iflag: TermFlag,
+//RS         c_oflag: TermFlag,
+//RS         c_cflag: TermFlag,
+//RS         c_lflag: TermFlag,
+//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS         c_line: u8,
+//RS         c_cc: [u8; NCCS],
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             target_os = "freebsd",
+//RS             target_os = "openbsd",
+//RS             target_os = "netbsd",
+//RS         ))]
+//RS         c_ispeed: TermSpeed,
+//RS         #[cfg(any(
+//RS             target_os = "linux",
+//RS             target_os = "macos",
+//RS             target_os = "ios",
+//RS             target_os = "freebsd",
+//RS             target_os = "openbsd",
+//RS             target_os = "netbsd",
+//RS         ))]
+//RS         c_ospeed: TermSpeed,
+//RS     }
+//RS 
+//RS     #[cfg(target_os = "linux")]
+//RS     const _: () = assert!(std::mem::size_of::<Termios>() == 60);
+//RS     #[cfg(target_os = "android")]
+//RS     const _: () = assert!(std::mem::size_of::<Termios>() == 36);
+//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
+//RS     const _: () = assert!(std::mem::size_of::<Termios>() == 72);
+//RS     #[cfg(any(
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))]
+//RS     const _: () = assert!(std::mem::size_of::<Termios>() == 44);
+//RS 
+//RS     #[allow(dead_code)]
+//RS     pub(super) fn layout_fingerprint() -> [usize; 20] {
+//RS         let c_line_offset = {
+//RS             #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS             {
+//RS                 std::mem::offset_of!(Termios, c_line)
+//RS             }
+//RS             #[cfg(not(any(target_os = "linux", target_os = "android")))]
+//RS             {
+//RS                 usize::MAX
+//RS             }
+//RS         };
+//RS         let c_ispeed_offset = {
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios",
+//RS                 target_os = "freebsd",
+//RS                 target_os = "openbsd",
+//RS                 target_os = "netbsd",
+//RS             ))]
+//RS             {
+//RS                 std::mem::offset_of!(Termios, c_ispeed)
+//RS             }
+//RS             #[cfg(target_os = "android")]
+//RS             {
+//RS                 usize::MAX
+//RS             }
+//RS         };
+//RS         let c_ospeed_offset = {
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios",
+//RS                 target_os = "freebsd",
+//RS                 target_os = "openbsd",
+//RS                 target_os = "netbsd",
+//RS             ))]
+//RS             {
+//RS                 std::mem::offset_of!(Termios, c_ospeed)
+//RS             }
+//RS             #[cfg(target_os = "android")]
+//RS             {
+//RS                 usize::MAX
+//RS             }
+//RS         };
+//RS         let c_line_size = {
+//RS             #[cfg(any(target_os = "linux", target_os = "android"))]
+//RS             {
+//RS                 std::mem::size_of::<u8>()
+//RS             }
+//RS             #[cfg(not(any(target_os = "linux", target_os = "android")))]
+//RS             {
+//RS                 usize::MAX
+//RS             }
+//RS         };
+//RS         let speed_size = {
+//RS             #[cfg(any(
+//RS                 target_os = "linux",
+//RS                 target_os = "macos",
+//RS                 target_os = "ios",
+//RS                 target_os = "freebsd",
+//RS                 target_os = "openbsd",
+//RS                 target_os = "netbsd",
+//RS             ))]
+//RS             {
+//RS                 std::mem::size_of::<TermSpeed>()
+//RS             }
+//RS             #[cfg(target_os = "android")]
+//RS             {
+//RS                 usize::MAX
+//RS             }
+//RS         };
+//RS         [
+//RS             std::mem::size_of::<Termios>(),
+//RS             std::mem::align_of::<Termios>(),
+//RS             std::mem::size_of::<TermFlag>(),
+//RS             std::mem::offset_of!(Termios, c_iflag),
+//RS             std::mem::offset_of!(Termios, c_oflag),
+//RS             std::mem::offset_of!(Termios, c_cflag),
+//RS             std::mem::offset_of!(Termios, c_lflag),
+//RS             c_line_offset,
+//RS             std::mem::offset_of!(Termios, c_cc),
+//RS             c_ispeed_offset,
+//RS             c_ospeed_offset,
+//RS             NCCS,
+//RS             VMIN,
+//RS             VTIME,
+//RS             TCSANOW as usize,
+//RS             ECHO as usize,
+//RS             ICANON as usize,
+//RS             c_line_size,
+//RS             speed_size,
+//RS             std::mem::size_of::<[u8; NCCS]>(),
+//RS         ]
+//RS     }
+//RS 
+//RS     // Keep the C declarations layout-opaque. This file is included by the
+//RS     // interpreter, JIT, and AOT host modules, each with its own Rust Termios
+//RS     // type; raw pointers give every inclusion the same ABI declaration.
+//RS     unsafe extern "C" {
+//RS         fn tcgetattr(fd: i32, termios: *mut u8) -> i32;
+//RS         fn tcsetattr(fd: i32, optional_actions: i32, termios: *const u8) -> i32;
+//RS         fn cfmakeraw(termios: *mut u8);
+//RS     }
+//RS 
+//RS     std::thread_local! {
+//RS         static SAVED: std::cell::RefCell<Vec<Termios>> = const { std::cell::RefCell::new(Vec::new()) };
+//RS     }
+//RS 
+//RS     pub(super) fn enter(raw: bool) -> bool {
+//RS         unsafe {
+//RS             let mut mode = std::mem::zeroed::<Termios>();
+//RS             if tcgetattr(0, (&mut mode as *mut Termios).cast::<u8>()) != 0 {
+//RS                 return false;
+//RS             }
+//RS             let saved_mode = mode;
+//RS             mode.c_lflag &= !ECHO;
+//RS             if raw {
+//RS                 mode.c_lflag &= !ICANON;
+//RS                 mode.c_cc[VMIN] = 1;
+//RS                 mode.c_cc[VTIME] = 0;
+//RS             }
+//RS             if tcsetattr(0, TCSANOW, (&mode as *const Termios).cast::<u8>()) != 0 {
+//RS                 return false;
+//RS             }
+//RS             SAVED.with(|saved| saved.borrow_mut().push(saved_mode));
+//RS             true
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn configure_fd(fd: i32, raw: bool) -> std::io::Result<()> {
+//RS         unsafe {
+//RS             let mut mode = std::mem::zeroed::<Termios>();
+//RS             if tcgetattr(fd, (&mut mode as *mut Termios).cast::<u8>()) != 0 {
+//RS                 return Err(std::io::Error::last_os_error());
+//RS             }
+//RS             if raw {
+//RS                 cfmakeraw((&mut mode as *mut Termios).cast::<u8>());
+//RS                 mode.c_cc[VMIN] = 1;
+//RS                 mode.c_cc[VTIME] = 0;
+//RS             }
+//RS             if tcsetattr(fd, TCSANOW, (&mode as *const Termios).cast::<u8>()) != 0 {
+//RS                 return Err(std::io::Error::last_os_error());
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     pub(super) fn leave() {
+//RS         unsafe {
+//RS             SAVED.with(|saved| {
+//RS                 if let Some(mode) = saved.borrow_mut().pop() {
+//RS                     tcsetattr(0, TCSANOW, (&mode as *const Termios).cast::<u8>());
+//RS                 }
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(windows)]
+//RS mod jet_term_mode {
+//RS     unsafe extern "system" {
+//RS         fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
+//RS         fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
+//RS         fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
+//RS     }
+//RS 
+//RS     const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
+//RS     const ENABLE_ECHO_INPUT: u32 = 0x0004;
+//RS     const ENABLE_LINE_INPUT: u32 = 0x0002;
+//RS 
+//RS     std::thread_local! {
+//RS         static SAVED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+//RS     }
+//RS 
+//RS     pub(super) fn enter(raw: bool) -> bool {
+//RS         unsafe {
+//RS             let handle = GetStdHandle(STD_INPUT_HANDLE);
+//RS             let mut mode = 0;
+//RS             if GetConsoleMode(handle, &mut mode) == 0 {
+//RS                 return false;
+//RS             }
+//RS             let mut next = mode & !ENABLE_ECHO_INPUT;
+//RS             if raw {
+//RS                 next &= !ENABLE_LINE_INPUT;
+//RS             }
+//RS             if SetConsoleMode(handle, next) == 0 {
+//RS                 return false;
+//RS             }
+//RS             SAVED.with(|saved| saved.borrow_mut().push(mode));
+//RS             true
+//RS         }
+//RS     }
+//RS 
+//RS     pub(super) fn leave() {
+//RS         unsafe {
+//RS             let handle = GetStdHandle(STD_INPUT_HANDLE);
+//RS             SAVED.with(|saved| {
+//RS                 if let Some(mode) = saved.borrow_mut().pop() {
+//RS                     SetConsoleMode(handle, mode);
+//RS                 }
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(all(
+//RS     unix,
+//RS     not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))
+//RS ))]
+//RS mod jet_term_mode {
+//RS     // Unknown Unix ABIs do not get a guessed termios layout.
+//RS     pub(super) fn enter(_raw: bool) -> bool {
+//RS         false
+//RS     }
+//RS 
+//RS     pub(super) fn leave() {}
+//RS }
+//RS 
+//RS #[cfg(not(any(unix, windows)))]
+//RS mod jet_term_mode {
+//RS     pub(super) fn enter(_raw: bool) -> bool {
+//RS         false
+//RS     }
+//RS 
+//RS     pub(super) fn leave() {}
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_mode_enter(raw: bool) -> bool {
+//RS     jet_term_mode::enter(raw)
+//RS }
+//RS 
+//RS pub(crate) fn jet_term_mode_leave() {
+//RS     jet_term_mode::leave();
+//RS }
+//RS /// RAII terminal ownership for a TUI session.  Raw mode and the alternate
+//RS /// screen are one guard so every normal return, error, and panic restores the
+//RS /// terminal before the caller observes the outcome.
+//RS pub struct JetTuiTerminalGuard {
+//RS     alternate: bool,
+//RS     restored: bool,
+//RS }
+//RS 
+//RS impl JetTuiTerminalGuard {
+//RS     pub fn enter(alternate: bool) -> Option<Self> {
+//RS         use std::io::IsTerminal;
+//RS 
+//RS         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+//RS             return None;
+//RS         }
+//RS         if !jet_term_mode_enter(true) {
+//RS             return None;
+//RS         }
+//RS         if alternate
+//RS             && jet_term_write_stdout("\x1b[?1049h\x1b[?25l", true).is_err()
+//RS         {
+//RS             jet_term_mode_leave();
+//RS             return None;
+//RS         }
+//RS         Some(Self {
+//RS             alternate,
+//RS             restored: false,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn restore_now(&mut self) {
+//RS         if self.restored {
+//RS             return;
+//RS         }
+//RS         if self.alternate {
+//RS             let _ = jet_term_write_stdout("\x1b[?25h\x1b[?1049l", true);
+//RS         }
+//RS         jet_term_mode_leave();
+//RS         self.restored = true;
+//RS     }
+//RS 
+//RS     pub const fn is_active(&self) -> bool {
+//RS         !self.restored
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetTuiTerminalGuard {
+//RS     fn drop(&mut self) {
+//RS         self.restore_now();
+//RS     }
+//RS }
+//RS 
+//RS pub fn jet_term_tui_guard(alternate: bool) -> Option<JetTuiTerminalGuard> {
+//RS     JetTuiTerminalGuard::enter(alternate)
+//RS }
+//RS 
+//RS #[cfg(all(
+//RS     unix,
+//RS     any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     )
+//RS ))]
+//RS pub(crate) fn jet_term_configure_fd(fd: i32, raw: bool) -> std::io::Result<()> {
+//RS     jet_term_mode::configure_fd(fd, raw)
+//RS }
+//RS 
+//RS #[cfg(all(
+//RS     unix,
+//RS     not(any(
+//RS         target_os = "linux",
+//RS         target_os = "android",
+//RS         target_os = "macos",
+//RS         target_os = "ios",
+//RS         target_os = "freebsd",
+//RS         target_os = "openbsd",
+//RS         target_os = "netbsd",
+//RS     ))
+//RS ))]
+//RS pub(crate) fn jet_term_configure_fd(_fd: i32, _raw: bool) -> std::io::Result<()> {
+//RS     Err(std::io::Error::new(
+//RS         std::io::ErrorKind::Unsupported,
+//RS         "terminal attributes are unsupported on this target",
+//RS     ))
+//RS }
+//RS #[cfg(any(
+//RS     target_os = "linux",
+//RS     target_os = "android",
+//RS     target_os = "macos",
+//RS     target_os = "ios",
+//RS     target_os = "freebsd",
+//RS     target_os = "openbsd",
+//RS     target_os = "netbsd",
+//RS ))]
+//RS #[allow(dead_code)]
+//RS pub(crate) fn jet_term_layout_fingerprint() -> [usize; 20] {
+//RS     jet_term_mode::layout_fingerprint()
+//RS }
+// END-PORT-PENDING 0191 crates/jet-codegen/src/Prelude/Term.rs:1-953
+

@@ -1,0 +1,26 @@
+// PORT-PENDING 0154 crates-jet-codegen-src-prelude-core-option-module-group: crates/jet-codegen/src/Prelude/Core/RuntimeStack.rs:1-22
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-FAIL-BREACH1=A: the runtime call-depth counter is task-local.
+//RS //
+//RS // A resident engine may run several Jet tasks against one runtime value. The
+//RS // source call stack belongs to the task, not to that shared runtime. AOT uses
+//RS // this same kernel through `Prelude/Core.rs`; the JIT adapter only marshals
+//RS // entry and leave calls into it.
+//RS thread_local! {
+//RS     static JET_RUNTIME_STACK_DEPTH: std::cell::Cell<usize> =
+//RS         const { std::cell::Cell::new(0) };
+//RS }
+//RS 
+//RS pub fn jet_runtime_stack_enter() -> bool {
+//RS     JET_RUNTIME_STACK_DEPTH.with(|depth| {
+//RS         let next = depth.get().saturating_add(1);
+//RS         depth.set(next);
+//RS         next > JET_RUNTIME_STACK_LIMIT
+//RS     })
+//RS }
+//RS 
+//RS pub fn jet_runtime_stack_leave() {
+//RS     JET_RUNTIME_STACK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+//RS }
+// END-PORT-PENDING 0154 crates/jet-codegen/src/Prelude/Core/RuntimeStack.rs:1-22
+

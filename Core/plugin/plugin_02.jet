@@ -1,0 +1,1821 @@
+// PORT-PENDING 0640 crates-jet-pkg-model-src-prelude-plugin-module-group: crates/jet-pkg-model/src/Prelude/Plugin.rs:1-1817
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // core.plugin runtime (D-DEP-WASM1=A, c81) — sandboxed WASM Component Model
+//RS // plugin loader, via wasmtime's dynamic component API.
+//RS //
+//RS // This file is emitted verbatim into the hidden FFI bridge crate (see
+//RS // Source/FFI.rs) when a Jet program uses `core.plugin`. The compiler crate
+//RS // (`Source/`) never depends on `wasmtime`; it only ships this text. Owner-
+//RS // approved I6 bootstrap exception (D-DEP-WASM1=A): wasmtime + the Component
+//RS // Model is the plugin sandbox engine, runtime-side only.
+//RS //
+//RS // Host import admission is checked against typed HostImportFacts and the one
+//RS // canonical Authority lent at load time. Every import is preflighted before
+//RS // linker instantiation; an unregistered or denied import cannot reach an
+//RS // external adapter. Every file read uses a resource-scoped, no-follow FS.Read
+//RS // root. A plugin with no declared/imported capability still runs with a
+//RS // zero-grant scope (I1).
+//RS //
+//RS // Handles and stores are owner-thread state in a thread-local HashMap,
+//RS // mirroring `DB.rs`. Handle 0 is the error sentinel (never a live plugin
+//RS // instance). Nested host/guest entry and unload during a call are rejected,
+//RS // so a guest failure cannot unwind unrelated host work.
+//RS //
+//RS // Wire protocol (mirrors `DB.rs`'s tagged-length encoding for leaves and uses
+//RS // canonical recursive component values for aggregates):
+//RS // `I<len>:<int>`, `F<len>:<float>`, `B<len>:<true|false>`, `T<len>:<utf8>`,
+//RS // `L<count>:<values>`, `R<count>:<field-name><value>`, `Q<count>:<values>`,
+//RS // `N`/`P<value>` for none/some, `K`/`X<value>` for ok/error, `V<case><value>`
+//RS // for variants, `E<len>:<case>` for enums, and `G<count>:<flag-names>` for
+//RS // flags. A call result or error is `O:<value>` / `E:<kind>:<message>`. The
+//RS // wire is only a transport envelope; values are checked against the actual
+//RS // Component Model `Type` before every call and after every return. Failure
+//RS // kinds are user error, denied authority, budget exhaustion, and internal
+//RS // defect; classification uses typed boundary state, never backend strings.
+//RS 
+//RS use std::cell::{Cell, RefCell};
+//RS use std::collections::{BTreeMap, HashMap};
+//RS use std::path::{Component as PathComponent, Path, PathBuf};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use wasmtime::component::{
+//RS     types::{ComponentFunc, ComponentInstance, ComponentItem},
+//RS     Component, Linker, LinkerInstance, Type, Val,
+//RS };
+//RS use wasmtime::{
+//RS     Config, Engine, ResourceLimiter, Store, StoreContextMut, Trap,
+//RS };
+//RS use jet_foundation::PluginWire::{
+//RS     plugin_decode_params, plugin_encode_value, PluginParamDecodeError, PluginValue,
+//RS };
+//RS use jet_foundation::Authority::{
+//RS     Authority as CanonicalAuthority, HostImportDecision, HostImportFact, Verdict,
+//RS };
+//RS 
+//RS const PLUGIN_MAX_FUEL: u64 = 10_000_000;
+//RS const PLUGIN_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+//RS const PLUGIN_MAX_TABLE_ELEMENTS: u32 = 10_000;
+//RS const PLUGIN_MAX_WIRE_BYTES: usize = 16 * 1024 * 1024;
+//RS const PLUGIN_MAX_VALUE_DEPTH: usize = 64;
+//RS const PLUGIN_TIMEOUT_MS: u64 = 2_000;
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum PluginBudgetKind {
+//RS     Fuel,
+//RS     Memory,
+//RS     Table,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum PluginFailureKind {
+//RS     UserError,
+//RS     DeniedAuthority,
+//RS     BudgetExhausted,
+//RS     InternalDefect,
+//RS }
+//RS 
+//RS impl PluginFailureKind {
+//RS     fn label(self) -> &'static str {
+//RS         match self {
+//RS             Self::UserError => "user-error",
+//RS             Self::DeniedAuthority => "denied-authority",
+//RS             Self::BudgetExhausted => "budget-exhausted",
+//RS             Self::InternalDefect => "internal-defect",
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Debug)]
+//RS struct PluginBoundaryError {
+//RS     kind: PluginFailureKind,
+//RS     message: String,
+//RS }
+//RS 
+//RS impl PluginBoundaryError {
+//RS     fn new(kind: PluginFailureKind, message: impl Into<String>) -> Self {
+//RS         Self {
+//RS             kind,
+//RS             message: message.into(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::fmt::Display for PluginBoundaryError {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         formatter.write_str(&self.message)
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for PluginBoundaryError {}
+//RS 
+//RS struct PluginLimits {
+//RS     memory_size: usize,
+//RS     table_elements: u32,
+//RS     instances: usize,
+//RS     memories: usize,
+//RS     tables: usize,
+//RS     failure: Cell<Option<PluginBudgetKind>>,
+//RS }
+//RS 
+//RS impl PluginLimits {
+//RS     fn new() -> Self {
+//RS         Self {
+//RS             memory_size: PLUGIN_MAX_MEMORY_BYTES,
+//RS             table_elements: PLUGIN_MAX_TABLE_ELEMENTS,
+//RS             instances: 1,
+//RS             memories: 1,
+//RS             tables: 1,
+//RS             failure: Cell::new(None),
+//RS         }
+//RS     }
+//RS 
+//RS     fn reset_failure(&self) {
+//RS         self.failure.set(None);
+//RS     }
+//RS 
+//RS     fn failure(&self) -> Option<PluginBudgetKind> {
+//RS         self.failure.get()
+//RS     }
+//RS }
+//RS 
+//RS impl ResourceLimiter for PluginLimits {
+//RS     fn memory_growing(
+//RS         &mut self,
+//RS         _current: usize,
+//RS         desired: usize,
+//RS         maximum: Option<usize>,
+//RS     ) -> wasmtime::Result<bool> {
+//RS         if desired > self.memory_size {
+//RS             self.failure.set(Some(PluginBudgetKind::Memory));
+//RS             return Err(wasmtime::Error::msg("plugin memory budget exhausted"));
+//RS         }
+//RS         Ok(maximum.map_or(true, |maximum| desired <= maximum))
+//RS     }
+//RS 
+//RS     fn table_growing(
+//RS         &mut self,
+//RS         _current: u32,
+//RS         desired: u32,
+//RS         maximum: Option<u32>,
+//RS     ) -> wasmtime::Result<bool> {
+//RS         if desired > self.table_elements {
+//RS             self.failure.set(Some(PluginBudgetKind::Table));
+//RS             return Err(wasmtime::Error::msg("plugin table budget exhausted"));
+//RS         }
+//RS         Ok(maximum.map_or(true, |maximum| desired <= maximum))
+//RS     }
+//RS 
+//RS     fn instances(&self) -> usize {
+//RS         self.instances
+//RS     }
+//RS 
+//RS     fn memories(&self) -> usize {
+//RS         self.memories
+//RS     }
+//RS 
+//RS     fn tables(&self) -> usize {
+//RS         self.tables
+//RS     }
+//RS }
+//RS 
+//RS struct PluginHostState {
+//RS     limits: PluginLimits,
+//RS     /// The one canonical grant lent to this guest.  Host imports consult this
+//RS     /// value; they do not parse a second wire policy.
+//RS     authority: CanonicalAuthority,
+//RS     /// The typed load decision inherited by all exports of this instance.
+//RS     authority_decision: HostImportDecision,
+//RS     /// Component import name to typed fact, populated before instantiation.
+//RS     imports: BTreeMap<String, HostImportFact>,
+//RS }
+//RS 
+//RS struct PluginInstance {
+//RS     engine: Engine,
+//RS     store: Store<PluginHostState>,
+//RS     instance: wasmtime::component::Instance,
+//RS     authority: CanonicalAuthority,
+//RS     authority_decision: HostImportDecision,
+//RS     imports: BTreeMap<String, HostImportFact>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static PLUGINS: RefCell<HashMap<u64, PluginInstance>> = RefCell::new(HashMap::new());
+//RS     // Component calls are synchronous and store-owned.  Nested entry would
+//RS     // borrow the same thread-local map while it is already mutably borrowed,
+//RS     // so reject it explicitly instead of allowing a host panic.
+//RS     static PLUGIN_CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
+//RS }
+//RS 
+//RS struct PluginCallGuard;
+//RS 
+//RS impl PluginCallGuard {
+//RS     fn enter() -> Result<Self, String> {
+//RS         PLUGIN_CALL_DEPTH.with(|depth| {
+//RS             if depth.get() != 0 {
+//RS                 return Err("plugin re-entry is not supported during an active call".to_string());
+//RS             }
+//RS             depth.set(1);
+//RS             Ok(Self)
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for PluginCallGuard {
+//RS     fn drop(&mut self) {
+//RS         PLUGIN_CALL_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+//RS     }
+//RS }
+//RS 
+//RS static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+//RS 
+//RS fn plugin_error(kind: PluginFailureKind, message: impl Into<String>) -> String {
+//RS     format!("E:{}:{}", kind.label(), message.into())
+//RS }
+//RS 
+//RS fn plugin_call_error(
+//RS     name: &str,
+//RS     kind: PluginFailureKind,
+//RS     message: impl Into<String>,
+//RS ) -> String {
+//RS     plugin_error(kind, format!("plugin call `{name}`: {}", message.into()))
+//RS }
+//RS 
+//RS fn plugin_engine() -> Result<Engine, String> {
+//RS     let mut config = Config::new();
+//RS     config.consume_fuel(true);
+//RS     config.epoch_interruption(true);
+//RS     Engine::new(&config).map_err(|error| format!("plugin engine: {error}"))
+//RS }
+//RS 
+//RS fn plugin_limits() -> PluginLimits {
+//RS     PluginLimits::new()
+//RS }
+//RS 
+//RS fn plugin_relative_candidate(
+//RS     path: &Path,
+//RS     root_text: &str,
+//RS ) -> Result<Option<PathBuf>, String> {
+//RS     let explicit_root = root_text != "repo";
+//RS     if path.is_absolute() {
+//RS         if !explicit_root {
+//RS             return Ok(None);
+//RS         }
+//RS         let root = Path::new(root_text);
+//RS         if !root.is_absolute() {
+//RS             return Err(
+//RS                 "an absolute plugin path requires an absolute explicit FS.Read root".to_string(),
+//RS             );
+//RS         }
+//RS         let Some(relative) = path.strip_prefix(root).ok() else {
+//RS             return Ok(None);
+//RS         };
+//RS         if relative.as_os_str().is_empty() {
+//RS             return Err("plugin path names the FS.Read root, not a file".to_string());
+//RS         }
+//RS         if relative.components().any(|component| {
+//RS             matches!(
+//RS                 component,
+//RS                 PathComponent::ParentDir | PathComponent::RootDir | PathComponent::Prefix(_)
+//RS             )
+//RS         }) {
+//RS             return Err("plugin path escapes its explicit FS.Read root".to_string());
+//RS         }
+//RS         return Ok(Some(relative.to_path_buf()));
+//RS     }
+//RS     if path.components().any(|component| {
+//RS         matches!(
+//RS             component,
+//RS             PathComponent::ParentDir | PathComponent::RootDir | PathComponent::Prefix(_)
+//RS         )
+//RS     }) {
+//RS         return Err("plugin path must be relative and must not contain `..`".to_string());
+//RS     }
+//RS     Ok(Some(path.to_path_buf()))
+//RS }
+//RS 
+//RS fn plugin_authority_from_wire(wire: &str) -> Result<CanonicalAuthority, String> {
+//RS     let mut rights = Vec::new();
+//RS     for raw in wire.split('\n') {
+//RS         let right = raw.trim();
+//RS         if right.is_empty() {
+//RS             continue;
+//RS         }
+//RS         if jet_foundation::Authority::parse_right(right).is_none() {
+//RS             return Err(format!("plugin authority contains an unknown right `{right}`"));
+//RS         }
+//RS         rights.push(right.to_string());
+//RS     }
+//RS     Ok(CanonicalAuthority::from_rights(rights))
+//RS }
+//RS /// The package declaration is emitted by the hidden bridge beside this
+//RS /// runtime. It is a checked fact, not a second authority grant.
+//RS fn plugin_declared_authority_needs() -> Result<Vec<String>, String> {
+//RS     crate::jet_plugin_declared_authority_needs()
+//RS }
+//RS 
+//RS fn plugin_load_import_fact() -> HostImportFact {
+//RS     jet_foundation::MIR::plugin_authority_import_fact()
+//RS }
+//RS 
+//RS fn plugin_import_right(path: &str) -> Option<&'static str> {
+//RS     let leaf = path
+//RS         .split(|character: char| matches!(character, ':' | '/' | '.' | '@' | '-'))
+//RS         .rev()
+//RS         .find(|part| !part.is_empty())
+//RS         .unwrap_or(path)
+//RS         .to_ascii_lowercase();
+//RS     match leaf.as_str() {
+//RS         "read" | "read_bytes" | "readbytes" => Some("FS.Read"),
+//RS         "write" | "write_bytes" | "writebytes" => Some("FS.Write"),
+//RS         "connect" | "request" => Some("Net.Connect"),
+//RS         "run" | "exec" => Some("Exec"),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_import_fact(path: &str, function: &ComponentFunc) -> Result<HostImportFact, String> {
+//RS     let Some(required_right) = plugin_import_right(path) else {
+//RS         return Err(format!(
+//RS             "plugin import `{path}` has no declared authority fact"
+//RS         ));
+//RS     };
+//RS     let parameters = function
+//RS         .params()
+//RS         .map(|ty| plugin_type_name(&ty))
+//RS         .collect::<Vec<_>>();
+//RS     let results = function.results().collect::<Vec<_>>();
+//RS     if results.len() > 1 {
+//RS         return Err(format!(
+//RS             "plugin import `{path}` has {} results; host imports require one result or none",
+//RS             results.len()
+//RS         ));
+//RS     }
+//RS     Ok(HostImportFact::new(
+//RS         path.to_string(),
+//RS         path.to_string(),
+//RS         required_right,
+//RS         parameters,
+//RS         results.first().map(plugin_type_name),
+//RS     ))
+//RS }
+//RS 
+//RS fn plugin_scoped_candidates(
+//RS     path: &str,
+//RS     authority: &CanonicalAuthority,
+//RS     required_right: &str,
+//RS ) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+//RS     let path_ref = Path::new(path);
+//RS     let prefix = format!("{required_right}:");
+//RS     let mut saw_root = false;
+//RS     let mut candidates = Vec::new();
+//RS     for right in authority.rights() {
+//RS         let Some(root_text) = right.strip_prefix(&prefix) else {
+//RS             continue;
+//RS         };
+//RS         saw_root = true;
+//RS         if root_text.is_empty() {
+//RS             return Err(format!(
+//RS                 "plugin {required_right} authority names an empty root"
+//RS             ));
+//RS         }
+//RS         let root = if root_text == "repo" {
+//RS             PathBuf::from(".")
+//RS         } else {
+//RS             PathBuf::from(root_text)
+//RS         };
+//RS         let Some(relative) = plugin_relative_candidate(path_ref, root_text)? else {
+//RS             continue;
+//RS         };
+//RS         candidates.push((root, relative));
+//RS     }
+//RS     if !saw_root {
+//RS         return Err(format!(
+//RS             "plugin operation requires an explicit resource-scoped {required_right} authority"
+//RS         ));
+//RS     }
+//RS     if candidates.is_empty() {
+//RS         return Err(format!(
+//RS             "path `{path}` is outside the granted {required_right} roots"
+//RS         ));
+//RS     }
+//RS     Ok(candidates)
+//RS }
+//RS 
+//RS fn plugin_bytes(value: &Val) -> Option<Vec<u8>> {
+//RS     match value {
+//RS         Val::String(text) => Some(text.as_bytes().to_vec()),
+//RS         Val::List(values) => values
+//RS             .iter()
+//RS             .map(|value| match value {
+//RS                 Val::U8(byte) => Some(*byte),
+//RS                 _ => None,
+//RS             })
+//RS             .collect(),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_set_bytes_result(
+//RS     import: &HostImportFact,
+//RS     results: &mut [Val],
+//RS     bytes: Vec<u8>,
+//RS ) -> Result<(), String> {
+//RS     if results.len() != 1 {
+//RS         return Err(format!(
+//RS             "plugin host import `{}` must return Text or list<u8>",
+//RS             import.operation
+//RS         ));
+//RS     }
+//RS     match import.result_type_id.as_deref() {
+//RS         Some("Text") => {
+//RS             let text = String::from_utf8(bytes).map_err(|error| {
+//RS                 format!(
+//RS                     "plugin host import `{}` returned non-UTF-8 data for Text: {error}",
+//RS                     import.operation
+//RS                 )
+//RS             })?;
+//RS             results[0] = Val::String(text);
+//RS             Ok(())
+//RS         }
+//RS         Some("list") => {
+//RS             results[0] = Val::List(bytes.into_iter().map(Val::U8).collect());
+//RS             Ok(())
+//RS         }
+//RS         Some(result_type) => Err(format!(
+//RS             "plugin host import `{}` has unsupported byte result `{result_type}`",
+//RS             import.operation
+//RS         )),
+//RS         None => Err(format!(
+//RS             "plugin host import `{}` must return Text or list<u8>",
+//RS             import.operation
+//RS         )),
+//RS     }
+//RS }
+//RS fn plugin_io_error_value(
+//RS     operation: &str,
+//RS     resource: Option<&str>,
+//RS     error: &std::io::Error,
+//RS ) -> Val {
+//RS     let variant = match error.kind() {
+//RS         std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "invalid-input",
+//RS         std::io::ErrorKind::NotFound => "not-found",
+//RS         std::io::ErrorKind::PermissionDenied => "permission-denied",
+//RS         std::io::ErrorKind::TimedOut => "timed-out",
+//RS         std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "closed",
+//RS         _ => "other",
+//RS     };
+//RS     let context = Val::Record(vec![
+//RS         (
+//RS             "operation".to_string(),
+//RS             Val::Enum(operation.to_string()),
+//RS         ),
+//RS         (
+//RS             "resource".to_string(),
+//RS             Val::Option(resource.map(|value| Box::new(Val::String(value.to_string())))),
+//RS         ),
+//RS         (
+//RS             "os-code".to_string(),
+//RS             Val::Option(
+//RS                 error
+//RS                     .raw_os_error()
+//RS                     .map(|value| Box::new(Val::S64(i64::from(value)))),
+//RS             ),
+//RS         ),
+//RS         (
+//RS             "cause".to_string(),
+//RS             Val::Option(Some(Box::new(Val::String(error.to_string())))),
+//RS         ),
+//RS     ]);
+//RS     Val::Variant(variant.to_string(), Some(Box::new(context)))
+//RS }
+//RS 
+//RS fn plugin_require_io_result(
+//RS     import: &HostImportFact,
+//RS     results: &[Val],
+//RS ) -> Result<(), String> {
+//RS     if results.len() != 1 || import.result_type_id.as_deref() != Some("result") {
+//RS         return Err(format!(
+//RS             "plugin host import `{}` must return the declared typed result",
+//RS             import.operation
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_set_io_result_error(
+//RS     import: &HostImportFact,
+//RS     results: &mut [Val],
+//RS     operation: &str,
+//RS     resource: Option<&str>,
+//RS     error: &std::io::Error,
+//RS ) -> Result<(), String> {
+//RS     plugin_require_io_result(import, results)?;
+//RS     results[0] = Val::Result(Err(Some(Box::new(plugin_io_error_value(
+//RS         operation, resource, error,
+//RS     )))));
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_set_io_text_result(
+//RS     import: &HostImportFact,
+//RS     results: &mut [Val],
+//RS     bytes: Vec<u8>,
+//RS     resource: Option<&str>,
+//RS ) -> Result<(), String> {
+//RS     plugin_require_io_result(import, results)?;
+//RS     match String::from_utf8(bytes) {
+//RS         Ok(text) => {
+//RS             results[0] = Val::Result(Ok(Some(Box::new(Val::String(text)))));
+//RS         }
+//RS         Err(error) => {
+//RS             let error = std::io::Error::new(std::io::ErrorKind::InvalidData, error);
+//RS             results[0] = Val::Result(Err(Some(Box::new(plugin_io_error_value(
+//RS                 "read", resource, &error,
+//RS             )))));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_set_io_unit_result(
+//RS     import: &HostImportFact,
+//RS     results: &mut [Val],
+//RS ) -> Result<(), String> {
+//RS     plugin_require_io_result(import, results)?;
+//RS     results[0] = Val::Result(Ok(None));
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_host_read(
+//RS     import: &HostImportFact,
+//RS     params: &[Val],
+//RS     results: &mut [Val],
+//RS     authority: &CanonicalAuthority,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let user_error = |message: String| {
+//RS         PluginBoundaryError::new(PluginFailureKind::UserError, message)
+//RS     };
+//RS     if params.len() != 1 {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` expects one path parameter",
+//RS             import.operation
+//RS         )));
+//RS     }
+//RS     let Some(Val::String(path)) = params.first() else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires a Text path",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     let candidates = plugin_scoped_candidates(path, authority, "FS.Read").map_err(|error| {
+//RS         PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` rejected path `{path}`: {error}",
+//RS                 import.operation
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let mut last_error = None;
+//RS     for (root, relative) in candidates {
+//RS         match jet_foundation::SHA256::read_file_nofollow_at_root(
+//RS             &root,
+//RS             &relative,
+//RS             jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+//RS         ) {
+//RS             Ok(bytes) => {
+//RS                 return plugin_set_io_text_result(import, results, bytes, Some(path))
+//RS                     .map_err(user_error);
+//RS             }
+//RS             Err(error) => {
+//RS                 last_error = Some(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     let Some(error) = last_error else {
+//RS         return Err(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` rejected path `{path}`: no granted FS.Read root matched",
+//RS                 import.operation
+//RS             ),
+//RS         ));
+//RS     };
+//RS     plugin_set_io_result_error(import, results, "read", Some(path), &error).map_err(user_error)
+//RS }
+//RS 
+//RS fn plugin_host_write(
+//RS     import: &HostImportFact,
+//RS     params: &[Val],
+//RS     results: &mut [Val],
+//RS     authority: &CanonicalAuthority,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let user_error = |message: String| {
+//RS         PluginBoundaryError::new(PluginFailureKind::UserError, message)
+//RS     };
+//RS     if params.len() != 2 {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` expects a Text path and Text/list<u8> contents",
+//RS             import.operation
+//RS         )));
+//RS     }
+//RS     let Some(Val::String(path)) = params.first() else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires a Text path",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     let Some(contents) = params.get(1).and_then(plugin_bytes) else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires Text or list<u8> contents",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     plugin_require_io_result(import, results).map_err(user_error)?;
+//RS     let candidates = plugin_scoped_candidates(path, authority, "FS.Write").map_err(|error| {
+//RS         PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` rejected path `{path}`: {error}",
+//RS                 import.operation
+//RS             ),
+//RS         )
+//RS     })?;
+//RS     let mut last_error = None;
+//RS     for (root, relative) in candidates {
+//RS         match jet_foundation::SHA256::write_file_nofollow_at_root(&root, &relative, &contents) {
+//RS             Ok(()) => return plugin_set_io_unit_result(import, results).map_err(user_error),
+//RS             Err(error) => {
+//RS                 last_error = Some(error);
+//RS             }
+//RS         }
+//RS     }
+//RS     let Some(error) = last_error else {
+//RS         return Err(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` rejected path `{path}`: no granted FS.Write root matched",
+//RS                 import.operation
+//RS             ),
+//RS         ));
+//RS     };
+//RS     plugin_set_io_result_error(import, results, "write", Some(path), &error).map_err(user_error)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn plugin_network_target(endpoint: &str) -> Result<(String, String), String> {
+//RS     let endpoint = endpoint.trim();
+//RS     if endpoint.is_empty() {
+//RS         return Err("network endpoint is empty".to_string());
+//RS     }
+//RS     let (scheme, authority) = endpoint
+//RS         .split_once("://")
+//RS         .map(|(scheme, rest)| (scheme.to_ascii_lowercase(), rest))
+//RS         .unwrap_or_else(|| (String::new(), endpoint));
+//RS     let authority = authority
+//RS         .split('/')
+//RS         .next()
+//RS         .unwrap_or_default()
+//RS         .rsplit_once('@')
+//RS         .map(|(_, host)| host)
+//RS         .unwrap_or(authority);
+//RS     let default_port = match scheme.as_str() {
+//RS         "https" | "wss" => 443,
+//RS         _ => 80,
+//RS     };
+//RS     if authority.starts_with('[') {
+//RS         let end = authority
+//RS             .find(']')
+//RS             .ok_or_else(|| "network endpoint has an unterminated IPv6 address".to_string())?;
+//RS         let host = &authority[1..end];
+//RS         let port = match authority.get(end + 1..).unwrap_or_default() {
+//RS             "" => default_port,
+//RS             suffix if suffix.starts_with(':') => suffix[1..]
+//RS                 .parse::<u16>()
+//RS                 .map_err(|_| "network endpoint has an invalid port".to_string())?,
+//RS             _ => return Err("network endpoint has an invalid IPv6 authority".to_string()),
+//RS         };
+//RS         return Ok((host.to_string(), format!("[{host}]:{port}")));
+//RS     }
+//RS     let (host, port) = match authority.rsplit_once(':') {
+//RS         Some((host, port)) if !host.is_empty() && !port.is_empty() => (
+//RS             host,
+//RS             port.parse::<u16>()
+//RS                 .map_err(|_| "network endpoint has an invalid port".to_string())?,
+//RS         ),
+//RS         _ => (authority, default_port),
+//RS     };
+//RS     if host.is_empty() {
+//RS         return Err("network endpoint has no host".to_string());
+//RS     }
+//RS     Ok((host.to_string(), format!("{host}:{port}")))
+//RS }
+//RS 
+//RS fn plugin_host_connect(
+//RS     import: &HostImportFact,
+//RS     params: &[Val],
+//RS     results: &mut [Val],
+//RS     authority: &CanonicalAuthority,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let user_error = |message: String| {
+//RS         PluginBoundaryError::new(PluginFailureKind::UserError, message)
+//RS     };
+//RS     if params.len() != 1 {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` expects one Text endpoint",
+//RS             import.operation
+//RS         )));
+//RS     }
+//RS     let Some(Val::String(endpoint)) = params.first() else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires a Text endpoint",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     let (host, target) = plugin_network_target(endpoint).map_err(user_error)?;
+//RS     let requested = format!("Net.Connect:{host}");
+//RS     if !authority.allows(&requested) {
+//RS         return Err(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` denied endpoint `{endpoint}`: missing `{requested}`",
+//RS                 import.operation
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let addresses = std::net::ToSocketAddrs::to_socket_addrs(&target)
+//RS         .map_err(|error| user_error(format!("couldn't resolve `{endpoint}`: {error}")))?;
+//RS     let mut last_error = None;
+//RS     let mut timed_out = false;
+//RS     for address in addresses {
+//RS         match std::net::TcpStream::connect_timeout(
+//RS             &address,
+//RS             std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS),
+//RS         ) {
+//RS             Ok(stream) => {
+//RS                 drop(stream);
+//RS                 if results.len() != 1 {
+//RS                     return Err(user_error(format!(
+//RS                         "plugin host import `{}` must return one Bool or Text result",
+//RS                         import.operation
+//RS                     )));
+//RS                 }
+//RS                 match import.result_type_id.as_deref() {
+//RS                     Some("Bool") => results[0] = Val::Bool(true),
+//RS                     Some("Text") => results[0] = Val::String("connected".to_string()),
+//RS                     Some(result_type) => {
+//RS                         return Err(user_error(format!(
+//RS                             "plugin host import `{}` has unsupported Net.Connect result `{result_type}`",
+//RS                             import.operation
+//RS                         )));
+//RS                     }
+//RS                     None => {
+//RS                         return Err(user_error(format!(
+//RS                             "plugin host import `{}` must return one Bool or Text result",
+//RS                             import.operation
+//RS                         )));
+//RS                     }
+//RS                 }
+//RS                 return Ok(());
+//RS             }
+//RS             Err(error) => {
+//RS                 timed_out |= error.kind() == std::io::ErrorKind::TimedOut;
+//RS                 last_error = Some(error.to_string());
+//RS             }
+//RS         }
+//RS     }
+//RS     let message = format!(
+//RS         "plugin host import `{}` couldn't connect to `{endpoint}`: {}",
+//RS         import.operation,
+//RS         last_error.unwrap_or_else(|| "no address resolved".to_string())
+//RS     );
+//RS     Err(PluginBoundaryError::new(
+//RS         if timed_out {
+//RS             PluginFailureKind::BudgetExhausted
+//RS         } else {
+//RS             PluginFailureKind::UserError
+//RS         },
+//RS         message,
+//RS     ))
+//RS }
+//RS 
+//RS fn plugin_host_exec(
+//RS     import: &HostImportFact,
+//RS     params: &[Val],
+//RS     results: &mut [Val],
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let user_error = |message: String| {
+//RS         PluginBoundaryError::new(PluginFailureKind::UserError, message)
+//RS     };
+//RS     if params.len() != 2 {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` expects a Text program and list<Text> arguments",
+//RS             import.operation
+//RS         )));
+//RS     }
+//RS     if results.len() != 1 || import.result_type_id.as_deref() != Some("Text") {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` must return one Text result",
+//RS             import.operation
+//RS         )));
+//RS     }
+//RS     let Some(Val::String(program)) = params.first() else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires a Text program",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     let mut command = std::process::Command::new(program);
+//RS     let Some(Val::List(arguments)) = params.get(1) else {
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` requires list<Text> arguments",
+//RS             import.operation
+//RS         )));
+//RS     };
+//RS     let mut owned = Vec::with_capacity(arguments.len());
+//RS     for argument in arguments {
+//RS         let Val::String(argument) = argument else {
+//RS             return Err(user_error(format!(
+//RS                 "plugin host import `{}` requires list<Text> arguments",
+//RS                 import.operation
+//RS             )));
+//RS         };
+//RS         owned.push(argument.clone());
+//RS     }
+//RS     command.args(&owned);
+//RS     let mut child = command
+//RS         .stdout(std::process::Stdio::piped())
+//RS         .stderr(std::process::Stdio::piped())
+//RS         .spawn()
+//RS         .map_err(|error| user_error(format!("couldn't execute `{program}`: {error}")))?;
+//RS     let deadline =
+//RS         std::time::Instant::now() + std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS);
+//RS     loop {
+//RS         match child.try_wait() {
+//RS             Ok(Some(_)) => break,
+//RS             Ok(None) if std::time::Instant::now() >= deadline => {
+//RS                 let _ = child.kill();
+//RS                 let _ = child.wait();
+//RS                 return Err(PluginBoundaryError::new(
+//RS                     PluginFailureKind::BudgetExhausted,
+//RS                     format!("execution of `{program}` exceeded the plugin time limit"),
+//RS                 ));
+//RS             }
+//RS             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(1)),
+//RS             Err(error) => return Err(user_error(format!("couldn't wait for `{program}`: {error}"))),
+//RS         }
+//RS     }
+//RS     let output = child
+//RS         .wait_with_output()
+//RS         .map_err(|error| user_error(format!("couldn't collect `{program}` output: {error}")))?;
+//RS     if !output.status.success() {
+//RS         let stderr = String::from_utf8_lossy(&output.stderr);
+//RS         return Err(user_error(format!(
+//RS             "plugin host import `{}` command `{program}` failed: {}",
+//RS             import.operation,
+//RS             stderr.trim()
+//RS         )));
+//RS     }
+//RS     plugin_set_bytes_result(import, results, output.stdout).map_err(user_error)
+//RS }
+//RS 
+//RS fn plugin_host_import_call(
+//RS     mut store: StoreContextMut<'_, PluginHostState>,
+//RS     import_id: &str,
+//RS     params: &[Val],
+//RS     results: &mut [Val],
+//RS ) -> Result<(), wasmtime::Error> {
+//RS     let Some(import) = store.data().imports.get(import_id).cloned() else {
+//RS         return Err(wasmtime::Error::new(PluginBoundaryError::new(
+//RS             PluginFailureKind::InternalDefect,
+//RS             format!("unregistered plugin host import `{import_id}`"),
+//RS         )));
+//RS     };
+//RS     let authority = store.data().authority.clone();
+//RS     let decision = import.decision(&authority);
+//RS     if !decision.is_allowed() {
+//RS         return Err(wasmtime::Error::new(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{}` denied: missing `{}`",
+//RS                 import.operation,
+//RS                 import.required_grant()
+//RS             ),
+//RS         )));
+//RS     }
+//RS     match import.required_grant() {
+//RS         "FS.Read" => {
+//RS             plugin_host_read(&import, params, results, &authority).map_err(wasmtime::Error::new)
+//RS         }
+//RS         "FS.Write" => {
+//RS             plugin_host_write(&import, params, results, &authority).map_err(wasmtime::Error::new)
+//RS         }
+//RS         "Net.Connect" => {
+//RS             plugin_host_connect(&import, params, results, &authority)
+//RS                 .map_err(wasmtime::Error::new)
+//RS         }
+//RS         "Exec" => plugin_host_exec(&import, params, results).map_err(wasmtime::Error::new),
+//RS         required => Err(wasmtime::Error::new(PluginBoundaryError::new(
+//RS             PluginFailureKind::InternalDefect,
+//RS             format!(
+//RS                 "plugin host import `{}` has no runtime adapter for `{required}`",
+//RS                 import.operation
+//RS             ),
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_register_function(
+//RS     scope: &mut LinkerInstance<'_, PluginHostState>,
+//RS     name: &str,
+//RS     path: &str,
+//RS     function: &ComponentFunc,
+//RS     authority: &CanonicalAuthority,
+//RS     declared_needs: &[String],
+//RS     imports: &mut BTreeMap<String, HostImportFact>,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let fact = plugin_import_fact(path, function)
+//RS         .map_err(|error| PluginBoundaryError::new(PluginFailureKind::UserError, error))?;
+//RS     if !declared_needs
+//RS         .iter()
+//RS         .any(|need| jet_foundation::Authority::covers(need.as_str(), fact.required_grant()))
+//RS     {
+//RS         return Err(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{path}` requires `{}` in authority.needs",
+//RS                 fact.required_grant()
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let decision = fact.decision(authority);
+//RS     if !decision.is_allowed() {
+//RS         return Err(PluginBoundaryError::new(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             format!(
+//RS                 "plugin host import `{path}` denied: missing `{}`",
+//RS                 fact.required_grant()
+//RS             ),
+//RS         ));
+//RS     }
+//RS     let import_id = fact.id.clone();
+//RS     scope
+//RS         .func_new(name, move |store, params, results| {
+//RS             plugin_host_import_call(store, &import_id, params, results)
+//RS         })
+//RS         .map_err(|error| {
+//RS             PluginBoundaryError::new(
+//RS                 PluginFailureKind::InternalDefect,
+//RS                 format!("register plugin host import `{path}`: {error}"),
+//RS             )
+//RS         })?;
+//RS     imports.insert(fact.id.clone(), fact);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_register_instance_imports(
+//RS     scope: &mut LinkerInstance<'_, PluginHostState>,
+//RS     instance: &ComponentInstance,
+//RS     engine: &Engine,
+//RS     authority: &CanonicalAuthority,
+//RS     declared_needs: &[String],
+//RS     imports: &mut BTreeMap<String, HostImportFact>,
+//RS     prefix: &str,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     for (name, item) in instance.exports(engine) {
+//RS         let path = format!("{prefix}::{name}");
+//RS         match &item {
+//RS             ComponentItem::ComponentFunc(function) => {
+//RS                 plugin_register_function(
+//RS                     scope,
+//RS                     name,
+//RS                     &path,
+//RS                     function,
+//RS                     authority,
+//RS                     declared_needs,
+//RS                     imports,
+//RS                 )?;
+//RS             }
+//RS             ComponentItem::ComponentInstance(nested) => {
+//RS                 let mut nested_scope = scope.instance(name).map_err(|error| {
+//RS                     PluginBoundaryError::new(
+//RS                         PluginFailureKind::InternalDefect,
+//RS                         format!("register plugin host instance `{path}`: {error}"),
+//RS                     )
+//RS                 })?;
+//RS                 plugin_register_instance_imports(
+//RS                     &mut nested_scope,
+//RS                     nested,
+//RS                     engine,
+//RS                     authority,
+//RS                     declared_needs,
+//RS                     imports,
+//RS                     &path,
+//RS                 )?;
+//RS             }
+//RS             _ => {
+//RS                 return Err(PluginBoundaryError::new(
+//RS                     PluginFailureKind::UserError,
+//RS                     format!("plugin host import `{path}` is not a component function or instance"),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_register_imports(
+//RS     linker: &mut Linker<PluginHostState>,
+//RS     component: &Component,
+//RS     engine: &Engine,
+//RS     authority: &CanonicalAuthority,
+//RS     declared_needs: &[String],
+//RS     imports: &mut BTreeMap<String, HostImportFact>,
+//RS ) -> Result<(), PluginBoundaryError> {
+//RS     let component_type = component.component_type();
+//RS     let mut root = linker.root();
+//RS     for (name, item) in component_type.imports(engine) {
+//RS         match &item {
+//RS             ComponentItem::ComponentFunc(function) => {
+//RS                 plugin_register_function(
+//RS                     &mut root,
+//RS                     name,
+//RS                     name,
+//RS                     function,
+//RS                     authority,
+//RS                     declared_needs,
+//RS                     imports,
+//RS                 )?;
+//RS             }
+//RS             ComponentItem::ComponentInstance(instance) => {
+//RS                 let mut scope = root.instance(name).map_err(|error| {
+//RS                     PluginBoundaryError::new(
+//RS                         PluginFailureKind::InternalDefect,
+//RS                         format!("register plugin host instance `{name}`: {error}"),
+//RS                     )
+//RS                 })?;
+//RS                 plugin_register_instance_imports(
+//RS                     &mut scope,
+//RS                     instance,
+//RS                     engine,
+//RS                     authority,
+//RS                     declared_needs,
+//RS                     imports,
+//RS                     name,
+//RS                 )?;
+//RS             }
+//RS             _ => {
+//RS                 return Err(PluginBoundaryError::new(
+//RS                     PluginFailureKind::UserError,
+//RS                     format!("plugin host import `{name}` is not a component function or instance"),
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn plugin_read_module(
+//RS     path: &str,
+//RS     authority: &CanonicalAuthority,
+//RS ) -> Result<Vec<u8>, String> {
+//RS     let import = plugin_load_import_fact();
+//RS     if authority.decide_import(&import) != Verdict::Allowed {
+//RS         return Err("plugin load requires an FS.Read authority".to_string());
+//RS     }
+//RS     let candidates = plugin_scoped_candidates(path, authority, "FS.Read")?;
+//RS     let mut last_error = None;
+//RS     for (root, relative) in candidates {
+//RS         match jet_foundation::SHA256::read_file_nofollow_at_root(
+//RS             &root,
+//RS             &relative,
+//RS             jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+//RS         ) {
+//RS             Ok(bytes) => return Ok(bytes),
+//RS             Err(error) => {
+//RS                 last_error = Some(format!(
+//RS                     "couldn't read plugin `{path}` below the granted FS.Read root: {error}"
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Err(last_error.unwrap_or_else(|| {
+//RS         format!("couldn't read plugin `{path}` from the granted FS.Read roots")
+//RS     }))
+//RS }
+//RS 
+//RS /// Load a plugin `.wasm` Component Model module from `path` with the checked
+//RS /// package authority declaration supplied by the caller. The authority wire is
+//RS /// parsed once into the canonical rights carrier and the typed load decision
+//RS /// stored with the resulting handle. Every host import and export call reuses
+//RS /// that decision; an omitted/empty wire is an explicit zero-grant scope, never
+//RS /// an ambient fallback.
+//RS pub fn jet_plugin_load_declared(
+//RS     path: &str,
+//RS     authority_wire: &str,
+//RS     declared_needs: &[String],
+//RS ) -> String {
+//RS     if PLUGIN_CALL_DEPTH.with(|depth| depth.get()) != 0 {
+//RS         return plugin_error(
+//RS             PluginFailureKind::InternalDefect,
+//RS             "plugin load re-entry is not supported during an active call",
+//RS         );
+//RS     }
+//RS     let authority = match plugin_authority_from_wire(authority_wire) {
+//RS         Ok(authority) => authority,
+//RS         Err(error) => return plugin_error(PluginFailureKind::UserError, error),
+//RS     };
+//RS     let authority_decision = plugin_load_import_fact().decision(&authority);
+//RS     if authority_decision.verdict != Verdict::Allowed {
+//RS         return plugin_error(
+//RS             PluginFailureKind::DeniedAuthority,
+//RS             "plugin load requires an FS.Read authority",
+//RS         );
+//RS     }
+//RS     let component_bytes = match plugin_read_module(path, &authority) {
+//RS         Ok(bytes) => bytes,
+//RS         Err(error) => return plugin_error(PluginFailureKind::UserError, error),
+//RS     };
+//RS     let engine = match plugin_engine() {
+//RS         Ok(engine) => engine,
+//RS         Err(error) => return plugin_error(PluginFailureKind::InternalDefect, error),
+//RS     };
+//RS     let component = match Component::new(&engine, &component_bytes) {
+//RS         Ok(c) => c,
+//RS         Err(error) => {
+//RS             return plugin_error(
+//RS                 PluginFailureKind::UserError,
+//RS                 format!("couldn't load plugin `{path}`: {error}"),
+//RS             )
+//RS         }
+//RS     };
+//RS     // Host-import registration is driven by typed component facts and this
+//RS     // one authority decision.  An import with no checked host definition
+//RS     // remains a load error; it is never silently ambient. Every import is
+//RS     // admitted before linker instantiation, so denied imports cannot trigger
+//RS     // an external adapter.
+//RS     let mut linker: Linker<PluginHostState> = Linker::new(&engine);
+//RS     let mut imports = BTreeMap::new();
+//RS     if let Err(error) = plugin_register_imports(
+//RS         &mut linker,
+//RS         &component,
+//RS         &engine,
+//RS         &authority,
+//RS         declared_needs,
+//RS         &mut imports,
+//RS     ) {
+//RS         return plugin_error(
+//RS             error.kind,
+//RS             format!("plugin `{path}` host-import preflight failed: {}", error.message),
+//RS         );
+//RS     }
+//RS     let pre_instance = match linker.instantiate_pre(&component) {
+//RS         Ok(instance) => instance,
+//RS         Err(error) => {
+//RS             return plugin_error(
+//RS                 PluginFailureKind::InternalDefect,
+//RS                 format!(
+//RS                     "plugin `{path}` host-import preflight failed during component linking: {error}"
+//RS                 ),
+//RS             )
+//RS         }
+//RS     };
+//RS     let mut store = Store::new(
+//RS         &engine,
+//RS         PluginHostState {
+//RS             limits: plugin_limits(),
+//RS             authority: authority.clone(),
+//RS             authority_decision: authority_decision.clone(),
+//RS             imports: imports.clone(),
+//RS         },
+//RS     );
+//RS     store.limiter(|state| &mut state.limits);
+//RS     store.set_epoch_deadline(1_000_000_000);
+//RS     store.epoch_deadline_trap();
+//RS     if let Err(error) = store.set_fuel(PLUGIN_MAX_FUEL) {
+//RS         return plugin_error(
+//RS             PluginFailureKind::InternalDefect,
+//RS             format!("plugin fuel setup failed: {error}"),
+//RS         );
+//RS     }
+//RS     let instance = match pre_instance.instantiate(&mut store) {
+//RS         Ok(i) => i,
+//RS         Err(error) => {
+//RS             let kind = if store.data().limits.failure().is_some() {
+//RS                 PluginFailureKind::BudgetExhausted
+//RS             } else {
+//RS                 PluginFailureKind::UserError
+//RS             };
+//RS             return plugin_error(
+//RS                 kind,
+//RS                 format!(
+//RS                     "plugin `{path}` couldn't be instantiated under its authority scope: {error}"
+//RS                 ),
+//RS             );
+//RS         }
+//RS     };
+//RS     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
+//RS     PLUGINS.with(|m| {
+//RS         m.borrow_mut().insert(
+//RS             handle,
+//RS             PluginInstance {
+//RS                 engine,
+//RS                 store,
+//RS                 instance,
+//RS                 authority,
+//RS                 authority_decision,
+//RS                 imports,
+//RS             },
+//RS         )
+//RS     });
+//RS     format!("O:{handle}")
+//RS }
+//RS 
+//RS /// Load using the generated package declaration used by the AOT bridge.
+//RS pub fn jet_plugin_load(path: &str, authority_wire: &str) -> String {
+//RS     let declared_needs = match plugin_declared_authority_needs() {
+//RS         Ok(needs) => needs,
+//RS         Err(error) => return plugin_error(PluginFailureKind::InternalDefect, error),
+//RS     };
+//RS     jet_plugin_load_declared(path, authority_wire, &declared_needs)
+//RS }
+//RS 
+//RS /// Close a loaded plugin. Returns `true` if the handle was valid, `false`
+//RS /// otherwise (already closed, or never opened).
+//RS pub fn jet_plugin_close(handle: u64) -> bool {
+//RS     // Unload is owner-thread and call-boundary scoped.  A nested close would
+//RS     // invalidate the store while Component Model post-return still owns guest
+//RS     // views, so reject it rather than mutating the active map.
+//RS     if PLUGIN_CALL_DEPTH.with(|depth| depth.get()) != 0 {
+//RS         return false;
+//RS     }
+//RS     PLUGINS.with(|m| m.borrow_mut().remove(&handle).is_some())
+//RS }
+//RS 
+//RS /// Call exported function `name` on `handle` with the wire-encoded
+//RS /// `[PluginValue]` argument list `params_wire`. Returns `"O:"` + the
+//RS /// wire-encoded `PluginValue` result, or `"E:<kind>:<message>"` retaining the
+//RS /// Jet operation and exported call boundary. Kinds distinguish user error,
+//RS /// denied authority, budget exhaustion, and internal host defect. Every path
+//RS /// is a `Result`; nothing here can panic the host program (I2).
+//RS pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
+//RS     let _call_guard = match PluginCallGuard::enter() {
+//RS         Ok(guard) => guard,
+//RS         Err(error) => return plugin_error(PluginFailureKind::InternalDefect, error),
+//RS     };
+//RS     PLUGINS.with(|m| {
+//RS         let mut map = m.borrow_mut();
+//RS         let Some(plugin) = map.get_mut(&handle) else {
+//RS             return plugin_error(
+//RS                 PluginFailureKind::UserError,
+//RS                 "no plugin loaded for this handle",
+//RS             );
+//RS         };
+//RS         let call_decision = plugin.authority_decision.import.decision(&plugin.authority);
+//RS         if !call_decision.is_allowed() {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::DeniedAuthority,
+//RS                 "outside the authority granted at load time",
+//RS             );
+//RS         }
+//RS         if params_wire.len() > PLUGIN_MAX_WIRE_BYTES {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::BudgetExhausted,
+//RS                 "argument wire exceeds the 16 MiB resource budget",
+//RS             );
+//RS         }
+//RS         let Some(func) = plugin.instance.get_func(&mut plugin.store, name) else {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::UserError,
+//RS                 "no exported function has this name",
+//RS             );
+//RS         };
+//RS         let want_params = func.params(&plugin.store);
+//RS         let decoded = plugin_decode_params(params_wire);
+//RS         let args = match decoded {
+//RS             Ok(args) => args,
+//RS             Err(PluginParamDecodeError::TooMany { .. }) => {
+//RS                 // Preserve the established arity diagnostic while keeping the
+//RS                 // rejection typed internally; this must never become an empty
+//RS                 // argument list that can satisfy a zero-parameter export.
+//RS                 return plugin_call_error(
+//RS                     name,
+//RS                     PluginFailureKind::UserError,
+//RS                     format!("expects {} argument(s), got 0", want_params.len()),
+//RS                 );
+//RS             }
+//RS             Err(error) => {
+//RS                 return plugin_call_error(
+//RS                     name,
+//RS                     PluginFailureKind::UserError,
+//RS                     format!("arguments rejected: {error}"),
+//RS                 );
+//RS             }
+//RS         };
+//RS         if args.len() != want_params.len() {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::UserError,
+//RS                 format!(
+//RS                     "expects {} argument(s), got {}",
+//RS                     want_params.len(),
+//RS                     args.len()
+//RS                 ),
+//RS             );
+//RS         }
+//RS         let mut call_args = Vec::with_capacity(args.len());
+//RS         for (i, (arg, ty)) in args.iter().zip(want_params.iter()).enumerate() {
+//RS             match plugin_to_val(arg, ty) {
+//RS                 Some(v) => call_args.push(v),
+//RS                 None => {
+//RS                     return plugin_call_error(
+//RS                         name,
+//RS                         PluginFailureKind::UserError,
+//RS                         format!(
+//RS                             "argument {} does not match the declared type ({})",
+//RS                             i + 1,
+//RS                             plugin_type_name(ty)
+//RS                         ),
+//RS                     );
+//RS                 }
+//RS             }
+//RS         }
+//RS         let want_results = func.results(&plugin.store);
+//RS         if want_results.len() != 1 {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::UserError,
+//RS                 format!(
+//RS                     "returns {} values — v1 plugin calls support exactly one return value",
+//RS                     want_results.len()
+//RS                 ),
+//RS             );
+//RS         }
+//RS         let Some(zero) = plugin_zero_val(&want_results[0]) else {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::UserError,
+//RS                 format!(
+//RS                     "returns an unsupported Component Model type ({})",
+//RS                     plugin_type_name(&want_results[0])
+//RS                 ),
+//RS             );
+//RS         };
+//RS         if let Err(error) = plugin.store.set_fuel(PLUGIN_MAX_FUEL) {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::InternalDefect,
+//RS                 format!("fuel setup failed: {error}"),
+//RS             );
+//RS         }
+//RS         plugin.store.data_mut().limits.reset_failure();
+//RS         plugin.store.set_epoch_deadline(1);
+//RS         plugin.store.epoch_deadline_trap();
+//RS         let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS         let cancelled_timer = std::sync::Arc::clone(&cancelled);
+//RS         let timer_engine = plugin.engine.clone();
+//RS         let timer = match std::thread::Builder::new()
+//RS             .name("jet-plugin-deadline".to_string())
+//RS             .spawn(move || {
+//RS                 let deadline = std::time::Instant::now()
+//RS                     + std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS);
+//RS                 while std::time::Instant::now() < deadline {
+//RS                     if cancelled_timer.load(Ordering::Relaxed) {
+//RS                         return;
+//RS                     }
+//RS                     std::thread::sleep(std::time::Duration::from_millis(1));
+//RS                 }
+//RS                 if !cancelled_timer.load(Ordering::Relaxed) {
+//RS                     timer_engine.increment_epoch();
+//RS                 }
+//RS             }) {
+//RS             Ok(timer) => timer,
+//RS             Err(error) => {
+//RS                 plugin.store.set_epoch_deadline(1_000_000_000);
+//RS                 return plugin_call_error(
+//RS                     name,
+//RS                     PluginFailureKind::InternalDefect,
+//RS                     format!("couldn't start call deadline: {error}"),
+//RS                 );
+//RS             }
+//RS         };
+//RS         let mut results = vec![zero];
+//RS         let call_result = func.call(&mut plugin.store, &call_args, &mut results);
+//RS         cancelled.store(true, Ordering::Relaxed);
+//RS         let timer_joined = timer.join().is_ok();
+//RS         plugin.store.set_epoch_deadline(1_000_000_000);
+//RS         if !timer_joined {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::InternalDefect,
+//RS                 "call deadline worker failed",
+//RS             );
+//RS         }
+//RS         if let Err(error) = call_result {
+//RS             let budget_failure = plugin.store.data().limits.failure();
+//RS             return plugin_call_trap_error(name, error, budget_failure);
+//RS         }
+//RS         // Copy the result before `post_return`: strings, lists, and nested
+//RS         // records own guest allocations until the canonical post-return hook
+//RS         // releases them.  Returning a borrowed `Val` past that hook would make
+//RS         // aggregate results a use-after-free at the host boundary.
+//RS         let wire_size = plugin_val_wire_size(&results[0], 0);
+//RS         let copied = wire_size
+//RS             .filter(|size| *size <= PLUGIN_MAX_WIRE_BYTES)
+//RS             .and_then(|_| plugin_from_val(&results[0]));
+//RS         // Component Model contract: `post_return` must run after every call
+//RS         // before the instance can be called again, even when host conversion
+//RS         // rejects the value.
+//RS         if let Err(error) = func.post_return(&mut plugin.store) {
+//RS             return plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::InternalDefect,
+//RS                 format!("post-return failed: {error}"),
+//RS             );
+//RS         }
+//RS         match (wire_size, copied) {
+//RS             (Some(size), Some(value)) if size <= PLUGIN_MAX_WIRE_BYTES => {
+//RS                 let wire = plugin_encode_value(&value);
+//RS                 if wire.len() <= PLUGIN_MAX_WIRE_BYTES {
+//RS                     format!("O:{wire}")
+//RS                 } else {
+//RS                     plugin_call_error(
+//RS                         name,
+//RS                         PluginFailureKind::InternalDefect,
+//RS                         "wire-size accounting disagreed with the encoder",
+//RS                     )
+//RS                 }
+//RS             }
+//RS             (Some(_), _) => plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::BudgetExhausted,
+//RS                 "result wire exceeds the 16 MiB resource budget",
+//RS             ),
+//RS             (None, _) => plugin_call_error(
+//RS                 name,
+//RS                 PluginFailureKind::UserError,
+//RS                 format!(
+//RS                     "returned an unsupported Component Model value ({})",
+//RS                     plugin_type_name(&want_results[0])
+//RS                 ),
+//RS             ),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn plugin_call_trap_error(
+//RS     name: &str,
+//RS     error: wasmtime::Error,
+//RS     budget_failure: Option<PluginBudgetKind>,
+//RS ) -> String {
+//RS     if let Some(failure) = error.downcast_ref::<PluginBoundaryError>() {
+//RS         return plugin_call_error(name, failure.kind, &failure.message);
+//RS     }
+//RS     let trap = error.downcast_ref::<Trap>();
+//RS     let trap_is_budget = trap.is_some_and(|trap| matches!(*trap, Trap::OutOfFuel | Trap::Interrupt));
+//RS     if budget_failure.is_some() || trap_is_budget {
+//RS         let budget = match budget_failure {
+//RS             Some(PluginBudgetKind::Memory) => "memory",
+//RS             Some(PluginBudgetKind::Table) => "table",
+//RS             Some(PluginBudgetKind::Fuel) => "fuel",
+//RS             None => match trap {
+//RS                 Some(Trap::Interrupt) => "call",
+//RS                 Some(Trap::OutOfFuel) => "fuel",
+//RS                 _ => "call",
+//RS             },
+//RS         };
+//RS         return plugin_call_error(
+//RS             name,
+//RS             PluginFailureKind::BudgetExhausted,
+//RS             format!("{budget} budget exhausted"),
+//RS         );
+//RS     }
+//RS     if let Some(trap) = trap {
+//RS         return plugin_call_error(
+//RS             name,
+//RS             PluginFailureKind::UserError,
+//RS             format!("guest trapped: {trap}"),
+//RS         );
+//RS     }
+//RS     plugin_call_error(
+//RS         name,
+//RS         PluginFailureKind::InternalDefect,
+//RS         "host/runtime failed while executing the guest",
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn plugin_type_name(ty: &Type) -> String {
+//RS     match ty {
+//RS         Type::S8 => "s8",
+//RS         Type::U8 => "u8",
+//RS         Type::S16 => "s16",
+//RS         Type::U16 => "u16",
+//RS         Type::S32 => "s32",
+//RS         Type::U32 => "u32",
+//RS         Type::S64 => "Int",
+//RS         Type::U64 => "u64",
+//RS         Type::Float32 => "f32",
+//RS         Type::Float64 => "Float",
+//RS         Type::Bool => "Bool",
+//RS         Type::Char => "char",
+//RS         Type::String => "Text",
+//RS         Type::List(_) => "list",
+//RS         Type::Record(_) => "record",
+//RS         Type::Tuple(_) => "tuple",
+//RS         Type::Variant(_) => "variant",
+//RS         Type::Enum(_) => "enum",
+//RS         Type::Option(_) => "option",
+//RS         Type::Result(_) => "result",
+//RS         Type::Flags(_) => "flags",
+//RS         Type::Own(_) => "own resource",
+//RS         Type::Borrow(_) => "borrowed resource",
+//RS     }
+//RS     .to_string()
+//RS }
+//RS 
+//RS fn plugin_integer(value: i64, ty: &Type) -> Option<Val> {
+//RS     match ty {
+//RS         Type::S8 if i8::try_from(value).is_ok() => Some(Val::S8(value as i8)),
+//RS         Type::U8 if u8::try_from(value).is_ok() => Some(Val::U8(value as u8)),
+//RS         Type::S16 if i16::try_from(value).is_ok() => Some(Val::S16(value as i16)),
+//RS         Type::U16 if u16::try_from(value).is_ok() => Some(Val::U16(value as u16)),
+//RS         Type::S32 if i32::try_from(value).is_ok() => Some(Val::S32(value as i32)),
+//RS         Type::U32 if u32::try_from(value).is_ok() => Some(Val::U32(value as u32)),
+//RS         Type::S64 => Some(Val::S64(value)),
+//RS         Type::U64 if value >= 0 => Some(Val::U64(value as u64)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_to_val(value: &PluginValue, ty: &Type) -> Option<Val> {
+//RS     match (value, ty) {
+//RS         (PluginValue::Int(value), ty) => plugin_integer(*value, ty),
+//RS         (PluginValue::Float(value), Type::Float32) => {
+//RS             let value = *value as f32;
+//RS             value.is_finite().then_some(Val::Float32(value))
+//RS         }
+//RS         (PluginValue::Float(value), Type::Float64) => Some(Val::Float64(*value)),
+//RS         (PluginValue::Bool(value), Type::Bool) => Some(Val::Bool(*value)),
+//RS         (PluginValue::Text(value), Type::String) => Some(Val::String(value.clone())),
+//RS         (PluginValue::Text(value), Type::Char) => {
+//RS             let mut chars = value.chars();
+//RS             let ch = chars.next()?;
+//RS             chars.next().is_none().then_some(Val::Char(ch))
+//RS         }
+//RS         (PluginValue::List(values), Type::List(list)) => values
+//RS             .iter()
+//RS             .map(|value| plugin_to_val(value, &list.ty()))
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(Val::List),
+//RS         (PluginValue::Record(values), Type::Record(record)) => {
+//RS             let fields = record.fields().collect::<Vec<_>>();
+//RS             (values.len() == fields.len()).then_some(())?;
+//RS             let mut out = Vec::with_capacity(values.len());
+//RS             for ((name, value), field) in values.iter().zip(fields) {
+//RS                 if name != field.name {
+//RS                     return None;
+//RS                 }
+//RS                 out.push((name.clone(), plugin_to_val(value, &field.ty)?));
+//RS             }
+//RS             Some(Val::Record(out))
+//RS         }
+//RS         (PluginValue::Tuple(values), Type::Tuple(tuple)) => {
+//RS             let types = tuple.types().collect::<Vec<_>>();
+//RS             (values.len() == types.len()).then_some(())?;
+//RS             values
+//RS                 .iter()
+//RS                 .zip(types.iter())
+//RS                 .map(|(value, ty)| plugin_to_val(value, ty))
+//RS                 .collect::<Option<Vec<_>>>()
+//RS                 .map(Val::Tuple)
+//RS         }
+//RS         (PluginValue::Option(value), Type::Option(option)) => Some(Val::Option(match value.as_ref() {
+//RS             Some(value) => Some(Box::new(plugin_to_val(value, &option.ty())?)),
+//RS             None => None,
+//RS         })),
+//RS         (PluginValue::ResultOk(value), Type::Result(result)) => {
+//RS             let value = match (value.as_ref(), result.ok()) {
+//RS                 (None, None) => None,
+//RS                 (Some(value), Some(ty)) => Some(Box::new(plugin_to_val(value, &ty)?)),
+//RS                 _ => return None,
+//RS             };
+//RS             Some(Val::Result(Ok(value)))
+//RS         }
+//RS         (PluginValue::ResultErr(value), Type::Result(result)) => {
+//RS             let value = match (value.as_ref(), result.err()) {
+//RS                 (None, None) => None,
+//RS                 (Some(value), Some(ty)) => Some(Box::new(plugin_to_val(value, &ty)?)),
+//RS                 _ => return None,
+//RS             };
+//RS             Some(Val::Result(Err(value)))
+//RS         }
+//RS         (PluginValue::Variant(name, value), Type::Variant(variant)) => {
+//RS             let case = variant.cases().find(|case| case.name == name)?;
+//RS             let value = match (value.as_ref(), case.ty.as_ref()) {
+//RS                 (None, None) => None,
+//RS                 (Some(value), Some(ty)) => Some(Box::new(plugin_to_val(value, ty)?)),
+//RS                 _ => return None,
+//RS             };
+//RS             Some(Val::Variant(name.clone(), value))
+//RS         }
+//RS         (PluginValue::Enum(name), Type::Enum(enum_type))
+//RS             if enum_type.names().any(|candidate| candidate == name) =>
+//RS         {
+//RS             Some(Val::Enum(name.clone()))
+//RS         }
+//RS         (PluginValue::Flags(names), Type::Flags(flags))
+//RS             if names
+//RS                 .iter()
+//RS                 .all(|name| flags.names().any(|candidate| candidate == name)) =>
+//RS         {
+//RS             Some(Val::Flags(names.clone()))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_zero_val(ty: &Type) -> Option<Val> {
+//RS     match ty {
+//RS         Type::S8 => Some(Val::S8(0)),
+//RS         Type::U8 => Some(Val::U8(0)),
+//RS         Type::S16 => Some(Val::S16(0)),
+//RS         Type::U16 => Some(Val::U16(0)),
+//RS         Type::S32 => Some(Val::S32(0)),
+//RS         Type::U32 => Some(Val::U32(0)),
+//RS         Type::S64 => Some(Val::S64(0)),
+//RS         Type::U64 => Some(Val::U64(0)),
+//RS         Type::Float32 => Some(Val::Float32(0.0)),
+//RS         Type::Float64 => Some(Val::Float64(0.0)),
+//RS         Type::Bool => Some(Val::Bool(false)),
+//RS         Type::Char => Some(Val::Char('\0')),
+//RS         Type::String => Some(Val::String(String::new())),
+//RS         Type::List(_) => Some(Val::List(Vec::new())),
+//RS         Type::Record(record) => record
+//RS             .fields()
+//RS             .map(|field| Some((field.name.to_string(), plugin_zero_val(&field.ty)?)))
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(Val::Record),
+//RS         Type::Tuple(tuple) => tuple
+//RS             .types()
+//RS             .map(|ty| plugin_zero_val(&ty))
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(Val::Tuple),
+//RS         Type::Variant(variant) => {
+//RS             let case = variant.cases().next()?;
+//RS             let value = match case.ty.as_ref() {
+//RS                 Some(ty) => Some(Box::new(plugin_zero_val(ty)?)),
+//RS                 None => None,
+//RS             };
+//RS             Some(Val::Variant(case.name.to_string(), value))
+//RS         }
+//RS         Type::Enum(enum_type) => enum_type.names().next().map(|name| Val::Enum(name.to_string())),
+//RS         Type::Option(_) => Some(Val::Option(None)),
+//RS         Type::Result(result) => Some(Val::Result(Ok(match result.ok() {
+//RS             Some(ty) => Some(Box::new(plugin_zero_val(&ty)?)),
+//RS             None => None,
+//RS         }))),
+//RS         Type::Flags(_) => Some(Val::Flags(Vec::new())),
+//RS         Type::Own(_) | Type::Borrow(_) => None,
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn plugin_decimal_digits(mut value: usize) -> usize {
+//RS     let mut digits = 1;
+//RS     while value >= 10 {
+//RS         value /= 10;
+//RS         digits += 1;
+//RS     }
+//RS     digits
+//RS }
+//RS 
+//RS fn plugin_wire_add(left: usize, right: usize) -> Option<usize> {
+//RS     left.checked_add(right)
+//RS }
+//RS 
+//RS fn plugin_wire_tagged(payload_len: usize) -> Option<usize> {
+//RS     plugin_wire_add(2 + plugin_decimal_digits(payload_len), payload_len)
+//RS }
+//RS 
+//RS fn plugin_val_wire_size(value: &Val, depth: usize) -> Option<usize> {
+//RS     if depth > PLUGIN_MAX_VALUE_DEPTH {
+//RS         return None;
+//RS     }
+//RS     match value {
+//RS         Val::S8(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::U8(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::S16(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::U16(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::S32(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::U32(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::S64(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::U64(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::Float32(value) => plugin_wire_tagged((*value as f64).to_string().len()),
+//RS         Val::Float64(value) => plugin_wire_tagged(value.to_string().len()),
+//RS         Val::Bool(value) => plugin_wire_tagged(if *value { 4 } else { 5 }),
+//RS         Val::Char(value) => plugin_wire_tagged(value.len_utf8()),
+//RS         Val::String(value) => plugin_wire_tagged(value.len()),
+//RS         Val::List(values) | Val::Tuple(values) => {
+//RS             let mut size = 2 + plugin_decimal_digits(values.len());
+//RS             for value in values {
+//RS                 size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)?;
+//RS             }
+//RS             Some(size)
+//RS         }
+//RS         Val::Record(values) => {
+//RS             let mut size = 2 + plugin_decimal_digits(values.len());
+//RS             for (name, value) in values {
+//RS                 size = plugin_wire_add(size, plugin_wire_tagged(name.len())?)?;
+//RS                 size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)?;
+//RS             }
+//RS             Some(size)
+//RS         }
+//RS         Val::Variant(name, value) => {
+//RS             let mut size = plugin_wire_tagged(name.len())?;
+//RS             size = plugin_wire_add(size, 1)?;
+//RS             if let Some(value) = value {
+//RS                 size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)?;
+//RS             }
+//RS             Some(size)
+//RS         }
+//RS         Val::Enum(name) => plugin_wire_tagged(name.len()),
+//RS         Val::Option(value) => match value.as_ref() {
+//RS             Some(value) => plugin_wire_add(1, plugin_val_wire_size(value, depth + 1)?),
+//RS             None => Some(1),
+//RS         },
+//RS         Val::Result(Ok(value)) | Val::Result(Err(value)) => {
+//RS             let mut size = 2;
+//RS             if let Some(value) = value {
+//RS                 size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)?;
+//RS             }
+//RS             Some(size)
+//RS         }
+//RS         Val::Flags(names) => {
+//RS             let mut size = 2 + plugin_decimal_digits(names.len());
+//RS             for name in names {
+//RS                 size = plugin_wire_add(size, plugin_wire_tagged(name.len())?)?;
+//RS             }
+//RS             Some(size)
+//RS         }
+//RS         Val::Resource(_) => None,
+//RS     }
+//RS }
+//RS 
+//RS fn plugin_from_val(value: &Val) -> Option<PluginValue> {
+//RS     match value {
+//RS         Val::S8(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::U8(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::S16(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::U16(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::S32(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::U32(value) => Some(PluginValue::Int(*value as i64)),
+//RS         Val::S64(value) => Some(PluginValue::Int(*value)),
+//RS         Val::U64(value) => Some(PluginValue::Int(i64::try_from(*value).ok()?)),
+//RS         Val::Float32(value) => Some(PluginValue::Float(*value as f64)),
+//RS         Val::Float64(value) => Some(PluginValue::Float(*value)),
+//RS         Val::Bool(value) => Some(PluginValue::Bool(*value)),
+//RS         Val::Char(value) => Some(PluginValue::Text(value.to_string())),
+//RS         Val::String(value) => Some(PluginValue::Text(value.clone())),
+//RS         Val::List(values) => Some(PluginValue::List(
+//RS             values.iter().map(plugin_from_val).collect::<Option<Vec<_>>>()?,
+//RS         )),
+//RS         Val::Record(values) => Some(PluginValue::Record(
+//RS             values
+//RS                 .iter()
+//RS                 .map(|(name, value)| Some((name.clone(), plugin_from_val(value)?)))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         )),
+//RS         Val::Tuple(values) => Some(PluginValue::Tuple(
+//RS             values.iter().map(plugin_from_val).collect::<Option<Vec<_>>>()?,
+//RS         )),
+//RS         Val::Variant(name, value) => Some(PluginValue::Variant(
+//RS             name.clone(),
+//RS             match value.as_ref() {
+//RS                 Some(value) => Some(Box::new(plugin_from_val(value)?)),
+//RS                 None => None,
+//RS             },
+//RS         )),
+//RS         Val::Enum(name) => Some(PluginValue::Enum(name.clone())),
+//RS         Val::Option(value) => Some(PluginValue::Option(match value.as_ref() {
+//RS             Some(value) => Some(Box::new(plugin_from_val(value)?)),
+//RS             None => None,
+//RS         })),
+//RS         Val::Result(Ok(value)) => Some(PluginValue::ResultOk(match value.as_ref() {
+//RS             Some(value) => Some(Box::new(plugin_from_val(value)?)),
+//RS             None => None,
+//RS         })),
+//RS         Val::Result(Err(value)) => Some(PluginValue::ResultErr(match value.as_ref() {
+//RS             Some(value) => Some(Box::new(plugin_from_val(value)?)),
+//RS             None => None,
+//RS         })),
+//RS         Val::Flags(names) => Some(PluginValue::Flags(names.clone())),
+//RS         Val::Resource(_) => None,
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0640 crates/jet-pkg-model/src/Prelude/Plugin.rs:1-1817
+

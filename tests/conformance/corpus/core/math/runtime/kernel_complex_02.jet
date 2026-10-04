@@ -1,0 +1,37 @@
+use jet_foundation.Traits.[TraitRegistry, PRINTABLE, COMPARABLE]
+use jet_foundation.AST.Type
+use core.prelude.runtime.kernel_range_bounds.[jet_debug_field_metadata, jet_debug_map, jet_debug_record, jet_debug_record_fields, jet_debug_variant, jet_task_control_trace, JetDebugField]
+
+// Rust: crates/jet-foundation/src/Traits.rs:3901
+#Test("sized_scalars_only_satisfy_builtin_traits") {
+    traits :: TraitRegistry.default()
+    loop ty in [Type.IntN{signed: false, bits: 8}, Type.Float32] {
+        assert(traits.type_implements_trait(ty, PRINTABLE))
+        assert(!traits.type_implements_trait(ty, "UserTrait"))
+    }
+    assert(traits.type_implements_trait(Type.Float32, COMPARABLE))
+    assert(traits.implements_trait("Float", COMPARABLE))
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:248
+#Test("map_debug_shape_is_symmetric") {
+    assert(jet_debug_map([("x", "1"), ("y", "2")]) == "[x: 1, y: 2]")
+    assert(jet_debug_map([]) == "[:]")
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:260
+#Test("io_context_debug_fields_use_canonical_order") {
+    fields :: jet_debug_field_metadata("IOContext").unwrap()
+    assert(fields.iter().map(|(name, _)| name).collect::<[String]>() == ["operation", "resource", "os_code", "cause"])
+    assert(jet_debug_record("IOContext", [("cause", "None"), ("os_code", "None"), ("resource", "Val"), ("operation", "Read")])
+        == "IOContext { operation: Read, resource: Val, os_code: None, cause: None }")
+    assert(jet_debug_record_fields("Point", [JetDebugField{name: "secret", value: "42", storage_index: 0, redacted: true}])
+        == "Point { secret: [redacted] }")
+    assert(jet_debug_variant("Ready", None) == "Ready")
+}
+
+// Rust: crates/jet-foundation/src/StructuralDebug.rs:297
+#Test("task_control_trace_is_stable") {
+    assert(jet_task_control_trace(true, false) == "paused=true,cancel=false")
+    assert(jet_task_control_trace(false, true) == "paused=false,cancel=true")
+}

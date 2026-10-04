@@ -1,0 +1,2230 @@
+// PORT-PENDING 1075 tests-http-server-lifecycle-slice-5328: tests/http_server_lifecycle.rs:5328-7553
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_capacity() {
+//RS     use std::io::Write;
+//RS 
+//RS     const CHILD: &str = "JET_HTTP2_BLOCKING_BODY_TEST_CHILD";
+//RS     if std::env::var_os(CHILD).is_none() {
+//RS         let status = std::process::Command::new(std::env::current_exe().unwrap())
+//RS             .args([
+//RS                 "--exact",
+//RS                 "http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_capacity",
+//RS                 "--nocapture",
+//RS             ])
+//RS             .env(CHILD, "1")
+//RS             .env("JET_SCHEDULER_THREADS", "1")
+//RS             .status()
+//RS             .expect("spawn isolated HTTP/2 blocking-body test");
+//RS         assert!(
+//RS             status.success(),
+//RS             "isolated HTTP/2 blocking-body test failed"
+//RS         );
+//RS         return;
+//RS     }
+//RS 
+//RS     struct BlockingBody {
+//RS         started: Option<std::sync::mpsc::Sender<()>>,
+//RS         wake: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+//RS         dropped: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+//RS     }
+//RS 
+//RS     impl std::io::Read for BlockingBody {
+//RS         fn read(&mut self, _output: &mut [u8]) -> std::io::Result<usize> {
+//RS             if let Some(started) = self.started.take() {
+//RS                 let _ = started.send(());
+//RS             }
+//RS             let (cancelled, wake) = &*self.wake;
+//RS             let mut cancelled = cancelled.lock().unwrap();
+//RS             while !*cancelled {
+//RS                 cancelled = wake.wait(cancelled).unwrap();
+//RS             }
+//RS             Err(std::io::ErrorKind::Interrupted.into())
+//RS         }
+//RS     }
+//RS 
+//RS     impl Drop for BlockingBody {
+//RS         fn drop(&mut self) {
+//RS             self.dropped
+//RS                 .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+//RS         }
+//RS     }
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_mux_add(&mux, "POST", "/slow-body", |request| {
+//RS         let body = request.body.bytes(64).unwrap();
+//RS         jet_http_srv_response(200, &body.len().to_string())
+//RS     });
+//RS     jet_http_mux_add(&mux, "GET", "/fast", |_| {
+//RS         jet_http_srv_response(200, &"fast".to_string())
+//RS     });
+//RS     jet_http_mux_add(&mux, "GET", "/large", |_| {
+//RS         let mut response = jet_http_srv_empty_response(200);
+//RS         response.body = JetHTTPBody::from_bytes(vec![7; 100_000]);
+//RS         response
+//RS     });
+//RS     jet_http_mux_add(&mux, "POST", "/ignore", |_| {
+//RS         jet_http_srv_response(200, &"ignored".to_string())
+//RS     });
+//RS     let (response_started_tx, response_started_rx) = std::sync::mpsc::channel();
+//RS     let response_wake =
+//RS         std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+//RS     let response_dropped = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let response_closed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS     let handler_wake = response_wake.clone();
+//RS     let handler_dropped = response_dropped.clone();
+//RS     let handler_closed = response_closed.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/slow-response", move |_| {
+//RS         let mut response = jet_http_srv_empty_response(200);
+//RS         let source_wake = handler_wake.clone();
+//RS         let close_wake = handler_wake.clone();
+//RS         let close_count = handler_closed.clone();
+//RS         response.body = JetHTTPBody::reader_cancellable(
+//RS             BlockingBody {
+//RS                 started: Some(response_started_tx.clone()),
+//RS                 wake: source_wake,
+//RS                 dropped: handler_dropped.clone(),
+//RS             },
+//RS             Some(4),
+//RS             move || {
+//RS                 close_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+//RS                 let (cancelled, wake) = &*close_wake;
+//RS                 *cancelled.lock().unwrap() = true;
+//RS                 wake.notify_all();
+//RS             },
+//RS         );
+//RS         response
+//RS     });
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS     let (mut server_stream, _) = listener.accept().unwrap();
+//RS     let options = JetHTTPServerOptions {
+//RS         workers: 1,
+//RS         admission_queue: 1,
+//RS         read_idle_timeout: std::time::Duration::from_secs(2),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server_stream,
+//RS             &mux,
+//RS             &options,
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(
+//RS             1,
+//RS             0x4,
+//RS             1,
+//RS             &h2_request_headers(0x83, "/slow-body"),
+//RS         ))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(0, 0, 1, b"part")).unwrap();
+//RS     client.flush().unwrap();
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     while jet_scheduler_blocking_wait_stats().0 == 0 {
+//RS         assert!(
+//RS             std::time::Instant::now() < deadline,
+//RS             "request Body did not enter a scheduler-aware blocking wait"
+//RS         );
+//RS         std::thread::yield_now();
+//RS     }
+//RS     assert_eq!(
+//RS         JET_OBSERVE_WORKERS.load(std::sync::atomic::Ordering::Relaxed),
+//RS         1
+//RS     );
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/fast")))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(6, 0, 0, b"12345678")).unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let mut fast = false;
+//RS     let mut ping = false;
+//RS     while !fast || !ping {
+//RS         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+//RS         fast |= kind == 0 && stream == 3 && payload == b"fast";
+//RS         ping |= kind == 6 && flags & 1 != 0 && payload == b"12345678";
+//RS     }
+//RS     assert!(
+//RS         jet_scheduler_blocking_wait_stats().2 >= 1,
+//RS         "one blocked worker did not receive bounded compensation"
+//RS     );
+//RS     client.write_all(&h2_frame(0, 0x1, 1, b"done")).unwrap();
+//RS     client.flush().unwrap();
+//RS     while {
+//RS         let (kind, _, stream, payload) = h2_read_frame(&mut client);
+//RS         !(kind == 0 && stream == 1 && payload == b"8")
+//RS     } {}
+//RS 
+//RS     let blocked_response_id = 5;
+//RS     client
+//RS         .write_all(&h2_frame(
+//RS             1,
+//RS             0x5,
+//RS             blocked_response_id,
+//RS             &h2_request_headers(0x82, "/slow-response"),
+//RS         ))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     response_started_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("response Body producer did not start");
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 7, &h2_request_headers(0x82, "/fast")))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(6, 0, 0, b"bodyping")).unwrap();
+//RS     client.flush().unwrap();
+//RS     let mut fast = false;
+//RS     let mut ping = false;
+//RS     while !fast || !ping {
+//RS         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+//RS         fast |= kind == 0 && stream == 7 && payload == b"fast";
+//RS         ping |= kind == 6 && flags & 1 != 0 && payload == b"bodyping";
+//RS         assert!(
+//RS             !(kind == 0 && stream == blocked_response_id),
+//RS             "blocked response produced DATA before release"
+//RS         );
+//RS     }
+//RS     client
+//RS         .write_all(&h2_frame(3, 0, blocked_response_id, &8u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     loop {
+//RS         let (waits, threads, _) = jet_scheduler_blocking_wait_stats();
+//RS         if response_closed.load(std::sync::atomic::Ordering::Acquire) == 1
+//RS             && response_dropped.load(std::sync::atomic::Ordering::Acquire) == 1
+//RS             && waits == 0
+//RS             && threads == 0
+//RS         {
+//RS             break;
+//RS         }
+//RS         assert!(
+//RS             std::time::Instant::now() < deadline,
+//RS             "RST did not close and drop blocked response source: close={} drop={} scheduler={:?}",
+//RS             response_closed.load(std::sync::atomic::Ordering::Acquire),
+//RS             response_dropped.load(std::sync::atomic::Ordering::Acquire),
+//RS             jet_scheduler_blocking_wait_stats()
+//RS         );
+//RS         std::thread::yield_now();
+//RS     }
+//RS 
+//RS     // With a configured two-stream cap, more than two sequential successes prove
+//RS     // every per-stream map releases completed entries rather than accumulating.
+//RS     for stream_id in (9..29).step_by(2) {
+//RS         client
+//RS             .write_all(&h2_frame(
+//RS                 1,
+//RS                 0x5,
+//RS                 stream_id,
+//RS                 &h2_request_headers(0x82, "/fast"),
+//RS             ))
+//RS             .unwrap();
+//RS         client.flush().unwrap();
+//RS         loop {
+//RS             let (kind, _, stream, payload) = h2_read_frame(&mut client);
+//RS             assert!(
+//RS                 !(kind == 0 && stream == blocked_response_id),
+//RS                 "cancelled response producer emitted late DATA"
+//RS             );
+//RS             if kind == 0 && stream == stream_id && payload == b"fast" {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let large_id = 29;
+//RS     client
+//RS         .write_all(&h2_frame(4, 0, 0, &[0, 4, 0, 0, 0, 1]))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(
+//RS             1,
+//RS             0x5,
+//RS             large_id,
+//RS             &h2_request_headers(0x82, "/large"),
+//RS         ))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     loop {
+//RS         let (kind, _, stream, payload) = h2_read_frame(&mut client);
+//RS         if kind == 0 && stream == large_id && !payload.is_empty() {
+//RS             break;
+//RS         }
+//RS     }
+//RS     client
+//RS         .write_all(&h2_frame(3, 0, large_id, &8u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(8, 0, 0, &100_000u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(8, 0, large_id, &100_000u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(6, 0, 0, b"reset-ok")).unwrap();
+//RS     client.flush().unwrap();
+//RS     loop {
+//RS         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+//RS         assert!(
+//RS             !(kind == 0 && stream == large_id),
+//RS             "RST stream emitted late DATA"
+//RS         );
+//RS         if kind == 6 && flags & 1 != 0 && payload == b"reset-ok" {
+//RS             break;
+//RS         }
+//RS     }
+//RS 
+//RS     let ignored_id = 31;
+//RS     client
+//RS         .write_all(&h2_frame(4, 0, 0, &[0, 4, 0, 0, 0xff, 0xff]))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(
+//RS             1,
+//RS             0x4,
+//RS             ignored_id,
+//RS             &h2_request_headers(0x83, "/ignore"),
+//RS         ))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(0, 0, ignored_id, b"body"))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     loop {
+//RS         let (kind, _, stream, payload) = h2_read_frame(&mut client);
+//RS         assert!(
+//RS             !(kind == 8 && stream == ignored_id),
+//RS             "receive credit was returned before application consumption"
+//RS         );
+//RS         if kind == 0 && stream == ignored_id && payload == b"ignored" {
+//RS             break;
+//RS         }
+//RS     }
+//RS     client
+//RS         .write_all(&h2_frame(3, 0, ignored_id, &8u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+//RS     client.flush().unwrap();
+//RS     assert!(server.join().unwrap().is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_uses_configured_header_body_and_size_limits() {
+//RS     use std::io::Write;
+//RS 
+//RS     fn serve_once(
+//RS         options: JetHTTPServerOptions,
+//RS         write_client: impl FnOnce(&mut std::net::TcpStream),
+//RS     ) -> Result<(), String> {
+//RS         let mux = jet_http_mux_new();
+//RS         jet_http_mux_add(&mux, "POST", "/echo", |request| {
+//RS             let size = request.body.bytes(64).map(|body| body.len()).unwrap_or(0);
+//RS             jet_http_srv_response(200, &size.to_string())
+//RS         });
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let addr = listener.local_addr().unwrap();
+//RS         let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS         let (mut server, _) = listener.accept().unwrap();
+//RS         let worker = std::thread::spawn(move || {
+//RS             jet_http2_serve(
+//RS                 &mut server,
+//RS                 &mux,
+//RS                 &options,
+//RS                 &std::sync::atomic::AtomicBool::new(false),
+//RS                 None,
+//RS                 None,
+//RS             )
+//RS         });
+//RS         client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS         client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS         write_client(&mut client);
+//RS         client.flush().unwrap();
+//RS         worker.join().unwrap()
+//RS     }
+//RS 
+//RS     let short = JetHTTPServerOptions {
+//RS         read_header_timeout: std::time::Duration::from_millis(25),
+//RS         read_idle_timeout: std::time::Duration::from_secs(1),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let header_error = serve_once(short, |client| {
+//RS         client
+//RS             .write_all(&h2_frame(1, 0, 1, &h2_request_headers(0x83, "/echo")))
+//RS             .unwrap();
+//RS         std::thread::sleep(std::time::Duration::from_millis(60));
+//RS     })
+//RS     .unwrap_err();
+//RS     assert!(
+//RS         header_error.contains("timed out") || header_error.contains("ended early"),
+//RS         "{header_error}"
+//RS     );
+//RS 
+//RS     let bounded = JetHTTPServerOptions {
+//RS         max_body_bytes: 4,
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let body_error = serve_once(bounded, |client| {
+//RS         client
+//RS             .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/echo")))
+//RS             .unwrap();
+//RS         client.write_all(&h2_frame(0, 0x1, 1, b"12345")).unwrap();
+//RS         let _ = client.shutdown(std::net::Shutdown::Write);
+//RS     })
+//RS     .unwrap_err();
+//RS     assert_eq!(body_error, "HTTP/2 request body is too large");
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_mux_add(&mux, "POST", "/echo", |request| {
+//RS         let size = request.body.bytes(64).map(|body| body.len()).unwrap_or(0);
+//RS         jet_http_srv_response(200, &size.to_string())
+//RS     });
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS     let (mut server_stream, _) = listener.accept().unwrap();
+//RS     let options = JetHTTPServerOptions {
+//RS         read_body_timeout: std::time::Duration::from_millis(25),
+//RS         read_idle_timeout: std::time::Duration::from_secs(1),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let worker = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server_stream,
+//RS             &mux,
+//RS             &options,
+//RS             &std::sync::atomic::AtomicBool::new(false),
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/echo")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     let mut pinger = client.try_clone().unwrap();
+//RS     let pings = std::thread::spawn(move || {
+//RS         for sequence in 0u64..20 {
+//RS             if pinger
+//RS                 .write_all(&h2_frame(6, 0, 0, &sequence.to_be_bytes()))
+//RS                 .is_err()
+//RS             {
+//RS                 break;
+//RS             }
+//RS             let _ = pinger.flush();
+//RS             std::thread::sleep(std::time::Duration::from_millis(5));
+//RS         }
+//RS     });
+//RS     let deadline_started = std::time::Instant::now();
+//RS     loop {
+//RS         let (kind, _, stream, payload) = h2_read_frame(&mut client);
+//RS         if kind == 3 && stream == 1 {
+//RS             assert_eq!(payload, 8u32.to_be_bytes());
+//RS             break;
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         deadline_started.elapsed() < std::time::Duration::from_millis(250),
+//RS         "frequent PING traffic extended the incomplete-body deadline"
+//RS     );
+//RS     pings.join().unwrap();
+//RS     client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+//RS     client.flush().unwrap();
+//RS     assert!(worker.join().unwrap().is_ok());
+//RS }
+//RS 
+//RS #[test]
+//RS fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
+//RS     use std::io::{Read, Write};
+//RS 
+//RS     fn frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+//RS         let len = payload.len();
+//RS         let mut out = vec![(len >> 16) as u8, (len >> 8) as u8, len as u8, kind, flags];
+//RS         out.extend_from_slice(&(stream & 0x7fff_ffff).to_be_bytes());
+//RS         out.extend_from_slice(payload);
+//RS         out
+//RS     }
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_mux_add(&mux, "GET", "/", |_| {
+//RS         jet_http_srv_response(200, &"h2-ok".to_string())
+//RS     });
+//RS     jet_http_mux_add(&mux, "GET", "/large", |_| {
+//RS         let mut response = jet_http_srv_response(200, &String::new());
+//RS         response.body = JetHTTPBody::from_bytes(vec![7; 70_000]);
+//RS         response
+//RS     });
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+//RS     let stop = shutdown.clone();
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http_server_run_listener(
+//RS             listener,
+//RS             mux,
+//RS             JetHTTPServerOptions::safe(),
+//RS             stop,
+//RS             None,
+//RS             None,
+//RS             None,
+//RS         )
+//RS         .unwrap()
+//RS     });
+//RS 
+//RS     let mut stream = std::net::TcpStream::connect(addr).unwrap();
+//RS     stream
+//RS         .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+//RS         .unwrap();
+//RS     stream
+//RS         .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+//RS         .unwrap();
+//RS     stream.write_all(&frame(4, 0, 0, &[])).unwrap();
+//RS     // RFC 7541 C.4.1: GET http://www.example.com/ with a Huffman authority.
+//RS     stream
+//RS         .write_all(&frame(
+//RS             1,
+//RS             0x5,
+//RS             1,
+//RS             &[
+//RS                 0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab,
+//RS                 0x90, 0xf4, 0xff,
+//RS             ],
+//RS         ))
+//RS         .unwrap();
+//RS     stream.flush().unwrap();
+//RS     let mut wire = Vec::new();
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS     while !wire.windows(5).any(|part| part == b"h2-ok") && std::time::Instant::now() < deadline {
+//RS         let mut chunk = [0; 4096];
+//RS         match stream.read(&mut chunk) {
+//RS             Ok(0) => break,
+//RS             Ok(read) => wire.extend_from_slice(&chunk[..read]),
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+//RS                 ) =>
+//RS             {
+//RS                 break
+//RS             }
+//RS             Err(error) => panic!("HTTP/2 response read failed: {error}"),
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         wire.windows(5).any(|part| part == b"h2-ok"),
+//RS         "HTTP/2 DATA missing: {wire:02x?}"
+//RS     );
+//RS     assert!(
+//RS         wire.windows(9).any(|header| header[3] == 4),
+//RS         "server SETTINGS missing"
+//RS     );
+//RS     assert!(
+//RS         wire.windows(9)
+//RS             .any(|header| header[3] == 1 && header[8] == 1),
+//RS         "stream-1 HEADERS missing"
+//RS     );
+//RS 
+//RS     let large_headers = [
+//RS         0x82, 0x86, 0x04, 0x06, b'/', b'l', b'a', b'r', b'g', b'e', 0x41, 0x05, b'l', b'o', b'c',
+//RS         b'a', b'l',
+//RS     ];
+//RS     stream.write_all(&frame(1, 0x5, 3, &large_headers)).unwrap();
+//RS     stream.flush().unwrap();
+//RS     let mut received = 0usize;
+//RS     while received < 65_000 {
+//RS         let mut header = [0u8; 9];
+//RS         stream.read_exact(&mut header).unwrap();
+//RS         let length =
+//RS             (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS         let mut payload = vec![0; length];
+//RS         stream.read_exact(&mut payload).unwrap();
+//RS         if header[3] == 0 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 3 {
+//RS             assert!(payload.iter().all(|byte| *byte == 7));
+//RS             received += payload.len();
+//RS         }
+//RS     }
+//RS     assert!(received < 70_000, "server ignored HTTP/2 flow control");
+//RS     stream
+//RS         .write_all(&frame(8, 0, 0, &70_000u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     stream
+//RS         .write_all(&frame(8, 0, 3, &70_000u32.to_be_bytes()))
+//RS         .unwrap();
+//RS     stream.flush().unwrap();
+//RS     let mut ended = false;
+//RS     while !ended {
+//RS         let mut header = [0u8; 9];
+//RS         stream.read_exact(&mut header).unwrap();
+//RS         let length =
+//RS             (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS         let mut payload = vec![0; length];
+//RS         stream.read_exact(&mut payload).unwrap();
+//RS         if header[3] == 0 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 3 {
+//RS             received += payload.len();
+//RS             ended = header[4] & 0x1 != 0;
+//RS         }
+//RS     }
+//RS     assert_eq!(received, 70_000);
+//RS     // Dynamic index 62 reuses stream 3's incrementally indexed :authority.
+//RS     stream
+//RS         .write_all(&frame(1, 0x5, 5, &[0x82, 0x86, 0x84, 0xbe]))
+//RS         .unwrap();
+//RS     stream.flush().unwrap();
+//RS     let mut reused = Vec::new();
+//RS     while !reused.windows(5).any(|part| part == b"h2-ok") {
+//RS         let mut header = [0u8; 9];
+//RS         stream.read_exact(&mut header).unwrap();
+//RS         let length =
+//RS             (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS         let mut payload = vec![0; length];
+//RS         stream.read_exact(&mut payload).unwrap();
+//RS         reused.extend(payload);
+//RS     }
+//RS 
+//RS     shutdown.store(true, std::sync::atomic::Ordering::Release);
+//RS     drop(stream);
+//RS     let report = server.join().unwrap();
+//RS     assert_eq!(report.user_accepted, 1);
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let (mut client, mut server) = {
+//RS         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS         let addr = listener.local_addr().unwrap();
+//RS         let client = std::net::TcpStream::connect(addr).unwrap();
+//RS         let (server, _) = listener.accept().unwrap();
+//RS         (client, server)
+//RS     };
+//RS     client
+//RS         .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&frame(0, 0, 0, b"illegal stream-zero data"))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     server
+//RS         .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+//RS         .unwrap();
+//RS     assert!(jet_http2_serve(
+//RS         &mut server,
+//RS         &mux,
+//RS         &JetHTTPServerOptions::safe(),
+//RS         &std::sync::atomic::AtomicBool::new(false),
+//RS         None,
+//RS         None,
+//RS     )
+//RS     .is_err());
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_shutdown_sends_goaway_with_last_stream_and_drains_active() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/slow",
+//RS         std::sync::Arc::new(move |request| {
+//RS             entered_tx.send(()).expect("entered");
+//RS             assert_eq!(request.body.text(64)?, "");
+//RS             assert_eq!(
+//RS                 jet_http_srv_req_trailers(&request)?.first("x-drain"),
+//RS                 Some("done")
+//RS             );
+//RS             Ok(jet_http_srv_response(200, &"drained".to_string()))
+//RS         }),
+//RS     );
+//RS     jet_http_mux_add(&mux, "GET", "/late", |_| {
+//RS         jet_http_srv_response(200, &"too late".to_string())
+//RS     });
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let _addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(_addr).unwrap();
+//RS     let (mut server_stream, _) = listener.accept().unwrap();
+//RS     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let options = JetHTTPServerOptions {
+//RS         workers: 1,
+//RS         admission_queue: 1,
+//RS         shutdown_grace: std::time::Duration::from_secs(2),
+//RS         read_idle_timeout: std::time::Duration::from_secs(2),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server_stream,
+//RS             &mux,
+//RS             &options,
+//RS             &server_shutdown,
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS 
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/slow")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let read_frame = |stream: &mut std::net::TcpStream| -> Option<(u8, u8, u32, Vec<u8>)> {
+//RS         let mut header = [0u8; 9];
+//RS         match stream.read_exact(&mut header) {
+//RS             Ok(()) => {}
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+//RS                 ) =>
+//RS             {
+//RS                 return None;
+//RS             }
+//RS             Err(error) => panic!("frame header: {error}"),
+//RS         }
+//RS         let length =
+//RS             (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS         let mut payload = vec![0; length];
+//RS         stream.read_exact(&mut payload).expect("frame payload");
+//RS         Some((
+//RS             header[3],
+//RS             header[4],
+//RS             u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
+//RS             payload,
+//RS         ))
+//RS     };
+//RS 
+//RS     let mut saw_server_settings = false;
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     while !saw_server_settings {
+//RS         assert!(std::time::Instant::now() < deadline, "missing SETTINGS");
+//RS         let Some((kind, flags, stream, _payload)) = read_frame(&mut client) else {
+//RS             continue;
+//RS         };
+//RS         if kind == 4 && stream == 0 {
+//RS             saw_server_settings = true;
+//RS             if flags & 0x1 == 0 {
+//RS                 client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+//RS             }
+//RS         }
+//RS     }
+//RS     entered_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("handler entered");
+//RS     shutdown.store(true, Ordering::Release);
+//RS 
+//RS     let mut goaway_last = None;
+//RS     let mut saw_body = false;
+//RS     let mut refused_late = false;
+//RS     let mut trailing_sent = false;
+//RS     let mut late_headers_sent = false;
+//RS     let mut late_data_sent = false;
+//RS     let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS     while std::time::Instant::now() < drain_deadline
+//RS         && (goaway_last.is_none() || !saw_body || !refused_late)
+//RS     {
+//RS         if goaway_last.is_some() && !trailing_sent {
+//RS             client
+//RS                 .write_all(&h2_frame(
+//RS                     1,
+//RS                     0x5,
+//RS                     1,
+//RS                     &h2_literal_named_header("x-drain", "done"),
+//RS                 ))
+//RS                 .unwrap();
+//RS             client.flush().unwrap();
+//RS             trailing_sent = true;
+//RS         }
+//RS         if goaway_last.is_some() && !late_headers_sent {
+//RS             // Refuse path: HEADERS after GOAWAY must RST immediately (flushed).
+//RS             client
+//RS                 .write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/late")))
+//RS                 .unwrap();
+//RS             client.flush().unwrap();
+//RS             late_headers_sent = true;
+//RS         }
+//RS         if refused_late && !late_data_sent {
+//RS             // P0: DATA on a higher/unknown stream must be discarded, not kill drain.
+//RS             client.write_all(&h2_frame(0, 0x1, 5, b"late")).unwrap();
+//RS             client.flush().unwrap();
+//RS             late_data_sent = true;
+//RS         }
+//RS         let Some((kind, _flags, stream, payload)) = read_frame(&mut client) else {
+//RS             continue;
+//RS         };
+//RS         match kind {
+//RS             7 => {
+//RS                 assert_eq!(stream, 0);
+//RS                 assert!(payload.len() >= 8, "GOAWAY payload too short");
+//RS                 let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+//RS                 let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+//RS                 assert_eq!(error, 0, "GOAWAY should be NO_ERROR");
+//RS                 goaway_last = Some(last);
+//RS             }
+//RS             0 if stream == 1 => {
+//RS                 if payload.windows(7).any(|part| part == b"drained") {
+//RS                     saw_body = true;
+//RS                 }
+//RS             }
+//RS             3 if stream == 3 => {
+//RS                 assert_eq!(payload.len(), 4);
+//RS                 assert_eq!(u32::from_be_bytes(payload[..4].try_into().unwrap()), 7);
+//RS                 assert!(
+//RS                     !saw_body,
+//RS                     "RST refuse must flush before the active handler finishes"
+//RS                 );
+//RS                 refused_late = true;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     assert_eq!(
+//RS         goaway_last,
+//RS         Some(1),
+//RS         "GOAWAY must advertise the accepted last stream"
+//RS     );
+//RS     assert!(saw_body, "active request must drain after GOAWAY");
+//RS     assert!(refused_late, "streams after GOAWAY must be refused");
+//RS     assert!(
+//RS         trailing_sent,
+//RS         "accepted stream trailers must be exercised after GOAWAY"
+//RS     );
+//RS     assert!(late_data_sent, "late DATA after GOAWAY must be exercised");
+//RS     server
+//RS         .join()
+//RS         .expect("server join")
+//RS         .expect("http2 serve must survive discarded late DATA");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_goaway_discards_orphan_continuation_without_aborting_drain() {
+//RS     use std::io::{Read, Write};
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+//RS     let release = std::sync::Arc::new(AtomicBool::new(false));
+//RS     let handler_release = release.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/slow", move |_| {
+//RS         entered_tx.send(()).expect("entered");
+//RS         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS         while !handler_release.load(Ordering::Acquire) {
+//RS             assert!(std::time::Instant::now() < deadline, "release timed out");
+//RS             std::thread::sleep(std::time::Duration::from_millis(5));
+//RS         }
+//RS         jet_http_srv_response(200, &"drained".to_string())
+//RS     });
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let _addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(_addr).unwrap();
+//RS     let (mut server_stream, _) = listener.accept().unwrap();
+//RS     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let options = JetHTTPServerOptions {
+//RS         workers: 1,
+//RS         admission_queue: 1,
+//RS         shutdown_grace: std::time::Duration::from_secs(2),
+//RS         read_idle_timeout: std::time::Duration::from_secs(2),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server_stream,
+//RS             &mux,
+//RS             &options,
+//RS             &server_shutdown,
+//RS             None,
+//RS             None,
+//RS         )
+//RS     });
+//RS 
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let read_frame = |stream: &mut std::net::TcpStream| -> Option<(u8, u8, u32, Vec<u8>)> {
+//RS         let mut header = [0u8; 9];
+//RS         match stream.read_exact(&mut header) {
+//RS             Ok(()) => {}
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+//RS                 ) =>
+//RS             {
+//RS                 return None;
+//RS             }
+//RS             Err(error) => panic!("frame header: {error}"),
+//RS         }
+//RS         let length =
+//RS             (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS         let mut payload = vec![0; length];
+//RS         stream.read_exact(&mut payload).expect("frame payload");
+//RS         Some((
+//RS             header[3],
+//RS             header[4],
+//RS             u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
+//RS             payload,
+//RS         ))
+//RS     };
+//RS 
+//RS     let mut saw_server_settings = false;
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     while !saw_server_settings {
+//RS         assert!(std::time::Instant::now() < deadline, "missing SETTINGS");
+//RS         let Some((kind, flags, stream, _payload)) = read_frame(&mut client) else {
+//RS             continue;
+//RS         };
+//RS         if kind == 4 && stream == 0 {
+//RS             saw_server_settings = true;
+//RS             if flags & 0x1 == 0 {
+//RS                 client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+//RS             }
+//RS         }
+//RS     }
+//RS     entered_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("handler entered");
+//RS     shutdown.store(true, Ordering::Release);
+//RS 
+//RS     let mut goaway_last = None;
+//RS     let mut saw_body = false;
+//RS     let mut refused_partial = false;
+//RS     let mut partial_headers_sent = false;
+//RS     let mut continuation_sent = false;
+//RS     let mut released = false;
+//RS     let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+//RS     while std::time::Instant::now() < drain_deadline
+//RS         && (goaway_last.is_none() || !saw_body || !continuation_sent)
+//RS     {
+//RS         if goaway_last.is_some() && !partial_headers_sent {
+//RS             // HEADERS without END_HEADERS after GOAWAY → RST, then orphan CONTINUATION
+//RS             // must be discarded without aborting the active drain.
+//RS             client
+//RS                 .write_all(&h2_frame(1, 0x0, 3, &h2_request_headers(0x82, "/late")))
+//RS                 .unwrap();
+//RS             client.flush().unwrap();
+//RS             partial_headers_sent = true;
+//RS         }
+//RS         if refused_partial && !continuation_sent {
+//RS             client.write_all(&h2_frame(9, 0x4, 3, &[])).unwrap();
+//RS             client.flush().unwrap();
+//RS             continuation_sent = true;
+//RS         }
+//RS         if continuation_sent && !released {
+//RS             release.store(true, Ordering::Release);
+//RS             released = true;
+//RS         }
+//RS         let Some((kind, _flags, stream, payload)) = read_frame(&mut client) else {
+//RS             continue;
+//RS         };
+//RS         match kind {
+//RS             7 => {
+//RS                 assert_eq!(stream, 0);
+//RS                 assert!(payload.len() >= 8, "GOAWAY payload too short");
+//RS                 let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+//RS                 let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+//RS                 assert_eq!(error, 0, "GOAWAY should be NO_ERROR");
+//RS                 goaway_last = Some(last);
+//RS             }
+//RS             0 if stream == 1 => {
+//RS                 if payload.windows(7).any(|part| part == b"drained") {
+//RS                     saw_body = true;
+//RS                 }
+//RS             }
+//RS             3 if stream == 3 => {
+//RS                 assert_eq!(payload.len(), 4);
+//RS                 assert_eq!(u32::from_be_bytes(payload[..4].try_into().unwrap()), 7);
+//RS                 refused_partial = true;
+//RS             }
+//RS             _ => {}
+//RS         }
+//RS     }
+//RS     assert_eq!(
+//RS         goaway_last,
+//RS         Some(1),
+//RS         "GOAWAY must advertise the accepted last stream"
+//RS     );
+//RS     assert!(
+//RS         refused_partial,
+//RS         "partial HEADERS after GOAWAY must be refused"
+//RS     );
+//RS     assert!(
+//RS         continuation_sent,
+//RS         "orphan CONTINUATION after GOAWAY must be exercised"
+//RS     );
+//RS     assert!(
+//RS         saw_body,
+//RS         "active request must drain after orphan CONTINUATION"
+//RS     );
+//RS     release.store(true, Ordering::Release);
+//RS     server
+//RS         .join()
+//RS         .expect("server join")
+//RS         .expect("http2 serve must survive post-GOAWAY orphan CONTINUATION");
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_serve_honors_dynamic_grace_over_options_shutdown_grace() {
+//RS     use std::io::Write;
+//RS     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+//RS     let hold = std::sync::Arc::new(AtomicBool::new(true));
+//RS     let handler_hold = hold.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/slow", move |_| {
+//RS         let _ = entered_tx.send(());
+//RS         while handler_hold.load(Ordering::Acquire) {
+//RS             std::thread::sleep(std::time::Duration::from_millis(5));
+//RS         }
+//RS         jet_http_srv_response(200, &"late".to_string())
+//RS     });
+//RS 
+//RS     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+//RS     let addr = listener.local_addr().unwrap();
+//RS     let mut client = std::net::TcpStream::connect(addr).unwrap();
+//RS     let (mut server_stream, _) = listener.accept().unwrap();
+//RS     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+//RS     let server_shutdown = shutdown.clone();
+//RS     let grace_ms = std::sync::Arc::new(AtomicU64::new(45));
+//RS     let server_grace = grace_ms.clone();
+//RS     let options = JetHTTPServerOptions {
+//RS         workers: 1,
+//RS         admission_queue: 1,
+//RS         // If H2 ignored dynamic_grace_ms, drain would wait the full five seconds.
+//RS         shutdown_grace: std::time::Duration::from_secs(5),
+//RS         read_idle_timeout: std::time::Duration::from_secs(2),
+//RS         ..JetHTTPServerOptions::safe()
+//RS     };
+//RS     let server = std::thread::spawn(move || {
+//RS         jet_http2_serve(
+//RS             &mut server_stream,
+//RS             &mux,
+//RS             &options,
+//RS             &server_shutdown,
+//RS             Some(server_grace.as_ref()),
+//RS             None,
+//RS         )
+//RS     });
+//RS 
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_millis(40)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     loop {
+//RS         assert!(std::time::Instant::now() < deadline, "missing SETTINGS");
+//RS         let (kind, flags, stream, _) = match h2_try_read_frame(&mut client) {
+//RS             Some(frame) => frame,
+//RS             None => continue,
+//RS         };
+//RS         if kind == 4 && stream == 0 {
+//RS             if flags & 0x1 == 0 {
+//RS                 client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+//RS             }
+//RS             break;
+//RS         }
+//RS     }
+//RS     entered_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("handler entered");
+//RS     let started = std::time::Instant::now();
+//RS     shutdown.store(true, Ordering::Release);
+//RS     server.join().expect("join").expect("serve ok");
+//RS     let elapsed = started.elapsed();
+//RS     assert!(
+//RS         elapsed < std::time::Duration::from_millis(800),
+//RS         "dynamic grace ignored; waited options.shutdown_grace: {elapsed:?}"
+//RS     );
+//RS     hold.store(false, Ordering::Release);
+//RS }
+//RS 
+//RS #[test]
+//RS fn http2_server_api_shutdown_grace_reaches_h2_drain() {
+//RS     use std::io::Write;
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     // Server.serve uses JetHTTPServerOptions::safe() with shutdown_grace=30s.
+//RS     // Server.shutdown(grace) must publish that grace into jet_http2_serve via
+//RS     // dynamic_grace_ms. If H2 ignored it and waited options.shutdown_grace, the
+//RS     // listener would force-close the socket at the short grace and mark cancelled.
+//RS     // A green report with cancelled==0 while the handler is still held proves the
+//RS     // H2 path honored Server.shutdown(grace) without the TCP kill path.
+//RS     let mux = jet_http_mux_new();
+//RS     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+//RS     let hold = std::sync::Arc::new(AtomicBool::new(true));
+//RS     let handler_hold = hold.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/slow", move |_| {
+//RS         let _ = entered_tx.send(());
+//RS         while handler_hold.load(Ordering::Acquire) {
+//RS             std::thread::sleep(std::time::Duration::from_millis(5));
+//RS         }
+//RS         jet_http_srv_response(200, &"late".to_string())
+//RS     });
+//RS 
+//RS     let server =
+//RS         jet_http_server_bind(&"127.0.0.1:0".to_string(), mux, None, None).expect("bind");
+//RS     let addr = jet_http_server_local_addr(&server).expect("local addr");
+//RS     let serving = server.clone();
+//RS     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+//RS 
+//RS     let mut client = std::net::TcpStream::connect(&addr).expect("connect");
+//RS     client
+//RS         .set_read_timeout(Some(std::time::Duration::from_millis(40)))
+//RS         .unwrap();
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow")))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS 
+//RS     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+//RS     loop {
+//RS         assert!(
+//RS             std::time::Instant::now() < deadline,
+//RS             "missing SETTINGS before shutdown"
+//RS         );
+//RS         let Some((kind, flags, stream, _)) = h2_try_read_frame(&mut client) else {
+//RS             continue;
+//RS         };
+//RS         if kind == 4 && stream == 0 && flags & 0x1 == 0 {
+//RS             client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+//RS             break;
+//RS         }
+//RS     }
+//RS     entered_rx
+//RS         .recv_timeout(std::time::Duration::from_secs(1))
+//RS         .expect("handler entered");
+//RS 
+//RS     let started = std::time::Instant::now();
+//RS     let report =
+//RS         jet_http_server_shutdown(&server, &jet_std::Duration { ms: 250 }).expect("shutdown");
+//RS     let elapsed = started.elapsed();
+//RS 
+//RS     assert!(
+//RS         hold.load(Ordering::Acquire),
+//RS         "handler must still be held — completion must come from H2 grace cancel, not a finished response"
+//RS     );
+//RS     assert_eq!(
+//RS         report.user_cancelled, 0,
+//RS         "listener force-closed the socket; H2 did not honor Server.shutdown grace: {report:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         report.user_completed, report.user_accepted,
+//RS         "H2 drain must complete within Server.shutdown grace without TCP kill: {report:?}"
+//RS     );
+//RS     assert!(report.user_accepted >= 1, "{report:?}");
+//RS     assert!(
+//RS         elapsed < std::time::Duration::from_millis(1500),
+//RS         "Server.shutdown(grace) did not bound H2 drain: {elapsed:?}"
+//RS     );
+//RS     assert!(
+//RS         elapsed > std::time::Duration::from_millis(50),
+//RS         "shutdown returned too fast to prove grace drain: {elapsed:?}"
+//RS     );
+//RS 
+//RS     let mut saw_goaway = false;
+//RS     let observe = std::time::Instant::now() + std::time::Duration::from_millis(400);
+//RS     while !saw_goaway && std::time::Instant::now() < observe {
+//RS         if let Some((kind, _, stream, payload)) = h2_try_read_frame(&mut client) {
+//RS             if kind == 7 && stream == 0 && payload.len() >= 8 {
+//RS                 let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+//RS                 let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+//RS                 assert_eq!(last, 1, "Server API GOAWAY must carry last-stream");
+//RS                 assert_eq!(error, 0, "Server API GOAWAY must be NO_ERROR");
+//RS                 saw_goaway = true;
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(saw_goaway, "Server.shutdown must drive H2 GOAWAY");
+//RS     hold.store(false, Ordering::Release);
+//RS     let _ = serve.join().expect("serve join");
+//RS }
+//RS 
+//RS fn h2_try_read_frame(stream: &mut std::net::TcpStream) -> Option<(u8, u8, u32, Vec<u8>)> {
+//RS     use std::io::Read;
+//RS     let mut header = [0u8; 9];
+//RS     match stream.read_exact(&mut header) {
+//RS         Ok(()) => {}
+//RS         Err(error)
+//RS             if matches!(
+//RS                 error.kind(),
+//RS                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+//RS             ) =>
+//RS         {
+//RS             return None;
+//RS         }
+//RS         Err(error) => panic!("frame header: {error}"),
+//RS     }
+//RS     let length =
+//RS         (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+//RS     let mut payload = vec![0; length];
+//RS     stream.read_exact(&mut payload).expect("frame payload");
+//RS     Some((
+//RS         header[3],
+//RS         header[4],
+//RS         u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
+//RS         payload,
+//RS     ))
+//RS }
+//RS 
+//RS #[test]
+//RS fn tls_chunk_framing_scan_is_incremental_and_bounded() {
+//RS     let valid = b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n1 ; name=value\r\nx\r\n0\r\nX-Checksum: done\r\n\r\n";
+//RS     let (status, end, inspected) = http_server_tls_runtime::framing_probe(valid);
+//RS     assert_eq!((status, end), (1, valid.len()));
+//RS     assert!(
+//RS         inspected <= valid.len() * 4,
+//RS         "valid scan was not linear: {inspected}"
+//RS     );
+//RS     let repeated_length = b"POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1, 1\r\n\r\nx";
+//RS     assert_eq!(
+//RS         http_server_tls_runtime::framing_probe(repeated_length).0,
+//RS         1,
+//RS         "valid repeated Content-Length was rejected",
+//RS     );
+//RS 
+//RS     let mut hostile =
+//RS         b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+//RS     hostile.extend(std::iter::repeat_n(b'f', 32 * 1024 + 1));
+//RS     let (status, consumed, inspected) = http_server_tls_runtime::framing_probe(&hostile);
+//RS     assert_eq!(status, 2, "unbounded chunk-size line was not rejected");
+//RS     assert!(consumed <= hostile.len());
+//RS     assert!(
+//RS         inspected <= consumed * 4,
+//RS         "hostile scan was not linear: {inspected}/{consumed}"
+//RS     );
+//RS }
+//RS 
+//RS #[test]
+//RS fn tls_oversized_content_length_chunk_and_framing_return_413() {
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "POST", "/", move |_| {
+//RS         handler_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"unexpected".to_string())
+//RS     });
+//RS     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+//RS     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+//RS     let server = jet_http_server_bind_tls(
+//RS         &"127.0.0.1:0".to_string(),
+//RS         mux,
+//RS         JetHTTPServerTls {
+//RS             cert_pem: cert,
+//RS             key_pem: key,
+//RS         },
+//RS         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+//RS         |cert, key, stream, on_request, on_h2, should_stop| {
+//RS             http_server_tls_runtime::jet_http_server_tls_session_impl(
+//RS                 cert,
+//RS                 key,
+//RS                 stream,
+//RS                 on_request,
+//RS                 on_h2,
+//RS                 should_stop,
+//RS             )
+//RS         },
+//RS     )
+//RS     .expect("bind rustls tls");
+//RS     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+//RS         .expect("addr")
+//RS         .parse()
+//RS         .expect("parse");
+//RS     let serving = server.clone();
+//RS     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+//RS 
+//RS     let mut requests = vec![
+//RS         b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1048577\r\n\r\n".to_vec(),
+//RS         b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n"
+//RS             .to_vec(),
+//RS     ];
+//RS     let mut long_line =
+//RS         b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+//RS     long_line.extend(std::iter::repeat_n(b'f', 32 * 1024 + 1));
+//RS     requests.push(long_line);
+//RS     for request in requests {
+//RS         let started = std::time::Instant::now();
+//RS         let mut client = rustls_fixture_client(addr);
+//RS         let response = rustls_exchange(&mut client, &request);
+//RS         assert!(
+//RS             response.starts_with("HTTP/1.1 413 Payload Too Large"),
+//RS             "{response}"
+//RS         );
+//RS         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+//RS     }
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         0,
+//RS         "oversized TLS body reached handler"
+//RS     );
+//RS     let _ = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
+//RS     let _ = serve.join().expect("serve join");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tls_rustls_keep_alive_and_server_shutdown() {
+//RS     use std::io::Write;
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     // Real rustls path: Server.bind(tls) → keep-alive reuse → Server.shutdown stops
+//RS     // a third request. Plaintext JetHTTPTlsConn stubs are not enough.
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_srv_install_request_id(&mux);
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let handler_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/", move |_| {
+//RS         let n = handler_calls.fetch_add(1, Ordering::AcqRel) + 1;
+//RS         jet_http_srv_response(200, &format!("ok{n}"))
+//RS     });
+//RS     let encoded_calls = calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/encoded",
+//RS         std::sync::Arc::new(move |req| {
+//RS             assert_eq!(req.headers.first("content-encoding"), None);
+//RS             assert_eq!(req.headers.first("content-length"), None);
+//RS             let body = req.body.text(1024)?;
+//RS             encoded_calls.fetch_add(1, Ordering::AcqRel);
+//RS             Ok(jet_http_srv_response(200, &body))
+//RS         }),
+//RS     );
+//RS     let trailer_calls = calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/trailers",
+//RS         std::sync::Arc::new(move |req| {
+//RS             assert!(matches!(
+//RS                 jet_http_srv_req_trailers(&req),
+//RS                 Err(JetHTTPError::InvalidFraming)
+//RS             ));
+//RS             let body = req.body.text(1024)?;
+//RS             let trailers = jet_http_srv_req_trailers(&req)?;
+//RS             assert_eq!(trailers.first("x-checksum"), Some("tls-in"));
+//RS             trailer_calls.fetch_add(1, Ordering::AcqRel);
+//RS             let mut response = jet_http_srv_response(200, &String::new());
+//RS             response.body = JetHTTPBody::reader(std::io::Cursor::new(body), None);
+//RS             let mut trailers = JetHTTPHeaders::new();
+//RS             trailers.append("X-Checksum", "tls-out").unwrap();
+//RS             jet_http_srv_response_trailers(response, trailers)
+//RS         }),
+//RS     );
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "GET",
+//RS         "/error",
+//RS         std::sync::Arc::new(|_| {
+//RS             Err(JetHTTPError::Internal {
+//RS                 incident_id: "private-tls-handler-error".to_string(),
+//RS             })
+//RS         }),
+//RS     );
+//RS     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+//RS     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+//RS     let tls = JetHTTPServerTls {
+//RS         cert_pem: cert,
+//RS         key_pem: key,
+//RS     };
+//RS     let server = jet_http_server_bind_tls(
+//RS         &"127.0.0.1:0".to_string(),
+//RS         mux,
+//RS         tls,
+//RS         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+//RS         |cert, key, stream, on_request, on_h2, should_stop| {
+//RS             http_server_tls_runtime::jet_http_server_tls_session_impl(
+//RS                 cert,
+//RS                 key,
+//RS                 stream,
+//RS                 on_request,
+//RS                 on_h2,
+//RS                 should_stop,
+//RS             )
+//RS         },
+//RS     )
+//RS     .expect("bind rustls tls");
+//RS     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+//RS         .expect("addr")
+//RS         .parse()
+//RS         .expect("parse");
+//RS     let serving = server.clone();
+//RS     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+//RS 
+//RS     let mut client = rustls_fixture_client(addr);
+//RS     let first = rustls_exchange(&mut client, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+//RS     let second = rustls_exchange(
+//RS         &mut client,
+//RS         b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: tls-client-id\r\n\r\n",
+//RS     );
+//RS     let mut encoded_request = format!(
+//RS         "POST /encoded HTTP/1.1\r\nHost: localhost\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+//RS         HELLO_GZIP.len(),
+//RS     )
+//RS     .into_bytes();
+//RS     encoded_request.extend_from_slice(HELLO_GZIP);
+//RS     let encoded = rustls_exchange(&mut client, &encoded_request);
+//RS     let trailers = rustls_exchange(
+//RS         &mut client,
+//RS         b"POST /trailers HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n3\r\ntls\r\n0\r\nX-Checksum: tls-in\r\n\r\n",
+//RS     );
+//RS     let failed = rustls_exchange(
+//RS         &mut client,
+//RS         b"GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n",
+//RS     );
+//RS     assert!(first.contains("\r\n\r\nok1"), "{first}");
+//RS     assert!(second.contains("\r\n\r\nok2"), "{second}");
+//RS     assert!(
+//RS         second
+//RS             .to_ascii_lowercase()
+//RS             .contains("x-request-id: tls-client-id\r\n"),
+//RS         "{second}",
+//RS     );
+//RS     assert!(encoded.contains("\r\n\r\nhello gzip"), "{encoded}");
+//RS     assert!(trailers.contains("Trailer: X-Checksum\r\n"), "{trailers}");
+//RS     assert!(
+//RS         trailers.ends_with("3\r\ntls\r\n0\r\nX-Checksum: tls-out\r\n\r\n"),
+//RS         "{trailers}"
+//RS     );
+//RS     assert!(
+//RS         failed.starts_with("HTTP/1.1 500 Internal Server Error"),
+//RS         "{failed}"
+//RS     );
+//RS     assert!(
+//RS         failed
+//RS             .lines()
+//RS             .any(|line| line.to_ascii_lowercase().starts_with("x-request-id: req-")),
+//RS         "uncorrelated TLS failure: {failed}",
+//RS     );
+//RS     assert!(
+//RS         !failed.contains("private"),
+//RS         "private TLS failure leaked: {failed}"
+//RS     );
+//RS     assert_eq!(calls.load(Ordering::Acquire), 4);
+//RS 
+//RS     let started = std::time::Instant::now();
+//RS     let report =
+//RS         jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
+//RS     let _ = client.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+//RS     let _ = client.flush();
+//RS     std::thread::sleep(std::time::Duration::from_millis(40));
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         4,
+//RS         "Server.shutdown must stop rustls keep-alive reuse without client Connection: close"
+//RS     );
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_millis(1500),
+//RS         "{report:?}"
+//RS     );
+//RS     // One accepted TLS connection; shutdown cancels it rather than completing idle drain.
+//RS     assert_eq!(report.user_accepted, 1, "{report:?}");
+//RS     assert_eq!(
+//RS         report.user_completed + report.user_cancelled,
+//RS         report.user_accepted,
+//RS         "{report:?}"
+//RS     );
+//RS     let _ = serve.join().expect("serve join");
+//RS }
+//RS 
+//RS #[test]
+//RS fn tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown() {
+//RS     use std::io::Write;
+//RS     use std::sync::atomic::{AtomicUsize, Ordering};
+//RS 
+//RS     let mux = jet_http_mux_new();
+//RS     let calls = std::sync::Arc::new(AtomicUsize::new(0));
+//RS     let trailer_calls = calls.clone();
+//RS     jet_http_mux_add_handler(
+//RS         &mux,
+//RS         "POST",
+//RS         "/trailers",
+//RS         std::sync::Arc::new(move |request| {
+//RS             assert!(matches!(
+//RS                 jet_http_srv_req_trailers(&request),
+//RS                 Err(JetHTTPError::InvalidFraming),
+//RS             ));
+//RS             let body = request.body.text(64)?;
+//RS             let incoming = jet_http_srv_req_trailers(&request)?;
+//RS             assert_eq!(incoming.all("x-trace"), vec!["one", "two"]);
+//RS             trailer_calls.fetch_add(1, Ordering::AcqRel);
+//RS 
+//RS             let mut trailers = JetHTTPHeaders::new();
+//RS             trailers.append("X-Trace", "first").unwrap();
+//RS             trailers.append("x-trace", "second").unwrap();
+//RS             jet_http_srv_response_trailers(
+//RS                 jet_http_srv_response(200, &format!("tls-h2:{body}")),
+//RS                 trailers,
+//RS             )
+//RS         }),
+//RS     );
+//RS     let fast_calls = calls.clone();
+//RS     jet_http_mux_add(&mux, "GET", "/fast", move |_| {
+//RS         fast_calls.fetch_add(1, Ordering::AcqRel);
+//RS         jet_http_srv_response(200, &"fast".to_string())
+//RS     });
+//RS 
+//RS     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+//RS     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+//RS     let server = jet_http_server_bind_tls(
+//RS         &"127.0.0.1:0".to_string(),
+//RS         mux,
+//RS         JetHTTPServerTls {
+//RS             cert_pem: cert,
+//RS             key_pem: key,
+//RS         },
+//RS         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+//RS         |cert, key, stream, on_request, on_h2, should_stop| {
+//RS             http_server_tls_runtime::jet_http_server_tls_session_impl(
+//RS                 cert,
+//RS                 key,
+//RS                 stream,
+//RS                 on_request,
+//RS                 on_h2,
+//RS                 should_stop,
+//RS             )
+//RS         },
+//RS     )
+//RS     .expect("bind rustls h2");
+//RS     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+//RS         .expect("addr")
+//RS         .parse()
+//RS         .expect("parse");
+//RS     let serving = server.clone();
+//RS     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+//RS 
+//RS     // One real rustls connection carries two concurrent H2 streams. Stream 1
+//RS     // sends and receives ordered repeated trailers while stream 3 completes
+//RS     // independently, proving the native multiplexer is reused under TLS.
+//RS     let mut client = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+//RS     client.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers")))
+//RS         .unwrap();
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/fast")))
+//RS         .unwrap();
+//RS     client.write_all(&h2_frame(0, 0, 1, b"body")).unwrap();
+//RS     let mut request_trailers = h2_literal_named_header("x-trace", "one");
+//RS     request_trailers.extend_from_slice(&h2_literal_named_header("x-trace", "two"));
+//RS     client
+//RS         .write_all(&h2_frame(1, 0x5, 1, &request_trailers))
+//RS         .unwrap();
+//RS     client.flush().unwrap();
+//RS     assert_eq!(client.conn.alpn_protocol(), Some(b"h2".as_slice()));
+//RS 
+//RS     let mut stream_one_body = Vec::new();
+//RS     let mut stream_one_trailers = Vec::new();
+//RS     let mut stream_one_done = false;
+//RS     let mut stream_three_body = Vec::new();
+//RS     let mut stream_three_done = false;
+//RS     let mut decoder = JetHTTP2Hpack::new();
+//RS     while !stream_one_done || !stream_three_done {
+//RS         let frame = jet_http2_read_frame(&mut client).unwrap();
+//RS         if frame.stream == 1 && frame.kind == 0 {
+//RS             stream_one_body.extend_from_slice(&frame.payload);
+//RS             assert_eq!(frame.flags & 0x1, 0, "TLS H2 DATA ended before trailers");
+//RS         } else if frame.stream == 1 && frame.kind == 1 {
+//RS             let headers = jet_http2_decode_headers(&mut decoder, &frame.payload).unwrap();
+//RS             if frame.flags & 0x1 != 0 {
+//RS                 stream_one_trailers = headers;
+//RS                 stream_one_done = true;
+//RS             }
+//RS         } else if frame.stream == 3 && frame.kind == 0 {
+//RS             stream_three_body.extend_from_slice(&frame.payload);
+//RS             stream_three_done = frame.flags & 0x1 != 0;
+//RS         }
+//RS     }
+//RS     assert_eq!(stream_one_body, b"tls-h2:body");
+//RS     assert_eq!(stream_three_body, b"fast");
+//RS     assert_eq!(
+//RS         stream_one_trailers
+//RS             .into_iter()
+//RS             .filter_map(|(name, value)| (name == "x-trace").then_some(value))
+//RS             .collect::<Vec<_>>(),
+//RS         vec!["first", "second"],
+//RS     );
+//RS     assert_eq!(calls.load(Ordering::Acquire), 2);
+//RS     client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+//RS     client.flush().unwrap();
+//RS     drop(client);
+//RS 
+//RS     // A second negotiated TLS connection violates the server's advertised
+//RS     // frame bound. The H2 loop closes it before the handler can complete.
+//RS     let mut bounded = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+//RS     bounded.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     bounded.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     bounded
+//RS         .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers")))
+//RS         .unwrap();
+//RS     bounded
+//RS         .write_all(&h2_frame(0, 0, 1, &vec![0; JET_HTTP2_MAX_FRAME + 1]))
+//RS         .unwrap();
+//RS     bounded.flush().unwrap();
+//RS     assert_eq!(bounded.conn.alpn_protocol(), Some(b"h2".as_slice()));
+//RS     let mut bounded_goaway = false;
+//RS     let mut bounded_closed = false;
+//RS     for _ in 0..4 {
+//RS         match jet_http2_read_frame(&mut bounded) {
+//RS             Ok(frame) if frame.kind == 7 => {
+//RS                 bounded_goaway = true;
+//RS                 assert_eq!(&frame.payload[..4], &1u32.to_be_bytes());
+//RS                 assert_eq!(&frame.payload[4..8], &1u32.to_be_bytes());
+//RS             }
+//RS             Ok(_) => {}
+//RS             Err(_) => {
+//RS                 bounded_closed = true;
+//RS                 break;
+//RS             }
+//RS         }
+//RS     }
+//RS     assert!(
+//RS         bounded_goaway,
+//RS         "oversized TLS H2 frame omitted protocol GOAWAY"
+//RS     );
+//RS     assert!(
+//RS         bounded_closed,
+//RS         "oversized TLS H2 frame did not close the connection"
+//RS     );
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         2,
+//RS         "bounded request completed a handler"
+//RS     );
+//RS 
+//RS     // Keep a final request body open, then prove Server.shutdown negotiates
+//RS     // GOAWAY over rustls and closes within the requested grace bound.
+//RS     let mut draining = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+//RS     draining.write_all(JET_HTTP2_PREFACE).unwrap();
+//RS     draining.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+//RS     draining
+//RS         .write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers")))
+//RS         .unwrap();
+//RS     draining.write_all(&h2_frame(0, 0, 1, b"partial")).unwrap();
+//RS     draining.flush().unwrap();
+//RS     assert_eq!(draining.conn.alpn_protocol(), Some(b"h2".as_slice()));
+//RS     loop {
+//RS         let frame = jet_http2_read_frame(&mut draining).unwrap();
+//RS         if frame.kind == 4 && frame.stream == 0 {
+//RS             break;
+//RS         }
+//RS     }
+//RS     let started = std::time::Instant::now();
+//RS     let report =
+//RS         jet_http_server_shutdown(&server, &jet_std::Duration { ms: 40 }).expect("shutdown");
+//RS     assert!(
+//RS         started.elapsed() < std::time::Duration::from_millis(1500),
+//RS         "{report:?}"
+//RS     );
+//RS     let mut saw_goaway = false;
+//RS     while let Ok(frame) = jet_http2_read_frame(&mut draining) {
+//RS         if frame.kind == 7 {
+//RS             saw_goaway = true;
+//RS             assert_eq!(&frame.payload[..4], &1u32.to_be_bytes());
+//RS             break;
+//RS         }
+//RS     }
+//RS     assert!(saw_goaway, "TLS H2 shutdown omitted GOAWAY");
+//RS     assert_eq!(report.user_accepted, 3, "{report:?}");
+//RS     assert_eq!(
+//RS         report.user_completed + report.user_cancelled,
+//RS         report.user_accepted,
+//RS         "{report:?}"
+//RS     );
+//RS     assert_eq!(
+//RS         calls.load(Ordering::Acquire),
+//RS         2,
+//RS         "partial request completed during shutdown"
+//RS     );
+//RS     let _ = serve.join().expect("serve join");
+//RS }
+//RS 
+//RS fn rustls_fixture_client(
+//RS     addr: std::net::SocketAddr,
+//RS ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+//RS     rustls_fixture_client_with_alpn(addr, &[])
+//RS }
+//RS 
+//RS fn rustls_fixture_client_with_alpn(
+//RS     addr: std::net::SocketAddr,
+//RS     alpn_protocols: &[&[u8]],
+//RS ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+//RS     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+//RS     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+//RS     use rustls::{DigitallySignedStruct, Error as TLSError, SignatureScheme};
+//RS 
+//RS     let _ = rustls::crypto::ring::default_provider().install_default();
+//RS 
+//RS     #[derive(Debug)]
+//RS     struct AcceptFixture;
+//RS     impl ServerCertVerifier for AcceptFixture {
+//RS         fn verify_server_cert(
+//RS             &self,
+//RS             _end_entity: &CertificateDer<'_>,
+//RS             _intermediates: &[CertificateDer<'_>],
+//RS             _server_name: &ServerName<'_>,
+//RS             _ocsp_response: &[u8],
+//RS             _now: UnixTime,
+//RS         ) -> Result<ServerCertVerified, TLSError> {
+//RS             Ok(ServerCertVerified::assertion())
+//RS         }
+//RS         fn verify_tls12_signature(
+//RS             &self,
+//RS             _message: &[u8],
+//RS             _cert: &CertificateDer<'_>,
+//RS             _dss: &DigitallySignedStruct,
+//RS         ) -> Result<HandshakeSignatureValid, TLSError> {
+//RS             Ok(HandshakeSignatureValid::assertion())
+//RS         }
+//RS         fn verify_tls13_signature(
+//RS             &self,
+//RS             _message: &[u8],
+//RS             _cert: &CertificateDer<'_>,
+//RS             _dss: &DigitallySignedStruct,
+//RS         ) -> Result<HandshakeSignatureValid, TLSError> {
+//RS             Ok(HandshakeSignatureValid::assertion())
+//RS         }
+//RS         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+//RS             rustls::crypto::ring::default_provider()
+//RS                 .signature_verification_algorithms
+//RS                 .supported_schemes()
+//RS         }
+//RS     }
+//RS 
+//RS     let mut config = rustls::ClientConfig::builder()
+//RS         .dangerous()
+//RS         .with_custom_certificate_verifier(std::sync::Arc::new(AcceptFixture))
+//RS         .with_no_client_auth();
+//RS     config.alpn_protocols = alpn_protocols
+//RS         .iter()
+//RS         .map(|protocol| protocol.to_vec())
+//RS         .collect();
+//RS     let config = std::sync::Arc::new(config);
+//RS     let name = rustls::pki_types::ServerName::try_from("localhost").expect("name");
+//RS     let conn = rustls::ClientConnection::new(config, name).expect("conn");
+//RS     let sock = std::net::TcpStream::connect(addr).expect("connect");
+//RS     sock.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+//RS         .unwrap();
+//RS     sock.set_write_timeout(Some(std::time::Duration::from_secs(2)))
+//RS         .unwrap();
+//RS     rustls::StreamOwned::new(conn, sock)
+//RS }
+//RS 
+//RS fn rustls_exchange(
+//RS     stream: &mut rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>,
+//RS     request: &[u8],
+//RS ) -> String {
+//RS     use std::io::{Read, Write};
+//RS     stream.write_all(request).expect("write");
+//RS     stream.flush().expect("flush");
+//RS     let mut raw = Vec::new();
+//RS     let mut buf = [0u8; 4096];
+//RS     loop {
+//RS         match stream.read(&mut buf) {
+//RS             Ok(0) => break,
+//RS             Ok(n) => {
+//RS                 raw.extend_from_slice(&buf[..n]);
+//RS                 if let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+//RS                     let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
+//RS                     let length = headers.lines().skip(1).find_map(|line| {
+//RS                         let (name, value) = line.split_once(':')?;
+//RS                         name.eq_ignore_ascii_case("content-length")
+//RS                             .then(|| value.trim().parse::<usize>().ok())
+//RS                             .flatten()
+//RS                     });
+//RS                     if let Some(length) = length {
+//RS                         if raw.len() >= header_end + 4 + length {
+//RS                             break;
+//RS                         }
+//RS                     } else if headers.lines().skip(1).any(|line| {
+//RS                         line.split_once(':').is_some_and(|(name, value)| {
+//RS                             name.eq_ignore_ascii_case("transfer-encoding")
+//RS                                 && value.trim().eq_ignore_ascii_case("chunked")
+//RS                         })
+//RS                     }) {
+//RS                         let trailer_values = headers
+//RS                             .lines()
+//RS                             .skip(1)
+//RS                             .filter_map(|line| {
+//RS                                 let (name, value) = line.split_once(':')?;
+//RS                                 name.eq_ignore_ascii_case("trailer")
+//RS                                     .then(|| value.trim().to_string())
+//RS                             })
+//RS                             .collect::<Vec<_>>();
+//RS                         let trailer_names = jet_http_parse_trailer_names(&trailer_values)
+//RS                             .expect("response trailer declaration");
+//RS                         let mut state = JetHTTPChunkState::new(8 * 1024 * 1024, trailer_names);
+//RS                         if let Ok(Some(end)) = state.advance(&raw[header_end + 4..]) {
+//RS                             raw.truncate(header_end + 4 + end);
+//RS                             break;
+//RS                         }
+//RS                     } else {
+//RS                         break;
+//RS                     }
+//RS                 }
+//RS             }
+//RS             Err(error)
+//RS                 if matches!(
+//RS                     error.kind(),
+//RS                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+//RS                 ) =>
+//RS             {
+//RS                 if !raw.is_empty() {
+//RS                     break;
+//RS                 }
+//RS             }
+//RS             Err(error) => panic!("read: {error}"),
+//RS         }
+//RS     }
+//RS     String::from_utf8_lossy(&raw).into_owned()
+//RS }
+//RS 
+//RS #[test]
+//RS fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
+//RS     HTTP_ACCESS_LOG_LINES
+//RS         .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+//RS         .lock()
+//RS         .unwrap()
+//RS         .clear();
+//RS 
+//RS     let slow = jet_http_mw_timeout(
+//RS         &jet_std::Duration { ms: 30 },
+//RS         std::sync::Arc::new(|_| {
+//RS             std::thread::sleep(std::time::Duration::from_millis(120));
+//RS             Ok(jet_http_srv_response(200, &"slow".to_string()))
+//RS         }),
+//RS     );
+//RS     let timed = slow(JetHTTPRequest::server(
+//RS         "GET",
+//RS         "/slow".to_string(),
+//RS         Vec::new(),
+//RS         Default::default(),
+//RS     ));
+//RS     assert_eq!(timed.unwrap().status, 504);
+//RS 
+//RS     let limited = jet_http_mw_body_limit(
+//RS         4,
+//RS         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
+//RS     );
+//RS     let mut big = JetHTTPRequest::server("POST", "/".to_string(), vec![0; 8], Default::default());
+//RS     big.body = JetHTTPBody::from_bytes(vec![0; 8]);
+//RS     assert!(matches!(
+//RS         limited(big),
+//RS         Err(JetHTTPError::BodyTooLarge { limit: 4 })
+//RS     ));
+//RS 
+//RS     let policy = jet_http_cors_policy(
+//RS         &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+//RS         &Vec::new(),
+//RS         &Vec::new(),
+//RS         false,
+//RS         86_400,
+//RS     )
+//RS     .unwrap();
+//RS     let cors = jet_http_mw_cors(
+//RS         &policy,
+//RS         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
+//RS     );
+//RS     let mut preflight_headers = JetHTTPHeaders::new();
+//RS     preflight_headers
+//RS         .append("origin", "https://app.example")
+//RS         .unwrap();
+//RS     preflight_headers
+//RS         .append("access-control-request-method", "POST")
+//RS         .unwrap();
+//RS     let preflight =
+//RS         JetHTTPRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers);
+//RS     let preflight = cors(preflight).unwrap();
+//RS     assert_eq!(preflight.status, 204);
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-allow-origin"),
+//RS         Some(&"https://app.example".to_string())
+//RS     );
+//RS 
+//RS     let compress = jet_http_mw_compress(
+//RS         JetHTTPCompressEncoding::Gzip,
+//RS         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"compressible".to_string()))),
+//RS     );
+//RS     let mut gzip_headers = JetHTTPHeaders::new();
+//RS     gzip_headers.append("accept-encoding", "gzip").unwrap();
+//RS     let gzip = compress(JetHTTPRequest::server(
+//RS         "GET",
+//RS         "/".to_string(),
+//RS         Vec::new(),
+//RS         gzip_headers,
+//RS     ))
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         gzip.headers.get("content-encoding"),
+//RS         Some(&"gzip".to_string())
+//RS     );
+//RS     assert!(gzip.body.bytes(64).unwrap().starts_with(&[0x1f, 0x8b]));
+//RS 
+//RS     let logged = jet_http_mw_access_log(std::sync::Arc::new(|_| {
+//RS         Ok(jet_http_srv_response(201, &"x".to_string()))
+//RS     }));
+//RS     let mut req =
+//RS         JetHTTPRequest::server("GET", "/logs/1".to_string(), Vec::new(), Default::default());
+//RS     req.route_template = Some("/logs/:id".to_string());
+//RS     assert_eq!(logged(req).unwrap().status, 201);
+//RS     let lines = HTTP_ACCESS_LOG_LINES.get().unwrap().lock().unwrap();
+//RS     assert_eq!(lines.len(), 1);
+//RS     assert!(lines[0].contains("route=/logs/:id"));
+//RS     assert!(lines[0].contains("status=201"));
+//RS     assert!(!lines[0].contains("secret"));
+//RS }
+//RS 
+//RS #[test]
+//RS fn static_files_handler_serves_root_index_and_rejects_traversal() {
+//RS     let root = std::env::temp_dir().join(format!(
+//RS         "jet-http-static-handler-{}-{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos(),
+//RS     ));
+//RS     std::fs::create_dir_all(root.join("nested")).unwrap();
+//RS     std::fs::write(root.join("index.html"), b"index").unwrap();
+//RS     std::fs::write(root.join("nested/data.bin"), [1, 2, 3]).unwrap();
+//RS     let handler = jet_http_srv_static_files_handler(
+//RS         String::new(),
+//RS         root.to_string_lossy().into_owned(),
+//RS         JetHTTPStaticOptions::safe(),
+//RS     );
+//RS     let ok = handler(JetHTTPRequest::server(
+//RS         "GET",
+//RS         "/nested/data.bin".to_string(),
+//RS         Vec::new(),
+//RS         Default::default(),
+//RS     ))
+//RS     .unwrap();
+//RS     assert_eq!(ok.status, 200);
+//RS     assert_eq!(ok.body.bytes(16).unwrap(), vec![1, 2, 3]);
+//RS     let index = handler(JetHTTPRequest::server(
+//RS         "GET",
+//RS         "/".to_string(),
+//RS         Vec::new(),
+//RS         Default::default(),
+//RS     ))
+//RS     .unwrap();
+//RS     assert_eq!(index.body.bytes(16).unwrap(), b"index");
+//RS     let blocked = handler(JetHTTPRequest::server(
+//RS         "GET",
+//RS         "/../secret".to_string(),
+//RS         Vec::new(),
+//RS         Default::default(),
+//RS     ))
+//RS     .unwrap();
+//RS     assert_eq!(blocked.status, 404);
+//RS     std::fs::remove_dir_all(root).unwrap();
+//RS }
+//RS 
+//RS /// D-HTTP-STATIC-FILES1=A: the mount defaults refuse every hostile path shape,
+//RS /// and each expert option opens exactly one of them.
+//RS #[test]
+//RS fn static_files_mount_refuses_escapes_dotfiles_and_link_escapes() {
+//RS     let base = std::env::temp_dir().join(format!(
+//RS         "jet-http-static-hostile-{}-{}",
+//RS         std::process::id(),
+//RS         std::time::SystemTime::now()
+//RS             .duration_since(std::time::UNIX_EPOCH)
+//RS             .unwrap()
+//RS             .as_nanos(),
+//RS     ));
+//RS     let root = base.join("public");
+//RS     std::fs::create_dir_all(root.join("nested")).unwrap();
+//RS     std::fs::write(base.join("secret.txt"), b"outside").unwrap();
+//RS     std::fs::write(root.join("index.html"), b"index").unwrap();
+//RS     std::fs::write(root.join(".env"), b"TOKEN=private").unwrap();
+//RS     std::fs::write(root.join("nested/app.css"), b"body{}").unwrap();
+//RS     #[cfg(unix)]
+//RS     {
+//RS         std::os::unix::fs::symlink(base.join("secret.txt"), root.join("escape.txt")).unwrap();
+//RS         std::os::unix::fs::symlink(root.join("nested/app.css"), root.join("inside.css")).unwrap();
+//RS     }
+//RS 
+//RS     let get = |path: &str| {
+//RS         JetHTTPRequest::server("GET", path.to_string(), Vec::new(), JetHTTPHeaders::new())
+//RS     };
+//RS     let serve = |path: &str, options: JetHTTPStaticOptions| {
+//RS         jet_http_srv_static_files(&get(path), "/assets", &root, options).unwrap()
+//RS     };
+//RS     let safe = JetHTTPStaticOptions::safe();
+//RS 
+//RS     // The mount only answers under its own prefix.
+//RS     assert_eq!(serve("/assets/nested/app.css", safe).status, 200);
+//RS     assert_eq!(serve("/assets/", safe).body.bytes(64).unwrap(), b"index");
+//RS     assert_eq!(serve("/nested/app.css", safe).status, 404);
+//RS     assert_eq!(serve("/assetsother/app.css", safe).status, 404);
+//RS 
+//RS     // Path escapes never leave the root.
+//RS     assert_eq!(serve("/assets/../secret.txt", safe).status, 404);
+//RS     assert_eq!(serve("/assets/nested/../../secret.txt", safe).status, 404);
+//RS     assert_eq!(serve("/assets/%2e%2e/secret.txt", safe).status, 404);
+//RS     assert_eq!(serve("/assets/%2fsecret.txt", safe).status, 404);
+//RS 
+//RS     // Dot-files are hidden until the expert asks for them.
+//RS     assert_eq!(serve("/assets/.env", safe).status, 404);
+//RS     let dotfiles = JetHTTPStaticOptions {
+//RS         dotfiles: true,
+//RS         ..safe
+//RS     };
+//RS     assert_eq!(serve("/assets/.env", dotfiles).status, 200);
+//RS 
+//RS     // Symbolic links are refused by default, and one that leaves the root stays
+//RS     // refused even when the expert turns links on.
+//RS     #[cfg(unix)]
+//RS     {
+//RS         assert_eq!(serve("/assets/escape.txt", safe).status, 404);
+//RS         assert_eq!(serve("/assets/inside.css", safe).status, 404);
+//RS         let links = JetHTTPStaticOptions {
+//RS             follow_links: true,
+//RS             ..safe
+//RS         };
+//RS         assert_eq!(serve("/assets/escape.txt", links).status, 404);
+//RS         assert_eq!(serve("/assets/inside.css", links).status, 200);
+//RS     }
+//RS 
+//RS     // The index option turns a directory request into a 404.
+//RS     let no_index = JetHTTPStaticOptions {
+//RS         index: false,
+//RS         ..safe
+//RS     };
+//RS     assert_eq!(serve("/assets/", no_index).status, 404);
+//RS 
+//RS     // A mount on a live mux answers GET and HEAD through the catch-all route.
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_srv_static_files_mount(
+//RS         &mux,
+//RS         &"/assets".to_string(),
+//RS         &root.to_string_lossy().into_owned(),
+//RS         safe,
+//RS     );
+//RS     let served = jet_http_mux_dispatch(&mux, get("/assets/nested/app.css")).unwrap();
+//RS     assert_eq!(served.status, 200);
+//RS     assert_eq!(
+//RS         served.headers.get("content-type"),
+//RS         Some(&"text/css; charset=utf-8".to_string())
+//RS     );
+//RS     let head = jet_http_mux_dispatch(
+//RS         &mux,
+//RS         JetHTTPRequest::server(
+//RS             "HEAD",
+//RS             "/assets/nested/app.css".to_string(),
+//RS             Vec::new(),
+//RS             JetHTTPHeaders::new(),
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(head.status, 200);
+//RS     assert_eq!(
+//RS         jet_http_mux_dispatch(&mux, get("/assets/.env"))
+//RS             .unwrap()
+//RS             .status,
+//RS         404
+//RS     );
+//RS 
+//RS     std::fs::remove_dir_all(base).unwrap();
+//RS }
+//RS 
+//RS /// D-HTTP-CORS1=A: no policy means no headers, a named origin is stamped, and
+//RS /// `.Any` with credentials is refused when the policy is built.
+//RS #[test]
+//RS fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
+//RS     let refused = jet_http_cors_policy(
+//RS         &JetHTTPCorsOrigins::Any,
+//RS         &Vec::new(),
+//RS         &Vec::new(),
+//RS         true,
+//RS         86_400,
+//RS     );
+//RS     let Err(JetHTTPError::Policy { reason }) = refused else {
+//RS         panic!("`.Any` origins with credentials must be refused");
+//RS     };
+//RS     assert!(reason.contains("CORS credentials need named origins"));
+//RS     assert!(reason.contains("set credentials to false"));
+//RS 
+//RS     // No policy installed means the mux sends no CORS header at all.
+//RS     let bare = jet_http_mux_new();
+//RS     jet_http_mux_add(&bare, "GET", "/api", |_| {
+//RS         jet_http_srv_response(200, &"ok".to_string())
+//RS     });
+//RS     let mut origin_headers = JetHTTPHeaders::new();
+//RS     origin_headers
+//RS         .append("origin", "https://app.example")
+//RS         .unwrap();
+//RS     let plain = jet_http_mux_dispatch(
+//RS         &bare,
+//RS         JetHTTPRequest::server(
+//RS             "GET",
+//RS             "/api".to_string(),
+//RS             Vec::new(),
+//RS             origin_headers.clone(),
+//RS         ),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(plain.headers.get("access-control-allow-origin"), None);
+//RS 
+//RS     let policy = jet_http_cors_policy(
+//RS         &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+//RS         &vec!["GET".to_string(), "POST".to_string()],
+//RS         &vec!["content-type".to_string()],
+//RS         true,
+//RS         600,
+//RS     )
+//RS     .unwrap();
+//RS     let mux = jet_http_mux_new();
+//RS     jet_http_srv_install_cors(&mux, &policy);
+//RS     jet_http_mux_add(&mux, "GET", "/api", |_| {
+//RS         let mut response = jet_http_srv_response(200, &"ok".to_string());
+//RS         let _ = response.headers.set("vary", "accept-encoding");
+//RS         response
+//RS     });
+//RS 
+//RS     let mut preflight_headers = origin_headers.clone();
+//RS     preflight_headers
+//RS         .append("access-control-request-method", "POST")
+//RS         .unwrap();
+//RS     let preflight = jet_http_mux_dispatch(
+//RS         &mux,
+//RS         JetHTTPRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(preflight.status, 204);
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-allow-origin"),
+//RS         Some(&"https://app.example".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-allow-methods"),
+//RS         Some(&"GET, POST".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-allow-headers"),
+//RS         Some(&"content-type".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-allow-credentials"),
+//RS         Some(&"true".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         preflight.headers.get("access-control-max-age"),
+//RS         Some(&"600".to_string())
+//RS     );
+//RS 
+//RS     let allowed = jet_http_mux_dispatch(
+//RS         &mux,
+//RS         JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), origin_headers),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         allowed.headers.get("access-control-allow-origin"),
+//RS         Some(&"https://app.example".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         allowed.headers.get("vary"),
+//RS         Some(&"accept-encoding, origin".to_string())
+//RS     );
+//RS 
+//RS     // An origin outside the list gets the answer with no CORS header.
+//RS     let mut other = JetHTTPHeaders::new();
+//RS     other.append("origin", "https://evil.example").unwrap();
+//RS     let denied = jet_http_mux_dispatch(
+//RS         &mux,
+//RS         JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), other),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(denied.status, 200);
+//RS     assert_eq!(denied.headers.get("access-control-allow-origin"), None);
+//RS 
+//RS     // `.Any` without credentials is a valid policy and answers every origin.
+//RS     let any =
+//RS         jet_http_cors_policy(&JetHTTPCorsOrigins::Any, &Vec::new(), &Vec::new(), false, 0).unwrap();
+//RS     let any_mux = jet_http_mux_new();
+//RS     jet_http_srv_install_cors(&any_mux, &any);
+//RS     jet_http_mux_add(&any_mux, "GET", "/api", |_| {
+//RS         jet_http_srv_response(200, &"ok".to_string())
+//RS     });
+//RS     let mut anywhere = JetHTTPHeaders::new();
+//RS     anywhere
+//RS         .append("origin", "https://anywhere.example")
+//RS         .unwrap();
+//RS     let wide = jet_http_mux_dispatch(
+//RS         &any_mux,
+//RS         JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), anywhere),
+//RS     )
+//RS     .unwrap();
+//RS     assert_eq!(
+//RS         wide.headers.get("access-control-allow-origin"),
+//RS         Some(&"*".to_string())
+//RS     );
+//RS }
+//RS 
+//RS /// D-HTTP-JSON1=A: `server.json` labels the encoded body, and the typed decode
+//RS /// used by `req.json<T>()` / `resp.json<T>(limit)` honours the body cap.
+//RS #[test]
+//RS fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
+//RS     let response = jet_http_srv_json(201, &"payload".to_string());
+//RS     assert_eq!(response.status, 201);
+//RS     assert_eq!(
+//RS         response.headers.get("content-type"),
+//RS         Some(&"application/json; charset=utf-8".to_string())
+//RS     );
+//RS     assert_eq!(
+//RS         response.body.bytes(64).unwrap(),
+//RS         br#"{"ok":true}"#.as_slice()
+//RS     );
+//RS 
+//RS     let body = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
+//RS     let decoded: String = jet_http_body_json(&body, 64).unwrap();
+//RS     assert_eq!(decoded, r#"{"a":1}"#);
+//RS 
+//RS     // The typed decode reads through the shared body reader, so the framing cap
+//RS     // rejects an oversized body before any decode runs.
+//RS     let oversized = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
+//RS     assert!(matches!(
+//RS         jet_http_body_json::<String>(&oversized, 2),
+//RS         Err(JetHTTPError::BodyTooLarge { limit: 2 })
+//RS     ));
+//RS }
+// END-PORT-PENDING 1075 tests/http_server_lifecycle.rs:5328-7553
+

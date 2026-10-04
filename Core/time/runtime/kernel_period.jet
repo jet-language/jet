@@ -1,0 +1,93 @@
+// Prelude/Core/Time.rs:484–625. The private Period payload has the original
+// three I64 fields; CivilDate remains the sole Gregorian date owner.
+// Borrow receivers/arguments; no allocation or public alternate carrier.
+use core.time.runtime.kernel_civil as period_civil
+use core.time.runtime.kernel_duration as period_duration
+
+#Equatable
+pub struct CivilPeriod { years: I64, months: I64, days: I64 }
+
+impl CivilPeriod {
+    // Rust JetPeriod::new (:491).
+    pub fn new(years: I64, months: I64, days: I64) -> CivilPeriod Never! {
+        CivilPeriod{years: years, months: months, days: days}
+    }
+    // Rust JetPeriod::days (:498).
+    pub fn from_days(n: I64) -> CivilPeriod Never! { CivilPeriod.new(I64{0}, I64{0}, n) }
+    // Rust JetPeriod::months (:501).
+    pub fn from_months(n: I64) -> CivilPeriod Never! { CivilPeriod.new(I64{0}, n, I64{0}) }
+    // Rust JetPeriod::years (:504).
+    pub fn from_years(n: I64) -> CivilPeriod Never! { CivilPeriod.new(n, I64{0}, I64{0}) }
+    // Rust JetPeriod::years_value (:507).
+    pub fn years_value(self) -> I64 Never! { self.years }
+    // Rust JetPeriod::months_value (:510).
+    pub fn months_value(self) -> I64 Never! { self.months }
+    // Rust JetPeriod::days_value (:513).
+    pub fn days_value(self) -> I64 Never! { self.days }
+    // Rust JetPeriod::sign (:516): first nonzero field, not a summed duration.
+    pub fn sign(self) -> I64 Never! {
+        if self.years != (I64{0}) -> return period_duration.jet_duration_kernel_sign(self.years)
+        if self.months != (I64{0}) -> return period_duration.jet_duration_kernel_sign(self.months)
+        period_duration.jet_duration_kernel_sign(self.days)
+    }
+    // Rust JetPeriod::is_zero (:525).
+    pub fn is_zero(self) -> Bool Never! {
+        self.years == I64{0} && self.months == I64{0} && self.days == I64{0}
+    }
+    // Rust JetPeriod::negated (:528), shared saturated I64 scalar policy.
+    pub fn negated(self) -> CivilPeriod Never! {
+        CivilPeriod.new(
+            period_duration.jet_duration_kernel_negated(self.years),
+            period_duration.jet_duration_kernel_negated(self.months),
+            period_duration.jet_duration_kernel_negated(self.days),
+        )
+    }
+    // Rust JetPeriod::abs (:535): independently abs each field, not sign-based.
+    pub fn abs(self) -> CivilPeriod Never! {
+        CivilPeriod.new(
+            period_duration.jet_duration_kernel_abs(self.years),
+            period_duration.jet_duration_kernel_abs(self.months),
+            period_duration.jet_duration_kernel_abs(self.days),
+        )
+    }
+    // Rust JetPeriod::add (:542).
+    pub fn add(self, other: CivilPeriod) -> CivilPeriod Never! {
+        CivilPeriod.new(
+            self.years.saturating_add(other.years),
+            self.months.saturating_add(other.months),
+            self.days.saturating_add(other.days),
+        )
+    }
+    // Rust JetPeriod::sub (:549): MIN negates to MAX before the add. Direct
+    // saturating_sub would change MIN - MIN from -1 to 0.
+    pub fn sub(self, other: CivilPeriod) -> CivilPeriod Never! { self.add(other.negated()) }
+    // Rust JetPeriod::total_in_date (:552), literal evaluation order even for
+    // an unknown unit: end, month delta, calendar anchor, then residual days.
+    pub fn total_in_date(self, unit: String, anchor: period_civil.CivilDate) -> Float Never! {
+        end :: anchor.add_period(self.years, self.months, self.days)
+        month_delta :: self.years.saturating_mul(I64{12}).saturating_add(self.months)
+        calendar_anchor :: anchor.add_months(month_delta)
+        residual_days :: Float.from_i64(end.diff_days(calendar_anchor))
+        if unit == {
+            "day" | "days" | "d" -> Float.from_i64(end.diff_days(anchor))
+            "week" | "weeks" | "w" -> Float.from_i64(end.diff_days(anchor)) / 7.0
+            "month" | "months" -> Float.from_i64(month_delta) + residual_days / Float.from_i64(calendar_anchor.days_in_month())
+            "year" | "years" | "y" -> Float.from_i64(month_delta) / 12.0 + residual_days / (if calendar_anchor.is_leap_year() -> Float{366.0} else -> Float{365.0})
+            else -> 0.0
+        }
+    }
+    // HELD #4262: Rust JetPeriod::total_in_datetime (:575–618) depends on the
+    // unified private allocation-free two-word wide/date native owner, also
+    // used by Duration and seeded RNG. Preserve anchor.time_for_output(),
+    // from_parts with its U32 nanosecond, total-ns subtraction BEFORE Float
+    // conversion, and calendar month/year residual denominators. No public
+    // I128, exact-Int emulation, Date-only substitute or successful stub.
+    // HELD #4262: Rust JetPeriod::to_string_fmt (:619–621) depends on the sole
+    // canonical append/fixed-number renderer. Exact spelling P{}Y{}M{}D with
+    // signed years/months/days; do not allocate three intermediate Strings.
+    // Rust JetPeriod::components (:622). Consumers marshal named fields;
+    // never assume a positional Rust tuple ABI for this Jet named tuple.
+    pub fn components(self) -> (years: I64, months: I64, days: I64) Never! {
+        (years: self.years, months: self.months, days: self.days)
+    }
+}

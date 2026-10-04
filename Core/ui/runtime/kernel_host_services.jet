@@ -1,0 +1,404 @@
+use core.ui.host.[UICapability, UICapabilityFact, UICapabilityFacts, UICancellation, UIHostError, UINodeID, UITextRange, UIFSAccess, UIFSRights, UIFSGrant, UIGrantedPath, UIFileDialogKind, UIFileFilter, UIFileDialogRequest, UIFileDialogSelection, UIClipboardText, UIClipboardWrite, UIShortcutModifier, UIShortcutModifiers, UIShortcut, UIShortcutBinding, UIAccessibilityState, UIAccessibility, UIAccessibilityProjection]
+use core.ui.host.ime.[UIIMEPhase, UIIMEEvent]
+use core.ui.host.drag_drop.[UIDragEvent]
+use core.font.[FontStyle, FontFace]
+use core.files.runtime.kernel_path_components as paths
+use core.text.runtime.kernel_unicode_string as unicode
+
+// HostServices.rs: one host-value kernel. No ambient registration or native
+// provider is fabricated here. Explicit PathPlatform parameters below are
+// selected-target inputs, not runtime host guesses (#4483).
+// The native HarfBuzz/TLS/Web closure requires #4494/#4483; the published
+// retained-descriptor ABI supplies none of its dlopen/HarfBuzz/TLS APIs.
+// ShortcutRegistry/HeadlessHost assembly requires the canonical ordered map
+// keyed by UIShortcut (#4499). No encoded String key or array substitute.
+// UINode's attachment implementation belongs to packet 0192 (Ui.rs:64–117).
+// Canonical UTF8 ingress currently materializes bytes (#4392/#4318); these
+// scalar loops reuse its sole decoder and do not claim borrowed-input parity.
+
+pub HOST_MAX_QUEUED_EVENTS :: 256
+pub FONT_SHAPING_CAPABILITY :: "UI.FontShaping"
+pub FONT_FACE_ARABIC :: "Noto Sans Arabic"
+pub FONT_FACE_SYMBOLS :: "Noto Sans Symbols 2"
+pub HARFBUZZ_RTLD_NOW :: I32{2}
+pub HARFBUZZ_MEMORY_MODE_READONLY :: U32{0}
+pub HARFBUZZ_MAX_GLYPHS :: 1048576
+pub WASM_FONT_MAX_TEXT_BYTES :: 4194304
+pub WASM_FONT_MAX_FAMILY_BYTES :: 1024
+pub WASM_FONT_MAX_GLYPHS :: 1048576
+
+// Rust:28,40,52; declaration order is also receipt order.
+pub fn capability_name(capability: UICapability) -> String Never! {
+    if capability == {
+        .FileDialog -> "UI.FileDialog"
+        .Clipboard -> "UI.Clipboard"
+        .IME -> "UI.IME"
+        .DragDrop -> "UI.DragDrop"
+        .Shortcuts -> "UI.Shortcuts"
+        .Accessibility -> "UI.Accessibility"
+        .FontShaping -> "UI.FontShaping"
+    }
+}
+pub fn capability_bit(capability: UICapability) -> U8 Never! {
+    if capability == {
+        .FileDialog -> U8{1}
+        .Clipboard -> U8{2}
+        .IME -> U8{4}
+        .DragDrop -> U8{8}
+        .Shortcuts -> U8{16}
+        .Accessibility -> U8{32}
+        .FontShaping -> U8{64}
+    }
+}
+pub fn capabilities_ordered() -> [UICapability] Never! {
+    [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility, .FontShaping}
+}
+// Rust:79–125. Default is empty, unlike HeadlessHost's all-rights default.
+pub fn capabilities_empty() -> UICapabilityFacts Never! { UICapabilityFacts{bits: U8{0}} }
+pub fn capabilities_all() -> UICapabilityFacts Never! { UICapabilityFacts{bits: U8{127}} }
+pub fn capabilities_with(facts: UICapabilityFacts, capability: UICapability) -> UICapabilityFacts Never! {
+    UICapabilityFacts{bits: facts.bits | capability_bit(capability)}
+}
+pub fn capabilities_grant(facts: &UICapabilityFacts, capability: UICapability) Never! {
+    facts.bits = facts.bits | capability_bit(capability)
+}
+pub fn capabilities_revoke(facts: &UICapabilityFacts, capability: UICapability) Never! {
+    facts.bits = facts.bits & (U8{255} ~| capability_bit(capability))
+}
+pub fn capabilities_contains(facts: UICapabilityFacts, capability: UICapability) -> Bool Never! {
+    (facts.bits & capability_bit(capability)) != (U8{0})
+}
+pub fn capability_fact(facts: UICapabilityFacts, capability: UICapability) -> UICapabilityFact Never! {
+    UICapabilityFact{capability: capability, granted: capabilities_contains(facts, capability)}
+}
+pub fn capabilities_to_facts(facts: UICapabilityFacts) -> [UICapabilityFact] Never! {
+    out := [UICapabilityFact]{}
+    loop capability in capabilities_ordered() -> &out.push(capability_fact(facts, capability))
+    out
+}
+pub fn capabilities_require(facts: UICapabilityFacts, capability: UICapability) UIHostError! {
+    if !capabilities_contains(facts, capability) -> return Err(UIHostError.CapabilityDenied(capability))
+    Ok()
+}
+
+// Rust:802–808. Header vetting is NOT an implementation of a font provider.
+pub fn font_bytes_are_vetted(bytes: [U8]) -> Bool Never! {
+    if bytes.len() < 4 -> return false
+    if bytes[0] == (U8{0}) && bytes[1] == (U8{1}) && bytes[2] == (U8{0}) && bytes[3] == (U8{0}) -> return true
+    if bytes[0] == (U8{79}) && bytes[1] == (U8{84}) && bytes[2] == (U8{84}) && bytes[3] == (U8{79}) -> return true
+    if bytes[0] == (U8{116}) && bytes[1] == (U8{114}) && bytes[2] == (U8{117}) && bytes[3] == (U8{101}) -> return true
+    if bytes[0] == (U8{116}) && bytes[1] == (U8{121}) && bytes[2] == (U8{112}) && bytes[3] == (U8{49}) -> return true
+    if bytes[0] == (U8{119}) && bytes[1] == (U8{79}) && bytes[2] == (U8{70}) && (bytes[3] == (U8{70}) || bytes[3] == (U8{50})) -> return true
+    false
+}
+// Rust:882–919. Scalar values are decoded by the canonical Unicode owner.
+pub fn font_is_arabic(cp: Int) -> Bool Never! {
+    (cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0750 && cp <= 0x077f) ||
+    (cp >= 0x08a0 && cp <= 0x08ff) || (cp >= 0xfb50 && cp <= 0xfdff) ||
+    (cp >= 0xfe70 && cp <= 0xfeff) || (cp >= 0x1ee00 && cp <= 0x1eeff)
+}
+pub fn font_is_symbol_or_emoji(cp: Int) -> Bool Never! {
+    (cp >= 0x1f000 && cp <= 0x1faff) || (cp >= 0x2300 && cp <= 0x23ff) ||
+    (cp >= 0x2500 && cp <= 0x27ff) || (cp >= 0x2b00 && cp <= 0x2bff)
+}
+pub fn font_is_extend(cp: Int) -> Bool Never! {
+    (cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x1dc0 && cp <= 0x1dff) || (cp >= 0x20d0 && cp <= 0x20ff) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef) ||
+    (cp >= 0x1f3fb && cp <= 0x1f3ff) || (cp >= 0xe0020 && cp <= 0xe007f) ||
+    (cp >= 0x200c && cp <= 0x200d)
+}
+// Rust:1009–1019. Native font shaping must never call the approximate fallback.
+pub fn font_system(style: FontStyle) -> FontFace Never! {
+    if style == {
+        .Body -> FontFace{family: "system-ui", size: 14.0, style: style}
+        .Title -> FontFace{family: "system-ui", size: 24.0, style: style}
+        .Monospace -> FontFace{family: "monospace", size: 14.0, style: style}
+    }
+}
+
+// Rust:1058–1090. Identity and range checks are not whitespace checks.
+pub fn node_id(value: String) -> UINodeID UIHostError! {
+    if value == "" -> return Err(UIHostError.InvalidRequest("UI node identity must not be empty"))
+    Ok(UINodeID{value: ~value})
+}
+pub fn node_id_text(node: UINodeID) -> @String Never! from node { @node.value }
+pub fn text_range(start: Int, end: Int) -> UITextRange UIHostError! {
+    // Nonnegative selected usize ingress remains a checked ABI prerequisite.
+    if start > end -> return Err(UIHostError.InvalidRequest("text range start must not exceed end"))
+    Ok(UITextRange{start: start, end: end})
+}
+pub fn text_range_len(range: UITextRange) -> Int Never! { range.end - range.start }
+
+// Rust:1107–1136; the existing Bool pair retains exactly the two rights bits.
+pub fn fs_rights_none() -> UIFSRights Never! { UIFSRights{read: false, write: false} }
+pub fn fs_rights_read() -> UIFSRights Never! { UIFSRights{read: true, write: false} }
+pub fn fs_rights_write() -> UIFSRights Never! { UIFSRights{read: false, write: true} }
+pub fn fs_rights_read_write() -> UIFSRights Never! { UIFSRights{read: true, write: true} }
+pub fn fs_rights_allows(rights: UIFSRights, access: UIFSAccess) -> Bool Never! {
+    if access == { .Read -> rights.read, .Write -> rights.write }
+}
+pub fn fs_rights_bits(rights: UIFSRights) -> U8 Never! {
+    bits := U8{0}
+    if rights.read -> bits = bits | (U8{1})
+    if rights.write -> bits = bits | (U8{2})
+    bits
+}
+pub fn fs_rights_from_bits(bits: U8) -> UIFSRights Never! {
+    UIFSRights{read: (bits & (U8{1})) != (U8{0}), write: (bits & (U8{2})) != (U8{0})}
+}
+
+// Rust:2408–2457. PathBuf push/pop and prefix semantics have one owner.
+// A depth stack is unnecessary: the canonical reverse component cursor finds
+// only the last component when popping; bytes removed are visited once.
+pub fn normalize_path(path: String, platform: paths.PathPlatform) -> paths.OSPath UIHostError! {
+    if path.trim() == "" -> return Err(UIHostError.InvalidRequest("filesystem grant path must not be empty"))
+    input :: paths.from_text(path, platform)
+    normalized := paths.from_encoded([U8]{}, platform)
+    cursor := paths.components(input)
+    rooted := false
+    normal_depth := 0
+    loop {
+        component :: paths.next(input, &cursor) ?? break
+        if component.kind == {
+            .Prefix -> { paths.push_component(&normalized, input, component); rooted = true }
+            .RootDir -> { paths.push_component(&normalized, input, component); rooted = true }
+            .CurDir -> { }
+            .ParentDir -> {
+                if normal_depth == 0 -> return Err(UIHostError.ResourceDenied("path `{path}` escapes its lexical root"))
+                _ :: paths.pop(&normalized)
+                normal_depth -= 1
+            }
+            .Normal -> { paths.push_component(&normalized, input, component); normal_depth += 1 }
+        }
+    }
+    if normalized.encoded.len() == 0 && rooted {
+        if platform == .Windows -> &normalized.encoded.push(U8{92})
+        else -> &normalized.encoded.push(U8{47})
+    }
+    Ok(normalized)
+}
+pub fn path_text(path: paths.OSPath) -> String Never! {
+    if path.encoded.len() == 0 -> return "."
+    paths.display(path)
+}
+// Rust:1150–1208; selected-target ingress is deliberately explicit (#4483).
+pub fn fs_grant(root: String, rights: UIFSRights, platform: paths.PathPlatform) -> UIFSGrant UIHostError! {
+    normalized :: normalize_path(root, platform) ?? return Err(err)
+    Ok(UIFSGrant{root: path_text(normalized), rights: rights})
+}
+pub fn grant_root(grant: UIFSGrant) -> @String Never! from grant { @grant.root }
+pub fn grant_rights(grant: UIFSGrant) -> UIFSRights Never! { grant.rights }
+pub fn grant_allows(grant: UIFSGrant, access: UIFSAccess) -> Bool Never! { fs_rights_allows(grant.rights, access) }
+pub fn grant_scope(grant: UIFSGrant, path: String, access: UIFSAccess, platform: paths.PathPlatform) -> UIGrantedPath UIHostError! {
+    if !grant_allows(grant, access) {
+        if access == .Read -> return Err(UIHostError.ResourceDenied("{grant.root} grant does not allow Read"))
+        return Err(UIHostError.ResourceDenied("{grant.root} grant does not allow Write"))
+    }
+    root :: normalize_path(grant.root, platform) ?? return Err(err)
+    requested :: paths.from_text(path, platform)
+    candidate := paths.from_encoded([U8]{}, platform)
+    if paths.is_absolute(requested) {
+        paths.push(&candidate, requested)
+    } else {
+        paths.push(&candidate, root)
+        paths.push(&candidate, requested)
+    }
+    candidate_text := paths.display(candidate) // #4303: String-typed normalizer input.
+    normalized :: normalize_path(candidate_text, platform) ?? return Err(err)
+    within := false
+    if root.encoded.len() == 0 -> within = !paths.is_absolute(normalized)
+    else -> within = paths.equals(normalized, root) || paths.strip_prefix_span(normalized, root) != None
+    if !within -> return Err(UIHostError.ResourceDenied("path `{path}` escapes grant `{grant.root}`"))
+    Ok(UIGrantedPath{path: path_text(normalized), grant_root: ~grant.root, access: access})
+}
+pub fn granted_path(path: UIGrantedPath) -> @String Never! from path { @path.path }
+pub fn granted_root(path: UIGrantedPath) -> @String Never! from path { @path.grant_root }
+pub fn granted_access(path: UIGrantedPath) -> UIFSAccess Never! { path.access }
+
+// Rust:1249–1281 / 2119–2131. Constructor consumes vectors; front door clones
+// borrowed vectors exactly once, as the original Rust wrapper does.
+pub fn file_filter_new(label: String, extensions: ^[String], mime_types: ^[String]) -> UIFileFilter UIHostError! {
+    if label == "" && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter must name an extension, media type, or label"))
+    loop extension in extensions -> if extension == "" -> return Err(UIHostError.InvalidRequest("file filter extensions must not be empty"))
+    loop mime in mime_types -> if mime == "" -> return Err(UIHostError.InvalidRequest("file filter media types must not be empty"))
+    Ok(UIFileFilter{label: ~label, extensions: ^extensions, mime_types: ^mime_types})
+}
+pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
+    file_filter_new(label, ~extensions, ~mime_types)
+}
+pub fn file_filter_text() -> UIFileFilter Never! {
+    UIFileFilter{label: "Text", extensions: [String]{"txt"}, mime_types: [String]{"text/plain"}}
+}
+// Rust:1298–1343 / 2156–2161.
+pub fn open_request(grant: ^UIFSGrant) -> UIFileDialogRequest Never! {
+    UIFileDialogRequest{kind: .Open, title: "Open File", grant: ^grant, initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: false}
+}
+pub fn save_request(grant: ^UIFSGrant) -> UIFileDialogRequest Never! {
+    UIFileDialogRequest{kind: .Save, title: "Save File", grant: ^grant, initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: false}
+}
+pub fn validate_request(request: UIFileDialogRequest) UIHostError! {
+    access := UIFSAccess.Read
+    if request.kind == .Save -> access = .Write
+    if !grant_allows(request.grant, access) {
+        if request.kind == .Open -> return Err(UIHostError.ResourceDenied("dialog Open requires Read access"))
+        return Err(UIHostError.ResourceDenied("dialog Save requires Write access"))
+    }
+    if request.initial_directory == .Val(directory) {
+        if directory.grant_root != request.grant.root || directory.access != access -> return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
+    }
+    if request.kind == .Save && request.allow_multiple -> return Err(UIHostError.InvalidRequest("save dialogs cannot select multiple files"))
+    Ok()
+}
+// Rust:1353–1363.
+pub fn selection_one(file: ^UIGrantedPath) -> UIFileDialogSelection Never! { UIFileDialogSelection{files: [UIGrantedPath]{^file}} }
+pub fn selection_new(files: ^[UIGrantedPath]) -> UIFileDialogSelection UIHostError! {
+    if files.len() == 0 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
+    Ok(UIFileDialogSelection{files: ^files})
+}
+// Rust:1406–1412.
+pub fn ime_cancel(target: ^UINodeID) -> UIIMEEvent Never! { UIIMEEvent{target: ^target, phase: .Cancel, composition: None} }
+
+// Rust:1461–1512; Command and Meta are distinct bits on every platform.
+pub fn modifiers_none() -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: U8{0}} }
+pub fn modifiers_command() -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: U8{16}} }
+pub fn modifiers_control() -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: U8{1}} }
+pub fn modifiers_alt() -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: U8{2}} }
+pub fn modifiers_shift() -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: U8{4}} }
+fn modifier_bit(modifier: UIShortcutModifier) -> U8 Never! {
+    if modifier == { .Control -> U8{1}, .Alt -> U8{2}, .Shift -> U8{4}, .Meta -> U8{8}, .Command -> U8{16} }
+}
+pub fn modifiers_with(modifiers: UIShortcutModifiers, modifier: UIShortcutModifier) -> UIShortcutModifiers Never! {
+    UIShortcutModifiers{bits: modifiers.bits | modifier_bit(modifier)}
+}
+pub fn modifiers_contains(modifiers: UIShortcutModifiers, modifier: UIShortcutModifier) -> Bool Never! {
+    (modifiers.bits & modifier_bit(modifier)) != (U8{0})
+}
+pub fn modifiers_bits(modifiers: UIShortcutModifiers) -> U8 Never! { modifiers.bits }
+pub fn modifiers_from_bits(bits: U8) -> UIShortcutModifiers Never! { UIShortcutModifiers{bits: bits & (U8{31})} }
+// Rust:1523–1564 / 2164–2181.
+pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -> UIShortcut UIHostError! {
+    trimmed := key.trim() // #4303: trim view into canonical String lowercase.
+    normalized :: unicode.lower(trimmed)
+    if normalized == "" -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
+    Ok(UIShortcut{key: normalized, modifiers: modifiers})
+}
+pub fn shortcut_cmd(key: String) -> UIShortcut Never! {
+    shortcut(key, modifiers_command()) ?? panic("checked .cmd literal must be valid")
+}
+pub fn shortcut_binding(shortcut: ^UIShortcut, action: String, node: ^UINodeID?) -> UIShortcutBinding UIHostError! {
+    if action == "" -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    Ok(UIShortcutBinding{shortcut: ^shortcut, action: ~action, node: ^node})
+}
+
+// Rust:1635–1654 / 2184–2192. None differs from Some(""); spaces are valid.
+pub fn accessibility_new(name: String?, description: String?) -> UIAccessibility UIHostError! {
+    if name == .Val(value) && value == "" -> return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
+    if description == .Val(value) && value == "" -> return Err(UIHostError.InvalidRequest("accessibility name and description must not be empty"))
+    Ok(UIAccessibility{name: ~name, description: ~description, states: [UIAccessibilityState]{}})
+}
+pub fn accessibility_named(name: String) -> UIAccessibility UIHostError! { accessibility_new(Val(name), None) }
+pub fn accessibility_with_state(metadata: ^UIAccessibility, state: ^UIAccessibilityState) -> UIAccessibility Never! {
+    out := ^metadata
+    &out.states.push(^state)
+    out
+}
+pub fn projection_node(projection: UIAccessibilityProjection) -> @UINodeID Never! from projection { @projection.node }
+pub fn projection_metadata(projection: UIAccessibilityProjection) -> @UIAccessibility Never! from projection { @projection.metadata }
+
+// Rust:1658–1705. The storage seam is generic; Ui.rs owns its UINode impl.
+pub trait UIAccessibilityTarget {
+    fn attach_jet_ui_accessibility(&self, accessibility: ^UIAccessibility) UIHostError!
+    fn jet_ui_accessibility(self) -> (@UIAccessibility)? Never! from self
+}
+pub fn accessibility_attach<T: UIAccessibilityTarget>(node: &T, accessibility: ^UIAccessibility) UIHostError! {
+    &node.attach_jet_ui_accessibility(^accessibility)
+}
+pub fn accessibility_project<T: UIAccessibilityTarget>(node: T, node_id: ^UINodeID) -> UIAccessibilityProjection? Never! {
+    if node.jet_ui_accessibility() == .Val(metadata) -> return Val(UIAccessibilityProjection{node: ^node_id, metadata: ~metadata})
+    None
+}
+// Rust:2256–2268,2367–2389. Facts gate storage access; no second tree exists.
+pub fn headless_attach_accessibility<T: UIAccessibilityTarget>(facts: UICapabilityFacts, node: &T, accessibility: ^UIAccessibility) UIHostError! {
+    capabilities_require(facts, .Accessibility) ?? return Err(err)
+    accessibility_attach(&node, ^accessibility)
+}
+pub fn headless_project_accessibility<T: UIAccessibilityTarget>(facts: UICapabilityFacts, node: T, node_id: ^UINodeID) -> UIAccessibilityProjection? UIHostError! {
+    capabilities_require(facts, .Accessibility) ?? return Err(err)
+    Ok(accessibility_project(node, ^node_id))
+}
+
+// Complete portable HeadlessHost operation bodies, with the original fields
+// passed explicitly until #4499 permits its one canonical registry carrier.
+// These are not native providers, alternate host instances, or mocked journeys.
+// Rust:2232–2253,2331–2342. Queue<T> is the canonical amortized-O(1) deque.
+pub fn queue_ime_event(facts: UICapabilityFacts, events: &Queue<UIIMEEvent>, event: ^UIIMEEvent) UIHostError! {
+    capabilities_require(facts, .IME) ?? return Err(err)
+    if events.len() >= HOST_MAX_QUEUED_EVENTS -> return Err(UIHostError.QueueFull("IME"))
+    &events.push_back(^event)
+    Ok()
+}
+pub fn queue_drag_event(facts: UICapabilityFacts, events: &Queue<UIDragEvent>, event: ^UIDragEvent) UIHostError! {
+    capabilities_require(facts, .DragDrop) ?? return Err(err)
+    if events.len() >= HOST_MAX_QUEUED_EVENTS -> return Err(UIHostError.QueueFull("drag/drop"))
+    &events.push_back(^event)
+    Ok()
+}
+pub fn poll_ime_event(facts: UICapabilityFacts, events: &Queue<UIIMEEvent>) -> UIIMEEvent? UIHostError! {
+    capabilities_require(facts, .IME) ?? return Err(err)
+    Ok(&events.pop_front())
+}
+pub fn poll_drag_event(facts: UICapabilityFacts, events: &Queue<UIDragEvent>) -> UIDragEvent? UIHostError! {
+    capabilities_require(facts, .DragDrop) ?? return Err(err)
+    Ok(&events.pop_front())
+}
+// Rust:2276–2328. Capability denial precedes request validation/state mutation.
+pub fn headless_open_file(facts: UICapabilityFacts, request: UIFileDialogRequest) -> UIFileDialogSelection UIHostError! {
+    capabilities_require(facts, .FileDialog) ?? return Err(err)
+    if request.kind != .Open -> return Err(UIHostError.InvalidRequest("open_file requires an open dialog request"))
+    validate_request(request) ?? return Err(err)
+    Err(UIHostError.Cancelled(.Headless))
+}
+pub fn headless_save_file(facts: UICapabilityFacts, request: UIFileDialogRequest) -> UIFileDialogSelection UIHostError! {
+    capabilities_require(facts, .FileDialog) ?? return Err(err)
+    if request.kind != .Save -> return Err(UIHostError.InvalidRequest("save_file requires a save dialog request"))
+    validate_request(request) ?? return Err(err)
+    Err(UIHostError.Cancelled(.Headless))
+}
+pub fn headless_read_clipboard(facts: UICapabilityFacts, clipboard: String) -> UIClipboardText UIHostError! {
+    capabilities_require(facts, .Clipboard) ?? return Err(err)
+    Ok(UIClipboardText{text: ~clipboard, selection: None})
+}
+pub fn headless_write_clipboard(facts: UICapabilityFacts, clipboard: &String, text: ^String) -> UIClipboardWrite UIHostError! {
+    capabilities_require(facts, .Clipboard) ?? return Err(err)
+    raw :: unicode.utf8_bytes(text)
+    characters := 0
+    at := 0
+    loop at < raw.len() { at += unicode.utf8_width_at(raw, at); characters += 1 }
+    clipboard = ^text
+    Ok(UIClipboardWrite{characters: characters})
+}
+
+// Gated original anchors, not success/failure stand-ins:
+// 228–800: Unix Api/ShapeResources/HbGlyphInfo/HbGlyphPosition, all C typedefs,
+// RTLD_NOW=2, READONLY=0, MAX_GLYPHS=1048576, loader and reverse-order cleanup;
+// wasm's identical shapes/imports and unsupported-target None selection.
+// 813,821,836,843,874,927,1753,1757,1874,2392: bundled immutable three font
+// assets, retained byte identity/loans, selected HarfBuzz shape/cleanup. No
+// approximate run is substituted for these gated native shaping functions.
+// 1578–1612,2199–2230,2272,2345–2365: ordered composite-key registry and host
+// carrier/default/registration/dispatch (#4499); all other host field kernels
+// above are ready for composition but are not a deletion-readiness claim.
+// 1710–1750: dynamic UIHost object integration and canonical UINode impl
+// (packet0192); generic accessibility storage/host bodies above are complete.
+// 1775–1868: actual per-thread borrowed dynamic-host slot, mutable borrow
+// exclusion, nested guard restoration on return/stop/unwind, persistent default
+// headless slot (#4494), including scope/drop/current-host/front-door calls.
+// 1881–2116: wasm repr(C) 48-byte glyph records; text/family/output/error TLS,
+// aligned U32 scratch and pointer-u32 export/import/no-mangle (#4494/#4483).
+// Limits: text4194304, family1024, glyphs1048576. Original validation order is
+// limit -> style -> family pointer -> family length -> family UTF8 -> family
+// default/empty -> text pointer -> text length -> text UTF8 -> real shaping;
+// failures replace error bytes and return -1 without changing previous output.
+// #4409 not used: this file returns UIHostError/String failures, never IOError.
+// #4500 not used here: headless deque bodies only push/pop/len, never iterate.

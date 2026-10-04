@@ -1,0 +1,113 @@
+// PORT-PENDING 0142 crates-jet-codegen-src-prelude-core-collectionfailure-module-group: crates/jet-codegen/src/Prelude/Core/MapKey.rs:1-109
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS 
+//RS /// Structural carrier used by every map-key adapter.
+//RS #[derive(Clone, Debug)]
+//RS pub enum JetMapKey {
+//RS     Int(i64),
+//RS     /// An exact `Int` outside the `i64` range: sign plus normalized magnitude
+//RS     /// limbs (little-endian base 10^9, no high zero limb). Values that fit
+//RS     /// `i64` always use `Int`, so each value has exactly one key.
+//RS     BigInt {
+//RS         negative: bool,
+//RS         limbs: Vec<u32>,
+//RS     },
+//RS     UInt(u64),
+//RS     String(String),
+//RS     Bool(bool),
+//RS     Char(char),
+//RS     Record(Vec<JetMapKey>),
+//RS }
+//RS 
+//RS fn jet_map_key_kind(key: &JetMapKey) -> u8 {
+//RS     match key {
+//RS         JetMapKey::Int(_) | JetMapKey::BigInt { .. } => 0,
+//RS         JetMapKey::UInt(_) => 1,
+//RS         JetMapKey::String(_) => 2,
+//RS         JetMapKey::Bool(_) => 3,
+//RS         JetMapKey::Char(_) => 4,
+//RS         JetMapKey::Record(_) => 5,
+//RS     }
+//RS }
+//RS 
+//RS /// The single deep value-semantic comparison used by map-key adapters.
+//RS pub fn jet_map_key_cmp(left: &JetMapKey, right: &JetMapKey) -> std::cmp::Ordering {
+//RS     match (left, right) {
+//RS         (JetMapKey::Int(left), JetMapKey::Int(right)) => left.cmp(right),
+//RS         // A `BigInt` lies outside the `i64` range, so its sign alone orders it
+//RS         // against every `Int`.
+//RS         (JetMapKey::Int(_), JetMapKey::BigInt { negative, .. }) => {
+//RS             if *negative {
+//RS                 std::cmp::Ordering::Greater
+//RS             } else {
+//RS                 std::cmp::Ordering::Less
+//RS             }
+//RS         }
+//RS         (JetMapKey::BigInt { negative, .. }, JetMapKey::Int(_)) => {
+//RS             if *negative {
+//RS                 std::cmp::Ordering::Less
+//RS             } else {
+//RS                 std::cmp::Ordering::Greater
+//RS             }
+//RS         }
+//RS         (
+//RS             JetMapKey::BigInt {
+//RS                 negative: left_negative,
+//RS                 limbs: left,
+//RS             },
+//RS             JetMapKey::BigInt {
+//RS                 negative: right_negative,
+//RS                 limbs: right,
+//RS             },
+//RS         ) => {
+//RS             if left_negative != right_negative {
+//RS                 return right_negative.cmp(left_negative);
+//RS             }
+//RS             let magnitude = left
+//RS                 .len()
+//RS                 .cmp(&right.len())
+//RS                 .then_with(|| left.iter().rev().cmp(right.iter().rev()));
+//RS             if *left_negative {
+//RS                 magnitude.reverse()
+//RS             } else {
+//RS                 magnitude
+//RS             }
+//RS         }
+//RS         (JetMapKey::UInt(left), JetMapKey::UInt(right)) => left.cmp(right),
+//RS         (JetMapKey::String(left), JetMapKey::String(right)) => left.cmp(right),
+//RS         (JetMapKey::Bool(left), JetMapKey::Bool(right)) => left.cmp(right),
+//RS         (JetMapKey::Char(left), JetMapKey::Char(right)) => left.cmp(right),
+//RS         (JetMapKey::Record(left), JetMapKey::Record(right)) => {
+//RS             for (left, right) in left.iter().zip(right) {
+//RS                 let ordering = jet_map_key_cmp(left, right);
+//RS                 if ordering != std::cmp::Ordering::Equal {
+//RS                     return ordering;
+//RS                 }
+//RS             }
+//RS             left.len().cmp(&right.len())
+//RS         }
+//RS         _ => jet_map_key_kind(left).cmp(&jet_map_key_kind(right)),
+//RS     }
+//RS }
+//RS 
+//RS impl PartialEq for JetMapKey {
+//RS     fn eq(&self, other: &Self) -> bool {
+//RS         jet_map_key_cmp(self, other) == std::cmp::Ordering::Equal
+//RS     }
+//RS }
+//RS 
+//RS impl Eq for JetMapKey {}
+//RS 
+//RS impl PartialOrd for JetMapKey {
+//RS     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+//RS         Some(jet_map_key_cmp(self, other))
+//RS     }
+//RS }
+//RS 
+//RS impl Ord for JetMapKey {
+//RS     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+//RS         jet_map_key_cmp(self, other)
+//RS     }
+//RS }
+// END-PORT-PENDING 0142 crates/jet-codegen/src/Prelude/Core/MapKey.rs:1-109
+

@@ -1,0 +1,42 @@
+// Measurement.rs:1–59: the Float pair policy; no second Measurement carrier.
+// The compiler-owned measured grade marshals these two scalar fields by value.
+use core.math as measurement_math
+
+// Rust jet_measurement_kernel_new (:3–7).
+pub fn jet_measurement_kernel_new(value: Float, uncertainty: Float) -> (value: Float, uncertainty: Float) Never! {
+    (value: value, uncertainty: measurement_math.abs_float(uncertainty))
+}
+// Rust jet_measurement_kernel_from_relative (:8–13).
+pub fn jet_measurement_kernel_from_relative(value: Float, relative_uncertainty: Float) -> (value: Float, uncertainty: Float) Never! {
+    jet_measurement_kernel_new(value, measurement_math.abs_float(value) * measurement_math.abs_float(relative_uncertainty))
+}
+// Rust jet_measurement_kernel_add (:16–21).
+pub fn jet_measurement_kernel_add(left: (value: Float, uncertainty: Float), right: (value: Float, uncertainty: Float)) -> (value: Float, uncertainty: Float) Never! {
+    (value: left.value + right.value, uncertainty: measurement_math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
+}
+// Rust jet_measurement_kernel_sub (:23–28).
+pub fn jet_measurement_kernel_sub(left: (value: Float, uncertainty: Float), right: (value: Float, uncertainty: Float)) -> (value: Float, uncertainty: Float) Never! {
+    (value: left.value - right.value, uncertainty: measurement_math.sqrt(left.uncertainty * left.uncertainty + right.uncertainty * right.uncertainty))
+}
+// Rust jet_measurement_kernel_mul (:30–35). powi(2) is one Float multiply.
+pub fn jet_measurement_kernel_mul(left: (value: Float, uncertainty: Float), right: (value: Float, uncertainty: Float)) -> (value: Float, uncertainty: Float) Never! {
+    a :: right.value * left.uncertainty
+    b :: left.value * right.uncertainty
+    (value: left.value * right.value, uncertainty: measurement_math.sqrt(a * a + b * b))
+}
+// Rust jet_measurement_kernel_div (:37–43): keep the derivative's evaluation order.
+pub fn jet_measurement_kernel_div(left: (value: Float, uncertainty: Float), right: (value: Float, uncertainty: Float)) -> (value: Float, uncertainty: Float) Never! {
+    a :: left.uncertainty / right.value
+    b :: left.value * right.uncertainty / (right.value * right.value)
+    (value: left.value / right.value, uncertainty: measurement_math.sqrt(a * a + b * b))
+}
+// Rust jet_measurement_kernel_sqrt (:44–54).
+pub fn jet_measurement_kernel_sqrt(value: (value: Float, uncertainty: Float)) -> (value: Float, uncertainty: Float) Never! {
+    root :: measurement_math.sqrt(value.value)
+    if root == (Float{0.0}) && value.uncertainty == (Float{0.0}) -> return (value: root, uncertainty: Float{0.0})
+    (value: root, uncertainty: value.uncertainty / (Float{2.0} * root))
+}
+// Rust jet_measurement_kernel_show (:57–59): Debug Float spelling on both fields.
+pub fn jet_measurement_kernel_show(value: (value: Float, uncertainty: Float)) -> String Never! {
+    "{value.value:Debug} ± {value.uncertainty:Debug}"
+}

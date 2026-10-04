@@ -1,0 +1,810 @@
+// DevtoolsTopologyPanel.rs:1-1807. Sole bounded topology owner (#2454).
+// Main publishes this private fragment and the Foundation Devtools dependencies.
+// Facts intentionally contain no credentials, authority proof or opaque handles.
+// #4392/#4318: retaining projections and Unicode byte views need canonical loans;
+// bootstrap utf8_bytes still materializes bytes. No native/allocation proof claimed.
+use jet_foundation.Devtools.Observation as topology_event
+use jet_foundation.Encoding.Json as topology_json
+use core.text.runtime.kernel_unicode_string as topology_text
+use core.text.runtime.unicode_assets as topology_assets
+use core.text.runtime.assets.unicode_white_space as topology_whitespace
+
+// Rust constants :10-15; byte lengths, never scalar lengths.
+pub JET_DEVTOOLS_TOPOLOGY_MAX_FACTS :: 256
+pub JET_DEVTOOLS_TOPOLOGY_MAX_RESTARTS :: 64
+JET_DEVTOOLS_TOPOLOGY_MAX_TEXT_BYTES :: 256
+JET_DEVTOOLS_TOPOLOGY_MAX_RESTART_BUDGET :: U32{1000}
+JET_DEVTOOLS_TOPOLOGY_MAX_RESTART_WINDOW_MS :: U64{86400000}
+JET_DEVTOOLS_TOPOLOGY_MAX_BYTES :: U64{1099511627776}
+
+// Rust :18-59. Typed topology errors are distinct from protocol Err! strings.
+#Error
+pub enum JetDevtoolsTopologyError {
+    TooManyFacts
+    TooManyRestarts(id: String)
+    DuplicateIdentity(id: String)
+    InvalidText(field: String)
+    InvalidEndpointAddress
+    InvalidRestartHistory(id: String)
+    InvalidRestartPolicy(id: String)
+    InvalidByteCount(id: String)
+    Cycle(id: String)
+    MissingParent(child_id: String, parent_id: String)
+    UnknownRoot(id: String)
+}
+impl JetDevtoolsTopologyError {
+    // Rust Display::fmt :33.
+    pub fn show(self) -> String Never! {
+        if self == {
+            .TooManyFacts -> "topology fact limit exceeded"
+            .TooManyRestarts(id) -> "restart history limit exceeded for `{id}`"
+            .DuplicateIdentity(id) -> "duplicate topology identity `{id}`"
+            .InvalidText(field) -> "invalid topology {field}"
+            .InvalidEndpointAddress -> "invalid topology endpoint address"
+            .InvalidRestartHistory(id) -> "invalid restart history for `{id}`"
+            .InvalidRestartPolicy(id) -> "invalid restart policy for `{id}`"
+            .InvalidByteCount(id) -> "invalid endpoint byte count for `{id}`"
+            .Cycle(id) -> "topology cycle at `{id}`"
+            .MissingParent(child, parent) -> "topology parent `{parent}` for `{child}` is missing"
+            .UnknownRoot(id) -> "unknown topology root `{id}`"
+        }
+    }
+}
+// Rust enums/as_str :62-203,238-324,362-405. Declaration order is retained.
+pub enum JetDevtoolsTopologySupervisorState { Starting, Running, Failed, Restarting, Stopping, Stopped, Escalated }
+impl JetDevtoolsTopologySupervisorState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Starting -> "starting", .Running -> "running", .Failed -> "failed", .Restarting -> "restarting", .Stopping -> "stopping", .Stopped -> "stopped", .Escalated -> "escalated" }
+    }
+}
+pub enum JetDevtoolsTopologyProcessState { Starting, Running, Failed, Restarting, Stopping, Stopped, Exited }
+impl JetDevtoolsTopologyProcessState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Starting -> "starting", .Running -> "running", .Failed -> "failed", .Restarting -> "restarting", .Stopping -> "stopping", .Stopped -> "stopped", .Exited -> "exited" }
+    }
+}
+pub enum JetDevtoolsTopologyTaskState { Created, Runnable, Running, Waiting, Succeeded, Failed, Cancelled }
+impl JetDevtoolsTopologyTaskState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Created -> "created", .Runnable -> "runnable", .Running -> "running", .Waiting -> "waiting", .Succeeded -> "succeeded", .Failed -> "failed", .Cancelled -> "cancelled" }
+    }
+}
+pub enum JetDevtoolsTopologyReadinessState { Unknown, Checking, Ready, NotReady, Failed }
+impl JetDevtoolsTopologyReadinessState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Unknown -> "unknown", .Checking -> "checking", .Ready -> "ready", .NotReady -> "not_ready", .Failed -> "failed" }
+    }
+}
+pub enum JetDevtoolsTopologyReadinessReason { NotChecked, Starting, WaitingForParent, WaitingForProcess, WaitingForEndpoint, ProbePassed, ProbeFailed, TimedOut, AuthorityRevoked, Stopped }
+impl JetDevtoolsTopologyReadinessReason {
+    pub fn as_str(self) -> String Never! {
+        if self == { .NotChecked -> "not_checked", .Starting -> "starting", .WaitingForParent -> "waiting_for_parent", .WaitingForProcess -> "waiting_for_process", .WaitingForEndpoint -> "waiting_for_endpoint", .ProbePassed -> "probe_passed", .ProbeFailed -> "probe_failed", .TimedOut -> "timed_out", .AuthorityRevoked -> "authority_revoked", .Stopped -> "stopped" }
+    }
+}
+pub enum JetDevtoolsTopologyRestartStrategy { OneForOne, OneForAll, RestForOne }
+impl JetDevtoolsTopologyRestartStrategy {
+    pub fn as_str(self) -> String Never! {
+        if self == { .OneForOne -> "one_for_one", .OneForAll -> "one_for_all", .RestForOne -> "rest_for_one" }
+    }
+}
+pub enum JetDevtoolsTopologyFailureKind { Failed, Cancelled, TimedOut, WorkerLost, Escalated }
+impl JetDevtoolsTopologyFailureKind {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Failed -> "failed", .Cancelled -> "cancelled", .TimedOut -> "timed_out", .WorkerLost -> "worker_lost", .Escalated -> "escalated" }
+    }
+}
+pub enum JetDevtoolsTopologyEndpointConnectionState { Unknown, Connecting, Connected, Draining, Closed, Failed }
+impl JetDevtoolsTopologyEndpointConnectionState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Unknown -> "unknown", .Connecting -> "connecting", .Connected -> "connected", .Draining -> "draining", .Closed -> "closed", .Failed -> "failed" }
+    }
+}
+pub enum JetDevtoolsTopologyRestartReason { Failed, Exited, HealthCheck, Manual, Policy }
+impl JetDevtoolsTopologyRestartReason {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Failed -> "failed", .Exited -> "exited", .HealthCheck -> "health_check", .Manual -> "manual", .Policy -> "policy" }
+    }
+}
+pub enum JetDevtoolsTopologyFreshnessState { Fresh, Stale, Unknown }
+impl JetDevtoolsTopologyFreshnessState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Fresh -> "fresh", .Stale -> "stale", .Unknown -> "unknown" }
+    }
+}
+pub enum JetDevtoolsTopologyEndpointScheme { Tcp, Http, Https, Unix }
+impl JetDevtoolsTopologyEndpointScheme {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Tcp -> "tcp", .Http -> "http", .Https -> "https", .Unix -> "unix" }
+    }
+}
+pub enum JetDevtoolsTopologyEndpointAuthorityState { Unknown, Unverified, Verified, Revoked }
+impl JetDevtoolsTopologyEndpointAuthorityState {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Unknown -> "unknown", .Unverified -> "unverified", .Verified -> "verified", .Revoked -> "revoked" }
+    }
+}
+pub enum JetDevtoolsTopologyNodeKind { Supervisor, Process, Task, Endpoint, Readiness }
+
+// Rust :206-235,303-307,327-359.
+pub struct JetDevtoolsTopologyRestartPolicy {
+    pub strategy: JetDevtoolsTopologyRestartStrategy
+    pub max_restarts: U32
+    pub window_ms: U64
+}
+impl JetDevtoolsTopologyRestartPolicy {
+    pub fn new(strategy: JetDevtoolsTopologyRestartStrategy, max_restarts: U32, window_ms: U64) -> JetDevtoolsTopologyRestartPolicy JetDevtoolsTopologyError! {
+        policy :: JetDevtoolsTopologyRestartPolicy{strategy: strategy, max_restarts: max_restarts, window_ms: window_ms}
+        jet_devtools_topology_validate_restart_policy(policy, "<policy>") ?? return Err(err)
+        policy
+    }
+    pub fn render_json(self) -> String Never! {
+        strategy :: jet_devtools_topology_json_string(self.strategy.as_str())
+        "{{\"strategy\":{strategy},\"max_restarts\":{self.max_restarts},\"window_ms\":{self.window_ms}}}"
+    }
+}
+pub struct JetDevtoolsTopologyRestartFact { pub at_ms: U64, pub duration_ms: U64, pub reason: JetDevtoolsTopologyRestartReason }
+pub struct JetDevtoolsTopologyFreshness { pub state: JetDevtoolsTopologyFreshnessState, pub observed_at_ms: U64 }
+impl JetDevtoolsTopologyFreshness {
+    pub fn fresh(at: U64) -> JetDevtoolsTopologyFreshness Never! { JetDevtoolsTopologyFreshness{state: .Fresh, observed_at_ms: at} }
+    pub fn stale(at: U64) -> JetDevtoolsTopologyFreshness Never! { JetDevtoolsTopologyFreshness{state: .Stale, observed_at_ms: at} }
+    pub fn unknown(at: U64) -> JetDevtoolsTopologyFreshness Never! { JetDevtoolsTopologyFreshness{state: .Unknown, observed_at_ms: at} }
+    pub fn default() -> JetDevtoolsTopologyFreshness Never! { JetDevtoolsTopologyFreshness.unknown(U64{0}) }
+}
+
+// Rust :409-469. Constructors move all caller-owned fact payloads.
+pub struct JetDevtoolsTopologySupervisorFact {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub state: JetDevtoolsTopologySupervisorState
+    pub restart_history: [JetDevtoolsTopologyRestartFact]
+    pub owner: String?
+    pub restart_policy: JetDevtoolsTopologyRestartPolicy?
+    pub failure: JetDevtoolsTopologyFailureKind?
+    pub duration_ms: U64?
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologySupervisorFact {
+    pub fn new(id: ^String, source: ^String, parent_id: ^String?, state: JetDevtoolsTopologySupervisorState, restart_history: ^[JetDevtoolsTopologyRestartFact], freshness: JetDevtoolsTopologyFreshness) -> JetDevtoolsTopologySupervisorFact JetDevtoolsTopologyError! {
+        fact :: JetDevtoolsTopologySupervisorFact{id: ^id, source: ^source, parent_id: ^parent_id, state: state, restart_history: ^restart_history, owner: None, restart_policy: None, failure: None, duration_ms: None, freshness: freshness}
+        jet_devtools_topology_validate_supervisor(fact) ?? return Err(err)
+        fact
+    }
+    pub fn with_owner(^self, owner: ^String) -> JetDevtoolsTopologySupervisorFact Never! {
+        fact := ^self
+        fact.owner = Val(^owner)
+        fact
+    }
+    pub fn with_restart_policy(^self, policy: ^JetDevtoolsTopologyRestartPolicy) -> JetDevtoolsTopologySupervisorFact Never! {
+        fact := ^self
+        fact.restart_policy = Val(^policy)
+        fact
+    }
+    pub fn with_failure(^self, failure: JetDevtoolsTopologyFailureKind) -> JetDevtoolsTopologySupervisorFact Never! {
+        fact := ^self
+        fact.failure = Val(failure)
+        fact
+    }
+    pub fn with_duration_ms(^self, duration_ms: U64) -> JetDevtoolsTopologySupervisorFact Never! {
+        fact := ^self
+        fact.duration_ms = Val(duration_ms)
+        fact
+    }
+    // Rust :794. Protocol errors preserve their exact original message.
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        jet_devtools_topology_validate_supervisor(self) ?? return Err(err.show())
+        jet_devtools_topology_event(self.freshness.observed_at_ms, ^source, "Supervisor", self.id, jet_devtools_topology_supervisor_fields(self))
+    }
+}
+// Rust :472-521.
+pub struct JetDevtoolsTopologyProcessFact {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub state: JetDevtoolsTopologyProcessState
+    pub pid: U64?
+    pub restart_history: [JetDevtoolsTopologyRestartFact]
+    pub owner: String?
+    pub restart_policy: JetDevtoolsTopologyRestartPolicy?
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologyProcessFact {
+    pub fn new(id: ^String, source: ^String, parent_id: ^String?, state: JetDevtoolsTopologyProcessState, pid: U64?, restart_history: ^[JetDevtoolsTopologyRestartFact], freshness: JetDevtoolsTopologyFreshness) -> JetDevtoolsTopologyProcessFact JetDevtoolsTopologyError! {
+        fact :: JetDevtoolsTopologyProcessFact{id: ^id, source: ^source, parent_id: ^parent_id, state: state, pid: pid, restart_history: ^restart_history, owner: None, restart_policy: None, freshness: freshness}
+        jet_devtools_topology_validate_process(fact) ?? return Err(err)
+        fact
+    }
+    pub fn with_owner(^self, owner: ^String) -> JetDevtoolsTopologyProcessFact Never! {
+        fact := ^self
+        fact.owner = Val(^owner)
+        fact
+    }
+    pub fn with_restart_policy(^self, policy: ^JetDevtoolsTopologyRestartPolicy) -> JetDevtoolsTopologyProcessFact Never! {
+        fact := ^self
+        fact.restart_policy = Val(^policy)
+        fact
+    }
+    // Rust :810.
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        jet_devtools_topology_validate_process(self) ?? return Err(err.show())
+        jet_devtools_topology_event(self.freshness.observed_at_ms, ^source, "Process", self.id, jet_devtools_topology_process_fields(self))
+    }
+}
+// Rust :524-591.
+pub struct JetDevtoolsTopologyTaskFact {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub state: JetDevtoolsTopologyTaskState
+    pub restart_history: [JetDevtoolsTopologyRestartFact]
+    pub owner: String?
+    pub wait_target: String?
+    pub duration_ms: U64?
+    pub failure: JetDevtoolsTopologyFailureKind?
+    pub restart_policy: JetDevtoolsTopologyRestartPolicy?
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologyTaskFact {
+    pub fn new(id: ^String, source: ^String, parent_id: ^String?, state: JetDevtoolsTopologyTaskState, restart_history: ^[JetDevtoolsTopologyRestartFact], freshness: JetDevtoolsTopologyFreshness) -> JetDevtoolsTopologyTaskFact JetDevtoolsTopologyError! {
+        fact :: JetDevtoolsTopologyTaskFact{id: ^id, source: ^source, parent_id: ^parent_id, state: state, restart_history: ^restart_history, owner: None, wait_target: None, duration_ms: None, failure: None, restart_policy: None, freshness: freshness}
+        jet_devtools_topology_validate_task(fact) ?? return Err(err)
+        fact
+    }
+    pub fn with_owner(^self, owner: ^String) -> JetDevtoolsTopologyTaskFact Never! {
+        fact := ^self
+        fact.owner = Val(^owner)
+        fact
+    }
+    pub fn with_wait_target(^self, target: ^String) -> JetDevtoolsTopologyTaskFact Never! {
+        fact := ^self
+        fact.wait_target = Val(^target)
+        fact
+    }
+    pub fn with_duration_ms(^self, duration_ms: U64) -> JetDevtoolsTopologyTaskFact Never! {
+        fact := ^self
+        fact.duration_ms = Val(duration_ms)
+        fact
+    }
+    pub fn with_failure(^self, failure: JetDevtoolsTopologyFailureKind) -> JetDevtoolsTopologyTaskFact Never! {
+        fact := ^self
+        fact.failure = Val(failure)
+        fact
+    }
+    pub fn with_restart_policy(^self, policy: ^JetDevtoolsTopologyRestartPolicy) -> JetDevtoolsTopologyTaskFact Never! {
+        fact := ^self
+        fact.restart_policy = Val(^policy)
+        fact
+    }
+    // Rust :826.
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        jet_devtools_topology_validate_task(self) ?? return Err(err.show())
+        jet_devtools_topology_event(self.freshness.observed_at_ms, ^source, "Task", self.id, jet_devtools_topology_task_fields(self))
+    }
+}
+// Rust :594-668.
+pub struct JetDevtoolsTopologyEndpointFact {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub scheme: JetDevtoolsTopologyEndpointScheme
+    pub host: String
+    pub port: U16?
+    pub authority_state: JetDevtoolsTopologyEndpointAuthorityState
+    pub owner: String?
+    pub connection: JetDevtoolsTopologyEndpointConnectionState
+    pub bytes_in: U64?
+    pub bytes_out: U64?
+    pub restart_policy: JetDevtoolsTopologyRestartPolicy?
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologyEndpointFact {
+    pub fn new(id: ^String, source: ^String, parent_id: ^String?, scheme: JetDevtoolsTopologyEndpointScheme, host: ^String, port: U16?, authority: JetDevtoolsTopologyEndpointAuthorityState, freshness: JetDevtoolsTopologyFreshness) -> JetDevtoolsTopologyEndpointFact JetDevtoolsTopologyError! {
+        fact :: JetDevtoolsTopologyEndpointFact{id: ^id, source: ^source, parent_id: ^parent_id, scheme: scheme, host: ^host, port: port, authority_state: authority, owner: None, connection: .Unknown, bytes_in: None, bytes_out: None, restart_policy: None, freshness: freshness}
+        jet_devtools_topology_validate_endpoint(fact) ?? return Err(err)
+        fact
+    }
+    pub fn display(self) -> JetDevtoolsTopologyEndpointDisplay Never! {
+        JetDevtoolsTopologyEndpointDisplay{scheme: self.scheme, host: ~self.host, port: self.port, authority_state: self.authority_state}
+    }
+    pub fn with_owner(^self, owner: ^String) -> JetDevtoolsTopologyEndpointFact Never! {
+        fact := ^self
+        fact.owner = Val(^owner)
+        fact
+    }
+    pub fn with_connection(^self, connection: JetDevtoolsTopologyEndpointConnectionState) -> JetDevtoolsTopologyEndpointFact Never! {
+        fact := ^self
+        fact.connection = connection
+        fact
+    }
+    pub fn with_restart_policy(^self, policy: ^JetDevtoolsTopologyRestartPolicy) -> JetDevtoolsTopologyEndpointFact Never! {
+        fact := ^self
+        fact.restart_policy = Val(^policy)
+        fact
+    }
+    // Rust :842.
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        jet_devtools_topology_validate_endpoint(self) ?? return Err(err.show())
+        jet_devtools_topology_event(self.freshness.observed_at_ms, ^source, "Endpoint", self.id, jet_devtools_topology_endpoint_fields(self))
+    }
+}
+// Rust :671-700.
+pub struct JetDevtoolsTopologyReadinessFact {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub state: JetDevtoolsTopologyReadinessState
+    pub reason: JetDevtoolsTopologyReadinessReason
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologyReadinessFact {
+    pub fn new(id: ^String, source: ^String, parent_id: ^String?, state: JetDevtoolsTopologyReadinessState, reason: JetDevtoolsTopologyReadinessReason, freshness: JetDevtoolsTopologyFreshness) -> JetDevtoolsTopologyReadinessFact JetDevtoolsTopologyError! {
+        fact :: JetDevtoolsTopologyReadinessFact{id: ^id, source: ^source, parent_id: ^parent_id, state: state, reason: reason, freshness: freshness}
+        jet_devtools_topology_validate_readiness(fact) ?? return Err(err)
+        fact
+    }
+    // Rust :858.
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        jet_devtools_topology_validate_readiness(self) ?? return Err(err.show())
+        jet_devtools_topology_event(self.freshness.observed_at_ms, ^source, "Readiness", self.id, jet_devtools_topology_readiness_fields(self))
+    }
+}
+// Rust :703-791,873-886. From<T>::from :712,718,724,730,736 maps directly
+// to these owning enum constructors, not a second conversion facade.
+pub enum JetDevtoolsTopologyFact {
+    Supervisor(fact: JetDevtoolsTopologySupervisorFact)
+    Process(fact: JetDevtoolsTopologyProcessFact)
+    Task(fact: JetDevtoolsTopologyTaskFact)
+    Endpoint(fact: JetDevtoolsTopologyEndpointFact)
+    Readiness(fact: JetDevtoolsTopologyReadinessFact)
+}
+impl JetDevtoolsTopologyFact {
+    pub fn id(self) -> @String Never! from self {
+        if self == { .Supervisor(f) -> @f.id, .Process(f) -> @f.id, .Task(f) -> @f.id, .Endpoint(f) -> @f.id, .Readiness(f) -> @f.id }
+    }
+    pub fn source(self) -> @String Never! from self {
+        if self == { .Supervisor(f) -> @f.source, .Process(f) -> @f.source, .Task(f) -> @f.source, .Endpoint(f) -> @f.source, .Readiness(f) -> @f.source }
+    }
+    pub fn parent_id(self) -> (@String)? Never! from self {
+        if self == {
+            .Supervisor(f) -> {
+                if f.parent_id == .Val(id) -> return Val(@id)
+                None
+            }
+            .Process(f) -> {
+                if f.parent_id == .Val(id) -> return Val(@id)
+                None
+            }
+            .Task(f) -> {
+                if f.parent_id == .Val(id) -> return Val(@id)
+                None
+            }
+            .Endpoint(f) -> {
+                if f.parent_id == .Val(id) -> return Val(@id)
+                None
+            }
+            .Readiness(f) -> {
+                if f.parent_id == .Val(id) -> return Val(@id)
+                None
+            }
+        }
+    }
+    pub fn kind(self) -> JetDevtoolsTopologyNodeKind Never! {
+        if self == { .Supervisor(_) -> .Supervisor, .Process(_) -> .Process, .Task(_) -> .Task, .Endpoint(_) -> .Endpoint, .Readiness(_) -> .Readiness }
+    }
+    pub fn freshness(self) -> JetDevtoolsTopologyFreshness Never! {
+        if self == { .Supervisor(f) -> f.freshness, .Process(f) -> f.freshness, .Task(f) -> f.freshness, .Endpoint(f) -> f.freshness, .Readiness(f) -> f.freshness }
+    }
+    pub fn to_protocol_event(self, source: ^String) -> topology_event.JetDevtoolsEvent Err! {
+        if self == { .Supervisor(f) -> f.to_protocol_event(^source), .Process(f) -> f.to_protocol_event(^source), .Task(f) -> f.to_protocol_event(^source), .Endpoint(f) -> f.to_protocol_event(^source), .Readiness(f) -> f.to_protocol_event(^source) }
+    }
+}
+// Only envelope construction belongs to Foundation; retain original String error.
+fn jet_devtools_topology_event(at: U64, source: ^String, kind: ^String, id: String, fields: ^String) -> topology_event.JetDevtoolsEvent Err! {
+    topology_event.JetDevtoolsEvent.from_parts(at, ^source, ^kind, ~id, ^fields)
+}
+
+// Rust :888-1139: exact field order; bounded fragments joined once.
+fn jet_devtools_topology_supervisor_fields(f: JetDevtoolsTopologySupervisorFact) -> String Never! {
+    fields := jet_devtools_topology_common_fields(f.id, f.source, f.parent_id, f.freshness)
+    &fields.push(jet_devtools_topology_text_field("state", f.state.as_str()))
+    &fields.push("\"restart_history\":{jet_devtools_topology_restart_history(f.restart_history)}")
+    &fields.push(jet_devtools_topology_optional_text_field("owner", f.owner))
+    &fields.push(jet_devtools_topology_optional_policy_field("restart_policy", f.restart_policy))
+    &fields.push(jet_devtools_topology_optional_failure_field("failure", f.failure))
+    &fields.push(jet_devtools_topology_optional_u64_field("duration_ms", f.duration_ms))
+    jet_devtools_topology_object(^fields)
+}
+fn jet_devtools_topology_process_fields(f: JetDevtoolsTopologyProcessFact) -> String Never! {
+    fields := jet_devtools_topology_common_fields(f.id, f.source, f.parent_id, f.freshness)
+    &fields.push(jet_devtools_topology_text_field("state", f.state.as_str()))
+    &fields.push(jet_devtools_topology_optional_u64_field("pid", f.pid))
+    &fields.push("\"restart_history\":{jet_devtools_topology_restart_history(f.restart_history)}")
+    &fields.push(jet_devtools_topology_optional_text_field("owner", f.owner))
+    &fields.push(jet_devtools_topology_optional_policy_field("restart_policy", f.restart_policy))
+    jet_devtools_topology_object(^fields)
+}
+fn jet_devtools_topology_task_fields(f: JetDevtoolsTopologyTaskFact) -> String Never! {
+    fields := jet_devtools_topology_common_fields(f.id, f.source, f.parent_id, f.freshness)
+    &fields.push(jet_devtools_topology_text_field("state", f.state.as_str()))
+    &fields.push("\"restart_history\":{jet_devtools_topology_restart_history(f.restart_history)}")
+    &fields.push(jet_devtools_topology_optional_text_field("owner", f.owner))
+    &fields.push(jet_devtools_topology_optional_text_field("wait_target", f.wait_target))
+    &fields.push(jet_devtools_topology_optional_u64_field("duration_ms", f.duration_ms))
+    &fields.push(jet_devtools_topology_optional_failure_field("failure", f.failure))
+    &fields.push(jet_devtools_topology_optional_policy_field("restart_policy", f.restart_policy))
+    jet_devtools_topology_object(^fields)
+}
+fn jet_devtools_topology_endpoint_fields(f: JetDevtoolsTopologyEndpointFact) -> String Never! {
+    fields := jet_devtools_topology_common_fields(f.id, f.source, f.parent_id, f.freshness)
+    &fields.push(jet_devtools_topology_text_field("scheme", f.scheme.as_str()))
+    &fields.push(jet_devtools_topology_text_field("host", f.host))
+    port := None
+    if f.port == .Val(number) -> port = Val(U64.from_u16(number))
+    &fields.push(jet_devtools_topology_optional_u64_field("port", port))
+    &fields.push(jet_devtools_topology_text_field("authority_state", f.authority_state.as_str()))
+    &fields.push(jet_devtools_topology_optional_text_field("owner", f.owner))
+    &fields.push(jet_devtools_topology_text_field("connection", f.connection.as_str()))
+    &fields.push(jet_devtools_topology_optional_u64_field("bytes_in", f.bytes_in))
+    &fields.push(jet_devtools_topology_optional_u64_field("bytes_out", f.bytes_out))
+    &fields.push(jet_devtools_topology_optional_policy_field("restart_policy", f.restart_policy))
+    jet_devtools_topology_object(^fields)
+}
+fn jet_devtools_topology_readiness_fields(f: JetDevtoolsTopologyReadinessFact) -> String Never! {
+    fields := jet_devtools_topology_common_fields(f.id, f.source, f.parent_id, f.freshness)
+    &fields.push(jet_devtools_topology_text_field("state", f.state.as_str()))
+    &fields.push(jet_devtools_topology_text_field("reason", f.reason.as_str()))
+    jet_devtools_topology_object(^fields)
+}
+fn jet_devtools_topology_common_fields(id: String, source: String, parent: String?, freshness: JetDevtoolsTopologyFreshness) -> [String] Never! {
+    [String]{
+        jet_devtools_topology_text_field("id", id),
+        jet_devtools_topology_text_field("source", source),
+        jet_devtools_topology_optional_text_field("parent_id", parent),
+        jet_devtools_topology_text_field("freshness", freshness.state.as_str()),
+        "\"observed_at_ms\":{freshness.observed_at_ms}",
+    }
+}
+fn jet_devtools_topology_restart_history(history: [JetDevtoolsTopologyRestartFact]) -> String Never! {
+    values := [String]{}
+    loop restart in history {
+        reason :: jet_devtools_topology_json_string(restart.reason.as_str())
+        &values.push("{{\"at_ms\":{restart.at_ms},\"duration_ms\":{restart.duration_ms},\"reason\":{reason}}}")
+    }
+    "[{values.join(",")}]"
+}
+fn jet_devtools_topology_text_field(key: String, value: String) -> String Never! {
+    "{jet_devtools_topology_json_string(key)}:{jet_devtools_topology_json_string(value)}"
+}
+fn jet_devtools_topology_optional_text_field(key: String, value: String?) -> String Never! {
+    rendered := "null"
+    if value == .Val(text) -> rendered = jet_devtools_topology_json_string(text)
+    "{jet_devtools_topology_json_string(key)}:{rendered}"
+}
+fn jet_devtools_topology_optional_u64_field(key: String, value: U64?) -> String Never! {
+    rendered := "null"
+    if value == .Val(number) -> rendered = "{number}"
+    "\"{key}\":{rendered}"
+}
+fn jet_devtools_topology_optional_failure_field(key: String, value: JetDevtoolsTopologyFailureKind?) -> String Never! {
+    rendered := "null"
+    if value == .Val(failure) -> rendered = jet_devtools_topology_json_string(failure.as_str())
+    "\"{key}\":{rendered}"
+}
+fn jet_devtools_topology_optional_policy_field(key: String, value: JetDevtoolsTopologyRestartPolicy?) -> String Never! {
+    rendered := "null"
+    if value == .Val(policy) -> rendered = policy.render_json()
+    "\"{key}\":{rendered}"
+}
+fn jet_devtools_topology_object(fields: ^[String]) -> String Never! { "{{{fields.join(",")}}}" }
+// Rust :1141-1160 is byte-for-byte the Foundation JSON.rs:363-381 owner.
+// This private helper has no independent escape policy or second serializer.
+fn jet_devtools_topology_json_string(value: String) -> String Never! { topology_json.foundation_json_quote(value) }
+
+// Rust :1163-1192. Only safe address components, never authority proof.
+pub struct JetDevtoolsTopologyEndpointDisplay {
+    pub scheme: JetDevtoolsTopologyEndpointScheme
+    pub host: String
+    pub port: U16?
+    pub authority_state: JetDevtoolsTopologyEndpointAuthorityState
+}
+impl JetDevtoolsTopologyEndpointDisplay {
+    pub fn render(self) -> String Never! {
+        scheme :: self.scheme.as_str()
+        if self.scheme == .Unix -> return "{scheme}://{self.host}"
+        if self.port == .Val(port) -> return "{scheme}://{self.host}:{port}"
+        "{scheme}://{self.host}"
+    }
+    pub fn show(self) -> String Never! { self.render() }
+}
+// Rust :1195-1246; owned projections copy only the output's retained payloads.
+pub enum JetDevtoolsTopologyRowState {
+    Supervisor(state: JetDevtoolsTopologySupervisorState)
+    Process(state: JetDevtoolsTopologyProcessState)
+    Task(state: JetDevtoolsTopologyTaskState)
+    Endpoint(state: JetDevtoolsTopologyEndpointAuthorityState)
+    Readiness(state: JetDevtoolsTopologyReadinessState)
+}
+pub struct JetDevtoolsTopologyRow {
+    pub id: String
+    pub source: String
+    pub parent_id: String?
+    pub kind: JetDevtoolsTopologyNodeKind
+    pub state: JetDevtoolsTopologyRowState
+    pub restart_history: [JetDevtoolsTopologyRestartFact]
+    pub process_id: U64?
+    pub endpoint: JetDevtoolsTopologyEndpointDisplay?
+    pub readiness_reason: JetDevtoolsTopologyReadinessReason?
+    pub owner: String?
+    pub wait_target: String?
+    pub duration_ms: U64?
+    pub failure: JetDevtoolsTopologyFailureKind?
+    pub restart_policy: JetDevtoolsTopologyRestartPolicy?
+    pub connection: JetDevtoolsTopologyEndpointConnectionState?
+    pub bytes_in: U64?
+    pub bytes_out: U64?
+    pub freshness: JetDevtoolsTopologyFreshness
+}
+impl JetDevtoolsTopologyRow {
+    pub fn restart_count(self) -> Int Never! { self.restart_history.len() }
+}
+pub struct JetDevtoolsTopologyTreeNode {
+    pub row: JetDevtoolsTopologyRow
+    pub children: [JetDevtoolsTopologyTreeNode]
+}
+pub struct JetDevtoolsTopologyTree { pub roots: [JetDevtoolsTopologyTreeNode] }
+impl JetDevtoolsTopologyTree {
+    pub fn default() -> JetDevtoolsTopologyTree Never! { JetDevtoolsTopologyTree{roots: [JetDevtoolsTopologyTreeNode]{}} }
+    pub fn roots(self) -> View<JetDevtoolsTopologyTreeNode> Never! from self { self.roots[..] }
+}
+
+// Rust :1249-1397. String keys use the canonical map; never array emulation.
+pub struct JetDevtoolsTopologyState { facts: [String: JetDevtoolsTopologyFact] }
+impl JetDevtoolsTopologyState {
+    pub fn default() -> JetDevtoolsTopologyState Never! { JetDevtoolsTopologyState{facts: [String: JetDevtoolsTopologyFact]{}} }
+    pub fn new() -> JetDevtoolsTopologyState Never! { JetDevtoolsTopologyState.default() }
+    pub fn len(self) -> Int Never! { self.facts.len() }
+    pub fn is_empty(self) -> Bool Never! { self.facts.is_empty() }
+    // Rust :1266: validation, duplicate, capacity, cycle -- in that order.
+    pub fn ingest(&self, fact: ^JetDevtoolsTopologyFact) JetDevtoolsTopologyError! {
+        jet_devtools_topology_validate_fact(fact) ?? return Err(err)
+        id :: fact.id()
+        if self.facts.has_key(id) -> return Err(JetDevtoolsTopologyError.DuplicateIdentity{id: ~id})
+        if self.facts.len() >= JET_DEVTOOLS_TOPOLOGY_MAX_FACTS -> return Err(JetDevtoolsTopologyError.TooManyFacts)
+        if self.would_create_cycle(id, fact.parent_id()) -> return Err(JetDevtoolsTopologyError.Cycle{id: ~id})
+        self.facts[~id] = ^fact
+    }
+    // Rust :1285: Rust BTreeMap order, not map iteration order.
+    pub fn rows(self) -> [JetDevtoolsTopologyRow] Never! {
+        keys := self.facts.keys().to_list()
+        &keys.sort()
+        rows := [JetDevtoolsTopologyRow]{}
+        loop id in keys -> &rows.push(jet_devtools_topology_project_row(self.facts[id]))
+        rows
+    }
+    // Rust :1292. Sorted adjacency is built once; no per-node full-table scan.
+    pub fn tree(self, root: String?) -> JetDevtoolsTopologyTree JetDevtoolsTopologyError! {
+        self.validate_graph() ?? return Err(err)
+        if root == .Val(id) {
+            if !self.facts.has_key(id) -> return Err(JetDevtoolsTopologyError.UnknownRoot{id: ~id})
+        }
+        keys := self.facts.keys().to_list()
+        &keys.sort()
+        children := [String: [String]]{}
+        roots := [String]{}
+        loop id in keys {
+            parent :: self.facts[id].parent_id()
+            if parent == .Val(parent_id) {
+                if !children.has_key(parent_id) -> children[~parent_id] = [String]{}
+                &children[parent_id].push(~id)
+            } else {
+                &roots.push(~id)
+            }
+        }
+        // keys are already sorted, so roots and each child list are sorted.
+        if root == .Val(id) -> roots = [String]{~id}
+        tree_roots := [JetDevtoolsTopologyTreeNode]{}
+        loop id in roots -> &tree_roots.push(jet_devtools_topology_tree_node(id, self.facts, children))
+        JetDevtoolsTopologyTree{roots: ^tree_roots}
+    }
+    // Rust :1337. All loans refer to this state or the incoming fact.
+    fn would_create_cycle(self, child_id: String, parent_id: (@String)?) -> Bool Never! {
+        cursor := parent_id
+        visited := [String: Bool]{}
+        loop {
+            id :: cursor ?? break
+            if id == child_id || visited.has_key(id) -> return true
+            visited[~id] = true
+            if self.facts.get(id) == .Val(fact) {
+                cursor = fact.parent_id()
+            } else {
+                cursor = None
+            }
+        }
+        false
+    }
+    // Rust :1352: preserve first sorted starting id / first repeated or missing
+    // cursor. Memoize ONLY successfully terminated paths, so error precedence
+    // is unchanged while shared parent chains are not rescanned quadratically.
+    fn validate_graph(self) JetDevtoolsTopologyError! {
+        keys := self.facts.keys().to_list()
+        &keys.sort()
+        complete := [String: Bool]{}
+        loop id in keys {
+            visited := [String: Bool]{}
+            cursor := @id
+            loop {
+                if complete.has_key(cursor) -> break
+                if visited.has_key(cursor) -> return Err(JetDevtoolsTopologyError.Cycle{id: ~cursor})
+                visited[~cursor] = true
+                fact :: self.facts.get(cursor) ?? return Err(JetDevtoolsTopologyError.MissingParent{child_id: ~id, parent_id: ~cursor})
+                if fact.parent_id() == .Val(parent) {
+                    cursor = parent
+                } else {
+                    break
+                }
+            }
+            loop member in visited.keys() -> complete[~member] = true
+        }
+    }
+    // Rust :1379,1391: graph failure precedes event construction; no partial
+    // stream crosses the boundary. Strings copied only into owned envelopes.
+    pub fn to_protocol_events(self, source: String) -> [topology_event.JetDevtoolsEvent] Err! {
+        self.validate_graph() ?? return Err(err.show())
+        keys := self.facts.keys().to_list()
+        &keys.sort()
+        events := [topology_event.JetDevtoolsEvent]{}
+        loop id in keys {
+            event :: self.facts[id].to_protocol_event(~source) ?? return Err(err)
+            &events.push(^event)
+        }
+        events
+    }
+    // Rust protocol_events is migrated to to_protocol_events, no legacy alias.
+}
+// Rust :1399. Project directly into each owned node, avoiding Rust's temporary
+// whole row map + redundant row clone. Recursion is capped by 256 facts.
+fn jet_devtools_topology_tree_node(id: String, facts: [String: JetDevtoolsTopologyFact], children: [String: [String]]) -> JetDevtoolsTopologyTreeNode Never! {
+    fact :: facts.get(id) ?? panic("validated topology tree identity must exist")
+    nodes := [JetDevtoolsTopologyTreeNode]{}
+    if children.get(id) == .Val(ids) {
+        loop child_id in ids -> &nodes.push(jet_devtools_topology_tree_node(child_id, facts, children))
+    }
+    JetDevtoolsTopologyTreeNode{row: jet_devtools_topology_project_row(fact), children: ^nodes}
+}
+// Rust :1417-1529: every row branch, including endpoint authority (not
+// connection) as row state and all explicit absent columns.
+fn jet_devtools_topology_project_row(fact: JetDevtoolsTopologyFact) -> JetDevtoolsTopologyRow Never! {
+    state :: if fact == {
+        .Supervisor(f) -> JetDevtoolsTopologyRowState.Supervisor{state: f.state}
+        .Process(f) -> JetDevtoolsTopologyRowState.Process{state: f.state}
+        .Task(f) -> JetDevtoolsTopologyRowState.Task{state: f.state}
+        .Endpoint(f) -> JetDevtoolsTopologyRowState.Endpoint{state: f.authority_state}
+        .Readiness(f) -> JetDevtoolsTopologyRowState.Readiness{state: f.state}
+    }
+    parent := None
+    if fact.parent_id() == .Val(id) -> parent = Val(~id)
+    row := JetDevtoolsTopologyRow{
+        id: ~fact.id(), source: ~fact.source(), parent_id: ^parent, kind: fact.kind(), state: state,
+        restart_history: [JetDevtoolsTopologyRestartFact]{}, process_id: None, endpoint: None,
+        readiness_reason: None, owner: None, wait_target: None, duration_ms: None, failure: None,
+        restart_policy: None, connection: None, bytes_in: None, bytes_out: None, freshness: fact.freshness(),
+    }
+    if fact == {
+        .Supervisor(f) -> {
+            row.restart_history = ~f.restart_history
+            row.owner = ~f.owner
+            row.duration_ms = f.duration_ms
+            row.failure = f.failure
+            row.restart_policy = ~f.restart_policy
+        }
+        .Process(f) -> {
+            row.restart_history = ~f.restart_history
+            row.process_id = f.pid
+            row.owner = ~f.owner
+            row.restart_policy = ~f.restart_policy
+        }
+        .Task(f) -> {
+            row.restart_history = ~f.restart_history
+            row.owner = ~f.owner
+            row.wait_target = ~f.wait_target
+            row.duration_ms = f.duration_ms
+            row.failure = f.failure
+            row.restart_policy = ~f.restart_policy
+        }
+        .Endpoint(f) -> {
+            row.endpoint = Val(f.display())
+            row.owner = ~f.owner
+            row.restart_policy = ~f.restart_policy
+            row.connection = Val(f.connection)
+            row.bytes_in = f.bytes_in
+            row.bytes_out = f.bytes_out
+        }
+        .Readiness(f) -> row.readiness_reason = Val(f.reason)
+    }
+    row
+}
+
+// Rust :1531-1691. Validation precedence and original narrow predicates.
+fn jet_devtools_topology_validate_fact(fact: JetDevtoolsTopologyFact) JetDevtoolsTopologyError! {
+    if fact == {
+        .Supervisor(f) -> jet_devtools_topology_validate_supervisor(f)
+        .Process(f) -> jet_devtools_topology_validate_process(f)
+        .Task(f) -> jet_devtools_topology_validate_task(f)
+        .Endpoint(f) -> jet_devtools_topology_validate_endpoint(f)
+        .Readiness(f) -> jet_devtools_topology_validate_readiness(f)
+    }
+}
+fn jet_devtools_topology_validate_common(id: String, source: String, parent: String?) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_text(id, "identity") ?? return Err(err)
+    jet_devtools_topology_validate_text(source, "source") ?? return Err(err)
+    if parent == .Val(id) -> jet_devtools_topology_validate_text(id, "parent identity") ?? return Err(err)
+}
+fn jet_devtools_topology_validate_text(text: String, field: String) JetDevtoolsTopologyError! {
+    if text.is_empty() || text.count_bytes() > JET_DEVTOOLS_TOPOLOGY_MAX_TEXT_BYTES || !topology_text.isprintable(text) {
+        return Err(JetDevtoolsTopologyError.InvalidText{field: ~field})
+    }
+}
+fn jet_devtools_topology_validate_optional_text(text: String?, field: String) JetDevtoolsTopologyError! {
+    if text == .Val(value) -> jet_devtools_topology_validate_text(value, field) ?? return Err(err)
+}
+fn jet_devtools_topology_validate_restart_policy(policy: JetDevtoolsTopologyRestartPolicy, id: String) JetDevtoolsTopologyError! {
+    if policy.max_restarts == (U32{0}) || policy.max_restarts > JET_DEVTOOLS_TOPOLOGY_MAX_RESTART_BUDGET || policy.window_ms == (U64{0}) || policy.window_ms > JET_DEVTOOLS_TOPOLOGY_MAX_RESTART_WINDOW_MS {
+        return Err(JetDevtoolsTopologyError.InvalidRestartPolicy{id: ~id})
+    }
+}
+fn jet_devtools_topology_validate_optional_policy(policy: JetDevtoolsTopologyRestartPolicy?, id: String) JetDevtoolsTopologyError! {
+    if policy == .Val(value) -> jet_devtools_topology_validate_restart_policy(value, id) ?? return Err(err)
+}
+fn jet_devtools_topology_validate_bytes(bytes: U64?, id: String) JetDevtoolsTopologyError! {
+    if bytes == .Val(value) {
+        if value > JET_DEVTOOLS_TOPOLOGY_MAX_BYTES -> return Err(JetDevtoolsTopologyError.InvalidByteCount{id: ~id})
+    }
+}
+fn jet_devtools_topology_validate_restart_history(id: String, history: [JetDevtoolsTopologyRestartFact]) JetDevtoolsTopologyError! {
+    // Rust intentionally reports InvalidRestartHistory, NOT TooManyRestarts.
+    // It does not impose timestamp ordering or duration bounds.
+    if history.len() > JET_DEVTOOLS_TOPOLOGY_MAX_RESTARTS -> return Err(JetDevtoolsTopologyError.InvalidRestartHistory{id: ~id})
+}
+fn jet_devtools_topology_validate_supervisor(f: JetDevtoolsTopologySupervisorFact) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_common(f.id, f.source, f.parent_id) ?? return Err(err)
+    jet_devtools_topology_validate_optional_text(f.owner, "owner") ?? return Err(err)
+    jet_devtools_topology_validate_optional_policy(f.restart_policy, f.id) ?? return Err(err)
+    jet_devtools_topology_validate_restart_history(f.id, f.restart_history) ?? return Err(err)
+}
+fn jet_devtools_topology_validate_process(f: JetDevtoolsTopologyProcessFact) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_common(f.id, f.source, f.parent_id) ?? return Err(err)
+    jet_devtools_topology_validate_optional_text(f.owner, "owner") ?? return Err(err)
+    jet_devtools_topology_validate_optional_policy(f.restart_policy, f.id) ?? return Err(err)
+    jet_devtools_topology_validate_restart_history(f.id, f.restart_history) ?? return Err(err)
+}
+fn jet_devtools_topology_validate_task(f: JetDevtoolsTopologyTaskFact) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_common(f.id, f.source, f.parent_id) ?? return Err(err)
+    jet_devtools_topology_validate_optional_text(f.owner, "owner") ?? return Err(err)
+    jet_devtools_topology_validate_optional_text(f.wait_target, "wait target") ?? return Err(err)
+    jet_devtools_topology_validate_optional_policy(f.restart_policy, f.id) ?? return Err(err)
+    jet_devtools_topology_validate_restart_history(f.id, f.restart_history) ?? return Err(err)
+}
+fn jet_devtools_topology_validate_endpoint(f: JetDevtoolsTopologyEndpointFact) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_common(f.id, f.source, f.parent_id) ?? return Err(err)
+    jet_devtools_topology_validate_optional_text(f.owner, "owner") ?? return Err(err)
+    jet_devtools_topology_validate_optional_policy(f.restart_policy, f.id) ?? return Err(err)
+    jet_devtools_topology_validate_bytes(f.bytes_in, f.id) ?? return Err(err)
+    jet_devtools_topology_validate_bytes(f.bytes_out, f.id) ?? return Err(err)
+    if f.host.is_empty() || f.host.count_bytes() > JET_DEVTOOLS_TOPOLOGY_MAX_TEXT_BYTES || !topology_text.isprintable(f.host) {
+        return Err(JetDevtoolsTopologyError.InvalidEndpointAddress)
+    }
+    raw :: topology_text.utf8_bytes(f.host)
+    at := 0
+    loop at < raw.len() {
+        cp :: topology_text.scalar_at(raw, at)
+        if topology_assets.asset_contains(topology_whitespace.UNICODE_WHITE_SPACE, cp) || cp == 64 || cp == 63 || cp == 35 {
+            return Err(JetDevtoolsTopologyError.InvalidEndpointAddress)
+        }
+        if f.scheme != .Unix && (cp == 47 || cp == 92) -> return Err(JetDevtoolsTopologyError.InvalidEndpointAddress)
+        at = at + topology_text.utf8_width_at(raw, at)
+    }
+    if f.scheme == .Unix && f.port != None -> return Err(JetDevtoolsTopologyError.InvalidEndpointAddress)
+}
+fn jet_devtools_topology_validate_readiness(f: JetDevtoolsTopologyReadinessFact) JetDevtoolsTopologyError! {
+    jet_devtools_topology_validate_common(f.id, f.source, f.parent_id) ?? return Err(err)
+}

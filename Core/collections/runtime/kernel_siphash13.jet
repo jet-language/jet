@@ -1,0 +1,197 @@
+use core.text.runtime.kernel_unicode_string as sip_text
+
+// Canonical inward relocation of TupleNames' SipHash-1-3, pinned to Rust
+// 8bab26f4f68e0e26f0bb7960be334d5b520ea452 core/hash/sip.rs and std/hash/random.rs.
+// This private module is the ONE engine; DefaultHasher is its zero-key state.
+// Machine facts are supplied by checked target selection, NEVER host inference.
+// #4483 gates native activation until width/endian/overflow-profile ingress lands.
+pub enum HashMachine { Usize32LE Usize32BE Usize64LE Usize64BE }
+struct SipState {
+    pub v0: U64
+    pub v2: U64
+    pub v1: U64
+    pub v3: U64
+}
+pub struct SipHasher13 {
+    pub k0: U64
+    pub k1: U64
+    state: SipState
+    pub tail: U64
+    pub tail_len: Int
+    pub length: U64
+    pub machine: HashMachine
+    pub checked_length: Bool
+}
+pub fn machine_is_32(machine: HashMachine) -> Bool Never! {
+    machine == HashMachine.Usize32LE || machine == HashMachine.Usize32BE
+}
+pub fn machine_is_little(machine: HashMachine) -> Bool Never! {
+    machine == HashMachine.Usize32LE || machine == HashMachine.Usize64LE
+}
+// Hasher::new_with_keys/reset. The pure byte-stream constructor below selects
+// explicit modulo-64 length accounting, NOT native usize/overflow configuration.
+pub fn new_with_machine(k0: U64, k1: U64, machine: HashMachine, checked_length: Bool) -> SipHasher13 Never! {
+    SipHasher13{k0: k0, k1: k1,
+        state: SipState{v0: k0 ~| U64{0x736f6d6570736575}, v2: k0 ~| U64{0x6c7967656e657261},
+            v1: k1 ~| U64{0x646f72616e646f6d}, v3: k1 ~| U64{0x7465646279746573}},
+        tail: U64{0}, tail_len: 0, length: U64{0}, machine: machine, checked_length: checked_length}
+}
+pub fn new_with_keys(k0: U64, k1: U64) -> SipHasher13 Never! {
+    new_with_machine(k0, k1, HashMachine.Usize64LE, false)
+}
+// SipHasher13::new/Default; DefaultHasher::new/Default (not RandomState).
+pub fn new() -> SipHasher13 Never! { new_with_keys(U64{0}, U64{0}) }
+pub fn reset(state: &SipHasher13) Never! {
+    state.state.v0 = state.k0 ~| U64{0x736f6d6570736575}
+    state.state.v2 = state.k0 ~| U64{0x6c7967656e657261}
+    state.state.v1 = state.k1 ~| U64{0x646f72616e646f6d}
+    state.state.v3 = state.k1 ~| U64{0x7465646279746573}
+    state.length = U64{0}
+    state.tail = U64{0}
+    state.tail_len = 0
+}
+// compress! / Sip13Rounds::c_rounds; same relocated wrapping round.
+fn round(state: &SipState) Never! {
+    state.v0 = state.v0.wrapping_add(state.v1)
+    state.v2 = state.v2.wrapping_add(state.v3)
+    state.v1 = state.v1.rotate_left(13) ~| state.v0
+    state.v3 = state.v3.rotate_left(16) ~| state.v2
+    state.v0 = state.v0.rotate_left(32)
+    state.v2 = state.v2.wrapping_add(state.v1)
+    state.v0 = state.v0.wrapping_add(state.v3)
+    state.v1 = state.v1.rotate_left(17) ~| state.v2
+    state.v3 = state.v3.rotate_left(21) ~| state.v0
+    state.v2 = state.v2.rotate_left(32)
+}
+fn compress_word(state: &SipState, word: U64) Never! {
+    state.v3 = state.v3 ~| word
+    round(&state)
+    state.v0 = state.v0 ~| word
+}
+// load_int_le/u8to64_le: fixed-width loads, no block allocation or per-byte
+// Int arithmetic in the full-word loop. Native unaligned view-load admission
+// is a performance integration gate; this safe body retains encoded bytes.
+fn load16(data: View<U8>, at: Int) -> U64 Never! {
+    U64.from_u8(data[at]) | (U64.from_u8(data[at + 1]) << 8)
+}
+fn load32(data: View<U8>, at: Int) -> U64 Never! {
+    load16(data, at) | (load16(data, at + 2) << 16)
+}
+fn load64(data: View<U8>, at: Int) -> U64 Never! {
+    load32(data, at) | (load32(data, at + 4) << 32)
+}
+fn load_tail(data: View<U8>, start: Int, size: Int) -> U64 Never! {
+    at := 0
+    out := U64{0}
+    if size >= 4 {
+        out = load32(data, start)
+        at = 4
+    }
+    if at + 2 <= size {
+        out = out | (load16(data, start + at) << (at * 8))
+        at += 2
+    }
+    if at < size -> out = out | (U64.from_u8(data[start + at]) << (at * 8))
+    out
+}
+fn add_length(state: &SipHasher13, count: U64) Never! {
+    limit :: if machine_is_32(state.machine) -> U64{0xffffffff} else -> U64{0xffffffffffffffff}
+    if state.checked_length && count > limit - state.length -> panic("attempt to add with overflow")
+    state.length = state.length.wrapping_add(count) & limit
+}
+// Hasher<Sip13Rounds>::write; bounds borrow original storage, no slice copy.
+pub fn write_span(state: &SipHasher13, data: View<U8>, start: Int, end: Int) Never! {
+    assert(start >= 0 && end >= start && end <= data.len())
+    add_length(&state, U64{end - start})
+    at := start
+    if state.tail_len != 0 {
+        needed :: 8 - state.tail_len
+        count :: min(end - at, needed)
+        state.tail = state.tail | (load_tail(data, at, count) << (8 * state.tail_len))
+        at += count
+        if count < needed {
+            state.tail_len += count
+            return
+        }
+        compress_word(&state.state, state.tail)
+        state.tail_len = 0
+    }
+    loop at + 8 <= end {
+        compress_word(&state.state, load64(data, at))
+        at += 8
+    }
+    state.tail_len = end - at
+    state.tail = load_tail(data, at, state.tail_len)
+}
+pub fn write(state: &SipHasher13, data: View<U8>) Never! {
+    write_span(&state, data, 0, data.len())
+}
+// Hasher::write_u8 without allocating a one-byte list.
+pub fn write_u8(state: &SipHasher13, byte: U8) Never! {
+    add_length(&state, U64{1})
+    state.tail = state.tail | (U64.from_u8(byte) << (state.tail_len * 8))
+    state.tail_len += 1
+    if state.tail_len == 8 {
+        compress_word(&state.state, state.tail)
+        state.tail = U64{0}
+        state.tail_len = 0
+    }
+}
+fn low_mask(size: Int) -> U64 Never! {
+    if size == 8 -> return U64{0xffffffffffffffff}
+    (U64{1} << (size * 8)) - U64{1}
+}
+fn reverse_bytes(input: U64) -> U64 Never! {
+    pairs :: ((input & U64{0x00ff00ff00ff00ff}) << 8) | ((input >> 8) & U64{0x00ff00ff00ff00ff})
+    halves :: ((pairs & U64{0x0000ffff0000ffff}) << 16) | ((pairs >> 16) & U64{0x0000ffff0000ffff})
+    halves.rotate_left(32)
+}
+// Hasher::write_u*/write_usize native-endian bytes, without byte arrays,
+// per-byte Int conversions, or per-byte length arithmetic. Width: 1/2/4/8.
+pub fn write_integer(state: &SipHasher13, word: U64, width: Int, little: Bool) Never! {
+    assert(width == 1 || width == 2 || width == 4 || width == 8)
+    add_length(&state, U64{width})
+    input := word & low_mask(width)
+    if !little -> input = reverse_bytes(input) >> ((8 - width) * 8)
+    remaining := width
+    if state.tail_len > 0 {
+        take :: min(remaining, 8 - state.tail_len)
+        state.tail = state.tail | ((input & low_mask(take)) << (state.tail_len * 8))
+        state.tail_len += take
+        remaining -= take
+        if state.tail_len < 8 -> return
+        compress_word(&state.state, state.tail)
+        state.tail = U64{0}
+        state.tail_len = 0
+        input = input >> (take * 8)
+    }
+    if remaining == 8 {
+        compress_word(&state.state, input)
+    } else {
+        state.tail = input
+        state.tail_len = remaining
+    }
+}
+pub fn write_usize(state: &SipHasher13, word: U64) Never! {
+    width :: if machine_is_32(state.machine) -> 4 else -> 8
+    write_integer(&state, word, width, machine_is_little(state.machine))
+}
+// Hasher::write_str: actual Rust str framing, unlike OsStr's length prefix.
+// Retained String byte-view support still gates allocation parity (#4318/#4392).
+pub fn write_str(state: &SipHasher13, text: String) Never! {
+    data :: sip_text.utf8_bytes(text)
+    write(&state, data)
+    write_u8(&state, U8{255})
+}
+// Clone/finish: only local scalar state is copied; finish never mutates input.
+pub fn clone(state: SipHasher13) -> SipHasher13 Never! { ~state }
+pub fn finish(input: SipHasher13) -> U64 Never! {
+    state := ~input.state
+    final_word :: input.tail | ((input.length & U64{255}) << 56)
+    compress_word(&state, final_word)
+    state.v2 = state.v2 ~| U64{255}
+    round(&state)
+    round(&state)
+    round(&state)
+    state.v0 ~| state.v1 ~| state.v2 ~| state.v3
+}

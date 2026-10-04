@@ -1,0 +1,33 @@
+// PORT-PENDING 0124 crates-jet-codegen-src-prelude-core-encodingbase-module-group: crates/jet-codegen/src/Prelude/Core/EncodingError.rs:1-29
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // D-ENCSTREAM-SURFACE1=A: the one `EncodingError` rendering for every tier.
+//RS //
+//RS // AOT's `impl JetShow for EncodingError` (Prelude/CoreLib/JetStd/CommonTypes.rs),
+//RS // the Cranelift host (`jet_jit_encoding_error_show`, jet-jit/src/Encoding.rs) and
+//RS // the TIR evaluator (`Comptime/CorePureParity.rs`) all marshal the same seven
+//RS // fields here. No engine re-encodes the "at byte" ladder.
+//RS 
+//RS pub(crate) fn jet_encoding_error_kernel_show(
+//RS     format_name: &str,
+//RS     kind_name: &str,
+//RS     byte_offset: i64,
+//RS     line: Option<i64>,
+//RS     column: Option<i64>,
+//RS     path: &str,
+//RS     reason: &str,
+//RS ) -> String {
+//RS     let mut out = format!("{format_name} {kind_name} at byte {byte_offset}");
+//RS     if let Some(line) = line {
+//RS         out.push_str(&format!(", line {line}"));
+//RS     }
+//RS     if let Some(column) = column {
+//RS         out.push_str(&format!(", column {column}"));
+//RS     }
+//RS     if !path.is_empty() {
+//RS         out.push_str(&format!(", path {path}"));
+//RS     }
+//RS     out.push_str(&format!(": {reason}"));
+//RS     out
+//RS }
+// END-PORT-PENDING 0124 crates/jet-codegen/src/Prelude/Core/EncodingError.rs:1-29
+

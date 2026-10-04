@@ -1,0 +1,210 @@
+// PORT-PENDING 0141 crates-jet-codegen-src-prelude-core-authority-module-group: crates/jet-codegen/src/Prelude/Core/Path.rs:1-206
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Lexical path value rules shared by AOT, JIT, and comptime.
+//RS 
+//RS fn jet_std_path_lexical_source(path: &String) -> std::borrow::Cow<'_, str> {
+//RS     if path.contains('\\') {
+//RS         std::borrow::Cow::Owned(path.replace('\\', "/"))
+//RS     } else {
+//RS         std::borrow::Cow::Borrowed(path.as_str())
+//RS     }
+//RS }
+//RS 
+//RS #[allow(dead_code)]
+//RS pub(crate) fn jet_std_path_join(base: &String, part: &String) -> String {
+//RS     let base = jet_std_path_lexical_source(base);
+//RS     let part = jet_std_path_lexical_source(part);
+//RS     std::path::Path::new(base.as_ref())
+//RS         .join(part.as_ref())
+//RS         .to_string_lossy()
+//RS         .to_string()
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_path_parent_opt(path: &String) -> Option<String> {
+//RS     let source = jet_std_path_lexical_source(path);
+//RS     std::path::Path::new(source.as_ref())
+//RS         .parent()
+//RS         .map(|value| value.to_string_lossy().to_string())
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_path_extension_opt(path: &String) -> Option<String> {
+//RS     let source = jet_std_path_lexical_source(path);
+//RS     std::path::Path::new(source.as_ref())
+//RS         .extension()
+//RS         .map(|value| value.to_string_lossy().to_string())
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_path_stem_opt(path: &String) -> Option<String> {
+//RS     let source = jet_std_path_lexical_source(path);
+//RS     std::path::Path::new(source.as_ref())
+//RS         .file_stem()
+//RS         .map(|value| value.to_string_lossy().to_string())
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_path_normalize(path: &String) -> String {
+//RS     let source = jet_std_path_lexical_source(path);
+//RS     let source = std::path::Path::new(source.as_ref());
+//RS     let rooted = source.has_root();
+//RS     let mut normalized = std::path::PathBuf::new();
+//RS     let mut normal_depth = 0usize;
+//RS     for component in source.components() {
+//RS         match component {
+//RS             std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+//RS             std::path::Component::RootDir => normalized.push(component.as_os_str()),
+//RS             std::path::Component::CurDir => {}
+//RS             std::path::Component::ParentDir if normal_depth > 0 => {
+//RS                 normalized.pop();
+//RS                 normal_depth -= 1;
+//RS             }
+//RS             std::path::Component::ParentDir if !rooted => normalized.push(".."),
+//RS             std::path::Component::ParentDir => {}
+//RS             std::path::Component::Normal(part) => {
+//RS                 normalized.push(part);
+//RS                 normal_depth += 1;
+//RS             }
+//RS         }
+//RS     }
+//RS     normalized.to_string_lossy().into_owned()
+//RS }
+//RS 
+//RS /// Compare normalized lexical path components, not filesystem identity. Both
+//RS /// slash spellings are separators on every host so the same Path relation is
+//RS /// preserved across AOT, JIT, interpreter, and comptime.
+//RS pub(crate) fn jet_std_path_is_within(path: &String, base: &String) -> bool {
+//RS     fn components(
+//RS         path: &std::path::Path,
+//RS     ) -> (
+//RS         Option<std::ffi::OsString>,
+//RS         bool,
+//RS         Vec<std::ffi::OsString>,
+//RS     ) {
+//RS         let mut prefix = None;
+//RS         let mut rooted = false;
+//RS         let mut parts: Vec<std::ffi::OsString> = Vec::new();
+//RS         for component in path.components() {
+//RS             match component {
+//RS                 std::path::Component::Prefix(value) => {
+//RS                     prefix = Some(value.as_os_str().to_os_string())
+//RS                 }
+//RS                 std::path::Component::RootDir => rooted = true,
+//RS                 std::path::Component::CurDir => {}
+//RS                 std::path::Component::ParentDir => {
+//RS                     if parts.last().is_some_and(|last| {
+//RS                         last.as_os_str() != std::ffi::OsStr::new("..")
+//RS                     }) {
+//RS                         parts.pop();
+//RS                     } else if !rooted {
+//RS                         parts.push(std::ffi::OsString::from(".."));
+//RS                     }
+//RS                 }
+//RS                 std::path::Component::Normal(value) => parts.push(value.to_os_string()),
+//RS             }
+//RS         }
+//RS         (prefix, rooted, parts)
+//RS     }
+//RS 
+//RS     let path_source = jet_std_path_lexical_source(path);
+//RS     let base_source = jet_std_path_lexical_source(base);
+//RS     let (base_prefix, base_rooted, base_parts) =
+//RS         components(std::path::Path::new(base_source.as_ref()));
+//RS     let (path_prefix, path_rooted, path_parts) =
+//RS         components(std::path::Path::new(path_source.as_ref()));
+//RS     let base_is_relative_current = base_prefix.is_none() && !base_rooted && base_parts.is_empty();
+//RS     base_prefix == path_prefix
+//RS         && base_rooted == path_rooted
+//RS         && path_parts.len() >= base_parts.len()
+//RS         && path_parts.starts_with(&base_parts)
+//RS         && !(base_is_relative_current
+//RS             && path_parts
+//RS                 .first()
+//RS                 .is_some_and(|part| part.as_os_str() == std::ffi::OsStr::new("..")))
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn jet_std_path_home() -> String {
+//RS     if cfg!(windows) {
+//RS         if let Ok(profile) = std::env::var("USERPROFILE") {
+//RS             return profile;
+//RS         }
+//RS         if let (Ok(drive), Ok(path)) = (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH")) {
+//RS             return format!("{drive}{path}");
+//RS         }
+//RS         std::env::current_dir()
+//RS             .map(|path| path.to_string_lossy().into_owned())
+//RS             .unwrap_or_default()
+//RS     } else {
+//RS         std::env::var("HOME").unwrap_or_else(|_| {
+//RS             std::env::current_dir()
+//RS                 .map(|path| path.to_string_lossy().into_owned())
+//RS                 .unwrap_or_default()
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Validate every existing component of a walk root without following a
+//RS /// symlink. Entry enumeration already uses `file_type`, but that protection
+//RS /// does not cover a symlink supplied as the root itself (or an ancestor).
+//RS fn jet_std_path_validate_walk_root(path: &std::path::Path) -> std::io::Result<()> {
+//RS     let source = if path.as_os_str().is_empty() {
+//RS         std::path::Path::new(".")
+//RS     } else {
+//RS         path
+//RS     };
+//RS     for ancestor in source
+//RS         .ancestors()
+//RS         .filter(|ancestor| !ancestor.as_os_str().is_empty())
+//RS     {
+//RS         let metadata = std::fs::symlink_metadata(ancestor)?;
+//RS         if metadata.file_type().is_symlink() {
+//RS             return Err(std::io::Error::new(
+//RS                 std::io::ErrorKind::PermissionDenied,
+//RS                 format!("filesystem walk path contains symlink: {}", ancestor.display()),
+//RS             ));
+//RS         }
+//RS     }
+//RS     let metadata = std::fs::symlink_metadata(source)?;
+//RS     if !metadata.is_dir() {
+//RS         return Err(std::io::Error::new(
+//RS             std::io::ErrorKind::NotADirectory,
+//RS             format!("filesystem walk root is not a directory: {}", source.display()),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn jet_std_path_walk(path: &String) -> Vec<String> {
+//RS     let root = std::path::Path::new(path.as_str());
+//RS     if jet_std_path_validate_walk_root(root).is_err() {
+//RS         return Vec::new();
+//RS     }
+//RS     let mut result = Vec::new();
+//RS     let mut stack = vec![std::path::PathBuf::from(path)];
+//RS     let mut visited = std::collections::HashSet::new();
+//RS     while let Some(dir) = stack.pop() {
+//RS         if jet_std_path_validate_walk_root(&dir).is_err() {
+//RS             continue;
+//RS         }
+//RS         let canonical = match std::fs::canonicalize(&dir) {
+//RS             Ok(canonical) => canonical,
+//RS             Err(_) => continue,
+//RS         };
+//RS         if !visited.insert(canonical) {
+//RS             continue;
+//RS         }
+//RS         let entries = match std::fs::read_dir(&dir) {
+//RS             Ok(entries) => entries,
+//RS             Err(_) => continue,
+//RS         };
+//RS         for entry in entries {
+//RS             let Ok(entry) = entry else { continue };
+//RS             let path = entry.path();
+//RS             result.push(path.to_string_lossy().into_owned());
+//RS             if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+//RS                 stack.push(path);
+//RS             }
+//RS         }
+//RS     }
+//RS     result
+//RS }
+// END-PORT-PENDING 0141 crates/jet-codegen/src/Prelude/Core/Path.rs:1-206
+

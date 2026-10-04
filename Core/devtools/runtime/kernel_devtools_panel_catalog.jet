@@ -1,0 +1,500 @@
+// D-DX-DEVTOOLS1 / #2492. DevtoolsPanelCatalog.rs:1-927.
+// One typed catalog owns vocabulary, validation, availability and event families.
+// Descriptor strings and lists are owner-backed views, like Rust's static slices;
+// hosts must retain their owners. No host-local metadata or event JSON parsing.
+use core.devtools.runtime.devtools as protocol
+
+// Named static owners keep returned spellings borrowed, never owned temporaries.
+pub PANEL_NAMES :: [String]{"build", "routes", "queries", "mutations", "forms", "table", "store", "traces", "cost", "gates", "structure", "tests", "jobs", "ui-tree", "database", "topology", "game", "world", "profiler"}
+pub PANEL_TITLES :: [String]{"Build", "Routes", "Queries", "Mutations", "Forms", "Table", "Store", "Traces", "Cost", "Gates", "Structure", "Tests", "Jobs", "UI tree", "Database", "Topology", "Game", "World", "Profiler"}
+pub HOST_NAMES :: [String]{"browser-in-app", "browser-workbench", "terminal", "editor", "native-overlay", "headless"}
+pub CAPABILITY_GRANTS :: [String]{"Devtools.BuildRead", "Devtools.SourceRead", "Devtools.RequestRead", "Devtools.QueryRead", "Devtools.MutationObserve", "Devtools.FormInspect", "Devtools.TableInspect", "Devtools.StateInspect", "Devtools.TraceRead", "Devtools.TelemetryRead", "Devtools.CostRead", "Devtools.GateRead", "Devtools.StructureRead", "Devtools.TestRead", "Devtools.JobRead", "Devtools.UiInspect", "Devtools.AccessibilityInspect", "Devtools.DatabaseStatsRead", "Devtools.DatabaseExplain", "Devtools.TopologyRead", "Devtools.GameInspect", "Devtools.GameControl"}
+pub FRESHNESS_NAMES :: [String]{"event-driven", "time-cursor", "snapshot", "frame", "on-demand"}
+pub UNAVAILABLE_NAMES :: [String]{"unsupported-host", "missing-capability"}
+
+pub PANEL_COUNT :: 19
+pub HOST_COUNT :: 6
+pub CAPABILITY_COUNT :: 22
+
+pub enum JetDevtoolsPanelId {
+    Build
+    Routes
+    Queries
+    Mutations
+    Forms
+    Table
+    Store
+    Traces
+    Cost
+    Gates
+    Structure
+    Tests
+    Jobs
+    UiTree
+    Database
+    Topology
+    Game
+    World
+    Profiler
+
+    pub fn as_str(self) -> View<str> Never! {
+        PANEL_NAMES[Int.from_u16(self.canonical_order()) - 1].after("")
+    }
+    pub fn title(self) -> View<str> Never! {
+        PANEL_TITLES[Int.from_u16(self.canonical_order()) - 1].after("")
+    }
+    pub fn canonical_order(self) -> U16 Never! {
+        if self == {
+            .Build -> U16{1}
+            .Routes -> U16{2}
+            .Queries -> U16{3}
+            .Mutations -> U16{4}
+            .Forms -> U16{5}
+            .Table -> U16{6}
+            .Store -> U16{7}
+            .Traces -> U16{8}
+            .Cost -> U16{9}
+            .Gates -> U16{10}
+            .Structure -> U16{11}
+            .Tests -> U16{12}
+            .Jobs -> U16{13}
+            .UiTree -> U16{14}
+            .Database -> U16{15}
+            .Topology -> U16{16}
+            .Game -> U16{17}
+            .World -> U16{18}
+            .Profiler -> U16{19}
+        }
+    }
+    // :395. Overlapping families are intentional: DatabaseQuery, LogLink.
+    pub fn accepts_event(self, event: protocol.JetDevtoolsEvent) -> Bool Never! {
+        kind := event.kind() // #4303: protocol string view flows to String comparisons.
+        if self == {
+            .Build -> kind == "Build"
+            .Routes -> kind == "Route" || kind == "Request" || kind == "Response" || kind == "Access" || kind == "Exception" || kind == "LogLink"
+            .Queries -> kind == "Query" || kind == "DatabaseQuery"
+            .Mutations -> kind == "Mutation"
+            .Forms -> kind == "Form"
+            .Table -> kind == "Table"
+            .Store -> kind == "Store" || kind == "State"
+            .Traces -> kind == "Trace" || kind == "Frame" || kind == "TraceLink" || kind == "LogLink"
+            .Cost -> kind == "Cost"
+            .Gates -> kind == "Gate"
+            .Structure -> kind == "Structure"
+            .Tests -> kind == "Test"
+            .Jobs -> kind == "Job"
+            .UiTree -> kind == "UI" || kind == "UiTree"
+            .Database -> kind == "Database" || kind == "DatabasePool" || kind == "DatabaseQuery" || kind == "DatabaseExplainRequest" || kind == "DatabaseExplainResult"
+            .Topology -> kind == "Topology" || kind == "Supervisor" || kind == "Process" || kind == "Task" || kind == "Readiness" || kind == "Endpoint"
+            .Game -> kind == "Game"
+            .World -> kind == "World"
+            .Profiler -> kind == "Profile" || kind == "Metric" || kind == "Log" || kind == "Telemetry" || kind == "SlowWork"
+        }
+    }
+}
+pub PANEL_ALL :: [JetDevtoolsPanelId]{.Build, .Routes, .Queries, .Mutations, .Forms, .Table, .Store, .Traces, .Cost, .Gates, .Structure, .Tests, .Jobs, .UiTree, .Database, .Topology, .Game, .World, .Profiler}
+
+pub enum JetDevtoolsHostKind {
+    BrowserInApp
+    BrowserWorkbench
+    Terminal
+    Editor
+    NativeOverlay
+    Headless
+
+    pub fn default() -> JetDevtoolsHostKind Never! { .BrowserInApp }
+    pub fn as_str(self) -> View<str> Never! {
+        if self == {
+            .BrowserInApp -> HOST_NAMES[0].after("")
+            .BrowserWorkbench -> HOST_NAMES[1].after("")
+            .Terminal -> HOST_NAMES[2].after("")
+            .Editor -> HOST_NAMES[3].after("")
+            .NativeOverlay -> HOST_NAMES[4].after("")
+            .Headless -> HOST_NAMES[5].after("")
+        }
+    }
+    fn bit(self) -> U8 Never! {
+        if self == {
+            .BrowserInApp -> U8{1}
+            .BrowserWorkbench -> U8{2}
+            .Terminal -> U8{4}
+            .Editor -> U8{8}
+            .NativeOverlay -> U8{16}
+            .Headless -> U8{32}
+        }
+    }
+}
+pub ALL_HOSTS :: [JetDevtoolsHostKind]{.BrowserInApp, .BrowserWorkbench, .Terminal, .Editor, .NativeOverlay, .Headless}
+
+pub enum JetDevtoolsPanelCapability {
+    BuildRead
+    SourceRead
+    RequestRead
+    QueryRead
+    MutationObserve
+    FormInspect
+    TableInspect
+    StateInspect
+    TraceRead
+    TelemetryRead
+    CostRead
+    GateRead
+    StructureRead
+    TestRead
+    JobRead
+    UiInspect
+    AccessibilityInspect
+    DatabaseStatsRead
+    DatabaseExplain
+    TopologyRead
+    GameInspect
+    GameControl
+
+    pub fn grant(self) -> View<str> Never! {
+        if self == {
+            .BuildRead -> CAPABILITY_GRANTS[0].after("")
+            .SourceRead -> CAPABILITY_GRANTS[1].after("")
+            .RequestRead -> CAPABILITY_GRANTS[2].after("")
+            .QueryRead -> CAPABILITY_GRANTS[3].after("")
+            .MutationObserve -> CAPABILITY_GRANTS[4].after("")
+            .FormInspect -> CAPABILITY_GRANTS[5].after("")
+            .TableInspect -> CAPABILITY_GRANTS[6].after("")
+            .StateInspect -> CAPABILITY_GRANTS[7].after("")
+            .TraceRead -> CAPABILITY_GRANTS[8].after("")
+            .TelemetryRead -> CAPABILITY_GRANTS[9].after("")
+            .CostRead -> CAPABILITY_GRANTS[10].after("")
+            .GateRead -> CAPABILITY_GRANTS[11].after("")
+            .StructureRead -> CAPABILITY_GRANTS[12].after("")
+            .TestRead -> CAPABILITY_GRANTS[13].after("")
+            .JobRead -> CAPABILITY_GRANTS[14].after("")
+            .UiInspect -> CAPABILITY_GRANTS[15].after("")
+            .AccessibilityInspect -> CAPABILITY_GRANTS[16].after("")
+            .DatabaseStatsRead -> CAPABILITY_GRANTS[17].after("")
+            .DatabaseExplain -> CAPABILITY_GRANTS[18].after("")
+            .TopologyRead -> CAPABILITY_GRANTS[19].after("")
+            .GameInspect -> CAPABILITY_GRANTS[20].after("")
+            .GameControl -> CAPABILITY_GRANTS[21].after("")
+        }
+    }
+    pub fn as_str(self) -> View<str> Never! { self.grant() }
+    fn bit(self) -> U32 Never! {
+        if self == {
+            .BuildRead -> U32{1}
+            .SourceRead -> U32{2}
+            .RequestRead -> U32{4}
+            .QueryRead -> U32{8}
+            .MutationObserve -> U32{16}
+            .FormInspect -> U32{32}
+            .TableInspect -> U32{64}
+            .StateInspect -> U32{128}
+            .TraceRead -> U32{256}
+            .TelemetryRead -> U32{512}
+            .CostRead -> U32{1024}
+            .GateRead -> U32{2048}
+            .StructureRead -> U32{4096}
+            .TestRead -> U32{8192}
+            .JobRead -> U32{16384}
+            .UiInspect -> U32{32768}
+            .AccessibilityInspect -> U32{65536}
+            .DatabaseStatsRead -> U32{131072}
+            .DatabaseExplain -> U32{262144}
+            .TopologyRead -> U32{524288}
+            .GameInspect -> U32{1048576}
+            .GameControl -> U32{2097152}
+        }
+    }
+}
+pub CAPABILITY_ALL :: [JetDevtoolsPanelCapability]{.BuildRead, .SourceRead, .RequestRead, .QueryRead, .MutationObserve, .FormInspect, .TableInspect, .StateInspect, .TraceRead, .TelemetryRead, .CostRead, .GateRead, .StructureRead, .TestRead, .JobRead, .UiInspect, .AccessibilityInspect, .DatabaseStatsRead, .DatabaseExplain, .TopologyRead, .GameInspect, .GameControl}
+
+pub enum JetDevtoolsPanelFreshnessPolicy {
+    EventDriven
+    TimeCursor
+    Snapshot
+    Frame
+    OnDemand
+
+    pub fn as_str(self) -> View<str> Never! {
+        if self == {
+            .EventDriven -> FRESHNESS_NAMES[0].after("")
+            .TimeCursor -> FRESHNESS_NAMES[1].after("")
+            .Snapshot -> FRESHNESS_NAMES[2].after("")
+            .Frame -> FRESHNESS_NAMES[3].after("")
+            .OnDemand -> FRESHNESS_NAMES[4].after("")
+        }
+    }
+}
+
+pub struct JetDevtoolsPanelDescriptor {
+    pub id: JetDevtoolsPanelId
+    pub title: View<str>
+    pub order: U16
+    pub required_capabilities: View<JetDevtoolsPanelCapability>
+    pub authority: JetDevtoolsPanelCapability
+    pub supported_hosts: View<JetDevtoolsHostKind>
+    pub freshness: JetDevtoolsPanelFreshnessPolicy
+
+    // :294. after("") retains every byte (including leading/trailing spaces).
+    pub fn new(id: JetDevtoolsPanelId, title: String, order: U16, required_capabilities: [JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, supported_hosts: [JetDevtoolsHostKind], freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
+        JetDevtoolsPanelDescriptor{id: id, title: title.after(""), order: order, required_capabilities: required_capabilities[0..<required_capabilities.len()], authority: authority, supported_hosts: supported_hosts[0..<supported_hosts.len()], freshness: freshness}
+    }
+    pub fn supports_host(self, host: JetDevtoolsHostKind) -> Bool Never! { self.supported_hosts.contains(host) }
+    pub fn requires(self, capability: JetDevtoolsPanelCapability) -> Bool Never! { self.required_capabilities.contains(capability) }
+}
+
+pub enum JetDevtoolsPanelUnavailableReason {
+    UnsupportedHost(host: JetDevtoolsHostKind)
+    MissingCapability(capability: JetDevtoolsPanelCapability)
+
+    pub fn as_str(self) -> View<str> Never! {
+        if self == {
+            .UnsupportedHost(_) -> UNAVAILABLE_NAMES[0].after("")
+            .MissingCapability(_) -> UNAVAILABLE_NAMES[1].after("")
+        }
+    }
+    pub fn host(self) -> JetDevtoolsHostKind? Never! {
+        if self == {
+            .UnsupportedHost(host) -> Val(host)
+            .MissingCapability(_) -> None
+        }
+    }
+    pub fn capability(self) -> JetDevtoolsPanelCapability? Never! {
+        if self == {
+            .UnsupportedHost(_) -> None
+            .MissingCapability(capability) -> Val(capability)
+        }
+    }
+}
+pub enum JetDevtoolsPanelAvailabilityState {
+    Available
+    Unavailable(reasons: [JetDevtoolsPanelUnavailableReason])
+}
+pub EMPTY_REASONS :: [JetDevtoolsPanelUnavailableReason]{}
+pub struct JetDevtoolsPanelAvailability {
+    pub descriptor: JetDevtoolsPanelDescriptor
+    pub state: JetDevtoolsPanelAvailabilityState
+
+    pub fn is_available(self) -> Bool Never! {
+        if self.state == {
+            .Available -> true
+            .Unavailable(_) -> false
+        }
+    }
+    pub fn unavailable_reasons(self) -> View<JetDevtoolsPanelUnavailableReason> Never! {
+        if self.state == {
+            .Available -> EMPTY_REASONS[0..<0]
+            .Unavailable(reasons) -> reasons[0..<reasons.len()]
+        }
+    }
+}
+pub struct JetDevtoolsPanelProjection {
+    pub availability: JetDevtoolsPanelAvailability
+    pub events: [protocol.JetDevtoolsEvent]
+    pub selected: Bool
+    pub cursor: protocol.JetDevtoolsTimeCursor?
+    pub freshness: protocol.JetDevtoolsFreshnessFact
+    pub reset: Bool
+    pub truncated: Bool
+}
+
+#Error
+pub enum JetDevtoolsPanelCatalogError {
+    Empty
+    DuplicateId(id: JetDevtoolsPanelId)
+    DuplicateOrder(order: U16)
+    ZeroOrder(id: JetDevtoolsPanelId)
+    EmptyTitle(id: JetDevtoolsPanelId)
+    NoCapabilities(id: JetDevtoolsPanelId)
+    NoSupportedHosts(id: JetDevtoolsPanelId)
+    AuthorityNotRequired(id: JetDevtoolsPanelId, authority: JetDevtoolsPanelCapability)
+    DuplicateCapability(id: JetDevtoolsPanelId, capability: JetDevtoolsPanelCapability)
+    DuplicateHost(id: JetDevtoolsPanelId, host: JetDevtoolsHostKind)
+
+    // :465. Exact Display text; structural errors remain typed, not String Err.
+    pub fn text(self) -> String Never! {
+        if self == {
+            .Empty -> "devtools panel catalog is empty"
+            .DuplicateId(id) -> "devtools panel id `{id.as_str()}` is duplicated"
+            .DuplicateOrder(order) -> "devtools panel order `{order}` is duplicated"
+            .ZeroOrder(id) -> "devtools panel `{id.as_str()}` has zero order"
+            .EmptyTitle(id) -> "devtools panel `{id.as_str()}` has an empty title"
+            .NoCapabilities(id) -> "devtools panel `{id.as_str()}` has no required authority"
+            .NoSupportedHosts(id) -> "devtools panel `{id.as_str()}` has no supported host"
+            .AuthorityNotRequired(id, authority) -> "devtools panel `{id.as_str()}` primary authority `{authority.grant()}` is not required"
+            .DuplicateCapability(id, capability) -> "devtools panel `{id.as_str()}` repeats authority `{capability.grant()}`"
+            .DuplicateHost(id, host) -> "devtools panel `{id.as_str()}` repeats host `{host.as_str()}`"
+        }
+    }
+}
+
+pub struct JetDevtoolsPanelCatalog {
+    rows: [JetDevtoolsPanelDescriptor]
+
+    // :516. Owned input is moved once. Reverse membership passes preserve the
+    // first repeated position / id-before-order precedence without suffix scans.
+    pub fn new(input: ^[JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+        descriptors := ^input
+        if descriptors.is_empty() -> return Err(.Empty)
+        loop descriptor in descriptors {
+            if descriptor.order == U16{0} -> return Err(.ZeroOrder(descriptor.id))
+            if descriptor.title.is_empty() -> return Err(.EmptyTitle(descriptor.id))
+            if descriptor.required_capabilities.is_empty() -> return Err(.NoCapabilities(descriptor.id))
+            if descriptor.supported_hosts.is_empty() -> return Err(.NoSupportedHosts(descriptor.id))
+            if !descriptor.requires(descriptor.authority) -> return Err(.AuthorityNotRequired(descriptor.id, descriptor.authority))
+            capabilities := U32{0}
+            duplicate_capability := JetDevtoolsPanelCapability?{None}
+            i := descriptor.required_capabilities.len()
+            loop i > 0 {
+                i = i - 1
+                capability :: descriptor.required_capabilities[i]
+                bit :: capability.bit()
+                if (capabilities & bit) != U32{0} -> duplicate_capability = Val(capability)
+                capabilities = capabilities | bit
+            }
+            if duplicate_capability == .Val(capability) -> return Err(.DuplicateCapability(descriptor.id, capability))
+            hosts := U8{0}
+            duplicate_host := JetDevtoolsHostKind?{None}
+            i = descriptor.supported_hosts.len()
+            loop i > 0 {
+                i = i - 1
+                host :: descriptor.supported_hosts[i]
+                bit :: host.bit()
+                if (hosts & bit) != U8{0} -> duplicate_host = Val(host)
+                hosts = hosts | bit
+            }
+            if duplicate_host == .Val(host) -> return Err(.DuplicateHost(descriptor.id, host))
+        }
+        ids := U32{0}
+        orders := [U16: Bool]{}
+        duplicate := JetDevtoolsPanelCatalogError?{None}
+        i := descriptors.len()
+        loop i > 0 {
+            i = i - 1
+            descriptor :: descriptors[i]
+            bit :: U32{1} << (descriptor.id.canonical_order() - U16{1})
+            if (ids & bit) != U32{0} {
+                duplicate = Val(.DuplicateId(descriptor.id))
+            } else if orders.has_key(descriptor.order) {
+                duplicate = Val(.DuplicateOrder(descriptor.order))
+            }
+            ids = ids | bit
+            orders[descriptor.order] = true
+        }
+        if duplicate == .Val(error) -> return Err(error)
+        // Orders are unique now, so the Rust (order,id) tie-break is unreachable.
+        &descriptors.sort_by((descriptor: JetDevtoolsPanelDescriptor) -> descriptor.order)
+        Ok(JetDevtoolsPanelCatalog{rows: ^descriptors})
+    }
+    pub fn canonical() -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+        rows := [JetDevtoolsPanelDescriptor]{}
+        loop descriptor in JET_DEVTOOLS_PANEL_DESCRIPTORS -> &rows.push(descriptor)
+        JetDevtoolsPanelCatalog.new(^rows)
+    }
+    pub fn descriptors(self) -> View<JetDevtoolsPanelDescriptor> Never! { self.rows[0..<self.rows.len()] }
+    // A one-element owner-backed view substitutes Rust Option<&Descriptor>.
+    pub fn get(self, id: JetDevtoolsPanelId) -> View<JetDevtoolsPanelDescriptor>? Never! {
+        loop i in 0..<self.rows.len() {
+            if self.rows[i].id == id -> return Val(self.rows[i..<i + 1])
+        }
+        None
+    }
+    pub fn panel_for_event(self, event: protocol.JetDevtoolsEvent) -> JetDevtoolsPanelId? Never! {
+        loop descriptor in self.rows {
+            if descriptor.id.accepts_event(event) -> return Val(descriptor.id)
+        }
+        None
+    }
+    pub fn available_for(self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] Never! {
+        granted := U32{0}
+        loop capability in grants -> granted = granted | capability.bit()
+        rows := [JetDevtoolsPanelAvailability]{}
+        loop descriptor in self.rows {
+            unavailable := [JetDevtoolsPanelUnavailableReason]{}
+            if !descriptor.supports_host(host) -> &unavailable.push(.UnsupportedHost(host))
+            loop capability in descriptor.required_capabilities {
+                if (granted & capability.bit()) == U32{0} -> &unavailable.push(.MissingCapability(capability))
+            }
+            state := JetDevtoolsPanelAvailabilityState.Available
+            if !unavailable.is_empty() -> state = .Unavailable(^unavailable)
+            &rows.push(JetDevtoolsPanelAvailability{descriptor: descriptor, state: ^state})
+        }
+        rows
+    }
+    pub fn project(self, envelope: protocol.JetDevtoolsEnvelope, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] Never! {
+        availability := self.available_for(host, grants)
+        rows := [JetDevtoolsPanelProjection]{}
+        selection :: envelope.view().selection()
+        cursor :: envelope.view().cursor()
+        // Tail extraction and one reversal preserve order without indexed moves.
+        loop !availability.is_empty() {
+            row := &availability.pop() ?? panic("nonempty availability")
+            id :: row.descriptor.id
+            events := [protocol.JetDevtoolsEvent]{}
+            loop event in envelope.events() {
+                // Rust explicitly clones matching events; no whole envelope copy.
+                if id.accepts_event(event) -> &events.push(~event)
+            }
+            selected := false
+            if selection == .Val(value) -> selected = value.panel_id == id.as_str()
+            &rows.push(JetDevtoolsPanelProjection{availability: ^row, events: ^events, selected: selected, cursor: cursor, freshness: envelope.freshness, reset: envelope.reset, truncated: envelope.truncated})
+        }
+        &rows.reverse()
+        rows
+    }
+}
+
+// :672-705 module entry points are folded into this canonical module, not aliases.
+pub fn descriptors() -> View<JetDevtoolsPanelDescriptor> Never! { JET_DEVTOOLS_PANEL_DESCRIPTORS[0..<JET_DEVTOOLS_PANEL_DESCRIPTORS.len()] }
+pub fn panel_for_event(event: protocol.JetDevtoolsEvent) -> JetDevtoolsPanelId? Never! {
+    loop descriptor in JET_DEVTOOLS_PANEL_DESCRIPTORS {
+        if descriptor.id.accepts_event(event) -> return Val(descriptor.id)
+    }
+    None
+}
+pub fn canonical() -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.canonical() }
+pub fn available_for(host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] JetDevtoolsPanelCatalogError! {
+    catalog :: canonical() ?? return Err(err)
+    Ok(catalog.available_for(host, grants))
+}
+
+// :710-751. Canonical authority conjunctions; borrowed by descriptors.
+pub BUILD_CAPABILITIES :: [JetDevtoolsPanelCapability]{.BuildRead}
+pub ROUTES_CAPABILITIES :: [JetDevtoolsPanelCapability]{.RequestRead, .SourceRead}
+pub QUERIES_CAPABILITIES :: [JetDevtoolsPanelCapability]{.QueryRead}
+pub MUTATIONS_CAPABILITIES :: [JetDevtoolsPanelCapability]{.MutationObserve}
+pub FORMS_CAPABILITIES :: [JetDevtoolsPanelCapability]{.FormInspect}
+pub TABLE_CAPABILITIES :: [JetDevtoolsPanelCapability]{.TableInspect}
+pub STORE_CAPABILITIES :: [JetDevtoolsPanelCapability]{.StateInspect}
+pub TRACES_CAPABILITIES :: [JetDevtoolsPanelCapability]{.TraceRead, .TelemetryRead}
+pub COST_CAPABILITIES :: [JetDevtoolsPanelCapability]{.CostRead}
+pub GATES_CAPABILITIES :: [JetDevtoolsPanelCapability]{.GateRead}
+pub STRUCTURE_CAPABILITIES :: [JetDevtoolsPanelCapability]{.StructureRead, .SourceRead}
+pub TESTS_CAPABILITIES :: [JetDevtoolsPanelCapability]{.TestRead}
+pub JOBS_CAPABILITIES :: [JetDevtoolsPanelCapability]{.JobRead}
+pub UI_TREE_CAPABILITIES :: [JetDevtoolsPanelCapability]{.UiInspect, .AccessibilityInspect, .SourceRead}
+pub DATABASE_CAPABILITIES :: [JetDevtoolsPanelCapability]{.DatabaseStatsRead, .DatabaseExplain}
+pub TOPOLOGY_CAPABILITIES :: [JetDevtoolsPanelCapability]{.TopologyRead}
+pub GAME_CAPABILITIES :: [JetDevtoolsPanelCapability]{.GameInspect, .GameControl}
+pub WORLD_CAPABILITIES :: [JetDevtoolsPanelCapability]{.GameInspect}
+pub PROFILER_CAPABILITIES :: [JetDevtoolsPanelCapability]{.TelemetryRead, .TraceRead}
+
+pub JET_DEVTOOLS_PANEL_DESCRIPTORS :: [JetDevtoolsPanelDescriptor]{
+    JetDevtoolsPanelDescriptor.new(.Build, PANEL_TITLES[0], U16{1}, BUILD_CAPABILITIES, .BuildRead, ALL_HOSTS, .EventDriven),
+    JetDevtoolsPanelDescriptor.new(.Routes, PANEL_TITLES[1], U16{2}, ROUTES_CAPABILITIES, .RequestRead, ALL_HOSTS, .EventDriven),
+    JetDevtoolsPanelDescriptor.new(.Queries, PANEL_TITLES[2], U16{3}, QUERIES_CAPABILITIES, .QueryRead, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.Mutations, PANEL_TITLES[3], U16{4}, MUTATIONS_CAPABILITIES, .MutationObserve, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.Forms, PANEL_TITLES[4], U16{5}, FORMS_CAPABILITIES, .FormInspect, ALL_HOSTS, .Snapshot),
+    JetDevtoolsPanelDescriptor.new(.Table, PANEL_TITLES[5], U16{6}, TABLE_CAPABILITIES, .TableInspect, ALL_HOSTS, .Snapshot),
+    JetDevtoolsPanelDescriptor.new(.Store, PANEL_TITLES[6], U16{7}, STORE_CAPABILITIES, .StateInspect, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.Traces, PANEL_TITLES[7], U16{8}, TRACES_CAPABILITIES, .TraceRead, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.Cost, PANEL_TITLES[8], U16{9}, COST_CAPABILITIES, .CostRead, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.Gates, PANEL_TITLES[9], U16{10}, GATES_CAPABILITIES, .GateRead, ALL_HOSTS, .EventDriven),
+    JetDevtoolsPanelDescriptor.new(.Structure, PANEL_TITLES[10], U16{11}, STRUCTURE_CAPABILITIES, .StructureRead, ALL_HOSTS, .Snapshot),
+    JetDevtoolsPanelDescriptor.new(.Tests, PANEL_TITLES[11], U16{12}, TESTS_CAPABILITIES, .TestRead, ALL_HOSTS, .EventDriven),
+    JetDevtoolsPanelDescriptor.new(.Jobs, PANEL_TITLES[12], U16{13}, JOBS_CAPABILITIES, .JobRead, ALL_HOSTS, .TimeCursor),
+    JetDevtoolsPanelDescriptor.new(.UiTree, PANEL_TITLES[13], U16{14}, UI_TREE_CAPABILITIES, .UiInspect, ALL_HOSTS, .Snapshot),
+    JetDevtoolsPanelDescriptor.new(.Database, PANEL_TITLES[14], U16{15}, DATABASE_CAPABILITIES, .DatabaseStatsRead, ALL_HOSTS, .OnDemand),
+    JetDevtoolsPanelDescriptor.new(.Topology, PANEL_TITLES[15], U16{16}, TOPOLOGY_CAPABILITIES, .TopologyRead, ALL_HOSTS, .Snapshot),
+    JetDevtoolsPanelDescriptor.new(.Game, PANEL_TITLES[16], U16{17}, GAME_CAPABILITIES, .GameInspect, ALL_HOSTS, .Frame),
+    JetDevtoolsPanelDescriptor.new(.World, PANEL_TITLES[17], U16{18}, WORLD_CAPABILITIES, .GameInspect, ALL_HOSTS, .Frame),
+    JetDevtoolsPanelDescriptor.new(.Profiler, PANEL_TITLES[18], U16{19}, PROFILER_CAPABILITIES, .TelemetryRead, ALL_HOSTS, .Frame),
+}

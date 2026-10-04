@@ -1,0 +1,1804 @@
+// PORT-PENDING 2051 crates-jet-jit-src-sourceinterfaces-slice-1801: crates/jet-jit/src/SourceInterfaces.rs:1801-3600
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS             signature,
+//RS             handler,
+//RS         });
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Register one explicit native function value under its checked Fn type.
+//RS     ///
+//RS     /// Two uniqueness rules make every later lookup exact instead of ambiguous:
+//RS     /// a callable identity (execution, artifact, key, checked type) is bound at
+//RS     /// most once in the set, and one external carrier exposes at most one
+//RS     /// function value per checked signature. Hosts that share one service behind
+//RS     /// several same-shaped functions must give each function its own carrier
+//RS     /// identity (for example a small per-function newtype over the shared `Arc`).
+//RS     pub fn bind_callable(
+//RS         &self,
+//RS         object: NativeInterfaceObject,
+//RS         identity: NativeCallableIdentity,
+//RS         signature: NativeCallableSignature,
+//RS         handler: NativeCallableHandler,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         if !Arc::ptr_eq(&object.set_identity, &self.set_identity) {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native callable object belongs to a different binding set".to_string(),
+//RS             ));
+//RS         }
+//RS         if object.instance.is_some() {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "callback-scope instances cannot register new callable bindings".to_string(),
+//RS             ));
+//RS         }
+//RS         if identity.execution.artifact.artifact != identity.artifact
+//RS             || NativeCallableSignature::checked(&identity.callable_type)? != signature
+//RS         {
+//RS             return Err(NativeInterfaceError::SignatureMismatch);
+//RS         }
+//RS         let object_key = NativeInterfaceObjectKey::of(&object).ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(
+//RS                 "static native callable object has no external physical carrier".to_string(),
+//RS             )
+//RS         })?;
+//RS         let mut bindings = self
+//RS             .callable_bindings
+//RS             .write()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         bindings.retain(|binding| binding.object.carrier.strong_count() != 0);
+//RS         if bindings
+//RS             .iter()
+//RS             .any(|binding| same_callable(&binding.identity, &identity))
+//RS         {
+//RS             return Err(NativeInterfaceError::DuplicateBinding);
+//RS         }
+//RS         if bindings.iter().any(|binding| {
+//RS             binding.signature == signature && binding.object.matches_object(&object)
+//RS         }) {
+//RS             return Err(NativeInterfaceError::CallableRootCollision {
+//RS                 key: identity.key,
+//RS                 object: object.id,
+//RS             });
+//RS         }
+//RS         bindings.push(NativeCallableBinding {
+//RS             object: object_key,
+//RS             identity,
+//RS             signature,
+//RS             handler,
+//RS         });
+//RS         Ok(())
+//RS     }
+//RS     /// Invoke by key only through this retained binding set. The adapter must
+//RS     /// retain the same `Arc` across Source tasks/transfers; the active scope is
+//RS     /// checked by pointer identity so a matching key in another root is never
+//RS     /// substituted. Its externally retained carrier keeps the physical root alive.
+//RS     pub fn dispatch_callable_for_scope(
+//RS         self: &Arc<Self>,
+//RS         identity: NativeCallableIdentity,
+//RS         signature: NativeCallableSignature,
+//RS         arguments: Vec<NativeInterfaceArgument>,
+//RS         span: Span,
+//RS     ) -> NativeCallableCompletion {
+//RS         let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS             stack.borrow().last().map(|active| {
+//RS                 (
+//RS                     active.bindings.clone(),
+//RS                     active.execution.clone(),
+//RS                     active.artifact,
+//RS                 )
+//RS             })
+//RS         });
+//RS         let Some((active_bindings, execution, artifact)) = active else {
+//RS             let mut call = NativeCallableCall::new(
+//RS                 Some(identity),
+//RS                 signature,
+//RS                 None,
+//RS                 None,
+//RS                 arguments,
+//RS                 span,
+//RS             );
+//RS             call.preflight_error = Some(NativeInterfaceError::MissingBinding);
+//RS             return NativeCallableCompletion {
+//RS                 outcome: Err(NativeInterfaceError::MissingBinding),
+//RS                 call,
+//RS             };
+//RS         };
+//RS         if !Arc::ptr_eq(&active_bindings, self)
+//RS             || execution != identity.execution
+//RS             || artifact != identity.artifact
+//RS         {
+//RS             let mut call = NativeCallableCall::new(
+//RS                 Some(identity),
+//RS                 signature,
+//RS                 None,
+//RS                 None,
+//RS                 arguments,
+//RS                 span,
+//RS             );
+//RS             call.preflight_error = Some(NativeInterfaceError::ExecutionMismatch);
+//RS             return NativeCallableCompletion {
+//RS                 outcome: Err(NativeInterfaceError::ExecutionMismatch),
+//RS                 call,
+//RS             };
+//RS         }
+//RS         let binding = self.object_for_callable_identity(&identity, &signature);
+//RS         let (object, preflight_error) = match binding {
+//RS             Ok(object) => (Some(object), None),
+//RS             Err(error) => (None, Some(error)),
+//RS         };
+//RS         let carrier = object.as_ref().map(NativeInterfaceObject::clone_root);
+//RS         let mut call = NativeCallableCall::new(
+//RS             Some(identity),
+//RS             signature,
+//RS             object,
+//RS             carrier,
+//RS             arguments,
+//RS             span,
+//RS         );
+//RS         // A failed lookup is the root cause; it must not be masked by the
+//RS         // shape error that a missing object implies.
+//RS         if let Some(error) = preflight_error {
+//RS             call.preflight_error = Some(error);
+//RS         }
+//RS         self.dispatch_callable(&execution, artifact, call)
+//RS     }
+//RS 
+//RS 
+//RS     /// Validate all registered identities and signatures against this exact
+//RS     /// checked artifact and capture the validated C binding scope.
+//RS     pub fn checked_scope(
+//RS         self: &Arc<Self>,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS     ) -> Result<NativeInterfaceCheckedScope, NativeInterfaceError> {
+//RS         let execution = program
+//RS             .execution_identity(Some(artifact))
+//RS             .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+//RS         self.checked_scope_for_execution(program, artifact, execution)
+//RS     }
+//RS 
+//RS     /// [`Self::checked_scope`] for a caller that already holds the artifact's
+//RS     /// execution identity (a sealed compiler image): every binding is checked
+//RS     /// against `program`'s rows and that identity, and the whole program is
+//RS     /// not re-digested.
+//RS     pub fn checked_scope_for_execution(
+//RS         self: &Arc<Self>,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         execution: MirExecutionIdentity,
+//RS     ) -> Result<NativeInterfaceCheckedScope, NativeInterfaceError> {
+//RS         let bindings = self
+//RS             .bindings
+//RS             .read()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         for binding in bindings.iter() {
+//RS             let checked = NativeInterfaceMethod::checked_for_execution(
+//RS                 program,
+//RS                 execution.clone(),
+//RS                 artifact,
+//RS                 binding.identity.trait_ref.id,
+//RS                 binding.identity.method_id,
+//RS                 binding.identity.receiver_type.clone(),
+//RS             )?;
+//RS             if checked.identity != binding.identity
+//RS                 || checked.signature != binding.signature
+//RS                 || binding.identity.execution != execution
+//RS             {
+//RS                 return Err(NativeInterfaceError::SignatureMismatch);
+//RS             }
+//RS         }
+//RS         drop(bindings);
+//RS         let callables = self
+//RS             .callable_bindings
+//RS             .read()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         for binding in callables.iter() {
+//RS             let checked = NativeCallableIdentity::checked_for_execution(
+//RS                 execution.clone(),
+//RS                 artifact,
+//RS                 binding.identity.key.clone(),
+//RS                 binding.identity.callable_type.clone(),
+//RS             )?;
+//RS             let checked_signature =
+//RS                 NativeCallableSignature::checked(&binding.identity.callable_type)?;
+//RS             if checked != binding.identity
+//RS                 || checked_signature != binding.signature
+//RS                 || binding.identity.execution != execution
+//RS             {
+//RS                 return Err(NativeInterfaceError::SignatureMismatch);
+//RS             }
+//RS         }
+//RS         drop(callables);
+//RS         Ok(NativeInterfaceCheckedScope {
+//RS             bindings: self.clone(),
+//RS             execution,
+//RS             artifact,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Validate this set for one artifact, then push a nested activation.
+//RS     pub fn activate(
+//RS         self: &Arc<Self>,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS     ) -> Result<NativeInterfaceScope, NativeInterfaceError> {
+//RS         let checked_scope = self.checked_scope(program, artifact)?;
+//RS         Ok(NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             None,
+//RS         ))
+//RS     }
+//RS 
+//RS     /// [`Self::activate`] for a caller that already holds the artifact's
+//RS     /// execution identity (a sealed compiler image).
+//RS     pub fn activate_for_execution(
+//RS         self: &Arc<Self>,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         execution: MirExecutionIdentity,
+//RS     ) -> Result<NativeInterfaceScope, NativeInterfaceError> {
+//RS         let checked_scope = self.checked_scope_for_execution(program, artifact, execution)?;
+//RS         Ok(NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             None,
+//RS         ))
+//RS     }
+//RS 
+//RS     fn object_for_carrier(
+//RS         &self,
+//RS         identity: &NativeInterfaceIdentity,
+//RS         signature: &NativeInterfaceSignature,
+//RS         carrier: &MirNativeOwned,
+//RS     ) -> Result<NativeInterfaceObject, NativeInterfaceError> {
+//RS         if let Some(physical) = carrier.downcast_ref::<NativeInterfaceStaticCarrier>() {
+//RS             let key = {
+//RS                 let bindings = self
+//RS                     .bindings
+//RS                     .read()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 let mut matches = bindings.iter().filter(|binding| {
+//RS                     binding.object.matches_static_carrier(physical)
+//RS                         && same_method(&binding.identity, identity)
+//RS                 });
+//RS                 let Some(binding) = matches.next() else {
+//RS                     return Err(NativeInterfaceError::MissingBinding);
+//RS                 };
+//RS                 if matches.next().is_some() {
+//RS                     return Err(NativeInterfaceError::AmbiguousBinding);
+//RS                 }
+//RS                 if binding.signature != *signature {
+//RS                     return Err(NativeInterfaceError::SignatureMismatch);
+//RS                 }
+//RS                 binding.object.clone()
+//RS             };
+//RS             return key
+//RS                 .object_for_static_carrier(carrier)
+//RS                 .ok_or(NativeInterfaceError::MissingBinding);
+//RS         }
+//RS 
+//RS         let carrier_instance = carrier
+//RS             .downcast_ref::<NativeInterfaceInstanceCarrier>()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         let instance = carrier_instance.instance.clone();
+//RS         if !Arc::ptr_eq(&instance.set_identity, &self.set_identity) {
+//RS             return Err(NativeInterfaceError::MissingBinding);
+//RS         }
+//RS         let Some(method) = instance
+//RS             .methods
+//RS             .iter()
+//RS             .find(|method| same_method(&method.identity, identity))
+//RS         else {
+//RS             return Err(NativeInterfaceError::MissingBinding);
+//RS         };
+//RS         if method.signature != *signature {
+//RS             return Err(NativeInterfaceError::SignatureMismatch);
+//RS         }
+//RS         let instances = self
+//RS             .instances
+//RS             .read()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if !instances
+//RS             .iter()
+//RS             .filter_map(Weak::upgrade)
+//RS             .any(|registered| Arc::ptr_eq(&registered, &instance))
+//RS         {
+//RS             return Err(NativeInterfaceError::MissingBinding);
+//RS         }
+//RS         drop(instances);
+//RS         Ok(NativeInterfaceObject {
+//RS             id: instance.id,
+//RS             set_identity: self.set_identity.clone(),
+//RS             root: instance.root.clone(),
+//RS             carrier: carrier.clone(),
+//RS             instance: Some(instance),
+//RS         })
+//RS     }
+//RS 
+//RS     fn dispatch(
+//RS         &self,
+//RS         execution: &MirExecutionIdentity,
+//RS         artifact: MirArtifactId,
+//RS         mut call: NativeInterfaceCall,
+//RS     ) -> NativeInterfaceCompletion {
+//RS         if let Some(error) = call.preflight_error.take() {
+//RS             return NativeInterfaceCompletion {
+//RS                 outcome: Err(error),
+//RS                 call,
+//RS             };
+//RS         }
+//RS         if call.identity.execution != *execution || call.identity.artifact != artifact {
+//RS             return NativeInterfaceCompletion {
+//RS                 outcome: Err(NativeInterfaceError::ExecutionMismatch),
+//RS                 call,
+//RS             };
+//RS         }
+//RS         let Some(object) = call.object.as_ref() else {
+//RS             return NativeInterfaceCompletion {
+//RS                 outcome: Err(NativeInterfaceError::ReceiverMismatch),
+//RS                 call,
+//RS             };
+//RS         };
+//RS         let binding = match &object.instance {
+//RS             Some(instance) => {
+//RS                 let receiver_matches = matches!(
+//RS                     &call.receiver,
+//RS                     MirRuntimeValue::NativeOwned(carrier)
+//RS                         if object.matches_root(carrier)
+//RS                             && Arc::ptr_eq(&object.set_identity, &self.set_identity)
+//RS                             && Arc::ptr_eq(&instance.set_identity, &self.set_identity)
+//RS                 );
+//RS                 if !receiver_matches {
+//RS                     Some(Err(NativeInterfaceError::ReceiverMismatch))
+//RS                 } else {
+//RS                     instance
+//RS                         .methods
+//RS                         .iter()
+//RS                         .find(|method| same_method(&method.identity, &call.identity))
+//RS                         .map(|method| {
+//RS                             if method.signature == call.signature {
+//RS                                 Ok((object.clone(), method.handler.clone()))
+//RS                             } else {
+//RS                                 Err(NativeInterfaceError::SignatureMismatch)
+//RS                             }
+//RS                         })
+//RS                 }
+//RS             }
+//RS             None => {
+//RS                 let carrier = match &call.receiver {
+//RS                     MirRuntimeValue::NativeOwned(carrier) => carrier,
+//RS                     _ => return NativeInterfaceCompletion {
+//RS                         outcome: Err(NativeInterfaceError::ReceiverMismatch),
+//RS                         call,
+//RS                     },
+//RS                 };
+//RS                 let Some(physical) = carrier.downcast_ref::<NativeInterfaceStaticCarrier>() else {
+//RS                     return NativeInterfaceCompletion {
+//RS                         outcome: Err(NativeInterfaceError::ReceiverMismatch),
+//RS                         call,
+//RS                     };
+//RS                 };
+//RS                 let bindings = self
+//RS                     .bindings
+//RS                     .read()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS                 let mut matches = bindings.iter().filter(|binding| {
+//RS                     binding.object.matches_object(object)
+//RS                         && binding.object.matches_static_carrier(physical)
+//RS                         && same_method(&binding.identity, &call.identity)
+//RS                 });
+//RS                 matches.next().map(|binding| {
+//RS                     if binding.signature == call.signature {
+//RS                         Ok((object.clone(), binding.handler.clone()))
+//RS                     } else {
+//RS                         Err(NativeInterfaceError::SignatureMismatch)
+//RS                     }
+//RS                 })
+//RS             }
+//RS         };
+//RS         let outcome = match binding {
+//RS             None => Err(NativeInterfaceError::MissingBinding),
+//RS             Some(Err(error)) => Err(error),
+//RS             Some(Ok((object, handler))) => invoke_handler(|| handler(&object, &mut call)),
+//RS         };
+//RS         let outcome = call.finish(outcome);
+//RS         NativeInterfaceCompletion { outcome, call }
+//RS     }
+//RS     // Static callable metadata retains only a weak carrier reference; the
+//RS     // adapter's external physical root determines whether that value is live.
+//RS     fn object_for_callable_carrier(
+//RS         &self,
+//RS         identity: &NativeCallableIdentity,
+//RS         signature: &NativeCallableSignature,
+//RS         carrier: &MirNativeOwned,
+//RS     ) -> Result<NativeInterfaceObject, NativeInterfaceError> {
+//RS         let physical = carrier
+//RS             .downcast_ref::<NativeInterfaceStaticCarrier>()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         let key = {
+//RS             let bindings = self
+//RS                 .callable_bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .find(|binding| {
+//RS                     same_callable(&binding.identity, identity)
+//RS                         && binding.signature == *signature
+//RS                         && binding.object.matches_static_carrier(physical)
+//RS                 })
+//RS                 .map(|binding| binding.object.clone())
+//RS                 .ok_or(NativeInterfaceError::MissingBinding)?
+//RS         };
+//RS         key.object_for_static_carrier(carrier)
+//RS             .ok_or(NativeInterfaceError::MissingBinding)
+//RS     }
+//RS 
+//RS     fn object_for_callable_identity(
+//RS         &self,
+//RS         identity: &NativeCallableIdentity,
+//RS         signature: &NativeCallableSignature,
+//RS     ) -> Result<NativeInterfaceObject, NativeInterfaceError> {
+//RS         let key = {
+//RS             let bindings = self
+//RS                 .callable_bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .find(|binding| {
+//RS                     same_callable(&binding.identity, identity) && binding.signature == *signature
+//RS                 })
+//RS                 .map(|binding| binding.object.clone())
+//RS                 .ok_or(NativeInterfaceError::MissingBinding)?
+//RS         };
+//RS         key.object_from_external_carrier()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)
+//RS     }
+//RS 
+//RS     fn binding_for_callable_carrier(
+//RS         &self,
+//RS         signature: &NativeCallableSignature,
+//RS         carrier: &MirNativeOwned,
+//RS     ) -> Result<(NativeCallableIdentity, NativeInterfaceObject), NativeInterfaceError> {
+//RS         let physical = carrier
+//RS             .downcast_ref::<NativeInterfaceStaticCarrier>()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         let (identity, key) = {
+//RS             let bindings = self
+//RS                 .callable_bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .find(|binding| {
+//RS                     binding.signature == *signature
+//RS                         && binding.object.matches_static_carrier(physical)
+//RS                 })
+//RS                 .map(|binding| (binding.identity.clone(), binding.object.clone()))
+//RS                 .ok_or(NativeInterfaceError::MissingBinding)?
+//RS         };
+//RS         let object = key
+//RS             .object_for_static_carrier(carrier)
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         Ok((identity, object))
+//RS     }
+//RS 
+//RS     fn dispatch_callable(
+//RS         &self,
+//RS         execution: &MirExecutionIdentity,
+//RS         artifact: MirArtifactId,
+//RS         mut call: NativeCallableCall,
+//RS     ) -> NativeCallableCompletion {
+//RS         if let Some(error) = call.preflight_error.take() {
+//RS             return NativeCallableCompletion {
+//RS                 outcome: Err(error),
+//RS                 call,
+//RS             };
+//RS         }
+//RS         // Preflight already proved identity, object, and carrier are present and
+//RS         // that the carrier identifies this exact registered physical root.
+//RS         let (Some(identity), Some(object)) = (call.identity.as_ref(), call.object.as_ref()) else {
+//RS             return NativeCallableCompletion {
+//RS                 outcome: Err(NativeInterfaceError::ReceiverMismatch),
+//RS                 call,
+//RS             };
+//RS         };
+//RS         if identity.execution != *execution || identity.artifact != artifact {
+//RS             return NativeCallableCompletion {
+//RS                 outcome: Err(NativeInterfaceError::ExecutionMismatch),
+//RS                 call,
+//RS             };
+//RS         }
+//RS         let handler = {
+//RS             let bindings = self
+//RS                 .callable_bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .find(|binding| {
+//RS                     binding.object.matches_object(object)
+//RS                         && same_callable(&binding.identity, identity)
+//RS                 })
+//RS                 .map(|binding| {
+//RS                     if binding.signature == call.signature {
+//RS                         Ok((object.clone(), binding.handler.clone()))
+//RS                     } else {
+//RS                         Err(NativeInterfaceError::SignatureMismatch)
+//RS                     }
+//RS                 })
+//RS         };
+//RS         let outcome = match handler {
+//RS             None => Err(NativeInterfaceError::MissingBinding),
+//RS             Some(Err(error)) => Err(error),
+//RS             Some(Ok((object, handler))) => invoke_handler(|| handler(&object, &mut call)),
+//RS         };
+//RS         let outcome = call.finish(outcome);
+//RS         NativeCallableCompletion { outcome, call }
+//RS     }
+//RS }
+//RS 
+//RS impl Default for NativeInterfaceBindings {
+//RS     fn default() -> Self {
+//RS         Self::new()
+//RS     }
+//RS }
+//RS 
+//RS /// Checked native interface method descriptor derived from canonical MIR.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeInterfaceMethod {
+//RS     pub identity: NativeInterfaceIdentity,
+//RS     pub signature: NativeInterfaceSignature,
+//RS }
+//RS 
+//RS impl NativeInterfaceMethod {
+//RS     pub fn checked(
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         trait_id: MirTraitId,
+//RS         method_id: MirTraitMethodId,
+//RS         receiver_type: MirType,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         Self::checked_with(program, artifact, trait_id, method_id, receiver_type, || {
+//RS             program
+//RS                 .execution_identity(Some(artifact))
+//RS                 .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))
+//RS         })
+//RS     }
+//RS 
+//RS     /// [`Self::checked`] for a caller that already holds the artifact's
+//RS     /// execution identity (a sealed compiler image): the method is checked
+//RS     /// against `program`'s rows and the whole program is not re-digested.
+//RS     pub fn checked_for_execution(
+//RS         program: &MirProgram,
+//RS         execution: MirExecutionIdentity,
+//RS         artifact: MirArtifactId,
+//RS         trait_id: MirTraitId,
+//RS         method_id: MirTraitMethodId,
+//RS         receiver_type: MirType,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         Self::checked_with(program, artifact, trait_id, method_id, receiver_type, || Ok(execution))
+//RS     }
+//RS 
+//RS     fn checked_with(
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         trait_id: MirTraitId,
+//RS         method_id: MirTraitMethodId,
+//RS         receiver_type: MirType,
+//RS         execution: impl FnOnce() -> Result<MirExecutionIdentity, NativeInterfaceError>,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         let artifact_row = program
+//RS             .artifacts
+//RS             .iter()
+//RS             .find(|row| row.id == artifact)
+//RS             .ok_or_else(|| NativeInterfaceError::InvalidMetadata(format!("MIR artifact {artifact:?} is missing")))?;
+//RS         let mut traits = program.traits.iter().filter(|row| row.id == trait_id);
+//RS         let trait_row = traits
+//RS             .next()
+//RS             .ok_or_else(|| NativeInterfaceError::InvalidMetadata(format!("MIR trait {trait_id:?} is missing")))?;
+//RS         if traits.next().is_some() || !artifact_row.modules.contains(&trait_row.module) {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface trait identity is ambiguous or outside the selected artifact".to_string(),
+//RS             ));
+//RS         }
+//RS         let mut methods = trait_row.methods.iter().filter(|row| row.id == method_id);
+//RS         let method = methods
+//RS             .next()
+//RS             .ok_or_else(|| NativeInterfaceError::InvalidMetadata(format!("MIR trait method {method_id:?} is missing")))?;
+//RS         if methods.next().is_some() {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface method identity is ambiguous".to_string(),
+//RS             ));
+//RS         }
+//RS         let receiver_access = method.self_access.ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidMetadata("native interface method has no checked receiver access".to_string())
+//RS         })?;
+//RS         let MirTypeKind::TraitObject(bounds) = receiver_type.kind() else {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface receiver type is not a checked trait object".to_string(),
+//RS             ));
+//RS         };
+//RS         let expected_bound_id =
+//RS             MirTypeId(jet_foundation::MIR::stable_id("mir-trait", &trait_row.name));
+//RS         if !bounds
+//RS             .iter()
+//RS             .any(|bound| bound.id == expected_bound_id && bound.name == trait_row.name)
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface receiver type does not carry the exact checked trait bound".to_string(),
+//RS             ));
+//RS         }
+//RS         if method.params.iter().any(|parameter| !parameter.ty.has_valid_layout())
+//RS             || !method.return_type.has_valid_layout()
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface signature contains an invalid MIR layout".to_string(),
+//RS             ));
+//RS         }
+//RS         let execution = execution()?;
+//RS         Ok(Self {
+//RS             identity: NativeInterfaceIdentity {
+//RS                 execution,
+//RS                 artifact,
+//RS                 trait_ref: MirTraitRef {
+//RS                     id: trait_id,
+//RS                     name: trait_row.name.clone(),
+//RS                 },
+//RS                 method_id,
+//RS                 method_name: method.name.clone(),
+//RS                 receiver_type,
+//RS             },
+//RS             signature: NativeInterfaceSignature {
+//RS                 receiver_access,
+//RS                 parameters: method.params.clone(),
+//RS                 return_type: method.return_type.clone(),
+//RS                 failure: method.failure.clone(),
+//RS             },
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS /// Full result of one native interface invocation. The owned call remains
+//RS /// available on failure so the caller can write back every mutable argument
+//RS /// and discharge every physical transfer receipt before returning the error.
+//RS pub struct NativeInterfaceCompletion {
+//RS     outcome: Result<MirRuntimeValue, NativeInterfaceError>,
+//RS     call: NativeInterfaceCall,
+//RS }
+//RS 
+//RS impl NativeInterfaceCompletion {
+//RS     pub fn outcome(&self) -> Result<&MirRuntimeValue, &NativeInterfaceError> {
+//RS         self.outcome.as_ref()
+//RS     }
+//RS 
+//RS     pub fn call(&self) -> &NativeInterfaceCall {
+//RS         &self.call
+//RS     }
+//RS 
+//RS     pub fn into_parts(
+//RS         self,
+//RS     ) -> (
+//RS         Result<MirRuntimeValue, NativeInterfaceError>,
+//RS         NativeInterfaceCall,
+//RS     ) {
+//RS         (self.outcome, self.call)
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub enum NativeInterfaceError {
+//RS     InvalidMetadata(String),
+//RS     InvalidCall(String),
+//RS     MissingBinding,
+//RS     DuplicateBinding,
+//RS     AmbiguousBinding,
+//RS     /// A second function value with the same checked signature was bound on a
+//RS     /// carrier root that already exposes one; JIT function values would be
+//RS     /// indistinguishable, so the registration is refused up front.
+//RS     CallableRootCollision {
+//RS         key: String,
+//RS         object: NativeInterfaceObjectId,
+//RS     },
+//RS     ReceiverMismatch,
+//RS     SignatureMismatch,
+//RS     ExecutionMismatch,
+//RS     IdentityExhausted,
+//RS     UnresolvedTransfers(Vec<usize>),
+//RS     Handler(String),
+//RS     /// The handler unwound. The completion still carries the owned call with
+//RS     /// every argument row, committed receipt, and pending transfer intact.
+//RS     HandlerPanicked(String),
+//RS }
+//RS 
+//RS impl fmt::Display for NativeInterfaceError {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         match self {
+//RS             Self::InvalidMetadata(detail) => write!(formatter, "invalid native interface metadata: {detail}"),
+//RS             Self::InvalidCall(detail) => write!(formatter, "invalid native interface call: {detail}"),
+//RS             Self::MissingBinding => formatter.write_str("no native interface binding is active for this checked receiver"),
+//RS             Self::DuplicateBinding => formatter.write_str("native interface method binding is duplicated"),
+//RS             Self::AmbiguousBinding => formatter.write_str("native interface receiver matches more than one checked binding"),
+//RS             Self::CallableRootCollision { key, object } => write!(
+//RS                 formatter,
+//RS                 "native callable `{key}` shares a carrier root ({object:?}) and checked signature with an existing function value; bind it on its own root"
+//RS             ),
+//RS             Self::ReceiverMismatch => formatter.write_str("native interface receiver does not carry the retained binding root"),
+//RS             Self::SignatureMismatch => formatter.write_str("native interface signature does not match its checked MIR method"),
+//RS             Self::ExecutionMismatch => formatter.write_str("native interface binding belongs to a different checked execution or artifact"),
+//RS             Self::IdentityExhausted => formatter.write_str("native interface object identity space is exhausted"),
+//RS             Self::UnresolvedTransfers(arguments) => write!(formatter, "native interface call has unresolved owned transfers for arguments {arguments:?}"),
+//RS             Self::Handler(detail) => write!(formatter, "native interface handler failed: {detail}"),
+//RS             Self::HandlerPanicked(detail) => write!(formatter, "native interface handler panicked: {detail}"),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl std::error::Error for NativeInterfaceError {}
+//RS 
+//RS /// Caller-validated Source root metadata paired with one invocation-local
+//RS /// physical SharedGuard view. The selector indexes only the owning call context.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeInterfacePhysicalBorrowMetadata {
+//RS     pub selector: i64,
+//RS     pub owner_row: MirPreludeCallId,
+//RS     pub capability: crate::SourceResources::SourceResourceHandle,
+//RS     pub physical_identity: usize,
+//RS     pub editable: bool,
+//RS     pub path: Vec<MirFieldId>,
+//RS }
+//RS 
+//RS /// One typed physical view already obtained from its Source/JIT owner.
+//RS pub struct NativeInterfacePhysicalBorrowEntry {
+//RS     pub metadata: NativeInterfacePhysicalBorrowMetadata,
+//RS     pub view: crate::SourceSharedInterop::SourceSharedInteropGuardState,
+//RS }
+//RS 
+//RS /// Validated native binding scope for one compiler execution/artifact. This
+//RS /// checked C-side identity is independent of any guest physical guard views.
+//RS #[derive(Clone)]
+//RS pub struct NativeInterfaceCheckedScope {
+//RS     bindings: Arc<NativeInterfaceBindings>,
+//RS     execution: MirExecutionIdentity,
+//RS     artifact: MirArtifactId,
+//RS }
+//RS 
+//RS impl NativeInterfaceCheckedScope {
+//RS     pub fn validate_execution(
+//RS         &self,
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         let execution = program
+//RS             .execution_identity(Some(artifact))
+//RS             .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+//RS         if self.execution != execution || self.artifact != artifact {
+//RS             return Err(NativeInterfaceError::ExecutionMismatch);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS /// Non-Send, call-owned set of guest physical guard views. Checked C binding
+//RS /// scopes carry this context independently and only expose it through a weak
+//RS /// activation-local association.
+//RS pub struct NativeInterfacePhysicalBorrowContext {
+//RS     entries: Vec<NativeInterfacePhysicalBorrowEntry>,
+//RS     thread: std::thread::ThreadId,
+//RS }
+//RS 
+//RS impl NativeInterfacePhysicalBorrowContext {
+//RS     /// Construct one coherent per-call sidecar from arena-validated root facts
+//RS     /// and already-typed views. This does not acquire, clone, or re-resolve a
+//RS     /// permit; owner-specific code supplies each existing view.
+//RS     pub fn new(
+//RS         entries: &mut Vec<NativeInterfacePhysicalBorrowEntry>,
+//RS     ) -> Result<Rc<Self>, NativeInterfaceError> {
+//RS         for (index, entry) in entries.iter().enumerate() {
+//RS             if entries[..index]
+//RS                 .iter()
+//RS                 .any(|prior| prior.metadata.selector == entry.metadata.selector)
+//RS             {
+//RS                 return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                     "physical borrow selector {} is duplicated in one call context",
+//RS                     entry.metadata.selector
+//RS                 )));
+//RS             }
+//RS             if !matches!(
+//RS                 &entry.metadata.capability.kind,
+//RS                 crate::SourceResources::SourceResourceKind::SharedInteropRoot { .. }
+//RS             ) {
+//RS                 return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                     "physical borrow selector {} does not carry a checked Shared root capability",
+//RS                     entry.metadata.selector
+//RS                 )));
+//RS             }
+//RS             validate_native_interface_physical_borrow_entry(entry)?;
+//RS         }
+//RS         Ok(Rc::new(Self {
+//RS             entries: std::mem::take(entries),
+//RS             thread: std::thread::current().id(),
+//RS         }))
+//RS     }
+//RS 
+//RS     fn with_physical_borrow<R>(
+//RS         &self,
+//RS         metadata: &NativeInterfacePhysicalBorrowMetadata,
+//RS         reborrow: impl FnOnce(&crate::SourceSharedInterop::SourceSharedInteropGuardState) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         if self.thread != std::thread::current().id() {
+//RS             return Err(NativeInterfaceError::ExecutionMismatch);
+//RS         }
+//RS         let entry = self
+//RS             .entries
+//RS             .iter()
+//RS             .find(|entry| entry.metadata.selector == metadata.selector)
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         if entry.metadata != *metadata {
+//RS             return Err(NativeInterfaceError::ExecutionMismatch);
+//RS         }
+//RS         validate_native_interface_physical_borrow_entry(entry)?;
+//RS         Ok(reborrow(&entry.view))
+//RS     }
+//RS }
+//RS fn validate_native_interface_physical_borrow_entry(
+//RS     entry: &NativeInterfacePhysicalBorrowEntry,
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     let metadata = &entry.metadata;
+//RS     let path_matches = entry.view.path().len() == metadata.path.len()
+//RS         && entry
+//RS             .view
+//RS             .path()
+//RS             .iter()
+//RS             .zip(&metadata.path)
+//RS             .all(|(actual, checked)| i64::try_from(checked.0).ok() == Some(*actual));
+//RS     if !entry.view.held()
+//RS         || entry.view.editable() != metadata.editable
+//RS         || entry.view.physical_identity() != metadata.physical_identity
+//RS         || !path_matches
+//RS     {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "physical borrow selector {} no longer matches its checked guard view",
+//RS             metadata.selector
+//RS         )));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS /// Invocation-local activation guard. It is deliberately !Send: every worker
+//RS /// must push its own scope instead of assuming thread-local state follows tasks.
+//RS pub struct NativeInterfaceScope {
+//RS     token: Option<Arc<()>>,
+//RS     physical_borrow_context: Option<Rc<NativeInterfacePhysicalBorrowContext>>,
+//RS     _not_send: PhantomData<Rc<()>>,
+//RS }
+//RS 
+//RS impl NativeInterfaceScope {
+//RS     /// Push an already-validated C compiler scope with an optional, independent
+//RS     /// guest physical context. The scope owns that context until after pop.
+//RS     pub fn activate_checked_scope(
+//RS         checked_scope: &NativeInterfaceCheckedScope,
+//RS         physical_borrow_context: Option<Rc<NativeInterfacePhysicalBorrowContext>>,
+//RS     ) -> Self {
+//RS         push_scope_with_physical_borrow(
+//RS             checked_scope.bindings.clone(),
+//RS             checked_scope.execution.clone(),
+//RS             checked_scope.artifact,
+//RS             physical_borrow_context,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Capture the exact checked scope at the top of the activation stack.
+//RS     pub fn current_checked_scope() -> Option<NativeInterfaceCheckedScope> {
+//RS         ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS             stack.borrow().last().map(|active| NativeInterfaceCheckedScope {
+//RS                 bindings: active.bindings.clone(),
+//RS                 execution: active.execution.clone(),
+//RS                 artifact: active.artifact,
+//RS             })
+//RS         })
+//RS     }
+//RS 
+//RS     /// Current activation's guest physical context, if its weak association is
+//RS     /// live on this same thread.
+//RS     pub fn current_physical_borrow_context(
+//RS     ) -> Option<Rc<NativeInterfacePhysicalBorrowContext>> {
+//RS         let thread = std::thread::current().id();
+//RS         ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS             stack
+//RS                 .borrow()
+//RS                 .last()
+//RS                 .and_then(|active| active.physical_borrow_context.as_ref()?.upgrade())
+//RS                 .filter(|context| context.thread == thread)
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn with_active_physical_borrow<R>(
+//RS         metadata: &NativeInterfacePhysicalBorrowMetadata,
+//RS         reborrow: impl FnOnce(&crate::SourceSharedInterop::SourceSharedInteropGuardState) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         let context =
+//RS             Self::current_physical_borrow_context().ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         context.with_physical_borrow(metadata, reborrow)
+//RS     }
+//RS }
+//RS 
+//RS struct ActiveNativeInterface {
+//RS     token: Arc<()>,
+//RS     bindings: Arc<NativeInterfaceBindings>,
+//RS     execution: MirExecutionIdentity,
+//RS     artifact: MirArtifactId,
+//RS     physical_borrow_context:
+//RS         Option<std::rc::Weak<NativeInterfacePhysicalBorrowContext>>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static ACTIVE_NATIVE_INTERFACES: RefCell<Vec<ActiveNativeInterface>> = const { RefCell::new(Vec::new()) };
+//RS }
+//RS /// Snapshot native free-callable registrations from the active checked
+//RS /// artifact. Callable keys and signatures remain explicit; no MIR function ID
+//RS /// is synthesized for a native function value.
+//RS pub fn active_callable_descriptors(
+//RS ) -> Result<Vec<NativeCallableBindingDescriptor>, NativeInterfaceError> {
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     let Some((bindings, execution, artifact)) = active else {
+//RS         return Ok(Vec::new());
+//RS     };
+//RS     let descriptors = bindings.callable_descriptors();
+//RS     if descriptors.iter().any(|descriptor| {
+//RS         descriptor.identity.execution != execution || descriptor.identity.artifact != artifact
+//RS     }) {
+//RS         return Err(NativeInterfaceError::ExecutionMismatch);
+//RS     }
+//RS     Ok(descriptors)
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// Snapshot the descriptors belonging to the currently active checked
+//RS /// artifact. This is the backend installation surface; callers never infer a
+//RS /// private trait name or search MIR for unrelated host bindings.
+//RS pub fn active_binding_descriptors(
+//RS     program: &MirProgram,
+//RS     artifact: MirArtifactId,
+//RS ) -> Result<Vec<NativeInterfaceBindingDescriptor>, NativeInterfaceError> {
+//RS     let execution = program
+//RS         .execution_identity(Some(artifact))
+//RS         .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     let Some((bindings, active_execution, active_artifact)) = active else {
+//RS         return Err(NativeInterfaceError::MissingBinding);
+//RS     };
+//RS     if active_execution != execution || active_artifact != artifact {
+//RS         return Err(NativeInterfaceError::ExecutionMismatch);
+//RS     }
+//RS     let descriptors = bindings.method_descriptors();
+//RS     if descriptors.iter().any(|descriptor| {
+//RS         descriptor.identity.execution != execution || descriptor.identity.artifact != artifact
+//RS     }) {
+//RS         return Err(NativeInterfaceError::ExecutionMismatch);
+//RS     }
+//RS     Ok(descriptors)
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS fn push_scope(
+//RS     bindings: Arc<NativeInterfaceBindings>,
+//RS     execution: MirExecutionIdentity,
+//RS     artifact: MirArtifactId,
+//RS ) -> NativeInterfaceScope {
+//RS     push_scope_with_physical_borrow(bindings, execution, artifact, None)
+//RS }
+//RS 
+//RS fn push_scope_with_physical_borrow(
+//RS     bindings: Arc<NativeInterfaceBindings>,
+//RS     execution: MirExecutionIdentity,
+//RS     artifact: MirArtifactId,
+//RS     physical_borrow_context: Option<Rc<NativeInterfacePhysicalBorrowContext>>,
+//RS ) -> NativeInterfaceScope {
+//RS     let token = Arc::new(());
+//RS     let weak_context = physical_borrow_context.as_ref().map(Rc::downgrade);
+//RS     ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow_mut().push(ActiveNativeInterface {
+//RS             token: token.clone(),
+//RS             bindings,
+//RS             execution,
+//RS             artifact,
+//RS             physical_borrow_context: weak_context,
+//RS         });
+//RS     });
+//RS     NativeInterfaceScope {
+//RS         token: Some(token),
+//RS         physical_borrow_context,
+//RS         _not_send: PhantomData,
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for NativeInterfaceScope {
+//RS     fn drop(&mut self) {
+//RS         if let Some(token) = self.token.take() {
+//RS             ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS                 let mut stack = stack.borrow_mut();
+//RS                 if stack
+//RS                     .last()
+//RS                     .is_some_and(|active| Arc::ptr_eq(&active.token, &token))
+//RS                 {
+//RS                     stack.pop();
+//RS                 } else if let Some(index) = stack
+//RS                     .iter()
+//RS                     .rposition(|active| Arc::ptr_eq(&active.token, &token))
+//RS                 {
+//RS                     stack.remove(index);
+//RS                 }
+//RS             });
+//RS         }
+//RS         drop(self.physical_borrow_context.take());
+//RS     }
+//RS }
+//RS 
+//RS /// Dispatch through the currently active per-artifact native interface set.
+//RS /// There is no Prelude fallback: absent or mismatched bindings are errors and
+//RS /// the owned call is returned intact in the completion.
+//RS pub fn dispatch_active(call: NativeInterfaceCall) -> NativeInterfaceCompletion {
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     match active {
+//RS         Some((bindings, execution, artifact)) => bindings.dispatch(&execution, artifact, call),
+//RS         None => NativeInterfaceCompletion {
+//RS             outcome: Err(NativeInterfaceError::MissingBinding),
+//RS             call,
+//RS         },
+//RS     }
+//RS }
+//RS /// Resolve a Source trait-object carrier through the active, artifact-scoped
+//RS /// native bindings. `carrier` must be the same retained `MirNativeOwned` Arc
+//RS /// carried by `receiver`; raw JIT integers are never interpreted as identity.
+//RS pub fn dispatch_active_for_carrier(
+//RS     identity: NativeInterfaceIdentity,
+//RS     signature: NativeInterfaceSignature,
+//RS     receiver_access: MirAccess,
+//RS     receiver: MirRuntimeValue,
+//RS     carrier: MirNativeOwned,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS ) -> NativeInterfaceCompletion {
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     let Some((bindings, execution, artifact)) = active else {
+//RS         let mut call = NativeInterfaceCall::new(
+//RS             identity,
+//RS             signature,
+//RS             None,
+//RS             receiver_access,
+//RS             receiver,
+//RS             arguments,
+//RS             span,
+//RS         );
+//RS         call.preflight_error = Some(NativeInterfaceError::MissingBinding);
+//RS         return NativeInterfaceCompletion {
+//RS             outcome: Err(NativeInterfaceError::MissingBinding),
+//RS             call,
+//RS         };
+//RS     };
+//RS     let object = match &receiver {
+//RS         MirRuntimeValue::NativeOwned(actual) if actual == &carrier => {
+//RS             bindings.object_for_carrier(&identity, &signature, &carrier)
+//RS         }
+//RS         _ => Err(NativeInterfaceError::ReceiverMismatch),
+//RS     };
+//RS     let (object, preflight_error) = match object {
+//RS         Ok(object) => (Some(object), None),
+//RS         Err(error) => (None, Some(error)),
+//RS     };
+//RS     let mut call = NativeInterfaceCall::new(
+//RS         identity,
+//RS         signature,
+//RS         object,
+//RS         receiver_access,
+//RS         receiver,
+//RS         arguments,
+//RS         span,
+//RS     );
+//RS     if let Some(error) = preflight_error {
+//RS         call.preflight_error = Some(error);
+//RS     }
+//RS     bindings.dispatch(&execution, artifact, call)
+//RS }
+//RS /// Dispatch a native Fn value by its checked retained carrier in the active
+//RS /// artifact scope. A carrier must identify exactly one registered callable.
+//RS pub fn dispatch_active_callable_for_carrier(
+//RS     signature: NativeCallableSignature,
+//RS     carrier: MirNativeOwned,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS ) -> NativeCallableCompletion {
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     let Some((bindings, execution, artifact)) = active else {
+//RS         let mut call = NativeCallableCall::new(
+//RS             None,
+//RS             signature,
+//RS             None,
+//RS             Some(carrier),
+//RS             arguments,
+//RS             span,
+//RS         );
+//RS         call.preflight_error = Some(NativeInterfaceError::MissingBinding);
+//RS         return NativeCallableCompletion {
+//RS             outcome: Err(NativeInterfaceError::MissingBinding),
+//RS             call,
+//RS         };
+//RS     };
+//RS     let binding = bindings.binding_for_callable_carrier(&signature, &carrier);
+//RS     let (identity, object, preflight_error) = match binding {
+//RS         Ok((identity, object)) => (Some(identity), Some(object), None),
+//RS         Err(error) => (None, None, Some(error)),
+//RS     };
+//RS     let mut call = NativeCallableCall::new(
+//RS         identity,
+//RS         signature,
+//RS         object,
+//RS         Some(carrier),
+//RS         arguments,
+//RS         span,
+//RS     );
+//RS     if let Some(error) = preflight_error {
+//RS         call.preflight_error = Some(error);
+//RS     }
+//RS     bindings.dispatch_callable(&execution, artifact, call)
+//RS }
+//RS 
+//RS /// Dispatch when the caller already has the exact callable identity.
+//RS pub fn dispatch_active_callable(
+//RS     identity: NativeCallableIdentity,
+//RS     signature: NativeCallableSignature,
+//RS     carrier: MirNativeOwned,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS ) -> NativeCallableCompletion {
+//RS     let active = ACTIVE_NATIVE_INTERFACES.with(|stack| {
+//RS         stack.borrow().last().map(|active| {
+//RS             (
+//RS                 active.bindings.clone(),
+//RS                 active.execution.clone(),
+//RS                 active.artifact,
+//RS             )
+//RS         })
+//RS     });
+//RS     let Some((bindings, execution, artifact)) = active else {
+//RS         let mut call = NativeCallableCall::new(
+//RS             Some(identity),
+//RS             signature,
+//RS             None,
+//RS             Some(carrier),
+//RS             arguments,
+//RS             span,
+//RS         );
+//RS         call.preflight_error = Some(NativeInterfaceError::MissingBinding);
+//RS         return NativeCallableCompletion {
+//RS             outcome: Err(NativeInterfaceError::MissingBinding),
+//RS             call,
+//RS         };
+//RS     };
+//RS     let binding = bindings.object_for_callable_carrier(&identity, &signature, &carrier);
+//RS     let (object, preflight_error) = match binding {
+//RS         Ok(object) => (Some(object), None),
+//RS         Err(error) => (None, Some(error)),
+//RS     };
+//RS     let mut call = NativeCallableCall::new(
+//RS         Some(identity),
+//RS         signature,
+//RS         object,
+//RS         Some(carrier),
+//RS         arguments,
+//RS         span,
+//RS     );
+//RS     if let Some(error) = preflight_error {
+//RS         call.preflight_error = Some(error);
+//RS     }
+//RS     bindings.dispatch_callable(&execution, artifact, call)
+//RS }
+//RS 
+//RS /// Resolve the canonical carrier from the typed receiver and dispatch it
+//RS /// through the same checked path as callers that already hold the root token.
+//RS pub fn dispatch_active_for_identity(
+//RS     identity: NativeInterfaceIdentity,
+//RS     signature: NativeInterfaceSignature,
+//RS     receiver_access: MirAccess,
+//RS     receiver: MirRuntimeValue,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS ) -> NativeInterfaceCompletion {
+//RS     let carrier = match &receiver {
+//RS         MirRuntimeValue::NativeOwned(carrier) => carrier.clone(),
+//RS         _ => {
+//RS             let mut call = NativeInterfaceCall::new(
+//RS                 identity,
+//RS                 signature,
+//RS                 None,
+//RS                 receiver_access,
+//RS                 receiver,
+//RS                 arguments,
+//RS                 span,
+//RS             );
+//RS             call.preflight_error = Some(NativeInterfaceError::ReceiverMismatch);
+//RS             return dispatch_active(call);
+//RS         }
+//RS     };
+//RS     dispatch_active_for_carrier(
+//RS         identity,
+//RS         signature,
+//RS         receiver_access,
+//RS         receiver,
+//RS         carrier,
+//RS         arguments,
+//RS         span,
+//RS     )
+//RS }
+//RS 
+//RS fn validate_call_shape(
+//RS     identity: &NativeInterfaceIdentity,
+//RS     signature: &NativeInterfaceSignature,
+//RS     object: Option<&NativeInterfaceObject>,
+//RS     receiver_access: MirAccess,
+//RS     receiver: &MirRuntimeValue,
+//RS     arguments: &[NativeInterfaceArgument],
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     if receiver_access != signature.receiver_access {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "trait receiver access disagrees with checked method metadata".to_string(),
+//RS         ));
+//RS     }
+//RS     let object = object.ok_or(NativeInterfaceError::ReceiverMismatch)?;
+//RS     let MirRuntimeValue::NativeOwned(carrier) = receiver else {
+//RS         return Err(NativeInterfaceError::ReceiverMismatch);
+//RS     };
+//RS     if !object.matches_root(carrier) {
+//RS         return Err(NativeInterfaceError::ReceiverMismatch);
+//RS     }
+//RS     let expected_bound_id =
+//RS         MirTypeId(jet_foundation::MIR::stable_id("mir-trait", &identity.trait_ref.name));
+//RS     if !matches!(identity.receiver_type.kind(), MirTypeKind::TraitObject(bounds)
+//RS         if bounds.iter().any(|bound| {
+//RS             bound.id == expected_bound_id && bound.name == identity.trait_ref.name
+//RS         }))
+//RS     {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "native receiver type does not carry the exact checked trait bound".to_string(),
+//RS         ));
+//RS     }
+//RS     if arguments.len() != signature.parameters.len() {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "native interface argument count disagrees with checked method metadata".to_string(),
+//RS         ));
+//RS     }
+//RS     for (index, (argument, parameter)) in arguments.iter().zip(&signature.parameters).enumerate() {
+//RS         if argument.index != index
+//RS             || argument.access != parameter.access
+//RS             || argument.ty != parameter.ty
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "argument {index} identity, access, or type disagrees with the checked method"
+//RS             )));
+//RS         }
+//RS         validate_writeback_access(parameter.access, argument.writeback).map_err(|_| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "argument {index} writeback contradicts its checked access"
+//RS             ))
+//RS         })?;
+//RS         if argument.value == MirRuntimeValue::Moved {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "native interface argument {index} is already moved"
+//RS             )));
+//RS         }
+//RS         if !runtime_value_matches_type(&argument.value, &argument.ty) {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "native interface argument {index} does not match its checked MIR type"
+//RS             )));
+//RS         }
+//RS     }
+//RS     if identity.trait_ref.id.0 == 0 || identity.method_id.0 == 0 {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "native interface call carries a zero checked identity".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn validate_writeback_access(access: MirAccess, writeback: bool) -> Result<(), ()> {
+//RS     if writeback == (access == MirAccess::Write) {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(())
+//RS     }
+//RS }
+//RS 
+//RS fn validate_native_callable_call(
+//RS     identity: Option<&NativeCallableIdentity>,
+//RS     signature: &NativeCallableSignature,
+//RS     object: Option<&NativeInterfaceObject>,
+//RS     carrier: Option<&MirNativeOwned>,
+//RS     arguments: &[NativeInterfaceArgument],
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     let identity = identity.ok_or(NativeInterfaceError::MissingBinding)?;
+//RS     let object = object.ok_or(NativeInterfaceError::ReceiverMismatch)?;
+//RS     let carrier = carrier.ok_or(NativeInterfaceError::ReceiverMismatch)?;
+//RS     if !object.matches_root(carrier) {
+//RS         return Err(NativeInterfaceError::ReceiverMismatch);
+//RS     }
+//RS     if identity.key.is_empty() || identity.artifact.0 == 0 {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "native callable carries an empty or zero checked identity".to_string(),
+//RS         ));
+//RS     }
+//RS     let checked = NativeCallableSignature::checked(&identity.callable_type)?;
+//RS     if checked != *signature {
+//RS         return Err(NativeInterfaceError::SignatureMismatch);
+//RS     }
+//RS     if arguments.len() != signature.parameters.len() {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "native callable received {} arguments for {} checked parameters",
+//RS             arguments.len(),
+//RS             signature.parameters.len()
+//RS         )));
+//RS     }
+//RS     for (index, (argument, parameter)) in arguments.iter().zip(&signature.parameters).enumerate() {
+//RS         if argument.index != index
+//RS             || argument.ty != parameter.ty
+//RS             || argument.access != parameter.access
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "callable argument {index} identity, access, or type disagrees with its checked Fn parameter"
+//RS             )));
+//RS         }
+//RS         validate_writeback_access(parameter.access, argument.writeback).map_err(|_| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "callable argument {index} writeback contradicts its checked access"
+//RS             ))
+//RS         })?;
+//RS         if argument.value == MirRuntimeValue::Moved
+//RS             || !runtime_value_matches_type(&argument.value, &argument.ty)
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "callable argument {index} does not contain its checked MIR value"
+//RS             )));
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS pub(crate) fn runtime_value_matches_type(value: &MirRuntimeValue, ty: &MirType) -> bool {
+//RS     use jet_foundation::MIR::MirTypeKind as Kind;
+//RS     match ty.kind() {
+//RS         Kind::Int => matches!(value, MirRuntimeValue::Int(_) | MirRuntimeValue::BigInt(_)),
+//RS         Kind::Float => matches!(value, MirRuntimeValue::Float { f32: false, .. }),
+//RS         Kind::Bool => matches!(value, MirRuntimeValue::Bool(_)),
+//RS         Kind::String => matches!(value, MirRuntimeValue::String(_)),
+//RS         Kind::Char => matches!(value, MirRuntimeValue::Char(_)),
+//RS         Kind::List(element) => {
+//RS             matches!(value, MirRuntimeValue::List(values) if values.iter().all(|value| runtime_value_matches_type(value, element)))
+//RS         }
+//RS         Kind::FixedList { elem, len } => {
+//RS             // A literal length is part of the checked type; the JIT list encoder
+//RS             // trusts it for bounds, so a short or long list must not cross here.
+//RS             matches!(value, MirRuntimeValue::List(values)
+//RS                 if len.literal_value().is_none_or(|len| u64::try_from(values.len()) == Ok(len))
+//RS                     && values.iter().all(|value| runtime_value_matches_type(value, elem)))
+//RS         }
+//RS         Kind::Map { value: element, .. } => {
+//RS             matches!(value, MirRuntimeValue::Map(values) if values.iter().all(|(_, value)| runtime_value_matches_type(value, element)))
+//RS         }
+//RS         Kind::Shared(_) => matches!(value, MirRuntimeValue::NativeOwned(_)),
+//RS         Kind::Option(inner) => match value {
+//RS             MirRuntimeValue::Present(value) => runtime_value_matches_type(value, inner),
+//RS             MirRuntimeValue::Absent { element } => element == inner.as_ref(),
+//RS             _ => false,
+//RS         },
+//RS         Kind::Result { ok, err } => match value {
+//RS             MirRuntimeValue::Present(value) => runtime_value_matches_type(value, ok),
+//RS             MirRuntimeValue::FailedTold(value) => runtime_value_matches_type(value, err),
+//RS             _ => false,
+//RS         },
+//RS         Kind::Fn(_) | Kind::SendFn { .. } => {
+//RS             matches!(value, MirRuntimeValue::Closure(_) | MirRuntimeValue::NativeOwned(_))
+//RS         }
+//RS         Kind::Apply { name, args } => {
+//RS             if args.is_empty() && name.name == "Unit" {
+//RS                 return matches!(value, MirRuntimeValue::Unit);
+//RS             }
+//RS             match value {
+//RS                 MirRuntimeValue::Struct { type_name, .. }
+//RS                 | MirRuntimeValue::Enum { type_name, .. } => type_name == &name.name,
+//RS                 _ => false,
+//RS             }
+//RS         }
+//RS         Kind::TraitObject(_) => matches!(value, MirRuntimeValue::NativeOwned(_)),
+//RS         Kind::Tuple(fields) => {
+//RS             let MirRuntimeValue::Struct {
+//RS                 fields: values, ..
+//RS             } = value
+//RS             else {
+//RS                 return false;
+//RS             };
+//RS             values.len() == fields.len()
+//RS                 && fields.iter().all(|(name, ty)| {
+//RS                     values
+//RS                         .iter()
+//RS                         .find(|(value_name, _)| value_name == name)
+//RS                         .is_some_and(|(_, value)| runtime_value_matches_type(value, ty))
+//RS                 })
+//RS         }
+//RS         Kind::IntN { signed, bits } => {
+//RS             if *bits == 0 || *bits > 64 {
+//RS                 false
+//RS             } else {
+//RS                 let (lower, upper) = jet_foundation::AST::int_range(*signed, *bits);
+//RS                 match value {
+//RS                     MirRuntimeValue::Int(number) => {
+//RS                         let number = i128::from(*number);
+//RS                         number >= lower && number <= upper
+//RS                     }
+//RS                     MirRuntimeValue::BigInt(number) => number
+//RS                         .parse::<i128>()
+//RS                         .is_ok_and(|number| number >= lower && number <= upper),
+//RS                     _ => false,
+//RS                 }
+//RS             }
+//RS         }
+//RS         Kind::InlineRange { base, lo, hi } => {
+//RS             runtime_value_matches_type(value, base)
+//RS                 && matches!(value, MirRuntimeValue::Int(number) if number >= lo && number <= hi)
+//RS         }
+//RS         Kind::Float32 => matches!(value, MirRuntimeValue::Float { f32: true, .. }),
+//RS         Kind::Tagged { inner, .. } | Kind::Quantity { base: inner, .. } => {
+//RS             runtime_value_matches_type(value, inner)
+//RS         }
+//RS         Kind::Union(members) => members
+//RS             .iter()
+//RS             .any(|member| runtime_value_matches_type(value, member)),
+//RS         Kind::Measure(_) => matches!(value, MirRuntimeValue::Int(_) | MirRuntimeValue::BigInt(_)),
+//RS     }
+//RS }
+//RS 
+//RS fn same_method(left: &NativeInterfaceIdentity, right: &NativeInterfaceIdentity) -> bool {
+//RS     left.execution == right.execution
+//RS         && left.artifact == right.artifact
+//RS         && left.trait_ref == right.trait_ref
+//RS         && left.method_id == right.method_id
+//RS         && left.method_name == right.method_name
+//RS         && left.receiver_type == right.receiver_type
+//RS }
+//RS 
+//RS fn same_callable(left: &NativeCallableIdentity, right: &NativeCallableIdentity) -> bool {
+//RS     left.execution == right.execution
+//RS         && left.artifact == right.artifact
+//RS         && left.key == right.key
+//RS         && left.callable_type == right.callable_type
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     #[test]
+//RS     fn writeback_requires_checked_write_access() {
+//RS         assert!(validate_writeback_access(MirAccess::Read, true).is_err());
+//RS         assert!(validate_writeback_access(MirAccess::Read, false).is_ok());
+//RS         assert!(validate_writeback_access(MirAccess::Write, true).is_ok());
+//RS         assert!(validate_writeback_access(MirAccess::Write, false).is_err());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_receiver_carrier_preserves_exact_root_identity() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let object = bindings
+//RS             .create_object(String::from("adapter-root"))
+//RS             .expect("object identity is available");
+//RS         let MirRuntimeValue::NativeOwned(carrier) = object.as_runtime_value() else {
+//RS             panic!("native interface receiver was not a native-owned value");
+//RS         };
+//RS         assert!(object.matches_root(&carrier));
+//RS         assert!(object.matches_root(&carrier.clone()));
+//RS         assert!(!object.matches_root(&MirNativeOwned::new(String::from("adapter-root"))));
+//RS     }
+//RS 
+//RS     use jet_foundation::MIR::{
+//RS         MirArtifactBuildMode, MirArtifactIdentity, MirArtifactKind, MirArtifactTarget,
+//RS         MirCallMetadata, MirFunctionSignature, MirMeasure, MirNominalRef, MirOwnership,
+//RS         MirProgramIdentity, MIR_SCHEMA_VERSION,
+//RS     };
+//RS     use std::sync::atomic::{AtomicBool, Ordering};
+//RS 
+//RS     const ARTIFACT: MirArtifactId = MirArtifactId(7);
+//RS 
+//RS     fn execution() -> MirExecutionIdentity {
+//RS         MirExecutionIdentity {
+//RS             schema_version: 1,
+//RS             artifact: MirArtifactIdentity {
+//RS                 schema_version: 1,
+//RS                 mir_schema_version: MIR_SCHEMA_VERSION,
+//RS                 program_digest: [0; 32],
+//RS                 package_identity: "test-package".to_string(),
+//RS                 artifact: ARTIFACT,
+//RS                 name: "main".to_string(),
+//RS                 kind: MirArtifactKind::NativeExecutable,
+//RS                 target: MirArtifactTarget::Cranelift,
+//RS                 mode: MirArtifactBuildMode::Dev,
+//RS                 provider_identity: String::new(),
+//RS                 closure_identity: String::new(),
+//RS                 artifact_identity: String::new(),
+//RS                 program_identity: std::sync::Arc::new(MirProgramIdentity::unavailable(
+//RS                     String::new(),
+//RS                     Vec::new(),
+//RS                 )),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn int() -> MirType {
+//RS         MirType::from_kind(MirTypeKind::Int)
+//RS     }
+//RS 
+//RS     fn unit() -> MirType {
+//RS         MirType::from_kind(MirTypeKind::Apply {
+//RS             name: MirNominalRef {
+//RS                 id: MirTypeId(jet_foundation::MIR::stable_id("mir-type", "Unit")),
+//RS                 name: "Unit".to_string(),
+//RS             },
+//RS             args: Vec::new(),
+//RS         })
+//RS     }
+//RS     fn interface_type() -> (MirTraitRef, MirType) {
+//RS         let name = "Sink".to_string();
+//RS         let id = jet_foundation::MIR::stable_id("mir-trait", &name);
+//RS         (
+//RS             MirTraitRef {
+//RS                 id: MirTraitId(id),
+//RS                 name: name.clone(),
+//RS             },
+//RS             MirType::from_kind(MirTypeKind::TraitObject(vec![MirNominalRef {
+//RS                 id: MirTypeId(id),
+//RS                 name,
+//RS             }])),
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS     fn callable_with_parameter_types(
+//RS         key: &str,
+//RS         parameter_types: &[MirType],
+//RS         conventions: &[MirAccess],
+//RS     ) -> (NativeCallableIdentity, NativeCallableSignature) {
+//RS         let callable_type = MirType::from_kind(MirTypeKind::Fn(MirFunctionSignature {
+//RS             params: parameter_types.to_vec(),
+//RS             ret: Some(Box::new(int())),
+//RS             effect_bound: None,
+//RS             param_contract: None,
+//RS             call_metadata: Some(MirCallMetadata {
+//RS                 conventions: conventions.to_vec(),
+//RS                 ..MirCallMetadata::default()
+//RS             }),
+//RS             return_view_provenance: None,
+//RS         }));
+//RS         let signature = NativeCallableSignature::checked(&callable_type).expect("checked Fn type");
+//RS         (
+//RS             NativeCallableIdentity {
+//RS                 execution: execution(),
+//RS                 artifact: ARTIFACT,
+//RS                 key: key.to_string(),
+//RS                 callable_type,
+//RS             },
+//RS             signature,
+//RS         )
+//RS     }
+//RS 
+//RS     fn callable(key: &str, conventions: &[MirAccess]) -> (NativeCallableIdentity, NativeCallableSignature) {
+//RS         let parameter_types = vec![int(); conventions.len()];
+//RS         callable_with_parameter_types(key, &parameter_types, conventions)
+//RS     }
+//RS 
+//RS     type TestNativeCallableWrapper = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
+//RS 
+//RS     fn register_callable_root<T: Any + Send + Sync>(
+//RS         root: T,
+//RS         key: &str,
+//RS     ) -> (
+//RS         Arc<NativeInterfaceBindings>,
+//RS         NativeInterfaceObject,
+//RS         NativeCallableIdentity,
+//RS         NativeCallableSignature,
+//RS         MirNativeOwned,
+//RS     ) {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings.create_object(root).expect("callable root object");
+//RS         let (identity, signature) = callable(key, &[MirAccess::Read]);
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 Arc::new(|_object, _call| Ok(MirRuntimeValue::Int(1))),
+//RS             )
+//RS             .expect("checked callable binds");
+//RS         let carrier = object.clone_root();
+//RS         (bindings, object, identity, signature, carrier)
+//RS     }
+//RS 
+//RS     fn make_test_native_callable_wrapper(
+//RS         bindings: &Arc<NativeInterfaceBindings>,
+//RS         identity: NativeCallableIdentity,
+//RS         carrier: MirNativeOwned,
+//RS         invoked: Rc<Cell<usize>>,
+//RS     ) -> Result<TestNativeCallableWrapper, NativeInterfaceError> {
+//RS         bindings.create_native_callable_rc_wrapper(identity, carrier, move |registration| {
+//RS             let callback: Box<dyn FnMut()> = Box::new(move || {
+//RS                 let _ = registration.identity();
+//RS                 let _ = registration.carrier();
+//RS                 invoked.set(invoked.get() + 1);
+//RS             });
+//RS             Rc::new(RefCell::new(Some(callback)))
+//RS         })
+//RS     }
+//RS 
+//RS     fn shared() -> MirType {
+//RS         MirType::from_kind(MirTypeKind::Shared(Box::new(int())))
+//RS     }
+//RS 
+//RS     fn argument(index: usize, access: MirAccess, value: MirRuntimeValue) -> NativeInterfaceArgument {
+//RS         NativeInterfaceArgument {
+//RS             index,
+//RS             ty: int(),
+//RS             access,
+//RS             value,
+//RS             writeback: access == MirAccess::Write,
+//RS         }
+//RS     }
+//RS 
+//RS     fn owned_argument(index: usize, carrier: MirNativeOwned) -> NativeInterfaceArgument {
+//RS         NativeInterfaceArgument {
+//RS             index,
+//RS             ty: shared(),
+//RS             access: MirAccess::Move,
+//RS             value: MirRuntimeValue::NativeOwned(carrier),
+//RS             writeback: false,
+//RS         }
+//RS     }
+//RS 
+//RS     fn callable_handler(
+//RS         body: impl Fn(&mut NativeCallableCall) -> Result<MirRuntimeValue, String> + Send + Sync + 'static,
+//RS     ) -> NativeCallableHandler {
+//RS         Arc::new(move |_object: &NativeInterfaceObject, call: &mut NativeCallableCall| body(call))
+//RS     }
+//RS 
+//RS     fn carrier_of(object: &NativeInterfaceObject) -> MirNativeOwned {
+//RS         object.clone_root()
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_callable_rc_wrapper_owns_registration_after_factory_scope_and_releases_root() {
+//RS         let root = Arc::new(());
+//RS         let weak_root = Arc::downgrade(&root);
+//RS         let invoked = Rc::new(Cell::new(0));
+//RS         let (wrapper, expected_identity, expected_object) = {
+//RS             let (bindings, object, identity, _signature, carrier) =
+//RS                 register_callable_root(root.clone(), "rc.factory-scope");
+//RS             let expected_object = object.id();
+//RS             let wrapper = make_test_native_callable_wrapper(
+//RS                 &bindings,
+//RS                 identity.clone(),
+//RS                 carrier,
+//RS                 invoked.clone(),
+//RS             )
+//RS             .expect("checked callable wrapper associates");
+//RS             drop(object);
+//RS             drop(bindings);
+//RS             (wrapper, identity, expected_object)
+//RS         };
+//RS         drop(root);
+//RS 
+//RS         assert!(weak_root.upgrade().is_some());
+//RS         let (identity, carrier) =
+//RS             native_callable_rc_association(&wrapper).expect("wrapper retains registration");
+//RS         assert_eq!(identity, expected_identity);
+//RS         assert_eq!(
+//RS             carrier
+//RS                 .downcast_ref::<NativeInterfaceStaticCarrier>()
+//RS                 .expect("native callable has the exact registered carrier")
+//RS                 .id,
+//RS             expected_object
+//RS         );
+//RS         wrapper
+//RS             .borrow_mut()
+//RS             .as_mut()
+//RS             .expect("local callable remains installed")();
+//RS         assert_eq!(invoked.get(), 1);
+//RS 
+//RS         drop(carrier);
+//RS         drop(wrapper);
+//RS         assert!(weak_root.upgrade().is_none());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_callable_rc_lookup_separates_types_and_expires_with_wrapper() {
+//RS         let (bindings, object, identity, _signature, carrier) =
+//RS             register_callable_root(String::from("rc-type-root"), "rc.type-separation");
+//RS         let wrapper = make_test_native_callable_wrapper(
+//RS             &bindings,
+//RS             identity,
+//RS             carrier.clone(),
+//RS             Rc::new(Cell::new(0)),
+//RS         )
+//RS         .expect("checked callable wrapper associates");
+//RS         assert!(native_callable_rc_association(&wrapper).is_ok());
+//RS 
+//RS         let wrong_type = Rc::new(Cell::new(0));
+//RS         assert!(matches!(
+//RS             native_callable_rc_association(&wrong_type),
+//RS             Err(NativeInterfaceError::MissingBinding)
+//RS         ));
+//RS 
+//RS         let stale = Rc::downgrade(&wrapper);
+//RS         drop(wrapper);
+//RS         assert!(stale.upgrade().is_none());
+//RS         let replacement: TestNativeCallableWrapper = Rc::new(RefCell::new(None));
+//RS         assert!(matches!(
+//RS             native_callable_rc_association(&replacement),
+//RS             Err(NativeInterfaceError::MissingBinding)
+//RS         ));
+//RS 
+//RS         drop(replacement);
+//RS         drop(carrier);
+//RS         drop(object);
+//RS         drop(bindings);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_callable_rc_association_rejects_interface_carriers() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let interface_object = bindings
+//RS             .create_object(String::from("interface-only-root"))
+//RS             .expect("interface root");
+//RS         let (trait_ref, receiver_type) = interface_type();
+//RS         bindings
+//RS             .bind(
+//RS                 interface_object.clone(),
+//RS                 NativeInterfaceIdentity {
+// END-PORT-PENDING 2051 crates/jet-jit/src/SourceInterfaces.rs:1801-3600
+

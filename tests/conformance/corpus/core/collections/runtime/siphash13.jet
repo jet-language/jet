@@ -1,0 +1,221 @@
+use core.collections.runtime.kernel_siphash13 as sip_test
+
+// Pinned Rust coretests/tests/hash/sip.rs test_siphash_1_3, original 64
+// independently published vectors (LE bytes rendered as U64). Sip24 is NOT
+// this engine. Shared Hasher-law tests below are applied to Sip13 explicitly.
+#Test("SipHash13 original 64 vectors, all split points, clone and immutable finish") {
+    vectors :: [U64]{
+        U64{0xabac0158050fc4dc}, U64{0xc9f49bf37d57ca93}, U64{0x82cb9b024dc7d44d}, U64{0x8bf80ab8e7ddf7fb},
+        U64{0xcf75576088d38328}, U64{0xdef9d52f49533b67}, U64{0xc50d2b50c59f22a7}, U64{0xd3927d989bb11140},
+        U64{0x369095118d299a8e}, U64{0x25a48eb36c063de4}, U64{0x79de85ee92ff097f}, U64{0x70c118c1f94dc352},
+        U64{0x78a384b157b4d9a2}, U64{0x306f760c1229ffa7}, U64{0x605aa111c0f95d34}, U64{0xd320d86d2a519956},
+        U64{0xcc4fdd1a7d908b66}, U64{0x9cf2689063dbd80c}, U64{0x8ffc389cb473e63e}, U64{0xf21f9de58d8bd29f},
+        U64{0xc0dc2f46a6cce040}, U64{0xb992abfe2b45f844}, U64{0x7ffe7b9ba320872e}, U64{0x525a0e7fdae6c123},
+        U64{0xf464aeb267349c8c}, U64{0x45cd5928705b0979}, U64{0x3a3e35e3ca9913a5}, U64{0xa91dc74e4ade3b35},
+        U64{0xfb0bed02ef6cd00d}, U64{0x88d93cb44ab1e1f4}, U64{0x540f11d643c5e663}, U64{0x2370dd1f8c21d1bc},
+        U64{0x81157b6c16a7b60d}, U64{0x4d54b9e57a8ff9bf}, U64{0x759f12781f2a753e}, U64{0xcea1a3bebf186b91},
+        U64{0x2cf508d3ada26206}, U64{0xb6101c2da3c33057}, U64{0xb3f47496ae3a36a1}, U64{0x626b57547b108392},
+        U64{0xc1d2363299e41531}, U64{0x667cc1923f1ad944}, U64{0x65704ffec8138825}, U64{0x24f280d1c28949a6},
+        U64{0xc2ca1cedfaf8876b}, U64{0xc2164bfc9f042196}, U64{0xa16e9c9368b1d623}, U64{0x49fb169c8b5114fd},
+        U64{0x9f3143f8df074c46}, U64{0xc6fdaf2412cc86b3}, U64{0x7eaf49d10a52098f}, U64{0x1cf313559d292f9a},
+        U64{0xc44a30dda2f41f12}, U64{0x36fae98943a71ed0}, U64{0x318fb34c73f0bce6}, U64{0xa27abf3670a7e980},
+        U64{0xb4bcc0db243c6d75}, U64{0x23f8d852fdb71513}, U64{0x8f035f4da67d8a08}, U64{0xd89cd0e5b7e8f148},
+        U64{0xf6f4e6bcf7a644ee}, U64{0xaec59ad80f1837f2}, U64{0xc3b2f6154b6694e0}, U64{0x9d199062b7bbb3a8}
+    }
+    data := [U8]{}
+    incremental := sip_test.new_with_keys(U64{0x0706050403020100}, U64{0x0f0e0d0c0b0a0908})
+    loop size in 0..<64 {
+        full := sip_test.new_with_keys(U64{0x0706050403020100}, U64{0x0f0e0d0c0b0a0908})
+        sip_test.write(&full, data)
+        assert_eq(sip_test.finish(full), vectors[size])
+        assert_eq(sip_test.finish(incremental), vectors[size])
+        assert_eq(sip_test.finish(incremental), vectors[size])
+        copied :: sip_test.clone(incremental)
+        assert_eq(sip_test.finish(copied), vectors[size])
+        loop split in 0..size {
+            partitioned := sip_test.new_with_keys(U64{0x0706050403020100}, U64{0x0f0e0d0c0b0a0908})
+            sip_test.write_span(&partitioned, data, 0, split)
+            sip_test.write_span(&partitioned, data, split, size)
+            assert_eq(sip_test.finish(partitioned), vectors[size])
+        }
+        loop width in 1..16 {
+            partitioned := sip_test.new_with_keys(U64{0x0706050403020100}, U64{0x0f0e0d0c0b0a0908})
+            at := 0
+            loop at < size {
+                end :: min(size, at + width)
+                sip_test.write_span(&partitioned, data, at, end)
+                at = end
+            }
+            assert_eq(sip_test.finish(partitioned), vectors[size])
+        }
+        &data.push(U8{size})
+        sip_test.write_u8(&incremental, U8{size})
+    }
+}
+fn integer_hash(word: U64, width: Int, little: Bool) -> U64 Never! {
+    state := sip_test.new()
+    sip_test.write_integer(&state, word, width, little)
+    sip_test.finish(state)
+}
+#Test("Hasher native integers no bytes dropped, idempotence, explicit usize width/endian") {
+    machines :: [sip_test.HashMachine]{sip_test.HashMachine.Usize32LE, sip_test.HashMachine.Usize32BE, sip_test.HashMachine.Usize64LE, sip_test.HashMachine.Usize64BE}
+    loop machine in machines {
+        little :: sip_test.machine_is_little(machine)
+        width :: if sip_test.machine_is_32(machine) -> 4 else -> 8
+        word :: U64{0xdeadbeefdeadbeef}
+        state := sip_test.new_with_machine(U64{0}, U64{0}, machine, false)
+        sip_test.write_usize(&state, word)
+        assert_eq(sip_test.finish(state), integer_hash(word, width, little))
+        assert(sip_test.finish(state) != integer_hash(word, 12 - width, little))
+        sizes :: [Int]{4, 8}
+        loop size in sizes {
+            original :: integer_hash(word, size, little)
+            assert_eq(original, integer_hash(word, size, little))
+            loop byte in 0..<size {
+                mask :: U64{0xffffffffffffffff} ~| (U64{255} << (byte * 8))
+                assert(original != integer_hash(word & mask, size, little))
+            }
+        }
+    }
+}
+#Test("Integer short writes agree with raw native-endian bytes at every buffered tail") {
+    data :: [U8]{U8{0xef}, U8{0xbe}, U8{0xad}, U8{0xde}, U8{0xef}, U8{0xbe}, U8{0xad}, U8{0xde}}
+    big :: [U8]{U8{0xde}, U8{0xad}, U8{0xbe}, U8{0xef}, U8{0xde}, U8{0xad}, U8{0xbe}, U8{0xef}}
+    widths :: [Int]{1, 2, 4, 8}
+    endians :: [Bool]{true, false}
+    loop tail in 0..7 {
+        loop width in widths {
+            loop little in endians {
+                raw := sip_test.new()
+                typed := sip_test.new()
+                sip_test.write_span(&raw, data, 0, tail)
+                sip_test.write_span(&typed, data, 0, tail)
+                sip_test.write_integer(&typed, U64{0xdeadbeefdeadbeef}, width, little)
+                if little {
+                    sip_test.write_span(&raw, data, 0, width)
+                } else {
+                    sip_test.write_span(&raw, big, 8 - width, 8)
+                }
+                sip_test.write_str(&typed, "bytesstring")
+                sip_test.write_str(&raw, "bytesstring")
+                sip_test.write_u8(&raw, U8{1})
+                sip_test.write_u8(&typed, U8{1})
+                assert_eq(sip_test.finish(typed), sip_test.finish(raw))
+            }
+        }
+    }
+}
+fn str_pair_hash(a: String, b: String) -> U64 Never! {
+    state := sip_test.new()
+    sip_test.write_str(&state, a)
+    sip_test.write_str(&state, b)
+    sip_test.finish(state)
+}
+#Test("Rust str terminator and tuple/slice prefix freedom, zero keys and reset") {
+    assert(str_pair_hash("aa", "bb") != str_pair_hash("aabb", ""))
+    assert(str_pair_hash("aa", "bb") != str_pair_hash("a", "abb"))
+    state := sip_test.new()
+    sip_test.write_str(&state, "")
+    raw := sip_test.new()
+    sip_test.write_u8(&raw, U8{255})
+    assert_eq(sip_test.finish(state), sip_test.finish(raw))
+    data :: [U8]{U8{1}, U8{0}, U8{0}, U8{0}}
+    v := sip_test.new()
+    w := sip_test.new()
+    extents :: [Int]{1, 2, 1}
+    start := 0
+    loop extent in extents {
+        sip_test.write_usize(&v, U64{extent})
+        sip_test.write_span(&v, data, start, start + extent)
+        start += extent
+    }
+    sip_test.write_usize(&w, U64{4})
+    sip_test.write(&w, data)
+    sip_test.write_usize(&w, U64{0})
+    sip_test.write_usize(&w, U64{0})
+    assert(sip_test.finish(v) != sip_test.finish(w))
+    loop split in 0..data.len() {
+        a := sip_test.new()
+        b := sip_test.new()
+        sip_test.write(&a, data)
+        sip_test.write_span(&b, data, 0, split)
+        sip_test.write_span(&b, data, split, data.len())
+        assert_eq(sip_test.finish(a), sip_test.finish(b))
+    }
+    sip_test.reset(&state)
+    assert_eq(sip_test.finish(state), sip_test.finish(sip_test.new()))
+    // Unchecked native usize arithmetic wraps, independently of chunk_bits.
+    small := sip_test.new_with_machine(U64{0}, U64{0}, sip_test.HashMachine.Usize32LE, false)
+    small.length = U64{0xffffffff}
+    sip_test.write_u8(&small, U8{0})
+    assert_eq(small.length, U64{0})
+    large := sip_test.new()
+    large.length = U64{0xffffffffffffffff}
+    sip_test.write_u8(&large, U8{0})
+    assert_eq(large.length, U64{0})
+}
+
+// Original test_write_short_works byte stream, now exercised with Sip13
+// rather than the out-of-scope Sip24, for every explicit machine fact.
+#Test("Original short-write Hasher fixture with actual native usize bytes") {
+    machines :: [sip_test.HashMachine]{sip_test.HashMachine.Usize32LE, sip_test.HashMachine.Usize32BE, sip_test.HashMachine.Usize64LE, sip_test.HashMachine.Usize64BE}
+    little_bytes :: [U8]{U8{0xa0}, U8{0xb0}, U8{0xc0}, U8{0xd0}, U8{0}, U8{0}, U8{0}, U8{0}}
+    big_bytes :: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0xd0}, U8{0xc0}, U8{0xb0}, U8{0xa0}}
+    terminal :: [U8]{U8{255}, U8{1}}
+    loop machine in machines {
+        typed := sip_test.new_with_machine(U64{0}, U64{0}, machine, false)
+        raw := sip_test.new_with_machine(U64{0}, U64{0}, machine, false)
+        width :: if sip_test.machine_is_32(machine) -> 4 else -> 8
+        sip_test.write_usize(&typed, U64{0xd0c0b0a0})
+        if sip_test.machine_is_little(machine) {
+            sip_test.write_span(&raw, little_bytes, 0, width)
+        } else {
+            sip_test.write_span(&raw, big_bytes, 8 - width, 8)
+        }
+        sip_test.write(&typed, "bytes".bytes())
+        sip_test.write(&typed, "string".bytes())
+        sip_test.write_u8(&typed, U8{255})
+        sip_test.write_u8(&typed, U8{1})
+        sip_test.write(&raw, "bytes".bytes())
+        sip_test.write(&raw, "string".bytes())
+        sip_test.write(&raw, terminal)
+        assert_eq(sip_test.finish(typed), sip_test.finish(raw))
+    }
+}
+
+#Test("Explicit checked usize length profile stops at 32 and 64 bit overflow") {
+    machines :: [sip_test.HashMachine]{sip_test.HashMachine.Usize32LE, sip_test.HashMachine.Usize64LE}
+    loop machine in machines {
+        limit :: if sip_test.machine_is_32(machine) -> U64{0xffffffff} else -> U64{0xffffffffffffffff}
+        safe := sip_test.new_with_machine(U64{0}, U64{0}, machine, true)
+        safe.length = limit - U64{1}
+        sip_test.write_u8(&safe, U8{0})
+        assert_eq(safe.length, limit)
+        .expect_fail {
+            overflow := sip_test.new_with_machine(U64{0}, U64{0}, machine, true)
+            overflow.length = limit
+            sip_test.write_u8(&overflow, U8{0})
+        }
+    }
+}
+
+#Test("Every streaming partition through 16 bytes against independent Sip13 vectors") {
+    expected :: [U64]{U64{0xabac0158050fc4dc}, U64{0xc9f49bf37d57ca93}, U64{0x82cb9b024dc7d44d}, U64{0x8bf80ab8e7ddf7fb}, U64{0xcf75576088d38328}, U64{0xdef9d52f49533b67}, U64{0xc50d2b50c59f22a7}, U64{0xd3927d989bb11140}, U64{0x369095118d299a8e}, U64{0x25a48eb36c063de4}, U64{0x79de85ee92ff097f}, U64{0x70c118c1f94dc352}, U64{0x78a384b157b4d9a2}, U64{0x306f760c1229ffa7}, U64{0x605aa111c0f95d34}, U64{0xd320d86d2a519956}, U64{0xcc4fdd1a7d908b66}}
+    data := [U8]{}
+    loop size in 0..16 {
+        partitions :: if size == 0 -> 1 else -> 1 << (size - 1)
+        loop cuts in 0..<partitions {
+            state := sip_test.new_with_keys(U64{0x0706050403020100}, U64{0x0f0e0d0c0b0a0908})
+            start := 0
+            loop at in 0..<size {
+                if at + 1 == size || (cuts & (1 << at)) != 0 {
+                    sip_test.write_span(&state, data, start, at + 1)
+                    sip_test.write_span(&state, data, at + 1, at + 1)
+                    start = at + 1
+                }
+            }
+            assert_eq(sip_test.finish(state), expected[size])
+        }
+        &data.push(U8{size})
+    }
+}
