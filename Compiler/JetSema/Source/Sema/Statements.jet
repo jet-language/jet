@@ -4287,27 +4287,35 @@ fn sema_stmt_lost_tail_diagnostic(function: String, value_type: String, span: Sp
     sema_error("E0433", span, "this {value_type} value is thrown away", "`{function}` has no return type, so it returns nothing and the value of its last line is lost", "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`")
 }
 
-// A statement call under an automatic or written `?` still carries a
-// failure unless its callee's contract is `T Never!` (D-DISCARD1=A): declared,
-// or projected onto a callee the #3708 failure solve proved infallible
-// (`sema_failure_project_infallible`) before the bundle's final check.
-fn sema_stmt_discarded_call(checked: TExpr) -> TExpr? Never! {
+// The call a statement drops, under an automatic or written `?` or bare, and
+// whether its checked carrier is `T Never!`. Under `?` the call still carries
+// a failure unless its callee's contract is `T Never!` (D-DISCARD1=A):
+// declared, or projected onto a callee the #3708 failure solve proves
+// infallible after this one check (`sema_failure_reconcile_infallible`).
+struct SemaStmtDiscardedCall {
+    call: TExpr
+    infallible: Bool
+}
+
+fn sema_stmt_discarded_call(checked: TExpr) -> SemaStmtDiscardedCall? Never! {
     inner := checked
     if checked.kind == {
         .Try(value, _, _) -> inner = value
         .TryWithContext(value, _, _, _, _, _) -> inner = value
-        else -> return Val(checked)
+        else -> return Val(SemaStmtDiscardedCall{call: checked, infallible: true})
     }
-    if sema_expr_unwrap_tag(inner.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> return Val(inner)
+    if sema_expr_unwrap_tag(inner.ty) == .Result(_, error) -> return Val(SemaStmtDiscardedCall{call: inner, infallible: sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"})})
     None
 }
 
 // E0433 candidate: the statement drops the non-Unit result of a direct,
 // static or method call. Mark the call's fact; the solved effect phase
 // reports it when the callee's row is empty (D-DISCARD1=A: pure means an
-// empty row and nothing passed with `&`).
+// empty row and nothing passed with `&`). A call whose carrier can still fail
+// waits for the failure solve.
 fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &SemaCheckContext) Never! {
-    call :: sema_stmt_discarded_call(checked) ?? return
+    discarded :: sema_stmt_discarded_call(checked) ?? return
+    call :: discarded.call
     callee_key :: if call.kind == {
         .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> callee.key
         .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> method.symbol.key
@@ -4324,7 +4332,11 @@ fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &Se
     index := context.call_facts.len() - 1
     loop index >= fact_start {
         if context.call_facts[index].callee == .Val(symbol) && symbol.key == callee_key {
-            context.call_facts[index].discarded = true
+            if discarded.infallible {
+                context.call_facts[index].discarded = true
+            } else {
+                context.call_facts[index].discarded_if_infallible = true
+            }
             return
         }
         index -= 1

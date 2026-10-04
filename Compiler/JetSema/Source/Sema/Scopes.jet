@@ -91,6 +91,10 @@ pub struct SemaCallSiteFact {
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (E0433).
     pub discarded: Bool
+    // The statement drops this call's result, but the callee's checked
+    // carrier can still fail. The bundle failure solve sets `discarded` when
+    // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
+    pub discarded_if_infallible: Bool{false}
 }
 
 pub struct SemaCallReturnViewFact {
