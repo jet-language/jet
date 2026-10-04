@@ -52,8 +52,6 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body,
@@ -297,8 +295,6 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
-                result_type: None,
-                error_type: None,
                 effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body: vec![loop_stmt],
@@ -412,8 +408,6 @@ impl<'a> Parser<'a> {
         let lambda = crate::AST::Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: crate::AST::LambdaBody::Block(vec![loop_stmt]),
             span: Span::new(start.start, end),

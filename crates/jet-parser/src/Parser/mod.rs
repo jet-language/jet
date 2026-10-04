@@ -2379,10 +2379,10 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn lambda_callable_interface_parses_result_error_and_effects() {
+    fn lambda_callable_interface_parses_only_parameters_and_effects() {
         let p = program(
             "fn run() {\n\
-                f :: (n: Int) Int MyError! -[IO]> { return Ok(n) }\n\
+                f :: (n: Int) -[IO]> { print(n) }\n\
             }\n",
         );
         let lambda = p
@@ -2403,11 +2403,6 @@ fn notify(ready: Bool) -[Net]> {
                 _ => None,
             })
             .expect("stored lambda");
-        assert!(matches!(lambda.result_type, Some(crate::AST::Type::Int)));
-        assert!(matches!(
-            &lambda.error_type,
-            Some(crate::AST::Type::Named(name)) if name == "MyError"
-        ));
         assert_eq!(
             lambda.effects.as_ref().map(|effects| effects
                 .iter()
@@ -2420,6 +2415,26 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn lambda_interface_lookahead_preserves_grouped_multiplication() {
         program("fn run() { print((2) * 3) }\n");
+    }
+
+    #[test]
+    fn lambda_return_annotations_teach_without_rejecting_struct_bodies() {
+        for source in [
+            "fn run() { f :: (n: Int) Int -> n }\n",
+            "fn run() { f :: (n: Int) Int MyError! -[]> Ok(n) }\n",
+            "fn run() { f :: (n: Int) Never! -[]> n }\n",
+            "fn run() { f :: (n: Int) -> Point MyError! { n } }\n",
+            "fn run() { f :: (n: Int) -> Point !Error { n } }\n",
+            "fn run() { f :: (n: Int) -> Point { n + 1 } }\n",
+        ] {
+            let (tokens, _) = lex(source);
+            let diagnostics = parse(&tokens).expect_err("lambda annotations must teach");
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0399"), "{diagnostics:?}");
+        }
+        program("fn run() { f :: (x: Int) -> Point{x} }\n");
+        program("fn run() { f :: (x: Int) -> Point{x: x} }\n");
+        program("fn run() { f :: x -[]> Point{x} }\n");
+        program("fn run() { f :: (x: Int) -[]> Point{x: x} }\n");
     }
 
     #[test]

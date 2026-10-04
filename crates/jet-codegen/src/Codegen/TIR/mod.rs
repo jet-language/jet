@@ -12822,22 +12822,7 @@ pub(crate) fn lambda_effect_facts(lam: &crate::AST::Lambda) -> TEffectFacts {
     facts
 }
 pub(crate) fn lambda_failure_carrier(lam: &crate::AST::Lambda) -> TFailureCarrier {
-    let contract = match (
-        &lam.result_type,
-        &lam.error_type,
-        &lam.meta.fallible_carrier,
-    ) {
-        (_, Some(error), _) => crate::AST::FailureContract::Explicit {
-            success: lam
-                .result_type
-                .clone()
-                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            error: error.clone(),
-        },
-        (Some(result), None, _) => crate::AST::FailureContract::from_return_type(Some(result)),
-        (None, None, Some(carrier)) => crate::AST::FailureContract::from_return_type(Some(carrier)),
-        (None, None, None) => crate::AST::FailureContract::from_return_type(None),
-    };
+    let contract = crate::AST::FailureContract::from_return_type(lam.meta.fallible_carrier.as_ref());
     TFailureCarrier::from_contract(&contract)
 }
 

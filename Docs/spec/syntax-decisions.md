@@ -377,6 +377,16 @@ wherever the expected type fixes it (same E0801/one-directional rule); no
 explicit capture prefix exists. The parenthesized and typed forms stay
 available where the type cannot be inferred.
 
+**D-LAMBDA-IFACE2=A**: a lambda writes parameters and, optionally, an effect
+row: `params -> body`, `params -[IO]> body`, or `params -[]> body`. It never
+writes a return or error type. Its arrow always starts the body, so
+`x -> Point{x}` and `x -> Point{x: x}` are struct values, not signatures.
+Return and error types come from the expected callable parameter or slot.
+For an explicit full interface, use a named `fn`; typed local bindings are
+not an escape hatch (D-BIND-BARE1/D-BIND-TYPE2). E0399 teaches this boundary.
+
+See the executable [lambda interface example](../../Examples/features/callable/lambda_interface.jet).
+
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
 values only when every parameter also has plain read access. Declaration-local
@@ -7772,10 +7782,9 @@ Bare type after the parameter list is a teaching diagnostic (E0068). This
 amends D-SIG-SHAPE1=B and D-CALLABLE-ONE1=A. D-EFFECT-ROW2=B,
 D-FAIL-UNIT1=A, and D-FAILURE-FOUNDATION1=A stay.
 
-**2026-08-21 — D-LAMBDA-IFACE1=A** *(card #2144)*: a lambda may write any
-suffix of the callable interface — return type, error, effect row — in the
-same shape as a named function. Inference law (D-LAMBDA-INFER1) is untouched:
-annotations stay optional wherever an expected type exists.
+**2026-09-18 — D-LAMBDA-IFACE2=A**: lambdas keep parameters and their optional
+effect row, never a return or error type. The arrow starts the body, keeping
+struct-literal bodies unambiguous. D-LAMBDA-INFER1 is unchanged.
 
 **2026-08-21 — D-ERRSUFFIX1=B** *(; reading-first
 slate card #2144; superseded by D-FAILURE-FOUNDATION1=A)*: the failure surface

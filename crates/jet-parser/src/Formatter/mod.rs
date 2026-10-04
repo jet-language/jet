@@ -2618,16 +2618,16 @@ fn run() {
     }
 
     #[test]
-    fn lambda_interface_round_trips_result_error_and_pure_effect_row() {
+    fn lambda_interface_round_trips_parameters_and_pure_effect_row() {
         let source = r#"enum LambdaError { Invalid }
 
 fn run() {
-    increment :: (n: Int) Int LambdaError! -[]> { return Ok(n + 1) }
+    increment :: (n: Int) -[]> { return n + 1 }
 }
 "#;
         let once = format_source(source).expect("lambda interface should format");
         assert!(
-            once.contains("(n: Int) Int LambdaError! -[]>") && !once.contains("(n: Int) ->"),
+            once.contains("(n: Int) -[]>") && !once.contains("(n: Int) Int"),
             "lambda interface was lost or respelled incorrectly:\n{once}"
         );
         assert_eq!(

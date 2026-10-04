@@ -3588,7 +3588,7 @@ pub fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaChe
         chain :: sema_expr_bare_member_chain_text(expr)
         if context.subject_shorthand_depth > 0 -> &diagnostics.push(sema_lint("L0512", span, "subject shorthand `{chain}` is nested inside another subject shorthand", "implicit subjects become hard to track when shorthand scopes nest", "rewrite it with a named binding: `(item) -> item{chain}`"))
         subject :: "__jet_subject"
-        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: span, ty: Val(params[0]), ty_span: None}}, result_type: None, error_type: None, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
+        return Val(Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: subject, name_span: span, ty: Val(params[0]), ty_span: None}}, effects: None, body: LambdaBody.Expr{value: sema_expr_replace_bare_subject(expr, subject)}, span: span, meta: ast_empty_lambda_meta()})
     }
     None
 }

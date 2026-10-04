@@ -1,8 +1,8 @@
-Error [E0112]: `apply` wants fn(Int) Int -[]> for argument 1, but this is fn(Int) Int -[IO]>
+Error [E0747]: This callback uses the effect `IO`, which the parameter doesn't allow
   --> tests/ui/lambda_interface_effect_mismatch.jet:4:17
     |
-  4 |     print(apply((n: Int) Int -[IO]> n))
-    |                 ^^^^^^^^^^^^^^^^^^^^^
- Why: Every argument must match its parameter's type
- Fix: Use fn(Int) Int -[]> here
-More: jet-lang.dev/e/E0112
+  4 |     print(apply((n: Int) -[IO]> n))
+    |                 ^^^^^^^^^^^^^^^^^
+ Why: The parameter is `fn(…) -[]>`, so the callback must be pure; `IO` is outside that bound
+ Fix: Pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound
+More: jet-lang.dev/e/E0747

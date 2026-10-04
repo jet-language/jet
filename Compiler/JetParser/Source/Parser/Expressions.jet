@@ -1095,9 +1095,8 @@ fn parser_looks_like_lambda(state: &JetParserState) -> Bool {
     false
 }
 
-// D-LAMBDA-IFACE1=A: probe the real result and effect parsers after a
-// parameter list, so type-start tokens that are also expression operators
-// (`*`, `(`, `[`, `?`) do not turn grouped expressions into lambdas.
+// D-LAMBDA-IFACE2=A: probe retired types only to select a teaching diagnostic;
+// they never become part of the lambda's interface.
 fn parser_lambda_tail_starts_at(state: &JetParserState, index: Int) -> Bool {
     saved_position :: state.position
     saved_diagnostics :: state.diagnostics.len()
@@ -1108,7 +1107,7 @@ fn parser_lambda_tail_starts_at(state: &JetParserState, index: Int) -> Bool {
     saved_semicolon :: state.explicit_semicolon_reported
     state.position = index
     state.pending_type_gt = false
-    _ := parser_parse_lambda_return_interface(&state, 0)
+    if !parser_func_effect_starts_here(&state) && !parser_at_unified_arrow(&state) && (parser_type_starts_here(&state) || parser_current_kind(&state) == TOKEN_BANG) -> _ := parser_parse_type(&state, 0)
     effects :: parser_parse_opt_func_effects(&state)
     failed :: parser_aborting(&state) && state.abort_mark > saved_diagnostics
     starts :: !failed && (effects.effects != None || effects.via != None || parser_at_unified_arrow(&state))
@@ -1119,20 +1118,8 @@ fn parser_lambda_tail_starts_at(state: &JetParserState, index: Int) -> Bool {
     starts
 }
 
-pub struct ParsedLambdaInterface {
-    pub result_type: Type?
-    pub error_type: Type?
-}
-
-// The optional result between a lambda's parameters and its arrow: a type,
-// or a unit-fallible `E!`. A result type `T E!` splits into both halves.
-fn parser_parse_lambda_return_interface(state: &JetParserState, depth: Int) -> ParsedLambdaInterface {
-    result :: if !parser_func_effect_starts_here(&state) && parser_type_starts_here(&state) -> Val(parser_parse_type(&state, depth + 1)) else -> parser_parse_unit_fallible_return(&state)
-    if result == .Val(parsed) {
-        if parsed.ty == .Result(ok, err) -> return ParsedLambdaInterface{result_type: Val(ok), error_type: Val(err)}
-        return ParsedLambdaInterface{result_type: Val(parsed.ty), error_type: None}
-    }
-    ParsedLambdaInterface{result_type: None, error_type: None}
+fn parser_lambda_interface_error(state: &JetParserState, span: Span) {
+    parser_add_fatal_code(&state, "E0399", span, "a lambda cannot write a return or error type", "a lambda's arrow introduces its body; return and error types come from the expected callable type", "remove the type; pass the lambda to a typed parameter or slot, or use a named `fn` for a full interface")
 }
 
 fn parser_parse_lambda_takes(state: &JetParserState) -> [NamedSpan] {
@@ -1196,7 +1183,7 @@ fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpa
         }
     }
     close :: parser_expect(&state, TOKEN_RPAREN, "`)` after lambda parameters")
-    interface :: parser_parse_lambda_return_interface(&state, depth)
+    if !parser_func_effect_starts_here(&state) && !parser_at_unified_arrow(&state) -> parser_lambda_interface_error(&state, parser_current(&state).span)
     effects :: parser_parse_opt_func_effects(&state)
     if effects.via == .Val(via) {
         parser_add_fatal_code(&state, "E0119", via.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
@@ -1207,8 +1194,6 @@ fn parser_parse_lambda(state: &JetParserState, depth: Int, take_names: [NamedSpa
     lambda := Lambda{
         take_names: take_names,
         params: params,
-        result_type: interface.result_type,
-        error_type: interface.error_type,
         effects: effects.effects,
         body: body.body,
         span: span,
@@ -1231,7 +1216,18 @@ fn parser_parse_lambda_arrow_body(state: &JetParserState, depth: Int, fallback_e
         block :: parser_parse_callable_body(&state, true)
         return ParsedLambdaBody{body: LambdaBody.Block{body: block.statements}, end: block.span.end}
     }
+    body_start :: parser_current(&state)
+    typed_body :: body_start.kind == TOKEN_IDENT && parser_pascal_name(body_start.payload.decoded)
+    struct_body :: typed_body && parser_kind_at(&state, 1) == TOKEN_LBRACE
+    error_suffix :: parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_BANG
+    if typed_body && (parser_kind_at(&state, 1) == TOKEN_BANG || error_suffix) -> parser_lambda_interface_error(&state, body_start.span)
+    saved_diagnostics :: state.diagnostics.len()
     value :: parser_parse_expression(&state, 1, depth + 1)
+    if struct_body && parser_aborting(&state) && state.abort_mark > saved_diagnostics {
+        loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
+        state.abort_mark = 0
+        parser_lambda_interface_error(&state, body_start.span)
+    }
     if parser_is_assignment_operator(parser_current_kind(&state)) {
         operator :: parser_bump(&state)
         right :: parser_parse_expression(&state, 1, depth + 1)
@@ -1250,8 +1246,6 @@ fn parser_parse_trailing_lambda(state: &JetParserState) -> Lambda {
     Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{},
-        result_type: None,
-        error_type: None,
         effects: None,
         body: body.body,
         span: Span{start: open.start, end: body.end},
@@ -1313,7 +1307,7 @@ fn parser_task_call(head: Span, method: String, method_span: Span, argument: Exp
 }
 
 fn parser_task_spawn(head: Span, take_names: [NamedSpan], body: LambdaBody, body_span: Span) -> Expr Never! {
-    lambda :: Lambda{take_names: take_names, params: [LambdaParam]{}, result_type: None, error_type: None, effects: None, body: body, span: body_span, meta: ast_empty_lambda_meta()}
+    lambda :: Lambda{take_names: take_names, params: [LambdaParam]{}, effects: None, body: body, span: body_span, meta: ast_empty_lambda_meta()}
     parser_task_call(head, "task.spawn", head, Expr.Lambda{lambda: lambda}, body_span)
 }
 

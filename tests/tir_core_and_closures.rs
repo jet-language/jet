@@ -535,7 +535,7 @@ fn card_2820_captured_nested_index_assignment_tier_parity() {
     let src = "\
 fn run() {
     rows := [[1]]
-    bump :: () Int -> {
+    bump :: () -> {
         rows[0][0] = rows[0][0] + 4
         rows[0][0]
     }
@@ -573,7 +573,7 @@ fn run() {
             print(err.message)
             0
         }
-        read_outer :: () String -> err.message
+        read_outer :: () -> err.message
         print(read_outer())
         inner + 1
     }
@@ -1110,7 +1110,7 @@ fn card_2837_escaping_closure_keeps_capture_copy() {
     let src = r#"
 fn run() {
     count := 1
-    get :: () Int -> count
+    get :: () -> count
     items :: [get]
     count = 7
     print(items[0].call())
@@ -1125,7 +1125,7 @@ fn closure_capture_reads_current_storage_and_reuses_owned_copy() {
     let src = r#"
 fn run() {
     first := 41
-    first_read :: () Int -> first
+    first_read :: () -> first
     first_items :: [first_read]
     print(first_items[0].call())
     print(first_items[0].call())
@@ -1133,7 +1133,7 @@ fn run() {
     current := 1
     print(current)
     current = 7
-    current_read :: () Int -> current
+    current_read :: () -> current
     current_items :: [current_read]
     print(current_items[0].call())
     print(current)
@@ -1174,7 +1174,7 @@ fn card_2845_stored_mutating_closure_tier_parity() {
     let src = r#"
 fn run() {
     count := 0
-    step :: () Int -> {
+    step :: () -> {
         count += 1
         count
     }
@@ -1208,7 +1208,7 @@ fn run() {
 fn card_2842_function_value_call_tier_parity() {
     let src = r#"
 fn run() {
-    double :: (x: Int) Int -> x * 2
+    double :: (x: Int) -> x * 2
     result :: double.call(21)
     print(result)
 }
@@ -1284,7 +1284,7 @@ fn run() {
     pair :: (left: [U8]{}, right: [String]{})
     print(pair.left == bytes)
     print(pair.right == names)
-    fresh :: () [U8] -> { [U8]{} }
+    fresh :: () -> { [U8]{} }
     print(fresh() == bytes)
 }
 ";
