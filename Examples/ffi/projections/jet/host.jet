@@ -1,0 +1,21 @@
+// Rust: Examples/ffi/projections/rust/host.rs:1
+// GATE #4494: native projection bindings generated for the resource descriptor ABI.
+use projection.[ResourceDocument, PROJECTION_RUST_EXPIRED_VIEW, PROJECTION_RUST_CLOSED, add]
+
+// Rust: Examples/ffi/projections/rust/host.rs:4
+fn main() -> {
+    initial :: [U8]{U8{10}, U8{20}, U8{30}}
+    replacement :: [U8]{U8{40}, U8{50}, U8{60}}
+    document := ResourceDocument.open(initial).unwrap()
+    stale :: document.bytes().unwrap()
+    assert_eq(document.at(stale, 1), Ok(U8{20}))
+    &document.replace(replacement).unwrap()
+    assert_eq(document.at(stale, 1), Err(PROJECTION_RUST_EXPIRED_VIEW))
+    fresh :: document.bytes().unwrap()
+    assert_eq(document.at(fresh, 1), Ok(U8{50}))
+    assert_eq(&document.close(), Ok(()))
+    assert_eq(&document.close(), Err(PROJECTION_RUST_CLOSED))
+    // GATE #4494: audited call to the generated native export binding.
+    assert_eq(#Unsafe("The generated add export accepts the integer argument 41") { add(41) }, 42)
+}
+

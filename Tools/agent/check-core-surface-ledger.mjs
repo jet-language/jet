@@ -2803,7 +2803,7 @@ function validateGeneratedViews(source, declarations) {
       read(CORE_SOURCE_TEXTS_PATH) !== generatedCoreSourceTexts(declarations)) {
     throw new Error("CoreSourceTexts.rs is stale; run --write to regenerate from Core.jet");
   }
-  // The Jet-hosted CLI's Core row table is generated from the export table.
+  // Foundation's embedded-Core payload is generated from the export table.
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {

@@ -37,6 +37,40 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
+### Retained source AST
+
+Foundation owns the complete `ProgramBundle` and flat `LoadedModule` carriers.
+Driver's `JetDriverLoadResult.bundle` and each semantic registration graph
+retain the same shared owner. Driver's parallel `JetDriverModuleFacts` rows
+contain identity, provenance and the original bundle index, not another Program.
+Registration-only Prelude and builtin namespace helpers have no loaded-module
+index; symbol-free source files still occupy their original bundle positions.
+Physical/native paths authorize inputs; module display strings do not.
+
+Parser results move into that owner once. Immutable parser metadata, generic
+and inline preparation, body lookup and memory-plan snapshots may retain read
+products, but none becomes a second writable loaded AST. The body checker
+addresses actual callable locations in the bundle, applies the real memory
+plan there, and checks `&Func`. It publishes `Every.resolved` during the real
+final body pass; probes and non-final ownership fixed-point passes never publish
+a cadence. A semantic cache hit restores its
+checked cadence on the current original function without rerunning a schedule
+resolver. Typed or schedule failure clears a previous stamp. Checked names
+extend the loader-seeded native NameLedger; usage and callback facts publish
+to the same bundle.
+
+Registry, canonical AST journal and App-entry consumers read this retained
+owner. A read guard encloses entry-item access; borrowed payloads cannot
+escape it. Import traversal loans actual declarations, keeps file imports
+first, and preserves original recursive module/generic/alias scope order.
+
+Backend scaffold native entry capture belongs to Driver at both original
+Loader sites. The first follows selection, destination and independently
+read UTF-8/path checks. The inverse captures afresh only after the recorded
+receipt digest matches; there is no prepared inverse request or CLI callback.
+The native retained-descriptor and true process-host/target producers are
+required activation prerequisites, not supplied by this source ownership seam.
+
 ### Checked job discovery
 
 Foundation's CLI-schema `JobRegistry` projects top-level `#Job` declarations
