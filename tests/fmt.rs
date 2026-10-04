@@ -1025,6 +1025,7 @@ fn fmt_preserves_triple_quoted_strings() {
     );
     let twice = jet::format_source(&out).expect("triple-quoted output should re-fmt");
     assert_eq!(out, twice, "triple-quoted formatting must be idempotent");
+    assert_eq!(out, src, "a corrected triple string stays unchanged");
 }
 
 #[test]

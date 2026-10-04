@@ -427,6 +427,62 @@ fn jet_lexer_payload_golden_covers_whitespace_exponents_and_shifted_spans() {
 }
 
 #[test]
+fn jet_and_rust_triple_delimiter_lines_have_identical_text_and_diagnostics() {
+    let cases = [
+        "\"\"\"Hello\n    kept\n    \"\"\"",
+        "\"\"\"\n    kept\n    end\"\"\"",
+        "\"\"\"Hello\n    kept\n    end\"\"\"",
+        "\"\"\"abc\"\"\"",
+        "\"\"\"{name}\nkept\n\"\"\"",
+        "\"\"\" \té😀 rest\nkept\n\"\"\"",
+        "\"\"\"   \nhello\n   \"\"\" }",
+        "\"\"\"\t\t\nhello\n\t\t\"\"\"",
+        "\"\"\" \t\r\nhello\r\n \t\"\"\"",
+        "\"\"\"\rstray\nkept\n\"\"\"",
+        "SQL{\"\"\"query\nkept\n\"\"\"}",
+        "SQL{\"\"\"\nhello\n\"\"\"}",
+        "\"\"\"\nhello\n\"\"\"",
+        "#FFI(c) fn f() { \"\"\"text {value} \\raw\"\"\" }",
+        "#FFI(cpp) fn f() { \"\"\"text {value} \\raw\"\"\" }",
+        "#FFI(asm) fn f() { \"\"\"text {value} \\raw\"\"\" }",
+    ];
+    let mut source = format!("{PASS_SOURCE}\nfn run() {{\n");
+    let mut expected = String::new();
+    for (index, input) in cases.iter().enumerate() {
+        let bytes = input.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
+        source.push_str(&format!(
+            "    result{index} :: lex_payload([U8]{{{bytes}}}, false)\n    loop token in result{index}.tokens {{\n        print(token.span.start)\n        print(token.span.end)\n        print(token.kind)\n        print(token.payload.text)\n        print(token.payload.decoded)\n    }}\n    print(result{index}.diagnostics.len())\n    loop diagnostic in result{index}.diagnostics {{\n        print(diagnostic.code)\n        span :: diagnostic.span ?? return\n        print(span.start)\n        print(span.end)\n        print(diagnostic.what)\n        print(diagnostic.why)\n        print(diagnostic.fix)\n    }}\n"
+        ));
+        let (tokens, diagnostics) = Lexer::lex_raw(input);
+        for token in tokens {
+            let decoded = match &token.kind {
+                TokKind::Str(parts) => parts.iter().map(|part| match part {
+                    StrTokPart::Lit(text) => text.as_str(),
+                    _ => panic!("parity input should have no retained interpolation"),
+                }).collect::<String>(),
+                _ => String::new(),
+            };
+            expected.push_str(&format!(
+                "{}\n{}\n{}\n{}\n{}\n",
+                token.span.start, token.span.end, Lexer::raw_token_fact(&token).kind,
+                &input[token.span.start..token.span.end], decoded,
+            ));
+        }
+        expected.push_str(&format!("{}\n", diagnostics.len()));
+        for diagnostic in diagnostics {
+            let span = diagnostic.span.expect("delimiter diagnostic span");
+            expected.push_str(&format!(
+                "{}\n{}\n{}\n{}\n{}\n{}\n",
+                diagnostic.code, span.start, span.end, diagnostic.what, diagnostic.why, diagnostic.fix,
+            ));
+        }
+    }
+    source.push_str("}\n");
+    tir_support::assert_tiers_agree("triple_delimiter_lexer_parity", &source, &expected);
+    tir_support::assert_awaited_web_tier("triple_delimiter_lexer_parity_web", &source, &expected);
+}
+
+#[test]
 fn jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics() {
     let source = format!(
         "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
