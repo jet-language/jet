@@ -1769,3 +1769,12 @@ authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
         "E1803",
     );
 }
+
+#[test]
+fn pattern_hole_new_names_and_explicit_comparisons_agree_across_tiers() {
+    assert_tiers_agree(
+        "pattern_hole_name1",
+        include_str!("../Examples/features/basics/pattern_matching.jet"),
+        include_str!("../Examples/features/expected/basics/pattern_matching.out"),
+    );
+}

@@ -71,12 +71,12 @@ use core.archive as archive
 fn run() {
     zip_name :: "zip-name/".repeat(120) + "file.txt"
     zip :: archive.create(zip_name, [U8]{122, 105, 112}) ?? panic("create")
-    print((archive.zip_names_json(zip) ?? "") == "[\"{zip_name}\"]")
+    print((archive.zip_names_json(zip) ?? "") == ("[\"{zip_name}\"]"))
     print((archive.zip_decompress(zip) ?? [U8]{}) == [U8]{122, 105, 112})
 
     tar_name :: "tar-name/".repeat(40) + "file.txt"
     tar :: archive.tar_add([U8]{}, tar_name, [U8]{116, 97, 114}) ?? panic("tar_add")
-    print((archive.tar_names_json(tar) ?? "") == "[\"{tar_name}\"]")
+    print((archive.tar_names_json(tar) ?? "") == ("[\"{tar_name}\"]"))
     print((archive.tar_get(tar, tar_name) ?? [U8]{}) == [U8]{116, 97, 114})
 
     valid :: archive.tar_add([U8]{}, "keep.txt", [U8]{1}) ?? panic("tar_add")

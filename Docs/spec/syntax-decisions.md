@@ -1437,6 +1437,20 @@ Only spaces or tabs may follow the opening quotes or precede the closing quotes
 on their line; CRLF is a line break, and raw foreign bodies are exempt
 (D-TRIPLE-DELIM1=A, ratified 2026-10-04, card #4241; E0084).
 
+**D-PATTERN-HOLE-NAME1=A — Pattern holes introduce names** *(ratified
+2026-10-04, card #4358)*: text and byte pattern holes cannot reuse a local,
+parameter, or module constant. E0118 explains that a hole captures new text,
+not the existing value, and offers a structured parenthesis fix for comparison
+or a new name for capture. The rule applies in conditions, `&&`/`||`, value
+positions, and test-bind routes; Optional locals do not turn holes into flow
+refinements. Write `symbol == ("{root}jet")` to compare interpolated text.
+Dotted or called interpolation expressions already compare; fresh holes such
+as `"v{major}.{minor}"` still bind.
+Plain text comparisons carry the parenthesis edit. Typed holes, byte holes,
+and test-bind routes carry advisory guidance only: their type/spec is not an
+interpolation selector, and a `Bool ?? route` is not a fallible value. A fix
+must not invent a type-stripping or whole-statement rewrite.
+
 **D-PARSESTR1 — Interpolation literal as pattern**: the same `"…{hole}…"`
 literal that formats a string may sit in pattern position (if-table arm
 head, `subject == pattern`) and match instead: it matches the fixed text and

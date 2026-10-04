@@ -1792,6 +1792,50 @@ fn bootstrap_private_self_compile_harness() {
     assert_optional_codec_roundtrip(&stage_two_binary, &small_project, &session, "stage-two");
     assert_mir_optimizer_compiler_source(&stage_two_binary, &compiler_project, &session);
     assert_mir_optimizer_fixtures(&stage_two_binary, repo, &session);
+    // D-PATTERN-HOLE-NAME1=A: both checkers publish the same hole refusal,
+    // source span, and contextual repair, before choosing an execution tier.
+    for position in ["if", "value", "route", "bytes", "or", "and", "optional", "constant", "typed"] {
+        let source = fs::read_to_string(repo.join(format!(
+            "tests/ui/pattern_hole_reuse_{position}.jet"
+        ))).unwrap();
+        let project = session.join(format!("pattern-hole-reuse-{position}"));
+        let entry = write_source_fixture_project(&project, SOURCE_FIXTURE_MANIFEST, &source);
+        let output = session.join(format!("pattern-hole-reuse-{position}.rs"));
+        let receipt = session.join(format!("pattern-hole-reuse-{position}.receipt"));
+        run_generated_artifact(
+            &stage_two_binary,
+            "runner",
+            &project,
+            SMALL_ENTRY_RELATIVE,
+            &output,
+            &receipt,
+        );
+        assert!(!output.exists(), "a reused hole must not produce backend source");
+        let generated = receipt_reports(&receipt)
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        let reference = rust_reference_reports(&entry, &source, &[(entry.clone(), source.clone())])
+            .into_iter()
+            .filter(|report| report.contains("\"code\":\"E0118\""))
+            .collect::<Vec<_>>();
+        assert_eq!(reference.len(), 1, "{position}: {reference:?}");
+        assert_eq!(generated, reference, "{position}: checker report parity");
+    }
+    let pattern_project = session.join("pattern-hole-new-names");
+    write_source_fixture_project(
+        &pattern_project,
+        SOURCE_FIXTURE_MANIFEST,
+        include_str!("../../Examples/features/basics/pattern_matching.jet"),
+    );
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "pattern_hole_new_names",
+        &pattern_project,
+        include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
+    );
 
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =

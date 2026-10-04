@@ -4043,7 +4043,7 @@ impl<'a> Checker<'a> {
         pattern: &mut Pattern,
         span: Span,
     ) -> HashMap<String, Type> {
-        self.check_pattern_test_typed(subject, pattern, span).1
+        self.check_pattern_test_typed(subject, pattern, span, false).1
     }
 
     /// The typed form is shared by ordinary conditions and statement-level
@@ -4055,6 +4055,7 @@ impl<'a> Checker<'a> {
         subject: &mut Box<Expr>,
         pattern: &mut Pattern,
         span: Span,
+        binding_position: bool,
     ) -> (Option<Type>, HashMap<String, Type>) {
         // A Result pattern consumes the carrier itself. Keep a direct
         // fallible call as `T !E` here; ordinary value positions unwrap the
@@ -4146,7 +4147,23 @@ impl<'a> Checker<'a> {
             return (None, HashMap::new());
         };
         self.normalize_pattern_tree(pattern, &st);
+        let before_validation = self.diags.len();
         let bindings = self.validate_pattern(&st, pattern, span);
+        if binding_position {
+            for diagnostic in &mut self.diags[before_validation..] {
+                if diagnostic.code == "E0118" && diagnostic.edit.is_some() {
+                    // Parenthesizing the RHS would turn this test-bind into
+                    // `Bool ?? route`, which is not a fallible value.
+                    *diagnostic = Diagnostic::error(
+                        "E0118",
+                        diagnostic.what.clone(),
+                        diagnostic.why.clone(),
+                        "pick a new hole name to capture; to compare, build the expected text or bytes first and compare the two values".to_string(),
+                        diagnostic.span,
+                    );
+                }
+            }
+        }
         if cached_subject_ty.is_none() && !matches!(pattern, Pattern::Struct { .. }) {
             self.mark_pattern_subject_moved(subject, &bindings);
         }
@@ -4185,6 +4202,44 @@ impl<'a> Checker<'a> {
                 self.mark_moved(n.clone(), *nspan, "the pattern match");
             }
         }
+    }
+
+    /// D-PATTERN-HOLE-NAME1=A: holes introduce names, never compare or refine.
+    pub(crate) fn pattern_hole_name_available(
+        &mut self,
+        name: &str,
+        hole_span: Span,
+        pattern_span: Span,
+        offer_comparison_edit: bool,
+    ) -> bool {
+        if name == "_" || (self.lookup(name).is_none() && !self.consts.contains_key(name)) {
+            return true;
+        }
+        let diagnostic = Diagnostic::error(
+            "E0118",
+            format!("pattern hole `{{{name}}}` would make a new `{name}`, but `{name}` already holds a value"),
+            "a pattern hole introduces a new name; it does not compare with an existing value or refine it".to_string(),
+            if offer_comparison_edit {
+                "wrap the pattern text in parentheses to compare with the existing value, or pick a new hole name to capture".to_string()
+            } else {
+                "pick a new hole name to capture; to compare, build the expected text or bytes first and compare the two values".to_string()
+            },
+            Some(hole_span),
+        );
+        // Typed hole annotations and byte specs are not interpolation
+        // selectors: parentheses alone cannot repair those patterns.
+        let comparison = if offer_comparison_edit {
+            self.source.get(pattern_span.start..pattern_span.end)
+        } else {
+            None
+        };
+        let diagnostic = if let Some(text) = comparison {
+            diagnostic.with_source_derived_suggestion(pattern_span, format!("({text})"))
+        } else {
+            diagnostic
+        };
+        self.diags.push(diagnostic);
+        false
     }
 
     /// D-PARSESTR1 (shared with D-SHIFT1's `take_pattern` — I8, one hole-type
@@ -4235,10 +4290,16 @@ impl<'a> Checker<'a> {
         &mut self,
         parts: &[crate::AST::BinMatchPart],
         span: Span,
+        introduces_names: bool,
     ) -> Vec<(String, Type)> {
         let mut off: usize = 0;
         let mut holes: Vec<(String, Type)> = Vec::new();
         for part in parts {
+            let available = match part {
+                crate::AST::BinMatchPart::Hole { name, span: hole_span, .. } if introduces_names =>
+                    self.pattern_hole_name_available(name, *hole_span, span, false),
+                _ => true,
+            };
             match part {
                 crate::AST::BinMatchPart::Lit(bytes) => {
                     if off % 8 != 0 {
@@ -4255,13 +4316,15 @@ impl<'a> Checker<'a> {
                         if off % 8 != 0 {
                             self.diags.push(self.bin_align_diag(*hole_span));
                         }
-                        holes.push((
-                            name.clone(),
-                            Type::List(Box::new(Type::IntN {
-                                signed: false,
-                                bits: 8,
-                            })),
-                        ));
+                        if available {
+                            holes.push((
+                                name.clone(),
+                                Type::List(Box::new(Type::IntN {
+                                    signed: false,
+                                    bits: 8,
+                                })),
+                            ));
+                        }
                     }
                     crate::AST::BinSpec::Bits { width, endian } => {
                         if matches!(endian, crate::AST::BinEndian::Little) && *width % 8 != 0 {
@@ -4276,7 +4339,9 @@ impl<'a> Checker<'a> {
                                     Some(*hole_span),
                                 ));
                         }
-                        holes.push((name.clone(), bin_bits_type(*width)));
+                        if available {
+                            holes.push((name.clone(), bin_bits_type(*width)));
+                        }
                         off += *width as usize;
                     }
                 },
@@ -4919,6 +4984,9 @@ impl<'a> Checker<'a> {
                     return HashMap::new();
                 }
                 let mut result = HashMap::new();
+                let offer_comparison_edit = !parts.iter().any(|part| {
+                    matches!(part, StrMatchPart::Hole { ty: Some(_), .. })
+                });
                 for part in parts {
                     let StrMatchPart::Hole {
                         name,
@@ -4928,6 +4996,9 @@ impl<'a> Checker<'a> {
                     else {
                         continue;
                     };
+                    if !self.pattern_hole_name_available(name, *hole_span, pattern.span(), offer_comparison_edit) {
+                        continue;
+                    }
                     let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
                     result.insert(name.clone(), bound_ty);
                 }
@@ -4957,7 +5028,7 @@ impl<'a> Checker<'a> {
                 }
                 // Static bit-offset fold: literals and the rest capture must be
                 // byte-aligned, and a little-endian read must be byte-multiple.
-                self.bin_match_hole_types(parts, span)
+                self.bin_match_hole_types(parts, span, true)
                     .into_iter()
                     .collect::<HashMap<_, _>>()
             }

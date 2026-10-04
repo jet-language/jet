@@ -2477,6 +2477,9 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     checked_pattern_tir := checked_pattern.checked
     loop name in names {
         fact := sema_stmt_refutable_capture_fact(checked_pattern.bindings, name)
+        // A refused hole has no binding fact; recovery must leave its
+        // existing value visible rather than declaring it a second time.
+        if fact == None && (if pattern == {.StrMatch(_, _) | .BinMatch(_, _) -> true else -> false}) && !sema_pattern_hole_name_available(name.name, scopes) -> next
         ty := if fact == {.Val(value) -> value.ty else -> Type.Int}
         local := sema_stmt_destructure_local(name, ty, binding.mutable, environment, &scopes, &state, &diagnostics)
         if local == None -> next

@@ -1470,7 +1470,7 @@ impl<'a> Checker<'a> {
         let subject = std::mem::replace(&mut b.init, Expr::Absent(subject_span));
         let mut subject = Box::new(subject);
         let (subject_ty, bindings) =
-            self.check_pattern_test_typed(&mut subject, &mut pattern, span);
+            self.check_pattern_test_typed(&mut subject, &mut pattern, span, true);
         b.init = *subject;
         let Some(subject_ty) = subject_ty else {
             for name in names.iter() {
@@ -1490,6 +1490,15 @@ impl<'a> Checker<'a> {
             *stored_fallback = fallback;
         }
         for name in names.iter() {
+            // Rejected text/byte holes have no binding fact. Do not install a
+            // recovery declaration over the value E0118 already protects.
+            if matches!(&pattern, Pattern::StrMatch { .. } | Pattern::BinMatch { .. })
+                && !bindings.contains_key(name.local_name())
+                && (self.lookup(name.local_name()).is_some()
+                    || self.consts.contains_key(name.local_name()))
+            {
+                continue;
+            }
             let ty = bindings
                 .get(name.local_name())
                 .or_else(|| bindings.get(&name.name))
