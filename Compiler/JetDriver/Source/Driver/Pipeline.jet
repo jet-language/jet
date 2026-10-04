@@ -130,6 +130,7 @@ use jet_sema.[
     SemaRegistrationModuleInput,
     SemaRegistrationPackagePolicy,
     SemaScopeEnvironment,
+    SemaScopeProbe,
     SemaSourceLocation,
     SemaSourceOrigin,
     SemaSourceSegment,
@@ -146,6 +147,7 @@ use jet_sema.[
     sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
+    sema_comptime_probe_init,
     sema_comptime_staged_constant_rows,
     sema_finalize_registration_graph,
     sema_function_memory_plan_from_graph,
@@ -1297,6 +1299,7 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 fn jet_driver_comptime_function_closure(
     graph: SemaRegistrationGraph,
     environment: &SemaScopeEnvironment,
+    probe: &SemaScopeProbe,
     available: SemaComptimeAvailableConstants,
     index: &JetDriverComptimeRunIndex,
     memory_plan: SemaFunctionMemoryPlan,
@@ -1332,7 +1335,7 @@ fn jet_driver_comptime_function_closure(
         if index.checked_rows.get(checked_key) == .Val(row) {
             if checked_functions[row].complete -> reused_row = row
         }
-        checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, available, memory_plan, values, current.module_identity, current.function_key)
+        checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, &environment, &probe, available, memory_plan, values, current.module_identity, current.function_key)
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(&waiting, dependency)
         if {
             !checked.complete || jet_driver_has_errors(checked.diagnostics) -> {
@@ -1837,6 +1840,8 @@ fn jet_driver_run_comptime(
     // are applied to that graph in place rather than rebuilding it per item,
     // and counted into the run's available constant keys.
     environment := sema_comptime_environment(graph, values)
+    // The module scope every item and function check of the run checks in.
+    probe := sema_comptime_probe_init()
     available := sema_comptime_available_constants(graph, values)
     resolved_count := values.len()
     run_index := jet_driver_comptime_run_index(graph, checked_functions)
@@ -1877,7 +1882,7 @@ fn jet_driver_run_comptime(
                 sema_comptime_available_constants_add(&available, values)
                 resolved_count = values.len()
             }
-            checked_item := sema_check_comptime_item(&environment, available, source, values)
+            checked_item := sema_check_comptime_item(&environment, &probe, available, source, values)
             item_diagnostic_start := diagnostics.len()
             // A comptime item's checker reports against its own module's
             // source, so each carries that module's location.
@@ -1929,7 +1934,7 @@ fn jet_driver_run_comptime(
                     next
                 }
             }
-            closure := jet_driver_comptime_function_closure(graph, &environment, available, &run_index, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
+            closure := jet_driver_comptime_function_closure(graph, &environment, &probe, available, &run_index, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
             if graph.keep_going {
                 if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
             } else if jet_driver_has_errors(diagnostics) {

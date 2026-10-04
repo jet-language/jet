@@ -1305,12 +1305,6 @@ fn sema_comptime_indexed_function_source(graph: SemaRegistrationGraph, module_in
     }
 }
 
-// The module scope of `module_identity` from the environment's own graph.
-fn sema_comptime_environment_apply_module(environment: SemaScopeEnvironment, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    graph :: environment.registration_graph ?? return false
-    sema_registration_apply_graph_module(graph, module_identity, &scopes, &diagnostics)
-}
-
 // Read the environment's staged graph only inside these probes; subsequent
 // environment writes must not turn the graph payload into an owned snapshot.
 fn sema_comptime_normalize_owner(environment: SemaScopeEnvironment, owner: Type, module_identity: String) -> Type? {
@@ -1329,7 +1323,9 @@ fn sema_comptime_owner_generic_params(environment: SemaScopeEnvironment, owner: 
 // time values only type constants, never the functions the plan annotates.
 // The caller keeps the run's checked functions and reuses a complete one
 // instead of calling this again.
-pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
+// `probe` is the run's module scope (sema_comptime_probe_init), lent to every
+// item and function check of the run.
+pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
     unresolved := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
@@ -1376,8 +1372,9 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
             memory_complete = false
         }
     }
-    scopes := sema_scope_init(module_identity)
-    if !sema_comptime_environment_apply_module(environment, module_identity, &scopes, &diagnostics) {
+    sema_comptime_probe_prepare(&probe, environment)
+    if !probe.applied {
+        loop diagnostic in probe.diagnostics -> &diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(&diagnostics, 0, environment.source_segments)
         return SemaComptimeFunctionResult{
             module_identity: module_identity,
@@ -1405,7 +1402,6 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
             incomplete_reasons: [String]{"the scope of module `{module_identity}` could not be applied"},
         }
     }
-    scopes.comptime_execution_depth = 1
     call_facts := [SemaCallSiteFact]{}
     calls := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
@@ -1422,7 +1418,10 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
             else -> source.kind
         }
     }
-    checked := sema_function_check(memory_func, source.symbol.id, function_kind, source.raw_protocol_return, &environment, &scopes, &diagnostics, &call_facts, &calls, &name_references)
+    mark :: sema_scope_mark(&probe.table)
+    probe.table.comptime_execution_depth = 1
+    checked := sema_function_check(memory_func, source.symbol.id, function_kind, source.raw_protocol_return, &environment, &probe.table, &diagnostics, &call_facts, &calls, &name_references)
+    sema_scope_rollback(&probe.table, mark)
     dependencies := sema_comptime_environment_dependencies(environment, name_references, values) ?? return unresolved
     waiting := sema_comptime_waiting_dependencies(available, dependencies)
     sema_attach_diagnostic_source_locations(&diagnostics, 0, environment.source_segments)
@@ -1617,16 +1616,6 @@ fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, pro
     None
 }
 
-// D-SHAPE-PLACE1=A: every module's items, so the length-preserving fact
-// covers calls into other modules like the Rust bundle-wide fact.
-fn sema_check_bundle_items(graph: SemaRegistrationGraph) -> [Item] Never! {
-    items := [Item]{}
-    loop source_module in graph.modules {
-        loop item in source_module.program.items -> &items.push(item)
-    }
-    items
-}
-
 // The Program-level forms the module checker does not support yet, by name.
 // Fenced statements are formatter metadata: sema checks their ordinary
 // expanded statements in `items`, as the Rust checker does.
@@ -1681,7 +1670,9 @@ fn sema_check_item_kind_label(item: Item) -> String Never! {
 // once here instead of once per module.
 fn sema_check_pass_environment(graph: SemaRegistrationGraph, checked_types: [TTypeDef]) -> SemaScopeEnvironment Never! {
     environment := sema_scope_environment_init(Val(~graph), "", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, checked_types, [SemaScopeDeclaration]{})
-    environment.fixed_length_write_params = sema_fixed_length_write_params(sema_check_bundle_items(graph))
+    // D-SHAPE-PLACE1=A: every module's functions, so the length-preserving
+    // fact covers calls into other modules like the Rust bundle-wide fact.
+    environment.fixed_length_write_params = sema_fixed_length_write_params_in_graph(graph)
     environment
 }
 
@@ -2424,11 +2415,17 @@ fn sema_comptime_value_for_symbol(constants: [String:SemaComptimeItemValue], mod
 
 fn sema_comptime_symbol_with_values(symbol: ^Symbol, module_identity: String, constants: [String:SemaComptimeItemValue]) -> Symbol Never! {
     updated := symbol
-    if updated.kind == SymbolKind.Constant && updated.ty == None {
+    if sema_comptime_symbol_waits(updated) {
         value :: sema_comptime_value_for_symbol(constants, module_identity, updated.id.key) ?? return updated
         updated.ty = Val(value.ty)
     }
     updated
+}
+
+// A constant still waiting for its known-time type: the only symbol a staged
+// value changes (first value wins, so a typed constant never changes again).
+pub fn sema_comptime_symbol_waits(symbol: Symbol) -> Bool Never! {
+    symbol.kind == SymbolKind.Constant && symbol.ty == None
 }
 
 // Only constants still waiting for their known-time type change, so each
@@ -2463,7 +2460,7 @@ pub fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [
 }
 
 fn sema_comptime_symbol_takes_value(symbol: Symbol, module_identity: String, constants: [String:SemaComptimeItemValue]) -> Bool Never! {
-    symbol.kind == SymbolKind.Constant && symbol.ty == None && sema_comptime_value_for_symbol(constants, module_identity, symbol.id.key) != None
+    sema_comptime_symbol_waits(symbol) && sema_comptime_value_for_symbol(constants, module_identity, symbol.id.key) != None
 }
 
 fn sema_comptime_binding_takes_value(binding: SemaRegistrationImportBinding, constants: [String:SemaComptimeItemValue]) -> Bool Never! {
@@ -2540,27 +2537,99 @@ fn sema_comptime_constant_has_ast_value(graph: SemaRegistrationGraph, module_ide
     true
 }
 
+// An empty probe scope: the first sema_comptime_probe_prepare builds it. The
+// caller that runs a series of probes owns one and lends it to each.
+pub fn sema_comptime_probe_init() -> SemaScopeProbe Never! {
+    SemaScopeProbe{module_identity: "", table: sema_scope_init(""), applied: false, diagnostics: [Diagnostic]{}, constants: [SemaScopeProbeConstant]{}}
+}
+
+// Readies `probe` as the declaration scope of the environment's current
+// module (set by sema_scope_environment_enter_probe_module): a scope built for
+// that module is reused, with any constant a staged value typed since copied
+// in, and anything else is rebuilt. The caller checks inside a mark on
+// `probe.table` and rolls back, so the next probe finds the same scope.
+fn sema_comptime_probe_prepare(probe: &SemaScopeProbe, environment: SemaScopeEnvironment) {
+    module_identity :: environment.module_identity
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? {
+        probe.module_identity = module_identity
+        probe.table = sema_scope_init(module_identity)
+        probe.applied = false
+        probe.diagnostics = [Diagnostic]{}
+        probe.constants = [SemaScopeProbeConstant]{}
+        return
+    }
+    if probe.applied && probe.module_identity == module_identity {
+        if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+            sema_comptime_probe_refresh(&probe, graph, module_index)
+            return
+        }
+    }
+    // Any other scope is rebuilt; an unapplied one always is, so it never
+    // outlives the graph state that failed it.
+    table := sema_scope_init(module_identity)
+    diagnostics := [Diagnostic]{}
+    constants := [SemaScopeProbeConstant]{}
+    applied :: sema_registration_apply_graph_module_rows(graph, module_identity, &table, &diagnostics, &constants)
+    probe.module_identity = module_identity
+    probe.table = table
+    probe.applied = applied
+    probe.diagnostics = diagnostics
+    probe.constants = constants
+}
+
+// Copies each waiting constant that a staged value has typed since the last
+// probe from its graph row into its binding: exactly the rows a rebuilt table
+// would differ in. Typed constants never change again, so they leave the list.
+fn sema_comptime_probe_refresh(probe: &SemaScopeProbe, graph: SemaRegistrationGraph, module_index: Int) Never! {
+    if probe.constants.len() == 0 -> return
+    waiting := [SemaScopeProbeConstant]{}
+    loop index in 0..<probe.constants.len() {
+        constant :: probe.constants[index]
+        if constant.source == {
+            .Symbol(position) -> {
+                if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) {
+                    &waiting.push(constant)
+                } else {
+                    probe.table.bindings[constant.binding].symbol = graph.modules[module_index].symbols[position]
+                }
+            }
+            .Import(import_index, binding) -> {
+                if sema_comptime_symbol_waits(graph.modules[module_index].imports[import_index].bindings[binding].symbol) {
+                    &waiting.push(constant)
+                } else {
+                    probe.table.bindings[constant.binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
+                }
+            }
+        }
+    }
+    probe.constants = waiting
+}
+
 // `environment` carries the graph with `values` applied and is re-targeted
 // at the source's module here, so every source of a pass shares one
-// environment instead of copying the graph per source.
-fn sema_comptime_source_dependencies(environment: &SemaScopeEnvironment, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> [String] {
+// environment and one module scope instead of copying either per source.
+fn sema_comptime_source_dependencies(environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> [String] {
     if !sema_scope_environment_enter_probe_module(&environment, source.module_identity, [SemaComptimeBodyValue]{}) -> return [String]{}
-    sema_comptime_source_dependencies_in(environment, source, values)
+    sema_comptime_source_dependencies_in(environment, &probe, source, values)
 }
 
 // Read-only half of the probe: the environment is borrowed, so reading its
 // registration graph never copies the graph (a writable parameter would).
-fn sema_comptime_source_dependencies_in(environment: SemaScopeEnvironment, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> [String] {
+fn sema_comptime_source_dependencies_in(environment: SemaScopeEnvironment, probe: &SemaScopeProbe, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> [String] {
     graph_option :: environment.registration_graph
     resolved_graph :: graph_option ?? return [String]{}
-    module_identity :: environment.module_identity
-    scopes := sema_scope_init(module_identity)
-    scopes.comptime_execution_depth = 1
+    sema_comptime_probe_prepare(&probe, environment)
     context := sema_check_context_init()
-    probe_diagnostics := [Diagnostic]{}
-    state := sema_ownership_state_init()
-    tail_store := sema_statement_tail_store_init()
-    if sema_registration_apply_graph_module(resolved_graph, module_identity, &scopes, &probe_diagnostics) -> _ := sema_check_expression(source.expression, source.expected_type, environment, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+    if probe.applied {
+        mark :: sema_scope_mark(&probe.table)
+        probe.table.comptime_execution_depth = 1
+        probe_diagnostics := ~probe.diagnostics
+        state := sema_ownership_state_init()
+        tail_store := sema_statement_tail_store_init()
+        _ := sema_check_expression(source.expression, source.expected_type, environment, &probe.table, &state, &tail_store, &context, &probe_diagnostics)
+        sema_scope_rollback(&probe.table, mark)
+    }
     sema_comptime_dependencies_from_references(resolved_graph, context.name_references, values)
 }
 
@@ -2655,10 +2724,12 @@ pub fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) 
 }
 
 // The comptime sources one module contributes, with the `module\nkey` of
-// each, so a repeated key is found without rescanning the list.
+// each, so a repeated key is found without rescanning the list, and the
+// module scope every source's dependency probe checks in.
 struct SemaComptimeSourceList {
     items: [SemaComptimeItemSource]
     keys: [String:Bool]
+    probe: SemaScopeProbe
 }
 
 fn sema_comptime_add_source(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, module_identity: String, key: String, destination_key: String, name: String, kind: SemaComptimeItemKind, expression: Expr, expected_type: Type?) {
@@ -2679,7 +2750,7 @@ fn sema_comptime_add_source(sources: &SemaComptimeSourceList, graph: SemaRegistr
         dependencies: [String]{},
         checked_text: None,
     }
-    source.dependencies = sema_comptime_source_dependencies(&environment, source, [SemaComptimeItemValue]{})
+    source.dependencies = sema_comptime_source_dependencies(&environment, &sources.probe, source, [SemaComptimeItemValue]{})
     &sources.items.push(source)
     sources.keys[source_key] = true
 }
@@ -2815,7 +2886,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
 }
 
 fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
-    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}}
+    sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}, probe: sema_comptime_probe_init()}
     loop constant in source_module.constants {
         if constant.declaration.ct != None -> next
         // D-MODULE-VALUE1: registration reports a non-literal module binding
@@ -2940,7 +3011,9 @@ pub fn sema_comptime_environment(graph: SemaRegistrationGraph, values: [SemaComp
 
 // `environment` is the run's sema_comptime_environment, whose graph already
 // carries `values`; `available` covers the same values.
-pub fn sema_check_comptime_item(environment: &SemaScopeEnvironment, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
+// `probe` is the run's module scope (sema_comptime_probe_init), lent to every
+// item and function check of the run.
+pub fn sema_check_comptime_item(environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     if source.checked_text == .Val(evaluation) {
         dependencies := evaluation.dependencies
         waiting := sema_comptime_waiting_dependencies(available, dependencies)
@@ -2962,29 +3035,28 @@ pub fn sema_check_comptime_item(environment: &SemaScopeEnvironment, available: S
         return SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: [Diagnostic]{}, complete: true}
     }
     if !sema_scope_environment_enter_probe_module(&environment, source.module_identity, [SemaComptimeBodyValue]{}) -> return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
-    sema_check_comptime_item_in(environment, available, source, values)
+    sema_check_comptime_item_in(environment, &probe, available, source, values)
 }
 
 // Read-only half of the item check: the environment is borrowed, so reading
 // its registration graph never copies the graph (a writable parameter would).
-fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
+fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     graph_option :: environment.registration_graph
     resolved_graph :: graph_option ?? return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
-    module_identity :: environment.module_identity
-    scopes := sema_scope_init(module_identity)
-    scopes.comptime_execution_depth = 1
+    sema_comptime_probe_prepare(&probe, environment)
+    diagnostics := ~probe.diagnostics
+    if !probe.applied -> return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
+    mark :: sema_scope_mark(&probe.table)
+    probe.table.comptime_execution_depth = 1
     // S57: `NAME :: expr` fails the build when evaluation cannot complete.
     // The build edge carries the implicit `!Err` rail of `fn run()`
     // (D-FAIL-EXIT1), so a fallible call here propagates to the build.
-    scopes.failure_carrier = Val(sema_failure_carrier(None))
+    probe.table.failure_carrier = Val(sema_failure_carrier(None))
     context := sema_check_context_init()
-    diagnostics := [Diagnostic]{}
-    if !sema_registration_apply_graph_module(resolved_graph, module_identity, &scopes, &diagnostics) {
-        return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
-    }
     state := sema_ownership_state_init()
     tail_store := sema_statement_tail_store_init()
-    checked := sema_check_expression(source.expression, source.expected_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked := sema_check_expression(source.expression, source.expected_type, environment, &probe.table, &state, &tail_store, &context, &diagnostics)
+    sema_scope_rollback(&probe.table, mark)
     dependencies := sema_comptime_dependencies_from_references(resolved_graph, context.name_references, values)
     loop dependency in source.dependencies {
         already := false
