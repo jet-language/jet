@@ -53,6 +53,7 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
     LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
+    LexicalEntry { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)", decision: "D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A" },
     LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
     LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
     LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },

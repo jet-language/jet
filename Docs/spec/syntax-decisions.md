@@ -53,6 +53,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
 | <code>`</code> | raw ordinary String fence | `D-RAWSTR1` |
+| `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) | `D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A` |
 | `,` | separator with optional trailing item in every comma list | `D-TRAILCOMMA1` |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes | — |
 | `;` | retired explicit statement terminator | `D-SEMI1` |
@@ -1421,6 +1422,9 @@ using longer suffixes (`inch` becomes `in`; `farad` stays spelled out).
 **S70 — Multi-line strings**: `"""…"""`, Swift-style trimming (newline after
 opening and before closing dropped; closing-quote column sets stripped
 indent); escapes and `{interp}` stay active; unterminated is E0002.
+Only spaces or tabs may follow the opening quotes or precede the closing quotes
+on their line; CRLF is a line break, and raw foreign bodies are exempt
+(D-TRIPLE-DELIM1=A, ratified 2026-10-04, card #4241; E0084).
 
 **D-PARSESTR1 — Interpolation literal as pattern**: the same `"…{hole}…"`
 literal that formats a string may sit in pattern position (if-table arm
