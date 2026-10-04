@@ -1,0 +1,97 @@
+use jet_devserver.NativeSwap.*
+use jet_devserver.NativeSwap02.*
+use jet_foundation.HotSwap.[HotSwapDecision, HotSwapCompatibility]
+
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2565
+fn fixture() -> (NativeSwapSourceIdentity, NativeSwapExecutable, NativeSwapListenerHandle, NativeSwapConnectionHandle) {
+    source :: NativeSwapSourceIdentity.new("server.jet").unwrap()
+    revision :: NativeSwapRevision.new("code-1", "data-1").unwrap()
+    executable :: NativeSwapExecutable.new(~source, ^revision, 1).unwrap()
+    listener :: NativeSwapListenerHandle.compatible("http", ~source, 1).unwrap()
+    connection :: NativeSwapConnectionHandle.compatible("conn-7", "http", ~source, 1).unwrap()
+    (^source, ^executable, ^listener, ^connection)
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2579
+fn compatible_decision() -> HotSwapDecision {
+    HotSwapDecision { module: "server.jet", compatibility: .Compatible, changed: [],
+        changed_functions: ["server.jet::fn:main"], state: [], schema_migrations: [], rechecked_items: [], change_facts: [] }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2592
+fn compatible_plan(source: NativeSwapSourceIdentity, executable: NativeSwapExecutable, listener: NativeSwapListenerHandle, connection: NativeSwapConnectionHandle) -> NativeSwapPlan {
+    next :: NativeSwapExecutable.new(~source, NativeSwapRevision.new("code-2", "data-1").unwrap(), 2).unwrap()
+    NativeSwapPlan.new(^source, ^executable, ^next, NativeSwapCapability.resident(), compatible_decision()).unwrap()
+        .preserve_listener(^listener).preserve_connection(^connection)
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2617
+#Test("compatible_swap_keeps_only_explicit_compatible_handles") {
+    (source, executable, listener, connection) :: fixture()
+    other_listener :: NativeSwapListenerHandle.compatible("metrics", ~source, 1).unwrap()
+    state := NativeSwapState.new(~executable, [~listener, ^other_listener], [~connection]).unwrap()
+    plan :: compatible_plan(^source, ^executable, ^listener, ^connection)
+    state.pause(&plan).unwrap()
+    state.apply(&plan).unwrap()
+    receipt :: state.commit().unwrap()
+    assert(receipt.committed())
+    assert_eq(state.generation(), 2)
+    assert_eq(state.listener_count(), 1)
+    assert_eq(state.connection_count(), 1)
+    assert_eq(receipt.preserved_listeners, ["http"])
+    assert_eq(receipt.reset_listeners, ["metrics"])
+    assert_eq(receipt.preserved_connections, ["conn-7"])
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2640
+#Test("incompatible_plan_is_rejected_before_pause_mutates_state") {
+    (source, executable, listener, connection) :: fixture()
+    state := NativeSwapState.new(~executable, [~listener], [~connection]).unwrap()
+    plan :: compatible_plan(^source, ~executable, ^listener, ^connection).mark_layout_changed(["Order"])
+    before :: ~state
+    error :: state.pause(&plan).unwrap_err()
+    assert_eq(error.blocking_fact(), NativeSwapBlockingFact.LayoutChanged)
+    assert_eq(state, before)
+    assert(error.render().contains("source=server.jet"))
+    assert(error.render().contains("blocking_fact=layout_changed"))
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2653
+#Test("rollback_restores_prior_executable_and_handles") {
+    (source, executable, listener, connection) :: fixture()
+    state := NativeSwapState.new(~executable, [~listener], [~connection]).unwrap()
+    plan :: compatible_plan(^source, ~executable, ^listener, ^connection)
+    state.pause(&plan).unwrap()
+    state.apply(&plan).unwrap()
+    assert_eq(state.generation(), 2)
+    receipt :: state.rollback().unwrap()
+    assert(receipt.rolled_back())
+    assert_eq(state.executable(), &executable)
+    assert_eq(state.listener_count(), 1)
+    assert_eq(state.connection_count(), 1)
+    assert_eq(state.phase(), NativeSwapPhase.Ready)
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2669
+#Test("quiescence_and_strategy_failures_name_exact_facts") {
+    (source, executable, listener, connection) :: fixture()
+    state := NativeSwapState.new(~executable, [~listener], [~connection]).unwrap()
+    plan :: compatible_plan(~source, ^executable, ^listener, ^connection).with_quiescence(NativeSwapQuiescence.pending(2))
+    error :: state.pause(&plan).unwrap_err()
+    assert_eq(error.blocking_fact(), NativeSwapBlockingFact.QuiescenceRequired)
+    assert_eq(error.source_id(), "server.jet")
+    executable :: ~state.executable()
+    listener :: ~state.listener("http").unwrap()
+    connection :: ~state.connection("conn-7").unwrap()
+    plan :: compatible_plan(^source, ^executable, ^listener, ^connection).with_relocation(NativeSwapRelocationFacts.new(.Reject))
+    error :: state.pause(&plan).unwrap_err()
+    assert_eq(error.blocking_fact(), NativeSwapBlockingFact.RelocationUnsupported)
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2688
+#Test("receipt_order_and_explanation_are_deterministic") {
+    (source, executable, listener, connection) :: fixture()
+    state := NativeSwapState.new(~executable, [~listener], [~connection]).unwrap()
+    plan :: compatible_plan(^source, ^executable, ^listener, ^connection)
+    assert_eq(state.explain_reload(&plan).blocking_fact, NativeSwapBlockingFact.None)
+    state.pause(&plan).unwrap()
+    state.apply(&plan).unwrap()
+    receipt :: state.commit().unwrap()
+    rendered :: receipt.render()
+    assert(rendered.contains("outcome=committed"))
+    assert(rendered.contains("preserved_listeners=[http]"))
+    assert(rendered.contains("preserved_connections=[conn-7]"))
+}

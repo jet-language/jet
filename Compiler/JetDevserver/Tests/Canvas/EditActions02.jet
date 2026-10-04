@@ -1,0 +1,48 @@
+use jet_devserver.Canvas.EditActions.[check_canvas_candidate]
+use std.sync.atomic.[AtomicU64, Ordering]
+use core.sys.target.[selected_family]
+use std.fs as fs
+use std.os.unix.fs.[symlink]
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4221
+TEST_SEQUENCE := AtomicU64.new(0) // GATE #4494: atomic fixture sequence.
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4223
+fn test_root(label: String) -> OSPath {
+    std.env.temp_dir().join("jet-canvas-action-overlay-{label}-{std.process.id()}-{TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)}") // GATE #4494
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4233
+#Test("canvas_action_check_ignores_final_swap_in_legacy_temp_name") {
+    if selected_family() == "unix" { // GATE #4483: original Unix-only test.
+        root := test_root("final")
+        fs.create_dir_all(root).unwrap()
+        source := root.join("main.jet")
+        fs.write(source, "fn run() -> {}\n").unwrap()
+        outside := root.join("outside.jet")
+        fs.write(outside, "must survive\n").unwrap()
+        legacy_temp := root.join("main.canvas-action-check.jet")
+        overlay_path := fs.canonicalize(source).unwrap()
+        symlink(outside, legacy_temp).unwrap() // GATE #4494: real filesystem symlink.
+        _ :: check_canvas_candidate(source, overlay_path, "fn run() -> {}\n")
+        assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
+        assert(fs.symlink_metadata(legacy_temp).unwrap().file_type().is_symlink())
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4260
+#Test("canvas_action_check_ignores_ancestor_swap_in_legacy_temp_name") {
+    if selected_family() == "unix" { // GATE #4483
+        root := test_root("ancestor")
+        real := root.join("real"); held := root.join("held"); outside := root.join("outside")
+        fs.create_dir_all(real).unwrap(); fs.create_dir_all(outside).unwrap()
+        source := real.join("main.jet")
+        fs.write(source, "fn run() -> {}\n").unwrap()
+        outside_temp := outside.join("main.canvas-action-check.jet")
+        fs.write(outside_temp, "must survive\n").unwrap()
+        overlay_path := fs.canonicalize(source).unwrap()
+        fs.rename(real, held).unwrap()
+        symlink(outside, real).unwrap() // GATE #4494: real ancestor replacement.
+        _ :: check_canvas_candidate(source, overlay_path, "fn run() -> {}\n")
+        assert_eq(fs.read_to_string(outside_temp).unwrap(), "must survive\n")
+        assert(fs.symlink_metadata(real).unwrap().file_type().is_symlink())
+        fs.remove_file(real).unwrap(); fs.remove_dir_all(root).unwrap()
+    }
+}

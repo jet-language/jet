@@ -1,593 +1,140 @@
-// PORT-PENDING 0766 crates-jet-devserver-src-canvas-node-catalog-module-group: crates/jet-devserver/src/Canvas/node_catalog.rs:1-589
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::collections::HashSet;
-//RS 
-//RS use super::super::validation_json::json_str;
-//RS 
-//RS pub(in crate::Canvas) struct NodeDescriptor {
-//RS     pub(in crate::Canvas) id: &'static str,
-//RS     pub(in crate::Canvas) kind: &'static str,
-//RS     pub(in crate::Canvas) archetype: &'static str,
-//RS     projected: bool,
-//RS     presentation: PresentationFacts,
-//RS     palette: PaletteFacts,
-//RS     pub(super) transaction: Option<&'static str>,
-//RS     default_editor: &'static str,
-//RS }
-//RS 
-//RS struct PresentationFacts {
-//RS     label: &'static str,
-//RS     glyph: &'static str,
-//RS     hover: &'static str,
-//RS     accent: &'static str,
-//RS     header: &'static str,
-//RS     style_archetype: &'static str,
-//RS     layout_family: &'static str,
-//RS     shape: &'static str,
-//RS }
-//RS 
-//RS struct PaletteFacts {
-//RS     visible: bool,
-//RS     insertable: bool,
-//RS     category: &'static str,
-//RS     rank: i32,
-//RS     rank_terms: &'static [&'static str],
-//RS }
-//RS 
-//RS const fn presentation(
-//RS     label: &'static str,
-//RS     glyph: &'static str,
-//RS     hover: &'static str,
-//RS     accent: &'static str,
-//RS     header: &'static str,
-//RS     style_archetype: &'static str,
-//RS     layout_family: &'static str,
-//RS     shape: &'static str,
-//RS ) -> PresentationFacts {
-//RS     PresentationFacts {
-//RS         label,
-//RS         glyph,
-//RS         hover,
-//RS         accent,
-//RS         header,
-//RS         style_archetype,
-//RS         layout_family,
-//RS         shape,
-//RS     }
-//RS }
-//RS 
-//RS const fn palette(
-//RS     visible: bool,
-//RS     insertable: bool,
-//RS     category: &'static str,
-//RS     rank: i32,
-//RS     rank_terms: &'static [&'static str],
-//RS ) -> PaletteFacts {
-//RS     PaletteFacts {
-//RS         visible,
-//RS         insertable,
-//RS         category,
-//RS         rank,
-//RS         rank_terms,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
-//RS     NodeDescriptor {
-//RS         id: "entry",
-//RS         kind: "entry",
-//RS         archetype: "entry",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Entry",
-//RS             "ƒ",
-//RS             "Starts this function.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "entry",
-//RS             "entry",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "", 0, &[]),
-//RS         transaction: None,
-//RS         default_editor: "function_signature",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "binding",
-//RS         kind: "binding",
-//RS         archetype: "function_exec",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Set variable",
-//RS             "•",
-//RS             "Creates a local variable.",
-//RS             "type",
-//RS             "#2c333d",
-//RS             "control",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Variables", 0, &["binding", "local"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "assignment",
-//RS         kind: "assign",
-//RS         archetype: "function_exec",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Set variable",
-//RS             "•",
-//RS             "Changes a variable.",
-//RS             "type",
-//RS             "#2c333d",
-//RS             "control",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Variables", 0, &["assign", "set"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "return",
-//RS         kind: "return",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "⏎",
-//RS             "Returns a value from this function.",
-//RS             "#7dd3a6",
-//RS             "archetype",
-//RS             "control",
-//RS             "exit",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Execution", 0, &["return", "exit"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "defer_close",
-//RS         kind: "defer_close",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "↩",
-//RS             "Closes this resource when the scope exits.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "exit",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Execution", 0, &["defer", "close", "cleanup"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "branch",
-//RS         kind: "branch",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "◇",
-//RS             "Chooses which path runs next.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(true, true, "Execution", 80, &["if", "else", "branch"]),
-//RS         transaction: Some("insert_branch"),
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "dispatch",
-//RS         kind: "function",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "◇",
-//RS             "Chooses a path by matching a value.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(
-//RS             true,
-//RS             true,
-//RS             "Execution",
-//RS             78,
-//RS             &["switch", "match", "dispatch"],
-//RS         ),
-//RS         transaction: Some("insert_switch"),
-//RS         default_editor: "pattern_arm",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "loop",
-//RS         kind: "loop",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "↻",
-//RS             "Repeats work.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(
-//RS             true,
-//RS             true,
-//RS             "Execution",
-//RS             76,
-//RS             &["loop", "repeat", "for", "while"],
-//RS         ),
-//RS         transaction: Some("insert_loop"),
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "flow",
-//RS         kind: "flow",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "◇",
-//RS             "Changes loop control flow.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Execution", 0, &["break", "continue"]),
-//RS         transaction: None,
-//RS         default_editor: "none",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "yield",
-//RS         kind: "yield",
-//RS         archetype: "function_exec",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Function",
-//RS             "ƒ",
-//RS             "Yields a stream value.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "function_exec",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Execution", 0, &["yield", "stream"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "variable_get",
-//RS         kind: "variable_get",
-//RS         archetype: "value",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Value",
-//RS             "•",
-//RS             "Reads a variable.",
-//RS             "type",
-//RS             "type",
-//RS             "value",
-//RS             "value",
-//RS             "capsule",
-//RS         ),
-//RS         palette: palette(true, false, "Variables", 84, &["get", "read", "variable"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "constant",
-//RS         kind: "constant",
-//RS         archetype: "value",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Literal",
-//RS             "•",
-//RS             "Uses a fixed value.",
-//RS             "type",
-//RS             "type",
-//RS             "value",
-//RS             "value",
-//RS             "capsule",
-//RS         ),
-//RS         palette: palette(false, false, "Values", 0, &["literal", "constant", "value"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_value",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "function_exec",
-//RS         kind: "function",
-//RS         archetype: "function_exec",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Function",
-//RS             "ƒ",
-//RS             "Calls a function.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "function_exec",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(true, true, "Project", 72, &["call", "function"]),
-//RS         transaction: Some("insert_call"),
-//RS         default_editor: "function_pins",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "function_pure",
-//RS         kind: "function",
-//RS         archetype: "function_pure",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Pure function",
-//RS             "ƒ",
-//RS             "Calls a pure function.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "function_pure",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(true, true, "Project", 74, &["call", "pure", "function"]),
-//RS         transaction: Some("insert_call"),
-//RS         default_editor: "function_pins",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "variant",
-//RS         kind: "variant",
-//RS         archetype: "function_pure",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Pure function",
-//RS             "ƒ",
-//RS             "Creates an enum variant.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "function_pure",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Values", 0, &["enum", "variant"]),
-//RS         transaction: None,
-//RS         default_editor: "function_pins",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "fallible",
-//RS         kind: "fallible",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Control",
-//RS             "◇",
-//RS             "Routes a fallible result.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(
-//RS             true,
-//RS             true,
-//RS             "Execution",
-//RS             70,
-//RS             &["fallible", "error", "result", "question"],
-//RS         ),
-//RS         transaction: Some("insert_fallible_rail"),
-//RS         default_editor: "fallback",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "switched",
-//RS         kind: "switched",
-//RS         archetype: "control",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Statement state",
-//RS             "◉",
-//RS             "Controls whether this statement runs.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "control",
-//RS             "control",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Execution", 0, &[]),
-//RS         transaction: None,
-//RS         default_editor: "none",
-//RS     },
-//RS     NodeDescriptor {
-//RS         id: "expression",
-//RS         kind: "expr",
-//RS         archetype: "function_pure",
-//RS         projected: true,
-//RS         presentation: presentation(
-//RS             "Pure function",
-//RS             "ƒ",
-//RS             "Computes a value.",
-//RS             "archetype",
-//RS             "archetype",
-//RS             "function_pure",
-//RS             "normal",
-//RS             "node",
-//RS         ),
-//RS         palette: palette(false, false, "Values", 0, &["expression", "value"]),
-//RS         transaction: None,
-//RS         default_editor: "inline_expr",
-//RS     },
-//RS ];
-//RS 
-//RS pub(super) fn descriptor_for(kind: &str, archetype: &str) -> &'static NodeDescriptor {
-//RS     validate_catalog().unwrap_or_else(|message| panic!("invalid Canvas node catalog: {message}"));
-//RS     NODE_DESCRIPTORS
-//RS         .iter()
-//RS         .find(|descriptor| descriptor.kind == kind && descriptor.archetype == archetype)
-//RS         .unwrap_or_else(|| panic!("missing Canvas node descriptor for {kind}/{archetype}"))
-//RS }
-//RS 
-//RS pub(in crate::Canvas) fn descriptor_for_id(id: &str) -> &'static NodeDescriptor {
-//RS     validate_catalog().unwrap_or_else(|message| panic!("invalid Canvas node catalog: {message}"));
-//RS     NODE_DESCRIPTORS
-//RS         .iter()
-//RS         .find(|descriptor| descriptor.id == id)
-//RS         .unwrap_or_else(|| panic!("missing Canvas node descriptor `{id}`"))
-//RS }
-//RS 
-//RS pub(in crate::Canvas) fn insert_descriptor_id(transaction: &str, pure: bool) -> &'static str {
-//RS     let descriptor = if transaction == "insert_call" {
-//RS         descriptor_for_id(if pure {
-//RS             "function_pure"
-//RS         } else {
-//RS             "function_exec"
-//RS         })
-//RS     } else {
-//RS         NODE_DESCRIPTORS
-//RS             .iter()
-//RS             .find(|descriptor| descriptor.transaction == Some(transaction))
-//RS             .unwrap_or_else(|| panic!("missing Canvas node descriptor transaction `{transaction}`"))
-//RS     };
-//RS     assert!(
-//RS         descriptor.palette.insertable,
-//RS         "Canvas action descriptor `{}` is not insertable",
-//RS         descriptor.id
-//RS     );
-//RS     descriptor.id
-//RS }
-//RS 
-//RS /// Return descriptor-owned palette ranking facts for an action payload.
-//RS /// The action endpoint must not copy a second rank table; the node descriptor
-//RS /// is the one source for both the browser palette and source transactions.
-//RS pub(in crate::Canvas) fn palette_rank_fields(id: &str) -> String {
-//RS     let descriptor = descriptor_for_id(id);
-//RS     let terms = descriptor
-//RS         .palette
-//RS         .rank_terms
-//RS         .iter()
-//RS         .map(|term| json_str(term))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         ",\"rank\":{},\"rank_terms\":[{}]",
-//RS         descriptor.palette.rank, terms
-//RS     )
-//RS }
-//RS 
-//RS pub(in crate::Canvas) fn catalog_json() -> String {
-//RS     validate_catalog().unwrap_or_else(|message| panic!("invalid Canvas node catalog: {message}"));
-//RS     format!(
-//RS         "[{}]",
-//RS         NODE_DESCRIPTORS
-//RS             .iter()
-//RS             .map(descriptor_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn validate_catalog() -> Result<(), String> {
-//RS     let mut ids = HashSet::new();
-//RS     let mut identities = HashSet::new();
-//RS     for descriptor in NODE_DESCRIPTORS {
-//RS         if descriptor.id.is_empty() || !ids.insert(descriptor.id) {
-//RS             return Err(format!("missing or duplicate id `{}`", descriptor.id));
-//RS         }
-//RS         if !identities.insert((descriptor.kind, descriptor.archetype)) {
-//RS             return Err(format!(
-//RS                 "duplicate identity `{}/{}`",
-//RS                 descriptor.kind, descriptor.archetype
-//RS             ));
-//RS         }
-//RS         if !descriptor.projected && !descriptor.palette.insertable {
-//RS             return Err(format!("orphaned descriptor `{}`", descriptor.id));
-//RS         }
-//RS         if descriptor.palette.insertable != descriptor.transaction.is_some() {
-//RS             return Err(format!(
-//RS                 "insertable/transaction mismatch for `{}`",
-//RS                 descriptor.id
-//RS             ));
-//RS         }
-//RS         if descriptor.palette.insertable
-//RS             && (!descriptor.palette.visible || descriptor.palette.category.is_empty())
-//RS         {
-//RS             return Err(format!(
-//RS                 "non-visible insertable descriptor `{}`",
-//RS                 descriptor.id
-//RS             ));
-//RS         }
-//RS         if let Some(transaction) = descriptor.transaction {
-//RS             if !matches!(
-//RS                 transaction,
-//RS                 "edit_inline_expr"
-//RS                     | "insert_branch"
-//RS                     | "insert_switch"
-//RS                     | "insert_loop"
-//RS                     | "insert_fallible_rail"
-//RS                     | "insert_call"
-//RS             ) {
-//RS                 return Err(format!(
-//RS                     "unsupported transaction `{transaction}` for `{}`",
-//RS                     descriptor.id
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn descriptor_json(descriptor: &NodeDescriptor) -> String {
-//RS     format!(
-//RS         "{{\"id\":{},\"kind\":{},\"archetype\":{},\"projected\":{},\"presentation\":{{\"label\":{},\"glyph\":{},\"hover\":{},\"accent\":{},\"header\":{},\"style_archetype\":{},\"layout_family\":{},\"shape\":{}}},\"palette\":{{\"visible\":{},\"insertable\":{},\"category\":{},\"rank\":{},\"rank_terms\":[{}]}},\"transaction\":{},\"default_editor\":{}}}",
-//RS         json_str(descriptor.id),
-//RS         json_str(descriptor.kind),
-//RS         json_str(descriptor.archetype),
-//RS         if descriptor.projected { "true" } else { "false" },
-//RS         json_str(descriptor.presentation.label),
-//RS         json_str(descriptor.presentation.glyph),
-//RS         json_str(descriptor.presentation.hover),
-//RS         json_str(descriptor.presentation.accent),
-//RS         json_str(descriptor.presentation.header),
-//RS         json_str(descriptor.presentation.style_archetype),
-//RS         json_str(descriptor.presentation.layout_family),
-//RS         json_str(descriptor.presentation.shape),
-//RS         if descriptor.palette.visible { "true" } else { "false" },
-//RS         if descriptor.palette.insertable {
-//RS             "true"
-//RS         } else {
-//RS             "false"
-//RS         },
-//RS         json_str(descriptor.palette.category),
-//RS         descriptor.palette.rank,
-//RS         descriptor
-//RS             .palette
-//RS             .rank_terms
-//RS             .iter()
-//RS             .map(|term| json_str(term))
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS         descriptor
-//RS             .transaction
-//RS             .map(json_str)
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         json_str(descriptor.default_editor),
-//RS     )
-//RS }
-// END-PORT-PENDING 0766 crates/jet-devserver/src/Canvas/node_catalog.rs:1-589
+use std.collections.[HashSet]
+use jet_devserver.Canvas.ValidationJson.[json_str]
 
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:5
+pub struct NodeDescriptor {
+    pub id: String; pub kind: String; pub archetype: String
+    projected: Bool; presentation: PresentationFacts; palette: PaletteFacts
+    pub transaction: String?; default_editor: String
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:16
+struct PresentationFacts {
+    label: String; glyph: String; hover: String; accent: String; header: String
+    style_archetype: String; layout_family: String; shape: String
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:27
+struct PaletteFacts {
+    visible: Bool; insertable: Bool; category: String; rank: I32; rank_terms: [String]
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:35
+fn presentation(label: String, glyph: String, hover: String, accent: String, header: String, style_archetype: String, layout_family: String, shape: String) -> PresentationFacts {
+    PresentationFacts { label: label, glyph: glyph, hover: hover, accent: accent, header: header, style_archetype: style_archetype, layout_family: layout_family, shape: shape }
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:57
+fn palette(visible: Bool, insertable: Bool, category: String, rank: I32, rank_terms: [String]) -> PaletteFacts {
+    PaletteFacts { visible: visible, insertable: insertable, category: category, rank: rank, rank_terms: rank_terms }
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:73
+pub const NODE_DESCRIPTORS: [NodeDescriptor] = [
+    NodeDescriptor { id: "entry", kind: "entry", archetype: "entry", projected: true,
+        presentation: presentation("Entry", "ƒ", "Starts this function.", "archetype", "archetype", "entry", "entry", "node"),
+        palette: palette(false, false, "", 0, []), transaction: .None, default_editor: "function_signature" },
+    NodeDescriptor { id: "binding", kind: "binding", archetype: "function_exec", projected: true,
+        presentation: presentation("Set variable", "•", "Creates a local variable.", "type", "#2c333d", "control", "normal", "node"),
+        palette: palette(false, false, "Variables", 0, ["binding", "local"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "assignment", kind: "assign", archetype: "function_exec", projected: true,
+        presentation: presentation("Set variable", "•", "Changes a variable.", "type", "#2c333d", "control", "normal", "node"),
+        palette: palette(false, false, "Variables", 0, ["assign", "set"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "return", kind: "return", archetype: "control", projected: true,
+        presentation: presentation("Control", "⏎", "Returns a value from this function.", "#7dd3a6", "archetype", "control", "exit", "node"),
+        palette: palette(false, false, "Execution", 0, ["return", "exit"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "defer_close", kind: "defer_close", archetype: "control", projected: true,
+        presentation: presentation("Control", "↩", "Closes this resource when the scope exits.", "archetype", "archetype", "control", "exit", "node"),
+        palette: palette(false, false, "Execution", 0, ["defer", "close", "cleanup"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "branch", kind: "branch", archetype: "control", projected: true,
+        presentation: presentation("Control", "◇", "Chooses which path runs next.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(true, true, "Execution", 80, ["if", "else", "branch"]), transaction: .Val("insert_branch"), default_editor: "inline_expr" },
+    NodeDescriptor { id: "dispatch", kind: "function", archetype: "control", projected: true,
+        presentation: presentation("Control", "◇", "Chooses a path by matching a value.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(true, true, "Execution", 78, ["switch", "match", "dispatch"]), transaction: .Val("insert_switch"), default_editor: "pattern_arm" },
+    NodeDescriptor { id: "loop", kind: "loop", archetype: "control", projected: true,
+        presentation: presentation("Control", "↻", "Repeats work.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(true, true, "Execution", 76, ["loop", "repeat", "for", "while"]), transaction: .Val("insert_loop"), default_editor: "inline_expr" },
+    NodeDescriptor { id: "flow", kind: "flow", archetype: "control", projected: true,
+        presentation: presentation("Control", "◇", "Changes loop control flow.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(false, false, "Execution", 0, ["break", "continue"]), transaction: .None, default_editor: "none" },
+    NodeDescriptor { id: "yield", kind: "yield", archetype: "function_exec", projected: true,
+        presentation: presentation("Function", "ƒ", "Yields a stream value.", "archetype", "archetype", "function_exec", "normal", "node"),
+        palette: palette(false, false, "Execution", 0, ["yield", "stream"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "variable_get", kind: "variable_get", archetype: "value", projected: true,
+        presentation: presentation("Value", "•", "Reads a variable.", "type", "type", "value", "value", "capsule"),
+        palette: palette(true, false, "Variables", 84, ["get", "read", "variable"]), transaction: .None, default_editor: "inline_expr" },
+    NodeDescriptor { id: "constant", kind: "constant", archetype: "value", projected: true,
+        presentation: presentation("Literal", "•", "Uses a fixed value.", "type", "type", "value", "value", "capsule"),
+        palette: palette(false, false, "Values", 0, ["literal", "constant", "value"]), transaction: .None, default_editor: "inline_value" },
+    NodeDescriptor { id: "function_exec", kind: "function", archetype: "function_exec", projected: true,
+        presentation: presentation("Function", "ƒ", "Calls a function.", "archetype", "archetype", "function_exec", "normal", "node"),
+        palette: palette(true, true, "Project", 72, ["call", "function"]), transaction: .Val("insert_call"), default_editor: "function_pins" },
+    NodeDescriptor { id: "function_pure", kind: "function", archetype: "function_pure", projected: true,
+        presentation: presentation("Pure function", "ƒ", "Calls a pure function.", "archetype", "archetype", "function_pure", "normal", "node"),
+        palette: palette(true, true, "Project", 74, ["call", "pure", "function"]), transaction: .Val("insert_call"), default_editor: "function_pins" },
+    NodeDescriptor { id: "variant", kind: "variant", archetype: "function_pure", projected: true,
+        presentation: presentation("Pure function", "ƒ", "Creates an enum variant.", "archetype", "archetype", "function_pure", "normal", "node"),
+        palette: palette(false, false, "Values", 0, ["enum", "variant"]), transaction: .None, default_editor: "function_pins" },
+    NodeDescriptor { id: "fallible", kind: "fallible", archetype: "control", projected: true,
+        presentation: presentation("Control", "◇", "Routes a fallible result.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(true, true, "Execution", 70, ["fallible", "error", "result", "question"]), transaction: .Val("insert_fallible_rail"), default_editor: "fallback" },
+    NodeDescriptor { id: "switched", kind: "switched", archetype: "control", projected: true,
+        presentation: presentation("Statement state", "◉", "Controls whether this statement runs.", "archetype", "archetype", "control", "control", "node"),
+        palette: palette(false, false, "Execution", 0, []), transaction: .None, default_editor: "none" },
+    NodeDescriptor { id: "expression", kind: "expr", archetype: "function_pure", projected: true,
+        presentation: presentation("Pure function", "ƒ", "Computes a value.", "archetype", "archetype", "function_pure", "normal", "node"),
+        palette: palette(false, false, "Values", 0, ["expression", "value"]), transaction: .None, default_editor: "inline_expr" }
+]
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:436
+pub fn descriptor_for(kind: String, archetype: String) -> &NodeDescriptor {
+    validate_catalog() catch message { panic("invalid Canvas node catalog: {message}") }
+    NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.kind == kind && descriptor.archetype == archetype)
+        .unwrap_or_else(() -> panic("missing Canvas node descriptor for {kind}/{archetype}"))
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:444
+pub fn descriptor_for_id(id: String) -> &NodeDescriptor {
+    validate_catalog() catch message { panic("invalid Canvas node catalog: {message}") }
+    NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.id == id)
+        .unwrap_or_else(() -> panic("missing Canvas node descriptor `{id}`"))
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:452
+pub fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
+    descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else "function_exec") else
+        NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == .Val(transaction))
+            .unwrap_or_else(() -> panic("missing Canvas node descriptor transaction `{transaction}`"))
+    assert(descriptor.palette.insertable, "Canvas action descriptor `{descriptor.id}` is not insertable")
+    descriptor.id
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:476
+pub fn palette_rank_fields(id: String) -> String {
+    descriptor := descriptor_for_id(id)
+    terms := descriptor.palette.rank_terms.iter().map((term) -> json_str(term)).collect().join(",")
+    ",\"rank\":{descriptor.palette.rank},\"rank_terms\":[{terms}]"
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:491
+pub fn catalog_json() -> String {
+    validate_catalog() catch message { panic("invalid Canvas node catalog: {message}") }
+    "[{NODE_DESCRIPTORS.iter().map((descriptor) -> descriptor_json(descriptor)).collect().join(",")}]"
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:503
+fn validate_catalog() -> Unit Err! {
+    ids := HashSet.new()
+    // GATE #4499: retain exact pair equality/hash for catalog identities.
+    identities := HashSet.new()
+    for descriptor in NODE_DESCRIPTORS {
+        if descriptor.id.is_empty() || !ids.insert(descriptor.id) -> throw "missing or duplicate id `{descriptor.id}`"
+        if !identities.insert((descriptor.kind, descriptor.archetype)) -> throw "duplicate identity `{descriptor.kind}/{descriptor.archetype}`"
+        if !descriptor.projected && !descriptor.palette.insertable -> throw "orphaned descriptor `{descriptor.id}`"
+        if descriptor.palette.insertable != descriptor.transaction.is_some() -> throw "insertable/transaction mismatch for `{descriptor.id}`"
+        if descriptor.palette.insertable && (!descriptor.palette.visible || descriptor.palette.category.is_empty()) -> throw "non-visible insertable descriptor `{descriptor.id}`"
+        if descriptor.transaction == .Val(transaction) {
+            if !["edit_inline_expr", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail", "insert_call"].contains(transaction) ->
+                throw "unsupported transaction `{transaction}` for `{descriptor.id}`"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:553
+fn descriptor_json(descriptor: &NodeDescriptor) -> String {
+    projected := if descriptor.projected -> "true" else "false"
+    visible := if descriptor.palette.visible -> "true" else "false"
+    insertable := if descriptor.palette.insertable -> "true" else "false"
+    terms := descriptor.palette.rank_terms.iter().map((term) -> json_str(term)).collect().join(",")
+    transaction := descriptor.transaction.map((value) -> json_str(value)).unwrap_or_else(() -> "null")
+    "{{\"id\":{json_str(descriptor.id)},\"kind\":{json_str(descriptor.kind)},\"archetype\":{json_str(descriptor.archetype)},\"projected\":{projected},\"presentation\":{{\"label\":{json_str(descriptor.presentation.label)},\"glyph\":{json_str(descriptor.presentation.glyph)},\"hover\":{json_str(descriptor.presentation.hover)},\"accent\":{json_str(descriptor.presentation.accent)},\"header\":{json_str(descriptor.presentation.header)},\"style_archetype\":{json_str(descriptor.presentation.style_archetype)},\"layout_family\":{json_str(descriptor.presentation.layout_family)},\"shape\":{json_str(descriptor.presentation.shape)}}},\"palette\":{{\"visible\":{visible},\"insertable\":{insertable},\"category\":{json_str(descriptor.palette.category)},\"rank\":{descriptor.palette.rank},\"rank_terms\":[{terms}]}},\"transaction\":{transaction},\"default_editor\":{json_str(descriptor.default_editor)}}}"
+}

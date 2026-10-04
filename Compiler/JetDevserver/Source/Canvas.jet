@@ -1,32 +1,37 @@
-// PORT-PENDING 0758 crates-jet-devserver-src-canvas: crates/jet-devserver/src/Canvas.rs:1-28
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-BPE-* Canvas: source-backed graph projection and v1 edit transactions.
-//RS //!
-//RS //! Canvas is a client of the checked front end. It does not parse or type-check
-//RS //! by a second path: projection comes from `ProgramBundle` + semindex facts, and
-//RS //! writes go back through `jet fmt` before the file is replaced.
-//RS 
-//RS #[path = "Canvas/edit_actions.rs"]
-//RS mod edit_transaction;
-//RS mod schema_api;
-//RS pub use schema_api::*;
-//RS // D-ARCH-SOURCE1=A: browser projection assets stay dependency-free in
-//RS // jet-canvas; semantic/edit APIs live with their dev-server host.
-//RS pub use jet_canvas::{canvas_html, canvas_html_for, canvas_html_query, canvas_js};
-//RS mod debug_source_git;
-//RS mod paused_debug_adapter;
-//RS mod graph_helpers;
-//RS mod graph_json;
-//RS mod graph_projection;
-//RS mod project_scan;
-//RS mod project_transactions;
-//RS mod query_actions;
-//RS mod source_model;
-//RS pub(crate) use source_model::read_source_without_symlinks;
-//RS pub use source_model::source_revision;
-//RS pub use debug_source_git::DebugSessions;
-//RS mod validation_json;
-//RS mod preview;
-//RS pub use preview::*;
-// END-PORT-PENDING 0758 crates/jet-devserver/src/Canvas.rs:1-28
+// Rust: crates/jet-devserver/src/Canvas.rs:1
+// D-BPE-* Canvas: source-backed graph projection and edit transactions.
+// Canvas consumes ProgramBundle and semindex facts from the checked front end;
+// edits pass through jet fmt before replacing the source file.
+
+// Rust: crates/jet-devserver/src/Canvas.rs:7
+use jet_devserver.Canvas.EditActions.*
+// Rust: crates/jet-devserver/src/Canvas.rs:9
+use jet_devserver.Canvas.SchemaApi.*
+// Rust: crates/jet-devserver/src/Canvas.rs:11
+// D-ARCH-SOURCE1=A: dependency-free projection assets retain their canonical owner.
+// Publication of these imports belongs to the package manifest.
+use jet_canvas.html.[canvas_html, canvas_html_for, canvas_html_query]
+use jet_canvas.js.[canvas_js]
+// Rust: crates/jet-devserver/src/Canvas.rs:14
+use jet_devserver.Canvas.DebugSourceGit.[DebugSessions]
+// Rust: crates/jet-devserver/src/Canvas.rs:15
+use jet_devserver.Canvas.PausedDebugAdapter.*
+// Rust: crates/jet-devserver/src/Canvas.rs:16
+use jet_devserver.Canvas.GraphHelpers.*
+// Rust: crates/jet-devserver/src/Canvas.rs:17
+use jet_devserver.Canvas.GraphJson.*
+// Rust: crates/jet-devserver/src/Canvas.rs:18
+use jet_devserver.Canvas.GraphProjection.*
+// Rust: crates/jet-devserver/src/Canvas.rs:19
+use jet_devserver.Canvas.ProjectScan.*
+// Rust: crates/jet-devserver/src/Canvas.rs:20
+use jet_devserver.Canvas.ProjectTransactions.*
+// Rust: crates/jet-devserver/src/Canvas.rs:21
+use jet_devserver.Canvas.QueryActions.*
+// Rust: crates/jet-devserver/src/Canvas.rs:22
+use jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision]
+// Rust: crates/jet-devserver/src/Canvas.rs:26
+use jet_devserver.Canvas.ValidationJson.*
+// Rust: crates/jet-devserver/src/Canvas.rs:27
+use jet_devserver.Canvas.Preview.*
 

@@ -1,921 +1,266 @@
-// PORT-PENDING 0772 crates-jet-devserver-src-canvas-source-model-module-group: crates/jet-devserver/src/Canvas/source_model.rs:1-917
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::io;
-//RS use std::path::Path;
-//RS #[cfg(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS ))]
-//RS use std::sync::atomic::AtomicU64;
-//RS use std::sync::{Mutex, OnceLock};
-//RS 
-//RS use jet_driver::SHA256;
-//RS 
-//RS static SOURCE_TRANSACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-//RS #[cfg(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS ))]
-//RS static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS /// Stable source revision used by Canvas source transactions and projections.
-//RS pub fn source_revision(src: &str) -> String {
-//RS     format!("sha256-{}", SHA256::sha256_hex(src.as_bytes()))
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS enum ReplaceResult {
-//RS     Applied,
-//RS     Conflict,
-//RS }
-//RS 
-//RS /// Read Canvas source from the object opened below a pinned directory.
-//RS pub(crate) fn read_source_without_symlinks(path: &Path) -> io::Result<String> {
-//RS     let bytes = read_file_without_symlinks(path)?;
-//RS     String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-//RS }
-//RS 
-//RS /// Read an arbitrary file from the object opened below a pinned directory.
-//RS /// Binary web artifacts use the same no-follow boundary as source reads.
-//RS pub(crate) fn read_file_without_symlinks(path: &Path) -> io::Result<Vec<u8>> {
-//RS     read_file_without_symlinks_bounded(path, crate::MAX_RESPONSE_BODY_BYTES as u64)
-//RS }
-//RS 
-//RS /// Read an arbitrary file without buffering more than the caller's limit.
-//RS pub(crate) fn read_file_without_symlinks_bounded(
-//RS     path: &Path,
-//RS     max_bytes: u64,
-//RS ) -> io::Result<Vec<u8>> {
-//RS     secure_fs::read_bounded(path, max_bytes)
-//RS }
-//RS 
-//RS /// Create a directory tree through pinned directory descriptors.
-//RS pub(super) fn ensure_no_symlink_directory(path: &Path) -> io::Result<()> {
-//RS     secure_fs::ensure_directory(path)
-//RS }
-//RS 
-//RS /// Create and write a new file below a pinned parent. Callers that need
-//RS /// collision handling can retry on AlreadyExists.
-//RS pub(super) fn write_new_file_without_symlinks(path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS     secure_fs::write_new(path, bytes)
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub(super) enum SourceWriteError {
-//RS     Conflict,
-//RS     Io(io::Error),
-//RS }
-//RS 
-//RS impl From<io::Error> for SourceWriteError {
-//RS     fn from(error: io::Error) -> Self {
-//RS         Self::Io(error)
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn with_source_transaction<T>(
-//RS     action: impl FnOnce() -> Result<T, SourceWriteError>,
-//RS ) -> Result<T, SourceWriteError> {
-//RS     let lock = SOURCE_TRANSACTION_LOCK.get_or_init(|| Mutex::new(()));
-//RS     let _guard = lock.lock().map_err(|_| {
-//RS         SourceWriteError::Io(io::Error::new(
-//RS             io::ErrorKind::Other,
-//RS             "Canvas source transaction lock was poisoned",
-//RS         ))
-//RS     })?;
-//RS     action()
-//RS }
-//RS 
-//RS pub(super) fn write_source_if_unchanged(
-//RS     path: &Path,
-//RS     expected: &str,
-//RS     candidate: &str,
-//RS ) -> Result<(), SourceWriteError> {
-//RS     with_source_transaction(|| {
-//RS         replace_source_if_unchanged_locked(path, Some(expected), Some(candidate))
-//RS     })
-//RS }
-//RS 
-//RS pub(super) fn replace_source_if_unchanged_locked(
-//RS     path: &Path,
-//RS     expected: Option<&str>,
-//RS     candidate: Option<&str>,
-//RS ) -> Result<(), SourceWriteError> {
-//RS     match secure_fs::replace_if_unchanged(
-//RS         path,
-//RS         expected.map(str::as_bytes),
-//RS         candidate.map(str::as_bytes),
-//RS     )
-//RS     .map_err(SourceWriteError::Io)?
-//RS     {
-//RS         ReplaceResult::Applied => Ok(()),
-//RS         ReplaceResult::Conflict => Err(SourceWriteError::Conflict),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS ))]
-//RS mod secure_fs {
-//RS     use super::{io, Path, ReplaceResult, TEMP_FILE_SEQUENCE};
-//RS     use std::ffi::{c_char, CString, OsStr};
-//RS     use std::fs::{self, File};
-//RS     use std::io::{Read, Write};
-//RS     use std::os::fd::{AsRawFd, FromRawFd};
-//RS     use std::os::unix::ffi::OsStrExt;
-//RS     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-//RS     use std::path::Component;
-//RS     use std::sync::atomic::Ordering;
-//RS 
-//RS     const O_RDONLY: i32 = 0;
-//RS     const O_WRONLY: i32 = 1;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const O_CREAT: i32 = 0o100;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const O_EXCL: i32 = 0o200;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const O_CLOEXEC: i32 = 0o2000000;
-//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
-//RS     const O_CREAT: i32 = 0x0200;
-//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
-//RS     const O_EXCL: i32 = 0x0800;
-//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
-//RS     const O_CLOEXEC: i32 = 0x01000000;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const O_DIRECTORY: i32 = 0o200000;
-//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
-//RS     const O_DIRECTORY: i32 = 0x00100000;
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     const O_NOFOLLOW: i32 = 0o400000;
-//RS     #[cfg(any(target_os = "macos", target_os = "ios"))]
-//RS     const O_NOFOLLOW: i32 = 0x0100;
-//RS     const MODE_NEW_FILE: u32 = 0o666;
-//RS 
-//RS     unsafe extern "C" {
-//RS         fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
-//RS         fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
-//RS         fn renameat(
-//RS             old_directory: i32,
-//RS             old_path: *const c_char,
-//RS             new_directory: i32,
-//RS             new_path: *const c_char,
-//RS         ) -> i32;
-//RS         fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
-//RS     }
-//RS 
-//RS     struct CurrentFile {
-//RS         bytes: Vec<u8>,
-//RS         mode: u32,
-//RS     }
-//RS 
-//RS     struct Target {
-//RS         parent: File,
-//RS         name: CString,
-//RS         current: Option<CurrentFile>,
-//RS     }
-//RS 
-//RS     pub(super) fn read_bounded(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
-//RS         let (parent, name) = open_parent(path)?;
-//RS         let mut file = open_file_at(&parent, &name, O_RDONLY)?;
-//RS         Ok(read_opened_file_bounded(&mut file, max_bytes, || Ok(()))?.bytes)
-//RS     }
-//RS 
-//RS     pub(super) fn ensure_directory(path: &Path) -> io::Result<()> {
-//RS         let mut directory = open_base(path.is_absolute())?;
-//RS         for component in path.components() {
-//RS             match component {
-//RS                 Component::RootDir | Component::CurDir => {}
-//RS                 Component::ParentDir => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::InvalidInput,
-//RS                         "Canvas paths must not contain parent components",
-//RS                     ));
-//RS                 }
-//RS                 Component::Normal(name) => {
-//RS                     let c_name = c_name(name)?;
-//RS                     match open_directory_at(&directory, name) {
-//RS                         Ok(child) => directory = child,
-//RS                         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-//RS                             if unsafe { mkdirat(directory.as_raw_fd(), c_name.as_ptr(), 0o777) }
-//RS                                 != 0
-//RS                             {
-//RS                                 let create_error = io::Error::last_os_error();
-//RS                                 if create_error.kind() != io::ErrorKind::AlreadyExists {
-//RS                                     return Err(map_nofollow(create_error));
-//RS                                 }
-//RS                             }
-//RS                             directory = open_directory_at(&directory, name)?;
-//RS                         }
-//RS                         Err(error) => return Err(error),
-//RS                     }
-//RS                 }
-//RS                 Component::Prefix(_) => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::InvalidInput,
-//RS                         "Canvas path has an unsupported prefix",
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub(super) fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
-//RS         let (parent, name) = open_parent(path)?;
-//RS         let mut file = create_new_at(&parent, &name, MODE_NEW_FILE)?;
-//RS         if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
-//RS             let _ = remove_at(&parent, &name);
-//RS             return Err(error);
-//RS         }
-//RS         require_regular(&file)
-//RS     }
-//RS 
-//RS     pub(super) fn replace_if_unchanged(
-//RS         path: &Path,
-//RS         expected: Option<&[u8]>,
-//RS         candidate: Option<&[u8]>,
-//RS     ) -> io::Result<ReplaceResult> {
-//RS         let target = open_target(path)?;
-//RS         let current = target.current.as_ref();
-//RS         let matches = match expected {
-//RS             Some(expected) => current.is_some_and(|current| current.bytes.as_slice() == expected),
-//RS             None => current.is_none(),
-//RS         };
-//RS         if !matches {
-//RS             return Ok(ReplaceResult::Conflict);
-//RS         }
-//RS         match candidate {
-//RS             Some(candidate)
-//RS                 if current.is_some_and(|current| current.bytes.as_slice() != candidate) =>
-//RS             {
-//RS                 target.replace(candidate, current.map(|current| current.mode))?;
-//RS             }
-//RS             Some(_) => {}
-//RS             None if current.is_some() => target.remove()?,
-//RS             None => {}
-//RS         }
-//RS         Ok(ReplaceResult::Applied)
-//RS     }
-//RS 
-//RS     fn open_target(path: &Path) -> io::Result<Target> {
-//RS         let (parent, name) = open_parent(path)?;
-//RS         let current = match open_file_at(&parent, &name, O_RDONLY) {
-//RS             Ok(mut file) => Some(read_opened_file(&mut file, || Ok(()))?),
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-//RS             Err(error) => return Err(error),
-//RS         };
-//RS         Ok(Target {
-//RS             parent,
-//RS             name,
-//RS             current,
-//RS         })
-//RS     }
-//RS 
-//RS     impl Target {
-//RS         fn replace(&self, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
-//RS             let mut temporary = None;
-//RS             for _ in 0..100 {
-//RS                 let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-//RS                 let name = format!(
-//RS                     ".{}.canvas-{}.tmp",
-//RS                     self.name.to_string_lossy(),
-//RS                     sequence
-//RS                 );
-//RS                 let name = c_name(OsStr::new(&name))?;
-//RS                 match create_new_at(
-//RS                     &self.parent,
-//RS                     &name,
-//RS                     mode.map_or(MODE_NEW_FILE, |mode| mode & 0o7777),
-//RS                 ) {
-//RS                     Ok(mut file) => {
-//RS                         let result = file.write_all(bytes).and_then(|_| file.sync_all());
-//RS                         let result = result.and_then(|()| {
-//RS                             mode.map_or(Ok(()), |mode| {
-//RS                                 file.set_permissions(fs::Permissions::from_mode(mode & 0o7777))
-//RS                                     .and_then(|()| file.sync_all())
-//RS                             })
-//RS                         });
-//RS                         if let Err(error) = result {
-//RS                             let _ = remove_at(&self.parent, &name);
-//RS                             return Err(error);
-//RS                         }
-//RS                         temporary = Some(name);
-//RS                         break;
-//RS                     }
-//RS                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-//RS                     Err(error) => return Err(error),
-//RS                 }
-//RS             }
-//RS             let Some(temporary) = temporary else {
-//RS                 return Err(io::Error::new(
-//RS                     io::ErrorKind::AlreadyExists,
-//RS                     "could not allocate a Canvas source temporary file",
-//RS                 ));
-//RS             };
-//RS             if unsafe {
-//RS                 renameat(
-//RS                     self.parent.as_raw_fd(),
-//RS                     temporary.as_ptr(),
-//RS                     self.parent.as_raw_fd(),
-//RS                     self.name.as_ptr(),
-//RS                 )
-//RS             } != 0
-//RS             {
-//RS                 let error = map_nofollow(io::Error::last_os_error());
-//RS                 let _ = remove_at(&self.parent, &temporary);
-//RS                 return Err(error);
-//RS             }
-//RS             let _ = self.parent.sync_all();
-//RS             Ok(())
-//RS         }
-//RS 
-//RS         fn remove(&self) -> io::Result<()> {
-//RS             remove_at(&self.parent, &self.name)
-//RS         }
-//RS     }
-//RS 
-//RS     fn open_base(absolute: bool) -> io::Result<File> {
-//RS         let base = if absolute { Path::new("/") } else { Path::new(".") };
-//RS         std::fs::OpenOptions::new()
-//RS             .read(true)
-//RS             .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-//RS             .open(base)
-//RS     }
-//RS 
-//RS     fn open_parent(path: &Path) -> io::Result<(File, CString)> {
-//RS         let components = path.components().collect::<Vec<_>>();
-//RS         let Some(Component::Normal(name)) = components.last() else {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidInput,
-//RS                 "Canvas source path has no file name",
-//RS             ));
-//RS         };
-//RS         let mut parent = open_base(path.is_absolute())?;
-//RS         for component in &components[..components.len() - 1] {
-//RS             parent = match component {
-//RS                 Component::RootDir | Component::CurDir => parent,
-//RS                 Component::ParentDir => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::InvalidInput,
-//RS                         "Canvas paths must not contain parent components",
-//RS                     ));
-//RS                 }
-//RS                 Component::Normal(name) => open_directory_at(&parent, name)?,
-//RS                 Component::Prefix(_) => {
-//RS                     return Err(io::Error::new(
-//RS                         io::ErrorKind::InvalidInput,
-//RS                         "Canvas source path has an unsupported prefix",
-//RS                     ));
-//RS                 }
-//RS             };
-//RS         }
-//RS         Ok((parent, c_name(name)?))
-//RS     }
-//RS 
-//RS     fn c_name(name: &OsStr) -> io::Result<CString> {
-//RS         CString::new(name.as_bytes()).map_err(|_| {
-//RS             io::Error::new(io::ErrorKind::InvalidInput, "Canvas path contains NUL")
-//RS         })
-//RS     }
-//RS 
-//RS     fn open_directory_at(parent: &File, name: &OsStr) -> io::Result<File> {
-//RS         open_file_at(parent, &c_name(name)?, O_DIRECTORY)
-//RS     }
-//RS 
-//RS     fn open_file_at(parent: &File, name: &CString, extra_flags: i32) -> io::Result<File> {
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 extra_flags | O_NOFOLLOW | O_CLOEXEC,
-//RS                 0,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(map_nofollow(io::Error::last_os_error()));
-//RS         }
-//RS         Ok(unsafe { File::from_raw_fd(fd) })
-//RS     }
-//RS 
-//RS     fn create_new_at(parent: &File, name: &CString, mode: u32) -> io::Result<File> {
-//RS         let fd = unsafe {
-//RS             openat(
-//RS                 parent.as_raw_fd(),
-//RS                 name.as_ptr(),
-//RS                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-//RS                 mode,
-//RS             )
-//RS         };
-//RS         if fd < 0 {
-//RS             return Err(map_nofollow(io::Error::last_os_error()));
-//RS         }
-//RS         Ok(unsafe { File::from_raw_fd(fd) })
-//RS     }
-//RS 
-//RS     fn remove_at(parent: &File, name: &CString) -> io::Result<()> {
-//RS         if unsafe { unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-//RS             return Err(map_nofollow(io::Error::last_os_error()));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn require_regular(file: &File) -> io::Result<()> {
-//RS         require_regular_metadata(&file.metadata()?)
-//RS     }
-//RS 
-//RS     fn read_opened_file(
-//RS         file: &mut File,
-//RS         before_read: impl FnOnce() -> io::Result<()>,
-//RS     ) -> io::Result<CurrentFile> {
-//RS         read_opened_file_bounded(file, crate::MAX_RESPONSE_BODY_BYTES as u64, before_read)
-//RS     }
-//RS 
-//RS     fn read_opened_file_bounded(
-//RS         file: &mut File,
-//RS         max_bytes: u64,
-//RS         before_read: impl FnOnce() -> io::Result<()>,
-//RS     ) -> io::Result<CurrentFile> {
-//RS         let metadata = file.metadata()?;
-//RS         require_regular_metadata(&metadata)?;
-//RS         if metadata.len() > max_bytes {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidData,
-//RS                 "file exceeds the devserver response limit",
-//RS             ));
-//RS         }
-//RS         let mode = metadata.permissions().mode();
-//RS         before_read()?;
-//RS         let mut bytes = Vec::new();
-//RS         file.take(max_bytes.saturating_add(1))
-//RS             .read_to_end(&mut bytes)?;
-//RS         if bytes.len() as u64 > max_bytes {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::InvalidData,
-//RS                 "file exceeds the devserver response limit",
-//RS             ));
-//RS         }
-//RS         let final_metadata = file.metadata()?;
-//RS         if !same_file(&metadata, &final_metadata) || final_metadata.nlink() != 1 {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::Other,
-//RS                 "Canvas source changed while it was being read",
-//RS             ));
-//RS         }
-//RS         Ok(CurrentFile { bytes, mode })
-//RS     }
-//RS 
-//RS     fn require_regular_metadata(metadata: &std::fs::Metadata) -> io::Result<()> {
-//RS         if !metadata.is_file() {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "Canvas source path is not a regular file",
-//RS             ));
-//RS         }
-//RS         if metadata.nlink() != 1 {
-//RS             return Err(io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "Canvas source file must not be a hard link",
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn same_file(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
-//RS         left.is_file()
-//RS             && right.is_file()
-//RS             && left.dev() == right.dev()
-//RS             && left.ino() == right.ino()
-//RS     }
-//RS 
-//RS     fn map_nofollow(error: io::Error) -> io::Error {
-//RS         let symlink_errno = if cfg!(any(target_os = "linux", target_os = "android")) {
-//RS             40
-//RS         } else {
-//RS             62
-//RS         };
-//RS         if error.raw_os_error() == Some(symlink_errno) {
-//RS             io::Error::new(
-//RS                 io::ErrorKind::PermissionDenied,
-//RS                 "Canvas source paths must not traverse symlinks",
-//RS             )
-//RS         } else {
-//RS             error
-//RS         }
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(super) fn test_replace_after_final_symlink_swap(
-//RS         path: &Path,
-//RS         outside: &Path,
-//RS         candidate: &[u8],
-//RS     ) -> io::Result<()> {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let target = open_target(path)?;
-//RS         let moved = path.with_file_name("main.jet.canvas-test-held");
-//RS         std::fs::rename(path, &moved)?;
-//RS         symlink(outside, path)?;
-//RS         target.replace(
-//RS             candidate,
-//RS             target.current.as_ref().map(|current| current.mode),
-//RS         )?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(super) fn test_replace_after_ancestor_symlink_swap(
-//RS         path: &Path,
-//RS         outside: &Path,
-//RS         candidate: &[u8],
-//RS     ) -> io::Result<()> {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let target = open_target(path)?;
-//RS         let parent = path.parent().ok_or_else(|| {
-//RS             io::Error::new(io::ErrorKind::InvalidInput, "test path has no parent")
-//RS         })?;
-//RS         let moved = parent.with_file_name("canvas-test-held");
-//RS         std::fs::rename(parent, &moved)?;
-//RS         symlink(outside, parent)?;
-//RS         target.replace(
-//RS             candidate,
-//RS             target.current.as_ref().map(|current| current.mode),
-//RS         )?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(super) fn test_read_after_final_symlink_swap(
-//RS         path: &Path,
-//RS         outside: &Path,
-//RS     ) -> io::Result<Vec<u8>> {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let (parent, name) = open_parent(path)?;
-//RS         let mut file = open_file_at(&parent, &name, O_RDONLY)?;
-//RS         let moved = path.with_file_name("main.jet.canvas-test-held");
-//RS         let current = read_opened_file(&mut file, || {
-//RS             std::fs::rename(path, &moved)?;
-//RS             symlink(outside, path)
-//RS         })?;
-//RS         Ok(current.bytes)
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(super) fn test_remove_after_final_symlink_swap(
-//RS         path: &Path,
-//RS         outside: &Path,
-//RS     ) -> io::Result<()> {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let target = open_target(path)?;
-//RS         let moved = path.with_file_name("main.jet.canvas-test-held");
-//RS         std::fs::rename(path, &moved)?;
-//RS         symlink(outside, path)?;
-//RS         target.remove()
-//RS     }
-//RS 
-//RS     #[cfg(test)]
-//RS     pub(super) fn test_remove_after_ancestor_symlink_swap(
-//RS         path: &Path,
-//RS         outside: &Path,
-//RS     ) -> io::Result<()> {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let target = open_target(path)?;
-//RS         let parent = path.parent().ok_or_else(|| {
-//RS             io::Error::new(io::ErrorKind::InvalidInput, "test path has no parent")
-//RS         })?;
-//RS         let moved = parent.with_file_name("canvas-test-held");
-//RS         std::fs::rename(parent, &moved)?;
-//RS         symlink(outside, parent)?;
-//RS         target.remove()
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(any(
-//RS     target_os = "linux",
-//RS     target_os = "android",
-//RS     target_os = "macos",
-//RS     target_os = "ios"
-//RS )))]
-//RS mod secure_fs {
-//RS     use super::{io, Path, ReplaceResult};
-//RS 
-//RS     fn unsupported<T>() -> io::Result<T> {
-//RS         Err(io::Error::new(
-//RS             io::ErrorKind::Unsupported,
-//RS             "Canvas descriptor-relative no-follow filesystem access is unavailable on this platform",
-//RS         ))
-//RS     }
-//RS 
-//RS     pub(super) fn read_bounded(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
-//RS         #[cfg(windows)]
-//RS         {
-//RS             let parent = path
-//RS                 .parent()
-//RS                 .filter(|parent| !parent.as_os_str().is_empty())
-//RS                 .unwrap_or_else(|| Path::new("."));
-//RS             let name = path.file_name().ok_or_else(|| {
-//RS                 io::Error::new(
-//RS                     io::ErrorKind::InvalidInput,
-//RS                     "Canvas source path has no file name",
-//RS                 )
-//RS             })?;
-//RS             return crate::read_static_file_bounded(parent, Path::new(name), max_bytes);
-//RS         }
-//RS         #[cfg(not(windows))]
-//RS         unsupported()
-//RS     }
-//RS 
-//RS     pub(super) fn ensure_directory(_: &Path) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS 
-//RS     pub(super) fn write_new(_: &Path, _: &[u8]) -> io::Result<()> {
-//RS         unsupported()
-//RS     }
-//RS 
-//RS     pub(super) fn replace_if_unchanged(
-//RS         _: &Path,
-//RS         _: Option<&[u8]>,
-//RS         _: Option<&[u8]>,
-//RS     ) -> io::Result<ReplaceResult> {
-//RS         unsupported()
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(all(
-//RS     test,
-//RS     any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     )
-//RS ))]
-//RS mod tests {
-//RS     use super::*;
-//RS     use std::fs;
-//RS     use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS     fn test_path() -> std::path::PathBuf {
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-canvas-source-model-{}-{}",
-//RS             std::process::id(),
-//RS             TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-//RS         ));
-//RS         fs::create_dir_all(&root).unwrap();
-//RS         root.join("main.jet")
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_preserves_source_on_conflict() {
-//RS         let path = test_path();
-//RS         fs::write(&path, "before\n").unwrap();
-//RS 
-//RS         write_source_if_unchanged(&path, "before\n", "after\n").unwrap();
-//RS         assert_eq!(fs::read_to_string(&path).unwrap(), "after\n");
-//RS 
-//RS         let error = write_source_if_unchanged(&path, "before\n", "lost\n").unwrap_err();
-//RS         assert!(matches!(error, SourceWriteError::Conflict));
-//RS         assert_eq!(fs::read_to_string(&path).unwrap(), "after\n");
-//RS 
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_preserves_source_permissions() {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS 
-//RS         let path = test_path();
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-//RS 
-//RS         replace_source_if_unchanged_locked(&path, Some("before\n"), Some("after\n"))
-//RS             .unwrap();
-//RS 
-//RS         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o7777, 0o640);
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_supports_new_and_removed_source() {
-//RS         let path = test_path();
-//RS         replace_source_if_unchanged_locked(&path, None, Some("new\n")).unwrap();
-//RS         assert_eq!(fs::read_to_string(&path).unwrap(), "new\n");
-//RS         replace_source_if_unchanged_locked(&path, Some("new\n"), None).unwrap();
-//RS         assert!(!path.exists());
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_rejects_symlinked_source() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let path = test_path();
-//RS         let outside = path.parent().unwrap().join("outside.jet");
-//RS         fs::write(&outside, "must survive\n").unwrap();
-//RS         symlink(&outside, &path).unwrap();
-//RS 
-//RS         let error = write_source_if_unchanged(&path, "must survive\n", "attacker\n")
-//RS             .expect_err("Canvas source writes must not follow symlinks");
-//RS         assert!(matches!(error, SourceWriteError::Io(_)));
-//RS         assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
-//RS 
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_rejects_symlinked_parent() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root_file = test_path();
-//RS         let root = root_file.parent().unwrap();
-//RS         let outside = root.with_file_name(format!(
-//RS             "jet-canvas-source-outside-{}",
-//RS             std::process::id()
-//RS         ));
-//RS         fs::create_dir_all(&outside).unwrap();
-//RS         let outside_file = outside.join("main.jet");
-//RS         fs::write(&outside_file, "must survive\n").unwrap();
-//RS         let linked = root.join("linked");
-//RS         symlink(&outside, &linked).unwrap();
-//RS         let path = linked.join("main.jet");
-//RS 
-//RS         let error = write_source_if_unchanged(&path, "must survive\n", "attacker\n")
-//RS             .expect_err("Canvas source writes must not traverse symlinked parents");
-//RS         assert!(matches!(error, SourceWriteError::Io(_)));
-//RS         assert_eq!(fs::read_to_string(&outside_file).unwrap(), "must survive\n");
-//RS 
-//RS         fs::remove_dir_all(root).unwrap();
-//RS         fs::remove_dir_all(outside).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_keeps_final_swap_inside_pinned_parent() {
-//RS         let path = test_path();
-//RS         let outside = path.parent().unwrap().join("outside.jet");
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         fs::write(&outside, "must survive\n").unwrap();
-//RS 
-//RS         secure_fs::test_replace_after_final_symlink_swap(&path, &outside, b"after\n")
-//RS             .unwrap();
-//RS 
-//RS         assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
-//RS         assert_eq!(fs::read_to_string(&path).unwrap(), "after\n");
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_read_stays_on_opened_file_after_final_swap() {
-//RS         let path = test_path();
-//RS         let outside = path.parent().unwrap().join("outside.jet");
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         fs::write(&outside, "must survive\n").unwrap();
-//RS 
-//RS         let bytes = secure_fs::test_read_after_final_symlink_swap(&path, &outside).unwrap();
-//RS 
-//RS         assert_eq!(bytes, b"before\n");
-//RS         assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_publish_keeps_ancestor_swap_inside_pinned_parent() {
-//RS         let root_file = test_path();
-//RS         let root = root_file.parent().unwrap();
-//RS         let nested = root.join("nested");
-//RS         fs::create_dir_all(&nested).unwrap();
-//RS         let path = nested.join("main.jet");
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         let outside = root.with_file_name(format!(
-//RS             "{}-outside",
-//RS             root.file_name().unwrap().to_string_lossy()
-//RS         ));
-//RS         fs::create_dir_all(&outside).unwrap();
-//RS         let outside_file = outside.join("main.jet");
-//RS         fs::write(&outside_file, "must survive\n").unwrap();
-//RS 
-//RS         secure_fs::test_replace_after_ancestor_symlink_swap(&path, &outside, b"after\n")
-//RS             .unwrap();
-//RS 
-//RS         assert_eq!(fs::read_to_string(&outside_file).unwrap(), "must survive\n");
-//RS         assert_eq!(
-//RS             fs::read_to_string(root.join("canvas-test-held/main.jet")).unwrap(),
-//RS             "after\n"
-//RS         );
-//RS         fs::remove_dir_all(root).unwrap();
-//RS         fs::remove_dir_all(outside).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_remove_keeps_final_swap_inside_pinned_parent() {
-//RS         let path = test_path();
-//RS         let outside = path.parent().unwrap().join("outside.jet");
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         fs::write(&outside, "must survive\n").unwrap();
-//RS         let moved = path.with_file_name("main.jet.canvas-test-held");
-//RS 
-//RS         secure_fs::test_remove_after_final_symlink_swap(&path, &outside).unwrap();
-//RS 
-//RS         assert!(fs::symlink_metadata(&path).is_err());
-//RS         assert_eq!(fs::read_to_string(&moved).unwrap(), "before\n");
-//RS         assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
-//RS         fs::remove_dir_all(path.parent().unwrap()).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios"
-//RS     ))]
-//RS     #[test]
-//RS     fn compare_and_remove_keeps_ancestor_swap_inside_pinned_parent() {
-//RS         let root_file = test_path();
-//RS         let root = root_file.parent().unwrap();
-//RS         let nested = root.join("nested");
-//RS         fs::create_dir_all(&nested).unwrap();
-//RS         let path = nested.join("main.jet");
-//RS         fs::write(&path, "before\n").unwrap();
-//RS         let outside = root.with_file_name(format!(
-//RS             "{}-outside",
-//RS             root.file_name().unwrap().to_string_lossy()
-//RS         ));
-//RS         fs::create_dir_all(&outside).unwrap();
-//RS         let outside_file = outside.join("main.jet");
-//RS         fs::write(&outside_file, "must survive\n").unwrap();
-//RS 
-//RS         secure_fs::test_remove_after_ancestor_symlink_swap(&path, &outside).unwrap();
-//RS 
-//RS         assert!(!root.join("canvas-test-held/main.jet").exists());
-//RS         assert_eq!(fs::read_to_string(&outside_file).unwrap(), "must survive\n");
-//RS         fs::remove_dir_all(root).unwrap();
-//RS         fs::remove_dir_all(outside).unwrap();
-//RS     }
-//RS }
-// END-PORT-PENDING 0772 crates/jet-devserver/src/Canvas/source_model.rs:1-917
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:1
+use core.files.[OSPath]
+use core.sys.target.[selected_os] // GATE #4483
+use std.io.[Error, ErrorKind] // GATE #4409
+use std.fs.[File, Metadata, OpenOptions, Permissions]
+use std.sync.[Mutex, OnceLock] // GATE #4494
+use std.sync.atomic.[AtomicU64, Ordering] // GATE #4494
+use std.ffi.[CString, OsStr] // GATE #4494 native encoded paths
+use std.path.[Component]
+use core.sys.host.unix_fd.[openat, mkdirat, renameat, unlinkat] // GATE #4494
+use jet_driver.[SHA256]
+use jet_devserver.[MAX_RESPONSE_BODY_BYTES, read_static_file_bounded]
+use std.fmt.[format]
 
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:14
+SOURCE_TRANSACTION_LOCK :: OnceLock<Mutex<Unit>>.new()
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:15
+TEMP_FILE_SEQUENCE :: AtomicU64.new(0)
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:24
+pub fn source_revision(src: String) -> String { format("sha256-{}", SHA256.sha256_hex(src.as_bytes())) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:28
+ enum ReplaceResult { Applied, Conflict }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:35
+pub fn read_source_without_symlinks(path: OSPath) -> Result<String, Error> {
+    bytes :: read_file_without_symlinks(path)?
+    String.from_utf8(bytes).map_err((error) -> Error.new(ErrorKind.InvalidData, error))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:42
+pub fn read_file_without_symlinks(path: OSPath) -> Result<[U8], Error> { read_file_without_symlinks_bounded(path, MAX_RESPONSE_BODY_BYTES as U64) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:47
+pub fn read_file_without_symlinks_bounded(path: OSPath, max_bytes: U64) -> Result<[U8], Error> {
+    if selected_os() is "linux" | "android" | "macos" | "ios" -> return secure_read_bounded(path, max_bytes)
+    if selected_os() == "windows" {
+        parent :: path.parent().filter((parent) -> !parent.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.new("."))
+        name :: path.file_name() ?? return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has no file name"))
+        return read_static_file_bounded(parent, OSPath.new(name), max_bytes)
+    }
+    unsupported()
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:55
+pub fn ensure_no_symlink_directory(path: OSPath) -> Result<Unit, Error> {
+    if selected_os() is "linux" | "android" | "macos" | "ios" { ensure_directory(path) } else { unsupported() }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:61
+pub fn write_new_file_without_symlinks(path: OSPath, bytes: [U8]) -> Result<Unit, Error> {
+    if selected_os() is "linux" | "android" | "macos" | "ios" { write_new(path, bytes) } else { unsupported() }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:65
+#Error
+pub enum SourceWriteError { Conflict, Io(Error) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:72
+impl From<Error> for SourceWriteError { fn from(error: Error) -> Self { .Io(error) } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:77
+pub fn with_source_transaction<T>(action: () -> Result<T, SourceWriteError>) -> Result<T, SourceWriteError> {
+    lock :: SOURCE_TRANSACTION_LOCK.get_or_init(() -> Mutex.new(()))
+    guard :: lock.lock().map_err((_) -> SourceWriteError.Io(Error.new(ErrorKind.Other, "Canvas source transaction lock was poisoned")))?
+    action()
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:90
+pub fn write_source_if_unchanged(path: OSPath, expected: String, candidate: String) -> Result<Unit, SourceWriteError> {
+    with_source_transaction(() -> replace_source_if_unchanged_locked(path, .Some(expected), .Some(candidate)))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:100
+pub fn replace_source_if_unchanged_locked(path: OSPath, expected: String?, candidate: String?) -> Result<Unit, SourceWriteError> {
+    result :: if selected_os() is "linux" | "android" | "macos" | "ios" { replace_if_unchanged(path, expected.map((s) -> s.as_bytes()), candidate.map((s) -> s.as_bytes())) } else { unsupported() }
+    if result.map_err(SourceWriteError.Io)? is { .Applied -> .Ok(()); .Conflict -> .Err(SourceWriteError.Conflict) }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:134
+O_RDONLY: I32 :: 0
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:135
+O_WRONLY: I32 :: 1
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:136
+fn o_creat() -> I32 { if selected_os() is "linux" | "android" { 0o100 } else { 0x0200 } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:138
+fn o_excl() -> I32 { if selected_os() is "linux" | "android" { 0o200 } else { 0x0800 } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:140
+fn o_cloexec() -> I32 { if selected_os() is "linux" | "android" { 0o2000000 } else { 0x01000000 } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:148
+fn o_directory() -> I32 { if selected_os() is "linux" | "android" { 0o200000 } else { 0x00100000 } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:152
+fn o_nofollow() -> I32 { if selected_os() is "linux" | "android" { 0o400000 } else { 0x0100 } }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:156
+MODE_NEW_FILE: U32 :: 0o666
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:158
+// Native declarations are canonical imports from core.sys.host.unix_fd (#4494).
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:170
+struct CurrentFile { bytes: [U8], mode: U32 }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:175
+struct Target {
+    parent: File
+    name: CString
+    current: CurrentFile?
+    // Rust: crates/jet-devserver/src/Canvas/source_model.rs:279
+    fn replace(self: &Self, bytes: [U8], mode: U32?) -> Result<Unit, Error> {
+        temporary: CString? := .None
+        for _ in 0..100 {
+            sequence :: TEMP_FILE_SEQUENCE.fetch_add(1, Ordering.Relaxed)
+            name :: c_name(OsStr.new(format(".{}.canvas-{}.tmp", self.name.to_string_lossy(), sequence)))?
+            if create_new_at(self.parent, name, mode.map_or(MODE_NEW_FILE, (mode) -> mode & 0o7777)) is {
+                .Ok(file) -> {
+                    file := file
+                    result :: file.write_all(bytes).and_then((_) -> file.sync_all()).and_then((()) -> mode.map_or(.Ok(()), (mode) -> file.set_permissions(Permissions.from_mode(mode & 0o7777)).and_then((()) -> file.sync_all())))
+                    if result is .Err(error) { _ :: remove_at(self.parent, name); return .Err(error) }
+                    temporary = .Some(name)
+                    break
+                }
+                .Err(error) if error.kind() == ErrorKind.AlreadyExists -> continue
+                .Err(error) -> return .Err(error)
+            }
+        }
+        temporary :: temporary ?? return .Err(Error.new(ErrorKind.AlreadyExists, "could not allocate a Canvas source temporary file"))
+        result :: #Unsafe("rename within the retained parent descriptor; C names remain live") { renameat(self.parent.as_raw_fd(), temporary.as_ptr(), self.parent.as_raw_fd(), self.name.as_ptr()) } // GATE #4494
+        if result != 0 {
+            error :: map_nofollow(Error.last_os_error())
+            _ :: remove_at(self.parent, temporary)
+            return .Err(error)
+        }
+        _ :: self.parent.sync_all()
+        .Ok(())
+    }
+    // Rust: crates/jet-devserver/src/Canvas/source_model.rs:336
+    fn remove(self: &Self) -> Result<Unit, Error> { remove_at(self.parent, self.name) }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:181
+fn secure_read_bounded(path: OSPath, max_bytes: U64) -> Result<[U8], Error> {
+    (parent, name) :: open_parent(path)?
+    file := open_file_at(parent, name, O_RDONLY)?
+    .Ok(read_opened_file_bounded(&file, max_bytes, () -> .Ok(()))?.bytes)
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:187
+fn ensure_directory(path: OSPath) -> Result<Unit, Error> {
+    directory := open_base(path.is_absolute())?
+    for component in path.components() {
+        if component is {
+            .RootDir | .CurDir -> {}
+            .ParentDir -> return .Err(Error.new(ErrorKind.InvalidInput, "Canvas paths must not contain parent components"))
+            .Normal(name) -> {
+                c_name :: c_name(name)?
+                if open_directory_at(directory, name) is {
+                    .Ok(child) -> directory = child
+                    .Err(error) if error.kind() == ErrorKind.NotFound -> {
+                        result :: #Unsafe("mkdir relative to retained directory with live encoded name") { mkdirat(directory.as_raw_fd(), c_name.as_ptr(), 0o777) } // GATE #4494
+                        if result != 0 {
+                            create_error :: Error.last_os_error()
+                            if create_error.kind() != ErrorKind.AlreadyExists -> return .Err(map_nofollow(create_error))
+                        }
+                        directory = open_directory_at(directory, name)?
+                    }
+                    .Err(error) -> return .Err(error)
+                }
+            }
+            .Prefix(_) -> return .Err(Error.new(ErrorKind.InvalidInput, "Canvas path has an unsupported prefix"))
+        }
+    }
+    .Ok(())
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:227
+fn write_new(path: OSPath, bytes: [U8]) -> Result<Unit, Error> {
+    (parent, name) :: open_parent(path)?
+    file := create_new_at(parent, name, MODE_NEW_FILE)?
+    if file.write_all(bytes).and_then((_) -> file.sync_all()) is .Err(error) { _ :: remove_at(parent, name); return .Err(error) }
+    require_regular(file)
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:237
+fn replace_if_unchanged(path: OSPath, expected: [U8]?, candidate: [U8]?) -> Result<ReplaceResult, Error> {
+    target :: open_target(path)?
+    current :: target.current.as_ref()
+    matches :: if expected is { .Some(expected) -> current.is_some_and((current) -> current.bytes == expected); .None -> current.is_none() }
+    if !matches -> return .Ok(.Conflict)
+    if candidate is {
+        .Some(candidate) if current.is_some_and((current) -> current.bytes != candidate) -> target.replace(candidate, current.map((current) -> current.mode))?
+        .Some(_) -> {}
+        .None if current.is_some() -> target.remove()?
+        .None -> {}
+    }
+    .Ok(.Applied)
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:264
+fn open_target(path: OSPath) -> Result<Target, Error> {
+    (parent, name) :: open_parent(path)?
+    current :: if open_file_at(parent, name, O_RDONLY) is {
+        .Ok(file) -> { file := file; .Some(read_opened_file(&file, () -> .Ok(()))?) }
+        .Err(error) if error.kind() == ErrorKind.NotFound -> .None
+        .Err(error) -> return .Err(error)
+    }
+    .Ok(Target(parent: parent, name: name, current: current))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:341
+fn open_base(absolute: Bool) -> Result<File, Error> {
+    base :: if absolute { OSPath.new("/") } else { OSPath.new(".") }
+    OpenOptions.new().read(true).custom_flags(o_directory() | o_nofollow() | o_cloexec()).open(base) // GATE #4494
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:349
+fn open_parent(path: OSPath) -> Result<(File, CString), Error> {
+    components :: path.components().collect()
+    name :: if components.last() is .Some(.Normal(name)) { name } else { return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has no file name")) }
+    parent := open_base(path.is_absolute())?
+    for component in components[..components.len() - 1] {
+        parent = if component is {
+            .RootDir | .CurDir -> parent
+            .ParentDir -> return .Err(Error.new(ErrorKind.InvalidInput, "Canvas paths must not contain parent components"))
+            .Normal(name) -> open_directory_at(parent, name)?
+            .Prefix(_) -> return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has an unsupported prefix"))
+        }
+    }
+    .Ok((parent, c_name(name)?))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:379
+fn c_name(name: OsStr) -> Result<CString, Error> {
+    CString.new(name.as_bytes()).map_err((_) -> Error.new(ErrorKind.InvalidInput, "Canvas path contains NUL"))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:385
+fn open_directory_at(parent: &File, name: OsStr) -> Result<File, Error> { open_file_at(parent, c_name(name)?, o_directory()) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:389
+fn open_file_at(parent: &File, name: &CString, extra_flags: I32) -> Result<File, Error> {
+    fd :: #Unsafe("openat borrows live retained parent and terminated encoded name") { openat(parent.as_raw_fd(), name.as_ptr(), extra_flags | o_nofollow() | o_cloexec(), 0) } // GATE #4494
+    if fd < 0 -> return .Err(map_nofollow(Error.last_os_error()))
+    .Ok(#Unsafe("transfer ownership of newly opened descriptor exactly once") { File.from_raw_fd(fd) })
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:404
+fn create_new_at(parent: &File, name: &CString, mode: U32) -> Result<File, Error> {
+    fd :: #Unsafe("exclusive nofollow openat below retained parent") { openat(parent.as_raw_fd(), name.as_ptr(), O_WRONLY | o_creat() | o_excl() | o_nofollow() | o_cloexec(), mode) } // GATE #4494
+    if fd < 0 -> return .Err(map_nofollow(Error.last_os_error()))
+    .Ok(#Unsafe("transfer ownership of newly created descriptor exactly once") { File.from_raw_fd(fd) })
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:419
+fn remove_at(parent: &File, name: &CString) -> Result<Unit, Error> {
+    result :: #Unsafe("unlink retained-parent entry without following final symlink") { unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } // GATE #4494
+    if result != 0 -> return .Err(map_nofollow(Error.last_os_error()))
+    .Ok(())
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:426
+fn require_regular(file: &File) -> Result<Unit, Error> { require_regular_metadata(file.metadata()?) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:430
+fn read_opened_file(file: &File, before_read: () -> Result<Unit, Error>) -> Result<CurrentFile, Error> { read_opened_file_bounded(file, MAX_RESPONSE_BODY_BYTES as U64, before_read) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:437
+fn read_opened_file_bounded(file: &File, max_bytes: U64, before_read: () -> Result<Unit, Error>) -> Result<CurrentFile, Error> {
+    metadata :: file.metadata()?
+    require_regular_metadata(metadata)?
+    if metadata.len() > max_bytes -> return .Err(Error.new(ErrorKind.InvalidData, "file exceeds the devserver response limit"))
+    mode :: metadata.permissions().mode()
+    before_read()?
+    bytes: [U8] := []
+    file.take(max_bytes.saturating_add(1)).read_to_end(&bytes)?
+    if bytes.len() as U64 > max_bytes -> return .Err(Error.new(ErrorKind.InvalidData, "file exceeds the devserver response limit"))
+    final_metadata :: file.metadata()?
+    if !same_file(metadata, final_metadata) || final_metadata.nlink() != 1 -> return .Err(Error.new(ErrorKind.Other, "Canvas source changed while it was being read"))
+    .Ok(CurrentFile(bytes: bytes, mode: mode))
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:471
+fn require_regular_metadata(metadata: &Metadata) -> Result<Unit, Error> {
+    if !metadata.is_file() -> return .Err(Error.new(ErrorKind.PermissionDenied, "Canvas source path is not a regular file"))
+    if metadata.nlink() != 1 -> return .Err(Error.new(ErrorKind.PermissionDenied, "Canvas source file must not be a hard link"))
+    .Ok(())
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:487
+fn same_file(left: &Metadata, right: &Metadata) -> Bool { left.is_file() && right.is_file() && left.dev() == right.dev() && left.ino() == right.ino() }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:494
+fn map_nofollow(error: Error) -> Error {
+    symlink_errno :: if selected_os() is "linux" | "android" { 40 } else { 62 }
+    if error.raw_os_error() == .Some(symlink_errno) { Error.new(ErrorKind.PermissionDenied, "Canvas source paths must not traverse symlinks") } else { error }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:609
+fn unsupported<T>() -> Result<T, Error> { .Err(Error.new(ErrorKind.Unsupported, "Canvas descriptor-relative no-follow filesystem access is unavailable on this platform")) }
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:616,635,639,643
+// Non-native read/ensure/write/replace arms dispatch at their public boundaries above.

@@ -1,0 +1,607 @@
+use std.io as io
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.thread as thread
+use std.time as time
+use std.collections.[VecDeque]
+use core.files.[OSPath]
+use core.sys.target.[selected_os]
+use jet_debug.Dap.*
+use jet_debug.Dap03.*
+use jet_debug.Inferior.[Inferior, RawFrame, ResumeResult]
+use jet_debug.LineMap.[LineMap]
+use jet_debug.[DebugHistory, DebugCheckpoint, ExitCodes]
+use jet_foundation.JSON.[parse_json, json_get, json_str, json_u32, json_escape]
+use jet_foundation.DataTree.[DataTree]
+
+// Rust: crates/jet-debug/src/Dap.rs:4311
+fn breakpoint_lines(args: DataTree?) -> [USize] Err! { breakpoint_lines_for_origin(args, true) }
+// Rust: crates/jet-debug/src/Dap.rs:4316
+fn breakpoint_lines_for_origin(args: DataTree?, lines_start_at_1: Bool) -> [USize] Err! {
+    value :: args.and_then((a) -> json_get(a, "breakpoints")) ?? return []
+    items :: if value == { .Array(items) -> items, else -> return .Err("breakpoints must be an array") }
+    lines := [USize]{}
+    loop item in items {
+        line := json_get(item, "line").and_then(json_u32) ?? return .Err("breakpoint line must be a nonnegative integer")
+        if lines_start_at_1 && line == 0 -> return .Err("breakpoint line must be a positive integer")
+        if !lines_start_at_1 -> line = line.checked_add(1) ?? return .Err("breakpoint line is too large")
+        &lines.push(USize.try_from(line) ?? return .Err("breakpoint line is too large"))
+    }
+    return lines
+}
+// Rust: crates/jet-debug/src/Dap.rs:4625
+fn test_server(state: State) -> DapServer {
+    DapServer {
+        map: LineMap.build(""), rust_file: "main.rs", rust_src: "", jet_file: "main.jet", jet_src: "",
+        binary: OSPath("missing-debug-binary"), inf: None,
+        pending_breakpoints: [], pending_specs: [], hit_counts: [], source_breakpoint_ids: [], client_breakpoint_ids: [],
+        next_client_breakpoint_id: 1, entry_breakpoint_id: None, stop_on_entry: true, target: None,
+        launch_args: [], launch_cwd: None, launch_env: [], current_thread: 1, last_signal: None, last_exception: None,
+        exception_filters: default_exception_filters(), show_raw_frames: false, lines_start_at_1: true,
+        columns_start_at_1: true, supports_ansi_styling: false, unmapped_steps: 0,
+        references: ObjectReferences.default(), state: state, terminal_failure: false, client_sequences: [U32:Bool]{},
+        seq: 1, resume_task: None, resume_stop_requested: false,
+        history: DebugHistory {
+            events: [], checkpoint: .Val(DebugCheckpoint {
+                source_identity: jet_foundation.SHA256.sha256_hex("main.jet:".as_bytes()),
+                shape: "native-dap-debug-artifact", sequence: 0
+            }), cursor: None, capped: false, decision_ledger: None
+        }, history_cursor: None, data_watches: [String:Bool]{}, candidate_artifacts: [], replay_only_after_fix: false
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4682
+fn frame(body: String) -> String { "Content-Length: {body.len()}\r\n\r\n{body}" }
+// Rust: crates/jet-debug/src/Dap.rs:4687
+#Test("stack_projection_pages_over_unmapped_native_frames") {
+    map :: LineMap.build("// jet:line 2\nlet x = 1;\n// jet:line 3\nlet y = 2;\n")
+    frames :: [RawFrame {
+        func: "runtime_helper", rust_file: "main.rs", rust_line: 1
+    }, RawFrame {
+        func: "__jet_run", rust_file: "main.rs", rust_line: 2
+    }, RawFrame {
+        func: "__jet_run", rust_file: "main.rs", rust_line: 4
+    }]
+    jet_frames :: project_frames(frames, map, "main.rs", false)
+    assert_eq(jet_frames.len(), 2)
+    assert_eq(jet_frames[0].position, 1)
+    assert_eq(jet_frames[0].jet_line, .Val(2))
+    assert_eq(jet_frames[1].position, 2)
+    assert_eq(jet_frames[1].jet_line, .Val(3))
+    second_page :: jet_frames.iter().skip(1).take(1).collect()
+    assert_eq(second_page[0].frame.rust_line, 4)
+    assert_eq(second_page[0].jet_line, .Val(3))
+    raw_frames :: project_frames(frames, map, "main.rs", true)
+    assert_eq(raw_frames.len(), 5)
+    assert(!raw_frames[0].raw)
+    assert(!raw_frames[1].raw)
+    assert(raw_frames[2].raw)
+    assert_eq(raw_frames[0].position, 1)
+    assert_eq(raw_frames[1].position, 2)
+    assert_eq(raw_frames[2].position, 0)
+}
+// Rust: crates/jet-debug/src/Dap.rs:4729
+#Test("async_task_threads_use_their_jet_frame_name") {
+    map :: LineMap.build("// jet:line 6\nlet value = 1;\n")
+    backtrace :: "frame #0: 0x1 bin`__jet_work at main.rs:2:1\nframe #1: 0x2 bin`__jet_run at main.rs:9:1\n"
+    assert_eq(jet_thread_name(2, backtrace, map, "main.rs"), "task work (stopped)")
+}
+// Rust: crates/jet-debug/src/Dap.rs:4741
+#Test("raw_frame_opt_in_does_not_make_a_helper_stop_a_jet_task") {
+    map :: LineMap.build("// jet:line 2\nlet x = 1;\n")
+    helper :: [RawFrame { func: "runtime_helper", rust_file: "main.rs", rust_line: 1 }]
+    assert(!has_jet_frame(helper, map, "main.rs"))
+    jet_and_helper :: [RawFrame { func: "runtime_helper", rust_file: "main.rs", rust_line: 1 }, RawFrame { func: "__jet_run", rust_file: "main.rs", rust_line: 2 }]
+    assert(has_jet_frame(jet_and_helper, map, "main.rs"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:4766
+#Test("dap_request_envelope_rejects_wrong_shapes_and_numbers") {
+    assert(parse_dap_request("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}").is_ok())
+    loop raw in [
+        "{{\"seq\":1,\"type\":\"event\",\"command\":\"initialize\"}}",
+        "{{\"seq\":1.5,\"type\":\"request\",\"command\":\"initialize\"}}",
+        "{{\"seq\":-1,\"type\":\"request\",\"command\":\"initialize\"}}",
+        "{{\"seq\":0,\"type\":\"request\",\"command\":\"initialize\"}}",
+        "{{\"seq\":1,\"type\":\"request\",\"command\":\"\"}}",
+        "{{\"seq\":1,\"type\":\"request\",\"command\":2}}",
+        "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":[]}}",
+        "[\"not\",\"a\",\"request\"]"
+    ] { assert(parse_dap_request(raw).is_err(), "accepted hostile DAP: {raw}") }
+}
+// Rust: crates/jet-debug/src/Dap.rs:4789
+#Test("initialize_requires_jet_and_negotiates_origins") {
+    server := test_server(.New)
+    rejected :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"other\"}}}}")
+    assert(rejected.contains("\"success\":false"), rejected)
+    assert(rejected.contains("\"id\":22032"), rejected)
+    assert_eq(server.state, .New)
+    accepted :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":false,\"columnsStartAt1\":false,\"supportsANSIStyling\":true}}}}")
+    assert(accepted.contains("\"success\":true"), accepted)
+    assert(accepted.contains("supportsPauseRequest"), accepted)
+    assert(accepted.contains("supportsVariablePaging"), accepted)
+    assert(!server.lines_start_at_1)
+    assert(!server.columns_start_at_1)
+    assert(server.supports_ansi_styling)
+}
+// Rust: crates/jet-debug/src/Dap.rs:4812
+#Test("dap_framing_accepts_case_insensitive_length_and_rejects_duplicates") {
+    body :: "{{\"seq\":1,\"type\":\"request\",\"command\":\"threads\"}}"
+    wire :: "X-Editor: test\r\ncontent-length: {body.len()}\r\n\r\n{body}"
+    reader := io.Cursor.new(wire)
+    assert_eq(read_message(&reader).unwrap(), .Val(body))
+    duplicate := io.Cursor.new("Content-Length: 1\r\ncontent-length: 1\r\n\r\na")
+    assert(read_message(&duplicate).is_err())
+    invalid := io.Cursor.new("Content-Length: +1\r\n\r\na")
+    assert(read_message(&invalid).is_err())
+}
+// Rust: crates/jet-debug/src/Dap.rs:4831
+#Test("queued_snapshot_requests_wait_for_resume_to_settle") {
+    requests := VecDeque.from([
+        parse_dap_request("{{\"seq\":1,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{{}}}}").unwrap(),
+        parse_dap_request("{{\"seq\":2,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{}}}}").unwrap(),
+        parse_dap_request("{{\"seq\":3,\"type\":\"request\",\"command\":\"pause\",\"arguments\":{{}}}}").unwrap(),
+        parse_dap_request("{{\"seq\":4,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}").unwrap(),
+        parse_dap_request("{{\"seq\":5,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{}}}}").unwrap()
+    ])
+    control :: take_next_request(&requests, true).expect("running control request")
+    assert_eq(json_get(control, "command").and_then(json_str), .Val("pause"))
+    restart :: take_next_request(&requests, true).expect("restart request")
+    assert_eq(json_get(restart, "command").and_then(json_str), .Val("restart"))
+    breakpoints :: take_next_request(&requests, true).expect("breakpoint replacement request")
+    assert_eq(json_get(breakpoints, "command").and_then(json_str), .Val("setBreakpoints"))
+    assert(take_next_request(&requests, true) == None)
+    assert_eq(requests.len(), 2)
+    first :: take_next_request(&requests, false).expect("queued request")
+    assert_eq(json_get(first, "command").and_then(json_str), .Val("threads"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:4876
+#Test("breakpoint_ids_are_stable_and_client_lines_follow_negotiation") {
+    server := test_server(.New)
+    initialized :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}")
+    assert(initialized.contains("\"success\":true"), initialized)
+    first :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"main.jet\"}},\"breakpoints\":[{{\"line\":2}}]}}}}")
+    first_id :: dap_body_id(first, "breakpoints", "id")
+    second :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"main.jet\"}},\"breakpoints\":[{{\"line\":2}}]}}}}")
+    assert_eq(dap_body_id(second, "breakpoints", "id"), first_id)
+    zero_based := test_server(.New)
+    initialized :: dap_call(&zero_based, "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\",\"linesStartAt1\":false}}}}")
+    assert(initialized.contains("\"success\":true"), initialized)
+    response :: dap_call(&zero_based, "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"main.jet\"}},\"breakpoints\":[{{\"line\":0}}]}}}}")
+    assert(response.contains("\"line\":0"), response)
+    assert_eq(zero_based.pending_breakpoints, [1])
+}
+// Rust: crates/jet-debug/src/Dap.rs:4909
+#Test("breakpoint_status_events_publish_backend_resolution") {
+    server := test_server(.Configuring)
+    server.pending_specs = [BreakpointSpec { line: 2, ..BreakpointSpec.default() }, BreakpointSpec { line: 3, ..BreakpointSpec.default() }]
+    server.client_breakpoint_ids = [7, 8]
+    output := [U8]{}
+    &server.emit_breakpoint_statuses(&output, [false, true])
+    text :: String.from_utf8(^output).unwrap()
+    assert(text.contains("\"event\":\"breakpoint\""), "missing DAP breakpoint change events: {text}")
+    assert(text.contains("\"id\":7,\"verified\":false"), "unresolved native breakpoint must be reported as pending: {text}")
+    assert(text.contains("\"id\":8,\"verified\":true"), "resolved native breakpoint must be reported as verified: {text}")
+}
+// Rust: crates/jet-debug/src/Dap.rs:4940
+#Test("invalid_breakpoint_conditions_fail_before_replacing_active_specs") {
+    server := test_server(.Ready)
+    server.pending_specs = [BreakpointSpec { line: 2, ..BreakpointSpec.default() }]
+    server.pending_breakpoints = [2]
+    response :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"main.jet\"}},\"breakpoints\":[{{\"line\":3,\"condition\":\"not a Jet expression\"}}]}}}}")
+    assert(response.contains("\"success\":false"), response)
+    assert(response.contains("\"id\":22032"), response)
+    assert(response.contains("\"code\":\"E2236\""), response)
+    assert_eq(server.pending_breakpoints, [2])
+    assert_eq(server.pending_specs[0].line, 2)
+}
+// Rust: crates/jet-debug/src/Dap.rs:4961
+#Test("dap_breakpoint_lines_require_positive_integers") {
+    loop raw in ["{{\"breakpoints\":[{{\"line\":-1}}]}}", "{{\"breakpoints\":[{{\"line\":1.5}}]}}", "{{\"breakpoints\":[{{\"line\":0}}]}}", "{{\"breakpoints\":[{{\"line\":\"2\"}}]}}"] {
+        args :: parse_json(raw).unwrap()
+        assert(breakpoint_lines(.Val(args)).is_err(), "accepted hostile line: {raw}")
+    }
+    args :: parse_json("{{\"breakpoints\":[{{\"line\":2}},{{\"line\":9}}]}}").unwrap()
+    assert_eq(breakpoint_lines(.Val(args)).unwrap(), [2, 9])
+}
+// Rust: crates/jet-debug/src/Dap.rs:4979
+#Test("launch_raw_frames_are_explicit_and_reference_scopes_are_marked") {
+    args :: parse_json("{{\"program\":\"main.jet\",\"showRawFrames\":true,\"args\":[],\"env\":{{}}}}").unwrap()
+    launch :: parse_launch_arguments(.Val(args), "main.jet").unwrap()
+    assert(launch.show_raw_frames)
+    refs := ObjectReferences.default()
+    frame :: &refs.issue_frame(7, 0)
+    scope :: &refs.issue_scope(frame, .RawScope)
+    assert(refs.is_live(scope, .RawScope))
+    assert_eq(refs.scope_location(scope), .Val(FrameLocation { thread_id: 7, position: 0 }))
+}
+// Rust: crates/jet-debug/src/Dap.rs:4999
+#Test("raw_scopes_append_to_jet_scopes_and_raw_frame_handles_stay_raw") {
+    server := test_server(.Stopped)
+    jet_frame :: &server.references.issue_frame(1, 0)
+    scopes :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{jet_frame},\"showRawFrames\":true}}}}")
+    assert(scopes.contains("\"name\":\"Locals\""), scopes)
+    assert(scopes.contains("\"name\":\"[raw] Locals\""), scopes)
+    assert(server.references.is_live(2, .Scope))
+    assert(server.references.is_live(3, .RawScope))
+    raw_frame :: &server.references.issue_raw_frame(1, 1)
+    raw_scopes :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{raw_frame},\"showRawFrames\":false}}}}")
+    assert(raw_scopes.contains("\"name\":\"[raw] Locals\""), raw_scopes)
+    assert(!raw_scopes.contains("\"name\":\"Locals\""), raw_scopes)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5028
+#Test("stack_requests_can_opt_into_raw_frames_without_changing_the_session") {
+    server :: test_server(.Stopped)
+    requested :: parse_json("{{\"showRawFrames\":true}}").unwrap()
+    assert(server.raw_frames_for_request(.Val(requested)).expect("valid raw-frame request"))
+    defaulted :: parse_json("{{\"showRawFrames\":false}}").unwrap()
+    assert(!server.raw_frames_for_request(.Val(defaulted)).expect("valid default-frame request"))
+    invalid :: parse_json("{{\"showRawFrames\":\"yes\"}}").unwrap()
+    assert(server.raw_frames_for_request(.Val(invalid)).is_err())
+}
+// Rust: crates/jet-debug/src/Dap.rs:5045
+#Test("attach_arguments_require_local_program_map_and_explicit_raw_frame_shape") {
+    // GATE #4494: real native files and process/thread identities.
+    root :: env.temp_dir().join("jet-dap-attach-{process.id()}-{thread.current().name() ?? "test"}")
+    fs.create_dir_all(root).unwrap()
+    program :: root.join("program")
+    map :: root.join("program.jetmap")
+    fs.write(program, "program".as_bytes()).unwrap()
+    fs.write(map, "map".as_bytes()).unwrap()
+    request :: parse_json("{{\"processId\":1,\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\",\"showRawFrames\":false}}").unwrap()
+    parsed :: parse_attach_arguments(.Val(request)).unwrap()
+    assert_eq(parsed.pid, 1)
+    assert_eq(parsed.program, fs.canonicalize(program).unwrap())
+    assert_eq(parsed.map, fs.canonicalize(map).unwrap())
+    assert(!parsed.show_raw_frames)
+    raw_request :: parse_json("{{\"processId\":1,\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\",\"showRawFrames\":true}}").unwrap()
+    assert(parse_attach_arguments(.Val(raw_request)).unwrap().show_raw_frames)
+    loop raw in ["{{\"processId\":0}}", "{{\"processId\":1,\"program\":\"missing\",\"map\":\"missing\"}}"] {
+        args :: parse_json(raw).unwrap()
+        assert(parse_attach_arguments(.Val(args)).is_err(), "accepted {raw}")
+    }
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5094
+#Test("dap_attach_invalid_arguments_fails_through_wire_before_backend") {
+    server := test_server(.New)
+    input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":0}}}}")
+    output := [U8]{}
+    code :: run_io(&server, io.Cursor.new(input), &output)
+    text :: String.from_utf8(^output).unwrap()
+    assert_eq(code, ExitCodes.OK)
+    assert(text.contains("\"command\":\"attach\""))
+    assert(text.contains("\"success\":false"))
+    assert(text.contains("\"id\":22032"))
+    assert(server.inf == None)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5114
+#Test("dap_attach_rejects_a_real_process_running_another_binary") {
+    // GATE #4494
+    root :: env.temp_dir().join("jet-debug-attach-denied-{process.id()}-{thread.current().name() ?? "test"}")
+    fs.create_dir_all(root).unwrap()
+    program :: env.current_exe().unwrap()
+    map :: root.join("program.jetmap")
+    LineMap.write_artifact(map, "main.jet", "", "main.rs", "", program).unwrap()
+    target := process.Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
+    input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{target.id()},\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\"}}}}")
+    server := test_server(.New)
+    output := [U8]{}
+    code :: run_io(&server, io.Cursor.new(input), &output)
+    text :: String.from_utf8(^output).unwrap()
+    _ :: &target.kill()
+    _ :: &target.wait()
+    _ :: fs.remove_dir_all(root)
+    assert_eq(code, ExitCodes.OK)
+    assert(text.contains("\"command\":\"attach\""), text)
+    assert(text.contains("\"success\":false"), text)
+    assert(text.contains("\"id\":22037"), text)
+    assert(text.contains("\"code\":\"E2231\""), text)
+    assert(server.inf == None)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5155
+#Test("dap_attaches_and_disconnects_without_terminating_a_real_target") {
+    if selected_os() == .Linux && Inferior.available() {
+        // GATE #4494
+        root :: env.temp_dir().join("jet-dap-attach-disconnect-{process.id()}-{time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("clock after epoch").as_nanos()}")
+        fs.create_dir_all(root).expect("create debugger test directory")
+        target := process.Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
+        pid :: target.id()
+        program :: fs.canonicalize(OSPath("/proc/{pid}/exe")).expect("resolve real attach target binary")
+        map :: root.join("target.jetmap")
+        LineMap.write_artifact(map, "main.jet", "", "main.rs", "", program).expect("write matching attach map")
+        input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}") + frame("{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{pid},\"program\":\"{json_escape(program.to_string_lossy())}\",\"map\":\"{json_escape(map.to_string_lossy())}\"}}}}") + frame("{{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{{}}}}")
+        server := test_server(.New)
+        output := [U8]{}
+        code :: run_io(&server, io.Cursor.new(input), &output)
+        text :: String.from_utf8(^output).expect("DAP output is UTF-8")
+        target_alive :: &target.try_wait().expect("check detached target") == None
+        _ :: &target.kill()
+        _ :: &target.wait()
+        _ :: fs.remove_dir_all(root)
+        assert_eq(code, ExitCodes.OK, text)
+        assert(text.contains("\"command\":\"attach\""), text)
+        assert(text.contains("\"command\":\"disconnect\""), text)
+        assert(!text.contains("\"success\":false"), text)
+        assert(target_alive, "disconnect must leave an attached target alive")
+        assert_eq(server.state, .Terminated)
+        assert(server.inf == None)
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:5211
+#Test("dap_rejects_oversized_frame_before_reading_a_body") {
+    reader := io.Cursor.new("Content-Length: {MAX_DAP_MESSAGE_BYTES + 1}\r\n\r\n")
+    error :: read_message(&reader).unwrap_err()
+    assert_eq(error.kind(), .InvalidData)
+    assert_eq(error.to_string(), "protocol message exceeds the 16777216-byte limit")
+}
+// Rust: crates/jet-debug/src/Dap.rs:5222
+struct BrokenPipe {}
+impl io.Write for BrokenPipe {
+    // Rust: crates/jet-debug/src/Dap.rs:5226
+    fn write(&self, _buf: [U8]) -> io.Result[USize] { .Err(io.Error.new(.BrokenPipe, "client closed")) }
+    // Rust: crates/jet-debug/src/Dap.rs:5230
+    fn flush(&self) -> io.Result[()] { .Err(io.Error.new(.BrokenPipe, "client closed")) }
+}
+#Test("broken_dap_output_cannot_finish_as_a_clean_session") {
+    input :: frame("{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}")
+    server := test_server(.New)
+    output := BrokenPipe {}
+    code :: run_io(&server, io.Cursor.new(input), &output)
+    assert_eq(code, ExitCodes.USER_ERROR)
+    assert(server.terminal_failure)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5246
+#Test("object_references_expire_on_generation_change") {
+    refs := ObjectReferences.default()
+    frame :: &refs.issue(.Frame)
+    scope :: &refs.issue(.Scope)
+    assert(refs.is_live(frame, .Frame))
+    assert(refs.is_live(scope, .Scope))
+    &refs.invalidate()
+    assert(!refs.is_live(frame, .Frame))
+    assert(!refs.is_live(scope, .Scope))
+    replacement :: &refs.issue(.Frame)
+    assert_ne(replacement, frame)
+    assert(refs.is_live(replacement, .Frame))
+    stable :: &refs.issue_frame(1, 0)
+    assert_eq(stable, &refs.issue_frame(1, 0))
+    assert_ne(stable, &refs.issue_frame(2, 0))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5267
+#Test("repeated_stopped_snapshot_requests_reuse_object_references") {
+    refs := ObjectReferences.default()
+    raw_frame :: &refs.issue_raw_frame(1, 2)
+    frame :: &refs.issue_frame(1, 2)
+    raw_scope :: &refs.issue_scope(raw_frame, .RawScope)
+    scope :: &refs.issue_scope(frame, .Scope)
+    location :: FrameLocation { thread_id: 1, position: 2 }
+    assert_eq(raw_frame, &refs.issue_raw_frame(1, 2))
+    assert_eq(raw_scope, &refs.issue_scope(raw_frame, .RawScope))
+    assert_eq(scope, &refs.issue_scope(frame, .Scope))
+    value :: &refs.issue_value_at(location, "answer", false)
+    assert_eq(value, &refs.issue_value_at(location, "answer", false))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5293
+#Test("continue_only_stops_at_requested_source_breakpoints") {
+    server := test_server(.Stopped)
+    assert_eq(&server.breakpoint_action(3), .Continue)
+    server.pending_specs = [BreakpointSpec { line: 7, ..BreakpointSpec.default() }]
+    server.client_breakpoint_ids = [42]
+    assert_eq(&server.breakpoint_action(3), .Continue)
+    assert(if &server.breakpoint_action(7) == { .Stop(_) -> true, else -> false })
+}
+// Rust: crates/jet-debug/src/Dap.rs:5314
+fn dap_call(server: &DapServer, body: String) -> String {
+    request :: parse_dap_request(body).expect("valid DAP request")
+    output := [U8]{}
+    assert(&server.handle(request, &output) != None)
+    String.from_utf8(^output).expect("DAP output is UTF-8")
+}
+// Rust: crates/jet-debug/src/Dap.rs:5321
+fn dap_message(output: String) -> DataTree {
+    reader := io.Cursor.new(output.as_bytes())
+    body :: read_message(&reader).expect("DAP response frame").expect("DAP response body")
+    parse_json(body).expect("DAP response JSON")
+}
+// Rust: crates/jet-debug/src/Dap.rs:5329
+fn dap_body_id(output: String, collection: String, field: String) -> U32 {
+    message :: dap_message(output)
+    body :: json_get(message, "body").expect("DAP response body object")
+    values :: if json_get(body, collection).expect("DAP response collection") == {
+        .Array(values) -> values, else -> panic("DAP response collection is not an array")
+    }
+    json_get(values.first().expect("DAP response collection item"), field).and_then(json_u32).expect("DAP response id")
+}
+// Rust: crates/jet-debug/src/Dap.rs:5342
+#Test("dap_restart_rebuilds_target_preserves_breakpoints_and_expires_references") {
+    if Inferior.available() {
+        // GATE #4494: real compiled native fixture, not a substitute backend.
+        root :: env.temp_dir().join("jet-dap-restart-{process.id()}-{time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("clock after epoch").as_nanos()}")
+        fs.create_dir_all(root).expect("create debugger test directory")
+        jet_file :: root.join("program.jet")
+        rust_file :: root.join("program.rs")
+        binary :: root.join("program")
+        jet_src :: "fn run() {{\n    value := 7\n    print(value)\n}}\n"
+        rust_src :: "fn main() {{\n    // jet:line 2\n    let __jet_value: i32 = 7;\n    // jet:line 3\n    println!(\"{{}}\", __jet_value);\n}}\n"
+        fs.write(jet_file, jet_src).expect("write Jet fixture")
+        fs.write(rust_file, rust_src).expect("write Rust fixture")
+        rustc :: process.Command.new("rustc").args(["--edition", "2021", "-C", "debuginfo=2"]).arg(rust_file).arg("-o").arg(binary).output().expect("run rustc")
+        assert(rustc.status.success(), "rustc rejected DAP fixture: {String.from_utf8_lossy(rustc.stderr)}")
+        map_path :: binary.with_extension("jetmap")
+        LineMap.write_artifact(map_path, jet_file.to_string_lossy(), jet_src, rust_file.to_string_lossy(), rust_src, binary).expect("write debugger map")
+        server := test_server(.New)
+        server.map = LineMap.load_verified(map_path, jet_file.to_string_lossy(), jet_src, rust_file.to_string_lossy(), rust_src, binary).expect("load debugger map")
+        server.rust_file = rust_file.to_string_lossy()
+        server.rust_src = rust_src
+        server.jet_file = jet_file.to_string_lossy()
+        server.jet_src = jet_src
+        server.binary = binary
+        assert(dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}").contains("\"success\":true"))
+        breakpoint :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{{\"source\":{{\"path\":\"{json_escape(jet_file.to_string_lossy())}\"}},\"breakpoints\":[{{\"line\":3}}]}}}}")
+        assert(breakpoint.contains("\"verified\":true"), breakpoint)
+        launch :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{{\"program\":\"{json_escape(jet_file.to_string_lossy())}\",\"stopOnEntry\":true}}}}")
+        assert(launch.contains("\"event\":\"initialized\""), launch)
+        configured :: dap_call(&server, "{{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{{}}}}")
+        assert(configured.contains("\"event\":\"stopped\""), configured)
+        assert_eq(server.state, .Stopped)
+        stack :: dap_call(&server, "{{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}")
+        old_frame :: dap_body_id(stack, "stackFrames", "id")
+        scopes :: dap_call(&server, "{{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{old_frame}}}}}")
+        old_scope :: dap_body_id(scopes, "scopes", "variablesReference")
+        variables :: dap_call(&server, "{{\"seq\":7,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{old_scope}}}}}")
+        assert(variables.contains("\"success\":true"), variables)
+        restarted :: dap_call(&server, "{{\"seq\":8,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}")
+        assert(restarted.contains("\"command\":\"restart\""), restarted)
+        assert(restarted.contains("\"success\":true"), restarted)
+        assert(restarted.contains("\"event\":\"stopped\""), restarted)
+        assert_eq(server.state, .Stopped)
+        stale_scope :: dap_call(&server, "{{\"seq\":9,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":{old_scope}}}}}")
+        assert(stale_scope.contains("\"id\":22036"), stale_scope)
+        assert(stale_scope.contains("\"code\":\"E2238\""), stale_scope)
+        continued :: dap_call(&server, "{{\"seq\":10,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{{\"threadId\":1}}}}")
+        assert(continued.contains("\"event\":\"stopped\""), continued)
+        assert_eq(server.state, .Stopped)
+        breakpoint_stack :: dap_call(&server, "{{\"seq\":101,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{{\"threadId\":1}}}}")
+        assert(breakpoint_stack.contains("\"line\":3"), breakpoint_stack)
+        assert(breakpoint_stack.contains(json_escape(jet_file.to_string_lossy())), breakpoint_stack)
+        // Rename over the busy executable inode rather than overwrite it.
+        replacement :: root.join("replacement-debug-binary")
+        fs.write(replacement, "replaced binary".as_bytes()).expect("write replacement binary")
+        fs.rename(replacement, binary).expect("replace debugger binary")
+        stale_binary :: dap_call(&server, "{{\"seq\":11,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}")
+        assert(stale_binary.contains("\"success\":false"), stale_binary)
+        assert(stale_binary.contains("\"id\":22037"), stale_binary)
+        assert(stale_binary.contains("\"code\":\"E2231\""), stale_binary)
+        assert_eq(server.state, .Ready)
+        assert(server.inf == None)
+        assert_eq(&server.finish(ExitCodes.OK), ExitCodes.OK)
+        _ :: fs.remove_dir_all(root)
+    }
+}
+// Rust: crates/jet-debug/src/Dap.rs:5509
+#Test("dap_rejects_stale_scope_after_resume_generation_is_invalidated") {
+    server := test_server(.Stopped)
+    frame_id :: &server.references.issue_frame(1, 0)
+    scopes :: parse_dap_request("{{\"seq\":1,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{frame_id}}}}}").unwrap()
+    out := [U8]{}
+    _ :: &server.handle(scopes, &out)
+    text :: String.from_utf8(^out).unwrap()
+    assert(text.contains("\"success\":true"))
+    assert(text.contains("\"variablesReference\":2"))
+    continue_request :: parse_dap_request("{{\"seq\":2,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{{\"threadId\":1}}}}").unwrap()
+    out := [U8]{}
+    _ :: &server.handle(continue_request, &out)
+    text :: String.from_utf8(^out).unwrap()
+    assert(text.contains("\"success\":false"))
+    server.state = .Stopped
+    variables :: parse_dap_request("{{\"seq\":3,\"type\":\"request\",\"command\":\"variables\",\"arguments\":{{\"variablesReference\":2}}}}").unwrap()
+    out := [U8]{}
+    _ :: &server.handle(variables, &out)
+    text :: String.from_utf8(^out).unwrap()
+    assert(text.contains("\"success\":false"))
+    assert(text.contains("\"message\":\"jet.staleReference\""))
+    assert(text.contains("\"id\":22036"))
+    assert(text.contains("\"schema\":\"jet.diagnostic/v1\""))
+    assert(text.contains("\"code\":\"E2238\""))
+    server.target = .Val(.Attached)
+    restart :: parse_dap_request("{{\"seq\":4,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{{}}}}").unwrap()
+    out := [U8]{}
+    _ :: &server.handle(restart, &out)
+    text :: String.from_utf8(^out).unwrap()
+    assert(text.contains("\"success\":false"))
+    assert(text.contains("\"message\":\"jet.unsupported\""))
+    assert(text.contains("\"id\":22033"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5558
+#Test("dap_exception_filters_and_loaded_sources_obey_lifecycle") {
+    server := test_server(.New)
+    before_initialize :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"setExceptionBreakpoints\",\"arguments\":{{\"filters\":[\"panic\"]}}}}")
+    assert(before_initialize.contains("\"id\":22031"))
+    initialized :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{{\"adapterID\":\"jet\"}}}}")
+    assert(initialized.contains("\"success\":true"))
+    selected :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"setExceptionBreakpoints\",\"arguments\":{{\"filters\":[\"panic\",\"signal\"]}}}}")
+    assert(selected.contains("\"success\":true"))
+    assert(server.exception_filters.contains("panic"))
+    assert(server.exception_filters.contains("signal"))
+    assert(!server.exception_filters.contains("all"))
+    invalid :: dap_call(&server, "{{\"seq\":4,\"type\":\"request\",\"command\":\"setExceptionBreakpoints\",\"arguments\":{{\"filters\":[\"generated-rust\"]}}}}")
+    assert(invalid.contains("\"id\":22032"))
+    server.state = .Terminated
+    after_termination :: dap_call(&server, "{{\"seq\":5,\"type\":\"request\",\"command\":\"loadedSources\",\"arguments\":{{}}}}")
+    assert(after_termination.contains("\"id\":22031"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5595
+#Test("dap_exception_info_keeps_jet_panic_error_and_signal_meaning") {
+    server := test_server(.Stopped)
+    server.last_exception = .Val("panic")
+    panic_response :: dap_call(&server, "{{\"seq\":1,\"type\":\"request\",\"command\":\"exceptionInfo\",\"arguments\":{{}}}}")
+    assert(panic_response.contains("\"exceptionId\":\"JetPanic\""), panic_response)
+    assert(panic_response.contains("\"description\":\"Jet panic\""), panic_response)
+    server.last_exception = .Val("error")
+    error :: dap_call(&server, "{{\"seq\":2,\"type\":\"request\",\"command\":\"exceptionInfo\",\"arguments\":{{}}}}")
+    assert(error.contains("\"exceptionId\":\"JetError\""), error)
+    assert(error.contains("\"description\":\"Jet error\""), error)
+    server.last_signal = .Val("SIGABRT")
+    server.last_exception = .Val("SIGABRT")
+    signal :: dap_call(&server, "{{\"seq\":3,\"type\":\"request\",\"command\":\"exceptionInfo\",\"arguments\":{{}}}}")
+    assert(signal.contains("\"exceptionId\":\"SIGABRT\""), signal)
+    assert(signal.contains("Jet target stopped on SIGABRT"), signal)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5624
+#Test("macos_exception_stops_use_the_error_filter") {
+    server :: test_server(.Running)
+    assert_eq(server.exception_kind("* thread #1, stop reason = EXC_BAD_ACCESS (code=1)"), .Val("error"))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5633
+#Test("unwind_frames_do_not_turn_breakpoints_into_jet_panics") {
+    server :: test_server(.Running)
+    backtrace :: "* thread #1, stop reason = breakpoint 1.1\n    frame #0: 0x1 bin`__jet_run at main.rs:2:1\n    frame #1: 0x2 bin`std::panic::catch_unwind at panicking.rs:1:1\n    frame #2: 0x3 bin`core::panic::unwind_safe::AssertUnwindSafe at unwind_safe.rs:1:1\n"
+    assert_eq(server.exception_kind(backtrace), None)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5646
+#Test("terminal_diagnostic_cannot_finish_as_success") {
+    server := test_server(.Running)
+    output := [U8]{}
+    &server.terminate_with_diagnostic(&output, "E2235", "stop storm")
+    assert_eq(&server.finish(ExitCodes.OK), ExitCodes.USER_ERROR)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5657
+#Test("dap_unmapped_stop_terminates_with_a_jet_diagnostic") {
+    server := test_server(.Running)
+    output := [U8]{}
+    &server.emit_resume(&output, .Stopped("stop reason = breakpoint\n"), .Continue)
+    text :: String.from_utf8(^output).expect("DAP output is UTF-8")
+    assert_eq(server.state, .Terminated)
+    assert(text.contains("E2235"))
+    assert(text.contains("\"event\":\"terminated\""))
+    assert(!text.contains("\"event\":\"stopped\""))
+}
+// Rust: crates/jet-debug/src/Dap.rs:5673
+#Test("dap_pause_does_not_expose_an_unmapped_native_frame") {
+    server := test_server(.Running)
+    output := [U8]{}
+    &server.emit_resume(&output, .Stopped("frame #0: 0x0000 `runtime_helper at generated.rs:99:1\n"), .Pause)
+    text :: String.from_utf8(^output).expect("DAP output is UTF-8")
+    assert_eq(server.state, .Terminated)
+    assert(!text.contains("\"event\":\"stopped\""))
+    assert(text.contains("E2235") || text.contains("E2234"), text)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5690
+#Test("exited_target_releases_server_target_state") {
+    server := test_server(.Running)
+    server.target = .Val(.Launched)
+    output := [U8]{}
+    &server.emit_resume(&output, .Exited { status: .Val(0), signal: None }, .Continue)
+    assert_eq(server.state, .Terminated)
+    assert(server.inf == None)
+    assert(server.target == None)
+    text :: String.from_utf8(^output).expect("DAP output is UTF-8")
+    assert(text.contains("\"event\":\"exited\""), text)
+    assert(text.contains("\"event\":\"terminated\""), text)
+}
+// Rust: crates/jet-debug/src/Dap.rs:5711
+#Test("breakpoint_conditions_fail_closed_when_jet_value_is_unavailable") {
+    server := test_server(.Stopped)
+    assert(!&server.condition_matches("missing == 1"))
+    assert(!&server.condition_matches("missing > 1"))
+}

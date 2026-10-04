@@ -1,0 +1,25 @@
+use jet_devserver.Canvas.GraphProjection02.*
+
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2691
+#Test("pattern_labels_balance_only_missing_closing_parens") {
+    assert_eq(balance_closing_parens(".Some((value"), ".Some((value))")
+    assert_eq(balance_closing_parens(".Some(value)"), ".Some(value)")
+    assert_eq(balance_closing_parens("value))"), "value))")
+    assert_eq(balance_closing_parens(""), "")
+}
+
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2847
+#Test("data_providers_alternate_between_two_source_order_rows") {
+    assert_eq(data_provider_y(130, 0), 226)
+    assert_eq(data_provider_y(130, 1), 244)
+    assert_eq(data_provider_y(130, 2), 226)
+    assert_eq(data_provider_y(-96, 3), 18)
+}
+
+// Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2975
+#Test("getter_node_identifier_fragments_preserve_ascii_alphanumerics") {
+    assert_eq(canvas_ident_fragment("name_2"), "name_2")
+    assert_eq(canvas_ident_fragment("pkg.member-3"), "pkg_member_3")
+    assert_eq(canvas_ident_fragment("éλ"), "__")
+    assert_eq(canvas_ident_fragment(""), "")
+}

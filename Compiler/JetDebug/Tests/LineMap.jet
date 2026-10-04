@@ -1,0 +1,83 @@
+use jet_debug.LineMap.[LineMap]
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.thread as thread
+// Rust: crates/jet-debug/src/LineMap.rs:302
+#Test("maps_marker_to_the_following_line") {
+    rust :: "fn main() {{\n    // jet:line 7\n    let x = 1;\n    // jet:line 8\n    let y = 2;\n}}\n"
+    map :: LineMap.build(rust)
+    assert_eq(map.jet_line_for(3), .Val(7))
+    assert_eq(map.jet_line_for(5), .Val(8))
+    assert_eq(map.rust_line_for(7), .Val(3))
+    assert_eq(map.rust_line_for(8), .Val(5))
+}
+// Rust: crates/jet-debug/src/LineMap.rs:312
+#Test("multi_line_statement_resolves_to_the_marker_before_it") {
+    rust :: "    // jet:line 12\n    let x = some_call(\n        1,\n        2,\n    );\n"
+    map :: LineMap.build(rust)
+    assert_eq(map.jet_line_for(2), .Val(12))
+    assert_eq(map.jet_line_for(4), .Val(12))
+}
+// Rust: crates/jet-debug/src/LineMap.rs:320
+#Test("no_marker_before_a_line_is_none") {
+    map :: LineMap.build("fn main() {{\n    let x = 1;\n}}\n")
+    assert_eq(map.jet_line_for(2), None)
+}
+// Rust: crates/jet-debug/src/LineMap.rs:327
+#Test("generated_entry_wrapper_is_not_projected_as_jet") {
+    map :: LineMap.build("pub fn __jet_run() {{\n    // jet:line 2\n    let x = 1;\n}}\nfn main() {{\n    __jet_run();\n}}\n")
+    assert_eq(map.jet_line_for(3), .Val(2))
+    assert_eq(map.jet_line_for(5), None)
+}
+// Rust: crates/jet-debug/src/LineMap.rs:335
+#Test("file_aware_mapping_rejects_an_unrelated_frame") {
+    map :: LineMap.build("fn main() {{\n// jet:line 7\nlet x = 1;\n}}\n")
+    assert_eq(map.jet_line_for_file("generated.rs", "generated.rs", 3), .Val(7))
+    assert_eq(map.jet_line_for_file("library.rs", "generated.rs", 3), None)
+}
+// Rust: crates/jet-debug/src/LineMap.rs:345
+#Test("first_at_or_after_finds_the_next_marked_line") {
+    map :: LineMap.build("fn main() {{\n    // jet:line 2\n    let x = 1;\n    // jet:line 3\n    let y = 2;\n}}\n")
+    // The initial function header is not itself a stoppable statement.
+    assert_eq(map.first_at_or_after(1), .Val(3))
+    assert_eq(map.first_at_or_after(4), .Val(5))
+    assert_eq(map.first_at_or_after(6), None)
+}
+// Rust: crates/jet-debug/src/LineMap.rs:356
+#Test("sidecar_round_trip_rejects_a_stale_binary") {
+    // GATE #4494: real local sidecar/binary files and native identities.
+    root :: env.temp_dir().join("jet-debug-map-test-{process.id()}-{thread.current().name() ?? "test"}")
+    _ :: fs.create_dir_all(root)
+    binary :: root.join("program")
+    map_path :: root.join("program.jetmap")
+    jet_src :: "main() {{\n  print(1)\n}}\n"
+    rust_src :: "fn main() {{\n// jet:line 2\nlet x = 1;\n}}\n"
+    fs.write(binary, "debug-binary".as_bytes()).unwrap()
+    LineMap.write_artifact(map_path, "program.jet", jet_src, "program.rs", rust_src, binary).unwrap()
+    loaded :: LineMap.load_verified(map_path, "program.jet", jet_src, "program.rs", rust_src, binary).unwrap()
+    assert_eq(loaded.rust_line_for(2), .Val(3))
+    fs.write(binary, "stale-binary".as_bytes()).unwrap()
+    assert(LineMap.load_verified(map_path, "program.jet", jet_src, "program.rs", rust_src, binary).is_err())
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-debug/src/LineMap.rs:401
+#Test("sidecar_round_trip_rejects_edited_entries_with_matching_hashes") {
+    // GATE #4494
+    root :: env.temp_dir().join("jet-debug-map-entry-test-{process.id()}-{thread.current().name() ?? "test"}")
+    _ :: fs.create_dir_all(root)
+    binary :: root.join("program")
+    map_path :: root.join("program.jetmap")
+    jet_src :: "main() {{\n  print(1)\n}}\n"
+    rust_src :: "fn main() {{\n// jet:line 2\nlet x = 1;\n}}\n"
+    fs.write(binary, "debug-binary".as_bytes()).unwrap()
+    LineMap.write_artifact(map_path, "program.jet", jet_src, "program.rs", rust_src, binary).unwrap()
+    map :: fs.read_to_string(map_path).unwrap()
+    edited :: map.replace("\"rust\":3,\"jet\":2", "\"rust\":3,\"jet\":99")
+    assert_ne(edited, map, "fixture must contain the expected mapping")
+    fs.write(map_path, edited).unwrap()
+    result :: LineMap.load_verified(map_path, "program.jet", jet_src, "program.rs", rust_src, binary)
+    error :: if result == { .Err(error) -> error, else -> panic("edited sidecar entries must not be trusted") }
+    assert(error.contains("entries do not match"), error)
+    _ :: fs.remove_dir_all(root)
+}

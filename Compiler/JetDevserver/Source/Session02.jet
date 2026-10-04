@@ -1,1087 +1,428 @@
-// PORT-PENDING 0783 crates-jet-devserver-src-session-slice-1824: crates/jet-devserver/src/Session.rs:1824-2906
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     fn publish_session_state(&self, state_name: &str, code: &str, diagnostic: &str) {
-//RS         let lifecycle = devtools_session_state(state_name);
-//RS         let freshness = if lifecycle == DevtoolsSessionState::Ready {
-//RS             JetDevtoolsFreshnessFact::fresh(unix_time_ms())
-//RS         } else {
-//RS             JetDevtoolsFreshnessFact::stale(unix_time_ms())
-//RS         };
-//RS         {
-//RS             let mut state = self.devtools_lock();
-//RS             state.envelope.set_lifecycle(lifecycle);
-//RS             state.envelope.set_freshness(freshness);
-//RS         }
-//RS         let fields = format!(
-//RS             "{{\"state\":{},\"code\":{},\"diagnostic\":{}}}",
-//RS             json_value(state_name),
-//RS             json_value(code),
-//RS             json_value(diagnostic),
-//RS         );
-//RS         if let Ok(event) = JetDevtoolsEvent::from_parts(
-//RS             unix_time_ms(),
-//RS             "devserver",
-//RS             "state",
-//RS             "session",
-//RS             fields,
-//RS         ) {
-//RS             let _ = self.publish_devtools_event_typed(event);
-//RS         }
-//RS     }
-//RS     fn push_devtools_event(&self, event: JetDevtoolsEvent) -> Result<u64, String> {
-//RS         let mut devtools = self.devtools_lock();
-//RS         let sequence = match devtools.envelope.latest_sequence() {
-//RS             Some(sequence) => sequence
-//RS                 .checked_add(1)
-//RS                 .ok_or_else(|| "devtools event sequence exhausted".to_string())?,
-//RS             None => 1,
-//RS         };
-//RS         let mut recording = self.recording.lock().map_err(|_| {
-//RS             "devtools recording state is unavailable because its lock is poisoned".to_string()
-//RS         })?;
-//RS         if let Some(state) = recording.as_mut() {
-//RS             let recorded = SessionEvent::new(
-//RS                 sequence,
-//RS                 event.timestamp_ms,
-//RS                 event.source().to_string(),
-//RS                 event.kind().to_string(),
-//RS                 event.entity().to_string(),
-//RS                 event.fields_json().to_string(),
-//RS                 event.payload_json().map(str::to_string),
-//RS             )
-//RS             .map_err(recording_error)?;
-//RS             state
-//RS                 .recording
-//RS                 .append_event(recorded)
-//RS                 .map_err(recording_error)?;
-//RS         }
-//RS         let assigned = devtools.envelope.push(event);
-//RS         if let Some(state) = recording.as_mut() {
-//RS             let mut cursor = state.recording.replay();
-//RS             for _ in 0..state.recording.event_count() {
-//RS                 cursor
-//RS                     .step_forward(&state.recording)
-//RS                     .map_err(recording_error)?;
-//RS             }
-//RS             state.cursor = cursor;
-//RS             state.checkpoints.clear();
-//RS         }
-//RS         Ok(assigned)
-//RS     }
-//RS 
-//RS     fn devtools_lock(&self) -> std::sync::MutexGuard<'_, DevtoolsState> {
-//RS         match self.devtools.lock() {
-//RS             Ok(guard) => guard,
-//RS             Err(poisoned) => poisoned.into_inner(),
-//RS         }
-//RS     }
-//RS     fn sync_replay_cursor(&self, projection: &ReplayProjection) {
-//RS         self.devtools_lock()
-//RS             .envelope
-//RS             .set_cursor(projection.sequence());
-//RS     }
-//RS 
-//RS     pub fn mark_last_good(&self, revision: &str, program: &str) {
-//RS         if revision.is_empty() {
-//RS             return;
-//RS         }
-//RS         *self.last_good_revision.lock().unwrap() = revision.to_string();
-//RS         *self.last_good_program.lock().unwrap() = program.to_string();
-//RS     }
-//RS 
-//RS     /// Retain the last successful payload for a view.  The payload is opaque
-//RS     /// to the broker: each view remains responsible for its own report shape,
-//RS     /// while reconnecting clients can recover the last-good projection after
-//RS     /// a failed source rebuild.
-//RS     pub fn remember_last_good_view(
-//RS         &self,
-//RS         kind: &str,
-//RS         source_id: &str,
-//RS         revision: &str,
-//RS         payload: &str,
-//RS     ) {
-//RS         if !matches!(kind, "graph" | "debugger" | "runtime")
-//RS             || revision.is_empty()
-//RS             || payload.is_empty()
-//RS             || payload.len() > MAX_RETAINED_VIEW_BYTES
-//RS 
-//RS         {
-//RS             return;
-//RS         }
-//RS         self.last_good_views.lock().unwrap().insert(
-//RS             kind.to_string(),
-//RS             RetainedView {
-//RS                 revision: revision.to_string(),
-//RS                 source_id: source_id.to_string(),
-//RS                 payload: payload.to_string(),
-//RS             },
-//RS         );
-//RS     }
-//RS 
-//RS     pub(crate) fn last_good_view(
-//RS         &self,
-//RS         kind: &str,
-//RS         source_id: &str,
-//RS     ) -> Option<(String, String)> {
-//RS         let views = self.last_good_views.lock().unwrap();
-//RS         let view = views.get(kind)?;
-//RS         if view.source_id != source_id {
-//RS             return None;
-//RS         }
-//RS         Some((view.revision.clone(), view.payload.clone()))
-//RS     }
-//RS 
-//RS     fn clear_last_good_view(&self, kind: &str) {
-//RS         self.last_good_views.lock().unwrap().remove(kind);
-//RS     }
-//RS 
-//RS     pub fn accept_transaction(&self, request: &str, revision: &str) {
-//RS         let before = request_string(request, "revision");
-//RS         let client = request_string(request, "client_id");
-//RS         let kind = request_string(request, "op");
-//RS         self.select_project_source(&request_string(request, "source_id"));
-//RS         self.observe_source(revision);
-//RS         if !revision.is_empty() {
-//RS             *self.accepted_revision.lock().unwrap() = revision.to_string();
-//RS         }
-//RS         self.push_receipt(Receipt {
-//RS             kind: if kind.is_empty() {
-//RS                 "source".to_string()
-//RS             } else {
-//RS                 kind
-//RS             },
-//RS             status: "accepted".to_string(),
-//RS             before,
-//RS             after: revision.to_string(),
-//RS             client,
-//RS             output: request_string(request, "output"),
-//RS             live: None,
-//RS         });
-//RS     }
-//RS 
-//RS     pub fn refuse_transaction(&self, request: &str, current_revision: &str) {
-//RS         self.observe_source(current_revision);
-//RS         self.push_receipt(Receipt {
-//RS             kind: request_string(request, "op"),
-//RS             status: "refused".to_string(),
-//RS             before: request_string(request, "revision"),
-//RS             after: current_revision.to_string(),
-//RS             client: request_string(request, "client_id"),
-//RS             output: request_string(request, "output"),
-//RS             live: None,
-//RS         });
-//RS     }
-//RS 
-//RS     pub(crate) fn lock_source_transaction(&self) -> std::sync::MutexGuard<'_, ()> {
-//RS         self.source_transactions.lock_source_transaction()
-//RS     }
-//RS 
-//RS     pub fn record_command(&self, request: &str) {
-//RS         let action = request_string(request, "action_id");
-//RS         self.select_project_source(&request_string(request, "source_id"));
-//RS         if action.contains("test") {
-//RS             *self.test_state.lock().unwrap() = "requested".to_string();
-//RS         }
-//RS         self.push_receipt(Receipt {
-//RS             kind: if action.is_empty() {
-//RS                 "command".to_string()
-//RS             } else {
-//RS                 action
-//RS             },
-//RS             status: "requested".to_string(),
-//RS             before: String::new(),
-//RS             after: self.current_revision.lock().unwrap().clone(),
-//RS             client: request_string(request, "client_id"),
-//RS             output: self.selected_output.lock().unwrap().clone(),
-//RS             live: None,
-//RS         });
-//RS     }
-//RS 
-//RS     pub fn record_debug(&self, request: &str) {
-//RS         self.select_project_source(&request_string(request, "source_id"));
-//RS         let mut debugger = self.debugger.lock().unwrap();
-//RS         if request_bool(request, "stop") || request_string(request, "op") == "disconnect" {
-//RS             *debugger = idle_debugger();
-//RS             drop(debugger);
-//RS             self.clear_last_good_view("debugger");
-//RS             return;
-//RS         }
-//RS         debugger.state = "active".to_string();
-//RS         set_if_present(&mut debugger.session_id, &request_string(request, "session_id"));
-//RS         set_if_present(&mut debugger.source_id, &request_string(request, "source_id"));
-//RS         set_if_present(&mut debugger.revision, &request_string(request, "revision"));
-//RS         set_if_present(&mut debugger.tier, &request_string(request, "tier"));
-//RS     }
-//RS 
-//RS     pub fn record_debug_response(&self, request: &str, response: &str) {
-//RS         self.record_debug(request);
-//RS         if request_bool(request, "stop") {
-//RS             return;
-//RS         }
-//RS         let Some(snapshot) = find_debugger_snapshot(response) else {
-//RS             return;
-//RS         };
-//RS         let (source_id, debugger_revision) = {
-//RS             let mut debugger = self.debugger.lock().unwrap();
-//RS             let state = match snapshot.state.as_str() {
-//RS                 "running" => "active".to_string(),
-//RS                 "stopped" => "idle".to_string(),
-//RS                 state => state.to_string(),
-//RS             };
-//RS             *debugger = DebuggerSnapshot {
-//RS                 state,
-//RS                 session_id: snapshot.session_id,
-//RS                 source_id: snapshot.source_id,
-//RS                 revision: snapshot.revision,
-//RS                 tier: snapshot.tier,
-//RS             };
-//RS             let source_id = if debugger.source_id.is_empty() {
-//RS                 request_string(request, "source_id")
-//RS             } else {
-//RS                 debugger.source_id.clone()
-//RS             };
-//RS             (source_id, debugger.revision.clone())
-//RS         };
-//RS         let revision = if debugger_revision.is_empty() {
-//RS             let requested = request_string(request, "revision");
-//RS             if requested.is_empty() {
-//RS                 self.current_revision.lock().unwrap().clone()
-//RS             } else {
-//RS                 requested
-//RS             }
-//RS         } else {
-//RS             debugger_revision
-//RS         };
-//RS         self.remember_last_good_view("debugger", &source_id, &revision, response);
-//RS     }
-//RS 
-//RS     pub fn select_project_source(&self, source_id: &str) {
-//RS         if !source_id.is_empty() {
-//RS             *self.selected_source_id.lock().unwrap() = source_id.to_string();
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn select_project_source_from_payload(&self, payload: &str) {
-//RS         if let Some(source_id) = json_string_any(payload, "source_id") {
-//RS             self.select_project_source(&source_id);
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn select_output(&self, request: &str) {
-//RS         let output = request_string(request, "output");
-//RS         let target = request_string(request, "target");
-//RS         self.select_output_values(
-//RS             (!output.is_empty()).then_some(output.as_str()),
-//RS             (!target.is_empty()).then_some(target.as_str()),
-//RS         );
-//RS     }
-//RS 
-//RS     pub(crate) fn select_output_values(&self, output: Option<&str>, target: Option<&str>) {
-//RS         if let Some(output) = output.filter(|output| !output.is_empty()) {
-//RS             *self.selected_output.lock().unwrap() = output.to_string();
-//RS         }
-//RS         if let Some(target) = target.filter(|target| !target.is_empty()) {
-//RS             *self.selected_target.lock().unwrap() = target.to_string();
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn id(&self) -> &str {
-//RS         &self.id
-//RS     }
-//RS 
-//RS     /// Return the terminal's current semantic target, if one was selected.
-//RS     /// Game controls use this fact rather than manufacturing an actor id.
-//RS     pub fn selected_target(&self) -> Option<String> {
-//RS         let target = self.selected_target.lock().unwrap().clone();
-//RS         (!target.is_empty()).then_some(target)
-//RS     }
-//RS 
-//RS     /// Return the terminal's current selected output, if one was selected.
-//RS     pub fn selected_output(&self) -> Option<String> {
-//RS         let output = self.selected_output.lock().unwrap().clone();
-//RS         (!output.is_empty()).then_some(output)
-//RS     }
-//RS     pub fn application_port(&self) -> u16 {
-//RS         self.application_port
-//RS     }
-//RS 
-//RS     pub fn canvas_port(&self) -> u16 {
-//RS         self.canvas_port
-//RS     }
-//RS 
-//RS     pub fn application_host(&self) -> &str {
-//RS         &self.application_host
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         let current = self.current_revision.lock().unwrap().clone();
-//RS         let accepted = self.accepted_revision.lock().unwrap().clone();
-//RS         let last_good = self.last_good_revision.lock().unwrap().clone();
-//RS         let program = self.last_good_program.lock().unwrap().clone();
-//RS         let state = self.state.lock().unwrap().clone();
-//RS         let diagnostic_code = self.diagnostic_code.lock().unwrap().clone();
-//RS         let diagnostic = self.diagnostic.lock().unwrap().clone();
-//RS         let diagnostic_revision = self.diagnostic_revision.lock().unwrap().clone();
-//RS         let selected_source_id = self.selected_source_id.lock().unwrap().clone();
-//RS         let output = self.selected_output.lock().unwrap().clone();
-//RS         let target = self.selected_target.lock().unwrap().clone();
-//RS         let debugger = self.debugger.lock().unwrap().clone();
-//RS         let tests = self.test_state.lock().unwrap().clone();
-//RS         let views = self.last_good_views.lock().unwrap().clone();
-//RS         let live_lineage = self.live_lineage.lock().unwrap().clone();
-//RS         let live_values = self.live_values.lock().unwrap().clone();
-//RS         let (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id) =
-//RS             live_lineage
-//RS                 .as_ref()
-//RS                 .map(|lineage| {
-//RS                     (
-//RS                         json_value(&lineage.protocol),
-//RS                         json_value(&lineage.session_id),
-//RS                         json_value(&lineage.source_id),
-//RS                         json_value(&lineage.build_id),
-//RS                         json_value(&lineage.revision),
-//RS                         json_value(&lineage.world_id),
-//RS                     )
-//RS                 })
-//RS                 .unwrap_or_else(|| {
-//RS                     (
-//RS                         "null".to_string(),
-//RS                         "null".to_string(),
-//RS                         "null".to_string(),
-//RS                         "null".to_string(),
-//RS                         "null".to_string(),
-//RS                         "null".to_string(),
-//RS                     )
-//RS                 });
-//RS         let live_values_json = live_values
-//RS             .iter()
-//RS             .map(live_value_fact_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let now = Instant::now();
-//RS         let mut client_state = self.clients.lock().unwrap();
-//RS         expire_clients(&mut client_state, now);
-//RS         let clients = client_state.len();
-//RS         let mut listener_entries = Vec::new();
-//RS         if self.canvas_port != 0 {
-//RS             listener_entries.push(format!(
-//RS                 "\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}",
-//RS                 json_value(&self.canvas_host),
-//RS                 self.canvas_port,
-//RS             ));
-//RS         }
-//RS         if self.application_port != 0 {
-//RS             listener_entries.push(format!(
-//RS                 "\"application\":{{\"host\":{},\"port\":{},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}",
-//RS                 json_value(&self.application_host),
-//RS                 self.application_port,
-//RS             ));
-//RS         }
-//RS         let listeners = format!("{{{}}}", listener_entries.join(","));
-//RS         let custom_server_listener = if self.application_port != 0 {
-//RS             "\"application\""
-//RS         } else {
-//RS             "null"
-//RS         };
-//RS         let receipts = self
-//RS             .receipts
-//RS             .lock()
-//RS             .unwrap()
-//RS             .iter()
-//RS             .map(|receipt| {
-//RS                 let live = receipt
-//RS                     .live
-//RS                     .as_ref()
-//RS                     .map(live_receipt_json)
-//RS                     .unwrap_or_else(|| "null".to_string());
-//RS                 format!(
-//RS                     "{{\"kind\":{},\"status\":{},\"before\":{},\"after\":{},\"client\":{},\"output\":{},\"live\":{}}}",
-//RS                     json_value(&receipt.kind),
-//RS                     json_value(&receipt.status),
-//RS                     json_value(&receipt.before),
-//RS                     json_value(&receipt.after),
-//RS                     json_value(&receipt.client),
-//RS                     json_value(&receipt.output),
-//RS                     live,
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "{{\"id\":{},\"protocol\":{},\"session_id\":{},\"source_id\":{},\"build_id\":{},\"revision\":{},\"world_id\":{},\"values\":[{}],\"entry\":{},\"project_context\":{{\"source_id\":{}}},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"diagnostic_revision\":{},\"last_good_views\":{{\"graph\":{},\"debugger\":{},\"runtime\":{}}},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{},\"session_id\":{},\"source_id\":{},\"revision\":{},\"tier\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{}}}}}",
-//RS             json_value(&self.id),
-//RS             live_protocol,
-//RS             live_session_id,
-//RS             live_source_id,
-//RS             live_build_id,
-//RS             live_revision,
-//RS             live_world_id,
-//RS             live_values_json,
-//RS             json_value(&self.entry),
-//RS             json_value(&selected_source_id),
-//RS             json_value(&current),
-//RS             json_value(&accepted),
-//RS             json_value(&last_good),
-//RS             json_value(&program),
-//RS             json_value(&state),
-//RS             json_value(&diagnostic_code),
-//RS             json_value(&diagnostic),
-//RS             json_value(&diagnostic_revision),
-//RS             retained_view_json(views.get("graph")),
-//RS             retained_view_json(views.get("debugger")),
-//RS             retained_view_json(views.get("runtime")),
-//RS             clients,
-//RS             json_value(&output),
-//RS             json_value(&target),
-//RS             json_value(&debugger.state),
-//RS             json_value(&debugger.session_id),
-//RS             json_value(&debugger.source_id),
-//RS             json_value(&debugger.revision),
-//RS             json_value(&debugger.tier),
-//RS             json_value(&tests),
-//RS             self.receipts.lock().unwrap().len(),
-//RS             receipts,
-//RS             listeners,
-//RS             custom_server_listener
-//RS         )
-//RS     }
-//RS 
-//RS     fn push_receipt(&self, receipt: Receipt) {
-//RS         let mut receipts = self.receipts.lock().unwrap();
-//RS         receipts.push(receipt);
-//RS         if receipts.len() > MAX_RECEIPTS {
-//RS             receipts.remove(0);
-//RS         }
-//RS     }
-//RS 
-//RS     /// Register this resident session as one scoped canonical event sink.
-//RS     /// The returned guard must be retained for the desired lifecycle.
-//RS     pub fn install_devtools_event_sink(
-//RS         self: &std::sync::Arc<Self>,
-//RS     ) -> JetDevtoolsEventSinkGuard {
-//RS         let sink: std::sync::Arc<dyn JetDevtoolsEventSink> = self.clone();
-//RS         jet_foundation::Devtools::jet_devtools_install_event_sink(sink)
-//RS     }
-//RS }
-//RS impl Drop for ResidentDevSession {
-//RS     fn drop(&mut self) {
-//RS         jet_foundation::DevtoolsControl::jet_devtools_clear_commands(&self.id);
-//RS         let _ = jet_foundation::Devtools::jet_devtools_clear_game_control_relays();
-//RS     }
-//RS }
-//RS 
-//RS impl JetDevtoolsEventSink for ResidentDevSession {
-//RS     fn publish(&self, event: JetDevtoolsEvent) {
-//RS         let _ = self.publish_devtools_event_typed(event);
-//RS     }
-//RS }
-//RS 
-//RS fn trim_capture_facts(facts: &mut Vec<CaptureSessionFact>) {
-//RS     if facts.len() > MAX_RECEIPTS {
-//RS         let drop_count = facts.len() - MAX_RECEIPTS;
-//RS         facts.drain(..drop_count);
-//RS     }
-//RS }
-//RS 
-//RS impl crate::CapturePolicy::RecordIndexCaptureSink for ResidentDevSession {
-//RS     type Error = String;
-//RS 
-//RS     fn record_capture_start(&mut self, fact: &CaptureStartFact) -> Result<(), Self::Error> {
-//RS         ResidentDevSession::record_capture_start(self, fact)
-//RS     }
-//RS 
-//RS     fn record_capture_fault(&mut self, fact: &CaptureFaultFact) -> Result<(), Self::Error> {
-//RS         ResidentDevSession::record_capture_fault(self, fact)
-//RS     }
-//RS }
-//RS 
-//RS fn persist_outcome_fact(outcome: &PersistOutcome) -> LiveValueFact {
-//RS     match outcome {
-//RS         PersistOutcome::Kept(entry) => LiveValueFact {
-//RS             value_id: entry.stable_key(),
-//RS             type_identity: entry.type_identity().to_string(),
-//RS             disposition: "kept".to_string(),
-//RS             reason: String::new(),
-//RS         },
-//RS         PersistOutcome::Migrated(entry) => LiveValueFact {
-//RS             value_id: entry.stable_key(),
-//RS             type_identity: entry.type_identity().to_string(),
-//RS             disposition: "migrated".to_string(),
-//RS             reason: "published schema migration applied".to_string(),
-//RS         },
-//RS         PersistOutcome::Reset { reason, entry } => LiveValueFact {
-//RS             value_id: entry.stable_key(),
-//RS             type_identity: entry.type_identity().to_string(),
-//RS             disposition: "reset".to_string(),
-//RS             reason: reason.clone(),
-//RS         },
-//RS         PersistOutcome::Rejected { reason, prior } => {
-//RS             let type_identity = match reason {
-//RS                 PersistRejectReason::MigrationUnavailable { from, .. }
-//RS                 | PersistRejectReason::ShapeChanged { from, .. } => from.clone(),
-//RS                 _ => "unavailable".to_string(),
-//RS             };
-//RS             LiveValueFact {
-//RS                 value_id: prior.key(),
-//RS                 type_identity,
-//RS                 disposition: "rejected".to_string(),
-//RS                 reason: reason.message(),
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn optional_fact(value: &str) -> Option<String> {
-//RS     (!value.is_empty()).then(|| value.to_string())
-//RS }
-//RS 
-//RS fn devtools_session_state(value: &str) -> DevtoolsSessionState {
-//RS     match value {
-//RS         "starting" => DevtoolsSessionState::Starting,
-//RS         "building" => DevtoolsSessionState::Building,
-//RS         "ready" => DevtoolsSessionState::Ready,
-//RS         "error" => DevtoolsSessionState::Error,
-//RS         "stopped" => DevtoolsSessionState::Stopped,
-//RS         _ => DevtoolsSessionState::Unavailable,
-//RS     }
-//RS }
-//RS fn live_value_fact_json(value: &LiveValueFact) -> String {
-//RS     format!(
-//RS         "{{\"value_id\":{},\"type_identity\":{},\"disposition\":{},\"reason\":{}}}",
-//RS         json_value(&value.value_id),
-//RS         json_value(&value.type_identity),
-//RS         json_value(&value.disposition),
-//RS         json_value(&value.reason),
-//RS     )
-//RS }
-//RS 
-//RS fn live_receipt_json(receipt: &LiveReceipt) -> String {
-//RS     let values = receipt
-//RS         .values
-//RS         .iter()
-//RS         .map(live_value_fact_json)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"protocol\":{},\"session_id\":{},\"source_id\":{},\"build_id\":{},\"revision\":{},\"world_id\":{},\"values\":[{}]}}",
-//RS         json_value(&receipt.lineage.protocol),
-//RS         json_value(&receipt.lineage.session_id),
-//RS         json_value(&receipt.lineage.source_id),
-//RS         json_value(&receipt.lineage.build_id),
-//RS         json_value(&receipt.lineage.revision),
-//RS         json_value(&receipt.lineage.world_id),
-//RS         values,
-//RS     )
-//RS }
-//RS 
-//RS fn expire_clients(clients: &mut HashMap<String, Instant>, now: Instant) {
-//RS     clients.retain(|_, seen| now.saturating_duration_since(*seen) <= CLIENT_TTL);
-//RS }
-//RS 
-//RS pub(crate) fn client_id_is_valid(client: &str) -> bool {
-//RS     !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any(char::is_control)
-//RS }
-//RS 
-//RS fn retained_view_json(view: Option<&RetainedView>) -> String {
-//RS     let view = view.cloned().unwrap_or_default();
-//RS     format!(
-//RS         "{{\"revision\":{},\"source_id\":{},\"payload\":{}}}",
-//RS         json_value(&view.revision),
-//RS         json_value(&view.source_id),
-//RS         json_value(&view.payload)
-//RS     )
-//RS }
-//RS 
-//RS fn recording_error(error: RecordingError) -> String {
-//RS     error.to_string()
-//RS }
-//RS 
-//RS fn recording_unavailable() -> String {
-//RS     "devtools recording is unavailable because source/build identity is not installed".to_string()
-//RS }
-//RS 
-//RS fn recording_unavailable_json(session_id: &str, reason: &str) -> String {
-//RS     format!(
-//RS         "{{\"protocol\":{},\"session_id\":{},\"kind\":\"session.recording\",\"available\":false,\"reason\":{},\"events\":[],\"cursor\":null,\"divergence\":null}}",
-//RS         json_value(JET_DEVTOOLS_PROTOCOL),
-//RS         json_value(session_id),
-//RS         json_value(reason),
-//RS     )
-//RS }
-//RS 
-//RS fn recording_json_for_state(
-//RS     session_id: &str,
-//RS     state: &ResidentRecordingState,
-//RS     projection: &ReplayProjection,
-//RS     divergence: Option<&DevtoolsRecordingDivergence>,
-//RS ) -> String {
-//RS     let identity = state.recording.identity();
-//RS     let events = state
-//RS         .recording
-//RS         .events()
-//RS         .map(recording_event_json)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let checkpoints = {
-//RS         let mut values = state.checkpoints.iter().collect::<Vec<_>>();
-//RS         values.sort_by(|(left, _), (right, _)| left.cmp(right));
-//RS         values
-//RS             .into_iter()
-//RS             .map(|(name, checkpoint)| recording_checkpoint_json(name, checkpoint))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     };
-//RS     let current_event = projection
-//RS         .event()
-//RS         .map(recording_event_json)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     let truncation = &state.recording.truncation();
-//RS     let divergence = divergence
-//RS         .map(recording_divergence_json)
-//RS         .unwrap_or_else(|| "null".to_string());
-//RS     format!(
-//RS         "{{\"protocol\":{},\"session_id\":{},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{},\"build_id\":{}}},\"events\":[{}],\"truncation\":{{\"event_limit\":{},\"byte_limit\":{},\"retained_events\":{},\"retained_bytes\":{},\"dropped_events\":{},\"dropped_bytes\":{},\"event_limit_reached\":{},\"byte_limit_reached\":{},\"first_dropped_sequence\":{},\"last_dropped_sequence\":{},\"first_retained_sequence\":{},\"last_retained_sequence\":{}}},\"cursor\":{{\"identity\":{{\"source_id\":{},\"build_id\":{}}},\"generation\":{},\"position\":{},\"sequence\":{},\"timestamp_ms\":{},\"previous_sequence\":{},\"next_sequence\":{},\"event\":{}}},\"checkpoints\":[{}],\"divergence\":{}}}",
-//RS         json_value(JET_DEVTOOLS_PROTOCOL),
-//RS         json_value(session_id),
-//RS         json_value(&identity.source_id),
-//RS         json_value(&identity.build_id),
-//RS         events,
-//RS         truncation.event_limit,
-//RS         truncation.byte_limit,
-//RS         truncation.retained_events,
-//RS         truncation.retained_bytes,
-//RS         truncation.dropped_events,
-//RS         truncation.dropped_bytes,
-//RS         truncation.event_limit_reached,
-//RS         truncation.byte_limit_reached,
-//RS         optional_u64_json(truncation.first_dropped_sequence),
-//RS         optional_u64_json(truncation.last_dropped_sequence),
-//RS         optional_u64_json(truncation.first_retained_sequence),
-//RS         optional_u64_json(truncation.last_retained_sequence),
-//RS         json_value(&projection.identity().source_id),
-//RS         json_value(&projection.identity().build_id),
-//RS         state.cursor.generation(),
-//RS         projection.position(),
-//RS         optional_u64_json(projection.sequence()),
-//RS         optional_u64_json(projection.timestamp_ms()),
-//RS         optional_u64_json(projection.previous_sequence()),
-//RS         optional_u64_json(projection.next_sequence()),
-//RS         current_event,
-//RS         checkpoints,
-//RS         divergence,
-//RS     )
-//RS }
-//RS 
-//RS fn recording_event_json(event: &SessionEvent) -> String {
-//RS     format!(
-//RS         "{{\"sequence\":{},\"timestamp_ms\":{},\"source\":{},\"kind\":{},\"entity\":{},\"fields\":{},\"payload\":{}}}",
-//RS         event.sequence(),
-//RS         event.timestamp_ms(),
-//RS         json_value(event.source()),
-//RS         json_value(event.kind()),
-//RS         json_value(event.entity()),
-//RS         event.fields_json(),
-//RS         event.payload_json().unwrap_or("null"),
-//RS     )
-//RS }
-//RS 
-//RS fn recording_checkpoint_json(name: &str, checkpoint: &SessionCheckpoint) -> String {
-//RS     format!(
-//RS         "{{\"name\":{},\"identity\":{{\"source_id\":{},\"build_id\":{}}},\"generation\":{},\"position\":{},\"sequence\":{},\"timestamp_ms\":{}}}",
-//RS         json_value(name),
-//RS         json_value(&checkpoint.identity().source_id),
-//RS         json_value(&checkpoint.identity().build_id),
-//RS         checkpoint.generation(),
-//RS         checkpoint.position(),
-//RS         optional_u64_json(checkpoint.sequence()),
-//RS         optional_u64_json(checkpoint.timestamp_ms()),
-//RS     )
-//RS }
-//RS 
-//RS fn recording_divergence_json(divergence: &DevtoolsRecordingDivergence) -> String {
-//RS     format!(
-//RS         "{{\"divergent\":{},\"reason\":{},\"expected_sequence\":{},\"actual_sequence\":{},\"retained_events\":{},\"dropped_events\":{}}}",
-//RS         divergence.divergent,
-//RS         divergence
-//RS             .reason
-//RS             .as_deref()
-//RS             .map(json_value)
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         optional_u64_json(divergence.expected_sequence),
-//RS         optional_u64_json(divergence.actual_sequence),
-//RS         divergence.retained_events,
-//RS         divergence.dropped_events,
-//RS     )
-//RS }
-//RS 
-//RS fn optional_u64_json(value: Option<u64>) -> String {
-//RS     value
-//RS         .map(|value| value.to_string())
-//RS         .unwrap_or_else(|| "null".to_string())
-//RS }
-//RS 
-//RS fn json_value(value: &str) -> String {
-//RS     if value.is_empty() {
-//RS         "null".to_string()
-//RS     } else {
-//RS         format!("\"{}\"", json_escape(value))
-//RS     }
-//RS }
-//RS 
-//RS fn unix_time_ms() -> u64 {
-//RS     SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_millis()
-//RS         .try_into()
-//RS         .unwrap_or(u64::MAX)
-//RS }
-//RS 
-//RS fn json_string(value: &DataTree) -> Option<&str> {
-//RS     match value {
-//RS         DataTree::Text(value) | DataTree::TypedText(value) => Some(value),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn json_u64(value: &DataTree) -> Option<u64> {
-//RS     match value {
-//RS         DataTree::Int(value) if *value >= 0 => (*value).try_into().ok(),
-//RS         DataTree::Float(value)
-//RS             if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
-//RS         {
-//RS             Some(*value as u64)
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn validate_devtools_text(value: &str, label: &str) -> Result<(), String> {
-//RS     if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any(char::is_control) {
-//RS         return Err(format!("devtools {label} is empty, too long, or contains control text"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS fn string_array_json(values: &[String]) -> String {
-//RS     format!(
-//RS         "[{}]",
-//RS         values
-//RS             .iter()
-//RS             .map(|value| json_value(value))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn retention_fact_json(fact: &jet_foundation::HotSwap::StateRetentionFact) -> String {
-//RS     let (decision, reason) = match &fact.decision {
-//RS         StateRetentionDecision::Preserve => ("preserve", ""),
-//RS         StateRetentionDecision::Fresh { reason } => ("fresh", reason.as_str()),
-//RS     };
-//RS     format!(
-//RS         "{{\"key\":{},\"decision\":{},\"reason\":{}}}",
-//RS         json_value(&fact.key),
-//RS         json_value(decision),
-//RS         json_value(reason),
-//RS     )
-//RS }
-//RS 
-//RS fn game_change_fact_json(fact: &jet_foundation::Game::JetGameChangeFact) -> String {
-//RS     format!(
-//RS         "{{\"path\":{},\"kind\":{},\"old_schema_id\":{},\"new_schema_id\":{},\"migration\":{},\"reason\":{}}}",
-//RS         json_value(&fact.path),
-//RS         json_value(fact.kind.as_str()),
-//RS         fact.old_schema_id
-//RS             .as_deref()
-//RS             .map(json_value)
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         fact.new_schema_id
-//RS             .as_deref()
-//RS             .map(json_value)
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         json_value(fact.migration.as_str()),
-//RS         json_value(&fact.reason),
-//RS     )
-//RS }
-//RS 
-//RS pub(crate) fn render_json(value: &DataTree) -> String {
-//RS     match value {
-//RS         DataTree::Null => "null".to_string(),
-//RS         DataTree::Bool(value) => value.to_string(),
-//RS         DataTree::Int(value) => value.to_string(),
-//RS         DataTree::Float(value) => value.to_string(),
-//RS         DataTree::Number(value) => value.clone(),
-//RS         DataTree::TypedText(value) | DataTree::Text(value) => json_value(value),
-//RS         DataTree::Bytes(values) => format!(
-//RS             "[{}]",
-//RS             values
-//RS                 .iter()
-//RS                 .map(|value| value.to_string())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS         DataTree::Array(values) => format!(
-//RS             "[{}]",
-//RS             values.iter().map(render_json).collect::<Vec<_>>().join(",")
-//RS         ),
-//RS         DataTree::Object(values) => format!(
-//RS             "{{{}}}",
-//RS             values
-//RS                 .iter()
-//RS                 .map(|(key, value)| format!("{}:{}", json_value(key), render_json(value)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS     }
-//RS }
-//RS fn object_map(value: &DataTree) -> Option<BTreeMap<String, DataTree>> {
-//RS     match value {
-//RS         DataTree::Object(values) => Some(values.iter().cloned().collect()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn request_string(text: &str, key: &str) -> String {
-//RS     let Ok(value) = parse_json(text) else {
-//RS         return String::new();
-//RS     };
-//RS     object_map(&value)
-//RS         .and_then(|object| object.get(key).and_then(json_string).map(str::to_string))
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS fn request_bool(text: &str, key: &str) -> bool {
-//RS     let Ok(value) = parse_json(text) else {
-//RS         return false;
-//RS     };
-//RS     object_map(&value)
-//RS         .and_then(|object| object.get(key).cloned())
-//RS         .is_some_and(|value| matches!(value, DataTree::Bool(true)))
-//RS }
-//RS 
-//RS fn set_if_present(target: &mut String, value: &str) {
-//RS     if !value.is_empty() {
-//RS         *target = value.to_string();
-//RS     }
-//RS }
-//RS 
-//RS fn idle_debugger() -> DebuggerSnapshot {
-//RS     DebuggerSnapshot {
-//RS         state: "idle".to_string(),
-//RS         session_id: String::new(),
-//RS         source_id: String::new(),
-//RS         revision: String::new(),
-//RS         tier: String::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn json_string_any(text: &str, key: &str) -> Option<String> {
-//RS     let value = parse_json(text).ok()?;
-//RS 
-//RS     fn find(value: &DataTree, key: &str) -> Option<String> {
-//RS         match value {
-//RS             DataTree::Object(object) => {
-//RS                 if let Some(DataTree::Text(value) | DataTree::TypedText(value)) =
-//RS                     object.iter().find_map(|(name, value)| (name == key).then_some(value))
-//RS                 {
-//RS                     return Some(value.clone());
-//RS                 }
-//RS                 object.iter().find_map(|(_, value)| find(value, key))
-//RS             }
-//RS             DataTree::Array(values) => values.iter().find_map(|value| find(value, key)),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     find(&value, key)
-//RS }
-//RS 
-//RS fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
-//RS     let value = parse_json(text).ok()?;
-//RS 
-//RS     fn find(value: &DataTree) -> Option<DebuggerSnapshot> {
-//RS         match value {
-//RS             DataTree::Object(object) => {
-//RS                 if let Some(DataTree::Text(session_id) | DataTree::TypedText(session_id)) =
-//RS                     object.iter().find_map(|(name, value)| (name == "id").then_some(value))
-//RS                 {
-//RS                     if session_id.starts_with("canvas-debug-") {
-//RS                         let field = |key: &str| {
-//RS                             object
-//RS                                 .iter()
-//RS                                 .find_map(|(name, value)| (name == key).then_some(value))
-//RS                                 .and_then(|value| match value {
-//RS                                     DataTree::Text(value) | DataTree::TypedText(value) => {
-//RS                                         Some(value.clone())
-//RS                                     }
-//RS                                     _ => None,
-//RS                                 })
-//RS                                 .unwrap_or_default()
-//RS                         };
-//RS                         return Some(DebuggerSnapshot {
-//RS                             state: field("state"),
-//RS                             session_id: session_id.clone(),
-//RS                             source_id: field("source_id"),
-//RS                             revision: field("revision"),
-//RS                             tier: field("tier"),
-//RS                         });
-//RS                     }
-//RS                 }
-//RS                 object.iter().find_map(|(_, value)| find(value))
-//RS             }
-//RS             DataTree::Array(values) => values.iter().find_map(find),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     find(&value)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{ResidentDevSession, CLIENT_TTL, MAX_CLIENTS};
-//RS     use std::time::Instant;
-//RS 
-//RS     #[test]
-//RS     fn one_session_keeps_history_last_good_and_listener_boundaries() {
-//RS         let session = ResidentDevSession::new("app.jet", 8080, 49152);
-//RS         session.note_client("a");
-//RS         session.note_client("b");
-//RS         session.select_output(r#"{"output":"web","target":"browser","client_id":"a"}"#);
-//RS         session.accept_transaction(
-//RS             r#"{"op":"replace_source","revision":"old","client_id":"a","output":"web"}"#,
-//RS             "new",
-//RS         );
-//RS         session.mark_last_good("new", "web-build-2");
-//RS         let json = session.json();
-//RS         assert!(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":8080"));
-//RS         assert!(json.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":49152"));
-//RS         assert!(json.contains("\"listener\":\"canvas\""));
-//RS         assert!(json.contains("\"listener\":\"application\""));
-//RS         assert!(!json.contains("\"shared\":true"));
-//RS         assert!(json.contains("\"accepted_revision\":\"new\""));
-//RS         assert!(json.contains("\"last_good_program\":\"web-build-2\""));
-//RS         assert!(json.contains("\"clients\":2"));
-//RS         assert!(json.contains("\"run\":{\"output\":\"web\",\"target\":\"browser\"}"));
-//RS         assert!(json.contains("\"count\":1"));
-//RS         assert!(json.contains("\"status\":\"accepted\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn session_json_lists_only_bound_listeners() {
-//RS         let app = ResidentDevSession::new("app.jet", 0, 49152).json();
-//RS         assert!(app.contains("\"listeners\":{\"application\""));
-//RS         assert!(!app.contains("\"listeners\":{\"canvas\""));
-//RS         assert!(!app.contains("\"workbench\""));
-//RS 
-//RS         let canvas = ResidentDevSession::new("app.jet", 4567, 0).json();
-//RS         assert!(canvas.contains("\"listeners\":{\"canvas\""));
-//RS         assert!(!canvas.contains("\"listeners\":{\"application\""));
-//RS         assert!(!canvas.contains("\"workbench\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canvas_command_metadata_does_not_change_program_selection() {
-//RS         let session = ResidentDevSession::new("app.jet", 4567, 49152);
-//RS         session.record_command(
-//RS             r#"{"action_id":"canvas.command:run","output":"native","target":"desktop","client_id":"b"}"#,
-//RS         );
-//RS         let json = session.json();
-//RS         assert!(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":4567"));
-//RS         assert!(json.contains("\"run\":{\"output\":null,\"target\":null}"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn failed_rebuild_keeps_last_good_views_and_current_source_diagnostics() {
-//RS         let session = ResidentDevSession::new("app.jet", 4567, 49152);
-//RS         session.observe_source("good-revision");
-//RS         session.mark_last_good("good-revision", "web-build-1");
-//RS         session.remember_last_good_view("graph", "", "good-revision", "graph-good");
-//RS         session.remember_last_good_view("debugger", "", "good-revision", "debug-good");
-//RS         session.remember_last_good_view("runtime", "", "good-revision", "runtime-good");
-//RS 
-//RS         session.observe_source("broken-revision");
-//RS         session.mark_error("E0102", "Error [E0102]: missing name");
-//RS         let json = session.json();
-//RS 
-//RS         for expected in [
-//RS             "\"source_revision\":\"broken-revision\"",
-//RS             "\"accepted_revision\":\"good-revision\"",
-//RS             "\"last_good_revision\":\"good-revision\"",
-//RS             "\"last_good_program\":\"web-build-1\"",
-//RS             "\"last_good_views\":{\"graph\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"graph-good\"},\"debugger\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"debug-good\"},\"runtime\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"runtime-good\"}}",
-//RS             "\"diagnostic_revision\":\"broken-revision\"",
-//RS             "\"state\":\"error\"",
-//RS             "\"diagnostic_code\":\"E0102\"",
-//RS             "Error [E0102]: missing name",
-//RS         ] {
-//RS             assert!(json.contains(expected), "session lost {expected}: {json}");
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn first_observed_source_is_the_accepted_session_baseline() {
-//RS         let session = ResidentDevSession::new("app.jet", 4567, 49152);
-//RS         session.observe_source("initial-revision");
-//RS         session.observe_source("current-revision");
-//RS         let json = session.json();
-//RS         assert!(json.contains("\"source_revision\":\"current-revision\""));
-//RS         assert!(json.contains("\"accepted_revision\":\"initial-revision\""));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn disconnect_reconnect_preserves_project_run_debug_and_last_good_state() {
-//RS         let session = ResidentDevSession::new("app.jet", 4567, 49152);
-//RS         session.note_client("canvas-a");
-//RS         session.select_output(r#"{"output":"web","target":"browser"}"#);
-//RS         session.accept_transaction(
-//RS             r#"{"op":"replace_source","source_id":"helper.jet","revision":"old","client_id":"canvas-a"}"#,
-//RS             "accepted-revision",
-//RS         );
-//RS         session.mark_last_good("accepted-revision", "web-build-2");
-//RS         session.record_debug_response(
-//RS             r#"{"schema_version":1,"revision":"accepted-revision","source_id":"helper.jet","commands":["s"]}"#,
-//RS             r#"{"schema":"jet.report/v1","canvas":{"protocol":"jet.canvas.debug","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","source_id":"helper.jet","revision":"accepted-revision"}}}"#,
-//RS         );
-//RS 
-//RS         session.drop_client("canvas-a");
-//RS         session.note_client("canvas-b");
-//RS         let json = session.json();
-//RS         for expected in [
-//RS             "\"project_context\":{\"source_id\":\"helper.jet\"}",
-//RS             "\"accepted_revision\":\"accepted-revision\"",
-//RS             "\"last_good_program\":\"web-build-2\"",
-//RS             "\"run\":{\"output\":\"web\",\"target\":\"browser\"}",
-//RS             "\"debugger\":{\"state\":\"active\",\"session_id\":\"canvas-debug-1\"",
-//RS             "\"clients\":1",
-//RS         ] {
-//RS             assert!(json.contains(expected), "reconnect lost {expected}: {json}");
-//RS         }
-//RS 
-//RS         session.record_debug(
-//RS             r#"{"schema_version":1,"revision":"accepted-revision","source_id":"helper.jet","session_id":"canvas-debug-1","stop":true}"#,
-//RS         );
-//RS         assert!(session.json().contains("\"debugger\":{\"state\":\"idle\",\"session_id\":null"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn client_registry_is_bounded_and_expires_before_admission() {
-//RS         let session = ResidentDevSession::new("app.jet", 4567, 49152);
-//RS         for index in 0..MAX_CLIENTS {
-//RS             session.note_client(&format!("client-{index}"));
-//RS         }
-//RS         session.note_client("overflow");
-//RS         assert!(session.json().contains(&format!("\"clients\":{MAX_CLIENTS}")));
-//RS 
-//RS         let expired = Instant::now()
-//RS             .checked_sub(CLIENT_TTL + std::time::Duration::from_millis(1))
-//RS             .expect("test instant must have a past value");
-//RS         session.clients.lock().unwrap().insert("expired".into(), expired);
-//RS         session.note_client("replacement");
-//RS         assert!(session.json().contains("\"clients\":256"));
-//RS     }
-//RS }
-// END-PORT-PENDING 0783 crates/jet-devserver/src/Session.rs:1824-2906
+use std.sync.[Arc, MutexGuard]
+use std.time.[Instant, SystemTime, UNIX_EPOCH]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, parse_json]
+use jet_foundation.HotSwap.[StateRetentionFact, StateRetentionDecision]
+use jet_foundation.Game.[JetGameChangeFact]
+use jet_devserver.CapturePolicy.[RecordIndexCaptureSink]
 
+impl ResidentDevSession {
+    // Rust: crates/jet-devserver/src/Session.rs:1824
+    fn publish_session_state(self: &Self, state_name: String, code: String, diagnostic: String) -> Unit {
+        lifecycle :: devtools_session_state(state_name)
+        freshness :: if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(unix_time_ms()) else -> JetDevtoolsFreshnessFact.stale(unix_time_ms())
+        {
+            state :: self.devtools_lock()
+            state.envelope.set_lifecycle(lifecycle)
+            state.envelope.set_freshness(freshness)
+        }
+        fields :: "{{\"state\":{json_value(state_name)},\"code\":{json_value(code)},\"diagnostic\":{json_value(diagnostic)}}}"
+        if JetDevtoolsEvent.from_parts(unix_time_ms(), "devserver", "state", "session", ^fields) == .Ok(event) {
+            _ :: self.publish_devtools_event_typed(^event)
+        }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1852
+    fn push_devtools_event(self: &Self, event: JetDevtoolsEvent) -> U64 Err! {
+        devtools :: self.devtools_lock()
+        sequence :: if devtools.envelope.latest_sequence() == {
+            .Val(sequence) -> sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted")
+            .None -> 1
+        }
+        recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
+        if recording.as_mut() == .Val(state) {
+            recorded :: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
+                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)?
+            state.recording.append_event(^recorded).map_err(recording_error)?
+        }
+        assigned :: devtools.envelope.push(^event)
+        if recording.as_mut() == .Val(state) {
+            cursor := state.recording.replay()
+            for _ in 0..state.recording.event_count() -> _ :: cursor.step_forward(&state.recording).map_err(recording_error)?
+            state.cursor = ^cursor
+            state.checkpoints.clear()
+        }
+        assigned
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1893
+    fn devtools_lock(self: &Self) -> MutexGuard<DevtoolsState> {
+        // GATE #4494: poison recovery retains the resident envelope.
+        if self.devtools.lock() == { .Ok(guard) -> guard, .Err(poisoned) -> poisoned.into_inner() }
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1899
+    fn sync_replay_cursor(self: &Self, projection: &ReplayProjection) -> Unit { self.devtools_lock().envelope.set_cursor(projection.sequence()) }
+    // Rust: crates/jet-devserver/src/Session.rs:1905
+    pub fn mark_last_good(self: &Self, revision: String, program: String) -> Unit {
+        if revision.is_empty() -> return
+        *self.last_good_revision.lock().unwrap() = revision
+        *self.last_good_program.lock().unwrap() = program
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1917
+    pub fn remember_last_good_view(self: &Self, kind: String, source_id: String, revision: String, payload: String) -> Unit {
+        if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision.is_empty() || payload.is_empty() || payload.len() > MAX_RETAINED_VIEW_BYTES -> return
+        self.last_good_views.lock().unwrap().insert(kind, RetainedView { revision, source_id, payload })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1942
+    pub fn last_good_view(self: &Self, kind: String, source_id: String) -> (String,String)? {
+        views :: self.last_good_views.lock().unwrap()
+        view :: views.get(kind)?
+        if view.source_id != source_id -> return .None
+        .Val((~view.revision, ~view.payload))
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1955
+    fn clear_last_good_view(self: &Self, kind: String) -> Unit { self.last_good_views.lock().unwrap().remove(kind) }
+    // Rust: crates/jet-devserver/src/Session.rs:1959
+    pub fn accept_transaction(self: &Self, request: String, revision: String) -> Unit {
+        before :: request_string(request, "revision")
+        client :: request_string(request, "client_id")
+        kind :: request_string(request, "op")
+        self.select_project_source(request_string(request, "source_id"))
+        self.observe_source(revision)
+        if !revision.is_empty() -> *self.accepted_revision.lock().unwrap() = revision
+        self.push_receipt(Receipt { kind: if kind.is_empty() -> "source" else -> ^kind, status: "accepted", before: ^before,
+            after: revision, client: ^client, output: request_string(request, "output"), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1983
+    pub fn refuse_transaction(self: &Self, request: String, current_revision: String) -> Unit {
+        self.observe_source(current_revision)
+        self.push_receipt(Receipt { kind: request_string(request, "op"), status: "refused", before: request_string(request, "revision"),
+            after: current_revision, client: request_string(request, "client_id"), output: request_string(request, "output"), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:1996
+    pub fn lock_source_transaction(self: &Self) -> MutexGuard<Unit> { self.source_transactions.lock_source_transaction() }
+    // Rust: crates/jet-devserver/src/Session.rs:2000
+    pub fn record_command(self: &Self, request: String) -> Unit {
+        action :: request_string(request, "action_id")
+        self.select_project_source(request_string(request, "source_id"))
+        if action.contains("test") -> *self.test_state.lock().unwrap() = "requested"
+        self.push_receipt(Receipt { kind: if action.is_empty() -> "command" else -> ^action, status: "requested", before: "",
+            after: ~*self.current_revision.lock().unwrap(), client: request_string(request, "client_id"),
+            output: ~*self.selected_output.lock().unwrap(), live: .None })
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2021
+    pub fn record_debug(self: &Self, request: String) -> Unit {
+        self.select_project_source(request_string(request, "source_id"))
+        debugger :: self.debugger.lock().unwrap()
+        if request_bool(request, "stop") || request_string(request, "op") == "disconnect" {
+            *debugger = idle_debugger()
+            drop(debugger)
+            self.clear_last_good_view("debugger")
+            return
+        }
+        debugger.state = "active"
+        set_if_present(&debugger.session_id, request_string(request, "session_id"))
+        set_if_present(&debugger.source_id, request_string(request, "source_id"))
+        set_if_present(&debugger.revision, request_string(request, "revision"))
+        set_if_present(&debugger.tier, request_string(request, "tier"))
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2037
+    pub fn record_debug_response(self: &Self, request: String, response: String) -> Unit {
+        self.record_debug(request)
+        if request_bool(request, "stop") -> return
+        snapshot :: find_debugger_snapshot(response) ?? return
+        (source_id, debugger_revision) :: {
+            debugger :: self.debugger.lock().unwrap()
+            state :: if snapshot.state == { "running" -> "active", "stopped" -> "idle", state -> ~state }
+            *debugger = DebuggerSnapshot { state: ^state, session_id: ^snapshot.session_id, source_id: ^snapshot.source_id,
+                revision: ^snapshot.revision, tier: ^snapshot.tier }
+            source_id :: if debugger.source_id.is_empty() -> request_string(request, "source_id") else -> ~debugger.source_id
+            (source_id, ~debugger.revision)
+        }
+        revision :: if debugger_revision.is_empty() {
+            requested :: request_string(request, "revision")
+            if requested.is_empty() -> ~*self.current_revision.lock().unwrap() else -> ^requested
+        } else -> ^debugger_revision
+        self.remember_last_good_view("debugger", source_id, revision, response)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2079
+    pub fn select_project_source(self: &Self, source_id: String) -> Unit {
+        if !source_id.is_empty() -> *self.selected_source_id.lock().unwrap() = source_id
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2085
+    pub fn select_project_source_from_payload(self: &Self, payload: String) -> Unit {
+        if json_string_any(payload, "source_id") == .Val(source_id) -> self.select_project_source(source_id)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2091
+    pub fn select_output(self: &Self, request: String) -> Unit {
+        output :: request_string(request, "output")
+        target :: request_string(request, "target")
+        self.select_output_values(if !output.is_empty() -> .Val(&output) else -> .None, if !target.is_empty() -> .Val(&target) else -> .None)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2100
+    pub fn select_output_values(self: &Self, output: &String?, target: &String?) -> Unit {
+        if output.filter((output) -> !output.is_empty()) == .Val(output) -> *self.selected_output.lock().unwrap() = ~output
+        if target.filter((target) -> !target.is_empty()) == .Val(target) -> *self.selected_target.lock().unwrap() = ~target
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2109
+    pub fn id(self: &Self) -> &String { &self.id }
+    // Rust: crates/jet-devserver/src/Session.rs:2115
+    pub fn selected_target(self: &Self) -> String? {
+        target :: ~*self.selected_target.lock().unwrap()
+        if !target.is_empty() -> .Val(^target) else -> .None
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2121
+    pub fn selected_output(self: &Self) -> String? {
+        output :: ~*self.selected_output.lock().unwrap()
+        if !output.is_empty() -> .Val(^output) else -> .None
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2125
+    pub fn application_port(self: &Self) -> U16 { self.application_port }
+    // Rust: crates/jet-devserver/src/Session.rs:2129
+    pub fn canvas_port(self: &Self) -> U16 { self.canvas_port }
+    // Rust: crates/jet-devserver/src/Session.rs:2133
+    pub fn application_host(self: &Self) -> &String { &self.application_host }
+    // Rust: crates/jet-devserver/src/Session.rs:2137
+    pub fn json(self: &Self) -> String {
+        current :: ~*self.current_revision.lock().unwrap()
+        accepted :: ~*self.accepted_revision.lock().unwrap()
+        last_good :: ~*self.last_good_revision.lock().unwrap()
+        program :: ~*self.last_good_program.lock().unwrap()
+        state :: ~*self.state.lock().unwrap()
+        diagnostic_code :: ~*self.diagnostic_code.lock().unwrap()
+        diagnostic :: ~*self.diagnostic.lock().unwrap()
+        diagnostic_revision :: ~*self.diagnostic_revision.lock().unwrap()
+        selected_source_id :: ~*self.selected_source_id.lock().unwrap()
+        output :: ~*self.selected_output.lock().unwrap()
+        target :: ~*self.selected_target.lock().unwrap()
+        debugger :: ~*self.debugger.lock().unwrap()
+        tests :: ~*self.test_state.lock().unwrap()
+        views :: ~*self.last_good_views.lock().unwrap()
+        live_lineage :: ~*self.live_lineage.lock().unwrap()
+        live_values :: ~*self.live_values.lock().unwrap()
+        (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id) :: live_lineage.as_ref().map((lineage) ->
+            (json_value(lineage.protocol), json_value(lineage.session_id), json_value(lineage.source_id), json_value(lineage.build_id),
+                json_value(lineage.revision), json_value(lineage.world_id))).unwrap_or(("null", "null", "null", "null", "null", "null"))
+        live_values_json :: live_values.iter().map(live_value_fact_json).collect::<[String]>().join(",")
+        now :: Instant.now()
+        client_state :: self.clients.lock().unwrap()
+        expire_clients(&client_state, now)
+        clients :: client_state.len()
+        listener_entries: [String] := []
+        if self.canvas_port != 0 {
+            listener_entries.push("\"canvas\":{{\"host\":{json_value(self.canvas_host)},\"port\":{self.canvas_port},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}")
+        }
+        if self.application_port != 0 {
+            listener_entries.push("\"application\":{{\"host\":{json_value(self.application_host)},\"port\":{self.application_port},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}")
+        }
+        listeners :: "{{{listener_entries.join(",")}}}"
+        custom_server_listener :: if self.application_port != 0 -> "\"application\"" else -> "null"
+        receipts :: self.receipts.lock().unwrap().iter().map((receipt) -> {
+            live :: receipt.live.as_ref().map(live_receipt_json).unwrap_or("null")
+            "{{\"kind\":{json_value(receipt.kind)},\"status\":{json_value(receipt.status)},\"before\":{json_value(receipt.before)},\"after\":{json_value(receipt.after)},\"client\":{json_value(receipt.client)},\"output\":{json_value(receipt.output)},\"live\":{live}}}"
+        }).collect::<[String]>().join(",")
+        "{{\"id\":{json_value(self.id)},\"protocol\":{live_protocol},\"session_id\":{live_session_id},\"source_id\":{live_source_id},\"build_id\":{live_build_id},\"revision\":{live_revision},\"world_id\":{live_world_id},\"values\":[{live_values_json}],\"entry\":{json_value(self.entry)},\"project_context\":{{\"source_id\":{json_value(selected_source_id)}}},\"source_revision\":{json_value(current)},\"accepted_revision\":{json_value(accepted)},\"last_good_revision\":{json_value(last_good)},\"last_good_program\":{json_value(program)},\"state\":{json_value(state)},\"diagnostic_code\":{json_value(diagnostic_code)},\"diagnostic\":{json_value(diagnostic)},\"diagnostic_revision\":{json_value(diagnostic_revision)},\"last_good_views\":{{\"graph\":{retained_view_json(views.get("graph"))},\"debugger\":{retained_view_json(views.get("debugger"))},\"runtime\":{retained_view_json(views.get("runtime"))}}},\"clients\":{clients},\"run\":{{\"output\":{json_value(output)},\"target\":{json_value(target)}}},\"debugger\":{{\"state\":{json_value(debugger.state)},\"session_id\":{json_value(debugger.session_id)},\"source_id\":{json_value(debugger.source_id)},\"revision\":{json_value(debugger.revision)},\"tier\":{json_value(debugger.tier)}}},\"tests\":{{\"state\":{json_value(tests)}}},\"history\":{{\"count\":{self.receipts.lock().unwrap().len()},\"receipts\":[{receipts}]}},\"listeners\":{listeners},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{custom_server_listener}}}}}"
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2270
+    fn push_receipt(self: &Self, receipt: Receipt) -> Unit {
+        receipts :: self.receipts.lock().unwrap()
+        receipts.push(^receipt)
+        if receipts.len() > MAX_RECEIPTS -> receipts.remove(0)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2280
+    pub fn install_devtools_event_sink(self: &Arc<Self>) -> JetDevtoolsEventSinkGuard {
+        // GATE #4494: scoped Arc-backed callback registration.
+        sink: Arc<JetDevtoolsEventSink> :: self.clone()
+        jet_foundation.Devtools.jet_devtools_install_event_sink(^sink)
+    }
+    // Rust: crates/jet-devserver/src/Session.rs:2288
+    fn drop(self: &Self) -> Unit {
+        jet_foundation.DevtoolsControl.jet_devtools_clear_commands(self.id)
+        _ :: jet_foundation.Devtools.jet_devtools_clear_game_control_relays()
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2294
+impl JetDevtoolsEventSink for ResidentDevSession {
+    // Rust: crates/jet-devserver/src/Session.rs:2295
+    fn publish(self: &Self, event: JetDevtoolsEvent) -> Unit { _ :: self.publish_devtools_event_typed(^event) }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2300
+fn trim_capture_facts(facts: &[CaptureSessionFact]) -> Unit {
+    if facts.len() > MAX_RECEIPTS {
+        drop_count :: facts.len() - MAX_RECEIPTS
+        facts.drain(..drop_count)
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2307
+impl RecordIndexCaptureSink for ResidentDevSession {
+    type Error = String
+    // Rust: crates/jet-devserver/src/Session.rs:2310
+    fn record_capture_start(self: &Self, fact: &CaptureStartFact) -> Unit Err! { ResidentDevSession.record_capture_start(self, fact) }
+    // Rust: crates/jet-devserver/src/Session.rs:2314
+    fn record_capture_fault(self: &Self, fact: &CaptureFaultFact) -> Unit Err! { ResidentDevSession.record_capture_fault(self, fact) }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2319
+fn persist_outcome_fact(outcome: &PersistOutcome) -> LiveValueFact {
+    if outcome == {
+        .Kept(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "kept", reason: "" }
+        .Migrated(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "migrated", reason: "published schema migration applied" }
+        .Reset { reason, entry } -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "reset", reason: ~reason }
+        .Rejected { reason, prior } -> {
+            type_identity :: if reason == { .MigrationUnavailable { from, .. } | .ShapeChanged { from, .. } -> ~from, _ -> "unavailable" }
+            LiveValueFact { value_id: prior.key(), type_identity: ^type_identity, disposition: "rejected", reason: reason.message() }
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2355
+fn optional_fact(value: String) -> String? { if !value.is_empty() -> .Val(value) else -> .None }
+// Rust: crates/jet-devserver/src/Session.rs:2359
+fn devtools_session_state(value: String) -> DevtoolsSessionState {
+    if value == { "starting" -> .Starting, "building" -> .Building, "ready" -> .Ready, "error" -> .Error, "stopped" -> .Stopped, _ -> .Unavailable }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2369
+fn live_value_fact_json(value: &LiveValueFact) -> String {
+    "{{\"value_id\":{json_value(value.value_id)},\"type_identity\":{json_value(value.type_identity)},\"disposition\":{json_value(value.disposition)},\"reason\":{json_value(value.reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2379
+fn live_receipt_json(receipt: &LiveReceipt) -> String {
+    values :: receipt.values.iter().map(live_value_fact_json).collect::<[String]>().join(",")
+    "{{\"protocol\":{json_value(receipt.lineage.protocol)},\"session_id\":{json_value(receipt.lineage.session_id)},\"source_id\":{json_value(receipt.lineage.source_id)},\"build_id\":{json_value(receipt.lineage.build_id)},\"revision\":{json_value(receipt.lineage.revision)},\"world_id\":{json_value(receipt.lineage.world_id)},\"values\":[{values}]}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2398
+fn expire_clients(clients: &[String:Instant], now: Instant) -> Unit { clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= CLIENT_TTL) }
+// Rust: crates/jet-devserver/src/Session.rs:2402
+pub fn client_id_is_valid(client: String) -> Bool { !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any((ch) -> ch.is_control()) }
+// Rust: crates/jet-devserver/src/Session.rs:2406
+fn retained_view_json(view: &RetainedView?) -> String {
+    retained :: view.cloned().unwrap_or(RetainedView { revision: "", source_id: "", payload: "" })
+    "{{\"revision\":{json_value(retained.revision)},\"source_id\":{json_value(retained.source_id)},\"payload\":{json_value(retained.payload)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2416
+fn recording_error(error: RecordingError) -> String { error.to_string() }
+// Rust: crates/jet-devserver/src/Session.rs:2420
+fn recording_unavailable() -> String { "devtools recording is unavailable because source/build identity is not installed" }
+// Rust: crates/jet-devserver/src/Session.rs:2424
+fn recording_unavailable_json(session_id: String, reason: String) -> String {
+    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":false,\"reason\":{json_value(reason)},\"events\":[],\"cursor\":null,\"divergence\":null}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2433
+fn recording_json_for_state(session_id: String, state: &ResidentRecordingState, projection: &ReplayProjection, divergence: &DevtoolsRecordingDivergence?) -> String {
+    identity :: state.recording.identity()
+    events :: state.recording.events().map(recording_event_json).collect::<[String]>().join(",")
+    names := state.checkpoints.keys().cloned().collect::<[String]>()
+    names.sort()
+    checkpoints :: names.into_iter().map((name) -> recording_checkpoint_json(name, state.checkpoints.get(name).unwrap())).collect::<[String]>().join(",")
+    current_event :: projection.event().map(recording_event_json).unwrap_or("null")
+    truncation :: state.recording.truncation()
+    divergence_json :: divergence.map(recording_divergence_json).unwrap_or("null")
+    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{json_value(identity.source_id)},\"build_id\":{json_value(identity.build_id)}}},\"events\":[{events}],\"truncation\":{{\"event_limit\":{truncation.event_limit},\"byte_limit\":{truncation.byte_limit},\"retained_events\":{truncation.retained_events},\"retained_bytes\":{truncation.retained_bytes},\"dropped_events\":{truncation.dropped_events},\"dropped_bytes\":{truncation.dropped_bytes},\"event_limit_reached\":{truncation.event_limit_reached},\"byte_limit_reached\":{truncation.byte_limit_reached},\"first_dropped_sequence\":{optional_u64_json(truncation.first_dropped_sequence)},\"last_dropped_sequence\":{optional_u64_json(truncation.last_dropped_sequence)},\"first_retained_sequence\":{optional_u64_json(truncation.first_retained_sequence)},\"last_retained_sequence\":{optional_u64_json(truncation.last_retained_sequence)}}},\"cursor\":{{\"identity\":{{\"source_id\":{json_value(projection.identity().source_id)},\"build_id\":{json_value(projection.identity().build_id)}}},\"generation\":{state.cursor.generation()},\"position\":{projection.position()},\"sequence\":{optional_u64_json(projection.sequence())},\"timestamp_ms\":{optional_u64_json(projection.timestamp_ms())},\"previous_sequence\":{optional_u64_json(projection.previous_sequence())},\"next_sequence\":{optional_u64_json(projection.next_sequence())},\"event\":{current_event}}},\"checkpoints\":[{checkpoints}],\"divergence\":{divergence_json}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2496
+fn recording_event_json(event: &SessionEvent) -> String {
+    "{{\"sequence\":{event.sequence()},\"timestamp_ms\":{event.timestamp_ms()},\"source\":{json_value(event.source())},\"kind\":{json_value(event.kind())},\"entity\":{json_value(event.entity())},\"fields\":{event.fields_json()},\"payload\":{event.payload_json().unwrap_or("null")}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2509
+fn recording_checkpoint_json(name: String, checkpoint: &SessionCheckpoint) -> String {
+    "{{\"name\":{json_value(name)},\"identity\":{{\"source_id\":{json_value(checkpoint.identity().source_id)},\"build_id\":{json_value(checkpoint.identity().build_id)}}},\"generation\":{checkpoint.generation()},\"position\":{checkpoint.position()},\"sequence\":{optional_u64_json(checkpoint.sequence())},\"timestamp_ms\":{optional_u64_json(checkpoint.timestamp_ms())}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2522
+fn recording_divergence_json(divergence: &DevtoolsRecordingDivergence) -> String {
+    reason :: divergence.reason.as_ref().map(json_value).unwrap_or("null")
+    "{{\"divergent\":{divergence.divergent},\"reason\":{reason},\"expected_sequence\":{optional_u64_json(divergence.expected_sequence)},\"actual_sequence\":{optional_u64_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2538
+fn optional_u64_json(value: U64?) -> String { value.map((value) -> value.to_string()).unwrap_or("null") }
+// Rust: crates/jet-devserver/src/Session.rs:2544
+fn json_value(value: String) -> String { if value.is_empty() -> "null" else -> "\"{json_escape(value)}\"" }
+// Rust: crates/jet-devserver/src/Session.rs:2552
+fn unix_time_ms() -> U64 {
+    // GATE #4494: wall clock uses epoch duration with original failure/overflow behavior.
+    SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(U64.MAX)
+}
+// Rust: crates/jet-devserver/src/Session.rs:2561
+fn json_string(value: &DataTree) -> &String? { if value == { .Text(value) | .TypedText(value) -> .Val(value), _ -> .None } }
+// Rust: crates/jet-devserver/src/Session.rs:2568
+fn json_u64(value: &DataTree) -> U64? {
+    if value == {
+        .Int(value) if *value >= 0 -> U64.try_from(*value).ok()
+        .Float(value) if value.fract() == 0.0 && *value >= 0.0 && *value <= U64.MAX as F64 -> .Val(*value as U64)
+        _ -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2580
+fn validate_devtools_text(value: String, label: String) -> Unit Err! {
+    if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any((ch) -> ch.is_control()) -> return .Err("devtools {label} is empty, too long, or contains control text")
+}
+// Rust: crates/jet-devserver/src/Session.rs:2588
+fn string_array_json(values: &[String]) -> String { "[{values.iter().map((value) -> json_value(value)).collect::<[String]>().join(",")}]" }
+// Rust: crates/jet-devserver/src/Session.rs:2599
+fn retention_fact_json(fact: &StateRetentionFact) -> String {
+    (decision, reason) :: if fact.decision == { .Preserve -> ("preserve", ""), .Fresh { reason } -> ("fresh", reason) }
+    "{{\"key\":{json_value(fact.key)},\"decision\":{json_value(decision)},\"reason\":{json_value(reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2612
+fn game_change_fact_json(fact: &JetGameChangeFact) -> String {
+    old_schema :: fact.old_schema_id.as_ref().map(json_value).unwrap_or("null")
+    new_schema :: fact.new_schema_id.as_ref().map(json_value).unwrap_or("null")
+    "{{\"path\":{json_value(fact.path)},\"kind\":{json_value(fact.kind.as_str())},\"old_schema_id\":{old_schema},\"new_schema_id\":{new_schema},\"migration\":{json_value(fact.migration.as_str())},\"reason\":{json_value(fact.reason)}}}"
+}
+// Rust: crates/jet-devserver/src/Session.rs:2630
+pub fn render_json(value: &DataTree) -> String {
+    if value == {
+        .Null -> "null"
+        .Bool(value) -> value.to_string()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Number(value) -> ~value
+        .TypedText(value) | .Text(value) -> json_value(value)
+        .Bytes(values) -> "[{values.iter().map((value) -> value.to_string()).collect::<[String]>().join(",")}]"
+        .Array(values) -> "[{values.iter().map(render_json).collect::<[String]>().join(",")}]"
+        .Object(values) -> "{{{values.iter().map(((key, value)) -> "{json_value(key)}:{render_json(value)}").collect::<[String]>().join(",")}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2660
+fn object_map(value: &DataTree) -> [String:DataTree]? {
+    if value == { .Object(values) -> .Val(values.iter().cloned().collect()), _ -> .None }
+}
+// Rust: crates/jet-devserver/src/Session.rs:2667
+fn request_string(text: String, key: String) -> String {
+    value :: parse_json(text) ?? return ""
+    object_map(&value).and_then((object) -> object.get(key).and_then(json_string).map((text) -> text.to_string())).unwrap_or_default()
+}
+// Rust: crates/jet-devserver/src/Session.rs:2676
+fn request_bool(text: String, key: String) -> Bool {
+    value :: parse_json(text) ?? return false
+    object_map(&value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == { .Bool(true) -> true, _ -> false })
+}
+// Rust: crates/jet-devserver/src/Session.rs:2685
+fn set_if_present(target: &String, value: String) -> Unit { if !value.is_empty() -> *target = value }
+// Rust: crates/jet-devserver/src/Session.rs:2691
+fn idle_debugger() -> DebuggerSnapshot { DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" } }
+// Rust: crates/jet-devserver/src/Session.rs:2701
+fn json_string_any(text: String, key: String) -> String? {
+    value :: parse_json(text).ok()?
+    // Rust: crates/jet-devserver/src/Session.rs:2704
+    fn find(value: &DataTree, key: String) -> String? {
+        if value == {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None) == .Val(found) {
+                    if json_string(found) == .Val(text) -> return .Val(~text)
+                }
+                object.iter().find_map(((_, value)) -> find(value, key))
+            }
+            .Array(values) -> values.iter().find_map((value) -> find(value, key))
+            _ -> .None
+        }
+    }
+    find(&value, key)
+}
+// Rust: crates/jet-devserver/src/Session.rs:2722
+fn find_debugger_snapshot(text: String) -> DebuggerSnapshot? {
+    value :: parse_json(text).ok()?
+    // Rust: crates/jet-devserver/src/Session.rs:2725
+    fn find(value: &DataTree) -> DebuggerSnapshot? {
+        if value == {
+            .Object(object) -> {
+                if object.iter().find_map(((name, value)) -> if name == "id" -> .Val(value) else -> .None).and_then(json_string) == .Val(session_id) {
+                    if session_id.starts_with("canvas-debug-") {
+                        field :: (key: String) -> object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None)
+                            .and_then(json_string).map((text) -> text.to_string()).unwrap_or_default()
+                        return .Val(DebuggerSnapshot { state: field("state"), session_id: ~session_id, source_id: field("source_id"), revision: field("revision"), tier: field("tier") })
+                    }
+                }
+                object.iter().find_map(((_, value)) -> find(value))
+            }
+            .Array(values) -> values.iter().find_map(find)
+            _ -> .None
+        }
+    }
+    find(&value)
+}

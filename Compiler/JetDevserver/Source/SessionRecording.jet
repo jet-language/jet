@@ -1,1180 +1,470 @@
-// PORT-PENDING 0784 crates-jet-devserver-src-sessionrecording: crates/jet-devserver/src/SessionRecording.rs:1-1176
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Bounded replay state for the shared `jet.devtools.v1` observation stream.
-//RS //!
-//RS //! The recorder only understands the envelope's transport facts: sequence,
-//RS //! monotonic timestamp, source, kind, entity, and opaque JSON objects. It does
-//RS //! not assign meaning to an event family or manufacture a payload. Replay
-//RS //! cursors operate on an immutable recording generation and fail closed when
-//RS //! the source/build identity or retained window changes.
-//RS 
-//RS use crate::Session::JET_DEVTOOLS_PROTOCOL;
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::{json_escape, parse_json_with_limit};
-//RS use std::collections::{BTreeMap, VecDeque};
-//RS use std::fmt;
-//RS 
-//RS /// The largest event ring admitted by the shared devtools policy.
-//RS pub const MAX_RECORDING_EVENTS: usize = 256;
-//RS /// The largest byte budget admitted by the shared devtools policy.
-//RS pub const MAX_RECORDING_BYTES: usize = 1024 * 1024;
-//RS /// Maximum size of one identity or event text label.
-//RS pub const MAX_RECORDING_TEXT_BYTES: usize = 16 * 1024;
-//RS /// Maximum size of an identity component. IDs are opaque stable strings.
-//RS pub const MAX_ID_BYTES: usize = 1024;
-//RS 
-//RS /// Explicit source/build identity attached to one recording.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct SessionIdentity {
-//RS     pub source_id: String,
-//RS     pub build_id: String,
-//RS }
-//RS 
-//RS impl SessionIdentity {
-//RS     /// Construct and validate an identity without consulting ambient state.
-//RS     pub fn new(source_id: impl Into<String>, build_id: impl Into<String>) -> Result<Self, RecordingError> {
-//RS         let identity = Self {
-//RS             source_id: source_id.into(),
-//RS             build_id: build_id.into(),
-//RS         };
-//RS         validate_id(&identity.source_id, "source_id")?;
-//RS         validate_id(&identity.build_id, "build_id")?;
-//RS         Ok(identity)
-//RS     }
-//RS 
-//RS     /// Return whether both identity components match exactly.
-//RS     pub fn matches(&self, other: &Self) -> bool {
-//RS         self == other
-//RS     }
-//RS }
-//RS 
-//RS /// Hard limits for one in-memory session recording.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct SessionRecordingLimits {
-//RS     pub max_events: usize,
-//RS     pub max_bytes: usize,
-//RS }
-//RS 
-//RS impl SessionRecordingLimits {
-//RS     /// Declare a bounded policy. Zero and over-policy values are rejected when
-//RS     /// the policy is attached to a recording.
-//RS     pub const fn new(max_events: usize, max_bytes: usize) -> Self {
-//RS         Self {
-//RS             max_events,
-//RS             max_bytes,
-//RS         }
-//RS     }
-//RS 
-//RS     fn validate(self) -> Result<(), RecordingError> {
-//RS         if self.max_events == 0 || self.max_events > MAX_RECORDING_EVENTS {
-//RS             return Err(RecordingError::InvalidLimits {
-//RS                 max_events: self.max_events,
-//RS                 max_bytes: self.max_bytes,
-//RS             });
-//RS         }
-//RS         if self.max_bytes == 0 || self.max_bytes > MAX_RECORDING_BYTES {
-//RS             return Err(RecordingError::InvalidLimits {
-//RS                 max_events: self.max_events,
-//RS                 max_bytes: self.max_bytes,
-//RS             });
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Default for SessionRecordingLimits {
-//RS     fn default() -> Self {
-//RS         Self::new(MAX_RECORDING_EVENTS, MAX_RECORDING_BYTES)
-//RS     }
-//RS }
-//RS 
-//RS /// One opaque event fact copied from a devtools envelope.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct SessionEvent {
-//RS     sequence: u64,
-//RS     timestamp_ms: u64,
-//RS     source: String,
-//RS     kind: String,
-//RS     entity: String,
-//RS     fields_json: String,
-//RS     payload_json: Option<String>,
-//RS }
-//RS 
-//RS impl SessionEvent {
-//RS     /// Construct one event from envelope facts.
-//RS     ///
-//RS     /// `fields_json` and an explicitly supplied `payload_json` must be JSON
-//RS     /// objects. A `None` payload remains absent; no default value is added.
-//RS     pub fn new(
-//RS         sequence: u64,
-//RS         timestamp_ms: u64,
-//RS         source: impl Into<String>,
-//RS         kind: impl Into<String>,
-//RS         entity: impl Into<String>,
-//RS         fields_json: impl Into<String>,
-//RS         payload_json: Option<String>,
-//RS     ) -> Result<Self, RecordingError> {
-//RS         let source = source.into();
-//RS         let kind = kind.into();
-//RS         let entity = entity.into();
-//RS         validate_text(&source, "event source")?;
-//RS         validate_text(&kind, "event kind")?;
-//RS         validate_text(&entity, "event entity")?;
-//RS         let fields_json = canonical_object(&fields_json.into(), "event fields")?;
-//RS         let payload_json = match payload_json {
-//RS             None => None,
-//RS             Some(payload) => {
-//RS                 let value = parse_json_value(&payload, "event payload")?;
-//RS                 match value {
-//RS                     DataTree::Null => None,
-//RS                     value @ DataTree::Object(_) => Some(canonical_json(&value)),
-//RS                     _ => {
-//RS                         return Err(RecordingError::InvalidEvent(
-//RS                             "event payload must be an object or null".to_string(),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         };
-//RS         let event = Self {
-//RS             sequence,
-//RS             timestamp_ms,
-//RS             source,
-//RS             kind,
-//RS             entity,
-//RS             fields_json,
-//RS             payload_json,
-//RS         };
-//RS         if event.wire_len() > MAX_RECORDING_BYTES {
-//RS             return Err(RecordingError::EventTooLarge {
-//RS                 bytes: event.wire_len(),
-//RS                 limit: MAX_RECORDING_BYTES,
-//RS             });
-//RS         }
-//RS         Ok(event)
-//RS     }
-//RS 
-//RS     pub fn sequence(&self) -> u64 {
-//RS         self.sequence
-//RS     }
-//RS 
-//RS     pub fn timestamp_ms(&self) -> u64 {
-//RS         self.timestamp_ms
-//RS     }
-//RS 
-//RS     pub fn source(&self) -> &str {
-//RS         &self.source
-//RS     }
-//RS 
-//RS     pub fn kind(&self) -> &str {
-//RS         &self.kind
-//RS     }
-//RS 
-//RS     pub fn entity(&self) -> &str {
-//RS         &self.entity
-//RS     }
-//RS 
-//RS     /// Return the canonical opaque metadata object.
-//RS     pub fn fields_json(&self) -> &str {
-//RS         &self.fields_json
-//RS     }
-//RS 
-//RS     /// Return a payload only when its producer explicitly supplied one.
-//RS     pub fn payload_json(&self) -> Option<&str> {
-//RS         self.payload_json.as_deref()
-//RS     }
-//RS 
-//RS     fn wire_len(&self) -> usize {
-//RS         let payload = self.payload_json.as_deref().unwrap_or("null");
-//RS         format!(
-//RS             "{{\"sequence\":{},\"timestamp_ms\":{},\"source\":{},\"kind\":{},\"entity\":{},\"fields\":{},\"payload\":{}}}",
-//RS             self.sequence,
-//RS             self.timestamp_ms,
-//RS             quoted(&self.source),
-//RS             quoted(&self.kind),
-//RS             quoted(&self.entity),
-//RS             self.fields_json,
-//RS             payload,
-//RS         )
-//RS         .len()
-//RS     }
-//RS }
-//RS 
-//RS /// Why and how much of a recording was evicted.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct TruncationFacts {
-//RS     pub event_limit: usize,
-//RS     pub byte_limit: usize,
-//RS     pub retained_events: usize,
-//RS     pub retained_bytes: usize,
-//RS     pub dropped_events: u64,
-//RS     pub dropped_bytes: u64,
-//RS     pub event_limit_reached: bool,
-//RS     pub byte_limit_reached: bool,
-//RS     pub first_dropped_sequence: Option<u64>,
-//RS     pub last_dropped_sequence: Option<u64>,
-//RS     pub first_retained_sequence: Option<u64>,
-//RS     pub last_retained_sequence: Option<u64>,
-//RS }
-//RS 
-//RS impl TruncationFacts {
-//RS     pub fn truncated(&self) -> bool {
-//RS         self.dropped_events != 0
-//RS     }
-//RS }
-//RS 
-//RS /// Errors are typed so identity, ordering, and bound failures cannot be
-//RS /// confused with a domain event's opaque payload.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum RecordingError {
-//RS     InvalidIdentity(String),
-//RS     InvalidLimits { max_events: usize, max_bytes: usize },
-//RS     InvalidEnvelope(String),
-//RS     InvalidEvent(String),
-//RS     EnvelopeTooLarge { bytes: usize, limit: usize },
-//RS     EventTooLarge { bytes: usize, limit: usize },
-//RS     NonMonotonicSequence { previous: u64, next: u64 },
-//RS     NonMonotonicTime { previous: u64, next: u64 },
-//RS     IdentityMismatch {
-//RS         expected: SessionIdentity,
-//RS         found: SessionIdentity,
-//RS     },
-//RS     RecordingChanged,
-//RS     CheckpointUnavailable,
-//RS     CursorUnavailable { sequence: u64 },
-//RS     ReplayAtBeginning,
-//RS     ReplayAtEnd,
-//RS }
-//RS 
-//RS impl fmt::Display for RecordingError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::InvalidIdentity(message) => write!(formatter, "invalid session identity: {message}"),
-//RS             Self::InvalidLimits {
-//RS                 max_events,
-//RS                 max_bytes,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "session recording limits are outside the bounded policy: events={max_events}, bytes={max_bytes}"
-//RS             ),
-//RS             Self::InvalidEnvelope(message) => write!(formatter, "invalid jet.devtools.v1 envelope: {message}"),
-//RS             Self::InvalidEvent(message) => write!(formatter, "invalid jet.devtools.v1 event: {message}"),
-//RS             Self::EnvelopeTooLarge { bytes, limit } => {
-//RS                 write!(formatter, "devtools envelope is {bytes} bytes; limit is {limit}")
-//RS             }
-//RS             Self::EventTooLarge { bytes, limit } => {
-//RS                 write!(formatter, "devtools event is {bytes} bytes; limit is {limit}")
-//RS             }
-//RS             Self::NonMonotonicSequence { previous, next } => write!(
-//RS                 formatter,
-//RS                 "devtools event sequence moved backwards or repeated: previous={previous}, next={next}"
-//RS             ),
-//RS             Self::NonMonotonicTime { previous, next } => write!(
-//RS                 formatter,
-//RS                 "devtools event timestamp moved backwards: previous={previous}, next={next}"
-//RS             ),
-//RS             Self::IdentityMismatch { expected, found } => write!(
-//RS                 formatter,
-//RS                 "replay identity mismatch: expected source={} build={}, found source={} build={}",
-//RS                 expected.source_id, expected.build_id, found.source_id, found.build_id
-//RS             ),
-//RS             Self::RecordingChanged => write!(formatter, "recording changed after replay cursor creation"),
-//RS             Self::CheckpointUnavailable => write!(formatter, "checkpoint does not belong to the retained recording"),
-//RS             Self::CursorUnavailable { sequence } => {
-//RS                 write!(formatter, "replay sequence {sequence} is outside the retained window")
-//RS             }
-//RS             Self::ReplayAtBeginning => write!(formatter, "replay cursor is already at the beginning"),
-//RS             Self::ReplayAtEnd => write!(formatter, "replay cursor is already at the end"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for RecordingError {}
-//RS 
-//RS /// Direction for a one-event deterministic replay step.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum ReplayStep {
-//RS     Forward,
-//RS     Backward,
-//RS }
-//RS 
-//RS /// An immutable position bound to one recording generation.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReplayCursor {
-//RS     identity: SessionIdentity,
-//RS     generation: u64,
-//RS     position: usize,
-//RS     sequence: Option<u64>,
-//RS }
-//RS 
-//RS impl ReplayCursor {
-//RS     pub fn identity(&self) -> &SessionIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     /// Number of retained events consumed by this cursor.
-//RS     pub fn position(&self) -> usize {
-//RS         self.position
-//RS     }
-//RS 
-//RS     /// Sequence at the current position, or `None` before the first event.
-//RS     pub fn sequence(&self) -> Option<u64> {
-//RS         self.sequence
-//RS     }
-//RS 
-//RS     pub fn generation(&self) -> u64 {
-//RS         self.generation
-//RS     }
-//RS 
-//RS     pub fn seek(
-//RS         &mut self,
-//RS         recording: &SessionRecording,
-//RS         sequence: u64,
-//RS     ) -> Result<ReplayProjection, RecordingError> {
-//RS         self.check(recording)?;
-//RS         let Some(index) = recording
-//RS             .events
-//RS             .iter()
-//RS             .position(|event| event.sequence == sequence)
-//RS         else {
-//RS             return Err(RecordingError::CursorUnavailable { sequence });
-//RS         };
-//RS         self.position = index + 1;
-//RS         self.sequence = Some(sequence);
-//RS         recording.projection(self)
-//RS     }
-//RS 
-//RS     /// Seek to the newest event at or before an exact monotonic timestamp.
-//RS     /// Before the first retained timestamp, the cursor becomes the explicit
-//RS     /// before-start position rather than inventing an event.
-//RS     pub fn seek_time(
-//RS         &mut self,
-//RS         recording: &SessionRecording,
-//RS         timestamp_ms: u64,
-//RS     ) -> Result<ReplayProjection, RecordingError> {
-//RS         self.check(recording)?;
-//RS         if let Some(first) = recording.events.front() {
-//RS             if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 {
-//RS                 return Err(RecordingError::CursorUnavailable {
-//RS                     sequence: first.sequence,
-//RS                 });
-//RS             }
-//RS         }
-//RS         let position = recording
-//RS             .events
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter(|(_, event)| event.timestamp_ms <= timestamp_ms)
-//RS             .map(|(index, _)| index + 1)
-//RS             .last()
-//RS             .unwrap_or(0);
-//RS         self.position = position;
-//RS         self.sequence = position
-//RS             .checked_sub(1)
-//RS             .and_then(|index| recording.events.get(index))
-//RS             .map(|event| event.sequence);
-//RS         recording.projection(self)
-//RS     }
-//RS 
-//RS     pub fn step(
-//RS         &mut self,
-//RS         recording: &SessionRecording,
-//RS         direction: ReplayStep,
-//RS     ) -> Result<ReplayProjection, RecordingError> {
-//RS         match direction {
-//RS             ReplayStep::Forward => self.step_forward(recording),
-//RS             ReplayStep::Backward => self.step_backward(recording),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn step_forward(
-//RS         &mut self,
-//RS         recording: &SessionRecording,
-//RS     ) -> Result<ReplayProjection, RecordingError> {
-//RS         self.check(recording)?;
-//RS         let Some(event) = recording.events.get(self.position) else {
-//RS             return Err(RecordingError::ReplayAtEnd);
-//RS         };
-//RS         self.position += 1;
-//RS         self.sequence = Some(event.sequence);
-//RS         recording.projection(self)
-//RS     }
-//RS 
-//RS     pub fn step_backward(
-//RS         &mut self,
-//RS         recording: &SessionRecording,
-//RS     ) -> Result<ReplayProjection, RecordingError> {
-//RS         self.check(recording)?;
-//RS         if self.position == 0 {
-//RS             return Err(RecordingError::ReplayAtBeginning);
-//RS         }
-//RS         self.position -= 1;
-//RS         self.sequence = self
-//RS             .position
-//RS             .checked_sub(1)
-//RS             .and_then(|index| recording.events.get(index))
-//RS             .map(|event| event.sequence);
-//RS         recording.projection(self)
-//RS     }
-//RS 
-//RS     fn check(&self, recording: &SessionRecording) -> Result<(), RecordingError> {
-//RS         if !self.identity.matches(&recording.identity) {
-//RS             return Err(RecordingError::IdentityMismatch {
-//RS                 expected: self.identity.clone(),
-//RS                 found: recording.identity.clone(),
-//RS             });
-//RS         }
-//RS         if self.generation != recording.generation {
-//RS             return Err(RecordingError::RecordingChanged);
-//RS         }
-//RS         if self.position > recording.events.len() {
-//RS             return Err(RecordingError::CheckpointUnavailable);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS /// A replay restore point. It is bound to identity, generation, and retained
-//RS /// window so restoring against a different source/build fails closed.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct SessionCheckpoint {
-//RS     identity: SessionIdentity,
-//RS     generation: u64,
-//RS     position: usize,
-//RS     sequence: Option<u64>,
-//RS     timestamp_ms: Option<u64>,
-//RS     first_retained_sequence: Option<u64>,
-//RS     last_retained_sequence: Option<u64>,
-//RS }
-//RS 
-//RS impl SessionCheckpoint {
-//RS     pub fn identity(&self) -> &SessionIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     pub fn position(&self) -> usize {
-//RS         self.position
-//RS     }
-//RS 
-//RS     pub fn sequence(&self) -> Option<u64> {
-//RS         self.sequence
-//RS     }
-//RS 
-//RS     pub fn generation(&self) -> u64 {
-//RS         self.generation
-//RS     }
-//RS 
-//RS     pub fn timestamp_ms(&self) -> Option<u64> {
-//RS         self.timestamp_ms
-//RS     }
-//RS }
-//RS 
-//RS /// A read-only projection at one replay position. It carries the generic
-//RS /// event fact plus visible ring bounds and truncation evidence.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReplayProjection {
-//RS     identity: SessionIdentity,
-//RS     position: usize,
-//RS     sequence: Option<u64>,
-//RS     timestamp_ms: Option<u64>,
-//RS     event: Option<SessionEvent>,
-//RS     previous_sequence: Option<u64>,
-//RS     next_sequence: Option<u64>,
-//RS     limits: SessionRecordingLimits,
-//RS     truncation: TruncationFacts,
-//RS }
-//RS 
-//RS impl ReplayProjection {
-//RS     pub fn identity(&self) -> &SessionIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     pub fn position(&self) -> usize {
-//RS         self.position
-//RS     }
-//RS 
-//RS     pub fn sequence(&self) -> Option<u64> {
-//RS         self.sequence
-//RS     }
-//RS 
-//RS     pub fn timestamp_ms(&self) -> Option<u64> {
-//RS         self.timestamp_ms
-//RS     }
-//RS 
-//RS     pub fn event(&self) -> Option<&SessionEvent> {
-//RS         self.event.as_ref()
-//RS     }
-//RS 
-//RS     pub fn previous_sequence(&self) -> Option<u64> {
-//RS         self.previous_sequence
-//RS     }
-//RS 
-//RS     pub fn next_sequence(&self) -> Option<u64> {
-//RS         self.next_sequence
-//RS     }
-//RS 
-//RS     pub fn limits(&self) -> SessionRecordingLimits {
-//RS         self.limits
-//RS     }
-//RS 
-//RS     pub fn truncation(&self) -> &TruncationFacts {
-//RS         &self.truncation
-//RS     }
-//RS }
-//RS 
-//RS /// Mutable capture boundary whose replay views are immutable by generation.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct SessionRecording {
-//RS     identity: SessionIdentity,
-//RS     limits: SessionRecordingLimits,
-//RS     events: VecDeque<SessionEvent>,
-//RS     retained_bytes: usize,
-//RS     dropped_events: u64,
-//RS     dropped_bytes: u64,
-//RS     event_limit_reached: bool,
-//RS     byte_limit_reached: bool,
-//RS     first_dropped_sequence: Option<u64>,
-//RS     last_dropped_sequence: Option<u64>,
-//RS     last_sequence: Option<u64>,
-//RS     last_timestamp_ms: Option<u64>,
-//RS     generation: u64,
-//RS }
-//RS 
-//RS impl SessionRecording {
-//RS     pub fn new(identity: SessionIdentity) -> Result<Self, RecordingError> {
-//RS         Self::with_limits(identity, SessionRecordingLimits::default())
-//RS     }
-//RS 
-//RS     pub fn with_limits(
-//RS         identity: SessionIdentity,
-//RS         limits: SessionRecordingLimits,
-//RS     ) -> Result<Self, RecordingError> {
-//RS         validate_id(&identity.source_id, "source_id")?;
-//RS         validate_id(&identity.build_id, "build_id")?;
-//RS         limits.validate()?;
-//RS         Ok(Self {
-//RS             identity,
-//RS             limits,
-//RS             events: VecDeque::new(),
-//RS             retained_bytes: 0,
-//RS             dropped_events: 0,
-//RS             dropped_bytes: 0,
-//RS             event_limit_reached: false,
-//RS             byte_limit_reached: false,
-//RS             first_dropped_sequence: None,
-//RS             last_dropped_sequence: None,
-//RS             last_sequence: None,
-//RS             last_timestamp_ms: None,
-//RS             generation: 0,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn identity(&self) -> &SessionIdentity {
-//RS         &self.identity
-//RS     }
-//RS 
-//RS     pub fn limits(&self) -> SessionRecordingLimits {
-//RS         self.limits
-//RS     }
-//RS 
-//RS     pub fn event_count(&self) -> usize {
-//RS         self.events.len()
-//RS     }
-//RS 
-//RS     pub fn generation(&self) -> u64 {
-//RS         self.generation
-//RS     }
-//RS 
-//RS     pub fn retained_bytes(&self) -> usize {
-//RS         self.retained_bytes
-//RS     }
-//RS 
-//RS     pub fn events(&self) -> impl Iterator<Item = &SessionEvent> {
-//RS         self.events.iter()
-//RS     }
-//RS 
-//RS     /// Return explicit retained-window and eviction facts.
-//RS     pub fn truncation(&self) -> TruncationFacts {
-//RS         TruncationFacts {
-//RS             event_limit: self.limits.max_events,
-//RS             byte_limit: self.limits.max_bytes,
-//RS             retained_events: self.events.len(),
-//RS             retained_bytes: self.retained_bytes,
-//RS             dropped_events: self.dropped_events,
-//RS             dropped_bytes: self.dropped_bytes,
-//RS             event_limit_reached: self.event_limit_reached,
-//RS             byte_limit_reached: self.byte_limit_reached,
-//RS             first_dropped_sequence: self.first_dropped_sequence,
-//RS             last_dropped_sequence: self.last_dropped_sequence,
-//RS             first_retained_sequence: self.events.front().map(|event| event.sequence),
-//RS             last_retained_sequence: self.events.back().map(|event| event.sequence),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Append one already-validated protocol event while preserving its exact
-//RS     /// sequence and timestamp facts.
-//RS     pub fn append_event(&mut self, event: SessionEvent) -> Result<u64, RecordingError> {
-//RS         self.validate_next(&event)?;
-//RS         let sequence = event.sequence;
-//RS         self.append_event_unchecked(event);
-//RS         Ok(sequence)
-//RS     }
-//RS 
-//RS     /// Parse and append one complete `jet.devtools.v1` envelope. The whole
-//RS     /// batch is preflighted before the first event is retained.
-//RS     pub fn record_envelope(&mut self, bytes: &[u8]) -> Result<usize, RecordingError> {
-//RS         if bytes.len() > MAX_RECORDING_BYTES {
-//RS             return Err(RecordingError::EnvelopeTooLarge {
-//RS                 bytes: bytes.len(),
-//RS                 limit: MAX_RECORDING_BYTES,
-//RS             });
-//RS         }
-//RS         let events = parse_envelope(bytes, &self.identity)?;
-//RS         self.preflight(&events)?;
-//RS         let count = events.len();
-//RS         for event in events {
-//RS             self.append_event_unchecked(event);
-//RS         }
-//RS         Ok(count)
-//RS     }
-//RS 
-//RS     /// Open a cursor at the deterministic before-start position.
-//RS     pub fn replay(&self) -> ReplayCursor {
-//RS         ReplayCursor {
-//RS             identity: self.identity.clone(),
-//RS             generation: self.generation,
-//RS             position: 0,
-//RS             sequence: None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Open a replay only when the caller presents the exact source/build
-//RS     /// identity expected by this recording.
-//RS     pub fn replay_for(&self, identity: &SessionIdentity) -> Result<ReplayCursor, RecordingError> {
-//RS         validate_id(&identity.source_id, "source_id")?;
-//RS         validate_id(&identity.build_id, "build_id")?;
-//RS         if !self.identity.matches(identity) {
-//RS             return Err(RecordingError::IdentityMismatch {
-//RS                 expected: self.identity.clone(),
-//RS                 found: identity.clone(),
-//RS             });
-//RS         }
-//RS         Ok(self.replay())
-//RS     }
-//RS 
-//RS     pub fn projection(&self, cursor: &ReplayCursor) -> Result<ReplayProjection, RecordingError> {
-//RS         cursor.check(self)?;
-//RS         Ok(self.make_projection(cursor))
-//RS     }
-//RS 
-//RS     pub fn checkpoint(&self, cursor: &ReplayCursor) -> Result<SessionCheckpoint, RecordingError> {
-//RS         cursor.check(self)?;
-//RS         let timestamp_ms = cursor
-//RS             .position
-//RS             .checked_sub(1)
-//RS             .and_then(|index| self.events.get(index))
-//RS             .map(|event| event.timestamp_ms);
-//RS         Ok(SessionCheckpoint {
-//RS             identity: self.identity.clone(),
-//RS             generation: self.generation,
-//RS             position: cursor.position,
-//RS             sequence: cursor.sequence,
-//RS             timestamp_ms,
-//RS             first_retained_sequence: self.events.front().map(|event| event.sequence),
-//RS             last_retained_sequence: self.events.back().map(|event| event.sequence),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn restore_checkpoint(
-//RS         &self,
-//RS         checkpoint: &SessionCheckpoint,
-//RS     ) -> Result<ReplayCursor, RecordingError> {
-//RS         if !self.identity.matches(&checkpoint.identity) {
-//RS             return Err(RecordingError::IdentityMismatch {
-//RS                 expected: self.identity.clone(),
-//RS                 found: checkpoint.identity.clone(),
-//RS             });
-//RS         }
-//RS         if checkpoint.generation != self.generation
-//RS             || checkpoint.first_retained_sequence
-//RS                 != self.events.front().map(|event| event.sequence)
-//RS             || checkpoint.last_retained_sequence != self.events.back().map(|event| event.sequence)
-//RS             || checkpoint.position > self.events.len()
-//RS         {
-//RS             return Err(RecordingError::CheckpointUnavailable);
-//RS         }
-//RS         let actual_sequence = checkpoint
-//RS             .position
-//RS             .checked_sub(1)
-//RS             .and_then(|index| self.events.get(index))
-//RS             .map(|event| event.sequence);
-//RS         if actual_sequence != checkpoint.sequence {
-//RS             return Err(RecordingError::CheckpointUnavailable);
-//RS         }
-//RS         Ok(ReplayCursor {
-//RS             identity: self.identity.clone(),
-//RS             generation: self.generation,
-//RS             position: checkpoint.position,
-//RS             sequence: checkpoint.sequence,
-//RS         })
-//RS     }
-//RS 
-//RS     fn preflight(&self, events: &[SessionEvent]) -> Result<(), RecordingError> {
-//RS         let mut previous_sequence = self.last_sequence;
-//RS         let mut previous_time = self.last_timestamp_ms;
-//RS         for event in events {
-//RS             let bytes = event.wire_len();
-//RS             if bytes > self.limits.max_bytes {
-//RS                 return Err(RecordingError::EventTooLarge {
-//RS                     bytes,
-//RS                     limit: self.limits.max_bytes,
-//RS                 });
-//RS             }
-//RS             if let Some(previous) = previous_sequence {
-//RS                 if event.sequence <= previous {
-//RS                     return Err(RecordingError::NonMonotonicSequence {
-//RS                         previous,
-//RS                         next: event.sequence,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             if let Some(previous) = previous_time {
-//RS                 if event.timestamp_ms < previous {
-//RS                     return Err(RecordingError::NonMonotonicTime {
-//RS                         previous,
-//RS                         next: event.timestamp_ms,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             previous_sequence = Some(event.sequence);
-//RS             previous_time = Some(event.timestamp_ms);
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn validate_next(&self, event: &SessionEvent) -> Result<(), RecordingError> {
-//RS         let bytes = event.wire_len();
-//RS         if bytes > self.limits.max_bytes {
-//RS             return Err(RecordingError::EventTooLarge {
-//RS                 bytes,
-//RS                 limit: self.limits.max_bytes,
-//RS             });
-//RS         }
-//RS         if let Some(previous) = self.last_sequence {
-//RS             if event.sequence <= previous {
-//RS                 return Err(RecordingError::NonMonotonicSequence {
-//RS                     previous,
-//RS                     next: event.sequence,
-//RS                 });
-//RS             }
-//RS         }
-//RS         if let Some(previous) = self.last_timestamp_ms {
-//RS             if event.timestamp_ms < previous {
-//RS                 return Err(RecordingError::NonMonotonicTime {
-//RS                     previous,
-//RS                     next: event.timestamp_ms,
-//RS                 });
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn append_event_unchecked(&mut self, event: SessionEvent) {
-//RS         let bytes = event.wire_len();
-//RS         self.last_sequence = Some(event.sequence);
-//RS         self.last_timestamp_ms = Some(event.timestamp_ms);
-//RS         self.events.push_back(event);
-//RS         self.retained_bytes = self.retained_bytes.saturating_add(bytes);
-//RS         if self.events.len() > self.limits.max_events {
-//RS             self.event_limit_reached = true;
-//RS         }
-//RS         while self.events.len() > self.limits.max_events
-//RS             || self.retained_bytes > self.limits.max_bytes
-//RS         {
-//RS             if self.events.len() > self.limits.max_events {
-//RS                 self.event_limit_reached = true;
-//RS             }
-//RS             if self.retained_bytes > self.limits.max_bytes {
-//RS                 self.byte_limit_reached = true;
-//RS             }
-//RS             let Some(evicted) = self.events.pop_front() else {
-//RS                 break;
-//RS             };
-//RS             let evicted_bytes = evicted.wire_len();
-//RS             self.retained_bytes = self.retained_bytes.saturating_sub(evicted_bytes);
-//RS             self.dropped_events = self.dropped_events.saturating_add(1);
-//RS             self.dropped_bytes = self
-//RS                 .dropped_bytes
-//RS                 .saturating_add(evicted_bytes as u64);
-//RS             if self.first_dropped_sequence.is_none() {
-//RS                 self.first_dropped_sequence = Some(evicted.sequence);
-//RS             }
-//RS             self.last_dropped_sequence = Some(evicted.sequence);
-//RS         }
-//RS         self.generation = self.generation.wrapping_add(1);
-//RS     }
-//RS 
-//RS     fn make_projection(&self, cursor: &ReplayCursor) -> ReplayProjection {
-//RS         let current_index = cursor.position.checked_sub(1);
-//RS         let event = current_index.and_then(|index| self.events.get(index)).cloned();
-//RS         let previous_sequence = cursor
-//RS             .position
-//RS             .checked_sub(2)
-//RS             .and_then(|index| self.events.get(index))
-//RS             .map(|event| event.sequence);
-//RS         let next_sequence = self
-//RS             .events
-//RS             .get(cursor.position)
-//RS             .map(|event| event.sequence);
-//RS         ReplayProjection {
-//RS             identity: self.identity.clone(),
-//RS             position: cursor.position,
-//RS             sequence: cursor.sequence,
-//RS             timestamp_ms: event.as_ref().map(|event| event.timestamp_ms),
-//RS             event,
-//RS             previous_sequence,
-//RS             next_sequence,
-//RS             limits: self.limits,
-//RS             truncation: self.truncation(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn parse_envelope(
-//RS     bytes: &[u8],
-//RS     expected_identity: &SessionIdentity,
-//RS ) -> Result<Vec<SessionEvent>, RecordingError> {
-//RS     let text = std::str::from_utf8(bytes)
-//RS         .map_err(|_| RecordingError::InvalidEnvelope("envelope is not UTF-8".to_string()))?;
-//RS     let root = parse_json_value(text, "devtools envelope")?;
-//RS     let object = match root {
-//RS         DataTree::Object(object) => object.into_iter().collect::<BTreeMap<_, _>>(),
-//RS         _ => {
-//RS             return Err(RecordingError::InvalidEnvelope(
-//RS                 "envelope must be an object".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     let protocol = object
-//RS         .get("protocol")
-//RS         .and_then(|value| match value {
-//RS             DataTree::Text(protocol) => Some(protocol.as_str()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| RecordingError::InvalidEnvelope("missing string `protocol`".to_string()))?;
-//RS     if protocol != JET_DEVTOOLS_PROTOCOL {
-//RS         return Err(RecordingError::InvalidEnvelope(format!(
-//RS             "protocol is `{protocol}`, expected `{JET_DEVTOOLS_PROTOCOL}`"
-//RS         )));
-//RS     }
-//RS     validate_optional_envelope_identity(&object, expected_identity)?;
-//RS     let values = object
-//RS         .get("events")
-//RS         .ok_or_else(|| RecordingError::InvalidEnvelope("missing `events` array".to_string()))?;
-//RS     let values = match values {
-//RS         DataTree::Array(values) => values,
-//RS         _ => {
-//RS             return Err(RecordingError::InvalidEnvelope(
-//RS                 "envelope `events` must be an array".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     values.iter().map(parse_event).collect()
-//RS }
-//RS 
-//RS fn parse_event(value: &DataTree) -> Result<SessionEvent, RecordingError> {
-//RS     let object = match value {
-//RS         DataTree::Object(object) => object.iter().cloned().collect::<BTreeMap<_, _>>(),
-//RS         _ => {
-//RS             return Err(RecordingError::InvalidEvent(
-//RS                 "event must be an object".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     let sequence = required_u64(&object, "sequence")?;
-//RS     let timestamp_ms = required_u64(&object, "timestamp_ms")?;
-//RS     let source = required_string(&object, "source")?;
-//RS     let kind = required_string(&object, "kind")?;
-//RS     let entity = required_string(&object, "entity")?;
-//RS     let fields = object
-//RS         .get("fields")
-//RS         .ok_or_else(|| RecordingError::InvalidEvent("missing event `fields`".to_string()))?;
-//RS     let fields_json = match fields {
-//RS         DataTree::Object(_) => canonical_json(fields),
-//RS         _ => {
-//RS             return Err(RecordingError::InvalidEvent(
-//RS                 "event fields must be an object".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     let payload_json = match object.get("payload") {
-//RS         None | Some(DataTree::Null) => None,
-//RS         Some(value @ DataTree::Object(_)) => Some(canonical_json(value)),
-//RS         Some(_) => {
-//RS             return Err(RecordingError::InvalidEvent(
-//RS                 "event payload must be an object or null".to_string(),
-//RS             ));
-//RS         }
-//RS     };
-//RS     SessionEvent::new(
-//RS         sequence,
-//RS         timestamp_ms,
-//RS         source,
-//RS         kind,
-//RS         entity,
-//RS         fields_json,
-//RS         payload_json,
-//RS     )
-//RS }
-//RS 
-//RS fn parse_json_value(text: &str, label: &str) -> Result<DataTree, RecordingError> {
-//RS     if text.len() > MAX_RECORDING_BYTES {
-//RS         return Err(RecordingError::InvalidEvent(format!(
-//RS             "{label} exceeds the {}-byte limit",
-//RS             MAX_RECORDING_BYTES
-//RS         )));
-//RS     }
-//RS     parse_json_with_limit(text, MAX_RECORDING_BYTES).map_err(|_| {
-//RS         if label == "devtools envelope" {
-//RS             RecordingError::InvalidEnvelope(format!("{label} is not valid bounded JSON"))
-//RS         } else {
-//RS             RecordingError::InvalidEvent(format!("{label} is not valid bounded JSON"))
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn canonical_object(text: &str, label: &str) -> Result<String, RecordingError> {
-//RS     if text.len() > MAX_RECORDING_TEXT_BYTES {
-//RS         return Err(RecordingError::InvalidEvent(format!(
-//RS             "{label} exceeds the {}-byte JSON object limit",
-//RS             MAX_RECORDING_TEXT_BYTES
-//RS         )));
-//RS     }
-//RS     let value = parse_json_value(text, label)?;
-//RS     if !matches!(value, DataTree::Object(_)) {
-//RS         return Err(RecordingError::InvalidEvent(format!("{label} must be an object")));
-//RS     }
-//RS     Ok(canonical_json(&value))
-//RS }
-//RS 
-//RS fn required_string(object: &BTreeMap<String, DataTree>, key: &str) -> Result<String, RecordingError> {
-//RS     let value = object
-//RS         .get(key)
-//RS         .and_then(|value| match value {
-//RS             DataTree::Text(value) => Some(value.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| RecordingError::InvalidEvent(format!("missing string `{key}`")))?;
-//RS     validate_text(&value, &format!("event {key}"))?;
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn required_u64(object: &BTreeMap<String, DataTree>, key: &str) -> Result<u64, RecordingError> {
-//RS     match object.get(key) {
-//RS         Some(DataTree::Int(value)) => u64::try_from(*value).map_err(|_| {
-//RS             RecordingError::InvalidEvent(format!("event `{key}` must be a non-negative integer"))
-//RS         }),
-//RS         Some(_) => Err(RecordingError::InvalidEvent(format!(
-//RS             "event `{key}` must be an exact integer"
-//RS         ))),
-//RS         None => Err(RecordingError::InvalidEvent(format!("missing integer `{key}`"))),
-//RS     }
-//RS }
-//RS 
-//RS fn validate_optional_envelope_identity(
-//RS     object: &BTreeMap<String, DataTree>,
-//RS     expected: &SessionIdentity,
-//RS ) -> Result<(), RecordingError> {
-//RS     let source = object.get("source_id");
-//RS     let build = object.get("build_id");
-//RS     if source.is_none() && build.is_none() {
-//RS         return Ok(());
-//RS     }
-//RS     let source = source
-//RS         .and_then(|value| match value {
-//RS             DataTree::Text(value) => Some(value.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| {
-//RS             RecordingError::InvalidEnvelope("envelope `source_id` must be a string".to_string())
-//RS         })?;
-//RS     let build = build
-//RS         .and_then(|value| match value {
-//RS             DataTree::Text(value) => Some(value.clone()),
-//RS             _ => None,
-//RS         })
-//RS         .ok_or_else(|| {
-//RS             RecordingError::InvalidEnvelope("envelope `build_id` must be a string".to_string())
-//RS         })?;
-//RS     let found = SessionIdentity::new(source, build).map_err(|error| {
-//RS         RecordingError::InvalidEnvelope(format!("invalid envelope identity: {error}"))
-//RS     })?;
-//RS     if !expected.matches(&found) {
-//RS         return Err(RecordingError::IdentityMismatch {
-//RS             expected: expected.clone(),
-//RS             found,
-//RS         });
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_id(value: &str, label: &str) -> Result<(), RecordingError> {
-//RS     if value.is_empty()
-//RS         || value.len() > MAX_ID_BYTES
-//RS         || value.bytes().any(|byte| byte.is_ascii_control())
-//RS     {
-//RS         return Err(RecordingError::InvalidIdentity(format!(
-//RS             "{label} must contain 1..={} bytes and no control characters",
-//RS             MAX_ID_BYTES
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS  
-//RS fn validate_text(value: &str, label: &str) -> Result<(), RecordingError> {
-//RS     if value.len() > MAX_RECORDING_TEXT_BYTES {
-//RS         return Err(RecordingError::InvalidEvent(format!(
-//RS             "{label} exceeds the {}-byte text limit",
-//RS             MAX_RECORDING_TEXT_BYTES
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn quoted(value: &str) -> String {
-//RS     format!("\"{}\"", json_escape(value))
-//RS }
-//RS 
-//RS fn canonical_json(value: &DataTree) -> String {
-//RS     match value {
-//RS         DataTree::Null => "null".to_string(),
-//RS         DataTree::Bool(value) => value.to_string(),
-//RS         DataTree::Int(value) => value.to_string(),
-//RS         DataTree::Float(value) => value.to_string(),
-//RS         DataTree::Number(value) => value.clone(),
-//RS         DataTree::TypedText(value) | DataTree::Text(value) => quoted(value),
-//RS         DataTree::Bytes(values) => format!(
-//RS             "[{}]",
-//RS             values
-//RS                 .iter()
-//RS                 .map(|value| value.to_string())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS         DataTree::Array(values) => format!(
-//RS             "[{}]",
-//RS             values
-//RS                 .iter()
-//RS                 .map(canonical_json)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS         DataTree::Object(values) => format!(
-//RS 
-//RS             "{{{}}}",
-//RS             values
-//RS                 .iter()
-//RS                 .map(|(key, value)| format!("{}:{}", quoted(key), canonical_json(value)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",")
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn identity(source_id: &str, build_id: &str) -> SessionIdentity {
-//RS         SessionIdentity::new(source_id, build_id).unwrap()
-//RS     }
-//RS 
-//RS     fn event(sequence: u64, timestamp_ms: u64) -> SessionEvent {
-//RS         SessionEvent::new(
-//RS             sequence,
-//RS             timestamp_ms,
-//RS             "runtime",
-//RS             "Trace",
-//RS             "request-1",
-//RS             "{\"status\":\"ok\"}",
-//RS             None,
-//RS         )
-//RS         .unwrap()
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn replay_steps_and_checkpoint_restore_are_deterministic() {
-//RS         let mut recording = SessionRecording::with_limits(
-//RS             identity("src-a", "build-a"),
-//RS             SessionRecordingLimits::new(8, 64 * 1024),
-//RS         )
-//RS         .unwrap();
-//RS         recording.append_event(event(1, 10)).unwrap();
-//RS         recording.append_event(event(2, 20)).unwrap();
-//RS         recording.append_event(event(3, 30)).unwrap();
-//RS 
-//RS         let mut cursor = recording.replay();
-//RS         assert_eq!(cursor.step_forward(&recording).unwrap().sequence(), Some(1));
-//RS         let checkpoint = recording.checkpoint(&cursor).unwrap();
-//RS         assert_eq!(cursor.step_forward(&recording).unwrap().sequence(), Some(2));
-//RS         assert_eq!(cursor.step_forward(&recording).unwrap().sequence(), Some(3));
-//RS         assert_eq!(cursor.step_backward(&recording).unwrap().sequence(), Some(2));
-//RS 
-//RS         let restored = recording.restore_checkpoint(&checkpoint).unwrap();
-//RS         assert_eq!(restored.sequence(), Some(1));
-//RS         assert_eq!(recording.projection(&restored).unwrap().next_sequence(), Some(2));
-//RS         assert_eq!(recording.projection(&restored).unwrap().event().unwrap().sequence(), 1);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn truncation_facts_expose_count_and_window() {
-//RS         let mut recording = SessionRecording::with_limits(
-//RS             identity("src-a", "build-a"),
-//RS             SessionRecordingLimits::new(2, 64 * 1024),
-//RS         )
-//RS         .unwrap();
-//RS         recording.append_event(event(1, 10)).unwrap();
-//RS         recording.append_event(event(2, 20)).unwrap();
-//RS         recording.append_event(event(3, 30)).unwrap();
-//RS         let facts = recording.truncation();
-//RS         assert_eq!(facts.retained_events, 2);
-//RS         assert_eq!(facts.first_retained_sequence, Some(2));
-//RS         assert_eq!(facts.last_retained_sequence, Some(3));
-//RS         assert_eq!(facts.dropped_events, 1);
-//RS         assert_eq!(facts.first_dropped_sequence, Some(1));
-//RS         assert!(facts.event_limit_reached);
-//RS         assert!(facts.truncated());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn incompatible_identity_fails_closed_and_payload_stays_absent() {
-//RS         let recording = SessionRecording::new(identity("src-a", "build-a")).unwrap();
-//RS         let error = recording
-//RS             .replay_for(&identity("src-b", "build-a"))
-//RS             .unwrap_err();
-//RS         assert!(matches!(error, RecordingError::IdentityMismatch { .. }));
-//RS 
-//RS         let event = event(1, 1);
-//RS         assert_eq!(event.payload_json(), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn envelope_preserves_explicit_payload_and_rejects_time_regressions() {
-//RS         let mut recording = SessionRecording::new(identity("src-a", "build-a")).unwrap();
-//RS         let envelope = format!(
-//RS             "{{\"protocol\":\"{}\",\"events\":[{{\"sequence\":1,\"timestamp_ms\":7,\"source\":\"host\",\"kind\":\"Custom\",\"entity\":\"item\",\"fields\":{{\"state\":\"ready\"}},\"payload\":{{\"published\":true}}}}]}}",
-//RS             JET_DEVTOOLS_PROTOCOL
-//RS         );
-//RS         assert_eq!(recording.record_envelope(envelope.as_bytes()).unwrap(), 1);
-//RS         assert_eq!(
-//RS             recording.events().next().unwrap().payload_json(),
-//RS             Some("{\"published\":true}")
-//RS         );
-//RS 
-//RS         let error = recording.append_event(event(2, 6)).unwrap_err();
-//RS         assert!(matches!(error, RecordingError::NonMonotonicTime { .. }));
-//RS     }
-//RS }
-// END-PORT-PENDING 0784 crates/jet-devserver/src/SessionRecording.rs:1-1176
+// Bounded transport-fact recorder; replay fails closed on identity/generation changes.
+use jet_foundation.Devtools.[JET_DEVTOOLS_PROTOCOL]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, parse_json_with_limit]
+use std.collections.[VecDeque]
+use std.fmt
 
+// Rust: crates/jet-devserver/src/SessionRecording.rs:16
+pub const MAX_RECORDING_EVENTS: USize = 256
+// Rust: crates/jet-devserver/src/SessionRecording.rs:18
+pub const MAX_RECORDING_BYTES: USize = 1024 * 1024
+// Rust: crates/jet-devserver/src/SessionRecording.rs:20
+pub const MAX_RECORDING_TEXT_BYTES: USize = 16 * 1024
+// Rust: crates/jet-devserver/src/SessionRecording.rs:22
+pub const MAX_ID_BYTES: USize = 1024
+// Rust: crates/jet-devserver/src/SessionRecording.rs:26
+pub struct SessionIdentity { pub source_id: String; pub build_id: String }
+impl SessionIdentity {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:33
+    pub fn new(source_id: String, build_id: String) -> Self RecordingError! {
+        identity :: Self { source_id: ^source_id, build_id: ^build_id }
+        validate_id(identity.source_id, "source_id")?
+        validate_id(identity.build_id, "build_id")?
+        identity
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:44
+    pub fn matches(self: &Self, other: &Self) -> Bool { self == other }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:51
+pub struct SessionRecordingLimits { pub max_events: USize; pub max_bytes: USize }
+impl SessionRecordingLimits {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:59
+    pub fn new(max_events: USize, max_bytes: USize) -> Self { Self { max_events, max_bytes } }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:66
+    fn validate(self: Self) -> Unit RecordingError! {
+        if self.max_events == 0 || self.max_events > MAX_RECORDING_EVENTS -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
+        if self.max_bytes == 0 || self.max_bytes > MAX_RECORDING_BYTES -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:84
+    pub fn default() -> Self { Self.new(MAX_RECORDING_EVENTS, MAX_RECORDING_BYTES) }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:91
+pub struct SessionEvent {
+    sequence: U64; timestamp_ms: U64; source: String; kind: String; entity: String; fields_json: String; payload_json: String?
+}
+impl SessionEvent {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:106
+    pub fn new(sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> Self RecordingError! {
+        validate_text(source, "event source")?
+        validate_text(kind, "event kind")?
+        validate_text(entity, "event entity")?
+        fields :: canonical_object(fields_json, "event fields")?
+        payload :: if payload_json == {
+            .None -> .None
+            .Val(payload) -> {
+                value :: parse_json_value(payload, "event payload")?
+                if value == {
+                    .Null -> .None
+                    .Object(_) -> .Val(canonical_json(&value))
+                    _ -> return .Err(.InvalidEvent("event payload must be an object or null"))
+                }
+            }
+        }
+        event :: Self { sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields_json: ^fields, payload_json: ^payload }
+        if event.wire_len() > MAX_RECORDING_BYTES -> return .Err(.EventTooLarge { bytes: event.wire_len(), limit: MAX_RECORDING_BYTES })
+        event
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:155
+    pub fn sequence(self: &Self) -> U64 { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:159
+    pub fn timestamp_ms(self: &Self) -> U64 { self.timestamp_ms }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:163
+    pub fn source(self: &Self) -> &String { &self.source }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:167
+    pub fn kind(self: &Self) -> &String { &self.kind }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:171
+    pub fn entity(self: &Self) -> &String { &self.entity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:176
+    pub fn fields_json(self: &Self) -> &String { &self.fields_json }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:181
+    pub fn payload_json(self: &Self) -> &String? { self.payload_json.as_ref() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:185
+    fn wire_len(self: &Self) -> USize {
+        payload :: self.payload_json.as_ref().unwrap_or("null")
+        "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{quoted(self.source)},\"kind\":{quoted(self.kind)},\"entity\":{quoted(self.entity)},\"fields\":{self.fields_json},\"payload\":{payload}}}".len()
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:203
+pub struct TruncationFacts {
+    pub event_limit: USize; pub byte_limit: USize; pub retained_events: USize; pub retained_bytes: USize
+    pub dropped_events: U64; pub dropped_bytes: U64; pub event_limit_reached: Bool; pub byte_limit_reached: Bool
+    pub first_dropped_sequence: U64?; pub last_dropped_sequence: U64?; pub first_retained_sequence: U64?; pub last_retained_sequence: U64?
+}
+impl TruncationFacts {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:219
+    pub fn truncated(self: &Self) -> Bool { self.dropped_events != 0 }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:227
+#Error
+pub enum RecordingError {
+    InvalidIdentity(String); InvalidLimits { max_events: USize; max_bytes: USize }; InvalidEnvelope(String); InvalidEvent(String)
+    EnvelopeTooLarge { bytes: USize; limit: USize }; EventTooLarge { bytes: USize; limit: USize }
+    NonMonotonicSequence { previous: U64; next: U64 }; NonMonotonicTime { previous: U64; next: U64 }
+    IdentityMismatch { expected: SessionIdentity; found: SessionIdentity }
+    RecordingChanged; CheckpointUnavailable; CursorUnavailable { sequence: U64 }; ReplayAtBeginning; ReplayAtEnd
+}
+impl RecordingError {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:248
+    pub fn fmt(self: &Self, formatter: &fmt.Formatter) -> Unit fmt.Error! {
+        if self == {
+            .InvalidIdentity(message) -> formatter.write_str("invalid session identity: {message}")
+            .InvalidLimits { max_events, max_bytes } -> formatter.write_str("session recording limits are outside the bounded policy: events={max_events}, bytes={max_bytes}")
+            .InvalidEnvelope(message) -> formatter.write_str("invalid jet.devtools.v1 envelope: {message}")
+            .InvalidEvent(message) -> formatter.write_str("invalid jet.devtools.v1 event: {message}")
+            .EnvelopeTooLarge { bytes, limit } -> formatter.write_str("devtools envelope is {bytes} bytes; limit is {limit}")
+            .EventTooLarge { bytes, limit } -> formatter.write_str("devtools event is {bytes} bytes; limit is {limit}")
+            .NonMonotonicSequence { previous, next } -> formatter.write_str("devtools event sequence moved backwards or repeated: previous={previous}, next={next}")
+            .NonMonotonicTime { previous, next } -> formatter.write_str("devtools event timestamp moved backwards: previous={previous}, next={next}")
+            .IdentityMismatch { expected, found } -> formatter.write_str("replay identity mismatch: expected source={expected.source_id} build={expected.build_id}, found source={found.source_id} build={found.build_id}")
+            .RecordingChanged -> formatter.write_str("recording changed after replay cursor creation")
+            .CheckpointUnavailable -> formatter.write_str("checkpoint does not belong to the retained recording")
+            .CursorUnavailable { sequence } -> formatter.write_str("replay sequence {sequence} is outside the retained window")
+            .ReplayAtBeginning -> formatter.write_str("replay cursor is already at the beginning")
+            .ReplayAtEnd -> formatter.write_str("replay cursor is already at the end")
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:294
+pub enum ReplayStep { Forward; Backward }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:301
+pub struct ReplayCursor { identity: SessionIdentity; generation: U64; position: USize; sequence: U64? }
+impl ReplayCursor {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:309
+    pub fn identity(self: &Self) -> &SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:314
+    pub fn position(self: &Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:319
+    pub fn sequence(self: &Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:323
+    pub fn generation(self: &Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:327
+    pub fn seek(self: &Self, recording: &SessionRecording, sequence: U64) -> ReplayProjection RecordingError! {
+        self.check(recording)?
+        index :: recording.events.iter().position((event) -> event.sequence == sequence) ?? return .Err(.CursorUnavailable { sequence })
+        self.position = index + 1
+        self.sequence = .Val(sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:348
+    pub fn seek_time(self: &Self, recording: &SessionRecording, timestamp_ms: U64) -> ReplayProjection RecordingError! {
+        self.check(recording)?
+        if recording.events.front() == .Val(first) {
+            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return .Err(.CursorUnavailable { sequence: first.sequence })
+        }
+        position :: recording.events.iter().enumerate().filter(((_, event)) -> event.timestamp_ms <= timestamp_ms).map(((index, _)) -> index + 1).last().unwrap_or(0)
+        self.position = position
+        self.sequence = position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:377
+    pub fn step(self: &Self, recording: &SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
+        if direction == { .Forward -> self.step_forward(recording), .Backward -> self.step_backward(recording) }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:388
+    pub fn step_forward(self: &Self, recording: &SessionRecording) -> ReplayProjection RecordingError! {
+        self.check(recording)?
+        event :: recording.events.get(self.position) ?? return .Err(.ReplayAtEnd)
+        self.position += 1
+        self.sequence = .Val(event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:401
+    pub fn step_backward(self: &Self, recording: &SessionRecording) -> ReplayProjection RecordingError! {
+        self.check(recording)?
+        if self.position == 0 -> return .Err(.ReplayAtBeginning)
+        self.position -= 1
+        self.sequence = self.position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
+        recording.projection(self)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:418
+    fn check(self: &Self, recording: &SessionRecording) -> Unit RecordingError! {
+        if !self.identity.matches(&recording.identity) -> return .Err(.IdentityMismatch { expected: ~self.identity, found: ~recording.identity })
+        if self.generation != recording.generation -> return .Err(.RecordingChanged)
+        if self.position > recording.events.len() -> return .Err(.CheckpointUnavailable)
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:438
+pub struct SessionCheckpoint {
+    identity: SessionIdentity; generation: U64; position: USize; sequence: U64?; timestamp_ms: U64?
+    first_retained_sequence: U64?; last_retained_sequence: U64?
+}
+impl SessionCheckpoint {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:449
+    pub fn identity(self: &Self) -> &SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:453
+    pub fn position(self: &Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:457
+    pub fn sequence(self: &Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:461
+    pub fn generation(self: &Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:465
+    pub fn timestamp_ms(self: &Self) -> U64? { self.timestamp_ms }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:473
+pub struct ReplayProjection {
+    identity: SessionIdentity; position: USize; sequence: U64?; timestamp_ms: U64?; event: SessionEvent?
+    previous_sequence: U64?; next_sequence: U64?; limits: SessionRecordingLimits; truncation: TruncationFacts
+}
+impl ReplayProjection {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:486
+    pub fn identity(self: &Self) -> &SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:490
+    pub fn position(self: &Self) -> USize { self.position }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:494
+    pub fn sequence(self: &Self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:498
+    pub fn timestamp_ms(self: &Self) -> U64? { self.timestamp_ms }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:502
+    pub fn event(self: &Self) -> &SessionEvent? { self.event.as_ref() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:506
+    pub fn previous_sequence(self: &Self) -> U64? { self.previous_sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:510
+    pub fn next_sequence(self: &Self) -> U64? { self.next_sequence }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:514
+    pub fn limits(self: &Self) -> SessionRecordingLimits { self.limits }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:518
+    pub fn truncation(self: &Self) -> &TruncationFacts { &self.truncation }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:525
+pub struct SessionRecording {
+    identity: SessionIdentity; limits: SessionRecordingLimits; events: VecDeque<SessionEvent>; retained_bytes: USize
+    dropped_events: U64; dropped_bytes: U64; event_limit_reached: Bool; byte_limit_reached: Bool
+    first_dropped_sequence: U64?; last_dropped_sequence: U64?; last_sequence: U64?; last_timestamp_ms: U64?; generation: U64
+}
+impl SessionRecording {
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:542
+    pub fn new(identity: SessionIdentity) -> Self RecordingError! { Self.with_limits(^identity, SessionRecordingLimits.default()) }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:546
+    pub fn with_limits(identity: SessionIdentity, limits: SessionRecordingLimits) -> Self RecordingError! {
+        validate_id(identity.source_id, "source_id")?
+        validate_id(identity.build_id, "build_id")?
+        limits.validate()?
+        Self { identity: ^identity, limits, events: VecDeque.new(), retained_bytes: 0, dropped_events: 0, dropped_bytes: 0,
+            event_limit_reached: false, byte_limit_reached: false, first_dropped_sequence: .None, last_dropped_sequence: .None,
+            last_sequence: .None, last_timestamp_ms: .None, generation: 0 }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:570
+    pub fn identity(self: &Self) -> &SessionIdentity { &self.identity }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:574
+    pub fn limits(self: &Self) -> SessionRecordingLimits { self.limits }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:578
+    pub fn event_count(self: &Self) -> USize { self.events.len() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:582
+    pub fn generation(self: &Self) -> U64 { self.generation }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:586
+    pub fn retained_bytes(self: &Self) -> USize { self.retained_bytes }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:590
+    pub fn events(self: &Self) -> Iterator<&SessionEvent> { self.events.iter() }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:595
+    pub fn truncation(self: &Self) -> TruncationFacts {
+        TruncationFacts { event_limit: self.limits.max_events, byte_limit: self.limits.max_bytes,
+            retained_events: self.events.len(), retained_bytes: self.retained_bytes, dropped_events: self.dropped_events,
+            dropped_bytes: self.dropped_bytes, event_limit_reached: self.event_limit_reached, byte_limit_reached: self.byte_limit_reached,
+            first_dropped_sequence: self.first_dropped_sequence, last_dropped_sequence: self.last_dropped_sequence,
+            first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:614
+    pub fn append_event(self: &Self, event: SessionEvent) -> U64 RecordingError! {
+        self.validate_next(&event)?
+        sequence :: event.sequence
+        self.append_event_unchecked(^event)
+        sequence
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:623
+    pub fn record_envelope(self: &Self, bytes: &[U8]) -> USize RecordingError! {
+        if bytes.len() > MAX_RECORDING_BYTES -> return .Err(.EnvelopeTooLarge { bytes: bytes.len(), limit: MAX_RECORDING_BYTES })
+        events :: parse_envelope(bytes, &self.identity)?
+        self.preflight(&events)?
+        count :: events.len()
+        for event in events -> self.append_event_unchecked(^event)
+        count
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:640
+    pub fn replay(self: &Self) -> ReplayCursor { ReplayCursor { identity: ~self.identity, generation: self.generation, position: 0, sequence: .None } }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:651
+    pub fn replay_for(self: &Self, identity: &SessionIdentity) -> ReplayCursor RecordingError! {
+        validate_id(identity.source_id, "source_id")?
+        validate_id(identity.build_id, "build_id")?
+        if !self.identity.matches(identity) -> return .Err(.IdentityMismatch { expected: ~self.identity, found: ~identity })
+        self.replay()
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:663
+    pub fn projection(self: &Self, cursor: &ReplayCursor) -> ReplayProjection RecordingError! {
+        cursor.check(self)?
+        self.make_projection(cursor)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:668
+    pub fn checkpoint(self: &Self, cursor: &ReplayCursor) -> SessionCheckpoint RecordingError! {
+        cursor.check(self)?
+        timestamp_ms :: cursor.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.timestamp_ms)
+        SessionCheckpoint { identity: ~self.identity, generation: self.generation, position: cursor.position, sequence: cursor.sequence, timestamp_ms,
+            first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:686
+    pub fn restore_checkpoint(self: &Self, checkpoint: &SessionCheckpoint) -> ReplayCursor RecordingError! {
+        if !self.identity.matches(&checkpoint.identity) -> return .Err(.IdentityMismatch { expected: ~self.identity, found: ~checkpoint.identity })
+        if checkpoint.generation != self.generation || checkpoint.first_retained_sequence != self.events.front().map((event) -> event.sequence)
+            || checkpoint.last_retained_sequence != self.events.back().map((event) -> event.sequence) || checkpoint.position > self.events.len() -> return .Err(.CheckpointUnavailable)
+        actual_sequence :: checkpoint.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        if actual_sequence != checkpoint.sequence -> return .Err(.CheckpointUnavailable)
+        ReplayCursor { identity: ~self.identity, generation: self.generation, position: checkpoint.position, sequence: checkpoint.sequence }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:720
+    fn preflight(self: &Self, events: &[SessionEvent]) -> Unit RecordingError! {
+        previous_sequence := self.last_sequence
+        previous_time := self.last_timestamp_ms
+        for event in events {
+            bytes :: event.wire_len()
+            if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
+            if previous_sequence == .Val(previous) {
+                if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
+            }
+            if previous_time == .Val(previous) {
+                if event.timestamp_ms < previous -> return .Err(.NonMonotonicTime { previous, next: event.timestamp_ms })
+            }
+            previous_sequence = .Val(event.sequence)
+            previous_time = .Val(event.timestamp_ms)
+        }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:753
+    fn validate_next(self: &Self, event: &SessionEvent) -> Unit RecordingError! {
+        bytes :: event.wire_len()
+        if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
+        if self.last_sequence == .Val(previous) {
+            if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
+        }
+        if self.last_timestamp_ms == .Val(previous) {
+            if event.timestamp_ms < previous -> return .Err(.NonMonotonicTime { previous, next: event.timestamp_ms })
+        }
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:780
+    fn append_event_unchecked(self: &Self, event: SessionEvent) -> Unit {
+        bytes :: event.wire_len()
+        self.last_sequence = .Val(event.sequence)
+        self.last_timestamp_ms = .Val(event.timestamp_ms)
+        self.events.push_back(^event)
+        self.retained_bytes = self.retained_bytes.saturating_add(bytes)
+        if self.events.len() > self.limits.max_events -> self.event_limit_reached = true
+        while self.events.len() > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
+            if self.events.len() > self.limits.max_events -> self.event_limit_reached = true
+            if self.retained_bytes > self.limits.max_bytes -> self.byte_limit_reached = true
+            evicted :: self.events.pop_front() ?? break
+            evicted_bytes :: evicted.wire_len()
+            self.retained_bytes = self.retained_bytes.saturating_sub(evicted_bytes)
+            self.dropped_events = self.dropped_events.saturating_add(1)
+            self.dropped_bytes = self.dropped_bytes.saturating_add(evicted_bytes as U64)
+            if self.first_dropped_sequence.is_none() -> self.first_dropped_sequence = .Val(evicted.sequence)
+            self.last_dropped_sequence = .Val(evicted.sequence)
+        }
+        self.generation = self.generation.wrapping_add(1)
+    }
+    // Rust: crates/jet-devserver/src/SessionRecording.rs:815
+    fn make_projection(self: &Self, cursor: &ReplayCursor) -> ReplayProjection {
+        current_index :: cursor.position.checked_sub(1)
+        event :: current_index.and_then((index) -> self.events.get(index)).cloned()
+        previous_sequence :: cursor.position.checked_sub(2).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        next_sequence :: self.events.get(cursor.position).map((event) -> event.sequence)
+        ReplayProjection { identity: ~self.identity, position: cursor.position, sequence: cursor.sequence,
+            timestamp_ms: event.as_ref().map((event) -> event.timestamp_ms), event: ^event, previous_sequence, next_sequence,
+            limits: self.limits, truncation: self.truncation() }
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:841
+fn parse_envelope(bytes: &[U8], expected_identity: &SessionIdentity) -> [SessionEvent] RecordingError! {
+    text :: std.str.from_utf8(bytes) ?? return .Err(.InvalidEnvelope("envelope is not UTF-8"))
+    root :: parse_json_value(text, "devtools envelope")?
+    object: [String:DataTree] :: if root == { .Object(object) -> object.into_iter().collect(), _ -> return .Err(.InvalidEnvelope("envelope must be an object")) }
+    protocol :: object.get("protocol").and_then((value) -> if value == { .Text(protocol) -> .Val(protocol), _ -> .None })
+        ?? return .Err(.InvalidEnvelope("missing string `protocol`"))
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEnvelope("protocol is `{protocol}`, expected `{JET_DEVTOOLS_PROTOCOL}`"))
+    validate_optional_envelope_identity(&object, expected_identity)?
+    values :: object.get("events") ?? return .Err(.InvalidEnvelope("missing `events` array"))
+    if values == .Array(values) {
+        events: [SessionEvent] := []
+        for value in values -> events.push(parse_event(value)?)
+        events
+    } else -> .Err(.InvalidEnvelope("envelope `events` must be an array"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:883
+fn parse_event(value: &DataTree) -> SessionEvent RecordingError! {
+    object: [String:DataTree] :: if value == { .Object(object) -> object.iter().cloned().collect(), _ -> return .Err(.InvalidEvent("event must be an object")) }
+    sequence :: required_u64(&object, "sequence")?
+    timestamp_ms :: required_u64(&object, "timestamp_ms")?
+    source :: required_string(&object, "source")?
+    kind :: required_string(&object, "kind")?
+    entity :: required_string(&object, "entity")?
+    fields :: object.get("fields") ?? return .Err(.InvalidEvent("missing event `fields`"))
+    fields_json :: if fields == { .Object(_) -> canonical_json(fields), _ -> return .Err(.InvalidEvent("event fields must be an object")) }
+    payload_json :: if object.get("payload") == {
+        .None | .Val(.Null) -> .None
+        .Val(value) if value == .Object(_) -> .Val(canonical_json(value))
+        .Val(_) -> return .Err(.InvalidEvent("event payload must be an object or null"))
+    }
+    SessionEvent.new(sequence, timestamp_ms, ^source, ^kind, ^entity, ^fields_json, ^payload_json)
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:928
+fn parse_json_value(text: String, label: String) -> DataTree RecordingError! {
+    if text.len() > MAX_RECORDING_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"))
+    parse_json_with_limit(text, MAX_RECORDING_BYTES).map_err((_) ->
+        if label == "devtools envelope" -> RecordingError.InvalidEnvelope("{label} is not valid bounded JSON")
+        else -> RecordingError.InvalidEvent("{label} is not valid bounded JSON"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:944
+fn canonical_object(text: String, label: String) -> String RecordingError! {
+    if text.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"))
+    value :: parse_json_value(text, label)?
+    if value == .Object(_) -> canonical_json(&value)
+    else -> .Err(.InvalidEvent("{label} must be an object"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:958
+fn required_string(object: &[String:DataTree], key: String) -> String RecordingError! {
+    value :: object.get(key).and_then((value) -> if value == { .Text(value) -> .Val(~value), _ -> .None })
+        ?? return .Err(.InvalidEvent("missing string `{key}`"))
+    validate_text(value, "event {key}")?
+    value
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:970
+fn required_u64(object: &[String:DataTree], key: String) -> U64 RecordingError! {
+    if object.get(key) == {
+        .Val(.Int(value)) -> U64.try_from(*value) ?? return .Err(.InvalidEvent("event `{key}` must be a non-negative integer"))
+        .Val(_) -> .Err(.InvalidEvent("event `{key}` must be an exact integer"))
+        .None -> .Err(.InvalidEvent("missing integer `{key}`"))
+    }
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:982
+fn validate_optional_envelope_identity(object: &[String:DataTree], expected: &SessionIdentity) -> Unit RecordingError! {
+    source :: object.get("source_id")
+    build :: object.get("build_id")
+    if source.is_none() && build.is_none() -> return
+    source_text :: source.and_then((value) -> if value == { .Text(value) -> .Val(~value), _ -> .None })
+        ?? return .Err(.InvalidEnvelope("envelope `source_id` must be a string"))
+    build_text :: build.and_then((value) -> if value == { .Text(value) -> .Val(~value), _ -> .None })
+        ?? return .Err(.InvalidEnvelope("envelope `build_id` must be a string"))
+    found :: SessionIdentity.new(^source_text, ^build_text) ?? return .Err(.InvalidEnvelope("invalid envelope identity: {err}"))
+    if !expected.matches(&found) -> return .Err(.IdentityMismatch { expected: ~expected, found: ^found })
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1019
+fn validate_id(value: String, label: String) -> Unit RecordingError! {
+    if value.is_empty() || value.len() > MAX_ID_BYTES || value.bytes().any((byte) -> byte.is_ascii_control()) -> return .Err(.InvalidIdentity("{label} must contain 1..={MAX_ID_BYTES} bytes and no control characters"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1033
+fn validate_text(value: String, label: String) -> Unit RecordingError! {
+    if value.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"))
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1043
+fn quoted(value: String) -> String { "\"{json_escape(value)}\"" }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1047
+fn canonical_json(value: &DataTree) -> String {
+    if value == {
+        .Null -> "null"
+        .Bool(value) -> value.to_string()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Number(value) -> ~value
+        .TypedText(value) | .Text(value) -> quoted(value)
+        .Bytes(values) -> "[{values.iter().map((value) -> value.to_string()).collect::<[String]>().join(",")}]"
+        .Array(values) -> "[{values.iter().map(canonical_json).collect::<[String]>().join(",")}]"
+        .Object(values) -> "{{{values.iter().map(((key, value)) -> "{quoted(key)}:{canonical_json(value)}").collect::<[String]>().join(",")}}}"
+    }
+}

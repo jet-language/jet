@@ -1,0 +1,36 @@
+use jet_devserver.Canvas.EditActions.*
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
+#Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
+    imports :: core_imports("// use core.fake as fake\nuse core.io as output // alias\nuse core.math\nfn run() -> {}\n")
+    assert(imports.len() == 2)
+    assert(imports[0].module == "core.io")
+    assert(imports[0].alias == "output")
+    assert(imports[1].module == "core.math")
+    assert(imports[1].alias == "math")
+    assert(ident_prefix("output.trailing") == "output")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
+#Test("canvas_core_prefix_selects_longest_existing_import") {
+    src :: "use core as base\nuse core.io as output\nuse core.io.file as files\n"
+    assert(imported_core_prefix(src, "core.io.file") == .Val("files"))
+    assert(imported_core_prefix(src, "core.io.file.read") == .Val("files.read"))
+    assert(imported_core_prefix(src, "core.io.net") == .Val("output.net"))
+    assert(imported_core_prefix(src, "other") == .None)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
+#Test("canvas_core_import_insertion_preserves_header_and_use_block") {
+    header :: "// heading\n\n"
+    imports :: "use core.math as math\nuse core.io as io\n"
+    (point, joined) :: core_import_insert_point("{header}{imports}\nfn run() -> {}\n")
+    assert(point == header.len() + imports.len())
+    assert(joined)
+    (point, joined) :: core_import_insert_point("{header}fn run() -> {}\n")
+    assert(point == header.len())
+    assert(!joined)
+    (point, joined) :: core_import_insert_point("fn run() -> {}\nuse core.io as io\n")
+    assert(point == 0)
+    assert(!joined)
+}

@@ -1,0 +1,57 @@
+use jet_devserver.SessionRecording.*
+use jet_foundation.Devtools.[JET_DEVTOOLS_PROTOCOL]
+
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1087
+fn identity(source_id: String, build_id: String) -> SessionIdentity { SessionIdentity.new(source_id, build_id).unwrap() }
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1091
+fn event(sequence: U64, timestamp_ms: U64) -> SessionEvent { SessionEvent.new(sequence, timestamp_ms, "runtime", "Trace", "request-1", "{\"status\":\"ok\"}", .None).unwrap() }
+
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1105
+#Test("replay_steps_and_checkpoint_restore_are_deterministic") {
+    recording := SessionRecording.with_limits(identity("src-a", "build-a"), SessionRecordingLimits.new(8, 64 * 1024)).unwrap()
+    _ :: recording.append_event(event(1, 10)).unwrap()
+    _ :: recording.append_event(event(2, 20)).unwrap()
+    _ :: recording.append_event(event(3, 30)).unwrap()
+    cursor := recording.replay()
+    assert_eq(cursor.step_forward(&recording).unwrap().sequence(), .Val(1))
+    checkpoint :: recording.checkpoint(&cursor).unwrap()
+    assert_eq(cursor.step_forward(&recording).unwrap().sequence(), .Val(2))
+    assert_eq(cursor.step_forward(&recording).unwrap().sequence(), .Val(3))
+    assert_eq(cursor.step_backward(&recording).unwrap().sequence(), .Val(2))
+    restored :: recording.restore_checkpoint(&checkpoint).unwrap()
+    assert_eq(restored.sequence(), .Val(1))
+    assert_eq(recording.projection(&restored).unwrap().next_sequence(), .Val(2))
+    assert_eq(recording.projection(&restored).unwrap().event().unwrap().sequence(), 1)
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1129
+#Test("truncation_facts_expose_count_and_window") {
+    recording := SessionRecording.with_limits(identity("src-a", "build-a"), SessionRecordingLimits.new(2, 64 * 1024)).unwrap()
+    _ :: recording.append_event(event(1, 10)).unwrap()
+    _ :: recording.append_event(event(2, 20)).unwrap()
+    _ :: recording.append_event(event(3, 30)).unwrap()
+    facts :: recording.truncation()
+    assert_eq(facts.retained_events, 2)
+    assert_eq(facts.first_retained_sequence, .Val(2))
+    assert_eq(facts.last_retained_sequence, .Val(3))
+    assert_eq(facts.dropped_events, 1)
+    assert_eq(facts.first_dropped_sequence, .Val(1))
+    assert(facts.event_limit_reached)
+    assert(facts.truncated())
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1149
+#Test("incompatible_identity_fails_closed_and_payload_stays_absent") {
+    recording :: SessionRecording.new(identity("src-a", "build-a")).unwrap()
+    error :: recording.replay_for(&identity("src-b", "build-a")).unwrap_err()
+    assert(if error == { .IdentityMismatch { .. } -> true, _ -> false })
+    fact :: event(1, 1)
+    assert_eq(fact.payload_json(), .None)
+}
+// Rust: crates/jet-devserver/src/SessionRecording.rs:1161
+#Test("envelope_preserves_explicit_payload_and_rejects_time_regressions") {
+    recording := SessionRecording.new(identity("src-a", "build-a")).unwrap()
+    envelope :: "{{\"protocol\":\"{JET_DEVTOOLS_PROTOCOL}\",\"events\":[{{\"sequence\":1,\"timestamp_ms\":7,\"source\":\"host\",\"kind\":\"Custom\",\"entity\":\"item\",\"fields\":{{\"state\":\"ready\"}},\"payload\":{{\"published\":true}}}}]}}"
+    assert_eq(recording.record_envelope(envelope.as_bytes()).unwrap(), 1)
+    assert_eq(recording.events().next().unwrap().payload_json(), .Val("{\"published\":true}"))
+    error :: recording.append_event(event(2, 6)).unwrap_err()
+    assert(if error == { .NonMonotonicTime { .. } -> true, _ -> false })
+}

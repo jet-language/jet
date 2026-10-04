@@ -1,771 +1,378 @@
-// PORT-PENDING 0756 crates-jet-devserver-src-browsertrace: crates/jet-devserver/src/BrowserTrace.rs:1-767
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-PERF-BROWSER-TRANSPORT1=A: payload-free browser rows relayed by `jet dev`.
-//RS 
-//RS use std::collections::{BTreeMap, hash_map::RandomState};
-//RS use std::fs::{self, File, OpenOptions};
-//RS use std::hash::{BuildHasher, Hasher};
-//RS use std::io::{Read, Write};
-//RS use std::path::PathBuf;
-//RS use std::sync::Mutex;
-//RS use std::time::{Instant, SystemTime, UNIX_EPOCH};
-//RS 
-//RS use jet_foundation::DataTree::DataTree;
-//RS pub(crate) use jet_foundation::Hex::encode as hex;
-//RS use jet_foundation::JSON::{json_int, json_str, json_u32, parse};
-//RS use jet_foundation::Report::{StatusEnvelope, StatusFields, STATUS_SCHEMA};
-//RS 
-//RS pub const ROW_LIMIT: usize = 4096;
-//RS const ENVELOPE_LIMIT: usize = 512;
-//RS const REQUEST_SCHEMA: &str = "jet.browser.request.v1";
-//RS const RELAY_ACTION: &str = "browser.relay";
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Row {
-//RS     pub class: String,
-//RS     pub duration_ns: u64,
-//RS     pub start_ns: u64,
-//RS     pub symbol: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Capture {
-//RS     pub rows: Vec<Row>,
-//RS     pub sources: Vec<Source>,
-//RS     pub source_map: Option<String>,
-//RS     pub truncated: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct Source {
-//RS     pub path: String,
-//RS     pub sha256: String,
-//RS     pub symbols: Vec<(String, String)>,
-//RS }
-//RS 
-//RS pub struct Relay {
-//RS     file: Mutex<File>,
-//RS     nonce: String,
-//RS     path: PathBuf,
-//RS     rows: Mutex<usize>,
-//RS     started: Instant,
-//RS }
-//RS 
-//RS impl Relay {
-//RS     pub fn new(manifest: &str) -> Result<Self, String> {
-//RS         supported()?;
-//RS         let (sources, source_map) = identity_from_manifest(manifest)?;
-//RS         let path = relay_path(std::process::id());
-//RS         let _ = fs::remove_file(&path);
-//RS         let mut options = OpenOptions::new();
-//RS         options.write(true).create_new(true);
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::OpenOptionsExt;
-//RS             options.mode(0o600);
-//RS         }
-//RS         let mut file = options
-//RS             .open(&path)
-//RS             .map_err(|error| format!("cannot create browser trace relay: {error}"))?;
-//RS         let nonce = nonce();
-//RS         let pid = std::process::id();
-//RS         let started =
-//RS             process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
-//RS         let mut fields = StatusFields::new();
-//RS         fields
-//RS             .insert("nonce", nonce.clone())
-//RS             .expect("relay nonce field is unique");
-//RS         fields
-//RS             .insert("pid", pid)
-//RS             .expect("relay pid field is unique");
-//RS         fields
-//RS             .insert("started", started.clone())
-//RS             .expect("relay started field is unique");
-//RS         fields
-//RS             .insert("sources", hex(encode_sources(&sources).as_bytes()))
-//RS             .expect("relay sources field is unique");
-//RS         if let Some(map) = &source_map {
-//RS             fields
-//RS                 .insert("source_map", hex(map.as_bytes()))
-//RS                 .expect("relay source_map field is unique");
-//RS         }
-//RS         let header = StatusEnvelope::new(RELAY_ACTION, true)
-//RS             .with_fields(fields)
-//RS             .json();
-//RS         writeln!(file, "{header}")
-//RS             .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
-//RS         file.flush()
-//RS             .map_err(|error| format!("cannot flush browser trace relay: {error}"))?;
-//RS         Ok(Self {
-//RS             file: Mutex::new(file),
-//RS             nonce,
-//RS             path,
-//RS             rows: Mutex::new(0),
-//RS             started: Instant::now(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn nonce(&self) -> &str {
-//RS         &self.nonce
-//RS     }
-//RS 
-//RS     pub fn record(&self, body: &[u8]) -> Result<(), RecordError> {
-//RS         if body.len() > ENVELOPE_LIMIT {
-//RS             return Err(RecordError::Oversized);
-//RS         }
-//RS         let body = std::str::from_utf8(body).map_err(|_| RecordError::Malformed)?;
-//RS         let mut keys = body
-//RS             .split('&')
-//RS             .map(|part| part.split_once('=').map(|(key, _)| key).unwrap_or(part))
-//RS             .collect::<Vec<_>>();
-//RS         keys.sort_unstable();
-//RS         if keys != ["class", "clock_ns", "duration_ns", "start_ns", "symbol"] {
-//RS             return Err(RecordError::Malformed);
-//RS         }
-//RS         let param = |name| crate::query_param(&format!("?{body}"), name);
-//RS         let class = param("class").ok_or(RecordError::Malformed)?;
-//RS         let symbol = param("symbol").ok_or(RecordError::Malformed)?;
-//RS         if !matches!(class.as_str(), "event" | "wasm" | "dom")
-//RS             || symbol.is_empty()
-//RS             || symbol.len() > 128
-//RS             || !symbol
-//RS                 .bytes()
-//RS                 .all(|b| matches!(b, b'_' | b'$') || b.is_ascii_alphanumeric())
-//RS         {
-//RS             return Err(RecordError::Malformed);
-//RS         }
-//RS         let start = number(param("start_ns"))?;
-//RS         let duration = number(param("duration_ns"))?;
-//RS         let clock = number(param("clock_ns"))?;
-//RS         if start > clock || duration > clock - start {
-//RS             return Err(RecordError::Malformed);
-//RS         }
-//RS         let host_now = self.started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
-//RS         let mapped_start = host_now.saturating_sub(clock - start);
-//RS         let mut rows = self.rows.lock().map_err(|_| RecordError::Unavailable)?;
-//RS         let mut file = self.file.lock().map_err(|_| RecordError::Unavailable)?;
-//RS         if *rows >= ROW_LIMIT {
-//RS             if *rows == ROW_LIMIT {
-//RS                 let truncated = StatusEnvelope::new("browser.relay.truncated", true).json();
-//RS                 writeln!(file, "{truncated}").map_err(|_| RecordError::Unavailable)?;
-//RS                 file.flush().map_err(|_| RecordError::Unavailable)?;
-//RS                 *rows += 1;
-//RS             }
-//RS             return Ok(());
-//RS         }
-//RS         let mut fields = StatusFields::new();
-//RS         fields
-//RS             .insert("start_ns", mapped_start)
-//RS             .expect("relay start_ns field is unique");
-//RS         fields
-//RS             .insert("duration_ns", duration)
-//RS             .expect("relay duration_ns field is unique");
-//RS         fields
-//RS             .insert("class", class)
-//RS             .expect("relay class field is unique");
-//RS         fields
-//RS             .insert("symbol", symbol)
-//RS             .expect("relay symbol field is unique");
-//RS         let row = StatusEnvelope::new("browser.relay.row", true)
-//RS             .with_fields(fields)
-//RS             .json();
-//RS         writeln!(file, "{row}").map_err(|_| RecordError::Unavailable)?;
-//RS         file.flush().map_err(|_| RecordError::Unavailable)?;
-//RS         *rows += 1;
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for Relay {
-//RS     fn drop(&mut self) {
-//RS         let _ = fs::remove_file(&self.path);
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum RecordError {
-//RS     Malformed,
-//RS     Oversized,
-//RS     Unavailable,
-//RS }
-//RS 
-//RS pub fn read(pid: u32) -> Result<Capture, String> {
-//RS     supported()?;
-//RS     read_with_process_state(pid, process_state(pid))
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS enum ProcessState {
-//RS     Alive(String),
-//RS     Dead,
-//RS     Unknown,
-//RS }
-//RS 
-//RS fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, String> {
-//RS     let path = relay_path(pid);
-//RS     let link_metadata = fs::symlink_metadata(&path)
-//RS         .map_err(|_| format!("process {pid} has no browser trace relay"))?;
-//RS     if !link_metadata.file_type().is_file() {
-//RS         return Err("browser trace relay is not a regular file".into());
-//RS     }
-//RS     let mut options = OpenOptions::new();
-//RS     options.read(true);
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         use std::os::unix::fs::OpenOptionsExt;
-//RS         options.custom_flags(0o400000);
-//RS     }
-//RS     let file = options
-//RS         .open(&path)
-//RS         .map_err(|_| "cannot securely open browser trace relay")?;
-//RS     let metadata = file
-//RS         .metadata()
-//RS         .map_err(|_| "cannot inspect browser trace relay")?;
-//RS     if !metadata.file_type().is_file() || metadata.len() > 1024 * 1024 {
-//RS         return Err("browser trace relay is not a bounded regular file".into());
-//RS     }
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-//RS         if metadata.permissions().mode() & 0o077 != 0 {
-//RS             return Err("browser trace relay permissions expose session rows".into());
-//RS         }
-//RS         #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS         if let Ok(self_metadata) = fs::metadata("/proc/self") {
-//RS             if metadata.uid() != self_metadata.uid() {
-//RS                 return Err("browser trace relay belongs to another user".into());
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut raw = String::new();
-//RS     file.take(1024 * 1024 + 1)
-//RS         .read_to_string(&mut raw)
-//RS         .map_err(|_| "cannot read browser trace relay")?;
-//RS     if raw.len() > 1024 * 1024 {
-//RS         return Err("browser trace relay exceeds 1 MiB".into());
-//RS     }
-//RS     let mut lines = raw.lines();
-//RS     let header = lines.next().ok_or("browser trace relay is empty")?;
-//RS     let (recorded_pid, started, sources, source_map) = relay_header(header)?;
-//RS     if matches!(process, ProcessState::Unknown) {
-//RS         return Err("browser trace process identity cannot be verified".into());
-//RS     }
-//RS     let stale_process = match &process {
-//RS         ProcessState::Alive(current) => current.as_str() != started.as_str(),
-//RS         ProcessState::Dead => true,
-//RS         ProcessState::Unknown => false,
-//RS     };
-//RS     let stale = recorded_pid != pid || stale_process;
-//RS     if stale {
-//RS         let _ = fs::remove_file(&path);
-//RS         return Err("browser trace relay belongs to a stale process session".into());
-//RS     }
-//RS     let mut rows = Vec::new();
-//RS     let mut truncated = false;
-//RS     for line in lines {
-//RS         if relay_status(line, "browser.relay.truncated").is_ok() {
-//RS             truncated = true;
-//RS             continue;
-//RS         }
-//RS         let (start_ns, duration_ns, class, symbol) = relay_row(line)?;
-//RS         if rows.len() >= ROW_LIMIT {
-//RS             return Err("browser trace relay exceeds its closed row schema".into());
-//RS         }
-//RS         rows.push(Row {
-//RS             class,
-//RS             duration_ns,
-//RS             start_ns,
-//RS             symbol,
-//RS         });
-//RS     }
-//RS     Ok(Capture {
-//RS         rows,
-//RS         sources,
-//RS         source_map,
-//RS         truncated,
-//RS     })
-//RS }
-//RS 
-//RS pub fn relay_path(pid: u32) -> PathBuf {
-//RS     std::env::temp_dir().join(format!("jet-browser-trace-{pid}.relay"))
-//RS }
-//RS 
-//RS pub fn request_path(pid: u32) -> PathBuf {
-//RS     std::env::temp_dir().join(format!("jet-browser-trace-{pid}.request"))
-//RS }
-//RS 
-//RS pub fn request(pid: u32) -> Result<(), String> {
-//RS     supported()?;
-//RS     let ProcessState::Alive(started) = process_state(pid) else {
-//RS         return Err(format!("process {pid} identity cannot be verified"));
-//RS     };
-//RS     let path = request_path(pid);
-//RS     let _ = fs::remove_file(&path);
-//RS     let mut options = OpenOptions::new();
-//RS     options.write(true).create_new(true);
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::OpenOptionsExt;
-//RS         options.mode(0o600);
-//RS     }
-//RS     let mut file = options
-//RS         .open(&path)
-//RS         .map_err(|error| format!("cannot request browser trace collection: {error}"))?;
-//RS     writeln!(file, "{REQUEST_SCHEMA}\t{pid}\t{started}")
-//RS         .map_err(|error| format!("cannot write browser trace request: {error}"))?;
-//RS     file.flush()
-//RS         .map_err(|error| format!("cannot flush browser trace request: {error}"))
-//RS }
-//RS 
-//RS pub fn take_request() -> Result<bool, String> {
-//RS     supported()?;
-//RS     let pid = std::process::id();
-//RS     let path = request_path(pid);
-//RS     if !path.exists() {
-//RS         return Ok(false);
-//RS     }
-//RS     let raw = secure_read(&path, 256, "browser trace request")?;
-//RS     let mut parts = raw.trim_end().split('\t');
-//RS     let current =
-//RS         process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
-//RS     let pid_text = pid.to_string();
-//RS     let valid = parts.next() == Some(REQUEST_SCHEMA)
-//RS         && parts.next() == Some(pid_text.as_str())
-//RS         && parts.next() == Some(current.as_str())
-//RS         && parts.next().is_none();
-//RS     let _ = fs::remove_file(&path);
-//RS     if !valid {
-//RS         return Err("browser trace request belongs to a stale process session".into());
-//RS     }
-//RS     Ok(true)
-//RS }
-//RS 
-//RS pub fn cancel_request(pid: u32) {
-//RS     let _ = fs::remove_file(request_path(pid));
-//RS }
-//RS 
-//RS fn supported() -> Result<(), String> {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         Ok(())
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     {
-//RS         Err("browser trace relay requires verified process and file ownership".into())
-//RS     }
-//RS }
-//RS 
-//RS fn secure_read(path: &PathBuf, limit: u64, label: &str) -> Result<String, String> {
-//RS     let link = fs::symlink_metadata(path).map_err(|_| format!("{label} is unavailable"))?;
-//RS     if !link.file_type().is_file() {
-//RS         return Err(format!("{label} is not a regular file"));
-//RS     }
-//RS     let mut options = OpenOptions::new();
-//RS     options.read(true);
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         use std::os::unix::fs::OpenOptionsExt;
-//RS         options.custom_flags(0o400000);
-//RS     }
-//RS     let file = options
-//RS         .open(path)
-//RS         .map_err(|_| format!("cannot securely open {label}"))?;
-//RS     let metadata = file
-//RS         .metadata()
-//RS         .map_err(|_| format!("cannot inspect {label}"))?;
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-//RS         if metadata.permissions().mode() & 0o077 != 0 {
-//RS             return Err(format!("{label} permissions expose session data"));
-//RS         }
-//RS         let self_uid = fs::metadata("/proc/self")
-//RS             .map_err(|_| "cannot verify browser trace owner".to_string())?
-//RS             .uid();
-//RS         if metadata.uid() != self_uid {
-//RS             return Err(format!("{label} belongs to another user"));
-//RS         }
-//RS     }
-//RS     if !metadata.is_file() || metadata.len() > limit {
-//RS         return Err(format!("{label} is not bounded"));
-//RS     }
-//RS     let mut raw = String::new();
-//RS     file.take(limit + 1)
-//RS         .read_to_string(&mut raw)
-//RS         .map_err(|_| format!("cannot read {label}"))?;
-//RS     if raw.len() as u64 > limit {
-//RS         return Err(format!("{label} exceeds its limit"));
-//RS     }
-//RS     Ok(raw)
-//RS }
-//RS 
-//RS pub fn sources_from_manifest(manifest: &str) -> Result<Vec<Source>, String> {
-//RS     Ok(identity_from_manifest(manifest)?.0)
-//RS }
-//RS 
-//RS fn identity_from_manifest(manifest: &str) -> Result<(Vec<Source>, Option<String>), String> {
-//RS     let key = "\"traceMap\": \"";
-//RS     let start = manifest
-//RS         .find(key)
-//RS         .map(|index| index + key.len())
-//RS         .ok_or("web manifest has no compiler trace map")?;
-//RS     let end = manifest[start..]
-//RS         .find('"')
-//RS         .map(|index| start + index)
-//RS         .ok_or("web manifest trace map is malformed")?;
-//RS     let sources = decode_sources(&unhex(&manifest[start..end])?)?;
-//RS     let map_key = "\"sourceMap\": \"";
-//RS     let source_map = match manifest.find(map_key) {
-//RS         Some(index) => {
-//RS             let start = index + map_key.len();
-//RS             let end = manifest[start..]
-//RS                 .find('"')
-//RS                 .map(|index| start + index)
-//RS                 .ok_or("web manifest source map is malformed")?;
-//RS             Some(unhex(&manifest[start..end])?)
-//RS         }
-//RS         None => None,
-//RS     };
-//RS     Ok((sources, source_map))
-//RS }
-//RS 
-//RS fn encode_sources(sources: &[Source]) -> String {
-//RS     let mut lines = Vec::new();
-//RS     for source in sources {
-//RS         lines.push(format!(
-//RS             "source\t{}\t{}",
-//RS             hex(source.path.as_bytes()),
-//RS             source.sha256
-//RS         ));
-//RS         for (name, kind) in &source.symbols {
-//RS             lines.push(format!(
-//RS                 "symbol\t{}\t{}\t{kind}",
-//RS                 hex(source.path.as_bytes()),
-//RS                 hex(name.as_bytes())
-//RS             ));
-//RS         }
-//RS     }
-//RS     lines.sort();
-//RS     lines.join("\n")
-//RS }
-//RS 
-//RS fn decode_sources(text: &str) -> Result<Vec<Source>, String> {
-//RS     let mut sources = Vec::<Source>::new();
-//RS     let mut symbols = Vec::<(String, String, String)>::new();
-//RS     for line in text.lines() {
-//RS         let mut parts = line.split('\t');
-//RS         match parts.next() {
-//RS             Some("source") => {
-//RS                 let path = unhex(parts.next().ok_or("trace source path is missing")?)?;
-//RS                 let sha256 = parts
-//RS                     .next()
-//RS                     .ok_or("trace source hash is missing")?
-//RS                     .to_string();
-//RS                 if parts.next().is_some()
-//RS                     || sha256.len() != 64
-//RS                     || !sha256
-//RS                         .bytes()
-//RS                         .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-//RS                 {
-//RS                     return Err("compiler trace source identity is malformed".into());
-//RS                 }
-//RS                 sources.push(Source {
-//RS                     path,
-//RS                     sha256,
-//RS                     symbols: Vec::new(),
-//RS                 });
-//RS             }
-//RS             Some("symbol") => {
-//RS                 let path = unhex(parts.next().ok_or("trace symbol path is missing")?)?;
-//RS                 let name = unhex(parts.next().ok_or("trace symbol name is missing")?)?;
-//RS                 let kind = parts
-//RS                     .next()
-//RS                     .ok_or("trace symbol kind is missing")?
-//RS                     .to_string();
-//RS                 if parts.next().is_some()
-//RS                     || name.is_empty()
-//RS                     || !matches!(kind.as_str(), "fn" | "handler")
-//RS                 {
-//RS                     return Err("compiler trace symbol identity is malformed".into());
-//RS                 }
-//RS                 symbols.push((path, name, kind));
-//RS             }
-//RS             _ => return Err("compiler trace map row is malformed".into()),
-//RS         }
-//RS     }
-//RS     if sources.is_empty() {
-//RS         return Err("compiler trace map has no sources".into());
-//RS     }
-//RS     for (path, name, kind) in symbols {
-//RS         if sources
-//RS             .iter()
-//RS             .any(|source| source.symbols.iter().any(|(existing, _)| existing == &name))
-//RS         {
-//RS             return Err(format!("compiler trace symbol `{name}` is ambiguous"));
-//RS         }
-//RS         let source = sources
-//RS             .iter_mut()
-//RS             .find(|source| source.path == path)
-//RS             .ok_or("compiler trace symbol names an unknown source")?;
-//RS         source.symbols.push((name, kind));
-//RS     }
-//RS     Ok(sources)
-//RS }
-//RS 
-//RS fn number(value: Option<String>) -> Result<u64, RecordError> {
-//RS     value
-//RS         .ok_or(RecordError::Malformed)?
-//RS         .parse()
-//RS         .map_err(|_| RecordError::Malformed)
-//RS }
-//RS 
-//RS fn relay_status(line: &str, action: &str) -> Result<DataTree, String> {
-//RS     let value = parse(line).map_err(|_| "browser trace relay record is malformed")?;
-//RS     let object = object_map(&value)?;
-//RS     if object.get("schema").and_then(json_str) != Some(STATUS_SCHEMA)
-//RS         || object.get("action").and_then(json_str) != Some(action)
-//RS         || !matches!(object.get("ok"), Some(DataTree::Bool(true)))
-//RS         || !matches!(object.get("reports"), Some(DataTree::Array(_)))
-//RS         || object.contains_key("status")
-//RS     {
-//RS         return Err("browser trace relay record is not a shared status".into());
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS fn relay_row(line: &str) -> Result<(u64, u64, String, String), String> {
-//RS     let value = relay_status(line, "browser.relay.row")?;
-//RS     let object = object_map(&value)?;
-//RS     let start_ns = object
-//RS         .get("start_ns")
-//RS         .and_then(json_int)
-//RS         .and_then(|value| u64::try_from(value).ok())
-//RS         .ok_or("browser trace relay start is malformed")?;
-//RS     let duration_ns = object
-//RS         .get("duration_ns")
-//RS         .and_then(json_int)
-//RS         .and_then(|value| u64::try_from(value).ok())
-//RS         .ok_or("browser trace relay duration is malformed")?;
-//RS     let class = object
-//RS         .get("class")
-//RS         .and_then(|value| json_str(value))
-//RS         .ok_or("browser trace relay class is missing")?
-//RS         .to_owned();
-//RS     let symbol = object
-//RS         .get("symbol")
-//RS         .and_then(|value| json_str(value))
-//RS         .ok_or("browser trace relay symbol is missing")?
-//RS         .to_owned();
-//RS     if !matches!(class.as_str(), "event" | "wasm" | "dom")
-//RS         || symbol.is_empty()
-//RS         || symbol.len() > 128
-//RS         || !symbol
-//RS             .bytes()
-//RS             .all(|b| matches!(b, b'_' | b'$') || b.is_ascii_alphanumeric())
-//RS     {
-//RS         return Err("browser trace relay row is malformed".into());
-//RS     }
-//RS     Ok((start_ns, duration_ns, class, symbol))
-//RS }
-//RS 
-//RS fn relay_header(header: &str) -> Result<(u32, String, Vec<Source>, Option<String>), String> {
-//RS     let value = relay_status(header, RELAY_ACTION)?;
-//RS     let object = object_map(&value)?;
-//RS     let _nonce = object
-//RS         .get("nonce")
-//RS         .and_then(|value| json_str(value))
-//RS         .filter(|value| !value.is_empty())
-//RS         .ok_or("browser trace relay nonce is missing")?;
-//RS     let recorded_pid = object
-//RS         .get("pid")
-//RS         .and_then(json_u32)
-//RS         .ok_or("browser trace relay process id is missing")?;
-//RS     let started = object
-//RS         .get("started")
-//RS         .and_then(|value| json_str(value))
-//RS         .filter(|value| !value.is_empty())
-//RS         .ok_or("browser trace relay process identity is missing")?
-//RS         .to_owned();
-//RS     let sources = object
-//RS         .get("sources")
-//RS         .and_then(|value| json_str(value))
-//RS         .ok_or("browser trace relay source map is missing")?;
-//RS     let sources = decode_sources(&unhex(sources)?)?;
-//RS     let source_map = object
-//RS         .get("source_map")
-//RS         .map(|value| {
-//RS             json_str(value)
-//RS                 .ok_or_else(|| "browser trace relay source map is malformed".to_owned())
-//RS                 .and_then(unhex)
-//RS         })
-//RS         .transpose()?;
-//RS     Ok((recorded_pid, started, sources, source_map))
-//RS }
-//RS 
-//RS fn nonce() -> String {
-//RS     let state = RandomState::new();
-//RS     let seed = SystemTime::now()
-//RS         .duration_since(UNIX_EPOCH)
-//RS         .unwrap_or_default()
-//RS         .as_nanos();
-//RS     let mut out = String::new();
-//RS     for domain in [0u64, 1] {
-//RS         let mut hasher = state.build_hasher();
-//RS         hasher.write_u128(seed);
-//RS         hasher.write_u32(std::process::id());
-//RS         hasher.write_u64(domain);
-//RS         out.push_str(&format!("{:016x}", hasher.finish()));
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn process_start_marker(pid: u32) -> Option<String> {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-//RS         let fields = stat
-//RS             .rsplit_once(") ")?
-//RS             .1
-//RS             .split_whitespace()
-//RS             .collect::<Vec<_>>();
-//RS         fields.get(19).map(|value| (*value).to_string())
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     {
-//RS         let _ = pid;
-//RS     }
-//RS }
-//RS fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
-//RS     let DataTree::Object(fields) = value else {
-//RS         return Err("browser trace relay record must be an object".to_string());
-//RS     };
-//RS     Ok(fields.iter().cloned().collect())
-//RS }
-//RS 
-//RS fn process_state(pid: u32) -> ProcessState {
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     {
-//RS         let path = PathBuf::from(format!("/proc/{pid}"));
-//RS         if !path.exists() {
-//RS             return ProcessState::Dead;
-//RS         }
-//RS         return process_start_marker(pid)
-//RS             .map(ProcessState::Alive)
-//RS             .unwrap_or(ProcessState::Unknown);
-//RS     }
-//RS     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-//RS     {
-//RS         let _ = pid;
-//RS         ProcessState::Unknown
-//RS     }
-//RS }
-//RS 
-//RS fn unhex(text: &str) -> Result<String, String> {
-//RS     if text.len() % 2 != 0 {
-//RS         return Err("browser trace relay source encoding is malformed".into());
-//RS     }
-//RS     let bytes = text
-//RS         .as_bytes()
-//RS         .chunks_exact(2)
-//RS         .map(|pair| {
-//RS             let digit = |byte| match byte {
-//RS                 b'0'..=b'9' => Some(byte - b'0'),
-//RS                 b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS                 _ => None,
-//RS             };
-//RS             Some(digit(pair[0])? * 16 + digit(pair[1])?)
-//RS         })
-//RS         .collect::<Option<Vec<_>>>()
-//RS         .ok_or("browser trace relay source encoding is malformed")?;
-//RS     String::from_utf8(bytes).map_err(|_| "browser trace relay source is not UTF-8".into())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS pub static TEST_LOCK: Mutex<()> = Mutex::new(());
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn manifest() -> String {
-//RS         let map = "source\t6170702e6a6574\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nsymbol\t6170702e6a6574\t6c6f61645f7265706f7274\tfn";
-//RS         format!("{{\n  \"traceMap\": \"{}\"\n}}\n", hex(map.as_bytes()))
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn relay_maps_payload_free_rows_and_rejects_extra_fields() {
-//RS         let _guard = TEST_LOCK.lock().unwrap();
-//RS         let relay = Relay::new(&manifest()).unwrap();
-//RS         let header = fs::read_to_string(relay_path(std::process::id())).unwrap();
-//RS         let header = header.trim_end();
-//RS         let parsed = parse(header).unwrap();
-//RS         assert_eq!(
-//RS             parsed.get_opt("schema").and_then(json_str),
-//RS             Some(STATUS_SCHEMA)
-//RS         );
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::PermissionsExt;
-//RS             let mode = fs::metadata(relay_path(std::process::id()))
-//RS                 .unwrap()
-//RS                 .permissions()
-//RS                 .mode()
-//RS                 & 0o777;
-//RS             assert_eq!(mode, 0o600, "relay mode must be atomic owner-only");
-//RS         }
-//RS         relay
-//RS             .record(b"class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15")
-//RS             .unwrap();
-//RS         assert_eq!(
-//RS             relay.record(b"class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret"),
-//RS             Err(RecordError::Malformed)
-//RS         );
-//RS         let capture = read(std::process::id()).unwrap();
-//RS         assert_eq!(capture.sources[0].path, "app.jet");
-//RS         assert_eq!(capture.rows.len(), 1);
-//RS         assert_eq!(capture.rows[0].symbol, "load_report");
-//RS         assert!(!capture.truncated);
-//RS     }
-//RS 
-//RS     #[cfg(any(target_os = "linux", target_os = "android"))]
-//RS     #[test]
-//RS     fn dead_devserver_relay_is_rejected_and_removed() {
-//RS         let _guard = TEST_LOCK.lock().unwrap();
-//RS         let relay = Relay::new(&manifest()).unwrap();
-//RS         let path = relay_path(std::process::id());
-//RS         let error = read_with_process_state(std::process::id(), ProcessState::Dead).unwrap_err();
-//RS         assert!(error.contains("stale process session"), "{error}");
-//RS         assert!(!path.exists(), "dead devserver relay was not removed");
-//RS         drop(relay);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn unknown_process_identity_fails_closed_without_consuming_relay() {
-//RS         let _guard = TEST_LOCK.lock().unwrap();
-//RS         let relay = Relay::new(&manifest()).unwrap();
-//RS         let path = relay_path(std::process::id());
-//RS         let error = read_with_process_state(std::process::id(), ProcessState::Unknown).unwrap_err();
-//RS         assert!(error.contains("cannot be verified"), "{error}");
-//RS         assert!(
-//RS             path.exists(),
-//RS             "unknown identity must not mutate relay ownership"
-//RS         );
-//RS         drop(relay);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn relay_caps_rows_and_records_truncation() {
-//RS         let _guard = TEST_LOCK.lock().unwrap();
-//RS         let relay = Relay::new(&manifest()).unwrap();
-//RS         for _ in 0..=ROW_LIMIT {
-//RS             relay
-//RS                 .record(b"class=dom&symbol=run&start_ns=1&duration_ns=1&clock_ns=2")
-//RS                 .unwrap();
-//RS         }
-//RS         let capture = read(std::process::id()).unwrap();
-//RS         assert_eq!(capture.rows.len(), ROW_LIMIT);
-//RS         assert!(capture.truncated);
-//RS     }
-//RS }
-// END-PORT-PENDING 0756 crates/jet-devserver/src/BrowserTrace.rs:1-767
+// Payload-free browser rows relayed by jet dev.
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:3
+use std.fs as fs
+use std.fs.[File, OpenOptions]
+use std.sync.[Mutex]
+use std.time.[Instant, SystemTime, UNIX_EPOCH]
+use std.collections.hash_map.[RandomState]
+use core.files.[OSPath]
+use core.sys.target.[selected_os, selected_family]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.Hex.[encode as hex]
+use jet_foundation.JSON.[json_int, json_str, json_u32, parse]
+use jet_foundation.Report.[StatusEnvelope, StatusFields, STATUS_SCHEMA]
+use jet_devserver.[query_param]
 
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:16
+pub ROW_LIMIT :: 4096
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:17
+ENVELOPE_LIMIT :: 512
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:18
+REQUEST_SCHEMA :: "jet.browser.request.v1"
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:19
+RELAY_ACTION :: "browser.relay"
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:22
+pub struct Row { class: String; duration_ns: U64; start_ns: U64; symbol: String }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:30
+pub struct Capture { rows: [Row]; sources: [Source]; source_map: String?; truncated: Bool }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:38
+pub struct Source { path: String; sha256: String; symbols: [(String, String)] }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:44
+pub struct Relay { file: Mutex[File]; nonce: String; path: OSPath; rows: Mutex[Usize]; started: Instant }
+
+impl Relay {
+    // Rust: crates/jet-devserver/src/BrowserTrace.rs:53
+    pub fn new(manifest: String) -> Self Err! {
+        // GATE #4494: owner-only atomic file creation, native locks and clock.
+        supported()?
+        (sources, source_map) :: identity_from_manifest(manifest)?
+        path :: relay_path(std.process.id())
+        _ :: fs.remove_file(path)
+        options := OpenOptions.new()
+        options.write(true).create_new(true)
+        if selected_family() == "unix" -> options.mode(0o600)
+        file := options.open(path) ?? return .Err("cannot create browser trace relay: {err}")
+        nonce :: nonce()
+        pid :: std.process.id()
+        started :: process_start_marker(pid) ?? return .Err("browser trace process identity cannot be verified")
+        fields := StatusFields.new()
+        fields.insert("nonce", ~nonce).expect("relay nonce field is unique")
+        fields.insert("pid", pid).expect("relay pid field is unique")
+        fields.insert("started", ~started).expect("relay started field is unique")
+        fields.insert("sources", hex(encode_sources(sources).as_bytes())).expect("relay sources field is unique")
+        if source_map.as_ref() == .Val(map) -> fields.insert("source_map", hex(map.as_bytes())).expect("relay source_map field is unique")
+        header :: StatusEnvelope.new(RELAY_ACTION, true).with_fields(^fields).json()
+        file.write_all("{header}\n".as_bytes()) ?? return .Err("cannot initialize browser trace relay: {err}")
+        file.flush() ?? return .Err("cannot flush browser trace relay: {err}")
+        return Self { file: Mutex.new(^file), nonce: ^nonce, path: ^path, rows: Mutex.new(0), started: Instant.now() }
+    }
+    // Rust: crates/jet-devserver/src/BrowserTrace.rs:106
+    pub fn nonce(self: &Self) -> String { return self.nonce }
+    // Rust: crates/jet-devserver/src/BrowserTrace.rs:110
+    pub fn record(self: &Self, body: &[U8]) -> Unit RecordError! {
+        if body.len() > ENVELOPE_LIMIT -> return .Err(.Oversized)
+        body :: std.str.from_utf8(body) ?? return .Err(.Malformed)
+        keys := body.split('&').map((part) -> part.split_once('=').map(((key, _)) -> key).unwrap_or(part)).collect()
+        keys.sort_unstable()
+        if keys != ["class", "clock_ns", "duration_ns", "start_ns", "symbol"] -> return .Err(.Malformed)
+        param :: (name) -> query_param("?{body}", name)
+        class :: param("class") ?? return .Err(.Malformed)
+        symbol :: param("symbol") ?? return .Err(.Malformed)
+        if (class != "event" && class != "wasm" && class != "dom") || symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all((b) -> b == 95 || b == 36 || b.is_ascii_alphanumeric()) -> return .Err(.Malformed)
+        start :: number(param("start_ns"))?
+        duration :: number(param("duration_ns"))?
+        clock :: number(param("clock_ns"))?
+        if start > clock || duration > clock - start -> return .Err(.Malformed)
+        host_now :: self.started.elapsed().as_nanos().min(U64.MAX as U128) as U64
+        mapped_start :: host_now.saturating_sub(clock - start)
+        rows := self.rows.lock() ?? return .Err(.Unavailable)
+        file := self.file.lock() ?? return .Err(.Unavailable)
+        if rows >= ROW_LIMIT {
+            if rows == ROW_LIMIT {
+                truncated :: StatusEnvelope.new("browser.relay.truncated", true).json()
+                file.write_all("{truncated}\n".as_bytes()) ?? return .Err(.Unavailable)
+                file.flush() ?? return .Err(.Unavailable)
+                rows += 1
+            }
+            return ()
+        }
+        fields := StatusFields.new()
+        fields.insert("start_ns", mapped_start).expect("relay start_ns field is unique")
+        fields.insert("duration_ns", duration).expect("relay duration_ns field is unique")
+        fields.insert("class", ^class).expect("relay class field is unique")
+        fields.insert("symbol", ^symbol).expect("relay symbol field is unique")
+        row :: StatusEnvelope.new("browser.relay.row", true).with_fields(^fields).json()
+        file.write_all("{row}\n".as_bytes()) ?? return .Err(.Unavailable)
+        file.flush() ?? return .Err(.Unavailable)
+        rows += 1
+        return ()
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:177
+impl Drop for Relay {
+    // Rust: crates/jet-devserver/src/BrowserTrace.rs:178
+    fn drop(self: &Self) -> { _ :: fs.remove_file(self.path) }
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:184
+#Error
+pub enum RecordError { Malformed; Oversized; Unavailable }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:190
+pub fn read(pid: U32) -> Capture Err! { supported()?; return read_with_process_state(pid, process_state(pid)) }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:196
+ enum ProcessState { Alive(String); Dead; Unknown }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:202
+fn read_with_process_state(pid: U32, process: ProcessState) -> Capture Err! {
+    // GATE #4494: descriptor-backed no-follow open and native metadata ownership.
+    path :: relay_path(pid)
+    link_metadata :: fs.symlink_metadata(path) ?? return .Err("process {pid} has no browser trace relay")
+    if !link_metadata.file_type().is_file() -> return .Err("browser trace relay is not a regular file")
+    options := OpenOptions.new()
+    options.read(true)
+    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
+    file :: options.open(path) ?? return .Err("cannot securely open browser trace relay")
+    metadata :: file.metadata() ?? return .Err("cannot inspect browser trace relay")
+    if !metadata.file_type().is_file() || metadata.len() > 1024 * 1024 -> return .Err("browser trace relay is not a bounded regular file")
+    if selected_family() == "unix" {
+        if metadata.permissions().mode() & 0o077 != 0 -> return .Err("browser trace relay permissions expose session rows")
+        if selected_os() == "linux" || selected_os() == "android" {
+            if fs.metadata("/proc/self") == .Ok(self_metadata) {
+                if metadata.uid() != self_metadata.uid() -> return .Err("browser trace relay belongs to another user")
+            }
+        }
+    }
+    raw := ""
+    file.take(1024 * 1024 + 1).read_to_string(&raw) ?? return .Err("cannot read browser trace relay")
+    if raw.len() > 1024 * 1024 -> return .Err("browser trace relay exceeds 1 MiB")
+    lines := raw.lines()
+    header :: lines.next() ?? return .Err("browser trace relay is empty")
+    (recorded_pid, started, sources, source_map) :: relay_header(header)?
+    if process == .Unknown -> return .Err("browser trace process identity cannot be verified")
+    stale_process :: match process {
+        .Alive(current) -> current != started
+        .Dead -> true
+        .Unknown -> false
+    }
+    if recorded_pid != pid || stale_process {
+        _ :: fs.remove_file(path)
+        return .Err("browser trace relay belongs to a stale process session")
+    }
+    rows := [Row]{}
+    truncated := false
+    for line in lines {
+        if relay_status(line, "browser.relay.truncated").is_ok() { truncated = true; next }
+        (start_ns, duration_ns, class, symbol) :: relay_row(line)?
+        if rows.len() >= ROW_LIMIT -> return .Err("browser trace relay exceeds its closed row schema")
+        rows.push(Row { class: ^class, duration_ns: duration_ns, start_ns: start_ns, symbol: ^symbol })
+    }
+    return Capture { rows: ^rows, sources: ^sources, source_map: ^source_map, truncated: truncated }
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:287
+pub fn relay_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.relay") }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:291
+pub fn request_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.request") }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:295
+pub fn request(pid: U32) -> Unit Err! {
+    supported()?
+    started :: match process_state(pid) { .Alive(started) -> ^started; _ -> return .Err("process {pid} identity cannot be verified") }
+    path :: request_path(pid)
+    _ :: fs.remove_file(path)
+    options := OpenOptions.new()
+    options.write(true).create_new(true)
+    if selected_family() == "unix" -> options.mode(0o600)
+    file := options.open(path) ?? return .Err("cannot request browser trace collection: {err}")
+    file.write_all("{REQUEST_SCHEMA}\t{pid}\t{started}\n".as_bytes()) ?? return .Err("cannot write browser trace request: {err}")
+    file.flush() ?? return .Err("cannot flush browser trace request: {err}")
+    return ()
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:318
+pub fn take_request() -> Bool Err! {
+    supported()?
+    pid :: std.process.id()
+    path :: request_path(pid)
+    if !path.exists() -> return false
+    raw :: secure_read(path, 256, "browser trace request")?
+    parts := raw.trim_end().split('\t')
+    current :: process_start_marker(pid) ?? return .Err("browser trace process identity cannot be verified")
+    pid_text :: pid.to_string()
+    valid :: parts.next() == .Val(REQUEST_SCHEMA) && parts.next() == .Val(pid_text) && parts.next() == .Val(current) && parts.next().is_none()
+    _ :: fs.remove_file(path)
+    if !valid -> return .Err("browser trace request belongs to a stale process session")
+    return true
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:341
+pub fn cancel_request(pid: U32) -> { _ :: fs.remove_file(request_path(pid)) }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:345
+fn supported() -> Unit Err! {
+    if selected_os() == "linux" || selected_os() == "android" -> return ()
+    return .Err("browser trace relay requires verified process and file ownership")
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:356
+fn secure_read(path: &OSPath, limit: U64, label: String) -> String Err! {
+    link :: fs.symlink_metadata(path) ?? return .Err("{label} is unavailable")
+    if !link.file_type().is_file() -> return .Err("{label} is not a regular file")
+    options := OpenOptions.new()
+    options.read(true)
+    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
+    file :: options.open(path) ?? return .Err("cannot securely open {label}")
+    metadata :: file.metadata() ?? return .Err("cannot inspect {label}")
+    if selected_family() == "unix" {
+        if metadata.permissions().mode() & 0o077 != 0 -> return .Err("{label} permissions expose session data")
+        self_metadata :: fs.metadata("/proc/self") ?? return .Err("cannot verify browser trace owner")
+        if metadata.uid() != self_metadata.uid() -> return .Err("{label} belongs to another user")
+    }
+    if !metadata.is_file() || metadata.len() > limit -> return .Err("{label} is not bounded")
+    raw := ""
+    file.take(limit + 1).read_to_string(&raw) ?? return .Err("cannot read {label}")
+    if raw.len() as U64 > limit -> return .Err("{label} exceeds its limit")
+    return ^raw
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:400
+pub fn sources_from_manifest(manifest: String) -> [Source] Err! { return identity_from_manifest(manifest)?.0 }
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:404
+fn identity_from_manifest(manifest: String) -> ([Source], String?) Err! {
+    key :: "\"traceMap\": \""
+    start :: manifest.find(key).map((index) -> index + key.len()) ?? return .Err("web manifest has no compiler trace map")
+    end :: manifest[start..].find('"').map((index) -> start + index) ?? return .Err("web manifest trace map is malformed")
+    sources :: decode_sources(unhex(manifest[start..end])?)?
+    map_key :: "\"sourceMap\": \""
+    source_map :: match manifest.find(map_key) {
+        .Val(index) -> {
+            start :: index + map_key.len()
+            end :: manifest[start..].find('"').map((index) -> start + index) ?? return .Err("web manifest source map is malformed")
+            .Val(unhex(manifest[start..end])?)
+        }
+        None -> None
+    }
+    return (^sources, ^source_map)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:430
+fn encode_sources(sources: &[Source]) -> String {
+    lines := [String]{}
+    for source in sources {
+        lines.push("source\t{hex(source.path.as_bytes())}\t{source.sha256}")
+        for (name, kind) in source.symbols -> lines.push("symbol\t{hex(source.path.as_bytes())}\t{hex(name.as_bytes())}\t{kind}")
+    }
+    lines.sort()
+    return lines.join("\n")
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:450
+fn decode_sources(text: String) -> [Source] Err! {
+    sources := [Source]{}
+    symbols := [(String, String, String)]{}
+    for line in text.lines() {
+        parts := line.split('\t')
+        match parts.next() {
+            .Val("source") -> {
+                path :: unhex(parts.next() ?? return .Err("trace source path is missing"))?
+                sha256 :: (parts.next() ?? return .Err("trace source hash is missing")).to_string()
+                if parts.next().is_some() || sha256.len() != 64 || !sha256.bytes().all((byte) -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) -> return .Err("compiler trace source identity is malformed")
+                sources.push(Source { path: ^path, sha256: ^sha256, symbols: [] })
+            }
+            .Val("symbol") -> {
+                path :: unhex(parts.next() ?? return .Err("trace symbol path is missing"))?
+                name :: unhex(parts.next() ?? return .Err("trace symbol name is missing"))?
+                kind :: (parts.next() ?? return .Err("trace symbol kind is missing")).to_string()
+                if parts.next().is_some() || name.is_empty() || (kind != "fn" && kind != "handler") -> return .Err("compiler trace symbol identity is malformed")
+                symbols.push((^path, ^name, ^kind))
+            }
+            _ -> return .Err("compiler trace map row is malformed")
+        }
+    }
+    if sources.is_empty() -> return .Err("compiler trace map has no sources")
+    // Index first occurrence exactly as Rust find(), without repeated source scans.
+    by_path := [String:Usize]{}
+    for (i, source) in sources.iter().enumerate() {
+        if !by_path.contains_key(source.path) -> by_path[~source.path] = i
+    }
+    names := [String:Bool]{}
+    for (path, name, kind) in symbols {
+        if names.contains_key(name) -> return .Err("compiler trace symbol `{name}` is ambiguous")
+        i :: by_path.get(path) ?? return .Err("compiler trace symbol names an unknown source")
+        names[~name] = true
+        sources[i].symbols.push((^name, ^kind))
+    }
+    return ^sources
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:513
+fn number(value: String?) -> U64 RecordError! {
+    value :: value ?? return .Err(.Malformed)
+    return U64.parse(value) ?? return .Err(.Malformed)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:520
+fn relay_status(line: String, action: String) -> DataTree Err! {
+    value :: parse(line) ?? return .Err("browser trace relay record is malformed")
+    object :: object_map(value)?
+    if object.get("schema").and_then(json_str) != .Val(STATUS_SCHEMA) || object.get("action").and_then(json_str) != .Val(action) || object.get("ok") != .Val(.Bool(true)) || object.get("reports") != .Val(.Array(_)) || object.contains_key("status") -> return .Err("browser trace relay record is not a shared status")
+    return ^value
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:534
+fn relay_row(line: String) -> (U64, U64, String, String) Err! {
+    value :: relay_status(line, "browser.relay.row")?
+    object :: object_map(value)?
+    start_ns :: object.get("start_ns").and_then(json_int).and_then((value) -> U64.try_from(value).ok()) ?? return .Err("browser trace relay start is malformed")
+    duration_ns :: object.get("duration_ns").and_then(json_int).and_then((value) -> U64.try_from(value).ok()) ?? return .Err("browser trace relay duration is malformed")
+    class :: (object.get("class").and_then(json_str) ?? return .Err("browser trace relay class is missing")).to_owned()
+    symbol :: (object.get("symbol").and_then(json_str) ?? return .Err("browser trace relay symbol is missing")).to_owned()
+    if (class != "event" && class != "wasm" && class != "dom") || symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all((b) -> b == 95 || b == 36 || b.is_ascii_alphanumeric()) -> return .Err("browser trace relay row is malformed")
+    return (start_ns, duration_ns, ^class, ^symbol)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:569
+fn relay_header(header: String) -> (U32, String, [Source], String?) Err! {
+    value :: relay_status(header, RELAY_ACTION)?
+    object :: object_map(value)?
+    _nonce :: object.get("nonce").and_then(json_str).filter((value) -> !value.is_empty()) ?? return .Err("browser trace relay nonce is missing")
+    recorded_pid :: object.get("pid").and_then(json_u32) ?? return .Err("browser trace relay process id is missing")
+    started :: (object.get("started").and_then(json_str).filter((value) -> !value.is_empty()) ?? return .Err("browser trace relay process identity is missing")).to_owned()
+    sources :: object.get("sources").and_then(json_str) ?? return .Err("browser trace relay source map is missing")
+    sources := decode_sources(unhex(sources)?)?
+    source_map :: object.get("source_map").map((value) -> {
+        text :: json_str(value) ?? return .Err("browser trace relay source map is malformed")
+        unhex(text)
+    }).transpose()?
+    return (recorded_pid, ^started, ^sources, ^source_map)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:603
+fn nonce() -> String {
+    // GATE #4494: randomized native hash state, process ID and system clock.
+    state :: RandomState.new()
+    seed :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()
+    out := ""
+    for domain in [0 as U64, 1] {
+        hasher := state.build_hasher()
+        hasher.write_u128(seed)
+        hasher.write_u32(std.process.id())
+        hasher.write_u64(domain)
+        out.push_str(format("{:016x}", hasher.finish()))
+    }
+    return ^out
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:620
+fn process_start_marker(pid: U32) -> String? {
+    if selected_os() == "linux" || selected_os() == "android" {
+        stat :: fs.read_to_string("/proc/{pid}/stat").ok()?
+        (_, rest) :: stat.rsplit_once(") ")?
+        fields :: rest.split_whitespace().collect()
+        return fields.get(19).map((value) -> value.to_string())
+    }
+    return None
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:636
+fn object_map(value: &DataTree) -> [String:DataTree] Err! {
+    fields :: match value { .Object(fields) -> fields; _ -> return .Err("browser trace relay record must be an object") }
+    return fields.iter().map(((key, value)) -> (~key, ~value)).collect()
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:643
+fn process_state(pid: U32) -> ProcessState {
+    if selected_os() == "linux" || selected_os() == "android" {
+        path :: OSPath.from("/proc/{pid}")
+        if !path.exists() -> return .Dead
+        return process_start_marker(pid).map((start) -> ProcessState.Alive(^start)).unwrap_or(.Unknown)
+    }
+    return .Unknown
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:661
+fn unhex(text: String) -> String Err! {
+    if text.len() % 2 != 0 -> return .Err("browser trace relay source encoding is malformed")
+    digit :: (byte) -> {
+        if byte >= 48 && byte <= 57 -> .Val(byte - 48)
+        else if byte >= 97 && byte <= 102 -> .Val(byte - 97 + 10)
+        else -> None
+    }
+    bytes := [U8].with_capacity(text.len() / 2)
+    for pair in text.as_bytes().chunks_exact(2) {
+        a :: digit(pair[0]) ?? return .Err("browser trace relay source encoding is malformed")
+        b :: digit(pair[1]) ?? return .Err("browser trace relay source encoding is malformed")
+        bytes.push(a * 16 + b)
+    }
+    return String.from_utf8(^bytes) ?? return .Err("browser trace relay source is not UTF-8")
+}

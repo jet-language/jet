@@ -1,1818 +1,747 @@
-// PORT-PENDING 0778 crates-jet-devserver-src-nativeswap-slice-1: crates/jet-devserver/src/NativeSwap.rs:1-1814
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Backend-neutral facts and transaction state for a resident native swap.
-//RS //!
-//RS //! This module deliberately stops before a linker, socket, scheduler, or
-//RS //! operating-system adapter.  A compiler/sema producer supplies the source,
-//RS //! revision, compatibility, relocation, and link facts.  A native host can
-//RS //! then consume the checked plan without re-deciding what an edit means.
-//RS //!
-//RS //! A swap is a small compare-and-commit transaction:
-//RS //!
-//RS //! 1. [`NativeSwapState::pause`] validates every fact while the old executable
-//RS //!    is still live and records a checkpoint.
-//RS //! 2. [`NativeSwapState::apply`] installs only the already validated candidate
-//RS //!    and only the listener/connection handles named by the plan.
-//RS //! 3. [`NativeSwapState::commit`] drops the checkpoint and publishes a receipt.
-//RS //!    [`NativeSwapState::rollback`] restores the checkpoint exactly.
-//RS //!
-//RS //! No method waits for quiescence or performs a native operation.  Quiescence,
-//RS //! relocation, and link strategy are facts that an adapter must prove before it
-//RS //! hands a plan to this boundary.
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fmt;
-//RS 
-//RS use jet_foundation::HotSwap::{HotSwapDecision, StateRetentionDecision};
-//RS 
-//RS /// Protocol label for a future native devtools/reload projection.
-//RS pub const NATIVE_SWAP_PROTOCOL: &str = "jet.native.swap.v1";
-//RS /// Maximum bytes accepted for one stable source, handle, symbol, or revision identity.
-//RS pub const MAX_NATIVE_SWAP_ID_BYTES: usize = 256;
-//RS /// Maximum bytes retained for one human-readable explanation.
-//RS pub const MAX_NATIVE_SWAP_DETAIL_BYTES: usize = 1024;
-//RS /// Maximum number of typed handle or changed-item facts in one plan.
-//RS pub const MAX_NATIVE_SWAP_FACTS: usize = 1024;
-//RS 
-//RS /// A source/module identity.  It is kept separate from code and data revisions:
-//RS /// a new revision of the same source can be swapped, while a different source
-//RS /// cannot borrow its resident executable or handles.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapSourceIdentity {
-//RS     /// Stable source identity, normally a project-relative path or sema id.
-//RS     pub source_id: String,
-//RS     /// Stable module identity within that source.  [`Self::new`] uses the
-//RS     /// source id for both fields, which is useful for single-module programs.
-//RS     pub module: String,
-//RS }
-//RS 
-//RS impl NativeSwapSourceIdentity {
-//RS     /// Construct a source identity whose source and module have one identity.
-//RS     pub fn new(source_id: impl Into<String>) -> Result<Self, NativeSwapError> {
-//RS         let source_id = source_id.into();
-//RS         Self::new_with_module(source_id.clone(), source_id)
-//RS     }
-//RS 
-//RS     /// Construct a source identity with separate source and module names.
-//RS     pub fn new_with_module(
-//RS         source_id: impl Into<String>,
-//RS         module: impl Into<String>,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let source_id = source_id.into();
-//RS         let module = module.into();
-//RS         if let Err(detail) = validate_identity(&source_id, "source identity") {
-//RS             return Err(NativeSwapError::input(source_id, NativeSwapBlockingFact::InvalidIdentity, detail));
-//RS         }
-//RS         if let Err(detail) = validate_identity(&module, "module identity") {
-//RS             return Err(NativeSwapError::input(source_id, NativeSwapBlockingFact::InvalidIdentity, detail));
-//RS         }
-//RS         Ok(Self { source_id, module })
-//RS     }
-//RS 
-//RS     /// Return the source identity used in explanations and receipts.
-//RS     pub fn canonical(&self) -> String {
-//RS         if self.source_id == self.module {
-//RS             self.source_id.clone()
-//RS         } else {
-//RS             format!("{}::{}", self.source_id, self.module)
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return whether two source/module identities match exactly.
-//RS     pub fn matches(&self, other: &Self) -> bool {
-//RS         self == other
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapSourceIdentity {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(&self.canonical())
-//RS     }
-//RS }
-//RS 
-//RS /// Content/build identity for the code side of a native resident image.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapCodeRevision(String);
-//RS 
-//RS impl NativeSwapCodeRevision {
-//RS     /// Construct a checked code revision identity.
-//RS     pub fn new(value: impl Into<String>) -> Result<Self, NativeSwapError> {
-//RS         let value = value.into();
-//RS         validate_revision(&value, "code revision")
-//RS             .map(|_| Self(value.clone()))
-//RS             .map_err(|detail| NativeSwapError::input(value, NativeSwapBlockingFact::InvalidRevision, detail))
-//RS     }
-//RS 
-//RS     /// Borrow the opaque revision identity.
-//RS     pub fn as_str(&self) -> &str {
-//RS         &self.0
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapCodeRevision {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(&self.0)
-//RS     }
-//RS }
-//RS 
-//RS /// Content/build identity for the data/layout side of a native resident image.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapDataRevision(String);
-//RS 
-//RS impl NativeSwapDataRevision {
-//RS     /// Construct a checked data revision identity.
-//RS     pub fn new(value: impl Into<String>) -> Result<Self, NativeSwapError> {
-//RS         let value = value.into();
-//RS         validate_revision(&value, "data revision")
-//RS             .map(|_| Self(value.clone()))
-//RS             .map_err(|detail| NativeSwapError::input(value, NativeSwapBlockingFact::InvalidRevision, detail))
-//RS     }
-//RS 
-//RS     /// Borrow the opaque revision identity.
-//RS     pub fn as_str(&self) -> &str {
-//RS         &self.0
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapDataRevision {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(&self.0)
-//RS     }
-//RS }
-//RS 
-//RS /// The two revision facts that identify one executable/data image.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapRevision {
-//RS     /// Code/TIR/native-symbol revision.
-//RS     pub code: NativeSwapCodeRevision,
-//RS     /// Data/layout/retained-value revision.
-//RS     pub data: NativeSwapDataRevision,
-//RS }
-//RS 
-//RS impl NativeSwapRevision {
-//RS     /// Construct a checked pair of code and data revisions.
-//RS     pub fn new(
-//RS         code: impl Into<String>,
-//RS         data: impl Into<String>,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         Ok(Self {
-//RS             code: NativeSwapCodeRevision::new(code)?,
-//RS             data: NativeSwapDataRevision::new(data)?,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Borrow the code revision as an opaque string.
-//RS     pub fn code_revision(&self) -> &str {
-//RS         self.code.as_str()
-//RS     }
-//RS 
-//RS     /// Borrow the data revision as an opaque string.
-//RS     pub fn data_revision(&self) -> &str {
-//RS         self.data.as_str()
-//RS     }
-//RS 
-//RS     /// Return whether the code fact is unchanged.
-//RS     pub fn code_unchanged(&self, other: &Self) -> bool {
-//RS         self.code == other.code
-//RS     }
-//RS 
-//RS     /// Return whether the data fact is unchanged.
-//RS     pub fn data_unchanged(&self, other: &Self) -> bool {
-//RS         self.data == other.data
-//RS     }
-//RS }
-//RS 
-//RS /// An executable image identity held by a resident state.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapExecutable {
-//RS     /// Source/module owning this image.
-//RS     pub source: NativeSwapSourceIdentity,
-//RS     /// Code and data facts for this image.
-//RS     pub revision: NativeSwapRevision,
-//RS     /// Monotonic resident generation, distinct from source revisions.
-//RS     pub generation: u64,
-//RS }
-//RS 
-//RS impl NativeSwapExecutable {
-//RS     /// Construct one executable identity.
-//RS     pub fn new(
-//RS         source: NativeSwapSourceIdentity,
-//RS         revision: NativeSwapRevision,
-//RS         generation: u64,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         if let Err(detail) = validate_source_identity(&source, "executable") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         Ok(Self {
-//RS             source,
-//RS             revision,
-//RS             generation,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Return the source identity used by this image.
-//RS     pub fn source_id(&self) -> String {
-//RS         self.source.canonical()
-//RS     }
-//RS }
-//RS 
-//RS /// Whether a code revision can be installed in place.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapCodePolicy {
-//RS     /// Replace the resident code after all other facts pass.
-//RS     Replace,
-//RS     /// Never replace code in place; the caller must perform a clean restart.
-//RS     Restart,
-//RS     /// Reject the edit instead of offering a restart path.
-//RS     Reject,
-//RS }
-//RS 
-//RS impl NativeSwapCodePolicy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Replace => "replace",
-//RS             Self::Restart => "restart",
-//RS             Self::Reject => "reject",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Whether a data/layout revision can be installed in place.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapDataPolicy {
-//RS     /// Keep existing resident data; a changed data revision is not accepted.
-//RS     Preserve,
-//RS     /// Replace data through an already checked adapter operation.
-//RS     Replace,
-//RS     /// Apply an already checked migration at the adapter boundary.
-//RS     Migrate,
-//RS     /// Require a clean restart for changed data.
-//RS     Restart,
-//RS     /// Reject changed data without a restart path.
-//RS     Reject,
-//RS }
-//RS 
-//RS impl NativeSwapDataPolicy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Preserve => "preserve",
-//RS             Self::Replace => "replace",
-//RS             Self::Migrate => "migrate",
-//RS             Self::Restart => "restart",
-//RS             Self::Reject => "reject",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Policy for preserving one class of native handles.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapHandlePolicy {
-//RS     /// No handle may cross the boundary.
-//RS     Never,
-//RS     /// A handle crosses only when explicitly named and marked compatible.
-//RS     ExplicitCompatible,
-//RS }
-//RS 
-//RS impl NativeSwapHandlePolicy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Never => "never",
-//RS             Self::ExplicitCompatible => "explicit_compatible",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Whether the caller must prove no work is executing at the swap boundary.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapQuiescencePolicy {
-//RS     /// The plan must carry a reached quiescence fact.
-//RS     Required,
-//RS     /// The capability does not require a quiescence fact for this boundary.
-//RS     NotRequired,
-//RS }
-//RS 
-//RS impl NativeSwapQuiescencePolicy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Required => "required",
-//RS             Self::NotRequired => "not_required",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Abstract relocation choices.  These are facts for a later native adapter,
-//RS /// not calls into a linker or address allocator.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapRelocationStrategy {
-//RS     /// Existing identities remain valid without moving the resident handles.
-//RS     StableIdentity,
-//RS     /// New code/data is rebound by its checked semantic identity.
-//RS     RebindByIdentity,
-//RS     /// Relocation is only valid as part of a clean restart.
-//RS     Restart,
-//RS     /// The capability cannot account for the relocation.
-//RS     Reject,
-//RS }
-//RS 
-//RS impl NativeSwapRelocationStrategy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::StableIdentity => "stable_identity",
-//RS             Self::RebindByIdentity => "rebind_by_identity",
-//RS             Self::Restart => "restart",
-//RS             Self::Reject => "reject",
-//RS         }
-//RS     }
-//RS 
-//RS     fn permits_in_place(self) -> bool {
-//RS         matches!(self, Self::StableIdentity | Self::RebindByIdentity)
-//RS     }
-//RS }
-//RS 
-//RS /// Abstract link choices.  This records what a native adapter must do later;
-//RS /// this module never invokes a linker or loads a symbol.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapLinkStrategy {
-//RS     /// Existing resident link identity remains valid.
-//RS     ReuseResident,
-//RS     /// A checked adapter may link the new image before activation.
-//RS     Relink,
-//RS     /// Linking is only valid across a clean restart.
-//RS     Restart,
-//RS     /// No compatible link strategy is available.
-//RS     Reject,
-//RS }
-//RS 
-//RS impl NativeSwapLinkStrategy {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::ReuseResident => "reuse_resident",
-//RS             Self::Relink => "relink",
-//RS             Self::Restart => "restart",
-//RS             Self::Reject => "reject",
-//RS         }
-//RS     }
-//RS 
-//RS     fn permits_in_place(self) -> bool {
-//RS         matches!(self, Self::ReuseResident | Self::Relink)
-//RS     }
-//RS }
-//RS impl fmt::Display for NativeSwapRelocationStrategy {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapLinkStrategy {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Relocation identity facts supplied by the checked producer.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapRelocationFacts {
-//RS     /// Chosen relocation strategy.
-//RS     pub strategy: NativeSwapRelocationStrategy,
-//RS     /// Changed code identities whose relocation was considered.
-//RS     pub code_symbols: Vec<String>,
-//RS     /// Changed data identities whose relocation was considered.
-//RS     pub data_slots: Vec<String>,
-//RS }
-//RS 
-//RS impl NativeSwapRelocationFacts {
-//RS     /// Construct relocation facts with no symbol list.
-//RS     pub fn new(strategy: NativeSwapRelocationStrategy) -> Self {
-//RS         Self {
-//RS             strategy,
-//RS             code_symbols: Vec::new(),
-//RS             data_slots: Vec::new(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl Default for NativeSwapRelocationFacts {
-//RS     fn default() -> Self {
-//RS         Self::new(NativeSwapRelocationStrategy::StableIdentity)
-//RS     }
-//RS }
-//RS 
-//RS /// Link identity facts supplied by the checked producer.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapLinkFacts {
-//RS     /// Chosen link strategy.
-//RS     pub strategy: NativeSwapLinkStrategy,
-//RS     /// Opaque resident link identity, not a pointer or OS handle.
-//RS     pub resident_identity: String,
-//RS     /// Opaque candidate link identity.
-//RS     pub candidate_identity: String,
-//RS }
-//RS 
-//RS /// Descriptive alias matching the capability/plan vocabulary.
-//RS pub type NativeSwapLinkStrategyFacts = NativeSwapLinkFacts;
-//RS 
-//RS impl NativeSwapLinkFacts {
-//RS     /// Construct checked link facts.
-//RS     pub fn new(
-//RS         strategy: NativeSwapLinkStrategy,
-//RS         resident_identity: impl Into<String>,
-//RS         candidate_identity: impl Into<String>,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let resident_identity = resident_identity.into();
-//RS         let candidate_identity = candidate_identity.into();
-//RS         if let Err(detail) = validate_identity(&resident_identity, "resident link identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 resident_identity,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_identity(&candidate_identity, "candidate link identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 candidate_identity,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         Ok(Self {
-//RS             strategy,
-//RS             resident_identity,
-//RS             candidate_identity,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Reuse one resident link identity for an unchanged link boundary.
-//RS     pub fn resident(identity: impl Into<String>) -> Result<Self, NativeSwapError> {
-//RS         let identity = identity.into();
-//RS         Self::new(
-//RS             NativeSwapLinkStrategy::ReuseResident,
-//RS             identity.clone(),
-//RS             identity,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl Default for NativeSwapLinkFacts {
-//RS     fn default() -> Self {
-//RS         // The default only carries opaque labels.  It is valid and does not
-//RS         // claim that any linker has run.
-//RS         Self {
-//RS             strategy: NativeSwapLinkStrategy::ReuseResident,
-//RS             resident_identity: "resident".to_string(),
-//RS             candidate_identity: "candidate".to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Quiescence facts observed before a plan crosses the native boundary.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapQuiescence {
-//RS     /// Whether this plan asks for a quiescent boundary.
-//RS     pub required: bool,
-//RS     /// Number of active/in-flight operations observed by the producer.
-//RS     pub active_operations: u64,
-//RS     /// Whether the producer has reached the required boundary.
-//RS     pub reached: bool,
-//RS }
-//RS 
-//RS impl NativeSwapQuiescence {
-//RS     /// A reached boundary with no active operations.
-//RS     pub const fn ready() -> Self {
-//RS         Self {
-//RS             required: true,
-//RS             active_operations: 0,
-//RS             reached: true,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A boundary that still has active work and cannot be applied.
-//RS     pub const fn pending(active_operations: u64) -> Self {
-//RS         Self {
-//RS             required: true,
-//RS             active_operations,
-//RS             reached: false,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A plan for which no quiescence proof is needed.
-//RS     pub const fn not_required() -> Self {
-//RS         Self {
-//RS             required: false,
-//RS             active_operations: 0,
-//RS             reached: true,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return whether this fact is sufficient for a required pause.
-//RS     pub const fn is_ready(self) -> bool {
-//RS         self.reached && self.active_operations == 0
-//RS     }
-//RS }
-//RS 
-//RS /// Why a plan cannot be applied as an in-place native swap.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapBlockingFact {
-//RS     /// No fact blocks the in-place operation.
-//RS     None,
-//RS     /// A source/module identity is malformed or does not match.
-//RS     InvalidIdentity,
-//RS     /// A code or data revision is malformed or stale.
-//RS     InvalidRevision,
-//RS     /// Source identity changed between the resident and candidate images.
-//RS     SourceIdentityChanged,
-//RS     /// Candidate code revision is not accepted by the capability.
-//RS     CodeRevisionUnsupported,
-//RS     /// Candidate data/layout revision is not accepted by the capability.
-//RS     DataRevisionUnsupported,
-//RS     /// The checked semantic type surface changed.
-//RS     IncompatibleType,
-//RS     /// A connection handle belongs to another source or generation.
-//RS     ConnectionHandleStale,
-//RS     LayoutChanged,
-//RS     /// An unsafe edit was offered to the resident boundary.
-//RS     UnsafeEdit,
-//RS     /// A restart boundary was explicitly required.
-//RS     RestartRequired,
-//RS     /// A listener handle was not explicitly supplied.
-//RS     ListenerHandleMissing,
-//RS     /// A listener handle was supplied but marked incompatible.
-//RS     ListenerHandleIncompatible,
-//RS     /// A listener handle belongs to another source or generation.
-//RS     ListenerHandleStale,
-//RS     /// A connection handle was not explicitly supplied.
-//RS     ConnectionHandleMissing,
-//RS     /// A connection handle was supplied but marked incompatible.
-//RS     ConnectionHandleIncompatible,
-//RS     /// A connection's listener was not explicitly preserved.
-//RS     ConnectionListenerNotPreserved,
-//RS     /// The plan has duplicate handle or changed-item identity.
-//RS     DuplicateIdentity,
-//RS     /// The plan has too many typed facts.
-//RS     FactLimit,
-//RS     /// The boundary was not quiescent.
-//RS     QuiescenceRequired,
-//RS     /// Relocation facts do not permit in-place activation.
-//RS     RelocationUnsupported,
-//RS     /// Link facts do not permit in-place activation.
-//RS     LinkStrategyUnsupported,
-//RS     /// A removed definition would leave an old reference callable.
-//RS     StaleReference,
-//RS     /// The plan no longer describes the current executable.
-//RS     StalePlan,
-//RS     /// The transaction method was called in the wrong phase.
-//RS     InvalidPhase,
-//RS     /// Candidate compilation failed before activation.
-//RS     CompileFailed,
-//RS     /// Candidate data migration failed before activation.
-//RS     MigrationFailed,
-//RS     /// No checkpoint remains to restore.
-//RS     RollbackUnavailable,
-//RS     /// A capability does not offer the requested operation.
-//RS     CapabilityUnavailable,
-//RS }
-//RS 
-//RS impl NativeSwapBlockingFact {
-//RS     /// Stable report spelling for `jet explain --reload` and receipts.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::None => "none",
-//RS             Self::InvalidIdentity => "invalid_identity",
-//RS             Self::InvalidRevision => "invalid_revision",
-//RS             Self::SourceIdentityChanged => "source_identity_changed",
-//RS             Self::CodeRevisionUnsupported => "code_revision_unsupported",
-//RS             Self::DataRevisionUnsupported => "data_revision_unsupported",
-//RS             Self::IncompatibleType => "incompatible_type",
-//RS             Self::ConnectionHandleStale => "connection_handle_stale",
-//RS             Self::LayoutChanged => "layout_changed",
-//RS             Self::UnsafeEdit => "unsafe_edit",
-//RS             Self::RestartRequired => "restart_required",
-//RS             Self::ListenerHandleMissing => "listener_handle_missing",
-//RS             Self::ListenerHandleIncompatible => "listener_handle_incompatible",
-//RS             Self::ListenerHandleStale => "listener_handle_stale",
-//RS             Self::ConnectionHandleMissing => "connection_handle_missing",
-//RS             Self::ConnectionHandleIncompatible => "connection_handle_incompatible",
-//RS             Self::ConnectionListenerNotPreserved => "connection_listener_not_preserved",
-//RS             Self::DuplicateIdentity => "duplicate_identity",
-//RS             Self::FactLimit => "fact_limit",
-//RS             Self::QuiescenceRequired => "quiescence_required",
-//RS             Self::RelocationUnsupported => "relocation_unsupported",
-//RS             Self::LinkStrategyUnsupported => "link_strategy_unsupported",
-//RS             Self::StaleReference => "stale_reference",
-//RS             Self::StalePlan => "stale_plan",
-//RS             Self::InvalidPhase => "invalid_phase",
-//RS             Self::CompileFailed => "compile_failed",
-//RS             Self::MigrationFailed => "migration_failed",
-//RS             Self::RollbackUnavailable => "rollback_unavailable",
-//RS             Self::CapabilityUnavailable => "capability_unavailable",
-//RS         }
-//RS     }
-//RS     /// Return whether a blocking fact can be handled by a clean restart.
-//RS     ///
-//RS     /// Unsafe edits, stale references, malformed facts, and operational
-//RS     /// failures remain hard rejections even when a host supports restarting.
-//RS     pub const fn is_restartable(self) -> bool {
-//RS         matches!(
-//RS             self,
-//RS             Self::CodeRevisionUnsupported
-//RS                 | Self::DataRevisionUnsupported
-//RS                 | Self::IncompatibleType
-//RS                 | Self::LayoutChanged
-//RS                 | Self::RestartRequired
-//RS                 | Self::RelocationUnsupported
-//RS                 | Self::LinkStrategyUnsupported
-//RS         )
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapBlockingFact {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS /// Whether `jet explain --reload` recommends an in-place swap or a restart.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapDisposition {
-//RS     /// The checked plan may be applied in place.
-//RS     Swap,
-//RS     /// The plan is valid evidence for a clean restart, but this module will
-//RS     /// not perform that restart.
-//RS     Restart,
-//RS     /// The plan is unsafe or malformed and must be rejected.
-//RS     Rejected,
-//RS }
-//RS 
-//RS impl NativeSwapDisposition {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Swap => "swap",
-//RS             Self::Restart => "restart",
-//RS             Self::Rejected => "rejected",
-//RS         }
-//RS     }
-//RS }
-//RS impl fmt::Display for NativeSwapDisposition {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Exact explanation for one reload decision or failure.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapExplanation {
-//RS     /// Source/module identity that owns the decision.
-//RS     pub source_id: String,
-//RS     /// Whether this is an in-place swap, restart recommendation, or rejection.
-//RS     pub disposition: NativeSwapDisposition,
-//RS     /// One closed blocking fact; [`NativeSwapBlockingFact::None`] means the
-//RS     /// plan is compatible.
-//RS     pub blocking_fact: NativeSwapBlockingFact,
-//RS     /// Human-readable detail tied to the blocking fact.
-//RS     pub detail: String,
-//RS }
-//RS 
-//RS impl NativeSwapExplanation {
-//RS     /// Construct an exact bounded explanation.
-//RS     pub fn new(
-//RS         source_id: impl Into<String>,
-//RS         disposition: NativeSwapDisposition,
-//RS         blocking_fact: NativeSwapBlockingFact,
-//RS         detail: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             source_id: bounded_text(&source_id.into(), MAX_NATIVE_SWAP_ID_BYTES),
-//RS             disposition,
-//RS             blocking_fact,
-//RS             detail: bounded_text(&detail.into(), MAX_NATIVE_SWAP_DETAIL_BYTES),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Construct the positive explanation for a compatible plan.
-//RS     pub fn compatible(source_id: impl Into<String>) -> Self {
-//RS         Self::new(
-//RS             source_id,
-//RS             NativeSwapDisposition::Swap,
-//RS             NativeSwapBlockingFact::None,
-//RS             "code/data and explicit resident handles are compatible",
-//RS         )
-//RS     }
-//RS 
-//RS     /// Return a deterministic one-line explanation suitable for a CLI report.
-//RS     pub fn render(&self) -> String {
-//RS         format!(
-//RS             "reload disposition={} source={} blocking_fact={} detail={}",
-//RS             self.disposition, self.source_id, self.blocking_fact, self.detail
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapExplanation {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(&self.render())
-//RS     }
-//RS }
-//RS 
-//RS /// Error returned before a native swap mutates resident state.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapError {
-//RS     /// Machine-readable explanation of the refusal.
-//RS     pub explanation: NativeSwapExplanation,
-//RS }
-//RS 
-//RS impl NativeSwapError {
-//RS     fn input(
-//RS         source_id: impl Into<String>,
-//RS         blocking_fact: NativeSwapBlockingFact,
-//RS         detail: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             explanation: NativeSwapExplanation::new(
-//RS                 source_id,
-//RS                 NativeSwapDisposition::Rejected,
-//RS                 blocking_fact,
-//RS                 detail,
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn restart(
-//RS         source_id: impl Into<String>,
-//RS         blocking_fact: NativeSwapBlockingFact,
-//RS         detail: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             explanation: NativeSwapExplanation::new(
-//RS                 source_id,
-//RS                 NativeSwapDisposition::Restart,
-//RS                 blocking_fact,
-//RS                 detail,
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Borrow the exact explanation.
-//RS     pub fn explanation(&self) -> &NativeSwapExplanation {
-//RS         &self.explanation
-//RS     }
-//RS 
-//RS     /// Source identity named by this error.
-//RS     pub fn source_id(&self) -> &str {
-//RS         &self.explanation.source_id
-//RS     }
-//RS 
-//RS     /// Blocking fact named by this error.
-//RS     pub const fn blocking_fact(&self) -> NativeSwapBlockingFact {
-//RS         self.explanation.blocking_fact
-//RS     }
-//RS 
-//RS     /// Deterministic one-line report.
-//RS     pub fn render(&self) -> String {
-//RS         self.explanation.render()
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapError {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(&self.render())
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for NativeSwapError {}
-//RS 
-//RS /// The explicit compatibility fact attached to a listener or connection.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapHandleCompatibility {
-//RS     /// This handle may cross a compatible swap when explicitly named.
-//RS     Compatible,
-//RS     /// This handle must not cross the boundary.
-//RS     Incompatible,
-//RS }
-//RS 
-//RS impl NativeSwapHandleCompatibility {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Compatible => "compatible",
-//RS             Self::Incompatible => "incompatible",
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return whether the handle carries the explicit compatible fact.
-//RS     pub const fn is_compatible(self) -> bool {
-//RS         matches!(self, Self::Compatible)
-//RS     }
-//RS }
-//RS 
-//RS /// Explicit resident listener identity.  It is only a fact; no socket or
-//RS /// listener object is stored here.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapListenerHandle {
-//RS     /// Stable listener identity.
-//RS     pub id: String,
-//RS     /// Source/module owning this listener.
-//RS     pub source: NativeSwapSourceIdentity,
-//RS     /// Resident generation in which the handle was observed.
-//RS     pub generation: u64,
-//RS     /// Explicit compatibility fact from the host/producer.
-//RS     pub compatibility: NativeSwapHandleCompatibility,
-//RS }
-//RS 
-//RS impl NativeSwapListenerHandle {
-//RS     /// Construct a listener handle with an explicit compatibility fact.
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS         compatibility: NativeSwapHandleCompatibility,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let id = id.into();
-//RS         if let Err(detail) = validate_identity(&id, "listener handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&source, "listener") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         Ok(Self {
-//RS             id,
-//RS             source,
-//RS             generation,
-//RS             compatibility,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Construct an explicitly compatible listener handle.
-//RS     pub fn compatible(
-//RS         id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         Self::new(id, source, generation, NativeSwapHandleCompatibility::Compatible)
-//RS     }
-//RS 
-//RS     /// Construct a listener handle that must be rejected if preservation is requested.
-//RS     pub fn incompatible(
-//RS         id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         Self::new(id, source, generation, NativeSwapHandleCompatibility::Incompatible)
-//RS     }
-//RS 
-//RS     /// Return whether this handle can cross a swap boundary.
-//RS     pub const fn is_compatible(&self) -> bool {
-//RS         self.compatibility.is_compatible()
-//RS     }
-//RS }
-//RS 
-//RS /// Explicit resident connection identity.  It is only a fact; no stream or
-//RS /// operating-system connection is stored here.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapConnectionHandle {
-//RS     /// Stable connection identity.
-//RS     pub id: String,
-//RS     /// Listener identity that accepted this connection.
-//RS     pub listener_id: String,
-//RS     /// Source/module owning this connection.
-//RS     pub source: NativeSwapSourceIdentity,
-//RS     /// Resident generation in which the handle was observed.
-//RS     pub generation: u64,
-//RS     /// Explicit compatibility fact from the host/producer.
-//RS     pub compatibility: NativeSwapHandleCompatibility,
-//RS }
-//RS 
-//RS impl NativeSwapConnectionHandle {
-//RS     /// Construct a connection handle with an explicit compatibility fact.
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         listener_id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS         compatibility: NativeSwapHandleCompatibility,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let id = id.into();
-//RS         let listener_id = listener_id.into();
-//RS         if let Err(detail) = validate_identity(&id, "connection handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_identity(&listener_id, "connection listener identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&source, "connection") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         Ok(Self {
-//RS             id,
-//RS             listener_id,
-//RS             source,
-//RS             generation,
-//RS             compatibility,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Construct an explicitly compatible connection handle.
-//RS     pub fn compatible(
-//RS         id: impl Into<String>,
-//RS         listener_id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         Self::new(
-//RS             id,
-//RS             listener_id,
-//RS             source,
-//RS             generation,
-//RS             NativeSwapHandleCompatibility::Compatible,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Construct a connection handle that must be rejected if preservation is requested.
-//RS     pub fn incompatible(
-//RS         id: impl Into<String>,
-//RS         listener_id: impl Into<String>,
-//RS         source: NativeSwapSourceIdentity,
-//RS         generation: u64,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         Self::new(
-//RS             id,
-//RS             listener_id,
-//RS             source,
-//RS             generation,
-//RS             NativeSwapHandleCompatibility::Incompatible,
-//RS         )
-//RS     }
-//RS 
-//RS     /// Return whether this handle can cross a swap boundary.
-//RS     pub const fn is_compatible(&self) -> bool {
-//RS         self.compatibility.is_compatible()
-//RS     }
-//RS }
-//RS 
-//RS /// Host capabilities accepted by a native swap plan.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapCapability {
-//RS     /// In-place code policy.
-//RS     pub code: NativeSwapCodePolicy,
-//RS     /// In-place data policy.
-//RS     pub data: NativeSwapDataPolicy,
-//RS     /// Listener preservation policy.
-//RS     pub listeners: NativeSwapHandlePolicy,
-//RS     /// Connection preservation policy.
-//RS     pub connections: NativeSwapHandlePolicy,
-//RS     /// Whether a clean restart can be recommended for unsupported edits.
-//RS     pub restart: bool,
-//RS     /// Quiescence policy.
-//RS     pub quiescence: NativeSwapQuiescencePolicy,
-//RS     /// Capability-level relocation strategy.
-//RS     pub relocation: NativeSwapRelocationStrategy,
-//RS     /// Capability-level link strategy.
-//RS     pub link: NativeSwapLinkStrategy,
-//RS }
-//RS 
-//RS impl NativeSwapCapability {
-//RS     /// Resident native default: code replacement, explicit handle retention,
-//RS     /// and a required quiescent boundary.  Data changes remain conservative
-//RS     /// until the producer explicitly chooses replacement or migration.
-//RS     pub const fn resident() -> Self {
-//RS         Self {
-//RS             code: NativeSwapCodePolicy::Replace,
-//RS             data: NativeSwapDataPolicy::Preserve,
-//RS             listeners: NativeSwapHandlePolicy::ExplicitCompatible,
-//RS             connections: NativeSwapHandlePolicy::ExplicitCompatible,
-//RS             restart: true,
-//RS             quiescence: NativeSwapQuiescencePolicy::Required,
-//RS             relocation: NativeSwapRelocationStrategy::StableIdentity,
-//RS             link: NativeSwapLinkStrategy::ReuseResident,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Set the relocation strategy.
-//RS     pub const fn with_relocation(mut self, strategy: NativeSwapRelocationStrategy) -> Self {
-//RS         self.relocation = strategy;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Set the link strategy.
-//RS     pub const fn with_link(mut self, strategy: NativeSwapLinkStrategy) -> Self {
-//RS         self.link = strategy;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Return whether this capability can recommend a restart.
-//RS     pub const fn allows_restart(self) -> bool {
-//RS         self.restart
-//RS     }
-//RS }
-//RS 
-//RS impl Default for NativeSwapCapability {
-//RS     fn default() -> Self {
-//RS         Self::resident()
-//RS     }
-//RS }
-//RS 
-//RS /// A clean restart boundary fact.  The native adapter owns the actual restart;
-//RS /// this record says why it is needed and what state it may keep/reset.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapRestartBoundary {
-//RS     /// Whether the candidate must cross a clean restart boundary.
-//RS     pub required: bool,
-//RS     /// Machine-readable reason for the boundary.
-//RS     pub reason: Option<NativeSwapBlockingFact>,
-//RS     /// Source identities affected by the boundary.
-//RS     pub affected: Vec<String>,
-//RS     /// State names that an eventual restart may keep.
-//RS     pub kept: Vec<String>,
-//RS     /// State names that an eventual restart must reset.
-//RS     pub reset: Vec<String>,
-//RS }
-//RS 
-//RS impl NativeSwapRestartBoundary {
-//RS     /// An in-place boundary with no restart requirement.
-//RS     pub fn in_place() -> Self {
-//RS         Self {
-//RS             required: false,
-//RS             reason: None,
-//RS             affected: Vec::new(),
-//RS             kept: Vec::new(),
-//RS             reset: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// A restart boundary for one exact blocking fact.
-//RS     pub fn required(reason: NativeSwapBlockingFact, affected: Vec<String>) -> Self {
-//RS         Self {
-//RS             required: true,
-//RS             reason: Some(reason),
-//RS             affected: normalized_facts(affected),
-//RS             kept: Vec::new(),
-//RS             reset: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Attach state facts to a restart explanation.
-//RS     pub fn with_state(mut self, kept: Vec<String>, reset: Vec<String>) -> Self {
-//RS         self.kept = normalized_facts(kept);
-//RS         self.reset = normalized_facts(reset);
-//RS         self
-//RS     }
-//RS 
-//RS     fn validate(&self, source_id: &str) -> Result<(), NativeSwapError> {
-//RS         validate_fact_list(source_id, &self.affected)?;
-//RS         validate_fact_list(source_id, &self.kept)?;
-//RS         validate_fact_list(source_id, &self.reset)?;
-//RS         if self.required && self.reason.is_none() {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::RestartRequired,
-//RS                 "restart boundary is required but has no blocking fact",
-//RS             ));
-//RS         }
-//RS         if !self.required && self.reason.is_some() {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::RestartRequired,
-//RS                 "in-place boundary carries a restart reason",
-//RS             ));
-//RS         }
-//RS         if let Some(reason) = self.reason {
-//RS             if !reason.is_restartable() {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     reason,
-//RS                     format!("restart boundary reason `{reason}` cannot be handled by a clean restart"),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if let Some(value) = self
-//RS             .reset
-//RS             .iter()
-//RS             .find(|value| self.kept.iter().any(|kept| kept == *value))
-//RS         {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 format!("restart state `{value}` is both kept and reset"),
-//RS             ));
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Default for NativeSwapRestartBoundary {
-//RS     fn default() -> Self {
-//RS         Self::in_place()
-//RS     }
-//RS }
-//RS 
-//RS /// Code/data and host facts for one candidate resident swap.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct NativeSwapPlan {
-//RS     /// Source/module whose resident image is being changed.
-//RS     pub source: NativeSwapSourceIdentity,
-//RS     /// Executable identity expected before activation.
-//RS     pub from: NativeSwapExecutable,
-//RS     /// Executable identity expected after activation.
-//RS     pub to: NativeSwapExecutable,
-//RS     /// Sema-owned compatibility and canonical `#Persist` retention verdict.
-//RS     pub decision: HotSwapDecision,
-//RS     /// Host capabilities used for preflight.
-//RS     pub capability: NativeSwapCapability,
-//RS     /// Explicit listener handles allowed to cross the boundary.
-//RS     pub preserve_listeners: Vec<NativeSwapListenerHandle>,
-//RS     /// Explicit connection handles allowed to cross the boundary.
-//RS     pub preserve_connections: Vec<NativeSwapConnectionHandle>,
-//RS     /// Restart explanation if the edit is not in-place compatible.
-//RS     pub restart_boundary: NativeSwapRestartBoundary,
-//RS     /// Quiescence fact supplied by the producer.
-//RS     pub quiescence: NativeSwapQuiescence,
-//RS     /// Relocation facts supplied by the producer.
-//RS     pub relocation: NativeSwapRelocationFacts,
-//RS     /// Link facts supplied by the producer.
-//RS     pub link: NativeSwapLinkFacts,
-//RS     /// Changed semantic identities, in deterministic order.
-//RS     pub changed_items: Vec<String>,
-//RS     /// Removed definitions that must invalidate old references.
-//RS     pub removed_definitions: Vec<String>,
-//RS     /// An explicit checked blocking fact, when the producer knows the edit is
-//RS     /// unsafe/incompatible before native preflight.
-//RS     pub blocking_fact: Option<NativeSwapBlockingFact>,
-//RS }
-//RS 
-//RS impl NativeSwapPlan {
-//RS     /// Construct a plan from the sema-owned compatibility and retention
-//RS     /// verdict. Native policy and handle facts are only applied after this
-//RS     /// semantic input has been accepted.
-//RS     pub fn new(
-//RS         source: NativeSwapSourceIdentity,
-//RS         from: NativeSwapExecutable,
-//RS         to: NativeSwapExecutable,
-//RS         capability: NativeSwapCapability,
-//RS         decision: HotSwapDecision,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let source_id = source.canonical();
-//RS         validate_hot_swap_decision(&source_id, &source, &decision)?;
-//RS         if !from.source.matches(&source) || !to.source.matches(&source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::SourceIdentityChanged,
-//RS                 "plan source does not match both executable identities",
-//RS             ));
-//RS         }
-//RS         if to.generation <= from.generation {
-//RS             return Err(NativeSwapError::input(
-//RS                 source.canonical(),
-//RS                 NativeSwapBlockingFact::StalePlan,
-//RS                 "candidate generation must advance beyond the resident generation",
-//RS             ));
-//RS         }
-//RS         let restart_boundary = if decision.is_compatible() {
-//RS             NativeSwapRestartBoundary::in_place()
-//RS         } else {
-//RS             decision_restart_boundary(&decision)
-//RS         };
-//RS         let changed_items = normalized_facts(decision.changed_functions.clone());
-//RS         Ok(Self {
-//RS             source,
-//RS             from,
-//RS             to,
-//RS             decision,
-//RS             capability,
-//RS             preserve_listeners: Vec::new(),
-//RS             preserve_connections: Vec::new(),
-//RS             restart_boundary,
-//RS             quiescence: NativeSwapQuiescence::ready(),
-//RS             relocation: NativeSwapRelocationFacts::default(),
-//RS             link: NativeSwapLinkFacts::default(),
-//RS             changed_items,
-//RS             removed_definitions: Vec::new(),
-//RS             blocking_fact: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Mark a layout edit and its restart boundary.
-//RS     pub fn mark_layout_changed(mut self, affected: Vec<String>) -> Self {
-//RS         self.blocking_fact = Some(NativeSwapBlockingFact::LayoutChanged);
-//RS         self.restart_boundary = NativeSwapRestartBoundary::required(
-//RS             NativeSwapBlockingFact::LayoutChanged,
-//RS             affected,
-//RS         );
-//RS         self
-//RS     }
-//RS 
-//RS     /// Attach quiescence facts.
-//RS     pub fn with_quiescence(mut self, quiescence: NativeSwapQuiescence) -> Self {
-//RS         self.quiescence = quiescence;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Attach relocation facts.
-//RS     pub fn with_relocation(mut self, relocation: NativeSwapRelocationFacts) -> Self {
-//RS         self.relocation = relocation;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Attach link facts.
-//RS     pub fn with_link(mut self, link: NativeSwapLinkFacts) -> Self {
-//RS         self.link = link;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Add one explicitly preserved listener handle.
-//RS     pub fn preserve_listener(mut self, handle: NativeSwapListenerHandle) -> Self {
-//RS         self.preserve_listeners.push(handle);
-//RS         self.preserve_listeners.sort();
-//RS         self
-//RS     }
-//RS 
-//RS     /// Add one explicitly preserved connection handle.
-//RS     pub fn preserve_connection(mut self, handle: NativeSwapConnectionHandle) -> Self {
-//RS         self.preserve_connections.push(handle);
-//RS         self.preserve_connections.sort();
-//RS         self
-//RS     }
-//RS 
-//RS     /// Return whether code changed between the two revision facts.
-//RS     pub fn code_changed(&self) -> bool {
-//RS         !self.from.revision.code_unchanged(&self.to.revision)
-//RS     }
-//RS 
-//RS     /// Return whether data/layout changed between the two revision facts.
-//RS     pub fn data_changed(&self) -> bool {
-//RS         !self.from.revision.data_unchanged(&self.to.revision)
-//RS     }
-//RS 
-//RS     /// Return whether this plan carries any explicit restart/incompatibility fact.
-//RS     pub fn requires_restart(&self) -> bool {
-//RS         self.decision.requires_restart()
-//RS             || self.restart_boundary.required
-//RS             || self
-//RS                 .blocking_fact
-//RS                 .is_some_and(NativeSwapBlockingFact::is_restartable)
-//RS     }
-//RS 
-//RS     /// Return a positive or blocking explanation without consulting a resident
-//RS     /// host state.  The temporary state supplies the plan's explicit handles
-//RS     /// as its resident baseline so capability and policy failures use the same
-//RS     /// validation path as a live reload.
-//RS     pub fn explanation(&self) -> NativeSwapExplanation {
-//RS         if !self.decision.is_compatible() {
-//RS             let disposition = if self.capability.restart {
-//RS                 NativeSwapDisposition::Restart
-//RS             } else {
-//RS                 NativeSwapDisposition::Rejected
-//RS             };
-//RS             return NativeSwapExplanation::new(
-//RS                 self.source.canonical(),
-//RS                 disposition,
-//RS                 NativeSwapBlockingFact::IncompatibleType,
-//RS                 self.decision
-//RS                     .compatibility
-//RS                     .reason()
-//RS                     .unwrap_or("semantic hot-swap verdict requires a clean restart"),
-//RS             );
-//RS         }
-//RS         match NativeSwapState::new(
-//RS             self.from.clone(),
-//RS             self.preserve_listeners.clone(),
-//RS             self.preserve_connections.clone(),
-//RS         ) {
-//RS             Ok(state) => state.explain_reload(self),
-//RS             Err(error) => error.explanation.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn validate_shape(&self) -> Result<(), NativeSwapError> {
-//RS         let source_id = self.source.canonical();
-//RS         for (label, identity) in [
-//RS             ("plan", &self.source),
-//RS             ("resident executable", &self.from.source),
-//RS             ("candidate executable", &self.to.source),
-//RS         ] {
-//RS             if let Err(detail) = validate_source_identity(identity, label) {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id.clone(),
-//RS                     NativeSwapBlockingFact::InvalidIdentity,
-//RS                     detail,
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if !self.from.source.matches(&self.source) || !self.to.source.matches(&self.source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id.clone(),
-//RS                 NativeSwapBlockingFact::SourceIdentityChanged,
-//RS                 "plan source does not match both executable identities",
-//RS             ));
-//RS         }
-//RS         if self.to.generation <= self.from.generation {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id.clone(),
-//RS                 NativeSwapBlockingFact::StalePlan,
-//RS                 "candidate generation must advance beyond the resident generation",
-//RS             ));
-//RS         }
-//RS         validate_hot_swap_decision(&source_id, &self.source, &self.decision)?;
-//RS         self.restart_boundary.validate(&source_id)?;
-//RS         validate_fact_list(&source_id, &self.changed_items)?;
-//RS         validate_fact_list(&source_id, &self.removed_definitions)?;
-//RS         validate_fact_list(&source_id, &self.relocation.code_symbols)?;
-//RS         validate_fact_list(&source_id, &self.relocation.data_slots)?;
-//RS         validate_listener_plan_facts(&source_id, &self.source, &self.preserve_listeners)?;
-//RS         validate_connection_plan_facts(&source_id, &self.source, &self.preserve_connections)?;
-//RS         for (label, identity) in [
-//RS             ("resident link identity", &self.link.resident_identity),
-//RS             ("candidate link identity", &self.link.candidate_identity),
-//RS         ] {
-//RS             if let Err(detail) = validate_identity(identity, label) {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id.clone(),
-//RS                     NativeSwapBlockingFact::InvalidIdentity,
-//RS                     detail,
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS /// Result of a committed, rolled-back, or rejected native swap attempt.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct NativeSwapReceipt {
-//RS     /// Source/module identity for the operation.
-//RS     pub source: NativeSwapSourceIdentity,
-//RS     /// Operation outcome.
-//RS     pub outcome: NativeSwapOutcome,
-//RS     /// Revision before the attempted operation.
-//RS     pub before: NativeSwapRevision,
-//RS     /// Revision after the attempted operation (the prior revision on rollback/rejection).
-//RS     pub after: NativeSwapRevision,
-//RS     /// Resident generation before the attempted operation.
-//RS     pub before_generation: u64,
-//RS     /// Resident generation after the attempted operation.
-//RS     pub after_generation: u64,
-//RS     /// Listener handles retained by explicit compatible facts.
-//RS     pub preserved_listeners: Vec<String>,
-//RS     /// Listener handles reset/dropped because they were not explicitly retained.
-//RS     pub reset_listeners: Vec<String>,
-//RS     /// Connection handles retained by explicit compatible facts.
-//RS     pub preserved_connections: Vec<String>,
-//RS     /// Connection handles reset/dropped because they were not explicitly retained.
-//RS     pub reset_connections: Vec<String>,
-//RS     /// Restart boundary fact, if the operation was rejected for restart.
-//RS     pub restart_boundary: NativeSwapRestartBoundary,
-//RS     /// Exact explanation for a rejection or rollback.
-//RS     pub explanation: Option<NativeSwapExplanation>,
-//RS }
-//RS 
-//RS /// Outcome of one native swap transaction.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapOutcome {
-//RS     /// Candidate is now the resident executable.
-//RS     Committed,
-//RS     /// Candidate was installed transiently then restored to the checkpoint.
-//RS     RolledBack,
-//RS     /// Candidate was rejected before activation.
-//RS     Rejected,
-//RS     /// Candidate was not activated because a clean restart is required.
-//RS     RestartRequired,
-//RS }
-//RS 
-//RS impl NativeSwapOutcome {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Committed => "committed",
-//RS             Self::RolledBack => "rolled_back",
-//RS             Self::Rejected => "rejected",
-//RS             Self::RestartRequired => "restart_required",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl NativeSwapReceipt {
-//RS     /// Return whether the candidate is the committed resident image.
-//RS     pub const fn committed(&self) -> bool {
-//RS         matches!(self.outcome, NativeSwapOutcome::Committed)
-//RS     }
-//RS 
-//RS     /// Return whether this receipt restored the prior checkpoint.
-//RS     pub const fn rolled_back(&self) -> bool {
-//RS         matches!(self.outcome, NativeSwapOutcome::RolledBack)
-//RS     }
-//RS 
-//RS     /// Return whether the operation did not activate the candidate.
-//RS     pub const fn rejected(&self) -> bool {
-//RS         matches!(
-//RS             self.outcome,
-//RS             NativeSwapOutcome::Rejected | NativeSwapOutcome::RestartRequired
-//RS         )
-//RS     }
-//RS 
-//RS     /// Return a deterministic one-line report with all preservation and
-//RS     /// explanation facts visible.
-//RS     pub fn render(&self) -> String {
-//RS         let explanation = self
-//RS             .explanation
-//RS             .as_ref()
-//RS             .map(NativeSwapExplanation::render)
-//RS             .unwrap_or_else(|| "none".to_string());
-//RS         format!(
-//RS             "native-swap outcome={} source={} before=code:{}+data:{}@{} after=code:{}+data:{}@{} preserved_listeners=[{}] reset_listeners=[{}] preserved_connections=[{}] reset_connections=[{}] restart={} explanation={}",
-//RS             self.outcome,
-//RS             self.source,
-//RS             self.before.code,
-//RS             self.before.data,
-//RS             self.before_generation,
-//RS             self.after.code,
-//RS             self.after.data,
-//RS             self.after_generation,
-//RS             self.preserved_listeners.join(","),
-//RS             self.reset_listeners.join(","),
-//RS             self.preserved_connections.join(","),
-//RS             self.reset_connections.join(","),
-//RS             self.restart_boundary.required,
-//RS             explanation,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapOutcome {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS /// Observable phase of a resident swap transaction.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum NativeSwapPhase {
-//RS     /// No transaction is open.
-//RS     Ready,
-//RS     /// Old executable is paused and a checkpoint is retained.
-//RS     Paused,
-//RS     /// Candidate has been applied but not committed.
-//RS     Applied,
-//RS }
-//RS 
-//RS impl NativeSwapPhase {
-//RS     /// Stable report spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Ready => "ready",
-//RS             Self::Paused => "paused",
-//RS             Self::Applied => "applied",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for NativeSwapPhase {
-//RS     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         output.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS struct NativeSwapCheckpoint {
-//RS     executable: NativeSwapExecutable,
-//RS     listeners: BTreeMap<String, NativeSwapListenerHandle>,
-//RS     connections: BTreeMap<String, NativeSwapConnectionHandle>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS struct NativeSwapWorkingReceipt {
-//RS     source: NativeSwapSourceIdentity,
-//RS     before: NativeSwapExecutable,
-//RS     after: NativeSwapExecutable,
-//RS     preserved_listeners: Vec<String>,
-//RS     reset_listeners: Vec<String>,
-//RS     preserved_connections: Vec<String>,
-//RS     reset_connections: Vec<String>,
-//RS     restart_boundary: NativeSwapRestartBoundary,
-//RS }
-//RS 
-//RS /// Resident executable and explicit handle state for one native dev session.
-//RS ///
-//RS /// Handles are retained only through the plan's explicit compatible lists.  A
-//RS /// successful swap that omits an old listener/connection resets it in the
-//RS /// receipt; this prevents accidental preservation by merely copying a map.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct NativeSwapState {
-//RS     executable: NativeSwapExecutable,
-//RS     listeners: BTreeMap<String, NativeSwapListenerHandle>,
-//RS     connections: BTreeMap<String, NativeSwapConnectionHandle>,
-//RS     phase: NativeSwapPhase,
-//RS     checkpoint: Option<NativeSwapCheckpoint>,
-//RS     pending_plan: Option<NativeSwapPlan>,
-//RS     working_receipt: Option<NativeSwapWorkingReceipt>,
-//RS }
-//RS 
-//RS impl NativeSwapState {
-//RS     /// Construct resident state from one executable and explicit live handles.
-//RS     pub fn new(
-//RS         executable: NativeSwapExecutable,
-//RS         listeners: Vec<NativeSwapListenerHandle>,
-//RS         connections: Vec<NativeSwapConnectionHandle>,
-//RS     ) -> Result<Self, NativeSwapError> {
-//RS         let source_id = executable.source.canonical();
-//RS         if let Err(detail) = validate_source_identity(&executable.source, "executable") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         let listener_map = listener_map(&source_id, &executable, listeners)?;
-//RS         let connection_map = connection_map(&source_id, &executable, connections, &listener_map)?;
-//RS         Ok(Self {
-//RS             executable,
-//RS             listeners: listener_map,
-//RS             connections: connection_map,
-//RS             phase: NativeSwapPhase::Ready,
-//RS             checkpoint: None,
-//RS             pending_plan: None,
-//RS             working_receipt: None,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Construct state with no listener or connection handles.
-//RS     pub fn empty(executable: NativeSwapExecutable) -> Result<Self, NativeSwapError> {
-//RS         Self::new(executable, Vec::new(), Vec::new())
-//RS     }
-//RS 
-//RS     /// Borrow the current executable identity.
-//RS     pub fn executable(&self) -> &NativeSwapExecutable {
-//RS         &self.executable
-//RS     }
-//RS 
-//RS     /// Borrow the current source identity.
-//RS     pub fn source(&self) -> &NativeSwapSourceIdentity {
-//RS         &self.executable.source
-//RS     }
-//RS 
-//RS     /// Borrow the current revisions.
-//RS     pub fn revision(&self) -> &NativeSwapRevision {
-//RS         &self.executable.revision
-//RS     }
-//RS 
-//RS     /// Current resident generation.
-//RS     pub const fn generation(&self) -> u64 {
-//RS         self.executable.generation
-//RS     }
-//RS 
-//RS     /// Current transaction phase.
-//RS     pub const fn phase(&self) -> NativeSwapPhase {
-//RS         self.phase
-//RS     }
-//RS 
-//RS     /// Return whether a transaction is paused before apply.
-//RS     pub const fn is_paused(&self) -> bool {
-//RS         matches!(self.phase, NativeSwapPhase::Paused)
-//RS     }
-//RS 
-//RS     /// Return whether a candidate is applied but not committed.
-//RS     pub const fn is_applied(&self) -> bool {
-//RS         matches!(self.phase, NativeSwapPhase::Applied)
-//RS     }
-//RS 
-//RS     /// Return listener handles in deterministic identity order.
-//RS     pub fn listeners(&self) -> Vec<NativeSwapListenerHandle> {
-//RS         self.listeners.values().cloned().collect()
-//RS     }
-//RS 
-//RS     /// Return connection handles in deterministic identity order.
-//RS     pub fn connections(&self) -> Vec<NativeSwapConnectionHandle> {
-//RS         self.connections.values().cloned().collect()
-//RS     }
-//RS 
-//RS     /// Find one resident listener by identity.
-//RS     pub fn listener(&self, id: &str) -> Option<&NativeSwapListenerHandle> {
-//RS         self.listeners.get(id)
-//RS     }
-//RS 
-//RS     /// Find one resident connection by identity.
-//RS     pub fn connection(&self, id: &str) -> Option<&NativeSwapConnectionHandle> {
-//RS         self.connections.get(id)
-//RS     }
-//RS 
-//RS     /// Number of resident listeners.
-//RS     pub fn listener_count(&self) -> usize {
-//RS         self.listeners.len()
-//RS     }
-//RS 
-//RS     /// Number of resident connections.
-//RS     pub fn connection_count(&self) -> usize {
-//RS         self.connections.len()
-//RS     }
-//RS 
-//RS     /// Validate a plan without changing phase, checkpoint, executable, or handles.
-//RS     pub fn preflight(&self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         self.validate_plan(plan)
-//RS     }
-//RS 
-//RS     /// Explain a plan in the exact vocabulary used by receipts and CLI reports.
-//RS     pub fn explain_reload(&self, plan: &NativeSwapPlan) -> NativeSwapExplanation {
-//RS         match self.validate_plan(plan) {
-//RS             Ok(()) => NativeSwapExplanation::compatible(plan.source.canonical()),
-//RS             Err(error) => error.explanation.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Pause a resident image after complete preflight and retain a rollback
-//RS     /// checkpoint.  Any failure leaves the state byte-for-byte equivalent to
-//RS     /// its prior ready state.
-//RS     pub fn pause(&mut self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         if self.phase != NativeSwapPhase::Ready {
-//RS             return Err(self.phase_error("pause requires a ready transaction"));
-//RS         }
-//RS         self.validate_plan(plan)?;
-//RS         let checkpoint = NativeSwapCheckpoint {
-//RS             executable: self.executable.clone(),
-//RS             listeners: self.listeners.clone(),
-//RS             connections: self.connections.clone(),
-//RS         };
-//RS         self.checkpoint = Some(checkpoint);
-//RS         self.pending_plan = Some(plan.clone());
-//RS         self.working_receipt = None;
-//RS         self.phase = NativeSwapPhase::Paused;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Apply a previously paused plan.  All checks run before the first state
-//RS     /// assignment, so incompatible/unsafe edits cannot partially mutate state.
-//RS     pub fn apply(&mut self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         if self.phase != NativeSwapPhase::Paused {
-//RS             return Err(self.phase_error("apply requires a paused transaction"));
-//RS         }
-//RS         if self.pending_plan.as_ref() != Some(plan) {
-//RS             return Err(NativeSwapError::input(
-//RS                 self.source().canonical(),
-//RS                 NativeSwapBlockingFact::StalePlan,
-//RS                 "apply plan does not match the paused plan",
-//RS             ));
-//RS         }
-//RS         self.validate_plan(plan)?;
-//RS         let checkpoint = self
-//RS             .checkpoint
-//RS             .as_ref()
-//RS             .ok_or_else(|| self.error(NativeSwapBlockingFact::RollbackUnavailable, "apply checkpoint is missing"))?;
-//RS         let preserved_listener_ids: BTreeSet<String> = plan
-//RS             .preserve_listeners
-//RS             .iter()
-//RS             .map(|handle| handle.id.clone())
-//RS             .collect();
-//RS         let preserved_connection_ids: BTreeSet<String> = plan
-//RS             .preserve_connections
-//RS             .iter()
-//RS             .map(|handle| handle.id.clone())
-//RS             .collect();
-//RS 
-//RS         let mut next_listeners = BTreeMap::new();
-//RS         for handle in &plan.preserve_listeners {
-//RS             let mut preserved = handle.clone();
-//RS             preserved.generation = plan.to.generation;
-//RS             next_listeners.insert(preserved.id.clone(), preserved);
-//RS         }
-//RS         let mut next_connections = BTreeMap::new();
-//RS         for handle in &plan.preserve_connections {
-//RS             let mut preserved = handle.clone();
-//RS             preserved.generation = plan.to.generation;
-//RS             next_connections.insert(preserved.id.clone(), preserved);
-//RS         }
-//RS         let reset_listeners = checkpoint
-//RS             .listeners
-//RS             .keys()
-//RS             .filter(|id| !preserved_listener_ids.contains(*id))
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         let reset_connections = checkpoint
-//RS             .connections
-//RS             .keys()
-//RS             .filter(|id| !preserved_connection_ids.contains(*id))
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         let working = NativeSwapWorkingReceipt {
-//RS             source: plan.source.clone(),
-//RS             before: checkpoint.executable.clone(),
-//RS             after: plan.to.clone(),
-//RS             preserved_listeners: preserved_listener_ids.iter().cloned().collect(),
-//RS             reset_listeners,
-//RS             preserved_connections: preserved_connection_ids.iter().cloned().collect(),
-//RS             reset_connections,
-//RS             restart_boundary: plan.restart_boundary.clone(),
-//RS         };
-//RS 
-//RS         // Every fallible check and all receipt facts are complete above.  These
-//RS         // assignments are the first mutation of the resident image/handles.
-//RS         self.executable = plan.to.clone();
-//RS         self.listeners = next_listeners;
-//RS         self.connections = next_connections;
-//RS         self.working_receipt = Some(working);
-//RS         self.phase = NativeSwapPhase::Applied;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Commit an applied candidate and drop the rollback checkpoint.
-//RS     pub fn commit(&mut self) -> Result<NativeSwapReceipt, NativeSwapError> {
-//RS         if self.phase != NativeSwapPhase::Applied {
-//RS             return Err(self.phase_error("commit requires an applied transaction"));
-//RS         }
-//RS         let working = self.working_receipt.take().ok_or_else(|| {
-//RS             self.error(
-//RS                 NativeSwapBlockingFact::InvalidPhase,
-//RS                 "applied transaction has no working receipt",
-//RS             )
-//RS         })?;
-//RS         let receipt = receipt_from_working(&working, NativeSwapOutcome::Committed, None);
-//RS         self.checkpoint = None;
-//RS         self.pending_plan = None;
-//RS         self.phase = NativeSwapPhase::Ready;
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     /// Restore the exact executable and explicit handles captured by pause.
-//RS     pub fn rollback(&mut self) -> Result<NativeSwapReceipt, NativeSwapError> {
-//RS         if !matches!(self.phase, NativeSwapPhase::Paused | NativeSwapPhase::Applied) {
-//RS             return Err(self.phase_error("rollback requires a paused or applied transaction"));
-//RS         }
-//RS         let checkpoint = self.checkpoint.take().ok_or_else(|| {
-//RS             self.error(
-//RS                 NativeSwapBlockingFact::RollbackUnavailable,
-//RS                 "rollback checkpoint is missing",
-//RS             )
-//RS         })?;
-//RS         let before = self.executable.clone();
-//RS         let source = checkpoint.executable.source.clone();
-//RS         let receipt = NativeSwapReceipt {
-//RS             source,
-//RS             outcome: NativeSwapOutcome::RolledBack,
-//RS             before: before.revision.clone(),
-//RS             after: checkpoint.executable.revision.clone(),
-//RS             before_generation: before.generation,
-//RS             after_generation: checkpoint.executable.generation,
-//RS             preserved_listeners: checkpoint.listeners.keys().cloned().collect(),
-//RS             reset_listeners: self
-//RS                 .listeners
-//RS                 .keys()
-//RS                 .filter(|id| !checkpoint.listeners.contains_key(*id))
-//RS                 .cloned()
-//RS                 .collect(),
-//RS             preserved_connections: checkpoint.connections.keys().cloned().collect(),
-//RS             reset_connections: self
-//RS                 .connections
-//RS                 .keys()
-//RS                 .filter(|id| !checkpoint.connections.contains_key(*id))
-//RS                 .cloned()
-//RS                 .collect(),
-//RS             restart_boundary: NativeSwapRestartBoundary::in_place(),
-//RS             explanation: Some(NativeSwapExplanation::new(
-//RS                 checkpoint.executable.source.canonical(),
-//RS                 NativeSwapDisposition::Rejected,
-//RS                 NativeSwapBlockingFact::UnsafeEdit,
-//RS                 "rollback restored the prior executable and explicit handles",
-//RS             )),
-//RS         };
-//RS         self.executable = checkpoint.executable;
-//RS         self.listeners = checkpoint.listeners;
-//RS         self.connections = checkpoint.connections;
-//RS         self.pending_plan = None;
-//RS         self.working_receipt = None;
-//RS         self.phase = NativeSwapPhase::Ready;
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     /// Reject a candidate without opening a transaction, retaining current
-//RS     /// executable and handles.  This is useful when compile/migration failed
-//RS     /// before pause could begin.
-// END-PORT-PENDING 0778 crates/jet-devserver/src/NativeSwap.rs:1-1814
+// Backend-neutral facts and compare-and-commit transaction state for a resident native swap.
+// No method waits for quiescence or performs linker, socket, scheduler or OS operations.
+// Producers supply checked semantic, relocation, link and quiescence facts before pause.
+use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
+use std.fmt
 
+// Rust: crates/jet-devserver/src/NativeSwap.rs:27
+pub const NATIVE_SWAP_PROTOCOL: String = "jet.native.swap.v1"
+// Rust: crates/jet-devserver/src/NativeSwap.rs:29
+pub const MAX_NATIVE_SWAP_ID_BYTES: USize = 256
+// Rust: crates/jet-devserver/src/NativeSwap.rs:31
+pub const MAX_NATIVE_SWAP_DETAIL_BYTES: USize = 1024
+// Rust: crates/jet-devserver/src/NativeSwap.rs:33
+pub const MAX_NATIVE_SWAP_FACTS: USize = 1024
+
+// Rust: crates/jet-devserver/src/NativeSwap.rs:39
+pub struct NativeSwapSourceIdentity { pub source_id: String; pub module: String }
+impl NativeSwapSourceIdentity {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:49
+    pub fn new(source_id: String) -> Self NativeSwapError! { Self.new_with_module(~source_id, ^source_id) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:55
+    pub fn new_with_module(source_id: String, module: String) -> Self NativeSwapError! {
+        _ :: validate_identity(source_id, "source identity") ?? return .Err(NativeSwapError.input(^source_id, .InvalidIdentity, err))
+        _ :: validate_identity(module, "module identity") ?? return .Err(NativeSwapError.input(^source_id, .InvalidIdentity, err))
+        Self { source_id: ^source_id, module: ^module }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:71
+    pub fn canonical(self: &Self) -> String {
+        if self.source_id == self.module -> ~self.source_id else -> "{self.source_id}::{self.module}"
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:80
+    pub fn matches(self: &Self, other: &Self) -> Bool { self == other }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:85
+impl fmt.Display for NativeSwapSourceIdentity {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:86
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.canonical()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:93
+pub struct NativeSwapCodeRevision { value: String }
+impl NativeSwapCodeRevision {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:97
+    pub fn new(value: String) -> Self NativeSwapError! {
+        _ :: validate_revision(value, "code revision") ?? return .Err(NativeSwapError.input(^value, .InvalidRevision, err))
+        Self { value: ^value }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:105
+    pub fn as_str(self: &Self) -> String { self.value }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:110
+impl fmt.Display for NativeSwapCodeRevision {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:111
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.value) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:118
+pub struct NativeSwapDataRevision { value: String }
+impl NativeSwapDataRevision {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:122
+    pub fn new(value: String) -> Self NativeSwapError! {
+        _ :: validate_revision(value, "data revision") ?? return .Err(NativeSwapError.input(^value, .InvalidRevision, err))
+        Self { value: ^value }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:130
+    pub fn as_str(self: &Self) -> String { self.value }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:135
+impl fmt.Display for NativeSwapDataRevision {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:136
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.value) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:143
+pub struct NativeSwapRevision { pub code: NativeSwapCodeRevision; pub data: NativeSwapDataRevision }
+impl NativeSwapRevision {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:152
+    pub fn new(code: String, data: String) -> Self NativeSwapError! {
+        Self { code: NativeSwapCodeRevision.new(^code)?, data: NativeSwapDataRevision.new(^data)? }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:163
+    pub fn code_revision(self: &Self) -> String { self.code.as_str() }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:168
+    pub fn data_revision(self: &Self) -> String { self.data.as_str() }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:173
+    pub fn code_unchanged(self: &Self, other: &Self) -> Bool { self.code == other.code }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:178
+    pub fn data_unchanged(self: &Self, other: &Self) -> Bool { self.data == other.data }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:185
+pub struct NativeSwapExecutable {
+    pub source: NativeSwapSourceIdentity
+    pub revision: NativeSwapRevision
+    pub generation: U64
+}
+impl NativeSwapExecutable {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:196
+    pub fn new(source: NativeSwapSourceIdentity, revision: NativeSwapRevision, generation: U64) -> Self NativeSwapError! {
+        _ :: validate_source_identity(&source, "executable") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        Self { source: ^source, revision: ^revision, generation }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:216
+    pub fn source_id(self: &Self) -> String { self.source.canonical() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:223
+pub enum NativeSwapCodePolicy { Replace; Restart; Reject }
+impl NativeSwapCodePolicy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:234
+    pub fn as_str(self) -> String { if self == { .Replace -> "replace", .Restart -> "restart", .Reject -> "reject" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:245
+pub enum NativeSwapDataPolicy { Preserve; Replace; Migrate; Restart; Reject }
+impl NativeSwapDataPolicy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:260
+    pub fn as_str(self) -> String { if self == { .Preserve -> "preserve", .Replace -> "replace", .Migrate -> "migrate", .Restart -> "restart", .Reject -> "reject" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:273
+pub enum NativeSwapHandlePolicy { Never; ExplicitCompatible }
+impl NativeSwapHandlePolicy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:282
+    pub fn as_str(self) -> String { if self == { .Never -> "never", .ExplicitCompatible -> "explicit_compatible" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:292
+pub enum NativeSwapQuiescencePolicy { Required; NotRequired }
+impl NativeSwapQuiescencePolicy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:301
+    pub fn as_str(self) -> String { if self == { .Required -> "required", .NotRequired -> "not_required" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:312
+pub enum NativeSwapRelocationStrategy { StableIdentity; RebindByIdentity; Restart; Reject }
+impl NativeSwapRelocationStrategy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:325
+    pub fn as_str(self) -> String { if self == { .StableIdentity -> "stable_identity", .RebindByIdentity -> "rebind_by_identity", .Restart -> "restart", .Reject -> "reject" } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:334
+    fn permits_in_place(self) -> Bool { self == .StableIdentity || self == .RebindByIdentity }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:342
+pub enum NativeSwapLinkStrategy { ReuseResident; Relink; Restart; Reject }
+impl NativeSwapLinkStrategy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:355
+    pub fn as_str(self) -> String { if self == { .ReuseResident -> "reuse_resident", .Relink -> "relink", .Restart -> "restart", .Reject -> "reject" } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:364
+    fn permits_in_place(self) -> Bool { self == .ReuseResident || self == .Relink }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:368
+impl fmt.Display for NativeSwapRelocationStrategy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:369
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:374
+impl fmt.Display for NativeSwapLinkStrategy {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:375
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:383
+pub struct NativeSwapRelocationFacts {
+    pub strategy: NativeSwapRelocationStrategy
+    pub code_symbols: [String]
+    pub data_slots: [String]
+}
+impl NativeSwapRelocationFacts {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:394
+    pub fn new(strategy: NativeSwapRelocationStrategy) -> Self { Self { strategy, code_symbols: [], data_slots: [] } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:403
+impl Default for NativeSwapRelocationFacts {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:404
+    fn default() -> Self { Self.new(.StableIdentity) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:411
+pub struct NativeSwapLinkFacts {
+    pub strategy: NativeSwapLinkStrategy
+    pub resident_identity: String
+    pub candidate_identity: String
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:421
+pub type NativeSwapLinkStrategyFacts = NativeSwapLinkFacts
+impl NativeSwapLinkFacts {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:425
+    pub fn new(strategy: NativeSwapLinkStrategy, resident_identity: String, candidate_identity: String) -> Self NativeSwapError! {
+        _ :: validate_identity(resident_identity, "resident link identity") ?? return .Err(NativeSwapError.input(^resident_identity, .InvalidIdentity, err))
+        _ :: validate_identity(candidate_identity, "candidate link identity") ?? return .Err(NativeSwapError.input(^candidate_identity, .InvalidIdentity, err))
+        Self { strategy, resident_identity: ^resident_identity, candidate_identity: ^candidate_identity }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:454
+    pub fn resident(identity: String) -> Self NativeSwapError! { Self.new(.ReuseResident, ~identity, ^identity) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:464
+impl Default for NativeSwapLinkFacts {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:465
+    fn default() -> Self {
+        // Opaque labels only: this does not claim a linker has run.
+        Self { strategy: .ReuseResident, resident_identity: "resident", candidate_identity: "candidate" }
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:478
+pub struct NativeSwapQuiescence { pub required: Bool; pub active_operations: U64; pub reached: Bool }
+impl NativeSwapQuiescence {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:489
+    pub fn ready() -> Self { Self { required: true, active_operations: 0, reached: true } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:498
+    pub fn pending(active_operations: U64) -> Self { Self { required: true, active_operations, reached: false } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:507
+    pub fn not_required() -> Self { Self { required: false, active_operations: 0, reached: true } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:516
+    pub fn is_ready(self) -> Bool { self.reached && self.active_operations == 0 }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:523
+pub enum NativeSwapBlockingFact {
+    None; InvalidIdentity; InvalidRevision; SourceIdentityChanged; CodeRevisionUnsupported; DataRevisionUnsupported;
+    IncompatibleType; ConnectionHandleStale; LayoutChanged; UnsafeEdit; RestartRequired; ListenerHandleMissing;
+    ListenerHandleIncompatible; ListenerHandleStale; ConnectionHandleMissing; ConnectionHandleIncompatible;
+    ConnectionListenerNotPreserved; DuplicateIdentity; FactLimit; QuiescenceRequired; RelocationUnsupported;
+    LinkStrategyUnsupported; StaleReference; StalePlan; InvalidPhase; CompileFailed; MigrationFailed;
+    RollbackUnavailable; CapabilityUnavailable
+}
+impl NativeSwapBlockingFact {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:585
+    pub fn as_str(self) -> String {
+        if self == {
+            .None -> "none", .InvalidIdentity -> "invalid_identity", .InvalidRevision -> "invalid_revision",
+            .SourceIdentityChanged -> "source_identity_changed", .CodeRevisionUnsupported -> "code_revision_unsupported",
+            .DataRevisionUnsupported -> "data_revision_unsupported", .IncompatibleType -> "incompatible_type",
+            .ConnectionHandleStale -> "connection_handle_stale", .LayoutChanged -> "layout_changed", .UnsafeEdit -> "unsafe_edit",
+            .RestartRequired -> "restart_required", .ListenerHandleMissing -> "listener_handle_missing",
+            .ListenerHandleIncompatible -> "listener_handle_incompatible", .ListenerHandleStale -> "listener_handle_stale",
+            .ConnectionHandleMissing -> "connection_handle_missing", .ConnectionHandleIncompatible -> "connection_handle_incompatible",
+            .ConnectionListenerNotPreserved -> "connection_listener_not_preserved", .DuplicateIdentity -> "duplicate_identity",
+            .FactLimit -> "fact_limit", .QuiescenceRequired -> "quiescence_required", .RelocationUnsupported -> "relocation_unsupported",
+            .LinkStrategyUnsupported -> "link_strategy_unsupported", .StaleReference -> "stale_reference", .StalePlan -> "stale_plan",
+            .InvalidPhase -> "invalid_phase", .CompileFailed -> "compile_failed", .MigrationFailed -> "migration_failed",
+            .RollbackUnavailable -> "rollback_unavailable", .CapabilityUnavailable -> "capability_unavailable"
+        }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:622
+    pub fn is_restartable(self) -> Bool {
+        self == .CodeRevisionUnsupported || self == .DataRevisionUnsupported || self == .IncompatibleType ||
+        self == .LayoutChanged || self == .RestartRequired || self == .RelocationUnsupported || self == .LinkStrategyUnsupported
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:637
+impl fmt.Display for NativeSwapBlockingFact {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:638
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:645
+pub enum NativeSwapDisposition { Swap; Restart; Rejected }
+impl NativeSwapDisposition {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:657
+    pub fn as_str(self) -> String { if self == { .Swap -> "swap", .Restart -> "restart", .Rejected -> "rejected" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:665
+impl fmt.Display for NativeSwapDisposition {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:666
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:674
+pub struct NativeSwapExplanation {
+    pub source_id: String
+    pub disposition: NativeSwapDisposition
+    pub blocking_fact: NativeSwapBlockingFact
+    pub detail: String
+}
+impl NativeSwapExplanation {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:688
+    pub fn new(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
+        Self { source_id: bounded_text(source_id, MAX_NATIVE_SWAP_ID_BYTES), disposition, blocking_fact, detail: bounded_text(detail, MAX_NATIVE_SWAP_DETAIL_BYTES) }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:703
+    pub fn compatible(source_id: String) -> Self {
+        Self.new(^source_id, .Swap, .None, "code/data and explicit resident handles are compatible")
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:713
+    pub fn render(self: &Self) -> String {
+        "reload disposition={self.disposition.as_str()} source={self.source_id} blocking_fact={self.blocking_fact.as_str()} detail={self.detail}"
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:721
+impl fmt.Display for NativeSwapExplanation {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:722
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.render()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:729
+#Error
+pub struct NativeSwapError { pub explanation: NativeSwapExplanation }
+impl NativeSwapError {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:735
+    fn input(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
+        Self { explanation: NativeSwapExplanation.new(^source_id, .Rejected, blocking_fact, ^detail) }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:750
+    fn restart(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
+        Self { explanation: NativeSwapExplanation.new(^source_id, .Restart, blocking_fact, ^detail) }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:766
+    pub fn explanation(self: &Self) -> &NativeSwapExplanation { &self.explanation }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:771
+    pub fn source_id(self: &Self) -> String { self.explanation.source_id }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:776
+    pub fn blocking_fact(self: &Self) -> NativeSwapBlockingFact { self.explanation.blocking_fact }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:781
+    pub fn render(self: &Self) -> String { self.explanation.render() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:786
+impl fmt.Display for NativeSwapError {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:787
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.render()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:792
+// NativeSwapError's #Error supplies the std.error.Error contract.
+// Rust: crates/jet-devserver/src/NativeSwap.rs:796
+pub enum NativeSwapHandleCompatibility { Compatible; Incompatible }
+impl NativeSwapHandleCompatibility {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:805
+    pub fn as_str(self) -> String { if self == { .Compatible -> "compatible", .Incompatible -> "incompatible" } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:813
+    pub fn is_compatible(self) -> Bool { self == .Compatible }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:822
+pub struct NativeSwapListenerHandle {
+    pub id: String
+    pub source: NativeSwapSourceIdentity
+    pub generation: U64
+    pub compatibility: NativeSwapHandleCompatibility
+}
+impl NativeSwapListenerHandle {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:834
+    pub fn new(id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> Self NativeSwapError! {
+        _ :: validate_identity(id, "listener handle identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _ :: validate_source_identity(&source, "listener") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        Self { id: ^id, source: ^source, generation, compatibility }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:864
+    pub fn compatible(id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(^id, ^source, generation, .Compatible) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:873
+    pub fn incompatible(id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(^id, ^source, generation, .Incompatible) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:882
+    pub fn is_compatible(self: &Self) -> Bool { self.compatibility.is_compatible() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:891
+pub struct NativeSwapConnectionHandle {
+    pub id: String
+    pub listener_id: String
+    pub source: NativeSwapSourceIdentity
+    pub generation: U64
+    pub compatibility: NativeSwapHandleCompatibility
+}
+impl NativeSwapConnectionHandle {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:905
+    pub fn new(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> Self NativeSwapError! {
+        _ :: validate_identity(id, "connection handle identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _ :: validate_identity(listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _ :: validate_source_identity(&source, "connection") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        Self { id: ^id, listener_id: ^listener_id, source: ^source, generation, compatibility }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:945
+    pub fn compatible(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(^id, ^listener_id, ^source, generation, .Compatible) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:961
+    pub fn incompatible(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(^id, ^listener_id, ^source, generation, .Incompatible) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:977
+    pub fn is_compatible(self: &Self) -> Bool { self.compatibility.is_compatible() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:985
+pub struct NativeSwapCapability {
+    pub code: NativeSwapCodePolicy
+    pub data: NativeSwapDataPolicy
+    pub listeners: NativeSwapHandlePolicy
+    pub connections: NativeSwapHandlePolicy
+    pub restart: Bool
+    pub quiescence: NativeSwapQuiescencePolicy
+    pub relocation: NativeSwapRelocationStrategy
+    pub link: NativeSwapLinkStrategy
+}
+impl NativeSwapCapability {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1007
+    pub fn resident() -> Self {
+        Self { code: .Replace, data: .Preserve, listeners: .ExplicitCompatible, connections: .ExplicitCompatible,
+            restart: true, quiescence: .Required, relocation: .StableIdentity, link: .ReuseResident }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1021
+    pub fn with_relocation(self: Self, strategy: NativeSwapRelocationStrategy) -> Self { self.relocation = strategy; self }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1027
+    pub fn with_link(self: Self, strategy: NativeSwapLinkStrategy) -> Self { self.link = strategy; self }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1033
+    pub fn allows_restart(self) -> Bool { self.restart }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1038
+impl Default for NativeSwapCapability {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1039
+    fn default() -> Self { Self.resident() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1048
+pub struct NativeSwapRestartBoundary {
+    pub required: Bool
+    pub reason: NativeSwapBlockingFact?
+    pub affected: [String]
+    pub kept: [String]
+    pub reset: [String]
+}
+impl NativeSwapRestartBoundary {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1062
+    pub fn in_place() -> Self { Self { required: false, reason: .None, affected: [], kept: [], reset: [] } }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1073
+    pub fn required(reason: NativeSwapBlockingFact, affected: [String]) -> Self {
+        Self { required: true, reason: .Val(reason), affected: normalized_facts(^affected), kept: [], reset: [] }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1084
+    pub fn with_state(self: Self, kept: [String], reset: [String]) -> Self {
+        self.kept = normalized_facts(^kept)
+        self.reset = normalized_facts(^reset)
+        self
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1090
+    fn validate(self: &Self, source_id: String) -> Unit NativeSwapError! {
+        validate_fact_list(source_id, &self.affected)?
+        validate_fact_list(source_id, &self.kept)?
+        validate_fact_list(source_id, &self.reset)?
+        if self.required && self.reason.is_none() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "restart boundary is required but has no blocking fact"))
+        if !self.required && self.reason.is_some() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "in-place boundary carries a restart reason"))
+        if self.reason == .Val(reason) {
+            if !reason.is_restartable() -> return .Err(NativeSwapError.input(source_id, reason, "restart boundary reason `{reason.as_str()}` cannot be handled by a clean restart"))
+        }
+        kept_index: [String:Bool] := [:]
+        for kept in self.kept -> kept_index.insert(kept, true)
+        for value in self.reset {
+            if kept_index.contains_key(value) -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "restart state `{value}` is both kept and reset"))
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1132
+impl Default for NativeSwapRestartBoundary {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1133
+    fn default() -> Self { Self.in_place() }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1140
+pub struct NativeSwapPlan {
+    pub source: NativeSwapSourceIdentity
+    pub from: NativeSwapExecutable
+    pub to: NativeSwapExecutable
+    pub decision: HotSwapDecision
+    pub capability: NativeSwapCapability
+    pub preserve_listeners: [NativeSwapListenerHandle]
+    pub preserve_connections: [NativeSwapConnectionHandle]
+    pub restart_boundary: NativeSwapRestartBoundary
+    pub quiescence: NativeSwapQuiescence
+    pub relocation: NativeSwapRelocationFacts
+    pub link: NativeSwapLinkFacts
+    pub changed_items: [String]
+    pub removed_definitions: [String]
+    pub blocking_fact: NativeSwapBlockingFact?
+}
+impl NativeSwapPlan {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1176
+    pub fn new(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> Self NativeSwapError! {
+        source_id :: source.canonical()
+        validate_hot_swap_decision(source_id, &source, &decision)?
+        if !from.source.matches(&source) || !to.source.matches(&source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
+        if to.generation <= from.generation -> return .Err(NativeSwapError.input(source.canonical(), .StalePlan, "candidate generation must advance beyond the resident generation"))
+        restart_boundary :: if decision.is_compatible() -> NativeSwapRestartBoundary.in_place() else -> decision_restart_boundary(&decision)
+        changed_items :: normalized_facts(~decision.changed_functions)
+        Self { source: ^source, from: ^from, to: ^to, decision: ^decision, capability: ^capability,
+            preserve_listeners: [], preserve_connections: [], restart_boundary: ^restart_boundary,
+            quiescence: NativeSwapQuiescence.ready(), relocation: NativeSwapRelocationFacts.default(),
+            link: NativeSwapLinkFacts.default(), changed_items: ^changed_items, removed_definitions: [], blocking_fact: .None }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1224
+    pub fn mark_layout_changed(self: Self, affected: [String]) -> Self {
+        self.blocking_fact = .Val(.LayoutChanged)
+        self.restart_boundary = NativeSwapRestartBoundary.required(.LayoutChanged, ^affected)
+        self
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1234
+    pub fn with_quiescence(self: Self, quiescence: NativeSwapQuiescence) -> Self { self.quiescence = quiescence; self }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1240
+    pub fn with_relocation(self: Self, relocation: NativeSwapRelocationFacts) -> Self { self.relocation = ^relocation; self }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1246
+    pub fn with_link(self: Self, link: NativeSwapLinkFacts) -> Self { self.link = ^link; self }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1252
+    pub fn preserve_listener(self: Self, handle: NativeSwapListenerHandle) -> Self {
+        self.preserve_listeners.push(^handle)
+        self.preserve_listeners.sort()
+        self
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1259
+    pub fn preserve_connection(self: Self, handle: NativeSwapConnectionHandle) -> Self {
+        self.preserve_connections.push(^handle)
+        self.preserve_connections.sort()
+        self
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1266
+    pub fn code_changed(self: &Self) -> Bool { !self.from.revision.code_unchanged(&self.to.revision) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1271
+    pub fn data_changed(self: &Self) -> Bool { !self.from.revision.data_unchanged(&self.to.revision) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1276
+    pub fn requires_restart(self: &Self) -> Bool {
+        self.decision.requires_restart() || self.restart_boundary.required || self.blocking_fact.is_some_and((fact) -> fact.is_restartable())
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1288
+    pub fn explanation(self: &Self) -> NativeSwapExplanation {
+        if !self.decision.is_compatible() {
+            disposition :: if self.capability.restart -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
+            return NativeSwapExplanation.new(self.source.canonical(), disposition, .IncompatibleType,
+                self.decision.compatibility.reason().unwrap_or("semantic hot-swap verdict requires a clean restart"))
+        }
+        state :: NativeSwapState.new(~self.from, ~self.preserve_listeners, ~self.preserve_connections) ?? return ~err.explanation
+        state.explain_reload(self)
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1315
+    fn validate_shape(self: &Self) -> Unit NativeSwapError! {
+        source_id :: self.source.canonical()
+        for (label, identity) in [("plan", &self.source), ("resident executable", &self.from.source), ("candidate executable", &self.to.source)] {
+            _ :: validate_source_identity(identity, label) ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        }
+        if !self.from.source.matches(&self.source) || !self.to.source.matches(&self.source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
+        if self.to.generation <= self.from.generation -> return .Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
+        validate_hot_swap_decision(source_id, &self.source, &self.decision)?
+        self.restart_boundary.validate(source_id)?
+        validate_fact_list(source_id, &self.changed_items)?
+        validate_fact_list(source_id, &self.removed_definitions)?
+        validate_fact_list(source_id, &self.relocation.code_symbols)?
+        validate_fact_list(source_id, &self.relocation.data_slots)?
+        validate_listener_plan_facts(source_id, &self.source, &self.preserve_listeners)?
+        validate_connection_plan_facts(source_id, &self.source, &self.preserve_connections)?
+        for (label, identity) in [("resident link identity", self.link.resident_identity), ("candidate link identity", self.link.candidate_identity)] {
+            _ :: validate_identity(identity, label) ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1370
+pub struct NativeSwapReceipt {
+    pub source: NativeSwapSourceIdentity
+    pub outcome: NativeSwapOutcome
+    pub before: NativeSwapRevision
+    pub after: NativeSwapRevision
+    pub before_generation: U64
+    pub after_generation: U64
+    pub preserved_listeners: [String]
+    pub reset_listeners: [String]
+    pub preserved_connections: [String]
+    pub reset_connections: [String]
+    pub restart_boundary: NativeSwapRestartBoundary
+    pub explanation: NativeSwapExplanation?
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1399
+pub enum NativeSwapOutcome { Committed; RolledBack; Rejected; RestartRequired }
+impl NativeSwapOutcome {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1412
+    pub fn as_str(self) -> String { if self == { .Committed -> "committed", .RolledBack -> "rolled_back", .Rejected -> "rejected", .RestartRequired -> "restart_required" } }
+}
+impl NativeSwapReceipt {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1424
+    pub fn committed(self: &Self) -> Bool { self.outcome == .Committed }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1429
+    pub fn rolled_back(self: &Self) -> Bool { self.outcome == .RolledBack }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1434
+    pub fn rejected(self: &Self) -> Bool { self.outcome == .Rejected || self.outcome == .RestartRequired }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1443
+    pub fn render(self: &Self) -> String {
+        explanation :: self.explanation.as_ref().map((value) -> value.render()).unwrap_or("none")
+        "native-swap outcome={self.outcome.as_str()} source={self.source.canonical()} before=code:{self.before.code.as_str()}+data:{self.before.data.as_str()}@{self.before_generation} after=code:{self.after.code.as_str()}+data:{self.after.data.as_str()}@{self.after_generation} preserved_listeners=[{self.preserved_listeners.join(",")}] reset_listeners=[{self.reset_listeners.join(",")}] preserved_connections=[{self.preserved_connections.join(",")}] reset_connections=[{self.reset_connections.join(",")}] restart={self.restart_boundary.required} explanation={explanation}"
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1469
+impl fmt.Display for NativeSwapOutcome {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1470
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1477
+pub enum NativeSwapPhase { Ready; Paused; Applied }
+impl NativeSwapPhase {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1488
+    pub fn as_str(self) -> String { if self == { .Ready -> "ready", .Paused -> "paused", .Applied -> "applied" } }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1497
+impl fmt.Display for NativeSwapPhase {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1498
+    fn fmt(self: &Self, output: &fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1504
+struct NativeSwapCheckpoint {
+    executable: NativeSwapExecutable
+    listeners: [String:NativeSwapListenerHandle]
+    connections: [String:NativeSwapConnectionHandle]
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1511
+struct NativeSwapWorkingReceipt {
+    source: NativeSwapSourceIdentity
+    before: NativeSwapExecutable
+    after: NativeSwapExecutable
+    preserved_listeners: [String]
+    reset_listeners: [String]
+    preserved_connections: [String]
+    reset_connections: [String]
+    restart_boundary: NativeSwapRestartBoundary
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1528
+pub struct NativeSwapState {
+    executable: NativeSwapExecutable
+    listeners: [String:NativeSwapListenerHandle]
+    connections: [String:NativeSwapConnectionHandle]
+    phase: NativeSwapPhase
+    checkpoint: NativeSwapCheckpoint?
+    pending_plan: NativeSwapPlan?
+    working_receipt: NativeSwapWorkingReceipt?
+}
+impl NativeSwapState {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1540
+    pub fn new(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> Self NativeSwapError! {
+        source_id :: executable.source.canonical()
+        _ :: validate_source_identity(&executable.source, "executable") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        listener_map :: listener_map(source_id, &executable, ^listeners)?
+        connection_map :: connection_map(source_id, &executable, ^connections, &listener_map)?
+        Self { executable: ^executable, listeners: ^listener_map, connections: ^connection_map,
+            phase: .Ready, checkpoint: .None, pending_plan: .None, working_receipt: .None }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1567
+    pub fn empty(executable: NativeSwapExecutable) -> Self NativeSwapError! { Self.new(^executable, [], []) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1572
+    pub fn executable(self: &Self) -> &NativeSwapExecutable { &self.executable }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1577
+    pub fn source(self: &Self) -> &NativeSwapSourceIdentity { &self.executable.source }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1582
+    pub fn revision(self: &Self) -> &NativeSwapRevision { &self.executable.revision }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1587
+    pub fn generation(self: &Self) -> U64 { self.executable.generation }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1592
+    pub fn phase(self: &Self) -> NativeSwapPhase { self.phase }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1597
+    pub fn is_paused(self: &Self) -> Bool { self.phase == .Paused }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1602
+    pub fn is_applied(self: &Self) -> Bool { self.phase == .Applied }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1607
+    pub fn listeners(self: &Self) -> [NativeSwapListenerHandle] {
+        keys := self.listeners.keys().cloned().collect[[String]]()
+        keys.sort()
+        keys.iter().map((key) -> ~self.listeners[key]).collect()
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1612
+    pub fn connections(self: &Self) -> [NativeSwapConnectionHandle] {
+        keys := self.connections.keys().cloned().collect[[String]]()
+        keys.sort()
+        keys.iter().map((key) -> ~self.connections[key]).collect()
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1617
+    pub fn listener(self: &Self, id: String) -> &NativeSwapListenerHandle? { self.listeners.get(id) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1622
+    pub fn connection(self: &Self, id: String) -> &NativeSwapConnectionHandle? { self.connections.get(id) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1627
+    pub fn listener_count(self: &Self) -> USize { self.listeners.len() }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1632
+    pub fn connection_count(self: &Self) -> USize { self.connections.len() }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1637
+    pub fn preflight(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! { self.validate_plan(plan) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1642
+    pub fn explain_reload(self: &Self, plan: &NativeSwapPlan) -> NativeSwapExplanation {
+        _ :: self.validate_plan(plan) ?? return ~err.explanation
+        NativeSwapExplanation.compatible(plan.source.canonical())
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1652
+    pub fn pause(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! {
+        if self.phase != .Ready -> return .Err(self.phase_error("pause requires a ready transaction"))
+        self.validate_plan(plan)?
+        checkpoint :: NativeSwapCheckpoint { executable: ~self.executable, listeners: ~self.listeners, connections: ~self.connections }
+        self.checkpoint = .Val(^checkpoint)
+        self.pending_plan = .Val(~plan)
+        self.working_receipt = .None
+        self.phase = .Paused
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1671
+    pub fn apply(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! {
+        if self.phase != .Paused -> return .Err(self.phase_error("apply requires a paused transaction"))
+        if self.pending_plan.as_ref() != .Val(plan) -> return .Err(NativeSwapError.input(self.source().canonical(), .StalePlan, "apply plan does not match the paused plan"))
+        self.validate_plan(plan)?
+        checkpoint :: self.checkpoint.as_ref() ?? return .Err(self.error(.RollbackUnavailable, "apply checkpoint is missing"))
+        preserved_listener_ids: [String:Bool] := [:]
+        for handle in plan.preserve_listeners -> preserved_listener_ids.insert(~handle.id, true)
+        preserved_connection_ids: [String:Bool] := [:]
+        for handle in plan.preserve_connections -> preserved_connection_ids.insert(~handle.id, true)
+        next_listeners: [String:NativeSwapListenerHandle] := [:]
+        for handle in plan.preserve_listeners {
+            preserved := ~handle
+            preserved.generation = plan.to.generation
+            next_listeners.insert(~preserved.id, ^preserved)
+        }
+        next_connections: [String:NativeSwapConnectionHandle] := [:]
+        for handle in plan.preserve_connections {
+            preserved := ~handle
+            preserved.generation = plan.to.generation
+            next_connections.insert(~preserved.id, ^preserved)
+        }
+        reset_listeners := checkpoint.listeners.keys().filter((id) -> !preserved_listener_ids.contains_key(id)).cloned().collect[[String]]()
+        reset_listeners.sort()
+        reset_connections := checkpoint.connections.keys().filter((id) -> !preserved_connection_ids.contains_key(id)).cloned().collect[[String]]()
+        reset_connections.sort()
+        listener_ids := preserved_listener_ids.keys().cloned().collect[[String]]()
+        listener_ids.sort()
+        connection_ids := preserved_connection_ids.keys().cloned().collect[[String]]()
+        connection_ids.sort()
+        working :: NativeSwapWorkingReceipt { source: ~plan.source, before: ~checkpoint.executable, after: ~plan.to,
+            preserved_listeners: ^listener_ids, reset_listeners: ^reset_listeners,
+            preserved_connections: ^connection_ids, reset_connections: ^reset_connections,
+            restart_boundary: ~plan.restart_boundary }
+        // Every fallible check and all receipt facts are complete before the first resident mutation.
+        self.executable = ~plan.to
+        self.listeners = ^next_listeners
+        self.connections = ^next_connections
+        self.working_receipt = .Val(^working)
+        self.phase = .Applied
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1744
+    pub fn commit(self: &Self) -> NativeSwapReceipt NativeSwapError! {
+        if self.phase != .Applied -> return .Err(self.phase_error("commit requires an applied transaction"))
+        working :: self.working_receipt.take() ?? return .Err(self.error(.InvalidPhase, "applied transaction has no working receipt"))
+        receipt :: receipt_from_working(&working, .Committed, .None)
+        self.checkpoint = .None
+        self.pending_plan = .None
+        self.phase = .Ready
+        receipt
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1762
+    pub fn rollback(self: &Self) -> NativeSwapReceipt NativeSwapError! {
+        if self.phase != .Paused && self.phase != .Applied -> return .Err(self.phase_error("rollback requires a paused or applied transaction"))
+        checkpoint :: self.checkpoint.take() ?? return .Err(self.error(.RollbackUnavailable, "rollback checkpoint is missing"))
+        before :: &self.executable
+        preserved_listeners := checkpoint.listeners.keys().cloned().collect[[String]]()
+        preserved_listeners.sort()
+        reset_listeners := self.listeners.keys().filter((id) -> !checkpoint.listeners.contains_key(id)).cloned().collect[[String]]()
+        reset_listeners.sort()
+        preserved_connections := checkpoint.connections.keys().cloned().collect[[String]]()
+        preserved_connections.sort()
+        reset_connections := self.connections.keys().filter((id) -> !checkpoint.connections.contains_key(id)).cloned().collect[[String]]()
+        reset_connections.sort()
+        receipt :: NativeSwapReceipt { source: ~checkpoint.executable.source, outcome: .RolledBack,
+            before: ~before.revision, after: ~checkpoint.executable.revision, before_generation: before.generation,
+            after_generation: checkpoint.executable.generation, preserved_listeners: ^preserved_listeners,
+            reset_listeners: ^reset_listeners, preserved_connections: ^preserved_connections, reset_connections: ^reset_connections,
+            restart_boundary: NativeSwapRestartBoundary.in_place(), explanation: .Val(NativeSwapExplanation.new(
+                checkpoint.executable.source.canonical(), .Rejected, .UnsafeEdit, "rollback restored the prior executable and explicit handles")) }
+        self.executable = ^checkpoint.executable
+        self.listeners = ^checkpoint.listeners
+        self.connections = ^checkpoint.connections
+        self.pending_plan = .None
+        self.working_receipt = .None
+        self.phase = .Ready
+        receipt
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:1812
+// reject (continued in NativeSwap02) retains the current executable and handles
+// when compilation or migration fails before pause can begin.

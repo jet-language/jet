@@ -1,1795 +1,659 @@
-// PORT-PENDING 0780 crates-jet-devserver-src-pausedevaluate-slice-1: crates/jet-devserver/src/PausedEvaluate.rs:1-1791
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Typed paused-session inspection and evaluation boundary.
-//RS //!
-//RS //! This module is deliberately an adapter, not an evaluator.  A paused
-//RS //! session supplies source-owned lexical facts and an injected evaluator
-//RS //! supplies a checked result.  The adapter accepts neither a closure nor a
-//RS //! command to run: it only checks identity, authority, cancellation, and
-//RS //! budgets before projecting the supplied result.
-//RS 
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::{json_escape, json_int, parse_json_with_limit};
-//RS use jet_foundation::SHA256::sha256_hex;
-//RS use std::collections::BTreeSet;
-//RS use std::fmt;
-//RS 
-//RS pub const PAUSED_EVALUATE_PROTOCOL: &str = "jet.devtools.v1";
-//RS pub const PAUSED_EVALUATE_SCHEMA_VERSION: u32 = 1;
-//RS pub const INSPECT_AUTHORITY: &str = "devtools.inspect";
-//RS pub const EVALUATE_AUTHORITY: &str = "devtools.evaluate";
-//RS pub const MUTATE_AUTHORITY: &str = "devtools.mutate";
-//RS 
-//RS pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
-//RS pub const MAX_EXPRESSION_BYTES: usize = 16 * 1024;
-//RS pub const MAX_SCOPES: usize = 256;
-//RS pub const MAX_VALUE_DEPTH: u32 = 64;
-//RS pub const MAX_VALUE_NODES: u64 = 4_096;
-//RS pub const MAX_VALUE_BYTES: u64 = 1024 * 1024;
-//RS pub const MAX_EVALUATION_STEPS: u64 = 1_000_000;
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum SessionState {
-//RS     Running,
-//RS     Paused,
-//RS     Finished,
-//RS     Stale,
-//RS     Cancelled,
-//RS }
-//RS 
-//RS impl SessionState {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Running => "running",
-//RS             Self::Paused => "paused",
-//RS             Self::Finished => "finished",
-//RS             Self::Stale => "stale",
-//RS             Self::Cancelled => "cancelled",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum EvaluationMode {
-//RS     ReadOnly,
-//RS     Mutate,
-//RS }
-//RS 
-//RS impl EvaluationMode {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::ReadOnly => "read_only",
-//RS             Self::Mutate => "mutate",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum Publication {
-//RS     Published,
-//RS     Redacted,
-//RS     Absent,
-//RS }
-//RS 
-//RS impl Publication {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Published => "published",
-//RS             Self::Redacted => "redacted",
-//RS             Self::Absent => "absent",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum AggregateKind {
-//RS     Record,
-//RS     List,
-//RS     Map,
-//RS     Set,
-//RS     Tuple,
-//RS     Variant,
-//RS }
-//RS 
-//RS impl AggregateKind {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Record => "record",
-//RS             Self::List => "list",
-//RS             Self::Map => "map",
-//RS             Self::Set => "set",
-//RS             Self::Tuple => "tuple",
-//RS             Self::Variant => "variant",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A typed leaf or aggregate header.  Aggregate children live in
-//RS /// [`ValueProjection::children`], so truncation never requires serializing a
-//RS /// large value into display text.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum TypedValue {
-//RS     Unit,
-//RS     Bool(bool),
-//RS     Int(i64),
-//RS     FloatBits(u64),
-//RS     Text(String),
-//RS     Bytes { length: u64, sha256: String },
-//RS     Aggregate { kind: AggregateKind, length: u64 },
-//RS }
-//RS 
-//RS impl TypedValue {
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         match self {
-//RS             Self::Text(value) => valid_text(value, "typed text", MAX_VALUE_BYTES as usize),
-//RS             Self::Bytes { sha256, .. } => {
-//RS                 if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-//RS                     return Err("typed bytes must carry a 64-character SHA-256 digest".to_string());
-//RS                 }
-//RS                 Ok(())
-//RS             }
-//RS             Self::Unit
-//RS             | Self::Bool(_)
-//RS             | Self::Int(_)
-//RS             | Self::FloatBits(_)
-//RS             | Self::Aggregate { .. } => Ok(()),
-//RS         }
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         match self {
-//RS             Self::Unit => "{\"kind\":\"unit\"}".to_string(),
-//RS             Self::Bool(value) => format!("{{\"kind\":\"bool\",\"value\":{value}}}"),
-//RS             Self::Int(value) => format!("{{\"kind\":\"int\",\"value\":{value}}}"),
-//RS             Self::FloatBits(bits) => {
-//RS                 format!("{{\"kind\":\"float_bits\",\"bits\":{bits}}}")
-//RS             }
-//RS             Self::Text(value) => format!(
-//RS                 "{{\"kind\":\"text\",\"value\":\"{}\"}}",
-//RS                 json_escape(value)
-//RS             ),
-//RS             Self::Bytes { length, sha256 } => format!(
-//RS                 "{{\"kind\":\"bytes\",\"length\":{length},\"sha256\":\"{}\"}}",
-//RS                 json_escape(sha256)
-//RS             ),
-//RS             Self::Aggregate { kind, length } => format!(
-//RS                 "{{\"kind\":\"{}\",\"length\":{length}}}",
-//RS                 kind.as_str()
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn bytes(&self) -> u64 {
-//RS         match self {
-//RS             Self::Unit => 1,
-//RS             Self::Bool(_) => 1,
-//RS             Self::Int(_) | Self::FloatBits(_) => 8,
-//RS             Self::Text(value) => value.len() as u64,
-//RS             Self::Bytes { .. } => 32,
-//RS             Self::Aggregate { .. } => 8,
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_aggregate(&self) -> bool {
-//RS         matches!(self, Self::Aggregate { .. })
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SourceLocation {
-//RS     pub source_id: String,
-//RS     pub source_revision: String,
-//RS     pub start: u64,
-//RS     pub end: u64,
-//RS }
-//RS 
-//RS impl SourceLocation {
-//RS     pub fn new(
-//RS         source_id: impl Into<String>,
-//RS         source_revision: impl Into<String>,
-//RS         start: u64,
-//RS         end: u64,
-//RS     ) -> Result<Self, String> {
-//RS         let location = Self {
-//RS             source_id: source_id.into(),
-//RS             source_revision: source_revision.into(),
-//RS             start,
-//RS             end,
-//RS         };
-//RS         location.validate()?;
-//RS         Ok(location)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         valid_id(&self.source_id, "source id")?;
-//RS         valid_id(&self.source_revision, "source revision")?;
-//RS         if self.end < self.start {
-//RS             return Err("source location ends before it starts".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"source_id\":\"{}\",\"source_revision\":\"{}\",\"start\":{},\"end\":{}}}",
-//RS             json_escape(&self.source_id),
-//RS             json_escape(&self.source_revision),
-//RS             self.start,
-//RS             self.end
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct SessionIdentity {
-//RS     pub session_id: String,
-//RS     pub source_id: String,
-//RS     pub source_revision: String,
-//RS     pub pause_id: String,
-//RS     pub frame_id: String,
-//RS }
-//RS 
-//RS impl SessionIdentity {
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         source_id: impl Into<String>,
-//RS         source_revision: impl Into<String>,
-//RS         pause_id: impl Into<String>,
-//RS         frame_id: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         let identity = Self {
-//RS             session_id: session_id.into(),
-//RS             source_id: source_id.into(),
-//RS             source_revision: source_revision.into(),
-//RS             pause_id: pause_id.into(),
-//RS             frame_id: frame_id.into(),
-//RS         };
-//RS         identity.validate()?;
-//RS         Ok(identity)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         valid_id(&self.session_id, "session id")?;
-//RS         valid_id(&self.source_id, "source id")?;
-//RS         valid_id(&self.source_revision, "source revision")?;
-//RS         valid_id(&self.pause_id, "pause id")?;
-//RS         valid_id(&self.frame_id, "frame id")
-//RS     }
-//RS 
-//RS     fn source_matches(&self, location: &SourceLocation) -> bool {
-//RS         self.source_id == location.source_id && self.source_revision == location.source_revision
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"session_id\":\"{}\",\"source_id\":\"{}\",\"source_revision\":\"{}\",\"pause_id\":\"{}\",\"frame_id\":\"{}\"}}",
-//RS             json_escape(&self.session_id),
-//RS             json_escape(&self.source_id),
-//RS             json_escape(&self.source_revision),
-//RS             json_escape(&self.pause_id),
-//RS             json_escape(&self.frame_id)
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-//RS pub struct AuthorityRequirement {
-//RS     pub capability: String,
-//RS     pub scope_id: String,
-//RS }
-//RS 
-//RS impl AuthorityRequirement {
-//RS     pub fn new(capability: impl Into<String>, scope_id: impl Into<String>) -> Result<Self, String> {
-//RS         let requirement = Self {
-//RS             capability: capability.into(),
-//RS             scope_id: scope_id.into(),
-//RS         };
-//RS         requirement.validate()?;
-//RS         Ok(requirement)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         valid_id(&self.capability, "authority capability")?;
-//RS         valid_id(&self.scope_id, "authority scope")
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"capability\":\"{}\",\"scope_id\":\"{}\"}}",
-//RS             json_escape(&self.capability),
-//RS             json_escape(&self.scope_id)
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-//RS pub struct AuthorityGrant {
-//RS     pub capability: String,
-//RS     pub scope_id: String,
-//RS }
-//RS 
-//RS impl AuthorityGrant {
-//RS     pub fn new(capability: impl Into<String>, scope_id: impl Into<String>) -> Result<Self, String> {
-//RS         let grant = Self {
-//RS             capability: capability.into(),
-//RS             scope_id: scope_id.into(),
-//RS         };
-//RS         grant.validate()?;
-//RS         Ok(grant)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         valid_id(&self.capability, "authority capability")?;
-//RS         valid_id(&self.scope_id, "authority scope")
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS pub struct AuthoritySet {
-//RS     pub grants: Vec<AuthorityGrant>,
-//RS }
-//RS 
-//RS impl AuthoritySet {
-//RS     pub fn new(mut grants: Vec<AuthorityGrant>) -> Self {
-//RS         grants.sort();
-//RS         grants.dedup();
-//RS         Self { grants }
-//RS     }
-//RS 
-//RS     pub fn allows(&self, requirement: &AuthorityRequirement) -> bool {
-//RS         self.grants.iter().any(|grant| {
-//RS             grant.capability == requirement.capability && grant.scope_id == requirement.scope_id
-//RS         })
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         for grant in &self.grants {
-//RS             grant.validate()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct EvaluationBudget {
-//RS     pub max_depth: u32,
-//RS     pub max_nodes: u64,
-//RS     pub max_bytes: u64,
-//RS     pub max_steps: u64,
-//RS }
-//RS 
-//RS pub const DEFAULT_EVALUATION_BUDGET: EvaluationBudget = EvaluationBudget {
-//RS     max_depth: 32,
-//RS     max_nodes: 1_024,
-//RS     max_bytes: 256 * 1024,
-//RS     max_steps: 100_000,
-//RS };
-//RS 
-//RS impl EvaluationBudget {
-//RS     pub fn new(
-//RS         max_depth: u32,
-//RS         max_nodes: u64,
-//RS         max_bytes: u64,
-//RS         max_steps: u64,
-//RS     ) -> Result<Self, String> {
-//RS         let budget = Self {
-//RS             max_depth,
-//RS             max_nodes,
-//RS             max_bytes,
-//RS             max_steps,
-//RS         };
-//RS         budget.validate()?;
-//RS         Ok(budget)
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         if self.max_depth == 0
-//RS             || self.max_depth > MAX_VALUE_DEPTH
-//RS             || self.max_nodes == 0
-//RS             || self.max_nodes > MAX_VALUE_NODES
-//RS             || self.max_bytes == 0
-//RS             || self.max_bytes > MAX_VALUE_BYTES
-//RS             || self.max_steps == 0
-//RS             || self.max_steps > MAX_EVALUATION_STEPS
-//RS         {
-//RS             return Err("paused evaluation budget is outside its bounded range".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn contains(&self, other: &Self) -> bool {
-//RS         other.max_depth <= self.max_depth
-//RS             && other.max_nodes <= self.max_nodes
-//RS             && other.max_bytes <= self.max_bytes
-//RS             && other.max_steps <= self.max_steps
-//RS     }
-//RS 
-//RS     fn fits(&self, usage: EvaluationUsage) -> bool {
-//RS         usage.depth <= self.max_depth
-//RS             && usage.nodes <= self.max_nodes
-//RS             && usage.bytes <= self.max_bytes
-//RS             && usage.steps <= self.max_steps
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"max_depth\":{},\"max_nodes\":{},\"max_bytes\":{},\"max_steps\":{}}}",
-//RS             self.max_depth, self.max_nodes, self.max_bytes, self.max_steps
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-//RS pub struct EvaluationUsage {
-//RS     pub depth: u32,
-//RS     pub nodes: u64,
-//RS     pub bytes: u64,
-//RS     pub steps: u64,
-//RS }
-//RS 
-//RS impl EvaluationUsage {
-//RS     pub const fn new(depth: u32, nodes: u64, bytes: u64, steps: u64) -> Self {
-//RS         Self {
-//RS             depth,
-//RS             nodes,
-//RS             bytes,
-//RS             steps,
-//RS         }
-//RS     }
-//RS 
-//RS     fn json(self) -> String {
-//RS         format!(
-//RS             "{{\"depth\":{},\"nodes\":{},\"bytes\":{},\"steps\":{}}}",
-//RS             self.depth, self.nodes, self.bytes, self.steps
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Default, Eq, PartialEq)]
-//RS pub struct Cancellation {
-//RS     pub requested: bool,
-//RS     pub reason: Option<String>,
-//RS }
-//RS 
-//RS impl Cancellation {
-//RS     pub const fn none() -> Self {
-//RS         Self {
-//RS             requested: false,
-//RS             reason: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn requested(reason: impl Into<String>) -> Result<Self, String> {
-//RS         let reason = reason.into();
-//RS         valid_text(&reason, "cancellation reason", 256)?;
-//RS         Ok(Self {
-//RS             requested: true,
-//RS             reason: Some(reason),
-//RS         })
-//RS     }
-//RS 
-//RS     fn validate(&self) -> Result<(), String> {
-//RS         if let Some(reason) = &self.reason {
-//RS             valid_text(reason, "cancellation reason", 256)?;
-//RS         }
-//RS         if !self.requested && self.reason.is_some() {
-//RS             return Err("a non-requested cancellation cannot carry a reason".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct ValueProjection {
-//RS     pub id: String,
-//RS     pub name: String,
-//RS     pub type_name: String,
-//RS     pub source: SourceLocation,
-//RS     pub publication: Publication,
-//RS     pub value: Option<TypedValue>,
-//RS     pub children: Vec<ValueProjection>,
-//RS     pub truncated: bool,
-//RS }
-//RS 
-//RS impl ValueProjection {
-//RS     pub fn published(
-//RS         id: impl Into<String>,
-//RS         name: impl Into<String>,
-//RS         type_name: impl Into<String>,
-//RS         source: SourceLocation,
-//RS         value: TypedValue,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             name: name.into(),
-//RS             type_name: type_name.into(),
-//RS             source,
-//RS             publication: Publication::Published,
-//RS             value: Some(value),
-//RS             children: Vec::new(),
-//RS             truncated: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn redacted(
-//RS         id: impl Into<String>,
-//RS         name: impl Into<String>,
-//RS         type_name: impl Into<String>,
-//RS         source: SourceLocation,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             name: name.into(),
-//RS             type_name: type_name.into(),
-//RS             source,
-//RS             publication: Publication::Redacted,
-//RS             value: None,
-//RS             children: Vec::new(),
-//RS             truncated: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn absent(
-//RS         id: impl Into<String>,
-//RS         name: impl Into<String>,
-//RS         type_name: impl Into<String>,
-//RS         source: SourceLocation,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             name: name.into(),
-//RS             type_name: type_name.into(),
-//RS             source,
-//RS             publication: Publication::Absent,
-//RS             value: None,
-//RS             children: Vec::new(),
-//RS             truncated: false,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_children(mut self, children: Vec<ValueProjection>) -> Self {
-//RS         self.children = children;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         let mut ids = BTreeSet::new();
-//RS         let mut nodes = 0u64;
-//RS         self.validate_inner(None, 1, &mut ids, &mut nodes)
-//RS     }
-//RS 
-//RS     fn validate_for_session(&self, identity: &SessionIdentity) -> Result<(), String> {
-//RS         let mut ids = BTreeSet::new();
-//RS         let mut nodes = 0u64;
-//RS         self.validate_inner(Some(identity), 1, &mut ids, &mut nodes)
-//RS     }
-//RS 
-//RS     fn validate_inner(
-//RS         &self,
-//RS         identity: Option<&SessionIdentity>,
-//RS         depth: u32,
-//RS         ids: &mut BTreeSet<String>,
-//RS         nodes: &mut u64,
-//RS     ) -> Result<(), String> {
-//RS         if depth > MAX_VALUE_DEPTH {
-//RS             return Err("paused value exceeds the maximum projection depth".to_string());
-//RS         }
-//RS         *nodes = nodes.saturating_add(1);
-//RS         if *nodes > MAX_VALUE_NODES {
-//RS             return Err("paused value exceeds the maximum projection node count".to_string());
-//RS         }
-//RS         valid_id(&self.id, "value id")?;
-//RS         valid_text(&self.name, "value name", 256)?;
-//RS         valid_id(&self.type_name, "value type")?;
-//RS         self.source.validate()?;
-//RS         if !ids.insert(self.id.clone()) {
-//RS             return Err("paused value ids must be unique within a projection".to_string());
-//RS         }
-//RS         if let Some(identity) = identity {
-//RS             if !identity.source_matches(&self.source) {
-//RS                 return Err("paused value source identity does not match the session".to_string());
-//RS             }
-//RS         }
-//RS         match self.publication {
-//RS             Publication::Published => {
-//RS                 let value = self
-//RS                     .value
-//RS                     .as_ref()
-//RS                     .ok_or_else(|| "published value is missing its typed payload".to_string())?;
-//RS                 value.validate()?;
-//RS                 if !value.is_aggregate() && !self.children.is_empty() {
-//RS                     return Err("only aggregate values may carry projected children".to_string());
-//RS                 }
-//RS             }
-//RS             Publication::Redacted | Publication::Absent => {
-//RS                 if self.value.is_some() || !self.children.is_empty() {
-//RS                     return Err("redacted or absent values cannot carry a payload".to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS         for child in &self.children {
-//RS             child.validate_inner(identity, depth.saturating_add(1), ids, nodes)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn metadata_bytes(&self) -> u64 {
-//RS         self.id
-//RS             .len()
-//RS             .saturating_add(self.name.len())
-//RS             .saturating_add(self.type_name.len())
-//RS             .saturating_add(self.source.source_id.len())
-//RS             .saturating_add(self.source.source_revision.len())
-//RS             .saturating_add(48) as u64
-//RS     }
-//RS 
-//RS     fn measure_inner(&self, depth: u32, usage: &mut EvaluationUsage) {
-//RS         if self.publication == Publication::Absent {
-//RS             return;
-//RS         }
-//RS         usage.depth = usage.depth.max(depth);
-//RS         usage.nodes = usage.nodes.saturating_add(1);
-//RS         usage.bytes = usage
-//RS             .bytes
-//RS             .saturating_add(self.metadata_bytes())
-//RS             .saturating_add(self.value.as_ref().map_or(0, TypedValue::bytes));
-//RS         for child in &self.children {
-//RS             child.measure_inner(depth.saturating_add(1), usage);
-//RS         }
-//RS     }
-//RS 
-//RS     fn measure(&self) -> EvaluationUsage {
-//RS         let mut usage = EvaluationUsage::default();
-//RS         self.measure_inner(1, &mut usage);
-//RS         usage
-//RS     }
-//RS 
-//RS     fn json(&self) -> Option<String> {
-//RS         if self.publication == Publication::Absent {
-//RS             return None;
-//RS         }
-//RS         let value = self
-//RS             .value
-//RS             .as_ref()
-//RS             .map(TypedValue::json)
-//RS             .map(|value| format!(",\"value\":{value}"))
-//RS             .unwrap_or_default();
-//RS         let children = array_json(self.children.iter().filter_map(ValueProjection::json));
-//RS         Some(format!(
-//RS             "{{\"id\":\"{}\",\"name\":\"{}\",\"type\":\"{}\",\"source\":{},\"publication\":\"{}\"{} ,\"children\":{},\"truncated\":{}}}",
-//RS             json_escape(&self.id),
-//RS             json_escape(&self.name),
-//RS             json_escape(&self.type_name),
-//RS             self.source.json(),
-//RS             self.publication.as_str(),
-//RS             value,
-//RS             children,
-//RS             self.truncated
-//RS         ))
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct LexicalScope {
-//RS     pub id: String,
-//RS     pub name: String,
-//RS     pub parent_id: Option<String>,
-//RS     pub source: SourceLocation,
-//RS     pub bindings: Vec<ValueProjection>,
-//RS }
-//RS 
-//RS impl LexicalScope {
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         name: impl Into<String>,
-//RS         parent_id: Option<String>,
-//RS         source: SourceLocation,
-//RS         bindings: Vec<ValueProjection>,
-//RS     ) -> Result<Self, String> {
-//RS         let scope = Self {
-//RS             id: id.into(),
-//RS             name: name.into(),
-//RS             parent_id,
-//RS             source,
-//RS             bindings,
-//RS         };
-//RS         scope.validate(None)?;
-//RS         Ok(scope)
-//RS     }
-//RS 
-//RS     fn validate(&self, identity: Option<&SessionIdentity>) -> Result<(), String> {
-//RS         valid_id(&self.id, "scope id")?;
-//RS         valid_text(&self.name, "scope name", 256)?;
-//RS         if let Some(parent) = &self.parent_id {
-//RS             valid_id(parent, "parent scope id")?;
-//RS         }
-//RS         self.source.validate()?;
-//RS         if let Some(identity) = identity {
-//RS             if !identity.source_matches(&self.source) {
-//RS                 return Err("lexical scope source identity does not match the session".to_string());
-//RS             }
-//RS         }
-//RS         let mut ids = BTreeSet::new();
-//RS         let mut nodes = 0u64;
-//RS         for binding in &self.bindings {
-//RS             binding.validate_inner(identity, 1, &mut ids, &mut nodes)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn visible_bindings(&self) -> impl Iterator<Item = &ValueProjection> {
-//RS         self.bindings
-//RS             .iter()
-//RS             .filter(|binding| binding.publication != Publication::Absent)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct ScopeProjection {
-//RS     pub id: String,
-//RS     pub name: String,
-//RS     pub parent_id: Option<String>,
-//RS     pub source: SourceLocation,
-//RS     pub bindings: Vec<ValueProjection>,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-//RS struct ProjectionStats {
-//RS     usage: EvaluationUsage,
-//RS     truncated: bool,
-//RS     published: u64,
-//RS     redacted: u64,
-//RS }
-//RS 
-//RS impl ScopeProjection {
-//RS     fn project(
-//RS         scope: &LexicalScope,
-//RS         identity: &SessionIdentity,
-//RS         budget: EvaluationBudget,
-//RS         selected_value: Option<&str>,
-//RS     ) -> Result<(Self, ProjectionStats), String> {
-//RS         let mut stats = ProjectionStats::default();
-//RS         let mut bindings = scope
-//RS             .visible_bindings()
-//RS             .filter(|binding| selected_value.is_none_or(|id| id == binding.id))
-//RS             .collect::<Vec<_>>();
-//RS         bindings.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
-//RS         let mut projected = Vec::with_capacity(bindings.len());
-//RS         for binding in bindings {
-//RS             if binding.publication == Publication::Published {
-//RS                 stats.published = stats.published.saturating_add(1);
-//RS             } else {
-//RS                 stats.redacted = stats.redacted.saturating_add(1);
-//RS             }
-//RS             let value = project_root(binding, identity, budget, &mut stats)?;
-//RS             projected.push(value);
-//RS         }
-//RS         Ok((
-//RS             Self {
-//RS                 id: scope.id.clone(),
-//RS                 name: scope.name.clone(),
-//RS                 parent_id: scope.parent_id.clone(),
-//RS                 source: scope.source.clone(),
-//RS                 bindings: projected,
-//RS             },
-//RS             stats,
-//RS         ))
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         let bindings = array_json(self.bindings.iter().filter_map(ValueProjection::json));
-//RS         format!(
-//RS             "{{\"id\":\"{}\",\"name\":\"{}\",\"parent_id\":{},\"source\":{},\"bindings\":{}}}",
-//RS             json_escape(&self.id),
-//RS             json_escape(&self.name),
-//RS             self.parent_id
-//RS                 .as_deref()
-//RS                 .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.source.json(),
-//RS             bindings
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct PausedSession {
-//RS     pub identity: SessionIdentity,
-//RS     pub state: SessionState,
-//RS     pub scopes: Vec<LexicalScope>,
-//RS     pub authority: AuthoritySet,
-//RS     pub budget: EvaluationBudget,
-//RS     pub cancellation: Cancellation,
-//RS }
-//RS 
-//RS impl PausedSession {
-//RS     pub fn new(
-//RS         identity: SessionIdentity,
-//RS         state: SessionState,
-//RS         scopes: Vec<LexicalScope>,
-//RS         authority: AuthoritySet,
-//RS         budget: EvaluationBudget,
-//RS     ) -> Result<Self, String> {
-//RS         identity.validate()?;
-//RS         budget.validate()?;
-//RS         authority.validate()?;
-//RS         if scopes.len() > MAX_SCOPES {
-//RS             return Err("paused session exceeds the lexical scope limit".to_string());
-//RS         }
-//RS         let mut ids = BTreeSet::new();
-//RS         for scope in &scopes {
-//RS             scope.validate(Some(&identity))?;
-//RS             if !ids.insert(scope.id.clone()) {
-//RS                 return Err("paused session scope ids must be unique".to_string());
-//RS             }
-//RS         }
-//RS         for scope in &scopes {
-//RS             if let Some(parent) = &scope.parent_id {
-//RS                 if !ids.contains(parent) {
-//RS                     return Err("paused lexical scope refers to a missing parent".to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(Self {
-//RS             identity,
-//RS             state,
-//RS             scopes,
-//RS             authority,
-//RS             budget,
-//RS             cancellation: Cancellation::none(),
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn paused(
-//RS         identity: SessionIdentity,
-//RS         scopes: Vec<LexicalScope>,
-//RS         authority: AuthoritySet,
-//RS         budget: EvaluationBudget,
-//RS     ) -> Result<Self, String> {
-//RS         Self::new(identity, SessionState::Paused, scopes, authority, budget)
-//RS     }
-//RS 
-//RS     pub fn cancel(&mut self, reason: impl Into<String>) -> Result<(), String> {
-//RS         self.cancellation = Cancellation::requested(reason)?;
-//RS         self.state = SessionState::Cancelled;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn scope(&self, id: &str) -> Option<&LexicalScope> {
-//RS         self.scopes.iter().find(|scope| scope.id == id)
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct InspectRequest {
-//RS     pub request_id: String,
-//RS     pub identity: SessionIdentity,
-//RS     pub scope_id: String,
-//RS     pub value_id: Option<String>,
-//RS     pub budget: EvaluationBudget,
-//RS     pub authority: Vec<AuthorityRequirement>,
-//RS     pub cancellation: Cancellation,
-//RS }
-//RS 
-//RS impl InspectRequest {
-//RS     pub fn new(
-//RS         request_id: impl Into<String>,
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         budget: EvaluationBudget,
-//RS         authority: Vec<AuthorityRequirement>,
-//RS     ) -> Result<Self, String> {
-//RS         let request = Self {
-//RS             request_id: request_id.into(),
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             value_id: None,
-//RS             budget,
-//RS             authority,
-//RS             cancellation: Cancellation::none(),
-//RS         };
-//RS         request.validate_shape()?;
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     fn validate_shape(&self) -> Result<(), String> {
-//RS         valid_id(&self.request_id, "request id")?;
-//RS         self.identity.validate()?;
-//RS         valid_id(&self.scope_id, "scope id")?;
-//RS         if let Some(value_id) = &self.value_id {
-//RS             valid_id(value_id, "value id")?;
-//RS         }
-//RS         self.budget.validate()?;
-//RS         self.cancellation.validate()?;
-//RS         for requirement in &self.authority {
-//RS             requirement.validate()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn from_json(raw: &str) -> Result<Self, String> {
-//RS         parse_inspect_request(raw)
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"protocol\":\"{}\",\"schema_version\":{},\"kind\":\"paused.inspect\",\"request_id\":\"{}\",\"identity\":{},\"scope_id\":\"{}\",\"value_id\":{},\"budget\":{},\"authority\":{},\"cancelled\":{}}}",
-//RS             PAUSED_EVALUATE_PROTOCOL,
-//RS             PAUSED_EVALUATE_SCHEMA_VERSION,
-//RS             json_escape(&self.request_id),
-//RS             self.identity.json(),
-//RS             json_escape(&self.scope_id),
-//RS             self.value_id
-//RS                 .as_deref()
-//RS                 .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.budget.json(),
-//RS             array_json(self.authority.iter().map(AuthorityRequirement::json)),
-//RS             self.cancellation.requested
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct EvaluateRequest {
-//RS     pub request_id: String,
-//RS     pub identity: SessionIdentity,
-//RS     pub scope_id: String,
-//RS     pub expression: String,
-//RS     pub mode: EvaluationMode,
-//RS     pub effects: Vec<String>,
-//RS     pub authority: Vec<AuthorityRequirement>,
-//RS     pub budget: EvaluationBudget,
-//RS     pub cancellation: Cancellation,
-//RS }
-//RS 
-//RS impl EvaluateRequest {
-//RS     pub fn new(
-//RS         request_id: impl Into<String>,
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         expression: impl Into<String>,
-//RS         mode: EvaluationMode,
-//RS         effects: Vec<String>,
-//RS         authority: Vec<AuthorityRequirement>,
-//RS         budget: EvaluationBudget,
-//RS     ) -> Result<Self, String> {
-//RS         let request = Self {
-//RS             request_id: request_id.into(),
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             expression: expression.into(),
-//RS             mode,
-//RS             effects,
-//RS             authority,
-//RS             budget,
-//RS             cancellation: Cancellation::none(),
-//RS         };
-//RS         request.validate_shape()?;
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     fn validate_shape(&self) -> Result<(), String> {
-//RS         valid_id(&self.request_id, "request id")?;
-//RS         self.identity.validate()?;
-//RS         valid_id(&self.scope_id, "scope id")?;
-//RS         valid_text(&self.expression, "evaluation expression", MAX_EXPRESSION_BYTES)?;
-//RS         if self.mode == EvaluationMode::Mutate && self.effects.is_empty() {
-//RS             return Err("mutating evaluation requires at least one checked effect".to_string());
-//RS         }
-//RS         for effect in &self.effects {
-//RS             valid_id(effect, "evaluation effect")?;
-//RS         }
-//RS         self.budget.validate()?;
-//RS         self.cancellation.validate()?;
-//RS         for requirement in &self.authority {
-//RS             requirement.validate()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn from_json(raw: &str) -> Result<Self, String> {
-//RS         parse_evaluate_request(raw)
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"protocol\":\"{}\",\"schema_version\":{},\"kind\":\"paused.evaluate\",\"request_id\":\"{}\",\"identity\":{},\"scope_id\":\"{}\",\"expression\":\"{}\",\"mode\":\"{}\",\"effects\":{},\"authority\":{},\"budget\":{},\"cancelled\":{}}}",
-//RS             PAUSED_EVALUATE_PROTOCOL,
-//RS             PAUSED_EVALUATE_SCHEMA_VERSION,
-//RS             json_escape(&self.request_id),
-//RS             self.identity.json(),
-//RS             json_escape(&self.scope_id),
-//RS             json_escape(&self.expression),
-//RS             self.mode.as_str(),
-//RS             array_json(self.effects.iter().map(|effect| {
-//RS                 format!("\"{}\"", json_escape(effect))
-//RS             })),
-//RS             array_json(self.authority.iter().map(AuthorityRequirement::json)),
-//RS             self.budget.json(),
-//RS             self.cancellation.requested
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum EvaluatorStatus {
-//RS     Completed,
-//RS     Failed,
-//RS     Cancelled,
-//RS }
-//RS 
-//RS impl EvaluatorStatus {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Completed => "completed",
-//RS             Self::Failed => "failed",
-//RS             Self::Cancelled => "cancelled",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct ObservationFact {
-//RS     pub event_id: String,
-//RS     pub kind: String,
-//RS     pub session_id: String,
-//RS     pub source_id: String,
-//RS     pub source_revision: String,
-//RS     pub scope_id: String,
-//RS     pub target_id: String,
-//RS     pub effect: String,
-//RS }
-//RS 
-//RS impl ObservationFact {
-//RS     pub fn new(
-//RS         event_id: impl Into<String>,
-//RS         kind: impl Into<String>,
-//RS         session_id: impl Into<String>,
-//RS         source_id: impl Into<String>,
-//RS         source_revision: impl Into<String>,
-//RS         scope_id: impl Into<String>,
-//RS         target_id: impl Into<String>,
-//RS         effect: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         let fact = Self {
-//RS             event_id: event_id.into(),
-//RS             kind: kind.into(),
-//RS             session_id: session_id.into(),
-//RS             source_id: source_id.into(),
-//RS             source_revision: source_revision.into(),
-//RS             scope_id: scope_id.into(),
-//RS             target_id: target_id.into(),
-//RS             effect: effect.into(),
-//RS         };
-//RS         fact.validate_shape()?;
-//RS         Ok(fact)
-//RS     }
-//RS 
-//RS     fn validate_shape(&self) -> Result<(), String> {
-//RS         valid_id(&self.event_id, "observation id")?;
-//RS         valid_id(&self.kind, "observation kind")?;
-//RS         valid_id(&self.session_id, "observation session id")?;
-//RS         valid_id(&self.source_id, "observation source id")?;
-//RS         valid_id(&self.source_revision, "observation source revision")?;
-//RS         valid_id(&self.scope_id, "observation scope id")?;
-//RS         valid_id(&self.target_id, "observation target id")?;
-//RS         valid_id(&self.effect, "observation effect")
-//RS     }
-//RS 
-//RS     fn matches(&self, session: &PausedSession, request: &EvaluateRequest) -> bool {
-//RS         self.session_id == session.identity.session_id
-//RS             && self.source_id == session.identity.source_id
-//RS             && self.source_revision == session.identity.source_revision
-//RS             && self.scope_id == request.scope_id
-//RS             && request.effects.iter().any(|effect| effect == &self.effect)
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"event_id\":\"{}\",\"kind\":\"{}\",\"session_id\":\"{}\",\"source_id\":\"{}\",\"source_revision\":\"{}\",\"scope_id\":\"{}\",\"target_id\":\"{}\",\"effect\":\"{}\"}}",
-//RS             json_escape(&self.event_id),
-//RS             json_escape(&self.kind),
-//RS             json_escape(&self.session_id),
-//RS             json_escape(&self.source_id),
-//RS             json_escape(&self.source_revision),
-//RS             json_escape(&self.scope_id),
-//RS             json_escape(&self.target_id),
-//RS             json_escape(&self.effect)
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Result supplied by the real paused evaluator.  `evaluate` consumes this
-//RS /// fact; it never invokes a closure, interpreter, process, or host command.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct EvaluatorResult {
-//RS     pub identity: SessionIdentity,
-//RS     pub scope_id: String,
-//RS     pub status: EvaluatorStatus,
-//RS     pub value: Option<ValueProjection>,
-//RS     pub usage: EvaluationUsage,
-//RS     pub changed: bool,
-//RS     pub observation: Option<ObservationFact>,
-//RS     pub error: Option<String>,
-//RS }
-//RS 
-//RS impl EvaluatorResult {
-//RS     pub fn completed(
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         value: Option<ValueProjection>,
-//RS         usage: EvaluationUsage,
-//RS     ) -> Self {
-//RS         Self {
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             status: EvaluatorStatus::Completed,
-//RS             value,
-//RS             usage,
-//RS             changed: false,
-//RS             observation: None,
-//RS             error: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn failed(
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         message: impl Into<String>,
-//RS         usage: EvaluationUsage,
-//RS     ) -> Self {
-//RS         Self {
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             status: EvaluatorStatus::Failed,
-//RS             value: None,
-//RS             usage,
-//RS             changed: false,
-//RS             observation: None,
-//RS             error: Some(message.into()),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn cancelled(
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         usage: EvaluationUsage,
-//RS     ) -> Self {
-//RS         Self {
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             status: EvaluatorStatus::Cancelled,
-//RS             value: None,
-//RS             usage,
-//RS             changed: false,
-//RS             observation: None,
-//RS             error: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn mutated(
-//RS         identity: SessionIdentity,
-//RS         scope_id: impl Into<String>,
-//RS         value: Option<ValueProjection>,
-//RS         usage: EvaluationUsage,
-//RS         observation: ObservationFact,
-//RS     ) -> Self {
-//RS         Self {
-//RS             identity,
-//RS             scope_id: scope_id.into(),
-//RS             status: EvaluatorStatus::Completed,
-//RS             value,
-//RS             usage,
-//RS             changed: true,
-//RS             observation: Some(observation),
-//RS             error: None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum AuditOutcome {
-//RS     Accepted,
-//RS     Rejected,
-//RS }
-//RS 
-//RS impl AuditOutcome {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Accepted => "accepted",
-//RS             Self::Rejected => "rejected",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum RejectReason {
-//RS     InvalidRequest,
-//RS     SessionNotPaused,
-//RS     StaleSession,
-//RS     SessionIdentityMismatch,
-//RS     SourceIdentityMismatch,
-//RS     PauseIdentityMismatch,
-//RS     FrameIdentityMismatch,
-//RS     ScopeNotFound,
-//RS     ValueNotFound,
-//RS     ValueNotPublished,
-//RS     InsufficientAuthority,
-//RS     BudgetExceeded,
-//RS     Cancelled,
-//RS     EvaluatorFailed,
-//RS     MutationNotAllowed,
-//RS     ObservationMissing,
-//RS     InvalidEvaluatorResult,
-//RS }
-//RS 
-//RS impl RejectReason {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::InvalidRequest => "invalid_request",
-//RS             Self::SessionNotPaused => "session_not_paused",
-//RS             Self::StaleSession => "stale_session",
-//RS             Self::SessionIdentityMismatch => "session_identity_mismatch",
-//RS             Self::SourceIdentityMismatch => "source_identity_mismatch",
-//RS             Self::PauseIdentityMismatch => "pause_identity_mismatch",
-//RS             Self::FrameIdentityMismatch => "frame_identity_mismatch",
-//RS             Self::ScopeNotFound => "scope_not_found",
-//RS             Self::ValueNotFound => "value_not_found",
-//RS             Self::ValueNotPublished => "value_not_published",
-//RS             Self::InsufficientAuthority => "insufficient_authority",
-//RS             Self::BudgetExceeded => "budget_exceeded",
-//RS             Self::Cancelled => "cancelled",
-//RS             Self::EvaluatorFailed => "evaluator_failed",
-//RS             Self::MutationNotAllowed => "mutation_not_allowed",
-//RS             Self::ObservationMissing => "observation_missing",
-//RS             Self::InvalidEvaluatorResult => "invalid_evaluator_result",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct AuditReceipt {
-//RS     pub receipt_id: String,
-//RS     pub operation: String,
-//RS     pub request_id: String,
-//RS     pub outcome: AuditOutcome,
-//RS     pub reason: Option<RejectReason>,
-//RS     pub identity: SessionIdentity,
-//RS     pub scope_id: String,
-//RS     pub authority: Vec<AuthorityRequirement>,
-//RS     pub usage: EvaluationUsage,
-//RS     pub truncated: bool,
-//RS     pub published_values: u64,
-//RS     pub redacted_values: u64,
-//RS     pub observation_id: Option<String>,
-//RS }
-//RS 
-//RS impl AuditReceipt {
-//RS     fn new(
-//RS         operation: &str,
-//RS         request_id: &str,
-//RS         identity: &SessionIdentity,
-//RS         scope_id: &str,
-//RS         authority: &[AuthorityRequirement],
-//RS         outcome: AuditOutcome,
-//RS         reason: Option<RejectReason>,
-//RS         usage: EvaluationUsage,
-//RS         truncated: bool,
-//RS         published_values: u64,
-//RS         redacted_values: u64,
-//RS         observation_id: Option<&str>,
-//RS     ) -> Self {
-//RS         let mut authority = authority.to_vec();
-//RS         authority.sort();
-//RS         authority.dedup();
-//RS         let authority_key = authority
-//RS             .iter()
-//RS             .map(|requirement| format!("{}@{}", requirement.capability, requirement.scope_id))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let observation_id = observation_id.map(str::to_string);
-//RS         let canonical = format!(
-//RS             "paused-audit-v1|{operation}|{request_id}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-//RS             identity.session_id,
-//RS             identity.source_id,
-//RS             identity.source_revision,
-//RS             identity.pause_id,
-//RS             identity.frame_id,
-//RS             scope_id,
-//RS             outcome.as_str(),
-//RS             reason.map(RejectReason::as_str).unwrap_or(""),
-//RS             authority_key,
-//RS             usage.depth,
-//RS             usage.nodes,
-//RS             usage.bytes,
-//RS             usage.steps,
-//RS             truncated,
-//RS             published_values,
-//RS             redacted_values,
-//RS             observation_id.as_deref().unwrap_or("")
-//RS         );
-//RS         let digest = sha256_hex(canonical.as_bytes());
-//RS         Self {
-//RS             receipt_id: format!("paused-audit-{}", &digest[..24]),
-//RS             operation: operation.to_string(),
-//RS             request_id: request_id.to_string(),
-//RS             outcome,
-//RS             reason,
-//RS             identity: identity.clone(),
-//RS             scope_id: scope_id.to_string(),
-//RS             authority,
-//RS             usage,
-//RS             truncated,
-//RS             published_values,
-//RS             redacted_values,
-//RS             observation_id,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         let reason = self
-//RS             .reason
-//RS             .map(|reason| format!("\"{}\"", reason.as_str()))
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"receipt_id\":\"{}\",\"operation\":\"{}\",\"request_id\":\"{}\",\"outcome\":\"{}\",\"reason\":{},\"identity\":{},\"scope_id\":\"{}\",\"authority\":{},\"usage\":{},\"truncated\":{},\"published_values\":{},\"redacted_values\":{},\"observation_id\":{}}}",
-//RS             json_escape(&self.receipt_id),
-//RS             json_escape(&self.operation),
-//RS             json_escape(&self.request_id),
-//RS             self.outcome.as_str(),
-//RS             reason,
-//RS             self.identity.json(),
-//RS             json_escape(&self.scope_id),
-//RS             array_json(self.authority.iter().map(AuthorityRequirement::json)),
-//RS             self.usage.json(),
-//RS             self.truncated,
-//RS             self.published_values,
-//RS             self.redacted_values,
-//RS             self.observation_id
-//RS                 .as_deref()
-//RS                 .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                 .unwrap_or_else(|| "null".to_string())
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct RequestError {
-//RS     pub reason: RejectReason,
-//RS     pub audit: AuditReceipt,
-//RS }
-//RS 
-//RS impl RequestError {
-//RS     pub fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":false,\"error\":\"{}\",\"audit\":{}}}",
-//RS             PAUSED_EVALUATE_PROTOCOL,
-//RS             PAUSED_EVALUATE_SCHEMA_VERSION,
-//RS             self.reason.as_str(),
-//RS             self.audit.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for RequestError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(self.reason.as_str())
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for RequestError {}
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct InspectResponse {
-//RS     pub identity: SessionIdentity,
-//RS     pub scope: ScopeProjection,
-//RS     pub selected_value_id: Option<String>,
-//RS     pub truncated: bool,
-//RS     pub audit: AuditReceipt,
-//RS }
-//RS 
-//RS impl InspectResponse {
-//RS     pub fn json(&self) -> String {
-//RS         format!(
-//RS             "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":true,\"kind\":\"paused.inspect\",\"identity\":{},\"scope\":{},\"selected_value_id\":{},\"truncated\":{},\"audit\":{}}}",
-//RS             PAUSED_EVALUATE_PROTOCOL,
-//RS             PAUSED_EVALUATE_SCHEMA_VERSION,
-//RS             self.identity.json(),
-//RS             self.scope.json(),
-//RS             self.selected_value_id
-//RS                 .as_deref()
-//RS                 .map(|id| format!("\"{}\"", json_escape(id)))
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.truncated,
-//RS             self.audit.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct EvaluateResponse {
-//RS     pub identity: SessionIdentity,
-//RS     pub scope_id: String,
-//RS     pub expression_hash: String,
-//RS     pub mode: EvaluationMode,
-//RS     pub value: Option<ValueProjection>,
-//RS     pub changed: bool,
-//RS     pub observation: Option<ObservationFact>,
-//RS     pub truncated: bool,
-//RS     pub audit: AuditReceipt,
-//RS }
-//RS 
-//RS impl EvaluateResponse {
-//RS     pub fn json(&self) -> String {
-//RS         let value = self
-//RS             .value
-//RS             .as_ref()
-//RS             .and_then(ValueProjection::json)
-//RS             .unwrap_or_else(|| "null".to_string());
-//RS         format!(
-//RS             "{{\"protocol\":\"{}\",\"schema_version\":{},\"ok\":true,\"kind\":\"paused.evaluate\",\"identity\":{},\"scope_id\":\"{}\",\"expression_hash\":\"{}\",\"mode\":\"{}\",\"value\":{},\"changed\":{},\"observation\":{},\"truncated\":{},\"audit\":{}}}",
-//RS             PAUSED_EVALUATE_PROTOCOL,
-//RS             PAUSED_EVALUATE_SCHEMA_VERSION,
-//RS             self.identity.json(),
-//RS             json_escape(&self.scope_id),
-//RS             json_escape(&self.expression_hash),
-//RS             self.mode.as_str(),
-//RS             value,
-//RS             self.changed,
-//RS             self.observation
-//RS                 .as_ref()
-//RS                 .map(ObservationFact::json)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.truncated,
-//RS             self.audit.json()
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Inspect one paused lexical scope.  The source session owns the facts; this
-//RS /// function only projects published and redacted values within the request
-//RS /// budget.
-//RS pub fn inspect(
-//RS     session: &PausedSession,
-//RS     request: &InspectRequest,
-//RS ) -> Result<InspectResponse, RequestError> {
-//RS     let authority = inspect_authority(request);
-//RS     if let Err(reason) = validate_common(
-//RS         session,
-//RS         &request.identity,
-//RS         &request.request_id,
-//RS         &request.scope_id,
-//RS         &request.budget,
-//RS         &request.cancellation,
-//RS         &authority,
-//RS     ) {
-//RS         return Err(reject(
-//RS             "paused.inspect",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             reason,
-//RS             EvaluationUsage::default(),
-//RS         ));
-//RS     }
-//RS     let Some(scope) = session.scope(&request.scope_id) else {
-//RS         return Err(reject(
-//RS             "paused.inspect",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::ScopeNotFound,
-//RS             EvaluationUsage::default(),
-//RS         ));
-//RS     };
-//RS     if let Some(value_id) = request.value_id.as_deref() {
-//RS         if !scope.bindings.iter().any(|binding| binding.id == value_id) {
-//RS             return Err(reject(
-//RS                 "paused.inspect",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::ValueNotFound,
-//RS                 EvaluationUsage::default(),
-//RS             ));
-//RS         }
-//RS         if scope
-//RS             .bindings
-//RS             .iter()
-//RS             .find(|binding| binding.id == value_id)
-//RS             .is_some_and(|binding| binding.publication == Publication::Absent)
-//RS         {
-//RS             return Err(reject(
-//RS                 "paused.inspect",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::ValueNotPublished,
-//RS                 EvaluationUsage::default(),
-//RS             ));
-//RS         }
-//RS     }
-//RS     let Ok((projection, stats)) = ScopeProjection::project(
-//RS         scope,
-//RS         &session.identity,
-//RS         request.budget,
-//RS         request.value_id.as_deref(),
-//RS     ) else {
-//RS         return Err(reject(
-//RS             "paused.inspect",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::InvalidEvaluatorResult,
-//RS             EvaluationUsage::default(),
-//RS         ));
-//RS     };
-//RS     let audit = AuditReceipt::new(
-//RS         "paused.inspect",
-//RS         &request.request_id,
-//RS         &request.identity,
-//RS         &request.scope_id,
-//RS         &authority,
-//RS         AuditOutcome::Accepted,
-//RS         None,
-//RS         stats.usage,
-//RS         stats.truncated,
-//RS         stats.published,
-//RS         stats.redacted,
-//RS         None,
-//RS     );
-//RS     Ok(InspectResponse {
-//RS         identity: request.identity.clone(),
-//RS         scope: projection,
-//RS         selected_value_id: request.value_id.clone(),
-//RS         truncated: stats.truncated,
-//RS         audit,
-//RS     })
-//RS }
-//RS 
-//RS /// Accept an injected paused-evaluator result.  This function does not execute
-//RS /// the requested expression or resume the target process.
-//RS pub fn evaluate(
-//RS     session: &PausedSession,
-//RS     request: &EvaluateRequest,
-//RS     result: EvaluatorResult,
-//RS ) -> Result<EvaluateResponse, RequestError> {
-//RS     let authority = evaluate_authority(request);
-//RS     if let Err(reason) = validate_common(
-//RS         session,
-//RS         &request.identity,
-//RS         &request.request_id,
-//RS         &request.scope_id,
-//RS         &request.budget,
-//RS         &request.cancellation,
-//RS         &authority,
-//RS     ) {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             reason,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     if result.identity != request.identity || result.scope_id != request.scope_id {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::InvalidEvaluatorResult,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     let invalid_result_shape = match result.status {
-//RS         EvaluatorStatus::Completed => result.error.is_some(),
-//RS         EvaluatorStatus::Failed => {
-//RS             result.value.is_some()
-//RS                 || result.changed
-//RS                 || result.observation.is_some()
-//RS                 || result.error.as_ref().is_none_or(|message| {
-//RS                     message.is_empty() || valid_text(message, "evaluator error", 4 * 1024).is_err()
-//RS                 })
-//RS         }
-//RS         EvaluatorStatus::Cancelled => {
-//RS             result.value.is_some()
-//RS                 || result.changed
-//RS                 || result.observation.is_some()
-//RS                 || result.error.is_some()
-//RS         }
-//RS     };
-//RS     if invalid_result_shape {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::InvalidEvaluatorResult,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     if result.status == EvaluatorStatus::Failed {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::EvaluatorFailed,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     if result.status == EvaluatorStatus::Cancelled {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::Cancelled,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     if !request.budget.fits(result.usage) {
-//RS         return Err(reject(
-//RS             "paused.evaluate",
-//RS             request.request_id.as_str(),
-//RS             &request.identity,
-//RS             &request.scope_id,
-//RS             &authority,
-//RS             RejectReason::BudgetExceeded,
-//RS             result.usage,
-//RS         ));
-//RS     }
-//RS     if result.changed || result.observation.is_some() {
-//RS         if request.mode != EvaluationMode::Mutate {
-//RS             return Err(reject(
-//RS                 "paused.evaluate",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::MutationNotAllowed,
-//RS                 result.usage,
-//RS             ));
-//RS         }
-//RS         if result.changed && result.observation.is_none() {
-//RS             return Err(reject(
-//RS                 "paused.evaluate",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::ObservationMissing,
-//RS                 result.usage,
-//RS             ));
-//RS         }
-//RS         if !result.changed && result.observation.is_some() {
-//RS             return Err(reject(
-//RS                 "paused.evaluate",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::InvalidEvaluatorResult,
-//RS                 result.usage,
-//RS             ));
-//RS         }
-//RS     }
-//RS     if let Some(observation) = result.observation.as_ref() {
-//RS         if !observation.matches(session, request) {
-//RS             return Err(reject(
-//RS                 "paused.evaluate",
-//RS                 request.request_id.as_str(),
-//RS                 &request.identity,
-//RS                 &request.scope_id,
-//RS                 &authority,
-//RS                 RejectReason::InvalidEvaluatorResult,
-//RS                 result.usage,
-//RS             ));
-//RS         }
-//RS     }
-//RS     let mut stats = ProjectionStats::default();
-//RS     let value = match result.value.as_ref() {
-//RS         Some(value) => {
-//RS             if value.validate_for_session(&session.identity).is_err() {
-//RS                 return Err(reject(
-//RS                     "paused.evaluate",
-//RS                     request.request_id.as_str(),
-//RS                     &request.identity,
-//RS                     &request.scope_id,
-//RS                     &authority,
-//RS                     RejectReason::InvalidEvaluatorResult,
-//RS                     result.usage,
-//RS                 ));
-//RS             }
-//RS             if value.publication == Publication::Absent {
-//RS                 None
-//RS             } else {
-//RS                 if value.publication == Publication::Published {
-//RS                     stats.published = 1;
-//RS                 } else {
-//RS                     stats.redacted = 1;
-//RS                 }
-//RS                 let projected =
-//RS                     project_root(value, &session.identity, request.budget, &mut stats)
-//RS                         .map_err(|_| RejectReason::InvalidEvaluatorResult)
-//RS                         .map_err(|reason| {
-//RS                             reject(
-//RS                                 "paused.evaluate",
-//RS                                 request.request_id.as_str(),
-//RS                                 &request.identity,
-//RS                                 &request.scope_id,
-//RS                                 &authority,
-//RS                                 reason,
-//RS                                 result.usage,
-//RS                             )
-//RS                         })?;
-//RS                 Some(projected)
-//RS             }
-//RS         }
-//RS         None => None,
-//RS     };
-//RS     let observation_id = result.observation.as_ref().map(|observation| observation.event_id.as_str());
-//RS     let audit = AuditReceipt::new(
-//RS         "paused.evaluate",
-//RS         &request.request_id,
-//RS         &request.identity,
-//RS         &request.scope_id,
-//RS         &authority,
-//RS         AuditOutcome::Accepted,
-//RS         None,
-//RS         result.usage,
-//RS         stats.truncated,
-//RS         stats.published,
-//RS         stats.redacted,
-//RS         observation_id,
-//RS     );
-//RS     Ok(EvaluateResponse {
-//RS         identity: request.identity.clone(),
-//RS         scope_id: request.scope_id.clone(),
-//RS         expression_hash: format!("sha256-{}", sha256_hex(request.expression.as_bytes())),
-//RS         mode: request.mode,
-//RS         value,
-//RS         changed: result.changed,
-//RS         observation: result.observation,
-//RS         truncated: stats.truncated,
-//RS         audit,
-//RS     })
-//RS }
-//RS 
-//RS /// Explicit failure to serve a `/paused/inspect` or `/paused/evaluate`
-//RS /// request from [`PausedEvaluateHost`]'s currently injected facts.  This is
-//RS /// distinct from [`RequestError`]: it covers the cases the kernel cannot
-//RS /// even be called for, because no real session or evaluator fact has been
-//RS /// injected yet.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum PausedEvaluateHostError {
-//RS     /// No paused session has been injected, or it was cleared (resume,
-//RS     /// detach, process exit).  There is nothing to inspect or evaluate.
-//RS     SessionUnavailable,
-//RS     /// A session is injected, but the real evaluator has not supplied a
-//RS     /// result fact for this evaluate call.
-//RS     EvaluatorUnavailable,
-//RS     /// The request body was not valid JSON for the expected request shape.
-//RS     InvalidRequest(String),
-//RS     /// The kernel rejected the request against the injected facts.
-//RS     Rejected(RequestError),
-//RS }
-//RS 
-//RS impl PausedEvaluateHostError {
-//RS     /// Explicit bounded JSON error body; never a fabricated success value.
-// END-PORT-PENDING 0780 crates/jet-devserver/src/PausedEvaluate.rs:1-1791
+// Typed paused-session inspection/evaluation adapter. It never executes an
+// expression, closure, interpreter, process or host command: real evaluators
+// inject checked results, then this boundary checks identity, authority and budgets.
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_escape, json_int, parse_json_with_limit]
+use jet_foundation.SHA256.[sha256_hex]
+use std.fmt
 
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:15
+pub const PAUSED_EVALUATE_PROTOCOL: String = "jet.devtools.v1"
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:16
+pub const PAUSED_EVALUATE_SCHEMA_VERSION: U32 = 1
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:17
+pub const INSPECT_AUTHORITY: String = "devtools.inspect"
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:18
+pub const EVALUATE_AUTHORITY: String = "devtools.evaluate"
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:19
+pub const MUTATE_AUTHORITY: String = "devtools.mutate"
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:21
+pub const MAX_REQUEST_BYTES: USize = 64 * 1024
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:22
+pub const MAX_EXPRESSION_BYTES: USize = 16 * 1024
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:23
+pub const MAX_SCOPES: USize = 256
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:24
+pub const MAX_VALUE_DEPTH: U32 = 64
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:25
+pub const MAX_VALUE_NODES: U64 = 4096
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:26
+pub const MAX_VALUE_BYTES: U64 = 1024 * 1024
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:27
+pub const MAX_EVALUATION_STEPS: U64 = 1_000_000
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:30
+pub enum SessionState { Running; Paused; Finished; Stale; Cancelled }
+impl SessionState {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:39
+    pub fn as_str(self) -> String { if self == { .Running -> "running", .Paused -> "paused", .Finished -> "finished", .Stale -> "stale", .Cancelled -> "cancelled" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:51
+pub enum EvaluationMode { ReadOnly; Mutate }
+impl EvaluationMode {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:57
+    pub fn as_str(self) -> String { if self == { .ReadOnly -> "read_only", .Mutate -> "mutate" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:66
+pub enum Publication { Published; Redacted; Absent }
+impl Publication {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:73
+    pub fn as_str(self) -> String { if self == { .Published -> "published", .Redacted -> "redacted", .Absent -> "absent" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:83
+pub enum AggregateKind { Record; List; Map; Set; Tuple; Variant }
+impl AggregateKind {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:93
+    pub fn as_str(self) -> String { if self == { .Record -> "record", .List -> "list", .Map -> "map", .Set -> "set", .Tuple -> "tuple", .Variant -> "variant" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:109
+pub enum TypedValue {
+    Unit; Bool(Bool); Int(I64); FloatBits(U64); Text(String)
+    Bytes { length: U64; sha256: String }
+    Aggregate { kind: AggregateKind; length: U64 }
+}
+impl TypedValue {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:120
+    fn validate(self: &Self) -> Unit Err! {
+        if self == {
+            .Text(value) -> valid_text(value, "typed text", MAX_VALUE_BYTES as USize)
+            .Bytes { sha256, .. } -> {
+                if sha256.len() != 64 || !sha256.bytes().all((byte) -> byte.is_ascii_hexdigit()) -> return .Err("typed bytes must carry a 64-character SHA-256 digest")
+            }
+            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Aggregate { .. } -> {}
+        }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:137
+    fn json(self: &Self) -> String {
+        if self == {
+            .Unit -> "{\"kind\":\"unit\"}"
+            .Bool(value) -> "{{\"kind\":\"bool\",\"value\":{value}}}"
+            .Int(value) -> "{{\"kind\":\"int\",\"value\":{value}}}"
+            .FloatBits(bits) -> "{{\"kind\":\"float_bits\",\"bits\":{bits}}}"
+            .Text(value) -> "{{\"kind\":\"text\",\"value\":\"{json_escape(value)}\"}}"
+            .Bytes { length, sha256 } -> "{{\"kind\":\"bytes\",\"length\":{length},\"sha256\":\"{json_escape(sha256)}\"}}"
+            .Aggregate { kind, length } -> "{{\"kind\":\"{kind.as_str()}\",\"length\":{length}}}"
+        }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:160
+    fn bytes(self: &Self) -> U64 {
+        if self == { .Unit | .Bool(_) -> 1, .Int(_) | .FloatBits(_) -> 8, .Text(value) -> value.len() as U64, .Bytes { .. } -> 32, .Aggregate { .. } -> 8 }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:171
+    fn is_aggregate(self: &Self) -> Bool { if self == { .Aggregate { .. } -> true, _ -> false } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:177
+pub struct SourceLocation { pub source_id: String; pub source_revision: String; pub start: U64; pub end: U64 }
+impl SourceLocation {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:185
+    pub fn new(source_id: String, source_revision: String, start: U64, end: U64) -> Self Err! {
+        location :: Self { source_id: ^source_id, source_revision: ^source_revision, start, end }
+        location.validate()?
+        location
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:201
+    fn validate(self: &Self) -> Unit Err! {
+        valid_id(self.source_id, "source id")?
+        valid_id(self.source_revision, "source revision")?
+        if self.end < self.start -> return .Err("source location ends before it starts")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:210
+    fn json(self: &Self) -> String { "{{\"source_id\":\"{json_escape(self.source_id)}\",\"source_revision\":\"{json_escape(self.source_revision)}\",\"start\":{self.start},\"end\":{self.end}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:222
+pub struct SessionIdentity { pub session_id: String; pub source_id: String; pub source_revision: String; pub pause_id: String; pub frame_id: String }
+impl SessionIdentity {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:231
+    pub fn new(session_id: String, source_id: String, source_revision: String, pause_id: String, frame_id: String) -> Self Err! {
+        identity :: Self { session_id: ^session_id, source_id: ^source_id, source_revision: ^source_revision, pause_id: ^pause_id, frame_id: ^frame_id }
+        identity.validate()?
+        identity
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:249
+    fn validate(self: &Self) -> Unit Err! {
+        valid_id(self.session_id, "session id")?
+        valid_id(self.source_id, "source id")?
+        valid_id(self.source_revision, "source revision")?
+        valid_id(self.pause_id, "pause id")?
+        valid_id(self.frame_id, "frame id")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:257
+    fn source_matches(self: &Self, location: &SourceLocation) -> Bool { self.source_id == location.source_id && self.source_revision == location.source_revision }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:261
+    fn json(self: &Self) -> String {
+        "{{\"session_id\":\"{json_escape(self.session_id)}\",\"source_id\":\"{json_escape(self.source_id)}\",\"source_revision\":\"{json_escape(self.source_revision)}\",\"pause_id\":\"{json_escape(self.pause_id)}\",\"frame_id\":\"{json_escape(self.frame_id)}\"}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:274
+pub struct AuthorityRequirement { pub capability: String; pub scope_id: String }
+impl AuthorityRequirement {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:280
+    pub fn new(capability: String, scope_id: String) -> Self Err! {
+        requirement :: Self { capability: ^capability, scope_id: ^scope_id }
+        requirement.validate()?
+        requirement
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:289
+    fn validate(self: &Self) -> Unit Err! { valid_id(self.capability, "authority capability")?; valid_id(self.scope_id, "authority scope") }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:294
+    fn json(self: &Self) -> String { "{{\"capability\":\"{json_escape(self.capability)}\",\"scope_id\":\"{json_escape(self.scope_id)}\"}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:304
+pub struct AuthorityGrant { pub capability: String; pub scope_id: String }
+impl AuthorityGrant {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:310
+    pub fn new(capability: String, scope_id: String) -> Self Err! {
+        grant :: Self { capability: ^capability, scope_id: ^scope_id }
+        grant.validate()?
+        grant
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:319
+    fn validate(self: &Self) -> Unit Err! { valid_id(self.capability, "authority capability")?; valid_id(self.scope_id, "authority scope") }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:326
+pub struct AuthoritySet { pub grants: [AuthorityGrant] }
+impl Default for AuthoritySet { fn default() -> Self { Self { grants: [] } } }
+impl AuthoritySet {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:331
+    pub fn new(grants: [AuthorityGrant]) -> Self { grants.sort(); grants.dedup(); Self { grants: ^grants } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:337
+    pub fn allows(self: &Self, requirement: &AuthorityRequirement) -> Bool {
+        self.grants.iter().any((grant) -> grant.capability == requirement.capability && grant.scope_id == requirement.scope_id)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:343
+    fn validate(self: &Self) -> Unit Err! { for grant in self.grants -> grant.validate()? }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:353
+pub struct EvaluationBudget { pub max_depth: U32; pub max_nodes: U64; pub max_bytes: U64; pub max_steps: U64 }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:360
+pub const DEFAULT_EVALUATION_BUDGET: EvaluationBudget = EvaluationBudget { max_depth: 32, max_nodes: 1024, max_bytes: 256 * 1024, max_steps: 100_000 }
+impl EvaluationBudget {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:368
+    pub fn new(max_depth: U32, max_nodes: U64, max_bytes: U64, max_steps: U64) -> Self Err! {
+        budget :: Self { max_depth, max_nodes, max_bytes, max_steps }
+        budget.validate()?
+        budget
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:384
+    fn validate(self: &Self) -> Unit Err! {
+        if self.max_depth == 0 || self.max_depth > MAX_VALUE_DEPTH || self.max_nodes == 0 || self.max_nodes > MAX_VALUE_NODES ||
+            self.max_bytes == 0 || self.max_bytes > MAX_VALUE_BYTES || self.max_steps == 0 || self.max_steps > MAX_EVALUATION_STEPS -> return .Err("paused evaluation budget is outside its bounded range")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:399
+    fn contains(self: &Self, other: &Self) -> Bool {
+        other.max_depth <= self.max_depth && other.max_nodes <= self.max_nodes && other.max_bytes <= self.max_bytes && other.max_steps <= self.max_steps
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:406
+    fn fits(self: &Self, usage: EvaluationUsage) -> Bool { usage.depth <= self.max_depth && usage.nodes <= self.max_nodes && usage.bytes <= self.max_bytes && usage.steps <= self.max_steps }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:413
+    fn json(self: &Self) -> String { "{{\"max_depth\":{self.max_depth},\"max_nodes\":{self.max_nodes},\"max_bytes\":{self.max_bytes},\"max_steps\":{self.max_steps}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:422
+pub struct EvaluationUsage { pub depth: U32; pub nodes: U64; pub bytes: U64; pub steps: U64 }
+impl Default for EvaluationUsage { fn default() -> Self { Self { depth: 0, nodes: 0, bytes: 0, steps: 0 } } }
+impl EvaluationUsage {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:430
+    pub fn new(depth: U32, nodes: U64, bytes: U64, steps: U64) -> Self { Self { depth, nodes, bytes, steps } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:439
+    fn json(self) -> String { "{{\"depth\":{self.depth},\"nodes\":{self.nodes},\"bytes\":{self.bytes},\"steps\":{self.steps}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:448
+pub struct Cancellation { pub requested: Bool; pub reason: String? }
+impl Default for Cancellation { fn default() -> Self { Self.none() } }
+impl Cancellation {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:454
+    pub fn none() -> Self { Self { requested: false, reason: .None } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:461
+    pub fn requested(reason: String) -> Self Err! { valid_text(reason, "cancellation reason", 256)?; Self { requested: true, reason: .Val(^reason) } }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:470
+    fn validate(self: &Self) -> Unit Err! {
+        if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)?
+        if !self.requested && self.reason.is_some() -> return .Err("a non-requested cancellation cannot carry a reason")
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:482
+pub struct ValueProjection {
+    pub id: String; pub name: String; pub type_name: String; pub source: SourceLocation
+    pub publication: Publication; pub value: TypedValue?; pub children: [ValueProjection]; pub truncated: Bool
+}
+impl ValueProjection {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:494
+    pub fn published(id: String, name: String, type_name: String, source: SourceLocation, value: TypedValue) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Published, value: .Val(^value), children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:513
+    pub fn redacted(id: String, name: String, type_name: String, source: SourceLocation) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Redacted, value: .None, children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:531
+    pub fn absent(id: String, name: String, type_name: String, source: SourceLocation) -> Self {
+        Self { id: ^id, name: ^name, type_name: ^type_name, source: ^source, publication: .Absent, value: .None, children: [], truncated: false }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:549
+    pub fn with_children(self: Self, children: [ValueProjection]) -> Self { self.children = ^children; self }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:554
+    pub fn validate(self: &Self) -> Unit Err! {
+        ids: [String:Bool] := [:]
+        nodes: U64 := 0
+        self.validate_inner(.None, 1, &ids, &nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:560
+    fn validate_for_session(self: &Self, identity: &SessionIdentity) -> Unit Err! {
+        ids: [String:Bool] := [:]
+        nodes: U64 := 0
+        self.validate_inner(.Val(identity), 1, &ids, &nodes)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:566
+    fn validate_inner(self: &Self, identity: &SessionIdentity?, depth: U32, ids: &[String:Bool], nodes: &U64) -> Unit Err! {
+        if depth > MAX_VALUE_DEPTH -> return .Err("paused value exceeds the maximum projection depth")
+        nodes = nodes.saturating_add(1)
+        if nodes > MAX_VALUE_NODES -> return .Err("paused value exceeds the maximum projection node count")
+        valid_id(self.id, "value id")?
+        valid_text(self.name, "value name", 256)?
+        valid_id(self.type_name, "value type")?
+        self.source.validate()?
+        if ids.insert(~self.id, true).is_some() -> return .Err("paused value ids must be unique within a projection")
+        if identity == .Val(identity) {
+            if !identity.source_matches(&self.source) -> return .Err("paused value source identity does not match the session")
+        }
+        if self.publication == {
+            .Published -> {
+                value :: self.value.as_ref() ?? return .Err("published value is missing its typed payload")
+                value.validate()?
+                if !value.is_aggregate() && !self.children.is_empty() -> return .Err("only aggregate values may carry projected children")
+            }
+            .Redacted | .Absent -> {
+                if self.value.is_some() || !self.children.is_empty() -> return .Err("redacted or absent values cannot carry a payload")
+            }
+        }
+        for child in self.children -> child.validate_inner(identity, depth.saturating_add(1), ids, nodes)?
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:615
+    fn metadata_bytes(self: &Self) -> U64 {
+        self.id.len().saturating_add(self.name.len()).saturating_add(self.type_name.len())
+            .saturating_add(self.source.source_id.len()).saturating_add(self.source.source_revision.len()).saturating_add(48) as U64
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:625
+    fn measure_inner(self: &Self, depth: U32, usage: &EvaluationUsage) -> Unit {
+        if self.publication == .Absent -> return
+        usage.depth = usage.depth.max(depth)
+        usage.nodes = usage.nodes.saturating_add(1)
+        usage.bytes = usage.bytes.saturating_add(self.metadata_bytes()).saturating_add(self.value.as_ref().map_or(0, (value) -> value.bytes()))
+        for child in self.children -> child.measure_inner(depth.saturating_add(1), usage)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:640
+    fn measure(self: &Self) -> EvaluationUsage { usage := EvaluationUsage.default(); self.measure_inner(1, &usage); usage }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:646
+    fn json(self: &Self) -> String? {
+        if self.publication == .Absent -> return .None
+        value :: self.value.as_ref().map((value) -> ",\"value\":{value.json()}").unwrap_or("")
+        children :: array_json(self.children.iter().filter_map((child) -> child.json()))
+        .Val("{{\"id\":\"{json_escape(self.id)}\",\"name\":\"{json_escape(self.name)}\",\"type\":\"{json_escape(self.type_name)}\",\"source\":{self.source.json()},\"publication\":\"{self.publication.as_str()}\"{value} ,\"children\":{children},\"truncated\":{self.truncated}}}")
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:672
+pub struct LexicalScope { pub id: String; pub name: String; pub parent_id: String?; pub source: SourceLocation; pub bindings: [ValueProjection] }
+impl LexicalScope {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:681
+    pub fn new(id: String, name: String, parent_id: String?, source: SourceLocation, bindings: [ValueProjection]) -> Self Err! {
+        scope :: Self { id: ^id, name: ^name, parent_id: ^parent_id, source: ^source, bindings: ^bindings }
+        scope.validate(.None)?
+        scope
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:699
+    fn validate(self: &Self, identity: &SessionIdentity?) -> Unit Err! {
+        valid_id(self.id, "scope id")?
+        valid_text(self.name, "scope name", 256)?
+        if self.parent_id == .Val(parent) -> valid_id(parent, "parent scope id")?
+        self.source.validate()?
+        if identity == .Val(identity) {
+            if !identity.source_matches(&self.source) -> return .Err("lexical scope source identity does not match the session")
+        }
+        ids: [String:Bool] := [:]
+        nodes: U64 := 0
+        for binding in self.bindings -> binding.validate_inner(identity, 1, &ids, &nodes)?
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:719
+    fn visible_bindings(self: &Self) -> Iterator[&ValueProjection] { self.bindings.iter().filter((binding) -> binding.publication != .Absent) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:727
+pub struct ScopeProjection { pub id: String; pub name: String; pub parent_id: String?; pub source: SourceLocation; pub bindings: [ValueProjection] }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:736
+struct ProjectionStats { usage: EvaluationUsage; truncated: Bool; published: U64; redacted: U64 }
+impl Default for ProjectionStats { fn default() -> Self { Self { usage: EvaluationUsage.default(), truncated: false, published: 0, redacted: 0 } } }
+impl ScopeProjection {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:744
+    fn project(scope: &LexicalScope, identity: &SessionIdentity, budget: EvaluationBudget, selected_value: String?) -> (Self, ProjectionStats) Err! {
+        stats := ProjectionStats.default()
+        bindings := scope.visible_bindings().filter((binding) -> selected_value.is_none_or((id) -> id == binding.id)).collect[[&ValueProjection]]()
+        bindings.sort_by((left, right) -> left.name.cmp(right.name).then(left.id.cmp(right.id)))
+        projected: [ValueProjection] := [].with_capacity(bindings.len())
+        for binding in bindings {
+            if binding.publication == .Published -> stats.published = stats.published.saturating_add(1)
+            else -> stats.redacted = stats.redacted.saturating_add(1)
+            value :: project_root(binding, identity, budget, &stats)?
+            projected.push(^value)
+        }
+        (Self { id: ~scope.id, name: ~scope.name, parent_id: ~scope.parent_id, source: ~scope.source, bindings: ^projected }, ^stats)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:778
+    pub fn json(self: &Self) -> String {
+        bindings :: array_json(self.bindings.iter().filter_map((value) -> value.json()))
+        parent_id :: self.parent_id.as_ref().map((id) -> "\"{json_escape(id)}\"").unwrap_or("null")
+        "{{\"id\":\"{json_escape(self.id)}\",\"name\":\"{json_escape(self.name)}\",\"parent_id\":{parent_id},\"source\":{self.source.json()},\"bindings\":{bindings}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:795
+pub struct PausedSession {
+    pub identity: SessionIdentity; pub state: SessionState; pub scopes: [LexicalScope]
+    pub authority: AuthoritySet; pub budget: EvaluationBudget; pub cancellation: Cancellation
+}
+impl PausedSession {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:805
+    pub fn new(identity: SessionIdentity, state: SessionState, scopes: [LexicalScope], authority: AuthoritySet, budget: EvaluationBudget) -> Self Err! {
+        identity.validate()?
+        budget.validate()?
+        authority.validate()?
+        if scopes.len() > MAX_SCOPES -> return .Err("paused session exceeds the lexical scope limit")
+        ids: [String:Bool] := [:]
+        for scope in scopes {
+            scope.validate(.Val(&identity))?
+            if ids.insert(~scope.id, true).is_some() -> return .Err("paused session scope ids must be unique")
+        }
+        for scope in scopes {
+            if scope.parent_id == .Val(parent) {
+                if !ids.contains_key(parent) -> return .Err("paused lexical scope refers to a missing parent")
+            }
+        }
+        Self { identity: ^identity, state, scopes: ^scopes, authority: ^authority, budget, cancellation: Cancellation.none() }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:842
+    pub fn paused(identity: SessionIdentity, scopes: [LexicalScope], authority: AuthoritySet, budget: EvaluationBudget) -> Self Err! { Self.new(^identity, .Paused, ^scopes, ^authority, budget) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:851
+    pub fn cancel(self: &Self, reason: String) -> Unit Err! { self.cancellation = Cancellation.requested(^reason)?; self.state = .Cancelled }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:857
+    fn scope(self: &Self, id: String) -> &LexicalScope? { self.scopes.iter().find((scope) -> scope.id == id) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:863
+pub struct InspectRequest {
+    pub request_id: String; pub identity: SessionIdentity; pub scope_id: String; pub value_id: String?
+    pub budget: EvaluationBudget; pub authority: [AuthorityRequirement]; pub cancellation: Cancellation
+}
+impl InspectRequest {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:874
+    pub fn new(request_id: String, identity: SessionIdentity, scope_id: String, budget: EvaluationBudget, authority: [AuthorityRequirement]) -> Self Err! {
+        request :: Self { request_id: ^request_id, identity: ^identity, scope_id: ^scope_id, value_id: .None, budget, authority: ^authority, cancellation: Cancellation.none() }
+        request.validate_shape()?
+        request
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:894
+    fn validate_shape(self: &Self) -> Unit Err! {
+        valid_id(self.request_id, "request id")?
+        self.identity.validate()?
+        valid_id(self.scope_id, "scope id")?
+        if self.value_id == .Val(value_id) -> valid_id(value_id, "value id")?
+        self.budget.validate()?
+        self.cancellation.validate()?
+        for requirement in self.authority -> requirement.validate()?
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:909
+    pub fn from_json(raw: String) -> Self Err! { parse_inspect_request(raw) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:913
+    pub fn json(self: &Self) -> String {
+        value_id :: self.value_id.as_ref().map((id) -> "\"{json_escape(id)}\"").unwrap_or("null")
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.inspect\",\"request_id\":\"{json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{json_escape(self.scope_id)}\",\"value_id\":{value_id},\"budget\":{self.budget.json()},\"authority\":{authority},\"cancelled\":{self.cancellation.requested}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:934
+pub struct EvaluateRequest {
+    pub request_id: String; pub identity: SessionIdentity; pub scope_id: String; pub expression: String
+    pub mode: EvaluationMode; pub effects: [String]; pub authority: [AuthorityRequirement]
+    pub budget: EvaluationBudget; pub cancellation: Cancellation
+}
+impl EvaluateRequest {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:946
+    pub fn new(request_id: String, identity: SessionIdentity, scope_id: String, expression: String, mode: EvaluationMode, effects: [String], authority: [AuthorityRequirement], budget: EvaluationBudget) -> Self Err! {
+        request :: Self { request_id: ^request_id, identity: ^identity, scope_id: ^scope_id, expression: ^expression, mode, effects: ^effects, authority: ^authority, budget, cancellation: Cancellation.none() }
+        request.validate_shape()?
+        request
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:971
+    fn validate_shape(self: &Self) -> Unit Err! {
+        valid_id(self.request_id, "request id")?
+        self.identity.validate()?
+        valid_id(self.scope_id, "scope id")?
+        valid_text(self.expression, "evaluation expression", MAX_EXPRESSION_BYTES)?
+        if self.mode == .Mutate && self.effects.is_empty() -> return .Err("mutating evaluation requires at least one checked effect")
+        for effect in self.effects -> valid_id(effect, "evaluation effect")?
+        self.budget.validate()?
+        self.cancellation.validate()?
+        for requirement in self.authority -> requirement.validate()?
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:990
+    pub fn from_json(raw: String) -> Self Err! { parse_evaluate_request(raw) }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:994
+    pub fn json(self: &Self) -> String {
+        effects :: array_json(self.effects.iter().map((effect) -> "\"{json_escape(effect)}\""))
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.evaluate\",\"request_id\":\"{json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{json_escape(self.scope_id)}\",\"expression\":\"{json_escape(self.expression)}\",\"mode\":\"{self.mode.as_str()}\",\"effects\":{effects},\"authority\":{authority},\"budget\":{self.budget.json()},\"cancelled\":{self.cancellation.requested}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1015
+pub enum EvaluatorStatus { Completed; Failed; Cancelled }
+impl EvaluatorStatus {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1022
+    pub fn as_str(self) -> String { if self == { .Completed -> "completed", .Failed -> "failed", .Cancelled -> "cancelled" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1032
+pub struct ObservationFact {
+    pub event_id: String; pub kind: String; pub session_id: String; pub source_id: String
+    pub source_revision: String; pub scope_id: String; pub target_id: String; pub effect: String
+}
+impl ObservationFact {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1044
+    pub fn new(event_id: String, kind: String, session_id: String, source_id: String, source_revision: String, scope_id: String, target_id: String, effect: String) -> Self Err! {
+        fact :: Self { event_id: ^event_id, kind: ^kind, session_id: ^session_id, source_id: ^source_id, source_revision: ^source_revision, scope_id: ^scope_id, target_id: ^target_id, effect: ^effect }
+        fact.validate_shape()?
+        fact
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1068
+    fn validate_shape(self: &Self) -> Unit Err! {
+        valid_id(self.event_id, "observation id")?
+        valid_id(self.kind, "observation kind")?
+        valid_id(self.session_id, "observation session id")?
+        valid_id(self.source_id, "observation source id")?
+        valid_id(self.source_revision, "observation source revision")?
+        valid_id(self.scope_id, "observation scope id")?
+        valid_id(self.target_id, "observation target id")?
+        valid_id(self.effect, "observation effect")
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1079
+    fn matches(self: &Self, session: &PausedSession, request: &EvaluateRequest) -> Bool {
+        self.session_id == session.identity.session_id && self.source_id == session.identity.source_id &&
+            self.source_revision == session.identity.source_revision && self.scope_id == request.scope_id && request.effects.iter().any((effect) -> effect == self.effect)
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1087
+    fn json(self: &Self) -> String {
+        "{{\"event_id\":\"{json_escape(self.event_id)}\",\"kind\":\"{json_escape(self.kind)}\",\"session_id\":\"{json_escape(self.session_id)}\",\"source_id\":\"{json_escape(self.source_id)}\",\"source_revision\":\"{json_escape(self.source_revision)}\",\"scope_id\":\"{json_escape(self.scope_id)}\",\"target_id\":\"{json_escape(self.target_id)}\",\"effect\":\"{json_escape(self.effect)}\"}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1105
+pub struct EvaluatorResult {
+    pub identity: SessionIdentity; pub scope_id: String; pub status: EvaluatorStatus; pub value: ValueProjection?
+    pub usage: EvaluationUsage; pub changed: Bool; pub observation: ObservationFact?; pub error: String?
+}
+impl EvaluatorResult {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1117
+    pub fn completed(identity: SessionIdentity, scope_id: String, value: ValueProjection?, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Completed, value: ^value, usage, changed: false, observation: .None, error: .None }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1135
+    pub fn failed(identity: SessionIdentity, scope_id: String, message: String, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Failed, value: .None, usage, changed: false, observation: .None, error: .Val(^message) }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1153
+    pub fn cancelled(identity: SessionIdentity, scope_id: String, usage: EvaluationUsage) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Cancelled, value: .None, usage, changed: false, observation: .None, error: .None }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1170
+    pub fn mutated(identity: SessionIdentity, scope_id: String, value: ValueProjection?, usage: EvaluationUsage, observation: ObservationFact) -> Self {
+        Self { identity: ^identity, scope_id: ^scope_id, status: .Completed, value: ^value, usage, changed: true, observation: .Val(^observation), error: .None }
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1191
+pub enum AuditOutcome { Accepted; Rejected }
+impl AuditOutcome {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1197
+    pub fn as_str(self) -> String { if self == { .Accepted -> "accepted", .Rejected -> "rejected" } }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1206
+pub enum RejectReason {
+    InvalidRequest; SessionNotPaused; StaleSession; SessionIdentityMismatch; SourceIdentityMismatch; PauseIdentityMismatch
+    FrameIdentityMismatch; ScopeNotFound; ValueNotFound; ValueNotPublished; InsufficientAuthority; BudgetExceeded
+    Cancelled; EvaluatorFailed; MutationNotAllowed; ObservationMissing; InvalidEvaluatorResult
+}
+impl RejectReason {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1227
+    pub fn as_str(self) -> String {
+        if self == {
+            .InvalidRequest -> "invalid_request", .SessionNotPaused -> "session_not_paused", .StaleSession -> "stale_session",
+            .SessionIdentityMismatch -> "session_identity_mismatch", .SourceIdentityMismatch -> "source_identity_mismatch",
+            .PauseIdentityMismatch -> "pause_identity_mismatch", .FrameIdentityMismatch -> "frame_identity_mismatch",
+            .ScopeNotFound -> "scope_not_found", .ValueNotFound -> "value_not_found", .ValueNotPublished -> "value_not_published",
+            .InsufficientAuthority -> "insufficient_authority", .BudgetExceeded -> "budget_exceeded", .Cancelled -> "cancelled",
+            .EvaluatorFailed -> "evaluator_failed", .MutationNotAllowed -> "mutation_not_allowed", .ObservationMissing -> "observation_missing",
+            .InvalidEvaluatorResult -> "invalid_evaluator_result"
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1251
+pub struct AuditReceipt {
+    pub receipt_id: String; pub operation: String; pub request_id: String; pub outcome: AuditOutcome; pub reason: RejectReason?
+    pub identity: SessionIdentity; pub scope_id: String; pub authority: [AuthorityRequirement]; pub usage: EvaluationUsage
+    pub truncated: Bool; pub published_values: U64; pub redacted_values: U64; pub observation_id: String?
+}
+impl AuditReceipt {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1268
+    fn new(operation: String, request_id: String, identity: &SessionIdentity, scope_id: String, authority: &[AuthorityRequirement], outcome: AuditOutcome, reason: RejectReason?, usage: EvaluationUsage, truncated: Bool, published_values: U64, redacted_values: U64, observation_id: String?) -> Self {
+        authority := ~authority
+        authority.sort()
+        authority.dedup()
+        authority_key :: authority.iter().map((requirement) -> "{requirement.capability}@{requirement.scope_id}").collect[[String]]().join(",")
+        reason_text :: reason.map((reason) -> reason.as_str()).unwrap_or("")
+        observation_text :: observation_id.as_ref().unwrap_or("")
+        canonical :: "paused-audit-v1|{operation}|{request_id}|{identity.session_id}|{identity.source_id}|{identity.source_revision}|{identity.pause_id}|{identity.frame_id}|{scope_id}|{outcome.as_str()}|{reason_text}|{authority_key}|{usage.depth}|{usage.nodes}|{usage.bytes}|{usage.steps}|{truncated}|{published_values}|{redacted_values}|{observation_text}"
+        digest :: sha256_hex(canonical.as_bytes())
+        Self { receipt_id: "paused-audit-{digest.slice(0..<24)}", operation: ~operation, request_id: ~request_id, outcome, reason,
+            identity: ~identity, scope_id: ~scope_id, authority: ^authority, usage, truncated, published_values, redacted_values, observation_id: ~observation_id }
+    }
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1329
+    pub fn json(self: &Self) -> String {
+        reason :: self.reason.map((reason) -> "\"{reason.as_str()}\"").unwrap_or("null")
+        authority :: array_json(self.authority.iter().map((requirement) -> requirement.json()))
+        observation_id :: self.observation_id.as_ref().map((id) -> "\"{json_escape(id)}\"").unwrap_or("null")
+        "{{\"receipt_id\":\"{json_escape(self.receipt_id)}\",\"operation\":\"{json_escape(self.operation)}\",\"request_id\":\"{json_escape(self.request_id)}\",\"outcome\":\"{self.outcome.as_str()}\",\"reason\":{reason},\"identity\":{self.identity.json()},\"scope_id\":\"{json_escape(self.scope_id)}\",\"authority\":{authority},\"usage\":{self.usage.json()},\"truncated\":{self.truncated},\"published_values\":{self.published_values},\"redacted_values\":{self.redacted_values},\"observation_id\":{observation_id}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1358
+#Error
+pub struct RequestError { pub reason: RejectReason; pub audit: AuditReceipt }
+impl RequestError {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1363
+    pub fn json(self: &Self) -> String { "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"{self.reason.as_str()}\",\"audit\":{self.audit.json()}}}" }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1374
+impl fmt.Display for RequestError {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1375
+    fn fmt(self: &Self, formatter: &fmt.Formatter) -> fmt.Result { formatter.write_str(self.reason.as_str()) }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1380
+// #Error supplies RequestError's std.error.Error contract.
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1384
+pub struct InspectResponse { pub identity: SessionIdentity; pub scope: ScopeProjection; pub selected_value_id: String?; pub truncated: Bool; pub audit: AuditReceipt }
+impl InspectResponse {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1392
+    pub fn json(self: &Self) -> String {
+        selected_value_id :: self.selected_value_id.as_ref().map((id) -> "\"{json_escape(id)}\"").unwrap_or("null")
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.inspect\",\"identity\":{self.identity.json()},\"scope\":{self.scope.json()},\"selected_value_id\":{selected_value_id},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1411
+pub struct EvaluateResponse {
+    pub identity: SessionIdentity; pub scope_id: String; pub expression_hash: String; pub mode: EvaluationMode
+    pub value: ValueProjection?; pub changed: Bool; pub observation: ObservationFact?; pub truncated: Bool; pub audit: AuditReceipt
+}
+impl EvaluateResponse {
+    // Rust: crates/jet-devserver/src/PausedEvaluate.rs:1423
+    pub fn json(self: &Self) -> String {
+        value :: self.value.as_ref().and_then((value) -> value.json()).unwrap_or("null")
+        observation :: self.observation.as_ref().map((fact) -> fact.json()).unwrap_or("null")
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.evaluate\",\"identity\":{self.identity.json()},\"scope_id\":\"{json_escape(self.scope_id)}\",\"expression_hash\":\"{json_escape(self.expression_hash)}\",\"mode\":\"{self.mode.as_str()}\",\"value\":{value},\"changed\":{self.changed},\"observation\":{observation},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
+    }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1452
+pub fn inspect(session: &PausedSession, request: &InspectRequest) -> InspectResponse RequestError! {
+    authority :: inspect_authority(request)
+    _ :: validate_common(session, &request.identity, request.request_id, request.scope_id, &request.budget, &request.cancellation, &authority) ?? return .Err(reject(
+        "paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, err, EvaluationUsage.default()))
+    scope :: session.scope(request.scope_id) ?? return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ScopeNotFound, EvaluationUsage.default()))
+    if request.value_id == .Val(value_id) {
+        binding :: scope.bindings.iter().find((binding) -> binding.id == value_id) ?? return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ValueNotFound, EvaluationUsage.default()))
+        if binding.publication == .Absent -> return .Err(reject("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .ValueNotPublished, EvaluationUsage.default()))
+    }
+    (projection, stats) :: ScopeProjection.project(scope, &session.identity, request.budget, request.value_id) ?? return .Err(reject(
+        "paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, EvaluationUsage.default()))
+    audit :: AuditReceipt.new("paused.inspect", request.request_id, &request.identity, request.scope_id, &authority, .Accepted, .None, stats.usage, stats.truncated, stats.published, stats.redacted, .None)
+    InspectResponse { identity: ~request.identity, scope: ^projection, selected_value_id: ~request.value_id, truncated: stats.truncated, audit: ^audit }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1557
+pub fn evaluate(session: &PausedSession, request: &EvaluateRequest, result: EvaluatorResult) -> EvaluateResponse RequestError! {
+    authority :: evaluate_authority(request)
+    _ :: validate_common(session, &request.identity, request.request_id, request.scope_id, &request.budget, &request.cancellation, &authority) ?? return .Err(reject(
+        "paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, err, result.usage))
+    if result.identity != request.identity || result.scope_id != request.scope_id -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    invalid_result_shape :: if result.status == {
+        .Completed -> result.error.is_some()
+        .Failed -> result.value.is_some() || result.changed || result.observation.is_some() || result.error.as_ref().is_none_or((message) -> message.is_empty() || valid_text(message, "evaluator error", 4 * 1024).is_err())
+        .Cancelled -> result.value.is_some() || result.changed || result.observation.is_some() || result.error.is_some()
+    }
+    if invalid_result_shape -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    if result.status == .Failed -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .EvaluatorFailed, result.usage))
+    if result.status == .Cancelled -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .Cancelled, result.usage))
+    if !request.budget.fits(result.usage) -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .BudgetExceeded, result.usage))
+    if result.changed || result.observation.is_some() {
+        if request.mode != .Mutate -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .MutationNotAllowed, result.usage))
+        if result.changed && result.observation.is_none() -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .ObservationMissing, result.usage))
+        if !result.changed && result.observation.is_some() -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    }
+    if result.observation.as_ref() == .Val(observation) {
+        if !observation.matches(session, request) -> return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+    }
+    stats := ProjectionStats.default()
+    value: ValueProjection? := .None
+    if result.value.as_ref() == .Val(supplied) {
+        _ :: supplied.validate_for_session(&session.identity) ?? return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+        if supplied.publication != .Absent {
+            if supplied.publication == .Published -> stats.published = 1 else -> stats.redacted = 1
+            projected :: project_root(supplied, &session.identity, request.budget, &stats) ?? return .Err(reject("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .InvalidEvaluatorResult, result.usage))
+            value = .Val(^projected)
+        }
+    }
+    observation_id :: result.observation.as_ref().map((observation) -> observation.event_id)
+    audit :: AuditReceipt.new("paused.evaluate", request.request_id, &request.identity, request.scope_id, &authority, .Accepted, .None, result.usage, stats.truncated, stats.published, stats.redacted, observation_id)
+    EvaluateResponse { identity: ~request.identity, scope_id: ~request.scope_id, expression_hash: "sha256-{sha256_hex(request.expression.as_bytes())}", mode: request.mode,
+        value: ^value, changed: result.changed, observation: ^result.observation, truncated: stats.truncated, audit: ^audit }
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1777
+#Error
+pub enum PausedEvaluateHostError { SessionUnavailable; EvaluatorUnavailable; InvalidRequest(String); Rejected(RequestError) }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:1791
+// PausedEvaluateHostError's bounded JSON error projection continues in PausedEvaluate02.

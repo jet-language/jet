@@ -1,0 +1,97 @@
+use jet_devserver.PausedEvaluate.*
+
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2400
+fn identity() -> SessionIdentity { SessionIdentity.new("session-1", "src/main.jet", "rev-1", "pause-1", "frame-1").unwrap() }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2405
+fn source() -> SourceLocation { SourceLocation.new("src/main.jet", "rev-1", 0, 10).unwrap() }
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2409
+fn scope() -> LexicalScope {
+    location :: source()
+    LexicalScope.new("scope-1", "run", .None, ~location, [
+        ValueProjection.published("value-public", "count", "Int", ~location, .Int(7)),
+        ValueProjection.redacted("value-secret", "token", "String", ~location),
+        ValueProjection.absent("value-hidden", "password", "String", ^location)
+    ]).unwrap()
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2441
+fn authority() -> AuthoritySet {
+    AuthoritySet.new([
+        AuthorityGrant.new(INSPECT_AUTHORITY, "scope-1").unwrap(),
+        AuthorityGrant.new(EVALUATE_AUTHORITY, "scope-1").unwrap(),
+        AuthorityGrant.new(MUTATE_AUTHORITY, "scope-1").unwrap(),
+        AuthorityGrant.new("fs.write", "scope-1").unwrap()
+    ])
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2450
+fn session() -> PausedSession { PausedSession.paused(identity(), [scope()], authority(), DEFAULT_EVALUATION_BUDGET).unwrap() }
+
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2461
+#Test("inspect_is_typed_and_omits_unpublished_values") {
+    paused :: session()
+    request :: InspectRequest.new("request-1", identity(), "scope-1", DEFAULT_EVALUATION_BUDGET, []).unwrap()
+    response :: inspect(&paused, &request).unwrap()
+    json :: response.json()
+    assert(json.contains("\"kind\":\"int\""))
+    assert(json.contains("\"publication\":\"redacted\""))
+    assert(!json.contains("password"))
+    assert(json.contains("\"name\":\"token\""))
+    assert_eq(response.audit.outcome, AuditOutcome.Accepted)
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2481
+#Test("stale_running_and_wrong_source_fail_closed") {
+    stale := session()
+    stale.state = .Stale
+    request :: InspectRequest.new("request-2", identity(), "scope-1", DEFAULT_EVALUATION_BUDGET, []).unwrap()
+    assert_eq(inspect(&stale, &request).unwrap_err().reason, RejectReason.StaleSession)
+    running := session()
+    running.state = .Running
+    assert_eq(inspect(&running, &request).unwrap_err().reason, RejectReason.SessionNotPaused)
+    wrong :: SessionIdentity.new("session-1", "src/other.jet", "rev-1", "pause-1", "frame-1").unwrap()
+    wrong_request :: InspectRequest.new("request-3", ^wrong, "scope-1", DEFAULT_EVALUATION_BUDGET, []).unwrap()
+    assert_eq(inspect(&session(), &wrong_request).unwrap_err().reason, RejectReason.SourceIdentityMismatch)
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2512
+#Test("evaluator_result_is_injected_and_mutation_needs_authority_and_observation") {
+    paused :: session()
+    request :: EvaluateRequest.new("request-4", identity(), "scope-1", "count + 1", .ReadOnly, [], [], DEFAULT_EVALUATION_BUDGET).unwrap()
+    value :: ValueProjection.published("eval-value", "result", "Int", source(), .Int(8))
+    response :: evaluate(&paused, &request, EvaluatorResult.completed(identity(), "scope-1", .Val(^value), EvaluationUsage.new(1, 1, 64, 2))).unwrap()
+    assert_eq(response.value.unwrap().value, .Val(TypedValue.Int(8)))
+    mutation :: EvaluateRequest.new("request-5", identity(), "scope-1", "count = 8", .Mutate, ["fs.write"], [], DEFAULT_EVALUATION_BUDGET).unwrap()
+    observation :: ObservationFact.new("event-1", "paused.update", "session-1", "src/main.jet", "rev-1", "scope-1", "value-public", "fs.write").unwrap()
+    result :: EvaluatorResult.mutated(identity(), "scope-1", .None, EvaluationUsage.new(1, 1, 32, 2), ^observation)
+    assert(evaluate(&paused, &mutation, ^result).is_ok())
+    denied := ~mutation
+    denied.authority.push(AuthorityRequirement.new("fs.read", "scope-1").unwrap())
+    assert_eq(evaluate(&paused, &denied, EvaluatorResult.completed(identity(), "scope-1", .None, EvaluationUsage.new(1, 0, 0, 1))).unwrap_err().reason, RejectReason.InsufficientAuthority)
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2583
+#Test("audit_receipts_are_deterministic") {
+    paused :: session()
+    request :: InspectRequest.new("request-6", identity(), "scope-1", DEFAULT_EVALUATION_BUDGET, []).unwrap()
+    first :: inspect(&paused, &request).unwrap()
+    second :: inspect(&paused, &request).unwrap()
+    assert_eq(first.audit, second.audit)
+    assert_eq(first.audit.receipt_id, "paused-audit-" + first.audit.receipt_id[13..])
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2600
+#Test("cancellation_budget_and_absent_result_are_fail_closed") {
+    paused :: session()
+    inspect_request := InspectRequest.new("request-cancelled", identity(), "scope-1", DEFAULT_EVALUATION_BUDGET, []).unwrap()
+    inspect_request.cancellation = Cancellation.requested("user stopped").unwrap()
+    assert_eq(inspect(&paused, &inspect_request).unwrap_err().reason, RejectReason.Cancelled)
+    budget :: EvaluationBudget.new(4, 16, 4096, 1).unwrap()
+    evaluate_request :: EvaluateRequest.new("request-budget", identity(), "scope-1", "count", .ReadOnly, [], [], budget).unwrap()
+    over_budget :: EvaluatorResult.completed(identity(), "scope-1", .None, EvaluationUsage.new(1, 1, 1, 2))
+    assert_eq(evaluate(&paused, &evaluate_request, ^over_budget).unwrap_err().reason, RejectReason.BudgetExceeded)
+    absent :: ValueProjection.absent("eval-hidden", "secret", "String", source())
+    response :: evaluate(&paused, &evaluate_request, EvaluatorResult.completed(identity(), "scope-1", .Val(^absent), EvaluationUsage.new(1, 1, 1, 1))).unwrap()
+    assert(response.value.is_none())
+    assert(!response.json().contains("secret"))
+}
+// Rust: crates/jet-devserver/src/PausedEvaluate.rs:2663
+#Test("request_json_round_trips") {
+    request :: EvaluateRequest.new("request-7", identity(), "scope-1", "count", .ReadOnly, [], [], DEFAULT_EVALUATION_BUDGET).unwrap()
+    parsed :: EvaluateRequest.from_json(request.json()).unwrap()
+    assert_eq(parsed, request)
+}

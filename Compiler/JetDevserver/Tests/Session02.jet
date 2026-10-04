@@ -1,0 +1,111 @@
+use jet_devserver.Session.*
+use std.time.[Instant, Duration]
+
+// Rust: crates/jet-devserver/src/Session.rs:2769
+#Test("one_session_keeps_history_last_good_and_listener_boundaries") {
+    session :: ResidentDevSession.new("app.jet", 8080, 49152)
+    session.note_client("a")
+    session.note_client("b")
+    session.select_output("{\"output\":\"web\",\"target\":\"browser\",\"client_id\":\"a\"}")
+    session.accept_transaction("{\"op\":\"replace_source\",\"revision\":\"old\",\"client_id\":\"a\",\"output\":\"web\"}", "new")
+    session.mark_last_good("new", "web-build-2")
+    json :: session.json()
+    assert(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":8080"))
+    assert(json.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":49152"))
+    assert(json.contains("\"listener\":\"canvas\""))
+    assert(json.contains("\"listener\":\"application\""))
+    assert(!json.contains("\"shared\":true"))
+    assert(json.contains("\"accepted_revision\":\"new\""))
+    assert(json.contains("\"last_good_program\":\"web-build-2\""))
+    assert(json.contains("\"clients\":2"))
+    assert(json.contains("\"run\":{\"output\":\"web\",\"target\":\"browser\"}"))
+    assert(json.contains("\"count\":1"))
+    assert(json.contains("\"status\":\"accepted\""))
+}
+// Rust: crates/jet-devserver/src/Session.rs:2794
+#Test("session_json_lists_only_bound_listeners") {
+    app :: ResidentDevSession.new("app.jet", 0, 49152).json()
+    assert(app.contains("\"listeners\":{\"application\""))
+    assert(!app.contains("\"listeners\":{\"canvas\""))
+    assert(!app.contains("\"workbench\""))
+    canvas :: ResidentDevSession.new("app.jet", 4567, 0).json()
+    assert(canvas.contains("\"listeners\":{\"canvas\""))
+    assert(!canvas.contains("\"listeners\":{\"application\""))
+    assert(!canvas.contains("\"workbench\""))
+}
+// Rust: crates/jet-devserver/src/Session.rs:2807
+#Test("canvas_command_metadata_does_not_change_program_selection") {
+    session :: ResidentDevSession.new("app.jet", 4567, 49152)
+    session.record_command("{\"action_id\":\"canvas.command:run\",\"output\":\"native\",\"target\":\"desktop\",\"client_id\":\"b\"}")
+    json :: session.json()
+    assert(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":4567"))
+    assert(json.contains("\"run\":{\"output\":null,\"target\":null}"))
+}
+// Rust: crates/jet-devserver/src/Session.rs:2818
+#Test("failed_rebuild_keeps_last_good_views_and_current_source_diagnostics") {
+    session :: ResidentDevSession.new("app.jet", 4567, 49152)
+    session.observe_source("good-revision")
+    session.mark_last_good("good-revision", "web-build-1")
+    session.remember_last_good_view("graph", "", "good-revision", "graph-good")
+    session.remember_last_good_view("debugger", "", "good-revision", "debug-good")
+    session.remember_last_good_view("runtime", "", "good-revision", "runtime-good")
+    session.observe_source("broken-revision")
+    session.mark_error("E0102", "Error [E0102]: missing name")
+    json :: session.json()
+    for expected in [
+        "\"source_revision\":\"broken-revision\"",
+        "\"accepted_revision\":\"good-revision\"",
+        "\"last_good_revision\":\"good-revision\"",
+        "\"last_good_program\":\"web-build-1\"",
+        "\"last_good_views\":{\"graph\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"graph-good\"},\"debugger\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"debug-good\"},\"runtime\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"runtime-good\"}}",
+        "\"diagnostic_revision\":\"broken-revision\"",
+        "\"state\":\"error\"",
+        "\"diagnostic_code\":\"E0102\"",
+        "Error [E0102]: missing name"
+    ] -> assert(json.contains(expected), "session lost {expected}: {json}")
+}
+// Rust: crates/jet-devserver/src/Session.rs:2846
+#Test("first_observed_source_is_the_accepted_session_baseline") {
+    session :: ResidentDevSession.new("app.jet", 4567, 49152)
+    session.observe_source("initial-revision")
+    session.observe_source("current-revision")
+    json :: session.json()
+    assert(json.contains("\"source_revision\":\"current-revision\""))
+    assert(json.contains("\"accepted_revision\":\"initial-revision\""))
+}
+// Rust: crates/jet-devserver/src/Session.rs:2856
+#Test("disconnect_reconnect_preserves_project_run_debug_and_last_good_state") {
+    session :: ResidentDevSession.new("app.jet", 4567, 49152)
+    session.note_client("canvas-a")
+    session.select_output("{\"output\":\"web\",\"target\":\"browser\"}")
+    session.accept_transaction("{\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"old\",\"client_id\":\"canvas-a\"}", "accepted-revision")
+    session.mark_last_good("accepted-revision", "web-build-2")
+    session.record_debug_response(
+        "{\"schema_version\":1,\"revision\":\"accepted-revision\",\"source_id\":\"helper.jet\",\"commands\":[\"s\"]}",
+        "{\"schema\":\"jet.report/v1\",\"canvas\":{\"protocol\":\"jet.canvas.debug\",\"session\":{\"id\":\"canvas-debug-1\",\"state\":\"running\",\"tier\":\"jet-dev-interpreter\",\"source_id\":\"helper.jet\",\"revision\":\"accepted-revision\"}}}")
+    session.drop_client("canvas-a")
+    session.note_client("canvas-b")
+    json :: session.json()
+    for expected in [
+        "\"project_context\":{\"source_id\":\"helper.jet\"}",
+        "\"accepted_revision\":\"accepted-revision\"",
+        "\"last_good_program\":\"web-build-2\"",
+        "\"run\":{\"output\":\"web\",\"target\":\"browser\"}",
+        "\"debugger\":{\"state\":\"active\",\"session_id\":\"canvas-debug-1\"",
+        "\"clients\":1"
+    ] -> assert(json.contains(expected), "reconnect lost {expected}: {json}")
+    session.record_debug("{\"schema_version\":1,\"revision\":\"accepted-revision\",\"source_id\":\"helper.jet\",\"session_id\":\"canvas-debug-1\",\"stop\":true}")
+    assert(session.json().contains("\"debugger\":{\"state\":\"idle\",\"session_id\":null"))
+}
+// Rust: crates/jet-devserver/src/Session.rs:2891
+#Test("client_registry_is_bounded_and_expires_before_admission") {
+    session :: ResidentDevSession.new("app.jet", 4567, 49152)
+    for index in 0..MAX_CLIENTS -> session.note_client("client-{index}")
+    session.note_client("overflow")
+    assert(session.json().contains("\"clients\":{MAX_CLIENTS}"))
+    // GATE #4494: monotonic clock past-value and shared mutex access.
+    expired :: Instant.now().checked_sub(CLIENT_TTL + Duration.from_millis(1)).expect("test instant must have a past value")
+    session.clients.lock().unwrap().insert("expired", expired)
+    session.note_client("replacement")
+    assert(session.json().contains("\"clients\":256"))
+}

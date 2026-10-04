@@ -1,1538 +1,577 @@
-// PORT-PENDING 0765 crates-jet-devserver-src-canvas-graph-projection-slice-1792: crates/jet-devserver/src/Canvas/graph_projection.rs:1792-3325
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn project_stmt_block(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     stmts: &[Stmt],
-//RS     base: usize,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) {
-//RS     let mut cursor_y = y;
-//RS     for (i, stmt) in stmts.iter().enumerate() {
-//RS         project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y);
-//RS         cursor_y += stmt_row_step(stmt);
-//RS     }
-//RS }
-//RS 
-//RS /// Vertical spacing before the next sibling statement. The default slot
-//RS /// (130px) has room for a couple of data-provider rows below a binding; a
-//RS /// list initializer with more items renders taller than that, so
-//RS /// widen the gap or its node body collides with the next statement's own
-//RS /// data-provider node (multi-input node body height grows with item count,
-//RS /// e.g. after `append_multi_input`).
-//RS fn stmt_row_step(stmt: &Stmt) -> i32 {
-//RS     let items = match stmt {
-//RS         Stmt::Val(b) => multi_input_item_count(&b.init),
-//RS         Stmt::Assign { value, .. } => multi_input_item_count(value),
-//RS         _ => 0,
-//RS     };
-//RS     130 + (items.saturating_sub(2) as i32) * 55
-//RS }
-//RS 
-//RS fn multi_input_item_count(expr: &Expr) -> usize {
-//RS     match expr {
-//RS         Expr::ListLit(items, _) => items.len(),
-//RS         _ => 0,
-//RS     }
-//RS }
-//RS 
-//RS fn project_stmt(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     stmt: &Stmt,
-//RS     ordinal: usize,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::Val(b) => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:binding", g.graph_id);
-//RS             let ty = binding_type(g, &b.name, b);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "binding",
-//RS                 &b.name,
-//RS                 binding_source_span(src, b),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["local"],
-//RS                 vec!["rename_binding", "edit_inline_expr", "source_jump"],
-//RS             );
-//RS             if let Some(node) = g.nodes.iter_mut().find(|node| node.id == node_id) {
-//RS                 node.meta_json = meta_attr_json(b.meta.as_ref());
-//RS             }
-//RS             let input_pin = add_pin(g, &node_id, "value", "input", &ty, "", false);
-//RS             let output_pin = add_pin(g, &node_id, &b.name, "output", &ty, "", false);
-//RS             g.local_pins.insert(b.name.clone(), output_pin);
-//RS             g.local_types.insert(b.name.clone(), ty);
-//RS             let init_span = if b.pattern.is_none() {
-//RS                 binding_init_span(src, b)
-//RS             } else {
-//RS                 b.init.span()
-//RS             };
-//RS             connect_expr_to_input_with_span(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 &b.init,
-//RS                 init_span,
-//RS                 ordinal,
-//RS                 "init",
-//RS                 &node_id,
-//RS                 &input_pin,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS         }
-//RS         Stmt::Assign {
-//RS             target, op, value, ..
-//RS         } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:assign", g.graph_id);
-//RS             let title = assignment_title(target, *op);
-//RS             let ty = lvalue_type(g, target);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "assignment",
-//RS                 &title,
-//RS                 target.span().into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["write"],
-//RS                 vec!["edit_inline_expr", "source_jump"],
-//RS             );
-//RS             let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-//RS             let output = add_pin(g, &node_id, "target", "output", &ty, "&", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 value,
-//RS                 ordinal,
-//RS                 "value",
-//RS                 &node_id,
-//RS                 &input,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS             if let AST::LValue::Local { name, .. } = target {
-//RS                 g.local_pins.insert(name.clone(), output);
-//RS                 g.local_types.insert(name.clone(), ty);
-//RS             }
-//RS         }
-//RS         Stmt::Expr(e) => {
-//RS             let _ = project_expr_node(g, index, src, e, ordinal, x, y, true);
-//RS         }
-//RS         Stmt::DeferClose { close, span } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:defer_close", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "defer_close",
-//RS                 "defer close",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["cleanup"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "close", src, close.span());
-//RS         }
-//RS         Stmt::Return(expr, span) => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:return", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "return",
-//RS                 "return",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["exit"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             if let Some(e) = expr {
-//RS                 let ty = expr_type(g, index, e);
-//RS                 let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     e,
-//RS                     ordinal,
-//RS                     "value",
-//RS                     &node_id,
-//RS                     &input,
-//RS                     x - 220,
-//RS                     y,
-//RS                 );
-//RS             }
-//RS         }
-//RS         Stmt::While {
-//RS             cond, body, span, ..
-//RS         } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:loop", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "loop",
-//RS                 "loop",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["edit_inline_expr", "source_jump"],
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Loop { body, span, .. } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:loop", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "loop",
-//RS                 "loop",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 20, x + 230, y + 70);
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:counted_loop", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "loop",
-//RS                 "counted loop",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
-//RS             );
-//RS             let initializer_span = Span::new(init.name_span.start, init.init.span().end);
-//RS             let init_pin = add_pin(g, &node_id, "initializer", "input", "Value", "", false);
-//RS             connect_expr_to_input_with_span(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 &init.init,
-//RS                 initializer_span,
-//RS                 ordinal * 10,
-//RS                 "initializer",
-//RS                 &node_id,
-//RS                 &init_pin,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS             let cond_pin = add_pin(g, &node_id, "condition", "input", "Bool", "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 cond,
-//RS                 ordinal * 10 + 1,
-//RS                 "condition",
-//RS                 &node_id,
-//RS                 &cond_pin,
-//RS                 x - 220,
-//RS                 y + 30,
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
-//RS             if let Some(step) = step {
-//RS                 let afterthought = match step.as_ref() {
-//RS                     Stmt::Assign { target, value, .. } => Some((
-//RS                         value,
-//RS                         Span::new(target.span().start, expr_source_end(value)),
-//RS                     )),
-//RS                     Stmt::Expr(value) => Some((value, value.span())),
-//RS                     _ => None,
-//RS                 };
-//RS                 if let Some((afterthought, afterthought_span)) = afterthought {
-//RS                     let pin = add_pin(g, &node_id, "afterthought", "input", "Value", "", false);
-//RS                     connect_expr_to_input_with_span(
-//RS                         g,
-//RS                         index,
-//RS                         src,
-//RS                         afterthought,
-//RS                         afterthought_span,
-//RS                         ordinal * 10 + 2,
-//RS                         "afterthought",
-//RS                         &node_id,
-//RS                         &pin,
-//RS                         x - 220,
-//RS                         y + 60,
-//RS                     );
-//RS                 }
-//RS             }
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200);
-//RS         }
-//RS         Stmt::For {
-//RS             var,
-//RS             var2,
-//RS             kind,
-//RS             body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:for", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "loop",
-//RS                 &format!("loop {var}"),
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             let iter_ty = match kind {
-//RS                 AST::ForKind::Range { .. } => "Int",
-//RS                 AST::ForKind::In { .. } => "iterable",
-//RS             };
-//RS             let output = add_pin(g, &node_id, var, "output", iter_ty, "", false);
-//RS             g.local_pins.insert(var.clone(), output);
-//RS             g.local_types.insert(var.clone(), iter_ty.to_string());
-//RS             if let Some((var2, _)) = var2 {
-//RS                 let output = add_pin(g, &node_id, var2, "output", iter_ty, "", false);
-//RS                 g.local_pins.insert(var2.clone(), output);
-//RS                 g.local_types.insert(var2.clone(), iter_ty.to_string());
-//RS             }
-//RS             match kind {
-//RS                 AST::ForKind::Range {
-//RS                     start,
-//RS                     end,
-//RS                     step,
-//RS                     exclusive: _,
-//RS                 } => {
-//RS                     let start_pin = add_pin(g, &node_id, "range_start", "input", "Int", "", false);
-//RS                     connect_expr_to_input(
-//RS                         g,
-//RS                         index,
-//RS                         src,
-//RS                         start,
-//RS                         ordinal * 10,
-//RS                         "range_start",
-//RS                         &node_id,
-//RS                         &start_pin,
-//RS                         x - 220,
-//RS                         y,
-//RS                     );
-//RS                     let end_pin = add_pin(g, &node_id, "range_end", "input", "Int", "", false);
-//RS                     connect_expr_to_input(
-//RS                         g,
-//RS                         index,
-//RS                         src,
-//RS                         end,
-//RS                         ordinal * 10 + 1,
-//RS                         "range_end",
-//RS                         &node_id,
-//RS                         &end_pin,
-//RS                         x - 220,
-//RS                         y + 30,
-//RS                     );
-//RS                     if let Some(step) = step {
-//RS                         let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
-//RS                         connect_expr_to_input(
-//RS                             g,
-//RS                             index,
-//RS                             src,
-//RS                             step,
-//RS                             ordinal * 10 + 2,
-//RS                             "stride",
-//RS                             &node_id,
-//RS                             &stride_pin,
-//RS                             x - 220,
-//RS                             y + 60,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 AST::ForKind::In { collection, step } => {
-//RS                     let source_pin = add_pin(g, &node_id, "source", "input", "Iterable", "", false);
-//RS                     connect_expr_to_input(
-//RS                         g,
-//RS                         index,
-//RS                         src,
-//RS                         collection,
-//RS                         ordinal * 10,
-//RS                         "source",
-//RS                         &node_id,
-//RS                         &source_pin,
-//RS                         x - 220,
-//RS                         y,
-//RS                     );
-//RS                     if let Some(step) = step {
-//RS                         let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
-//RS                         connect_expr_to_input(
-//RS                             g,
-//RS                             index,
-//RS                             src,
-//RS                             step,
-//RS                             ordinal * 10 + 1,
-//RS                             "stride",
-//RS                             &node_id,
-//RS                             &stride_pin,
-//RS                             x - 220,
-//RS                             y + 30,
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS         } => {
-//RS             let subjectless = AST::is_subjectless_guard(subject, *span);
-//RS             if subjectless && switch_was_classic_if(src, arms, *span) {
-//RS                 let Some(arm) = arms.first() else {
-//RS                     return;
-//RS                 };
-//RS                 let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
-//RS                 let mut affordances = vec!["edit_inline_expr", "source_jump"];
-//RS                 let is_pattern_test = matches!(arm.cond, Expr::PatternTest { .. });
-//RS                 if is_pattern_test {
-//RS                     affordances.push("add_pattern_arm");
-//RS                 }
-//RS                 add_node(
-//RS                     g,
-//RS                     &node_id,
-//RS                     "branch",
-//RS                     if is_pattern_test { "if ==" } else { "if" },
-//RS                     (*span).into(),
-//RS                     x,
-//RS                     y,
-//RS                     vec!["control"],
-//RS                     affordances,
-//RS                 );
-//RS                 if let Some(pattern_type) = pattern_subject_type(g, index, &arm.cond) {
-//RS                     set_pattern_node_type(g, &node_id, &pattern_type);
-//RS                 }
-//RS                 let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
-//RS                 if is_pattern_test {
-//RS                     add_arm_pin(
-//RS                         g,
-//RS                         &node_id,
-//RS                         "arm1",
-//RS                         &pattern_pin_label(src, &arm.cond),
-//RS                         pattern_arm_edit_span(src, &arm.cond),
-//RS                     );
-//RS                 }
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     &arm.cond,
-//RS                     ordinal,
-//RS                     "cond",
-//RS                     &node_id,
-//RS                     &cond,
-//RS                     x - 220,
-//RS                     y,
-//RS                 );
-//RS                 project_stmt_block(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     &arm.body,
-//RS                     ordinal * 100 + 10,
-//RS                     x + 230,
-//RS                     y + 70,
-//RS                 );
-//RS                 project_classic_switch_else(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     else_body.as_deref(),
-//RS                     ordinal,
-//RS                     x + 460,
-//RS                     y + 70,
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             let node_id = format!("{}:stmt:{ordinal}:dispatch", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "dispatch",
-//RS                 if subjectless { "if guards" } else { "if ==" },
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
-//RS             );
-//RS             let pattern_type = if subjectless {
-//RS                 arms.first()
-//RS                     .and_then(|arm| pattern_subject_type(g, index, &arm.cond))
-//RS             } else {
-//RS                 Some(expr_type(g, index, subject))
-//RS             };
-//RS             if let Some(pattern_type) = pattern_type {
-//RS                 set_pattern_node_type(g, &node_id, &pattern_type);
-//RS             }
-//RS             if !subjectless {
-//RS                 let ty = expr_type(g, index, subject);
-//RS                 let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     subject,
-//RS                     ordinal,
-//RS                     "subject",
-//RS                     &node_id,
-//RS                     &subject_pin,
-//RS                     x - 220,
-//RS                     y,
-//RS                 );
-//RS             }
-//RS             for (i, arm) in arms.iter().enumerate() {
-//RS                 add_arm_pin(
-//RS                     g,
-//RS                     &node_id,
-//RS                     &format!("arm{}", i + 1),
-//RS                     &dispatch_arm_pattern_label(src, &arm.cond),
-//RS                     dispatch_arm_pattern_span(src, &arm.cond),
-//RS                 );
-//RS                 add_inline(
-//RS                     g,
-//RS                     &node_id,
-//RS                     ordinal,
-//RS                     &format!("arm{}", i + 1),
-//RS                     src,
-//RS                     arm.cond.span(),
-//RS                 );
-//RS                 project_stmt_block(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     &arm.body,
-//RS                     ordinal * 100 + 50 + i * 20,
-//RS                     x + 230 + i as i32 * 180,
-//RS                     y + 100,
-//RS                 );
-//RS             }
-//RS             if let Some(body) = else_body {
-//RS                 project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230);
-//RS             }
-//RS         }
-//RS         Stmt::Break(span)
-//RS         | Stmt::Continue(span)
-//RS         | Stmt::BreakLabel(_, span)
-//RS         | Stmt::ContinueLabel(_, span) => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:flow", g.graph_id);
-//RS             let title = snippet(src, *span);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "flow",
-//RS                 &title,
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS         }
-//RS         Stmt::BreakValue(value, span) | Stmt::BreakLabelValue(_, _, value, span) => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:flow", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "flow",
-//RS                 "break",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["control"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             let ty = expr_type(g, index, value);
-//RS             let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 value,
-//RS                 ordinal,
-//RS                 "value",
-//RS                 &node_id,
-//RS                 &input,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS         }
-//RS         Stmt::Unsafe {
-//RS             span, audit, body, ..
-//RS         } => {
-//RS             g.regions.push(format!(
-//RS                 "{{\"region_id\":{},\"kind\":\"unsafe\",\"title\":{},\"source_span\":{}}}",
-//RS                 json_str(&format!("{}:region:{ordinal}:unsafe", g.graph_id)),
-//RS                 json_str(audit.as_deref().unwrap_or("#Unsafe")),
-//RS                 span_json((*span).into())
-//RS             ));
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Impure {
-//RS             reason, body, span, ..
-//RS         } => {
-//RS             add_region(
-//RS                 g,
-//RS                 ordinal,
-//RS                 "impure",
-//RS                 reason.as_deref().unwrap_or("#Impure"),
-//RS                 *span,
-//RS             );
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 100, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Reactive { body, span } => {
-//RS             add_region(g, ordinal, "reactive", "#Reactive", *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 110, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Shield { body, span } => {
-//RS             add_region(g, ordinal, "shield", "#Shield", *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Switched { marker, body, span } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:switched", g.graph_id);
-//RS             let badge = format!("#{}", marker.name);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "switched",
-//RS                 &badge,
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec![&badge],
-//RS                 vec!["toggle_switch_state", "source_jump"],
-//RS             );
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Region {
-//RS             name, body, span, ..
-//RS         } => {
-//RS             add_region(g, ordinal, "region", name, *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Policy {
-//RS             declarations,
-//RS             body,
-//RS             span,
-//RS         } => {
-//RS             let label = declarations
-//RS                 .iter()
-//RS                 .map(|d| d.key.name())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             add_region(g, ordinal, "policy", &format!("#Policy({label})"), *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70);
-//RS         }
-//RS         Stmt::TaskGroup {
-//RS             name, body, span, ..
-//RS         } => {
-//RS             add_region(g, ordinal, "task.group", name, *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Layout {
-//RS             name, body, span, ..
-//RS         } => {
-//RS             add_region(g, ordinal, "layout", name, *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70);
-//RS         }
-//RS         Stmt::AuthorityScope {
-//RS             caps,
-//RS             binding,
-//RS             body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             let title = caps
-//RS                 .iter()
-//RS                 .map(|(cap, _)| cap.as_str())
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let granted = caps
-//RS                 .iter()
-//RS                 .map(|(cap, _)| cap.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             add_authority_region(
-//RS                 g,
-//RS                 ordinal,
-//RS                 &format!("authority: {title}"),
-//RS                 &Vec::new(),
-//RS                 &granted,
-//RS                 &Vec::new(),
-//RS                 binding.as_deref(),
-//RS                 *span,
-//RS             );
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70);
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             cond,
-//RS             then_body,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             add_region(g, ordinal, "comptime_if", "prep if", *span);
-//RS             let node_id = format!("{}:stmt:{ordinal}:comptime_if", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "branch",
-//RS                 "prep if",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["comptime"],
-//RS                 vec!["edit_inline_expr", "source_jump"],
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
-//RS             project_stmt_block(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 then_body,
-//RS                 ordinal * 100 + 170,
-//RS                 x + 230,
-//RS                 y + 70,
-//RS             );
-//RS             if let Some(body) = else_body {
-//RS                 project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70);
-//RS             }
-//RS         }
-//RS         Stmt::ComptimeBlock { body, span, .. } => {
-//RS             add_region(g, ordinal, "comptime", "comptime", *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 190, x + 230, y + 70);
-//RS         }
-//RS         Stmt::ContextBlock { body, span, .. }
-//RS         | Stmt::Live { body, span }
-//RS         | Stmt::AssumeDet { body, span, .. }
-//RS         | Stmt::Transact { body, span, .. } => {
-//RS             add_region(g, ordinal, "scope", "scope", *span);
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 200, x + 230, y + 70);
-//RS         }
-//RS         Stmt::Yield(expr, span) => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:yield", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "yield",
-//RS                 "yield",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["stream"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             let ty = expr_type(g, index, expr);
-//RS             let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 expr,
-//RS                 ordinal,
-//RS                 "value",
-//RS                 &node_id,
-//RS                 &input,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS         }
-//RS         Stmt::ScopeMember {
-//RS             name,
-//RS             args,
-//RS             body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             let node_id = format!("{}:stmt:{ordinal}:scope_member:{name}", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "function_exec",
-//RS                 &format!(".{name}"),
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["scope"],
-//RS                 vec!["source_jump"],
-//RS             );
-//RS             for (i, arg) in args.iter().enumerate() {
-//RS                 add_inline(
-//RS                     g,
-//RS                     &node_id,
-//RS                     ordinal,
-//RS                     &format!("arg{}", i + 1),
-//RS                     src,
-//RS                     arg.span(),
-//RS                 );
-//RS             }
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn switch_was_classic_if(src: &str, arms: &[AST::SwitchArm], span: Span) -> bool {
-//RS     let Some(first) = arms.first() else {
-//RS         return false;
-//RS     };
-//RS     AST::uses_classic_if_spelling(src, span, first.cond.span())
-//RS }
-//RS 
-//RS fn pattern_subject_type(g: &GraphBuilder, index: &SemIndex, cond: &Expr) -> Option<String> {
-//RS     match cond {
-//RS         Expr::PatternTest { subject, .. } => Some(expr_type(g, index, subject)),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn set_pattern_node_type(g: &mut GraphBuilder, node_id: &str, pattern_type: &str) {
-//RS     if let Some(node) = g.nodes.iter_mut().find(|node| node.id == node_id) {
-//RS         node.meta_json = Some(format!("{{\"pattern_type\":{}}}", json_str(pattern_type)));
-//RS     }
-//RS }
-//RS 
-//RS fn pattern_pin_label(src: &str, expr: &Expr) -> String {
-//RS     let raw = snippet(src, expr.span());
-//RS     let balanced = balance_closing_parens(raw.trim());
-//RS     if matches!(expr, Expr::PatternTest { .. }) {
-//RS         if let Some(pos) = balanced.find("==") {
-//RS             return balanced[pos..].trim().to_string();
-//RS         }
-//RS         return format!("== {}", balanced.trim());
-//RS     }
-//RS     balanced
-//RS }
-//RS 
-//RS /// Label for a dispatch-form (`if subject == { ... }`) arm pattern.
-//RS /// Dispatch arms never carry their own `==`, and the leading dot on
-//RS /// enum-variant patterns is source spelling rather than arm identity.
-//RS fn dispatch_arm_pattern_label(src: &str, expr: &Expr) -> String {
-//RS     let (raw, _) = dispatch_arm_pattern_fragment(src, expr);
-//RS     let balanced = balance_closing_parens(raw.trim());
-//RS     balanced.strip_prefix('.').unwrap_or(&balanced).to_string()
-//RS }
-//RS 
-//RS fn dispatch_arm_pattern_span(src: &str, expr: &Expr) -> SourceSpan {
-//RS     let span: SourceSpan = expr.span().into();
-//RS     let (pattern, offset) = dispatch_arm_pattern_fragment(src, expr);
-//RS     SourceSpan {
-//RS         start: span.start + offset,
-//RS         end: span.start + offset + pattern.trim_end().len(),
-//RS     }
-//RS }
-//RS 
-//RS fn dispatch_arm_pattern_fragment(src: &str, expr: &Expr) -> (String, usize) {
-//RS     let span: SourceSpan = expr.span().into();
-//RS     let source = src.get(span.start..span.end).unwrap_or("");
-//RS     let trimmed = source.trim_start();
-//RS     let mut offset = source.len() - trimmed.len();
-//RS     let mut fragment = trimmed;
-//RS 
-//RS     let dispatch_open = fragment.find("==").and_then(|pos| {
-//RS         let after_cmp = &fragment[pos + 2..];
-//RS         let after_space = after_cmp.trim_start();
-//RS         after_space
-//RS             .starts_with('{')
-//RS             .then(|| (pos + 2, after_cmp.len() - after_space.len()))
-//RS     });
-//RS     if let Some((comparator, whitespace)) = dispatch_open {
-//RS         offset += comparator + whitespace;
-//RS         fragment = &fragment[comparator + whitespace..];
-//RS     } else {
-//RS         let after_space = fragment.trim_start();
-//RS         offset += fragment.len() - after_space.len();
-//RS         fragment = after_space;
-//RS     }
-//RS     if let Some(after_open) = fragment.strip_prefix('{') {
-//RS         offset += 1;
-//RS         fragment = after_open.trim_start();
-//RS         offset += after_open.len() - fragment.len();
-//RS     }
-//RS 
-//RS     if let Some(arrow) = fragment.rfind("->") {
-//RS         let after_arrow = &fragment[arrow + 2..];
-//RS         if let Some(close) = after_arrow.rfind('}') {
-//RS             let after_body = &after_arrow[close + 1..];
-//RS             offset += arrow + 2 + close + 1;
-//RS             fragment = after_body.trim_start();
-//RS             offset += after_body.len() - fragment.len();
-//RS         }
-//RS     }
-//RS 
-//RS     (fragment.trim_end().to_string(), offset)
-//RS }
-//RS 
-//RS fn pattern_arm_edit_span(src: &str, expr: &Expr) -> SourceSpan {
-//RS     match expr {
-//RS         Expr::PatternTest { pattern, .. } => span_through_closing_parens(src, pattern.span()),
-//RS         _ => expr.span().into(),
-//RS     }
-//RS }
-//RS 
-//RS fn balance_closing_parens(s: &str) -> String {
-//RS     let mut out = s.to_string();
-//RS     let opens = s.chars().filter(|c| *c == '(').count();
-//RS     let closes = s.chars().filter(|c| *c == ')').count();
-//RS     for _ in closes..opens {
-//RS         out.push(')');
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn project_classic_switch_else(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     else_body: Option<&[Stmt]>,
-//RS     ordinal: usize,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) {
-//RS     match else_body {
-//RS         Some(
-//RS             [stmt @ Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 span,
-//RS                 ..
-//RS             }],
-//RS         ) if AST::is_subjectless_guard(subject, *span)
-//RS             && switch_was_classic_if(src, arms, *span) =>
-//RS         {
-//RS             project_stmt(g, index, src, stmt, ordinal * 100 + 60, x, y);
-//RS         }
-//RS         Some(body) => {
-//RS             project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y);
-//RS         }
-//RS         None => {}
-//RS     }
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn connect_expr_to_input(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     expr: &Expr,
-//RS     ordinal: usize,
-//RS     role: &str,
-//RS     owner_node_id: &str,
-//RS     input_pin: &str,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) {
-//RS     connect_expr_to_input_with_span(
-//RS         g,
-//RS         index,
-//RS         src,
-//RS         expr,
-//RS         expr.span(),
-//RS         ordinal,
-//RS         role,
-//RS         owner_node_id,
-//RS         input_pin,
-//RS         x,
-//RS         y,
-//RS     );
-//RS }
-//RS 
-//RS fn expr_source_end(expr: &Expr) -> usize {
-//RS     match expr {
-//RS         // Sema expands compound assignment with the target span on the new
-//RS         // binary node; the original RHS child retains the source end.
-//RS         Expr::Binary(_, left, right, _) => expr_source_end(left).max(expr_source_end(right)),
-//RS         _ => expr.span().end,
-//RS     }
-//RS }
-//RS 
-//RS fn binding_source_span(src: &str, binding: &AST::Binding) -> SourceSpan {
-//RS     let mut init_end = expr_source_end(&binding.init);
-//RS     while src
-//RS         .as_bytes()
-//RS         .get(init_end)
-//RS         .is_some_and(|byte| byte.is_ascii_whitespace())
-//RS     {
-//RS         init_end += 1;
-//RS     }
-//RS     if src.as_bytes().get(init_end) == Some(&b'(') {
-//RS         init_end += 1;
-//RS     }
-//RS     let init_span =
-//RS         span_through_closing_parens(src, Span::new(binding.init.span().start, init_end));
-//RS     SourceSpan {
-//RS         start: binding.name_span.start,
-//RS         end: init_span.end,
-//RS     }
-//RS }
-//RS 
-//RS fn binding_init_span(src: &str, binding: &AST::Binding) -> Span {
-//RS     let end = expr_source_end(&binding.init);
-//RS     let mut start = binding
-//RS         .sigil_span
-//RS         .map(|span| span.end)
-//RS         .unwrap_or_else(|| binding.init.span().start);
-//RS     while start < end && src.as_bytes()[start].is_ascii_whitespace() {
-//RS         start += 1;
-//RS     }
-//RS     Span::new(start, end)
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn connect_expr_to_input_with_span(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     expr: &Expr,
-//RS     inline_span: Span,
-//RS     ordinal: usize,
-//RS     role: &str,
-//RS     owner_node_id: &str,
-//RS     input_pin: &str,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) {
-//RS     let provider_y = data_provider_y(y, ordinal);
-//RS     if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
-//RS         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
-//RS         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
-//RS     } else if pure_leaf(expr) && !matches!(expr, Expr::Binary(..)) {
-//RS         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
-//RS         wire_ident_refs(g, expr, input_pin);
-//RS     } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false)
-//RS     {
-//RS         if details_composite_expr(expr)
-//RS             || matches!(expr, Expr::EnumLit { .. })
-//RS             || matches!(expr, Expr::MethodCall { method, .. } if starts_uppercase(method))
-//RS         {
-//RS             add_inline(g, owner_node_id, ordinal, role, src, inline_span);
-//RS         }
-//RS         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
-//RS     }
-//RS }
-//RS 
-//RS fn details_composite_expr(expr: &Expr) -> bool {
-//RS     matches!(
-//RS         expr,
-//RS         Expr::ListLit(_, _)
-//RS             | Expr::MapLit(_, _)
-//RS             | Expr::StructLit { .. }
-//RS             | Expr::TypedLit { .. }
-//RS             | Expr::TupleLit(_, _, _)
-//RS             | Expr::Present(_, _)
-//RS             | Expr::Ok(_, _)
-//RS             | Expr::Err(_, _)
-//RS     )
-//RS }
-//RS 
-//RS fn data_provider_y(y: i32, ordinal: usize) -> i32 {
-//RS     y + 96 + ((ordinal % 2) as i32 * 18)
-//RS }
-//RS 
-//RS fn project_value_node(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     expr: &Expr,
-//RS     ordinal: usize,
-//RS     role: &str,
-//RS     x: i32,
-//RS     y: i32,
-//RS ) -> Option<String> {
-//RS     if let Expr::Place(inner, _, _) = expr {
-//RS         return project_value_node(g, index, src, inner, ordinal, role, x, y);
-//RS     }
-//RS     if let Expr::Ident(name, span) = expr {
-//RS         let source_span: SourceSpan = (*span).into();
-//RS         let key = getter_key(index, name, source_span);
-//RS         if let Some(pin) = g.getter_pins.get(&key).cloned() {
-//RS             return Some(pin);
-//RS         }
-//RS         let ty = expr_type(g, index, expr);
-//RS         let base_node_id = format!("{}:value:get:{}", g.graph_id, canvas_ident_fragment(name));
-//RS         let node_id = if g
-//RS             .nodes
-//RS             .iter()
-//RS             .any(|node| node.id == base_node_id && node.span != source_span)
-//RS         {
-//RS             format!("{base_node_id}:{}-{}", span.start, span.end)
-//RS         } else {
-//RS             base_node_id
-//RS         };
-//RS         add_node(
-//RS             g,
-//RS             &node_id,
-//RS             "variable_get",
-//RS             name,
-//RS             source_span,
-//RS             x,
-//RS             y,
-//RS             vec!["read"],
-//RS             vec!["edit_inline_expr", "source_jump"],
-//RS         );
-//RS         let pin = add_pin(g, &node_id, name, "output", &ty, "", false);
-//RS         g.getter_pins.insert(key, pin.clone());
-//RS         return Some(pin);
-//RS     }
-//RS     let (title, badges) = match expr {
-//RS         Expr::Int(_, _, _, _)
-//RS         | Expr::Float(_, _, _, _)
-//RS         | Expr::Bool(_, _)
-//RS         | Expr::Str(_, _)
-//RS         | Expr::Char(_, _)
-//RS         | Expr::Absent(_)
-//RS         | Expr::Todo { .. } => (snippet(src, expr.span()), vec!["const"]),
-//RS         _ => return None,
-//RS     };
-//RS     let span: SourceSpan = expr.span().into();
-//RS     let node_id = format!(
-//RS         "{}:value:{ordinal}:{role}:{}-{}",
-//RS         g.graph_id, span.start, span.end
-//RS     );
-//RS     add_node(
-//RS         g,
-//RS         &node_id,
-//RS         "constant",
-//RS         &title,
-//RS         span,
-//RS         x,
-//RS         y,
-//RS         badges,
-//RS         vec!["edit_inline_expr", "source_jump"],
-//RS     );
-//RS     Some(add_pin(
-//RS         g,
-//RS         &node_id,
-//RS         "value",
-//RS         "output",
-//RS         &expr_type(g, index, expr),
-//RS         "",
-//RS         false,
-//RS     ))
-//RS }
-//RS 
-//RS fn getter_key(index: &SemIndex, name: &str, span: SourceSpan) -> String {
-//RS     let Some(reference) = index
-//RS         .references()
-//RS         .iter()
-//RS         .find(|reference| reference.span == span && reference.name == name)
-//RS     else {
-//RS         return format!("{name}@{}:{}", span.start, span.end);
-//RS     };
-//RS     let Some(target) = reference.target.as_ref() else {
-//RS         return format!("{name}@{}:{}", span.start, span.end);
-//RS     };
-//RS     format!(
-//RS         "{name}@{}:{}:{}",
-//RS         target.module_path, target.def_span.start, target.def_span.end
-//RS     )
-//RS }
-//RS 
-//RS fn method_is_pure(index: &SemIndex, span: SourceSpan) -> bool {
-//RS     let Some(reference) = index
-//RS         .references()
-//RS         .iter()
-//RS         .find(|reference| reference.span == span)
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     let Some(target) = reference.target.as_ref() else {
-//RS         return false;
-//RS     };
-//RS     let Some(definition) = index.definitions().iter().find(|definition| {
-//RS         definition.module_path == target.module_path && definition.def_span == target.def_span
-//RS     }) else {
-//RS         return false;
-//RS     };
-//RS     let Some(signature) = definition.callable_signature.as_ref() else {
-//RS         return false;
-//RS     };
-//RS     matches!(
-//RS         &signature.effects,
-//RS         jet_semindex::CallableEffectsFact::Checked(effects) if effects.is_empty()
-//RS     )
-//RS }
-//RS 
-//RS fn canvas_ident_fragment(name: &str) -> String {
-//RS     name.chars()
-//RS         .map(|c| {
-//RS             if c.is_ascii_alphanumeric() || c == '_' {
-//RS                 c
-//RS             } else {
-//RS                 '_'
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn project_expr_node(
-//RS     g: &mut GraphBuilder,
-//RS     index: &SemIndex,
-//RS     src: &str,
-//RS     expr: &Expr,
-//RS     ordinal: usize,
-//RS     x: i32,
-//RS     y: i32,
-//RS     exec_context: bool,
-//RS ) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Binary(op, left, right, span) => {
-//RS             let node_id = format!(
-//RS                 "{}:expr:{ordinal}:operator:{}-{}",
-//RS                 g.graph_id, span.start, span.end
-//RS             );
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "expression",
-//RS                 op.spell(),
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 Vec::new(),
-//RS                 vec!["edit_inline_expr", "source_jump"],
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "value", src, *span);
-//RS 
-//RS             let left_ty = expr_type(g, index, left);
-//RS             let left_input = add_pin(g, &node_id, "left", "input", &left_ty, "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 left,
-//RS                 ordinal * 1000 + 1,
-//RS                 "left",
-//RS                 &node_id,
-//RS                 &left_input,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS 
-//RS             let right_ty = expr_type(g, index, right);
-//RS             let right_input = add_pin(g, &node_id, "right", "input", &right_ty, "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 right,
-//RS                 ordinal * 1000 + 2,
-//RS                 "right",
-//RS                 &node_id,
-//RS                 &right_input,
-//RS                 x - 220,
-//RS                 y + 74,
-//RS             );
-//RS 
-//RS             let result_ty = expr_type(g, index, expr);
-//RS             Some(add_pin(
-//RS                 g, &node_id, "result", "output", &result_ty, "", false,
-//RS             ))
-//RS         }
-//RS         Expr::Call(c) => {
-//RS             let node_id = format!("{}:expr:{ordinal}:call:{}", g.graph_id, c.name);
-//RS             let archetype = if exec_context || call_has_effects(index, &c.name) {
-//RS                 "function_exec"
-//RS             } else {
-//RS                 "function_pure"
-//RS             };
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 archetype,
-//RS                 &c.name,
-//RS                 c.name_span.into(),
-//RS                 x,
-//RS                 y,
-//RS                 effect_badges(index, &c.name),
-//RS                 vec!["insert_call", "source_jump"],
-//RS             );
-//RS             for (i, arg) in c.args.iter().enumerate() {
-//RS                 let ty = expr_type(g, index, &arg.expr);
-//RS                 let input = add_pin(
-//RS                     g,
-//RS                     &node_id,
-//RS                     &format!("arg{}", i + 1),
-//RS                     "input",
-//RS                     &ty,
-//RS                     arg.convention.sigil(),
-//RS                     false,
-//RS                 );
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     &arg.expr,
-//RS                     ordinal * 1000 + i + 1,
-//RS                     &format!("arg{}", i + 1),
-//RS                     &node_id,
-//RS                     &input,
-//RS                     x - 220,
-//RS                     y + i as i32 * 74,
-//RS                 );
-//RS             }
-//RS             let ret = call_ret(index, &c.name).unwrap_or_else(|| "Void".to_string());
-//RS             Some(add_pin(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "result",
-//RS                 "output",
-//RS                 &ret,
-//RS                 "",
-//RS                 ret.ends_with('?'),
-//RS             ))
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             method_span,
-//RS             args,
-//RS             recv_type,
-//RS             resolved_ret,
-//RS             ..
-//RS         } => {
-//RS             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
-//RS             let variant_like = starts_uppercase(method);
-//RS             let pure = method_is_pure(index, (*method_span).into());
-//RS             let archetype = if variant_like || pure {
-//RS                 "function_pure"
-//RS             } else {
-//RS                 "function_exec"
-//RS             };
-//RS             // D-CONC-SPAWN1=D: `task …`/`task.all { … }`/etc. desugar onto the
-//RS             // compiler-private `INTERNAL_TASK_RECEIVER` (parser-only, never a
-//RS             // real receiver a user typed) — but inside an active `task.group`,
-//RS             // sema rewrites that receiver in place to the group's own name
-//RS             // (`infer_task_surface_method`, CheckerTaskGroup.rs), so by the
-//RS             // time this checked AST reaches canvas the receiver identity is
-//RS             // gone. `recv_type` survives that rewrite: sema always tags the
-//RS             // dispatch with `INTERNAL_TASK_SURFACE_TYPE` (detached) or
-//RS             // `INTERNAL_TASK_GROUP_SURFACE_TYPE` (lexical group), never
-//RS             // `TYPE_TASKGROUP` (a real `TaskGroup` value, e.g. a retired wait-builder call,
-//RS             // which keeps its ordinary `.method` title). Show the surface
-//RS             // spelling the author actually wrote instead of the internal
-//RS             // dispatch method name (`spawn`) or the hidden receiver.
-//RS             let is_task_surface = matches!(
-//RS                 recv_type.as_deref(),
-//RS                 Some(jet_driver::Syntax::INTERNAL_TASK_SURFACE_TYPE)
-//RS                     | Some(jet_driver::Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
-//RS             );
-//RS             let title = if is_task_surface {
-//RS                 if method == "spawn" {
-//RS                     "task".to_string()
-//RS                 } else {
-//RS                     format!("task.{method}")
-//RS                 }
-//RS             } else if variant_like {
-//RS                 method.clone()
-//RS             } else {
-//RS                 format!(".{method}")
-//RS             };
-//RS             let is_game_asset =
-//RS                 matches!(method.as_str(), "image" | "sound") && game_assets_receiver(receiver);
-//RS             let is_game_component = method == "component";
-//RS             let mut affordances = vec!["insert_call", "source_jump"];
-//RS             if is_game_asset || is_game_component {
-//RS                 affordances.push("edit_game_selection");
-//RS             }
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 if variant_like { "variant" } else { archetype },
-//RS                 &title,
-//RS                 (*method_span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 Vec::new(),
-//RS                 affordances,
-//RS             );
-//RS             let recv_ty = expr_type(g, index, receiver);
-//RS             let recv_pin = add_pin(g, &node_id, "self", "input", &recv_ty, "", false);
-//RS             connect_expr_to_input(
-//RS                 g,
-//RS                 index,
-//RS                 src,
-//RS                 receiver,
-//RS                 ordinal * 1000 + 1,
-//RS                 "self",
-//RS                 &node_id,
-//RS                 &recv_pin,
-//RS                 x - 220,
-//RS                 y,
-//RS             );
-//RS             for (i, arg) in args.iter().enumerate() {
-//RS                 let ty = expr_type(g, index, &arg.expr);
-//RS                 let input = add_pin(
-//RS                     g,
-//RS                     &node_id,
-//RS                     &format!("arg{}", i + 1),
-//RS                     "input",
-//RS                     &ty,
-//RS                     arg.convention.sigil(),
-//RS                     false,
-//RS                 );
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     &arg.expr,
-//RS                     ordinal * 1000 + i + 2,
-//RS                     &format!("arg{}", i + 1),
-//RS                     &node_id,
-//RS                     &input,
-//RS                     x - 220,
-//RS                     y + (i as i32 + 1) * 74,
-//RS                 );
-//RS             }
-//RS             let ret = resolved_ret
-//RS                 .as_ref()
-//RS                 .map(AST::Type::name)
-//RS                 .unwrap_or_else(|| "unknown".to_string());
-//RS             Some(add_pin(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "result",
-//RS                 "output",
-//RS                 &ret,
-//RS                 "",
-//RS                 ret.ends_with('?'),
-//RS             ))
-//RS         }
-//RS         Expr::Try(inner, span, _, _) => {
-//RS             let node_id = format!("{}:expr:{ordinal}:fallible", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "fallible",
-//RS                 "?",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["fallible"],
-//RS                 vec!["add_fallback_rail", "source_jump"],
-//RS             );
-//RS             let input = add_pin(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "value",
-//RS                 "input",
-//RS                 &expr_type(g, index, inner),
-//RS                 "",
-//RS                 true,
-//RS             );
-//RS             if let Some(out) = project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) {
-//RS                 add_wire(g, &out, &input, "fallible");
-//RS             }
-//RS             Some(add_pin(g, &node_id, "ok", "output", "unknown", "", false))
-//RS         }
-//RS         Expr::OrFallback { value, .. } => {
-//RS             project_expr_node(g, index, src, value, ordinal, x, y, exec_context)
-//RS         }
-//RS         Expr::ListLit(items, span) => {
-//RS             let node_id = format!("{}:expr:{ordinal}:list", g.graph_id);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "expression",
-//RS                 "list",
-//RS                 (*span).into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["multi-input"],
-//RS                 vec!["append_multi_input", "edit_inline_expr", "source_jump"],
-//RS             );
-//RS             for (i, item) in items.iter().enumerate() {
-//RS                 let ty = expr_type(g, index, item);
-//RS                 let input = add_pin(
-//RS                     g,
-//RS                     &node_id,
-//RS                     &format!("item{}", i + 1),
-//RS                     "input",
-//RS                     &ty,
-//RS                     "",
-//RS                     false,
-//RS                 );
-//RS                 set_pin_source_span(g, &input, item.span().into());
-//RS                 set_pin_append(g, &input, "remove_multi_input_element", i);
-//RS                 connect_expr_to_input(
-//RS                     g,
-//RS                     index,
-//RS                     src,
-//RS                     item,
-//RS                     ordinal * 1000 + i + 1,
-//RS                     &format!("item{}", i + 1),
-//RS                     &node_id,
-//RS                     &input,
-//RS                     x - 220,
-//RS                     y + i as i32 * 74,
-//RS                 );
-//RS             }
-//RS             Some(add_pin(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "value",
-//RS                 "output",
-//RS                 &expr_type(g, index, expr),
-//RS                 "",
-//RS                 false,
-//RS             ))
-//RS         }
-//RS         _ => {
-//RS             let node_id = format!("{}:expr:{ordinal}:expr", g.graph_id);
-//RS             let title = expr_title(expr);
-//RS             add_node(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "expression",
-//RS                 title,
-//RS                 expr.span().into(),
-//RS                 x,
-//RS                 y,
-//RS                 vec!["expression"],
-//RS                 vec!["edit_inline_expr", "source_jump"],
-//RS             );
-//RS             add_inline(g, &node_id, ordinal, "value", src, expr.span());
-//RS             Some(add_pin(
-//RS                 g,
-//RS                 &node_id,
-//RS                 "value",
-//RS                 "output",
-//RS                 &expr_type(g, index, expr),
-//RS                 "",
-//RS                 false,
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 0765 crates/jet-devserver/src/Canvas/graph_projection.rs:1792-3325
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
+// Continuation of the canonical GraphProjection module.
+use std.fmt.[format]
+use jet_parser.AST as AST
+use jet_parser.AST.[Expr, Stmt]
+use jet_foundation.[Span]
+use jet_parser.Syntax.[INTERNAL_TASK_SURFACE_TYPE, INTERNAL_TASK_GROUP_SURFACE_TYPE]
+use jet_semindex.[SemIndex, SourceSpan, CallableEffectsFact]
+use jet_devserver.Canvas.GraphProjection.[GraphBuilder, game_assets_receiver]
+use jet_devserver.Canvas.GraphHelpers.[assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title, expr_type, lvalue_type, pure_leaf, snippet, span_through_closing_parens, starts_uppercase, wire_ident_refs]
+use jet_devserver.Canvas.GraphJson.[add_arm_pin, add_authority_region, add_inline, add_node, add_pin, add_region, add_wire, add_wire_with_span, meta_attr_json, set_pin_append, set_pin_source_span]
+use jet_devserver.Canvas.ValidationJson.[json_str, span_json]
 
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
+pub fn project_stmt_block(g: &GraphBuilder, index: &SemIndex, src: String, stmts: &[Stmt], base: USize, x: I32, y: I32) -> {
+    cursor_y := y
+    loop (i, stmt) in stmts.iter().enumerate() {
+        project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y)
+        cursor_y += stmt_row_step(stmt)
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1808
+// A list initializer's multi-input body grows with item count; retain enough
+// spacing for its data providers before the next sibling statement.
+fn stmt_row_step(stmt: &Stmt) -> I32 {
+    items :: if stmt is {
+        .Val(b) -> multi_input_item_count(b.init)
+        .Assign(value: value, ..) -> multi_input_item_count(value)
+        _ -> 0
+    }
+    130 + (items.saturating_sub(2) as I32) * 55
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1823
+fn multi_input_item_count(expr: &Expr) -> USize {
+    if expr is { .ListLit(items, _) -> items.len(); _ -> 0 }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1830
+pub fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, ordinal: USize, x: I32, y: I32) -> {
+    if stmt is {
+        .Val(b) -> {
+            node_id :: format("{}:stmt:{}:binding", g.graph_id, ordinal)
+            ty :: binding_type(g, b.name, b)
+            add_node(g, node_id, "binding", b.name, binding_source_span(src, b), x, y, ["local"], ["rename_binding", "edit_inline_expr", "source_jump"])
+            if node :: g.nodes.iter_mut().find((node) -> node.id == node_id) { node.meta_json = meta_attr_json(b.meta.as_ref()) }
+            input_pin :: add_pin(g, node_id, "value", "input", ty, "", false)
+            output_pin :: add_pin(g, node_id, b.name, "output", ty, "", false)
+            g.local_pins.insert(b.name.clone(), ^output_pin)
+            g.local_types.insert(b.name.clone(), ^ty)
+            init_span :: if b.pattern.is_none() { binding_init_span(src, b) } else { b.init.span() }
+            connect_expr_to_input_with_span(g, index, src, b.init, init_span, ordinal, "init", node_id, input_pin, x - 220, y)
+        }
+        .Assign(target: target, op: op, value: value, ..) -> {
+            node_id :: format("{}:stmt:{}:assign", g.graph_id, ordinal)
+            title :: assignment_title(target, op)
+            ty :: lvalue_type(g, target)
+            add_node(g, node_id, "assignment", title, target.span().into(), x, y, ["write"], ["edit_inline_expr", "source_jump"])
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            output :: add_pin(g, node_id, "target", "output", ty, "&", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+            if target is .Local(name: name, ..) {
+                g.local_pins.insert(name.clone(), ^output)
+                g.local_types.insert(name.clone(), ^ty)
+            }
+        }
+        .Expr(e) -> { _ :: project_expr_node(g, index, src, e, ordinal, x, y, true) }
+        .DeferClose(close: close, span: span) -> {
+            node_id :: format("{}:stmt:{}:defer_close", g.graph_id, ordinal)
+            add_node(g, node_id, "defer_close", "defer close", span.into(), x, y, ["cleanup"], ["source_jump"])
+            add_inline(g, node_id, ordinal, "close", src, close.span())
+        }
+        .Return(expr, span) -> {
+            node_id :: format("{}:stmt:{}:return", g.graph_id, ordinal)
+            add_node(g, node_id, "return", "return", span.into(), x, y, ["exit"], ["source_jump"])
+            if e :: expr {
+                ty :: expr_type(g, index, e)
+                input :: add_pin(g, node_id, "value", "input", ty, "", false)
+                connect_expr_to_input(g, index, src, e, ordinal, "value", node_id, input, x - 220, y)
+            }
+        }
+        .While(cond: cond, body: body, span: span, ..) -> {
+            node_id :: format("{}:stmt:{}:loop", g.graph_id, ordinal)
+            add_node(g, node_id, "loop", "loop", span.into(), x, y, ["control"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70)
+        }
+        .Loop(body: body, span: span, ..) -> {
+            node_id :: format("{}:stmt:{}:loop", g.graph_id, ordinal)
+            add_node(g, node_id, "loop", "loop", span.into(), x, y, ["control"], ["source_jump"])
+            project_stmt_block(g, index, src, body, ordinal * 100 + 20, x + 230, y + 70)
+        }
+        .CountedLoop(init: init, cond: cond, step: step, body: body, span: span, ..) -> {
+            node_id :: format("{}:stmt:{}:counted_loop", g.graph_id, ordinal)
+            add_node(g, node_id, "loop", "counted loop", span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
+            initializer_span :: Span.new(init.name_span.start, init.init.span().end)
+            init_pin :: add_pin(g, node_id, "initializer", "input", "Value", "", false)
+            connect_expr_to_input_with_span(g, index, src, init.init, initializer_span, ordinal * 10, "initializer", node_id, init_pin, x - 220, y)
+            cond_pin :: add_pin(g, node_id, "condition", "input", "Bool", "", false)
+            connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", node_id, cond_pin, x - 220, y + 30)
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            if step_value :: step {
+                afterthought :: if step_value.as_ref() is {
+                    .Assign(target: target, value: value, ..) -> .Some((value, Span.new(target.span().start, expr_source_end(value))))
+                    .Expr(value) -> .Some((value, value.span()))
+                    _ -> .None
+                }
+                if (value, value_span) :: afterthought {
+                    pin :: add_pin(g, node_id, "afterthought", "input", "Value", "", false)
+                    connect_expr_to_input_with_span(g, index, src, value, value_span, ordinal * 10 + 2, "afterthought", node_id, pin, x - 220, y + 60)
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200)
+        }
+        .For(var: var, var2: var2, kind: kind, body: body, span: span, ..) -> {
+            node_id :: format("{}:stmt:{}:for", g.graph_id, ordinal)
+            add_node(g, node_id, "loop", format("loop {}", var), span.into(), x, y, ["control"], ["source_jump"])
+            iter_ty :: if kind is { .Range(..) -> "Int"; .In(..) -> "iterable" }
+            output :: add_pin(g, node_id, var, "output", iter_ty, "", false)
+            g.local_pins.insert(var.clone(), ^output)
+            g.local_types.insert(var.clone(), iter_ty.to_string())
+            if (second, _) :: var2 {
+                second_output :: add_pin(g, node_id, second, "output", iter_ty, "", false)
+                g.local_pins.insert(second.clone(), ^second_output)
+                g.local_types.insert(second.clone(), iter_ty.to_string())
+            }
+            if kind is {
+                .Range(start: start, end: end, step: step, exclusive: _) -> {
+                    start_pin :: add_pin(g, node_id, "range_start", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", node_id, start_pin, x - 220, y)
+                    end_pin :: add_pin(g, node_id, "range_end", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", node_id, end_pin, x - 220, y + 30)
+                    if stride :: step {
+                        stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, stride, ordinal * 10 + 2, "stride", node_id, stride_pin, x - 220, y + 60)
+                    }
+                }
+                .In(collection: collection, step: step) -> {
+                    source_pin :: add_pin(g, node_id, "source", "input", "Iterable", "", false)
+                    connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", node_id, source_pin, x - 220, y)
+                    if stride :: step {
+                        stride_pin :: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, stride, ordinal * 10 + 1, "stride", node_id, stride_pin, x - 220, y + 30)
+                    }
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70)
+        }
+        .Switch(subject: subject, arms: arms, else_body: else_body, span: span) | .ComptimeSwitch(subject: subject, arms: arms, else_body: else_body, span: span) -> {
+            subjectless :: AST.is_subjectless_guard(subject, span)
+            if subjectless && switch_was_classic_if(src, arms, span) {
+                arm :: arms.first() ?? return
+                node_id :: format("{}:stmt:{}:branch", g.graph_id, ordinal)
+                affordances: [String] := ["edit_inline_expr", "source_jump"]
+                is_pattern_test :: arm.cond is .PatternTest(..)
+                if is_pattern_test { affordances.push("add_pattern_arm") }
+                add_node(g, node_id, "branch", if is_pattern_test { "if ==" } else { "if" }, span.into(), x, y, ["control"], ^affordances)
+                if pattern_type :: pattern_subject_type(g, index, arm.cond) { set_pattern_node_type(g, node_id, pattern_type) }
+                cond :: add_pin(g, node_id, "cond", "input", "Bool", "", false)
+                if is_pattern_test { _ :: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond)) }
+                connect_expr_to_input(g, index, src, arm.cond, ordinal, "cond", node_id, cond, x - 220, y)
+                project_stmt_block(g, index, src, arm.body, ordinal * 100 + 10, x + 230, y + 70)
+                project_classic_switch_else(g, index, src, else_body.as_ref(), ordinal, x + 460, y + 70)
+                return
+            }
+            node_id :: format("{}:stmt:{}:dispatch", g.graph_id, ordinal)
+            add_node(g, node_id, "dispatch", if subjectless { "if guards" } else { "if ==" }, span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
+            pattern_type :: if subjectless { arms.first().and_then((arm) -> pattern_subject_type(g, index, arm.cond)) } else { .Some(expr_type(g, index, subject)) }
+            if ty :: pattern_type { set_pattern_node_type(g, node_id, ty) }
+            if !subjectless {
+                ty :: expr_type(g, index, subject)
+                subject_pin :: add_pin(g, node_id, "subject", "input", ty, "", false)
+                connect_expr_to_input(g, index, src, subject, ordinal, "subject", node_id, subject_pin, x - 220, y)
+            }
+            loop (i, arm) in arms.iter().enumerate() {
+                _ :: add_arm_pin(g, node_id, format("arm{}", i + 1), dispatch_arm_pattern_label(src, arm.cond), dispatch_arm_pattern_span(src, arm.cond))
+                add_inline(g, node_id, ordinal, format("arm{}", i + 1), src, arm.cond.span())
+                project_stmt_block(g, index, src, arm.body, ordinal * 100 + 50 + i * 20, x + 230 + i as I32 * 180, y + 100)
+            }
+            if body :: else_body { project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230) }
+        }
+        .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> {
+            node_id :: format("{}:stmt:{}:flow", g.graph_id, ordinal)
+            title :: snippet(src, span)
+            add_node(g, node_id, "flow", title, span.into(), x, y, ["control"], ["source_jump"])
+        }
+        .BreakValue(value, span) | .BreakLabelValue(_, _, value, span) -> {
+            node_id :: format("{}:stmt:{}:flow", g.graph_id, ordinal)
+            add_node(g, node_id, "flow", "break", span.into(), x, y, ["control"], ["source_jump"])
+            ty :: expr_type(g, index, value)
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .Unsafe(span: span, audit: audit, body: body, ..) -> {
+            g.regions.push(format("{{\"region_id\":{},\"kind\":\"unsafe\",\"title\":{},\"source_span\":{}}}", json_str(format("{}:region:{}:unsafe", g.graph_id, ordinal)), json_str(audit.as_ref().unwrap_or("#Unsafe")), span_json(span.into())))
+            project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70)
+        }
+        .Impure(reason: reason, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "impure", reason.as_ref().unwrap_or("#Impure"), span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 100, x + 230, y + 70)
+        }
+        .Reactive(body: body, span: span) -> {
+            add_region(g, ordinal, "reactive", "#Reactive", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 110, x + 230, y + 70)
+        }
+        .Shield(body: body, span: span) -> {
+            add_region(g, ordinal, "shield", "#Shield", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
+        }
+        .Switched(marker: marker, body: body, span: span) -> {
+            node_id :: format("{}:stmt:{}:switched", g.graph_id, ordinal)
+            badge :: format("#{}", marker.name)
+            add_node(g, node_id, "switched", badge, span.into(), x, y, [badge], ["toggle_switch_state", "source_jump"])
+            project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70)
+        }
+        .Region(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "region", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70)
+        }
+        .Policy(declarations: declarations, body: body, span: span) -> {
+            label :: declarations.iter().map((d) -> d.key.name()).collect::<[String]>().join(", ")
+            add_region(g, ordinal, "policy", format("#Policy({})", label), span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70)
+        }
+        .TaskGroup(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "task.group", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70)
+        }
+        .Layout(name: name, body: body, span: span, ..) -> {
+            add_region(g, ordinal, "layout", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70)
+        }
+        .AuthorityScope(caps: caps, binding: binding, body: body, span: span, ..) -> {
+            title :: caps.iter().map(((cap, _)) -> cap.as_str()).collect::<[String]>().join(", ")
+            granted :: caps.iter().map(((cap, _)) -> cap.clone()).collect::<[String]>()
+            add_authority_region(g, ordinal, format("authority: {}", title), [], granted, [], binding.as_ref(), span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
+        }
+        .ComptimeIf(cond: cond, then_body: then_body, else_body: else_body, span: span, ..) -> {
+            add_region(g, ordinal, "comptime_if", "prep if", span)
+            node_id :: format("{}:stmt:{}:comptime_if", g.graph_id, ordinal)
+            add_node(g, node_id, "branch", "prep if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "cond", src, cond.span())
+            project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
+            if body :: else_body { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }
+        }
+        .ComptimeBlock(body: body, span: span, ..) -> {
+            add_region(g, ordinal, "comptime", "comptime", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 190, x + 230, y + 70)
+        }
+        .ContextBlock(body: body, span: span, ..) | .Live(body: body, span: span) | .AssumeDet(body: body, span: span, ..) | .Transact(body: body, span: span, ..) -> {
+            add_region(g, ordinal, "scope", "scope", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 200, x + 230, y + 70)
+        }
+        .Yield(expr, span) -> {
+            node_id :: format("{}:stmt:{}:yield", g.graph_id, ordinal)
+            add_node(g, node_id, "yield", "yield", span.into(), x, y, ["stream"], ["source_jump"])
+            ty :: expr_type(g, index, expr)
+            input :: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, expr, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .ScopeMember(name: name, args: args, body: body, span: span, ..) -> {
+            node_id :: format("{}:stmt:{}:scope_member:{}", g.graph_id, ordinal, name)
+            add_node(g, node_id, "function_exec", format(".{}", name), span.into(), x, y, ["scope"], ["source_jump"])
+            loop (i, arg) in args.iter().enumerate() { add_inline(g, node_id, ordinal, format("arg{}", i + 1), src, arg.span()) }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70)
+        }
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2593
+fn switch_was_classic_if(src: String, arms: &[AST.SwitchArm], span: Span) -> Bool {
+    first :: arms.first() ?? return false
+    AST.uses_classic_if_spelling(src, span, first.cond.span())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2600
+fn pattern_subject_type(g: &GraphBuilder, index: &SemIndex, cond: &Expr) -> String? {
+    if cond is { .PatternTest(subject: subject, ..) -> .Some(expr_type(g, index, subject)); _ -> .None }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2607
+fn set_pattern_node_type(g: &GraphBuilder, node_id: String, pattern_type: String) -> {
+    if node :: g.nodes.iter_mut().find((node) -> node.id == node_id) { node.meta_json = .Some(format("{{\"pattern_type\":{}}}", json_str(pattern_type))) }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2613
+fn pattern_pin_label(src: String, expr: &Expr) -> String {
+    raw :: snippet(src, expr.span())
+    text := raw.trim() // #4303
+    balanced :: balance_closing_parens(text)
+    if expr is .PatternTest(..) {
+        if pos :: balanced.find("==") {
+            label := balanced[pos..].trim() // #4303
+            return label.to_string()
+        }
+        label := balanced.trim() // #4303
+        return format("== {}", label)
+    }
+    balanced
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2625
+// Dispatch arm labels omit the leading enum-variant dot and carry no ==.
+fn dispatch_arm_pattern_label(src: String, expr: &Expr) -> String {
+    (raw, _) :: dispatch_arm_pattern_fragment(src, expr)
+    text := raw.trim() // #4303
+    balanced :: balance_closing_parens(text)
+    balanced.strip_prefix('.').unwrap_or(balanced).to_string()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2634
+fn dispatch_arm_pattern_span(src: String, expr: &Expr) -> SourceSpan {
+    span: SourceSpan :: expr.span().into()
+    (pattern, offset) :: dispatch_arm_pattern_fragment(src, expr)
+    SourceSpan(start: span.start + offset, end: span.start + offset + pattern.trim_end().len())
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2643
+fn dispatch_arm_pattern_fragment(src: String, expr: &Expr) -> (String, USize) {
+    span: SourceSpan :: expr.span().into()
+    source :: src.get(span.start..span.end).unwrap_or("")
+    trimmed := source.trim_start() // #4303
+    offset := source.len() - trimmed.len()
+    fragment := trimmed
+    dispatch_open :: fragment.find("==").and_then((pos) -> {
+        after_cmp :: fragment[pos + 2..]
+        after_space := after_cmp.trim_start() // #4303
+        if after_space.starts_with('{') { .Some((pos + 2, after_cmp.len() - after_space.len())) } else { .None }
+    })
+    if (comparator, whitespace) :: dispatch_open {
+        offset += comparator + whitespace
+        fragment = fragment[comparator + whitespace..]
+    } else {
+        after_space := fragment.trim_start() // #4303
+        offset += fragment.len() - after_space.len()
+        fragment = after_space
+    }
+    if after_open :: fragment.strip_prefix('{') {
+        offset += 1
+        fragment = after_open.trim_start() // #4303
+        offset += after_open.len() - fragment.len()
+    }
+    if arrow :: fragment.rfind("->") {
+        after_arrow :: fragment[arrow + 2..]
+        if close :: after_arrow.rfind('}') {
+            after_body :: after_arrow[close + 1..]
+            offset += arrow + 2 + close + 1
+            fragment = after_body.trim_start() // #4303
+            offset += after_body.len() - fragment.len()
+        }
+    }
+    text := fragment.trim_end() // #4303
+    (text.to_string(), offset)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2684
+fn pattern_arm_edit_span(src: String, expr: &Expr) -> SourceSpan {
+    if expr is {
+        .PatternTest(pattern: pattern, ..) -> span_through_closing_parens(src, pattern.span())
+        _ -> expr.span().into()
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2691
+fn balance_closing_parens(s: String) -> String {
+    out := s.to_string()
+    opens :: s.chars().filter((c) -> c == '(').count()
+    closes :: s.chars().filter((c) -> c == ')').count()
+    loop _ in closes..opens { out.push(')') }
+    out
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2702
+fn project_classic_switch_else(g: &GraphBuilder, index: &SemIndex, src: String, else_body: &[Stmt]?, ordinal: USize, x: I32, y: I32) -> {
+    body :: else_body ?? return
+    if body.len() == 1 {
+        stmt :: &body[0]
+        if stmt is .Switch(subject: subject, arms: arms, span: span, ..) {
+            if AST.is_subjectless_guard(subject, span) && switch_was_classic_if(src, arms, span) {
+                project_stmt(g, index, src, stmt, ordinal * 100 + 60, x, y)
+                return
+            }
+        }
+    }
+    project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2732
+pub fn connect_expr_to_input(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) -> {
+    connect_expr_to_input_with_span(g, index, src, expr, expr.span(), ordinal, role, owner_node_id, input_pin, x, y)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2759
+fn expr_source_end(expr: &Expr) -> USize {
+    if expr is {
+        // Compound-assignment sema gives the binary node the target span;
+        // its original RHS retains the actual source end.
+        .Binary(_, left, right, _) -> expr_source_end(left).max(expr_source_end(right))
+        _ -> expr.span().end
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2768
+fn binding_source_span(src: String, binding: &AST.Binding) -> SourceSpan {
+    init_end := expr_source_end(binding.init)
+    loop src.as_bytes().get(init_end).is_some_and((byte) -> byte.is_ascii_whitespace()) { init_end += 1 }
+    if src.as_bytes().get(init_end) == .Some(40) { init_end += 1 }
+    init_span :: span_through_closing_parens(src, Span.new(binding.init.span().start, init_end))
+    SourceSpan(start: binding.name_span.start, end: init_span.end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2788
+fn binding_init_span(src: String, binding: &AST.Binding) -> Span {
+    end :: expr_source_end(binding.init)
+    start := binding.sigil_span.map((span) -> span.end).unwrap_or_else(() -> binding.init.span().start)
+    loop start < end && src.as_bytes()[start].is_ascii_whitespace() { start += 1 }
+    Span.new(start, end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2801
+fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, inline_span: Span, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) -> {
+    provider_y :: data_provider_y(y, ordinal)
+    if out :: project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
+    } else if pure_leaf(expr) && !(expr is .Binary(..)) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        wire_ident_refs(g, expr, input_pin)
+    } else if out :: project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
+        variant_method :: if expr is { .MethodCall(method: method, ..) -> starts_uppercase(method); _ -> false }
+        if details_composite_expr(expr) || expr is .EnumLit(..) || variant_method { add_inline(g, owner_node_id, ordinal, role, src, inline_span) }
+        add_wire_with_span(g, out, input_pin, "data", .Some(expr.span().into()))
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2833
+fn details_composite_expr(expr: &Expr) -> Bool {
+    if expr is {
+        .ListLit(_, _) | .MapLit(_, _) | .StructLit(..) | .TypedLit(..) | .TupleLit(_, _, _) | .Present(_, _) | .Ok(_, _) | .Err(_, _) -> true
+        _ -> false
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2847
+fn data_provider_y(y: I32, ordinal: USize) -> I32 { y + 96 + ((ordinal % 2) as I32 * 18) }
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2851
+fn project_value_node(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, ordinal: USize, role: String, x: I32, y: I32) -> String? {
+    if expr is .Place(inner, _, _) -> return project_value_node(g, index, src, inner, ordinal, role, x, y)
+    if expr is .Ident(name, span) {
+        source_span: SourceSpan :: span.into()
+        key :: getter_key(index, name, source_span)
+        if pin :: g.getter_pins.get(key).cloned() -> return .Some(pin)
+        ty :: expr_type(g, index, expr)
+        base_node_id :: format("{}:value:get:{}", g.graph_id, canvas_ident_fragment(name))
+        node_id :: if g.nodes.iter().any((node) -> node.id == base_node_id && node.span != source_span) { format("{}:{}-{}", base_node_id, span.start, span.end) } else { base_node_id }
+        add_node(g, node_id, "variable_get", name, source_span, x, y, ["read"], ["edit_inline_expr", "source_jump"])
+        pin :: add_pin(g, node_id, name, "output", ty, "", false)
+        g.getter_pins.insert(^key, pin.clone())
+        return .Some(pin)
+    }
+    (title, badges) :: if expr is {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) | .Char(_, _) | .Absent(_) | .Todo(..) -> (snippet(src, expr.span()), ["const"])
+        _ -> return .None
+    }
+    span: SourceSpan :: expr.span().into()
+    node_id :: format("{}:value:{}:{}:{}-{}", g.graph_id, ordinal, role, span.start, span.end)
+    add_node(g, node_id, "constant", title, span, x, y, badges, ["edit_inline_expr", "source_jump"])
+    .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2933
+fn getter_key(index: &SemIndex, name: String, span: SourceSpan) -> String {
+    reference :: index.references().iter().find((reference) -> reference.span == span && reference.name == name) ?? return format("{}@{}:{}", name, span.start, span.end)
+    target :: reference.target.as_ref() ?? return format("{}@{}:{}", name, span.start, span.end)
+    format("{}@{}:{}:{}", name, target.module_path, target.def_span.start, target.def_span.end)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2950
+fn method_is_pure(index: &SemIndex, span: SourceSpan) -> Bool {
+    reference :: index.references().iter().find((reference) -> reference.span == span) ?? return false
+    target :: reference.target.as_ref() ?? return false
+    definition :: index.definitions().iter().find((definition) -> definition.module_path == target.module_path && definition.def_span == target.def_span) ?? return false
+    signature :: definition.callable_signature.as_ref() ?? return false
+    if signature.effects is { .Checked(effects) -> effects.is_empty(); _ -> false }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2975
+fn canvas_ident_fragment(name: String) -> String {
+    name.chars().map((c) -> if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
+}
+
+// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2987
+pub fn project_expr_node(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, ordinal: USize, x: I32, y: I32, exec_context: Bool) -> String? {
+    if expr is {
+        .Binary(op, left, right, span) -> {
+            node_id :: format("{}:expr:{}:operator:{}-{}", g.graph_id, ordinal, span.start, span.end)
+            add_node(g, node_id, "expression", op.spell(), span.into(), x, y, [], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "value", src, span)
+            left_ty :: expr_type(g, index, left)
+            left_input :: add_pin(g, node_id, "left", "input", left_ty, "", false)
+            connect_expr_to_input(g, index, src, left, ordinal * 1000 + 1, "left", node_id, left_input, x - 220, y)
+            right_ty :: expr_type(g, index, right)
+            right_input :: add_pin(g, node_id, "right", "input", right_ty, "", false)
+            connect_expr_to_input(g, index, src, right, ordinal * 1000 + 2, "right", node_id, right_input, x - 220, y + 74)
+            result_ty :: expr_type(g, index, expr)
+            .Some(add_pin(g, node_id, "result", "output", result_ty, "", false))
+        }
+        .Call(c) -> {
+            node_id :: format("{}:expr:{}:call:{}", g.graph_id, ordinal, c.name)
+            archetype :: if exec_context || call_has_effects(index, c.name) { "function_exec" } else { "function_pure" }
+            add_node(g, node_id, archetype, c.name, c.name_span.into(), x, y, effect_badges(index, c.name), ["insert_call", "source_jump"])
+            loop (i, arg) in c.args.iter().enumerate() {
+                ty :: expr_type(g, index, arg.expr)
+                input :: add_pin(g, node_id, format("arg{}", i + 1), "input", ty, arg.convention.sigil(), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 1, format("arg{}", i + 1), node_id, input, x - 220, y + i as I32 * 74)
+            }
+            ret :: call_ret(index, c.name).unwrap_or("Void")
+            .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
+        }
+        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, recv_type: recv_type, resolved_ret: resolved_ret, ..) -> {
+            node_id :: format("{}:expr:{}:method:{}", g.graph_id, ordinal, method)
+            variant_like :: starts_uppercase(method)
+            pure :: method_is_pure(index, method_span.into())
+            archetype :: if variant_like || pure { "function_pure" } else { "function_exec" }
+            // Checked task desugaring may replace the internal receiver with
+            // the lexical group name. The private recv_type tags survive that
+            // rewrite and distinguish authored task syntax from ordinary methods.
+            is_task_surface :: recv_type.as_ref() == .Some(INTERNAL_TASK_SURFACE_TYPE) || recv_type.as_ref() == .Some(INTERNAL_TASK_GROUP_SURFACE_TYPE)
+            title :: if is_task_surface { if method == "spawn" { "task" } else { format("task.{}", method) } } else if variant_like { method.clone() } else { format(".{}", method) }
+            is_game_asset :: (method == "image" || method == "sound") && game_assets_receiver(receiver)
+            is_game_component :: method == "component"
+            affordances: [String] := ["insert_call", "source_jump"]
+            if is_game_asset || is_game_component { affordances.push("edit_game_selection") }
+            add_node(g, node_id, if variant_like { "variant" } else { archetype }, title, method_span.into(), x, y, [], ^affordances)
+            recv_ty :: expr_type(g, index, receiver)
+            recv_pin :: add_pin(g, node_id, "self", "input", recv_ty, "", false)
+            connect_expr_to_input(g, index, src, receiver, ordinal * 1000 + 1, "self", node_id, recv_pin, x - 220, y)
+            loop (i, arg) in args.iter().enumerate() {
+                ty :: expr_type(g, index, arg.expr)
+                input :: add_pin(g, node_id, format("arg{}", i + 1), "input", ty, arg.convention.sigil(), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 2, format("arg{}", i + 1), node_id, input, x - 220, y + (i as I32 + 1) * 74)
+            }
+            ret :: resolved_ret.as_ref().map((ty) -> ty.name()).unwrap_or("unknown")
+            .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
+        }
+        .Try(inner, span, _, _) -> {
+            node_id :: format("{}:expr:{}:fallible", g.graph_id, ordinal)
+            add_node(g, node_id, "fallible", "?", span.into(), x, y, ["fallible"], ["add_fallback_rail", "source_jump"])
+            input :: add_pin(g, node_id, "value", "input", expr_type(g, index, inner), "", true)
+            if out :: project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) { add_wire(g, out, input, "fallible") }
+            .Some(add_pin(g, node_id, "ok", "output", "unknown", "", false))
+        }
+        .OrFallback(value: value, ..) -> project_expr_node(g, index, src, value, ordinal, x, y, exec_context)
+        .ListLit(items, span) -> {
+            node_id :: format("{}:expr:{}:list", g.graph_id, ordinal)
+            add_node(g, node_id, "expression", "list", span.into(), x, y, ["multi-input"], ["append_multi_input", "edit_inline_expr", "source_jump"])
+            loop (i, item) in items.iter().enumerate() {
+                ty :: expr_type(g, index, item)
+                input :: add_pin(g, node_id, format("item{}", i + 1), "input", ty, "", false)
+                set_pin_source_span(g, input, item.span().into())
+                set_pin_append(g, input, "remove_multi_input_element", i)
+                connect_expr_to_input(g, index, src, item, ordinal * 1000 + i + 1, format("item{}", i + 1), node_id, input, x - 220, y + i as I32 * 74)
+            }
+            .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+        }
+        _ -> {
+            node_id :: format("{}:expr:{}:expr", g.graph_id, ordinal)
+            title :: expr_title(expr)
+            add_node(g, node_id, "expression", title, expr.span().into(), x, y, ["expression"], ["edit_inline_expr", "source_jump"])
+            add_inline(g, node_id, ordinal, "value", src, expr.span())
+            .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
+        }
+    }
+}

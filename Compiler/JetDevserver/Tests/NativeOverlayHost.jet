@@ -1,0 +1,65 @@
+use jet_devserver.NativeOverlayHost.*
+
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1186
+fn panel(id: String, freshness: U64) -> NativeOverlayPanelFact {
+    return NativeOverlayPanelFact.new(id, id, freshness, "ready", [NativeOverlayNode.text("{id}:item", "item")])
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1197
+#Test("projection_keeps_panel_identity_and_freshness") {
+    host := NativeOverlayHost.new()
+    host.ingest(NativeOverlayEvent.current("session", "revision", 1, 10, [panel("Build", 4)])).unwrap()
+    first :: host.frame().unwrap().clone()
+    host.ingest(NativeOverlayEvent.current("session", "revision", 2, 11, [panel("Build", 5)])).unwrap()
+    second :: host.frame().unwrap()
+    assert_eq(first.panels[0].panel_id, second.panels[0].panel_id)
+    assert_eq(second.panels[0].freshness, 5)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1222
+#Test("stale_revision_identity_is_rejected_at_equal_sequence") {
+    host := NativeOverlayHost.new()
+    host.ingest(NativeOverlayEvent.current("session", "revision-a", 1, 10, [panel("Build", 1)])).unwrap()
+    error :: host.ingest(NativeOverlayEvent.current("session", "revision-b", 1, 11, [panel("Build", 2)])).unwrap_err()
+    assert(error.contains("revision identity"))
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1245
+#Test("revision_rollover_discards_old_panels") {
+    host := NativeOverlayHost.new()
+    host.ingest(NativeOverlayEvent.current("session", "revision-a", 1, 10, [panel("Old", 1)])).unwrap()
+    host.ingest(NativeOverlayEvent.current("session", "revision-b", 2, 11, [panel("New", 1)])).unwrap()
+    frame :: host.frame().unwrap()
+    assert_eq(frame.panels.len(), 1)
+    assert_eq(frame.panels[0].panel_id, "New")
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1269
+#Test("focused_overlay_never_routes_input_to_game") {
+    host := NativeOverlayHost.new()
+    host.open()
+    for input in [
+        NativeOverlayInput.Key { code: "Space", pressed: true },
+        NativeOverlayInput.Pointer { x: -100, y: -100, pressed: true },
+        NativeOverlayInput.Text("typed"), NativeOverlayInput.Activate { action_id: "inspect" }
+    ] -> assert_eq(host.route_input(^input), NativeOverlayInputRoute.Overlay)
+    host.close()
+    assert_eq(host.route_input(.Key { code: "Space", pressed: true }), NativeOverlayInputRoute.Game)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1300
+#Test("headless_projection_is_deterministic") {
+    event :: NativeOverlayEvent.current("session", "revision", 7, 99, [panel("Traces", 3), panel("Build", 3)])
+    assert_eq(NativeOverlayHost.headless_projection(&event).unwrap(), NativeOverlayHost.headless_projection(&event).unwrap())
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1315
+#Test("merged_projection_stays_bounded") {
+    host := NativeOverlayHost.new()
+    nodes :: (0..MAX_OVERLAY_NODES).map((index) -> NativeOverlayNode.text("node-{index}", "node")).collect()
+    host.ingest(NativeOverlayEvent.current("session", "revision", 1, 1, [NativeOverlayPanelFact.new("first", "first", 1, "ready", ^nodes)])).unwrap()
+    error :: host.ingest(NativeOverlayEvent.current("session", "revision", 2, 2, [panel("second", 1)])).unwrap_err()
+    assert(error.contains("node budget"))
+    assert_eq(host.frame().unwrap().sequence, 1)
+}
+// Rust: crates/jet-devserver/src/NativeOverlayHost.rs:1348
+#Test("frame_history_is_bounded") {
+    host := NativeOverlayHost.new().with_frame_capacity(2)
+    for sequence in 1..=4 -> host.ingest(NativeOverlayEvent.current("session", "revision", sequence, sequence, [panel("Build", sequence)])).unwrap()
+    assert_eq(host.frame_count(), 2)
+    assert_eq(host.frame().unwrap().sequence, 4)
+}

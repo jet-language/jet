@@ -1,891 +1,236 @@
-// PORT-PENDING 0779 crates-jet-devserver-src-nativeswap-slice-1815: crates/jet-devserver/src/NativeSwap.rs:1815-2701
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     pub fn reject(
-//RS         &self,
-//RS         plan: &NativeSwapPlan,
-//RS         explanation: NativeSwapExplanation,
-//RS     ) -> NativeSwapReceipt {
-//RS         NativeSwapReceipt {
-//RS             source: self.executable.source.clone(),
-//RS             outcome: if explanation.disposition == NativeSwapDisposition::Restart {
-//RS                 NativeSwapOutcome::RestartRequired
-//RS             } else {
-//RS                 NativeSwapOutcome::Rejected
-//RS             },
-//RS             before: self.executable.revision.clone(),
-//RS             after: plan.to.revision.clone(),
-//RS             before_generation: self.executable.generation,
-//RS             after_generation: self.executable.generation,
-//RS             preserved_listeners: self.listeners.keys().cloned().collect(),
-//RS             reset_listeners: Vec::new(),
-//RS             preserved_connections: self.connections.keys().cloned().collect(),
-//RS             reset_connections: Vec::new(),
-//RS             restart_boundary: plan.restart_boundary.clone(),
-//RS             explanation: Some(explanation),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Roll back and attach an exact compile/migration failure explanation.
-//RS     pub fn fail(
-//RS         &mut self,
-//RS         explanation: NativeSwapExplanation,
-//RS     ) -> Result<NativeSwapReceipt, NativeSwapError> {
-//RS         let mut receipt = self.rollback()?;
-//RS         receipt.outcome = if explanation.disposition == NativeSwapDisposition::Restart {
-//RS             NativeSwapOutcome::RestartRequired
-//RS         } else {
-//RS             NativeSwapOutcome::Rejected
-//RS         };
-//RS         receipt.explanation = Some(explanation);
-//RS         Ok(receipt)
-//RS     }
-//RS 
-//RS     fn validate_plan(&self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         plan.validate_shape()?;
-//RS         let source_id = self.source().canonical();
-//RS         if !plan.source.matches(self.source()) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::SourceIdentityChanged,
-//RS                 format!(
-//RS                     "plan source `{}` does not match resident source",
-//RS                     plan.source.canonical()
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         if plan.from != self.executable {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::StalePlan,
-//RS                 "plan `from` executable does not match resident executable",
-//RS             ));
-//RS         }
-//RS         if plan.to.source != plan.source {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::SourceIdentityChanged,
-//RS                 "candidate executable belongs to another source",
-//RS             ));
-//RS         }
-//RS         if plan.to.generation <= self.executable.generation {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::StalePlan,
-//RS                 "candidate generation does not advance the resident generation",
-//RS             ));
-//RS         }
-//RS         if plan.decision.requires_restart() {
-//RS             return Err(restart_or_reject(
-//RS                 &source_id,
-//RS                 plan.capability.restart,
-//RS                 NativeSwapBlockingFact::IncompatibleType,
-//RS                 plan.decision
-//RS                     .compatibility
-//RS                     .reason()
-//RS                     .unwrap_or("semantic hot-swap verdict requires a clean restart"),
-//RS             ));
-//RS         }
-//RS         if let Some(fact) = plan.blocking_fact {
-//RS             let disposition = if plan.capability.restart && fact.is_restartable() {
-//RS                 NativeSwapDisposition::Restart
-//RS             } else {
-//RS                 NativeSwapDisposition::Rejected
-//RS             };
-//RS             return Err(NativeSwapError {
-//RS                 explanation: NativeSwapExplanation::new(
-//RS                     source_id,
-//RS                     disposition,
-//RS                     fact,
-//RS                     "checked producer marked this plan unsafe or incompatible",
-//RS                 ),
-//RS             });
-//RS         }
-//RS         if !plan.removed_definitions.is_empty() {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::StaleReference,
-//RS                 format!(
-//RS                     "removed definitions would leave stale references: {}",
-//RS                     plan.removed_definitions.join(",")
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         if plan.restart_boundary.required {
-//RS             let fact = plan
-//RS                 .restart_boundary
-//RS                 .reason
-//RS                 .unwrap_or(NativeSwapBlockingFact::RestartRequired);
-//RS             return Err(restart_or_reject(
-//RS                 &source_id,
-//RS                 plan.capability.restart,
-//RS                 fact,
-//RS                 "candidate requires the announced clean restart boundary",
-//RS             ));
-//RS         }
-//RS         if plan.capability.quiescence == NativeSwapQuiescencePolicy::Required
-//RS             && (!plan.quiescence.required || !plan.quiescence.is_ready())
-//RS         {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::QuiescenceRequired,
-//RS                 format!(
-//RS                     "swap requires quiescence; active_operations={} reached={}",
-//RS                     plan.quiescence.active_operations, plan.quiescence.reached
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         if plan.code_changed() {
-//RS             match plan.capability.code {
-//RS                 NativeSwapCodePolicy::Replace => {}
-//RS                 NativeSwapCodePolicy::Restart => {
-//RS                     return Err(restart_or_reject(
-//RS                         &source_id,
-//RS                         plan.capability.restart,
-//RS                         NativeSwapBlockingFact::CodeRevisionUnsupported,
-//RS                         "code revision changed but capability permits replacement only at restart",
-//RS                     ));
-//RS                 }
-//RS                 NativeSwapCodePolicy::Reject => {
-//RS                     return Err(NativeSwapError::input(
-//RS                         source_id,
-//RS                         NativeSwapBlockingFact::CodeRevisionUnsupported,
-//RS                         "code revision changed and capability rejects in-place replacement",
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         if plan.data_changed() {
-//RS             match plan.capability.data {
-//RS                 NativeSwapDataPolicy::Preserve => {
-//RS                     return Err(restart_or_reject(
-//RS                         &source_id,
-//RS                         plan.capability.restart,
-//RS                         NativeSwapBlockingFact::DataRevisionUnsupported,
-//RS                         "data revision changed but resident data policy is preserve",
-//RS                     ));
-//RS                 }
-//RS                 NativeSwapDataPolicy::Replace | NativeSwapDataPolicy::Migrate => {}
-//RS                 NativeSwapDataPolicy::Restart => {
-//RS                     return Err(restart_or_reject(
-//RS                         &source_id,
-//RS                         plan.capability.restart,
-//RS                         NativeSwapBlockingFact::LayoutChanged,
-//RS                         "data revision changed and capability requires a clean restart",
-//RS                     ));
-//RS                 }
-//RS                 NativeSwapDataPolicy::Reject => {
-//RS                     return Err(NativeSwapError::input(
-//RS                         source_id,
-//RS                         NativeSwapBlockingFact::DataRevisionUnsupported,
-//RS                         "data revision changed and capability rejects in-place replacement",
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let relocation_supported = plan.relocation.strategy.permits_in_place()
-//RS             && plan.capability.relocation.permits_in_place();
-//RS         if (plan.code_changed() || plan.data_changed()) && !relocation_supported {
-//RS             return Err(restart_or_reject(
-//RS                 &source_id,
-//RS                 plan.capability.restart,
-//RS                 NativeSwapBlockingFact::RelocationUnsupported,
-//RS                 format!(
-//RS                     "relocation strategy `{}` with capability `{}` does not permit in-place activation",
-//RS                     plan.relocation.strategy, plan.capability.relocation
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         let link_supported =
-//RS             plan.link.strategy.permits_in_place() && plan.capability.link.permits_in_place();
-//RS         if (plan.code_changed() || plan.data_changed()) && !link_supported {
-//RS             return Err(restart_or_reject(
-//RS                 &source_id,
-//RS                 plan.capability.restart,
-//RS                 NativeSwapBlockingFact::LinkStrategyUnsupported,
-//RS                 format!(
-//RS                     "link strategy `{}` with capability `{}` does not permit in-place activation",
-//RS                     plan.link.strategy, plan.capability.link
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         self.validate_listener_handles(plan)?;
-//RS         self.validate_connection_handles(plan)?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn validate_listener_handles(&self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         let source_id = self.source().canonical();
-//RS         if !plan.preserve_listeners.is_empty()
-//RS             && plan.capability.listeners == NativeSwapHandlePolicy::Never
-//RS         {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::CapabilityUnavailable,
-//RS                 "listener preservation was requested but capability forbids it",
-//RS             ));
-//RS         }
-//RS         for handle in &plan.preserve_listeners {
-//RS             if !handle.source.matches(self.source()) {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ListenerHandleStale,
-//RS                     format!("listener handle `{}` belongs to another source", handle.id),
-//RS                 ));
-//RS             }
-//RS             let Some(current) = self.listeners.get(&handle.id) else {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ListenerHandleMissing,
-//RS                     format!("listener handle `{}` is not resident", handle.id),
-//RS                 ));
-//RS             };
-//RS             if !handle.is_compatible() {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ListenerHandleIncompatible,
-//RS                     format!("listener handle `{}` is explicitly incompatible", handle.id),
-//RS                 ));
-//RS             }
-//RS             if current.generation != handle.generation || !current.is_compatible() {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ListenerHandleStale,
-//RS                     format!("listener handle `{}` does not match the resident generation", handle.id),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn validate_connection_handles(&self, plan: &NativeSwapPlan) -> Result<(), NativeSwapError> {
-//RS         let source_id = self.source().canonical();
-//RS         if !plan.preserve_connections.is_empty()
-//RS             && plan.capability.connections == NativeSwapHandlePolicy::Never
-//RS         {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::CapabilityUnavailable,
-//RS                 "connection preservation was requested but capability forbids it",
-//RS             ));
-//RS         }
-//RS         let listener_ids: BTreeSet<&str> = plan
-//RS             .preserve_listeners
-//RS             .iter()
-//RS             .map(|handle| handle.id.as_str())
-//RS             .collect();
-//RS         for handle in &plan.preserve_connections {
-//RS             if !handle.source.matches(self.source()) {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ConnectionHandleStale,
-//RS                     format!("connection handle `{}` belongs to another source", handle.id),
-//RS                 ));
-//RS             }
-//RS             let Some(current) = self.connections.get(&handle.id) else {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ConnectionHandleMissing,
-//RS                     format!("connection handle `{}` is not resident", handle.id),
-//RS                 ));
-//RS             };
-//RS             if !handle.is_compatible() {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ConnectionHandleIncompatible,
-//RS                     format!("connection handle `{}` is explicitly incompatible", handle.id),
-//RS                 ));
-//RS             }
-//RS             if current.generation != handle.generation || !current.is_compatible() {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ConnectionHandleStale,
-//RS                     format!("connection handle `{}` does not match the resident generation", handle.id),
-//RS                 ));
-//RS             }
-//RS             if !listener_ids.contains(handle.listener_id.as_str()) {
-//RS                 return Err(NativeSwapError::input(
-//RS                     source_id,
-//RS                     NativeSwapBlockingFact::ConnectionListenerNotPreserved,
-//RS                     format!(
-//RS                         "connection `{}` names listener `{}` without an explicit compatible listener handle",
-//RS                         handle.id, handle.listener_id
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn error(&self, fact: NativeSwapBlockingFact, detail: impl Into<String>) -> NativeSwapError {
-//RS         NativeSwapError::input(self.source().canonical(), fact, detail)
-//RS     }
-//RS 
-//RS     fn phase_error(&self, detail: impl Into<String>) -> NativeSwapError {
-//RS         let detail = detail.into();
-//RS         self.error(
-//RS             NativeSwapBlockingFact::InvalidPhase,
-//RS             format!("{detail}; current phase={}", self.phase),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Compatibility aliases for callers that use unqualified domain terms.
-//RS pub type CodeRevision = NativeSwapCodeRevision;
-//RS /// Compatibility alias for the data revision fact.
-//RS pub type DataRevision = NativeSwapDataRevision;
-//RS /// Compatibility alias for the resident native state.
-//RS pub type NativeSwapResidentState = NativeSwapState;
-//RS /// Compatibility alias for the swap failure.
-//RS pub type NativeSwapFailure = NativeSwapError;
-//RS 
-//RS fn receipt_from_working(
-//RS     working: &NativeSwapWorkingReceipt,
-//RS     outcome: NativeSwapOutcome,
-//RS     explanation: Option<NativeSwapExplanation>,
-//RS ) -> NativeSwapReceipt {
-//RS     NativeSwapReceipt {
-//RS         source: working.source.clone(),
-//RS         outcome,
-//RS         before: working.before.revision.clone(),
-//RS         after: working.after.revision.clone(),
-//RS         before_generation: working.before.generation,
-//RS         after_generation: working.after.generation,
-//RS         preserved_listeners: working.preserved_listeners.clone(),
-//RS         reset_listeners: working.reset_listeners.clone(),
-//RS         preserved_connections: working.preserved_connections.clone(),
-//RS         reset_connections: working.reset_connections.clone(),
-//RS         restart_boundary: working.restart_boundary.clone(),
-//RS         explanation,
-//RS     }
-//RS }
-//RS 
-//RS fn listener_map(
-//RS     source_id: &str,
-//RS     executable: &NativeSwapExecutable,
-//RS     listeners: Vec<NativeSwapListenerHandle>,
-//RS ) -> Result<BTreeMap<String, NativeSwapListenerHandle>, NativeSwapError> {
-//RS     if listeners.len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "resident listener count exceeds its bounded fact limit",
-//RS         ));
-//RS     }
-//RS     let mut map = BTreeMap::new();
-//RS     for listener in listeners {
-//RS         if let Err(detail) = validate_identity(&listener.id, "listener handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&listener.source, "listener handle") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if !listener.source.matches(&executable.source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ListenerHandleStale,
-//RS                 format!("listener `{}` belongs to another source", listener.id),
-//RS             ));
-//RS         }
-//RS         if listener.generation != executable.generation {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ListenerHandleStale,
-//RS                 format!("listener `{}` does not match resident generation", listener.id),
-//RS             ));
-//RS         }
-//RS         if map.insert(listener.id.clone(), listener).is_some() {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 "resident listener identities must be unique",
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(map)
-//RS }
-//RS 
-//RS fn connection_map(
-//RS     source_id: &str,
-//RS     executable: &NativeSwapExecutable,
-//RS     connections: Vec<NativeSwapConnectionHandle>,
-//RS     listeners: &BTreeMap<String, NativeSwapListenerHandle>,
-//RS ) -> Result<BTreeMap<String, NativeSwapConnectionHandle>, NativeSwapError> {
-//RS     if connections.len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "resident connection count exceeds its bounded fact limit",
-//RS         ));
-//RS     }
-//RS     let mut map = BTreeMap::new();
-//RS     for connection in connections {
-//RS         if let Err(detail) = validate_identity(&connection.id, "connection handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_identity(&connection.listener_id, "connection listener identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&connection.source, "connection handle") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if !connection.source.matches(&executable.source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ConnectionHandleStale,
-//RS                 format!("connection `{}` belongs to another source", connection.id),
-//RS             ));
-//RS         }
-//RS         if connection.generation != executable.generation {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ConnectionHandleStale,
-//RS                 format!("connection `{}` does not match resident generation", connection.id),
-//RS             ));
-//RS         }
-//RS         if !listeners.contains_key(&connection.listener_id) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ConnectionListenerNotPreserved,
-//RS                 format!(
-//RS                     "connection `{}` names unknown listener `{}`",
-//RS                     connection.id, connection.listener_id
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         if map.insert(connection.id.clone(), connection).is_some() {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 "resident connection identities must be unique",
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(map)
-//RS }
-//RS 
-//RS fn validate_identity(value: &str, label: &str) -> Result<(), String> {
-//RS     if value.is_empty() {
-//RS         return Err(format!("{label} must not be empty"));
-//RS     }
-//RS     if value.len() > MAX_NATIVE_SWAP_ID_BYTES {
-//RS         return Err(format!(
-//RS             "{label} exceeds {} bytes",
-//RS             MAX_NATIVE_SWAP_ID_BYTES
-//RS         ));
-//RS     }
-//RS     if value.chars().any(char::is_control) {
-//RS         return Err(format!("{label} contains a control character"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_source_identity(
-//RS     identity: &NativeSwapSourceIdentity,
-//RS     label: &str,
-//RS ) -> Result<(), String> {
-//RS     validate_identity(&identity.source_id, &format!("{label} source"))?;
-//RS     validate_identity(&identity.module, &format!("{label} module"))
-//RS }
-//RS fn validate_hot_swap_decision(
-//RS     source_id: &str,
-//RS     source: &NativeSwapSourceIdentity,
-//RS     decision: &HotSwapDecision,
-//RS ) -> Result<(), NativeSwapError> {
-//RS     if let Err(detail) = validate_identity(&decision.module, "hot-swap decision module") {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::InvalidIdentity,
-//RS             detail,
-//RS         ));
-//RS     }
-//RS     if decision.module != source.module {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::SourceIdentityChanged,
-//RS             format!(
-//RS                 "hot-swap decision module `{}` does not match source module `{}`",
-//RS                 decision.module, source.module
-//RS             ),
-//RS         ));
-//RS     }
-//RS     if decision.state_facts().len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "hot-swap decision exceeds its retention fact limit",
-//RS         ));
-//RS     }
-//RS     let mut seen = BTreeSet::new();
-//RS     for fact in decision.state_facts() {
-//RS         if let Err(detail) = validate_identity(&fact.key, "hot-swap retention key") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if !seen.insert(fact.key.as_str()) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 format!("hot-swap retention key `{}` appears more than once", fact.key),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn decision_restart_boundary(decision: &HotSwapDecision) -> NativeSwapRestartBoundary {
-//RS     let mut affected = normalized_facts(decision.changed_functions.clone());
-//RS     if affected.is_empty() {
-//RS         affected.push(decision.module.clone());
-//RS     }
-//RS     let mut kept = Vec::new();
-//RS     let mut reset = Vec::new();
-//RS     for fact in decision.state_facts() {
-//RS         match &fact.decision {
-//RS             StateRetentionDecision::Preserve => kept.push(fact.key.clone()),
-//RS             StateRetentionDecision::Fresh { .. } => reset.push(fact.key.clone()),
-//RS         }
-//RS     }
-//RS     NativeSwapRestartBoundary::required(NativeSwapBlockingFact::IncompatibleType, affected)
-//RS         .with_state(kept, reset)
-//RS }
-//RS 
-//RS fn validate_listener_plan_facts(
-//RS     source_id: &str,
-//RS     expected_source: &NativeSwapSourceIdentity,
-//RS     handles: &[NativeSwapListenerHandle],
-//RS ) -> Result<(), NativeSwapError> {
-//RS     if handles.len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "native swap plan exceeds its listener fact limit",
-//RS         ));
-//RS     }
-//RS     let mut seen = BTreeSet::new();
-//RS     for handle in handles {
-//RS         if let Err(detail) = validate_identity(&handle.id, "listener handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&handle.source, "listener handle") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if !handle.source.matches(expected_source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ListenerHandleStale,
-//RS                 format!("listener handle `{}` belongs to another source", handle.id),
-//RS             ));
-//RS         }
-//RS         if !seen.insert(&handle.id) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 format!("listener handle `{}` appears more than once", handle.id),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_connection_plan_facts(
-//RS     source_id: &str,
-//RS     expected_source: &NativeSwapSourceIdentity,
-//RS     handles: &[NativeSwapConnectionHandle],
-//RS ) -> Result<(), NativeSwapError> {
-//RS     if handles.len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "native swap plan exceeds its connection fact limit",
-//RS         ));
-//RS     }
-//RS     let mut seen = BTreeSet::new();
-//RS     for handle in handles {
-//RS         if let Err(detail) = validate_identity(&handle.id, "connection handle identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_identity(&handle.listener_id, "connection listener identity") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if let Err(detail) = validate_source_identity(&handle.source, "connection handle") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS         if !handle.source.matches(expected_source) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::ConnectionHandleStale,
-//RS                 format!("connection handle `{}` belongs to another source", handle.id),
-//RS             ));
-//RS         }
-//RS         if !seen.insert(&handle.id) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 format!("connection handle `{}` appears more than once", handle.id),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_revision(value: &str, label: &str) -> Result<(), String> {
-//RS     validate_identity(value, label)
-//RS }
-//RS 
-//RS fn validate_fact_list(source_id: &str, facts: &[String]) -> Result<(), NativeSwapError> {
-//RS     if facts.len() > MAX_NATIVE_SWAP_FACTS {
-//RS         return Err(NativeSwapError::input(
-//RS             source_id,
-//RS             NativeSwapBlockingFact::FactLimit,
-//RS             "native swap fact list exceeds its bounded fact limit",
-//RS         ));
-//RS     }
-//RS     for fact in facts {
-//RS         if let Err(detail) = validate_identity(fact, "native swap fact") {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::InvalidIdentity,
-//RS                 detail,
-//RS             ));
-//RS         }
-//RS     }
-//RS     let mut seen = BTreeSet::new();
-//RS     for fact in facts {
-//RS         if !seen.insert(fact) {
-//RS             return Err(NativeSwapError::input(
-//RS                 source_id,
-//RS                 NativeSwapBlockingFact::DuplicateIdentity,
-//RS                 format!("native swap fact `{fact}` appears more than once"),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn normalized_facts(mut facts: Vec<String>) -> Vec<String> {
-//RS     facts.sort();
-//RS     facts
-//RS }
-//RS 
-//RS fn bounded_text(value: &str, limit: usize) -> String {
-//RS     let mut output = String::new();
-//RS     for character in value.chars() {
-//RS         if character.is_control() {
-//RS             continue;
-//RS         }
-//RS         if output.len() + character.len_utf8() > limit {
-//RS             break;
-//RS         }
-//RS         output.push(character);
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS fn restart_or_reject(
-//RS     source_id: &str,
-//RS     allows_restart: bool,
-//RS     fact: NativeSwapBlockingFact,
-//RS     detail: impl Into<String>,
-//RS ) -> NativeSwapError {
-//RS     let detail = detail.into();
-//RS     if allows_restart && fact.is_restartable() {
-//RS         NativeSwapError::restart(source_id.to_string(), fact, detail)
-//RS     } else {
-//RS         let reason = if fact.is_restartable() {
-//RS             "capability does not allow a clean restart"
-//RS         } else {
-//RS             "blocking fact cannot be handled by a clean restart"
-//RS         };
-//RS         NativeSwapError::input(source_id.to_string(), fact, format!("{detail}; {reason}"))
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS     use jet_foundation::HotSwap::HotSwapCompatibility;
-//RS 
-//RS     fn fixture() -> (
-//RS         NativeSwapSourceIdentity,
-//RS         NativeSwapExecutable,
-//RS         NativeSwapListenerHandle,
-//RS         NativeSwapConnectionHandle,
-//RS     ) {
-//RS         let source = NativeSwapSourceIdentity::new("server.jet").unwrap();
-//RS         let revision = NativeSwapRevision::new("code-1", "data-1").unwrap();
-//RS         let executable = NativeSwapExecutable::new(source.clone(), revision, 1).unwrap();
-//RS         let listener = NativeSwapListenerHandle::compatible("http", source.clone(), 1).unwrap();
-//RS         let connection = NativeSwapConnectionHandle::compatible("conn-7", "http", source.clone(), 1).unwrap();
-//RS         (source, executable, listener, connection)
-//RS     }
-//RS 
-//RS     fn compatible_decision() -> HotSwapDecision {
-//RS         HotSwapDecision {
-//RS             module: "server.jet".to_string(),
-//RS             compatibility: HotSwapCompatibility::Compatible,
-//RS             changed: Vec::new(),
-//RS             changed_functions: vec!["server.jet::fn:main".to_string()],
-//RS             state: Vec::new(),
-//RS             schema_migrations: Vec::new(),
-//RS             rechecked_items: Vec::new(),
-//RS             change_facts: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compatible_plan(
-//RS         source: NativeSwapSourceIdentity,
-//RS         executable: NativeSwapExecutable,
-//RS         listener: NativeSwapListenerHandle,
-//RS         connection: NativeSwapConnectionHandle,
-//RS     ) -> NativeSwapPlan {
-//RS         let next = NativeSwapExecutable::new(
-//RS             source.clone(),
-//RS             NativeSwapRevision::new("code-2", "data-1").unwrap(),
-//RS             2,
-//RS         )
-//RS         .unwrap();
-//RS         NativeSwapPlan::new(
-//RS             source,
-//RS             executable,
-//RS             next,
-//RS             NativeSwapCapability::resident(),
-//RS             compatible_decision(),
-//RS         )
-//RS             .unwrap()
-//RS             .preserve_listener(listener)
-//RS             .preserve_connection(connection)
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn compatible_swap_keeps_only_explicit_compatible_handles() {
-//RS         let (source, executable, listener, connection) = fixture();
-//RS         let other_listener = NativeSwapListenerHandle::compatible("metrics", source.clone(), 1).unwrap();
-//RS         let mut state = NativeSwapState::new(
-//RS             executable.clone(),
-//RS             vec![listener.clone(), other_listener],
-//RS             vec![connection.clone()],
-//RS         )
-//RS         .unwrap();
-//RS         let plan = compatible_plan(source, executable, listener, connection);
-//RS         state.pause(&plan).unwrap();
-//RS         state.apply(&plan).unwrap();
-//RS         let receipt = state.commit().unwrap();
-//RS         assert!(receipt.committed());
-//RS         assert_eq!(state.generation(), 2);
-//RS         assert_eq!(state.listener_count(), 1);
-//RS         assert_eq!(state.connection_count(), 1);
-//RS         assert_eq!(receipt.preserved_listeners, vec!["http"]);
-//RS         assert_eq!(receipt.reset_listeners, vec!["metrics"]);
-//RS         assert_eq!(receipt.preserved_connections, vec!["conn-7"]);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn incompatible_plan_is_rejected_before_pause_mutates_state() {
-//RS         let (source, executable, listener, connection) = fixture();
-//RS         let mut state = NativeSwapState::new(executable.clone(), vec![listener.clone()], vec![connection.clone()]).unwrap();
-//RS         let plan = compatible_plan(source, executable.clone(), listener, connection).mark_layout_changed(vec!["Order".to_string()]);
-//RS         let before = state.clone();
-//RS         let error = state.pause(&plan).unwrap_err();
-//RS         assert_eq!(error.blocking_fact(), NativeSwapBlockingFact::LayoutChanged);
-//RS         assert_eq!(state, before);
-//RS         assert!(error.render().contains("source=server.jet"));
-//RS         assert!(error.render().contains("blocking_fact=layout_changed"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rollback_restores_prior_executable_and_handles() {
-//RS         let (source, executable, listener, connection) = fixture();
-//RS         let mut state = NativeSwapState::new(executable.clone(), vec![listener.clone()], vec![connection.clone()]).unwrap();
-//RS         let plan = compatible_plan(source, executable.clone(), listener, connection);
-//RS         state.pause(&plan).unwrap();
-//RS         state.apply(&plan).unwrap();
-//RS         assert_eq!(state.generation(), 2);
-//RS         let receipt = state.rollback().unwrap();
-//RS         assert!(receipt.rolled_back());
-//RS         assert_eq!(state.executable(), &executable);
-//RS         assert_eq!(state.listener_count(), 1);
-//RS         assert_eq!(state.connection_count(), 1);
-//RS         assert_eq!(state.phase(), NativeSwapPhase::Ready);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn quiescence_and_strategy_failures_name_exact_facts() {
-//RS         let (source, executable, listener, connection) = fixture();
-//RS         let mut state = NativeSwapState::new(executable.clone(), vec![listener.clone()], vec![connection.clone()]).unwrap();
-//RS         let plan = compatible_plan(source.clone(), executable, listener, connection)
-//RS             .with_quiescence(NativeSwapQuiescence::pending(2));
-//RS         let error = state.pause(&plan).unwrap_err();
-//RS         assert_eq!(error.blocking_fact(), NativeSwapBlockingFact::QuiescenceRequired);
-//RS         assert_eq!(error.source_id(), "server.jet");
-//RS 
-//RS         let executable = state.executable().clone();
-//RS         let listener = state.listener("http").unwrap().clone();
-//RS         let connection = state.connection("conn-7").unwrap().clone();
-//RS         let plan = compatible_plan(source, executable, listener, connection)
-//RS             .with_relocation(NativeSwapRelocationFacts::new(NativeSwapRelocationStrategy::Reject));
-//RS         let error = state.pause(&plan).unwrap_err();
-//RS         assert_eq!(error.blocking_fact(), NativeSwapBlockingFact::RelocationUnsupported);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn receipt_order_and_explanation_are_deterministic() {
-//RS         let (source, executable, listener, connection) = fixture();
-//RS         let mut state = NativeSwapState::new(executable.clone(), vec![listener.clone()], vec![connection.clone()]).unwrap();
-//RS         let plan = compatible_plan(source, executable, listener, connection);
-//RS         assert_eq!(state.explain_reload(&plan).blocking_fact, NativeSwapBlockingFact::None);
-//RS         state.pause(&plan).unwrap();
-//RS         state.apply(&plan).unwrap();
-//RS         let receipt = state.commit().unwrap();
-//RS         let rendered = receipt.render();
-//RS         assert!(rendered.contains("outcome=committed"));
-//RS         assert!(rendered.contains("preserved_listeners=[http]"));
-//RS         assert!(rendered.contains("preserved_connections=[conn-7]"));
-//RS     }
-//RS }
-// END-PORT-PENDING 0779 crates/jet-devserver/src/NativeSwap.rs:1815-2701
+use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
 
+impl NativeSwapState {
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1815
+    pub fn reject(self: &Self, plan: &NativeSwapPlan, explanation: NativeSwapExplanation) -> NativeSwapReceipt {
+        preserved_listeners := self.listeners.keys().cloned().collect[[String]]()
+        preserved_listeners.sort()
+        preserved_connections := self.connections.keys().cloned().collect[[String]]()
+        preserved_connections.sort()
+        NativeSwapReceipt { source: ~self.executable.source,
+            outcome: if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected,
+            before: ~self.executable.revision, after: ~plan.to.revision,
+            before_generation: self.executable.generation, after_generation: self.executable.generation,
+            preserved_listeners: ^preserved_listeners, reset_listeners: [], preserved_connections: ^preserved_connections,
+            reset_connections: [], restart_boundary: ~plan.restart_boundary, explanation: .Val(^explanation) }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1841
+    pub fn fail(self: &Self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
+        receipt := self.rollback()?
+        receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
+        receipt.explanation = .Val(^explanation)
+        receipt
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:1855
+    fn validate_plan(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! {
+        plan.validate_shape()?
+        source_id :: self.source().canonical()
+        if !plan.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source `{plan.source.canonical()}` does not match resident source"))
+        if plan.from != self.executable -> return .Err(NativeSwapError.input(source_id, .StalePlan, "plan `from` executable does not match resident executable"))
+        if plan.to.source != plan.source -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "candidate executable belongs to another source"))
+        if plan.to.generation <= self.executable.generation -> return .Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation does not advance the resident generation"))
+        if plan.decision.requires_restart() -> return .Err(restart_or_reject(source_id, plan.capability.restart, .IncompatibleType,
+            plan.decision.compatibility.reason().unwrap_or("semantic hot-swap verdict requires a clean restart")))
+        if plan.blocking_fact == .Val(fact) {
+            disposition :: if plan.capability.restart && fact.is_restartable() -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
+            return .Err(NativeSwapError { explanation: NativeSwapExplanation.new(source_id, disposition, fact, "checked producer marked this plan unsafe or incompatible") })
+        }
+        if !plan.removed_definitions.is_empty() -> return .Err(NativeSwapError.input(source_id, .StaleReference, "removed definitions would leave stale references: {plan.removed_definitions.join(",")}"))
+        if plan.restart_boundary.required {
+            fact :: plan.restart_boundary.reason.unwrap_or(.RestartRequired)
+            return .Err(restart_or_reject(source_id, plan.capability.restart, fact, "candidate requires the announced clean restart boundary"))
+        }
+        if plan.capability.quiescence == .Required && (!plan.quiescence.required || !plan.quiescence.is_ready()) -> return .Err(NativeSwapError.input(source_id, .QuiescenceRequired,
+            "swap requires quiescence; active_operations={plan.quiescence.active_operations} reached={plan.quiescence.reached}"))
+        if plan.code_changed() {
+            if plan.capability.code == {
+                .Replace -> {}
+                .Restart -> return .Err(restart_or_reject(source_id, plan.capability.restart, .CodeRevisionUnsupported, "code revision changed but capability permits replacement only at restart"))
+                .Reject -> return .Err(NativeSwapError.input(source_id, .CodeRevisionUnsupported, "code revision changed and capability rejects in-place replacement"))
+            }
+        }
+        if plan.data_changed() {
+            if plan.capability.data == {
+                .Preserve -> return .Err(restart_or_reject(source_id, plan.capability.restart, .DataRevisionUnsupported, "data revision changed but resident data policy is preserve"))
+                .Replace | .Migrate -> {}
+                .Restart -> return .Err(restart_or_reject(source_id, plan.capability.restart, .LayoutChanged, "data revision changed and capability requires a clean restart"))
+                .Reject -> return .Err(NativeSwapError.input(source_id, .DataRevisionUnsupported, "data revision changed and capability rejects in-place replacement"))
+            }
+        }
+        relocation_supported :: plan.relocation.strategy.permits_in_place() && plan.capability.relocation.permits_in_place()
+        if (plan.code_changed() || plan.data_changed()) && !relocation_supported -> return .Err(restart_or_reject(source_id, plan.capability.restart, .RelocationUnsupported,
+            "relocation strategy `{plan.relocation.strategy.as_str()}` with capability `{plan.capability.relocation.as_str()}` does not permit in-place activation"))
+        link_supported :: plan.link.strategy.permits_in_place() && plan.capability.link.permits_in_place()
+        if (plan.code_changed() || plan.data_changed()) && !link_supported -> return .Err(restart_or_reject(source_id, plan.capability.restart, .LinkStrategyUnsupported,
+            "link strategy `{plan.link.strategy.as_str()}` with capability `{plan.capability.link.as_str()}` does not permit in-place activation"))
+        self.validate_listener_handles(plan)?
+        self.validate_connection_handles(plan)?
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:2028
+    fn validate_listener_handles(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! {
+        source_id :: self.source().canonical()
+        if !plan.preserve_listeners.is_empty() && plan.capability.listeners == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "listener preservation was requested but capability forbids it"))
+        for handle in plan.preserve_listeners {
+            if !handle.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
+            current :: self.listeners.get(handle.id) ?? return .Err(NativeSwapError.input(source_id, .ListenerHandleMissing, "listener handle `{handle.id}` is not resident"))
+            if !handle.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ListenerHandleIncompatible, "listener handle `{handle.id}` is explicitly incompatible"))
+            if current.generation != handle.generation || !current.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` does not match the resident generation"))
+        }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:2072
+    fn validate_connection_handles(self: &Self, plan: &NativeSwapPlan) -> Unit NativeSwapError! {
+        source_id :: self.source().canonical()
+        if !plan.preserve_connections.is_empty() && plan.capability.connections == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "connection preservation was requested but capability forbids it"))
+        listener_ids: [String:Bool] := [:]
+        for handle in plan.preserve_listeners -> listener_ids.insert(handle.id, true)
+        for handle in plan.preserve_connections {
+            if !handle.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
+            current :: self.connections.get(handle.id) ?? return .Err(NativeSwapError.input(source_id, .ConnectionHandleMissing, "connection handle `{handle.id}` is not resident"))
+            if !handle.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleIncompatible, "connection handle `{handle.id}` is explicitly incompatible"))
+            if current.generation != handle.generation || !current.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` does not match the resident generation"))
+            if !listener_ids.contains_key(handle.listener_id) -> return .Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved,
+                "connection `{handle.id}` names listener `{handle.listener_id}` without an explicit compatible listener handle"))
+        }
+    }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:2131
+    fn error(self: &Self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, ^detail) }
+    // Rust: crates/jet-devserver/src/NativeSwap.rs:2135
+    fn phase_error(self: &Self, detail: String) -> NativeSwapError { self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}") }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2145
+pub type CodeRevision = NativeSwapCodeRevision
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2147
+pub type DataRevision = NativeSwapDataRevision
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2149
+pub type NativeSwapResidentState = NativeSwapState
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2151
+pub type NativeSwapFailure = NativeSwapError
+
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2153
+fn receipt_from_working(working: &NativeSwapWorkingReceipt, outcome: NativeSwapOutcome, explanation: NativeSwapExplanation?) -> NativeSwapReceipt {
+    NativeSwapReceipt { source: ~working.source, outcome, before: ~working.before.revision, after: ~working.after.revision,
+        before_generation: working.before.generation, after_generation: working.after.generation,
+        preserved_listeners: ~working.preserved_listeners, reset_listeners: ~working.reset_listeners,
+        preserved_connections: ~working.preserved_connections, reset_connections: ~working.reset_connections,
+        restart_boundary: ~working.restart_boundary, explanation: ^explanation }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2174
+fn listener_map(source_id: String, executable: &NativeSwapExecutable, listeners: [NativeSwapListenerHandle]) -> [String:NativeSwapListenerHandle] NativeSwapError! {
+    if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
+    map: [String:NativeSwapListenerHandle] := [:]
+    for listener in listeners {
+        _ :: validate_identity(listener.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_source_identity(&listener.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !listener.source.matches(&executable.source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
+        if listener.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` does not match resident generation"))
+        if map.insert(~listener.id, ^listener).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
+    }
+    map
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2227
+fn connection_map(source_id: String, executable: &NativeSwapExecutable, connections: [NativeSwapConnectionHandle], listeners: &[String:NativeSwapListenerHandle]) -> [String:NativeSwapConnectionHandle] NativeSwapError! {
+    if connections.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident connection count exceeds its bounded fact limit"))
+    map: [String:NativeSwapConnectionHandle] := [:]
+    for connection in connections {
+        _ :: validate_identity(connection.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_identity(connection.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_source_identity(&connection.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !connection.source.matches(&executable.source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
+        if connection.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` does not match resident generation"))
+        if !listeners.contains_key(connection.listener_id) -> return .Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved, "connection `{connection.id}` names unknown listener `{connection.listener_id}`"))
+        if map.insert(~connection.id, ^connection).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident connection identities must be unique"))
+    }
+    map
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2298
+fn validate_identity(value: String, label: String) -> Unit Err! {
+    if value.is_empty() -> return .Err("{label} must not be empty")
+    if value.len() > MAX_NATIVE_SWAP_ID_BYTES -> return .Err("{label} exceeds {MAX_NATIVE_SWAP_ID_BYTES} bytes")
+    if value.chars().any((character) -> character.is_control()) -> return .Err("{label} contains a control character")
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2314
+fn validate_source_identity(identity: &NativeSwapSourceIdentity, label: String) -> Unit Err! {
+    validate_identity(identity.source_id, "{label} source")?
+    validate_identity(identity.module, "{label} module")
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2321
+fn validate_hot_swap_decision(source_id: String, source: &NativeSwapSourceIdentity, decision: &HotSwapDecision) -> Unit NativeSwapError! {
+    _ :: validate_identity(decision.module, "hot-swap decision module") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+    if decision.module != source.module -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module}` does not match source module `{source.module}`"))
+    if decision.state_facts().len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
+    seen: [String:Bool] := [:]
+    for fact in decision.state_facts() {
+        _ :: validate_identity(fact.key, "hot-swap retention key") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if seen.insert(fact.key, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2370
+fn decision_restart_boundary(decision: &HotSwapDecision) -> NativeSwapRestartBoundary {
+    affected := normalized_facts(~decision.changed_functions)
+    if affected.is_empty() -> affected.push(~decision.module)
+    kept: [String] := []
+    reset: [String] := []
+    for fact in decision.state_facts() {
+        if fact.decision == {
+            .Preserve -> kept.push(~fact.key)
+            .Fresh { .. } -> reset.push(~fact.key)
+        }
+    }
+    NativeSwapRestartBoundary.required(.IncompatibleType, ^affected).with_state(^kept, ^reset)
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2387
+fn validate_listener_plan_facts(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapListenerHandle]) -> Unit NativeSwapError! {
+    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
+    seen: [String:Bool] := [:]
+    for handle in handles {
+        _ :: validate_identity(handle.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_source_identity(&handle.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
+        if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2433
+fn validate_connection_plan_facts(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapConnectionHandle]) -> Unit NativeSwapError! {
+    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its connection fact limit"))
+    seen: [String:Bool] := [:]
+    for handle in handles {
+        _ :: validate_identity(handle.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_identity(handle.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _ :: validate_source_identity(&handle.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
+        if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2486
+fn validate_revision(value: String, label: String) -> Unit Err! { validate_identity(value, label) }
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2490
+fn validate_fact_list(source_id: String, facts: &[String]) -> Unit NativeSwapError! {
+    if facts.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap fact list exceeds its bounded fact limit"))
+    for fact in facts {
+        _ :: validate_identity(fact, "native swap fact") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+    }
+    seen: [String:Bool] := [:]
+    for fact in facts {
+        if seen.insert(fact, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
+    }
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2520
+fn normalized_facts(facts: [String]) -> [String] { facts.sort(); facts }
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2525
+fn bounded_text(value: String, limit: USize) -> String {
+    output := ""
+    for character in value.chars() {
+        if character.is_control() -> continue
+        if output.len() + character.len_utf8() > limit -> break
+        output.push(character)
+    }
+    output
+}
+// Rust: crates/jet-devserver/src/NativeSwap.rs:2539
+fn restart_or_reject(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+    if allows_restart && fact.is_restartable() -> NativeSwapError.restart(source_id, fact, ^detail)
+    else {
+        reason :: if fact.is_restartable() -> "capability does not allow a clean restart" else -> "blocking fact cannot be handled by a clean restart"
+        NativeSwapError.input(source_id, fact, "{detail}; {reason}")
+    }
+}

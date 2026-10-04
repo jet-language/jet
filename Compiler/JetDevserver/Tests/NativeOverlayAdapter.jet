@@ -1,0 +1,66 @@
+use jet_devserver.NativeOverlayAdapter.*
+use jet_devserver.NativeOverlayHost.[NativeOverlayPanelFact, NativeOverlayNode, NativeOverlayAction, NativeOverlayGrant, JET_DEVTOOLS_PROTOCOL]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsCommandCapabilities, DevtoolsSessionState, DevtoolsStatusFact]
+use jet_foundation.Devtools.[JetDevtoolsEvent, JetDevtoolsPayload, JetDevtoolsValue, JetDevtoolsEnvelope]
+
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1031
+fn projection(revision: String, sequence: U64, events: [JetDevtoolsEvent]) -> DevtoolsProjection {
+    return DevtoolsProjection {
+        protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: "session", source_id: .None, build_id: .None,
+        revision, world_id: .None, sequence, observed_at: 99, panels: events, selection: .None,
+        status: DevtoolsStatusFact { state: .Unavailable, diagnostic_code: .None, diagnostic: .None,
+            accepted_revision: .None, last_good_revision: .None, run_target: .None, run_output: .None, test_state: .None },
+        command_capabilities: DevtoolsCommandCapabilities { project_rebuild: false,
+            project_rebuild_reason: .Val("native overlay test projection has no rebuild executor") },
+        command_receipts: [], reset: false, truncation: false
+    }
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1069
+fn fact(_revision: String, sequence: U64) -> JetDevtoolsEvent {
+    event :: JetDevtoolsEvent.from_parts(sequence, "session", "build", "program", "{{\"ok\":true}}").unwrap()
+        .publish(JetDevtoolsPayload.one("message", JetDevtoolsValue.text("opaque payload"))).unwrap()
+    envelope := JetDevtoolsEnvelope.new("session", 0)
+    envelope.push(^event)
+    events :: envelope.events().cloned().collect()
+    return events.into_iter().next().unwrap()
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1089
+fn action_panel() -> NativeOverlayPanelFact {
+    return NativeOverlayPanelFact.new("Build", "Build", 1, "ready", [
+        NativeOverlayNode.new("run", .Action, "run").with_action(NativeOverlayAction.new("build.run", .Control))
+    ])
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1108
+#Test("projects_canonical_event_without_json_parsing") {
+    input :: projection("rev-1", 1, [fact("rev-1", 1)])
+    update :: project_projection(&input, &[]).unwrap()
+    event :: update.event.unwrap()
+    panel :: event.panels.iter().find((panel) -> panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID).unwrap()
+    root :: &panel.nodes[0]
+    assert_eq(root.status.as_deref(), .Val("build"))
+    assert_eq(root.children[4].value.as_deref(), .Val("{{\"ok\":true}}"))
+    assert_eq(root.children[5].value.as_deref(), .Val("{{\"fields\":{{\"message\":\"opaque payload\"}}}}"))
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1127
+#Test("action_request_rejects_stale_revision") {
+    adapter := NativeOverlayAdapter.new("session")
+    update :: adapter.apply_projection_with_panels(projection("rev-1", 1, [fact("rev-1", 1)]), &[action_panel()]).unwrap()
+    request :: adapter.action_request("Build", "run").unwrap()
+    second :: adapter.apply_projection_with_panels(projection("rev-2", 2, [fact("rev-2", 2)]), &[action_panel()]).unwrap()
+    assert_eq(update.identity.revision, "rev-1")
+    assert(second.reset)
+    assert(match adapter.validate_action_request(&request) {
+        .Err(.StaleRevision { expected: _, received: _ }) -> true
+        _ -> false
+    })
+}
+// Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:1145
+#Test("reset_and_truncation_are_preserved") {
+    input := projection("rev-1", 1, [fact("rev-1", 1)])
+    input.reset = true
+    input.truncation = true
+    update :: project_projection(&input, &[]).unwrap()
+    assert(update.reset)
+    assert(update.truncation)
+    assert(update.unavailable.iter().any((fact) -> fact.reason == .Reset))
+}

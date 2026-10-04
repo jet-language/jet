@@ -1,0 +1,211 @@
+use jet_devserver.Canvas.SourceModel.[write_source_if_unchanged, replace_source_if_unchanged_locked, SourceWriteError, open_target, open_parent, open_file_at, read_opened_file, O_RDONLY]
+use std.fs as fs // GATE #4494
+use std.os.unix.fs.[symlink]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.env.[temp_dir]
+use std.process.[id]
+use core.sys.target.[selected_os] // GATE #4483
+use core.files.[OSPath]
+use std.io.[Error, ErrorKind]
+use std.fmt.[format]
+
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:511
+fn test_replace_after_final_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) -> Result<Unit, Error> {
+    target :: open_target(path)?
+    moved :: path.with_file_name("main.jet.canvas-test-held")
+    fs.rename(path, moved)?
+    symlink(outside, path)?
+    target.replace(candidate, target.current.map((current) -> current.mode))?
+    .Ok(())
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:530
+fn test_replace_after_ancestor_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) -> Result<Unit, Error> {
+    target :: open_target(path)?
+    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))?
+    moved :: parent.with_file_name("canvas-test-held")
+    fs.rename(parent, moved)?
+    symlink(outside, parent)?
+    target.replace(candidate, target.current.map((current) -> current.mode))?
+    .Ok(())
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:552
+fn test_read_after_final_symlink_swap(path: OSPath, outside: OSPath) -> Result<[U8], Error> {
+    (parent, name) :: open_parent(path)?
+    file := open_file_at(parent, name, O_RDONLY)?
+    moved :: path.with_file_name("main.jet.canvas-test-held")
+    current :: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })?
+    .Ok(current.bytes)
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:569
+fn test_remove_after_final_symlink_swap(path: OSPath, outside: OSPath) -> Result<Unit, Error> {
+    target :: open_target(path)?
+    moved :: path.with_file_name("main.jet.canvas-test-held")
+    fs.rename(path, moved)?
+    symlink(outside, path)?
+    target.remove()
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:583
+fn test_remove_after_ancestor_symlink_swap(path: OSPath, outside: OSPath) -> Result<Unit, Error> {
+    target :: open_target(path)?
+    parent :: path.parent().ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "test path has no parent"))?
+    moved :: parent.with_file_name("canvas-test-held")
+    fs.rename(parent, moved)?
+    symlink(outside, parent)?
+    target.remove()
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:666
+TEST_SEQUENCE :: AtomicU64.new(0)
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:668
+fn test_path() -> OSPath {
+    root :: temp_dir().join(format("jet-canvas-source-model-{}-{}", id(), TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)))
+    fs.create_dir_all(root).unwrap()
+    root.join("main.jet")
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:685
+#Test("compare_and_publish_preserves_source_on_conflict") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        fs.write(path, "before\n").unwrap()
+        write_source_if_unchanged(path, "before\n", "after\n").unwrap()
+        assert_eq(fs.read_to_string(path).unwrap(), "after\n")
+        error :: write_source_if_unchanged(path, "before\n", "lost\n").unwrap_err()
+        assert(error is .Conflict)
+        assert_eq(fs.read_to_string(path).unwrap(), "after\n")
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:706
+#Test("compare_and_publish_preserves_source_permissions") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        fs.write(path, "before\n").unwrap()
+        fs.set_permissions(path, fs.Permissions.from_mode(0o640)).unwrap()
+        replace_source_if_unchanged_locked(path, .Some("before\n"), .Some("after\n")).unwrap()
+        assert_eq(fs.metadata(path).unwrap().permissions().mode() & 0o7777, 0o640)
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:727
+#Test("compare_and_publish_supports_new_and_removed_source") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        replace_source_if_unchanged_locked(path, .None, .Some("new\n")).unwrap()
+        assert_eq(fs.read_to_string(path).unwrap(), "new\n")
+        replace_source_if_unchanged_locked(path, .Some("new\n"), .None).unwrap()
+        assert(!path.exists())
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:743
+#Test("compare_and_publish_rejects_symlinked_source") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        outside :: path.parent().unwrap().join("outside.jet")
+        fs.write(outside, "must survive\n").unwrap()
+        symlink(outside, path).unwrap()
+        error :: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not follow symlinks")
+        assert(error is .Io(_))
+        assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:766
+#Test("compare_and_publish_rejects_symlinked_parent") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        root_file :: test_path()
+        root :: root_file.parent().unwrap()
+        outside :: root.with_file_name(format("jet-canvas-source-outside-{}", id()))
+        fs.create_dir_all(outside).unwrap()
+        outside_file :: outside.join("main.jet")
+        fs.write(outside_file, "must survive\n").unwrap()
+        linked :: root.join("linked")
+        symlink(outside, linked).unwrap()
+        path :: linked.join("main.jet")
+        error :: write_source_if_unchanged(path, "must survive\n", "attacker\n").expect_err("Canvas source writes must not traverse symlinked parents")
+        assert(error is .Io(_))
+        assert_eq(fs.read_to_string(outside_file).unwrap(), "must survive\n")
+        fs.remove_dir_all(root).unwrap()
+        fs.remove_dir_all(outside).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:798
+#Test("compare_and_publish_keeps_final_swap_inside_pinned_parent") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        outside :: path.parent().unwrap().join("outside.jet")
+        fs.write(path, "before\n").unwrap()
+        fs.write(outside, "must survive\n").unwrap()
+        test_replace_after_final_symlink_swap(path, outside, "after\n".as_bytes()).unwrap()
+        assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
+        assert_eq(fs.read_to_string(path).unwrap(), "after\n")
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:819
+#Test("compare_and_read_stays_on_opened_file_after_final_swap") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        outside :: path.parent().unwrap().join("outside.jet")
+        fs.write(path, "before\n").unwrap()
+        fs.write(outside, "must survive\n").unwrap()
+        bytes :: test_read_after_final_symlink_swap(path, outside).unwrap()
+        assert_eq(bytes, "before\n".as_bytes())
+        assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:839
+#Test("compare_and_publish_keeps_ancestor_swap_inside_pinned_parent") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        root_file :: test_path()
+        root :: root_file.parent().unwrap()
+        nested :: root.join("nested")
+        fs.create_dir_all(nested).unwrap()
+        path :: nested.join("main.jet")
+        fs.write(path, "before\n").unwrap()
+        outside :: root.with_file_name(format("{}-outside", root.file_name().unwrap().to_string_lossy()))
+        fs.create_dir_all(outside).unwrap()
+        outside_file :: outside.join("main.jet")
+        fs.write(outside_file, "must survive\n").unwrap()
+        test_replace_after_ancestor_symlink_swap(path, outside, "after\n".as_bytes()).unwrap()
+        assert_eq(fs.read_to_string(outside_file).unwrap(), "must survive\n")
+        assert_eq(fs.read_to_string(root.join("canvas-test-held/main.jet")).unwrap(), "after\n")
+        fs.remove_dir_all(root).unwrap()
+        fs.remove_dir_all(outside).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:873
+#Test("compare_and_remove_keeps_final_swap_inside_pinned_parent") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        path :: test_path()
+        outside :: path.parent().unwrap().join("outside.jet")
+        fs.write(path, "before\n").unwrap()
+        fs.write(outside, "must survive\n").unwrap()
+        moved :: path.with_file_name("main.jet.canvas-test-held")
+        test_remove_after_final_symlink_swap(path, outside).unwrap()
+        assert(fs.symlink_metadata(path).is_err())
+        assert_eq(fs.read_to_string(moved).unwrap(), "before\n")
+        assert_eq(fs.read_to_string(outside).unwrap(), "must survive\n")
+        fs.remove_dir_all(path.parent().unwrap()).unwrap()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/source_model.rs:895
+#Test("compare_and_remove_keeps_ancestor_swap_inside_pinned_parent") {
+    if selected_os() is "linux" | "android" | "macos" | "ios" {
+        root_file :: test_path()
+        root :: root_file.parent().unwrap()
+        nested :: root.join("nested")
+        fs.create_dir_all(nested).unwrap()
+        path :: nested.join("main.jet")
+        fs.write(path, "before\n").unwrap()
+        outside :: root.with_file_name(format("{}-outside", root.file_name().unwrap().to_string_lossy()))
+        fs.create_dir_all(outside).unwrap()
+        outside_file :: outside.join("main.jet")
+        fs.write(outside_file, "must survive\n").unwrap()
+        test_remove_after_ancestor_symlink_swap(path, outside).unwrap()
+        assert(!root.join("canvas-test-held/main.jet").exists())
+        assert_eq(fs.read_to_string(outside_file).unwrap(), "must survive\n")
+        fs.remove_dir_all(root).unwrap()
+        fs.remove_dir_all(outside).unwrap()
+    }
+}

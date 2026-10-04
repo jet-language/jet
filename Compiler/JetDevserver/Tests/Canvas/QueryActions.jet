@@ -1,0 +1,21 @@
+use jet_devserver.Canvas.QueryActions.[CoreCatalogMember, core_member_direct_exclusion, core_member_return_type]
+use std.fmt.[format]
+
+// Rust: crates/jet-devserver/src/Canvas/query_actions.rs:2206
+fn event_member(name: String) -> CoreCatalogMember {
+    CoreCatalogMember(name: name, signature: if name == "scope" { "event.scope()" } else { format("core.event.{}", name) }, summary: "", source: "", pure: false, available: true, stageable: false, stage_reason_code: "", stage_reason: "", receiver_type: "", unavailable_reason_code: "", unavailable_reason: "")
+}
+
+// Rust: crates/jet-devserver/src/Canvas/query_actions.rs:2228
+#Test("event_catalog_keeps_incomplete_constructors_recoverable") {
+    for name in ["new", "with_policy", "async_result", "hook", "decision_hook"] {
+        member :: event_member(name)
+        (code, reason) :: core_member_direct_exclusion("core.event", member).expect("incomplete event constructor must be excluded")
+        assert_eq(code, "needs_signature", format("wrong refusal for {}", name))
+        assert(reason.contains("explicit event type arguments"), format("{}: {}", name, reason))
+    }
+    assert(core_member_direct_exclusion("core.event", event_member("scope")).is_none())
+    (code, _) :: core_member_direct_exclusion("core.event", event_member("policy_sync")).expect("sema-only event policy constructor must remain excluded")
+    assert_eq(code, "needs_signature")
+    assert_eq(core_member_return_type("core.event", "policy_sync"), "EventPolicy")
+}

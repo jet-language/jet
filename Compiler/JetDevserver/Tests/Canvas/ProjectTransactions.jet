@@ -1,0 +1,23 @@
+use jet_devserver.Canvas.ProjectTransactions.[validate_project_path]
+use std.fs as fs // GATE #4494
+use std.env.[temp_dir]
+use std.process.[id]
+use std.os.unix.fs.[symlink] // GATE #4494
+use core.sys.target.[selected_family] // GATE #4483
+use std.fmt.[format]
+
+// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2147
+#Test("project_path_validation_rejects_symlink_components") {
+    if selected_family() == "unix" {
+        root :: temp_dir().join(format("jet-canvas-project-path-{}", id()))
+        _ :: fs.remove_dir_all(root)
+        fs.create_dir_all(root).unwrap()
+        outside :: root.with_file_name(format("jet-canvas-project-outside-{}", id()))
+        fs.create_dir_all(outside).unwrap()
+        symlink(outside, root.join("linked")).unwrap()
+        error :: validate_project_path(root, root.join("linked/new.jet"), "linked/new.jet").expect_err("Canvas must not resolve project paths through symlinks")
+        assert(error.contains("must not traverse symlinks"), error)
+        _ :: fs.remove_dir_all(root)
+        _ :: fs.remove_dir_all(outside)
+    }
+}

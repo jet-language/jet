@@ -1,0 +1,45 @@
+use jet_devserver.Canvas.DebugSourceGit.*
+use jet_devserver.Canvas.ValidationJson.[span_json]
+use jet_debug.[DebugSnapshot, ValueSnapshot, FrameSnapshot, SessionStatus]
+use std.fmt.[format]
+
+// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1430
+#Test("running_state_ignores_spoofed_completion_output") {
+    src :: "fn run() {\n    print(\"program finished\")\n}\n"
+    active :: line_span(src, 2)
+    graph :: format("{{\"node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\",\"source_span\":{},\"wire_id\":\"fn:main.jet::run@3-6:wire:1\",\"source_span\":{}}}", span_json(active), span_json(active))
+    transcript :: "breakpoint hit  main.jet:2  in main()\n   2 |     print(\"program finished\")        <- here\nprogram finished\n"
+    out :: debug_ok(src, graph, transcript, .None, SessionStatus.Running, "test-session", DebugTier.Interpreter, "main.jet", [], [], [])
+    assert(out.contains("\"state\":\"running\""), out)
+    assert(out.contains("\"debug_overlay\":\"running\""), out)
+    assert(out.contains("\"active_line\":2"), out)
+    assert(out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""), out)
+    assert(out.contains("\"active_node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\""), out)
+    assert(out.contains("\"active_wire_id\":\"fn:main.jet::run@3-6:wire:1\""), out)
+}
+
+// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1473
+#Test("runtime_snapshot_projects_typed_values_and_wire_path") {
+    src :: "fn run() {\n    total := 1\n    print(total)\n}\n"
+    active :: line_span(src, 3)
+    graph :: format("{{\"node_id\":\"node:print\",\"source_span\":{},\"wire_id\":\"wire:input\",\"source_span\":{}}},{{\"wire_id\":\"wire:output\",\"source_span\":{}}}", span_json(active), span_json(active), span_json(active))
+    snapshot :: DebugSnapshot {
+        function: "run", line: 3,
+        locals: [ValueSnapshot { name: "total", type_name: "Int", value: "1" }],
+        call_stack: [FrameSnapshot { function: "run", line: 3 }]
+    }
+    out :: debug_ok(src, graph, "program finished\n", .Val(&snapshot), SessionStatus.Running, "test-session", DebugTier.Interpreter, "main.jet", [], [], ["total"])
+    for field in ["\"runtime_state\":\"live\"", "\"active_line\":3", "\"type\":\"Int\"", "\"value\":\"1\"", "\"name\":\"total\"", "\"run()\"", "\"wire_path\":[\"wire:input\",\"wire:output\"]"] {
+        assert(out.contains(field), "runtime snapshot missing {field}: {out}")
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1524
+#Test("overlay_marks_bounded_debug_values") {
+    src :: "fn run() {\n    print(\"ok\")\n}\n"
+    huge :: "x".repeat(MAX_DEBUG_VALUE_BYTES + 128)
+    out :: debug_ok(src, "{}", "locals: value = {huge}\nvalue = {huge}", .None, SessionStatus.Finished, "test-session", DebugTier.Interpreter, "main.jet", [], [], ["value"])
+    assert(out.contains("\"locals_truncated\":true"), out)
+    assert(out.contains("\"watches_truncated\":true"), out)
+    assert(out.len() < 20 * 1024, "debug overlay escaped its bound: {out.len()}")
+}

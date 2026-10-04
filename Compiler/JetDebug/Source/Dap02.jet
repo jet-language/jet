@@ -1,1855 +1,913 @@
-// PORT-PENDING 0747 crates-jet-debug-src-dap-slice-1805: crates/jet-debug/src/Dap.rs:1805-3655
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     fn restart_target(&mut self, out: &mut impl Write, request_seq: i64) {
-//RS         let was_configuring = self.state == State::Configuring;
-//RS         if self.resume_task.is_some() {
-//RS             let settled = self.settle_resume();
-//RS             self.emit_program_output(out);
-//RS             if settled.is_err() {
-//RS                 if let Some(inf) = self.inf.take() {
-//RS                     inf.quit();
-//RS                 }
-//RS                 self.target = None;
-//RS                 self.state = State::Ready;
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     "restart",
-//RS                     22034,
-//RS                     "restart could not stop the current native target",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         }
-//RS         self.invalidate_references();
-//RS         if let Some(inf) = self.inf.take() {
-//RS             inf.quit();
-//RS         }
-//RS         self.reset_history();
-//RS         self.current_thread = 1;
-//RS         self.last_signal = None;
-//RS         self.last_exception = None;
-//RS         self.unmapped_steps = 0;
-//RS 
-//RS         let map_path = self.binary.with_extension("jetmap");
-//RS         self.map = match LineMap::load_verified(
-//RS             &map_path,
-//RS             &self.jet_file,
-//RS             &self.jet_src,
-//RS             &self.rust_file,
-//RS             &self.rust_src,
-//RS             &self.binary,
-//RS         ) {
-//RS             Ok(map) => map,
-//RS             Err(_error) => {
-//RS                 self.target = None;
-//RS                 self.entry_breakpoint_id = None;
-//RS                 self.source_breakpoint_ids.clear();
-//RS                 self.state = State::Ready;
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     "restart",
-//RS                     22037,
-//RS                     "restart target no longer matches the verified Jet build",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         };
-//RS 
-//RS         let (mut inf, entry_id) = match self.spawn_target() {
-//RS             Ok(target) => target,
-//RS             Err(_error) => {
-//RS                 self.target = None;
-//RS                 self.entry_breakpoint_id = None;
-//RS                 self.source_breakpoint_ids.clear();
-//RS                 self.state = State::Ready;
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     "restart",
-//RS                     22034,
-//RS                     "restart could not create a fresh native target",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         };
-//RS         if let Err(_error) = inf.configure_launch(
-//RS             &self.launch_args,
-//RS             self.launch_cwd.as_deref(),
-//RS             &self.launch_env,
-//RS         ) {
-//RS             inf.quit();
-//RS             self.target = None;
-//RS             self.entry_breakpoint_id = None;
-//RS             self.source_breakpoint_ids.clear();
-//RS             self.state = State::Ready;
-//RS             self.respond_jet_error(
-//RS                 out,
-//RS                 request_seq,
-//RS                 "restart",
-//RS                 22034,
-//RS                 "restart could not restore launch arguments",
-//RS             );
-//RS             return;
-//RS         }
-//RS         let (source_ids, statuses) = match Self::install_breakpoints(
-//RS             &self.map,
-//RS             &self.rust_file,
-//RS             &self.pending_breakpoints,
-//RS             &mut inf,
-//RS         ) {
-//RS             Ok(result) => result,
-//RS             Err(_error) => {
-//RS                 inf.quit();
-//RS                 self.target = None;
-//RS                 self.entry_breakpoint_id = None;
-//RS                 self.source_breakpoint_ids.clear();
-//RS                 self.state = State::Ready;
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     "restart",
-//RS                     22034,
-//RS                     "restart could not restore source breakpoints",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         };
-//RS         self.inf = Some(inf);
-//RS         self.entry_breakpoint_id = entry_id;
-//RS         self.source_breakpoint_ids = source_ids;
-//RS         self.hit_counts = vec![0; self.pending_specs.len()];
-//RS         self.target = Some(TargetKind::Launched);
-//RS         self.respond(out, request_seq, "restart", true, "{}");
-//RS         self.emit_target_started_events(out);
-//RS         self.emit_breakpoint_statuses(out, &statuses);
-//RS         if !was_configuring {
-//RS             self.start_target(out);
-//RS         }
-//RS     }
-//RS 
-//RS     fn begin_resume(&mut self, out: &mut impl Write, command: &'static str, mode: ResumeMode) {
-//RS         let Some(inf) = self.inf.take() else {
-//RS             self.terminate_with_diagnostic(
-//RS                 out,
-//RS                 "E2234",
-//RS                 "the native debugger has no target to start",
-//RS             );
-//RS             return;
-//RS         };
-//RS         self.resume_stop_requested = false;
-//RS         self.state = State::Running;
-//RS         self.resume_task = Some(ResumeTask::spawn(inf, command, mode));
-//RS     }
-//RS 
-//RS     fn start_target(&mut self, out: &mut impl Write) {
-//RS         self.begin_resume(out, "run", ResumeMode::Launch);
-//RS     }
-//RS 
-//RS     /// Dispatch one DAP request. `Some(())` to keep the loop going; `None` to
-//RS     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
-//RS     fn handle(&mut self, msg: &DataTree, out: &mut impl Write) -> Option<()> {
-//RS         let command = json_get(msg, "command").and_then(json_str)?;
-//RS         let client_seq = json_get(msg, "seq").and_then(json_u32)?;
-//RS         let request_seq = i64::from(client_seq);
-//RS         if !self.client_sequences.insert(client_seq) {
-//RS             self.respond_jet_error(
-//RS                 out,
-//RS                 request_seq,
-//RS                 command,
-//RS                 22032,
-//RS                 "request sequence numbers must be unique",
-//RS             );
-//RS             return Some(());
-//RS         }
-//RS         let args = json_get(msg, "arguments");
-//RS         match command {
-//RS             "initialize" => {
-//RS                 if self.state != State::New {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "initialize is only legal once at the start of a DAP session",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let initialize = match parse_initialize_arguments(args) {
-//RS                     Ok(arguments) => arguments,
-//RS                     Err(message) => {
-//RS                         self.respond_jet_error(out, request_seq, command, 22032, message);
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 self.lines_start_at_1 = initialize.lines_start_at_1;
-//RS                 self.columns_start_at_1 = initialize.columns_start_at_1;
-//RS                 self.supports_ansi_styling = initialize.supports_ansi_styling;
-//RS                 self.state = State::Ready;
-//RS                 self.respond(
-//RS                     out,
-//RS                     request_seq,
-//RS                     "initialize",
-//RS                     true,
-//RS                     "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsStepBack\":true,\"supportsDataBreakpoints\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS             "launch" | "attach" => {
-//RS                 if self.state != State::Ready {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "launch or attach requires a successful initialize request",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let progress_id = format!("jet-debug-{request_seq}");
-//RS                 self.progress_start(out, &progress_id, "Starting Jet debug target");
-//RS                 let target = if command == "launch" {
-//RS                     let launch = match parse_launch_arguments(args, &self.jet_file) {
-//RS                         Ok(launch) => launch,
-//RS                         Err(message) => {
-//RS                             self.progress_end(out, &progress_id, "Invalid launch configuration");
-//RS                             self.respond_jet_error(out, request_seq, command, 22032, message);
-//RS                             return Some(());
-//RS                         }
-//RS                     };
-//RS                     if let Some(value) = args.and_then(|args| json_get(args, "stopOnEntry")) {
-//RS                         let Some(value) = json_bool(value) else {
-//RS                             self.progress_end(out, &progress_id, "Invalid launch configuration");
-//RS                             self.respond_jet_error(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 22032,
-//RS                                 "stopOnEntry must be a boolean",
-//RS                             );
-//RS                             return Some(());
-//RS                         };
-//RS                         self.stop_on_entry = value;
-//RS                     }
-//RS                     let target = self.spawn_target().and_then(|(mut inf, id)| {
-//RS                         inf.configure_launch(&launch.args, launch.cwd.as_deref(), &launch.env)?;
-//RS                         Ok((inf, id))
-//RS                     });
-//RS                     if target.is_ok() {
-//RS                         self.show_raw_frames = launch.show_raw_frames;
-//RS                         self.launch_args = launch.args;
-//RS                         self.launch_cwd = launch.cwd;
-//RS                         self.launch_env = launch.env;
-//RS                     }
-//RS                     target
-//RS                 } else {
-//RS                     match self.attach_target(args) {
-//RS                         Ok((inf, map, show_raw_frames)) => {
-//RS                             self.map = map;
-//RS                             self.show_raw_frames = show_raw_frames;
-//RS                             Ok((inf, None))
-//RS                         }
-//RS                         Err(failure) => {
-//RS                             let (id, format) = failure.error();
-//RS                             self.progress_end(out, &progress_id, "Attach rejected");
-//RS                             self.respond_jet_error(out, request_seq, command, id, format);
-//RS                             return Some(());
-//RS                         }
-//RS                     }
-//RS                 };
-//RS                 match target {
-//RS                     Ok((inf, entry_id)) => {
-//RS                         self.progress_end(out, &progress_id, "Jet debug target ready");
-//RS                         self.inf = Some(inf);
-//RS                         self.entry_breakpoint_id = entry_id;
-//RS                         self.source_breakpoint_ids.clear();
-//RS                         self.target = Some(if command == "launch" {
-//RS                             TargetKind::Launched
-//RS                         } else {
-//RS                             TargetKind::Attached
-//RS                         });
-//RS                         self.state = State::Configuring;
-//RS                         self.respond(out, request_seq, command, true, "{}");
-//RS                         self.event(out, "initialized", "{}");
-//RS                     }
-//RS                     Err(_error) => {
-//RS                         self.progress_end(out, &progress_id, "Target setup failed");
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22034,
-//RS                             "the native debugger could not create the requested target",
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "restart" => {
-//RS                 if !matches!(
-//RS                     self.state,
-//RS                     State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "restart requires an active launched Jet target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 match self.target {
-//RS                     Some(TargetKind::Launched) => {
-//RS                         self.restart_target(out, request_seq);
-//RS                     }
-//RS                     Some(TargetKind::Attached) => self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22033,
-//RS                         "restart is only supported for a launched Jet target",
-//RS                     ),
-//RS                     _ => self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "restart is not legal before a launched Jet target exists",
-//RS                     ),
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "setBreakpoints" => {
-//RS                 if !matches!(
-//RS                     self.state,
-//RS                     State::Ready | State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "source breakpoints are not legal after the target terminated",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if let Err(message) = breakpoint_source(args, &self.jet_file) {
-//RS                     self.respond_jet_error(out, request_seq, command, 22032, message);
-//RS                     return Some(());
-//RS                 }
-//RS                 let specs = match breakpoint_specs_for_origin(args, self.lines_start_at_1) {
-//RS                     Ok(specs) => specs,
-//RS                     Err(message) => {
-//RS                         self.respond_err(out, request_seq, command, message);
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 if let Err(message) = validate_breakpoint_specs(&specs) {
-//RS                     self.respond_jet_error(out, request_seq, command, 22032, message);
-//RS                     return Some(());
-//RS                 }
-//RS                 let lines: Vec<usize> = specs.iter().map(|spec| spec.line).collect();
-//RS                 let client_ids = self.assign_client_breakpoint_ids(&specs);
-//RS                 // Keep the state the backend is actually running with. Every
-//RS                 // path below can still refuse the replacement, and leaving the
-//RS                 // new specs recorded would make the adapter disagree with the
-//RS                 // inferior about which breakpoints exist.
-//RS                 let previous_breakpoints = self.pending_breakpoints.clone();
-//RS                 let previous_specs = self.pending_specs.clone();
-//RS                 let previous_client_ids = self.client_breakpoint_ids.clone();
-//RS                 let previous_hit_counts = self.hit_counts.clone();
-//RS                 self.pending_breakpoints = lines.clone();
-//RS                 self.pending_specs = specs;
-//RS                 self.client_breakpoint_ids = client_ids.clone();
-//RS                 self.hit_counts = vec![0; lines.len()];
-//RS                 let resume_after_replacement =
-//RS                     self.state == State::Running && !self.resume_stop_requested;
-//RS                 if resume_after_replacement && self.resume_task.is_some() {
-//RS                     let (mode, result) = match self.take_resume_result() {
-//RS                         Ok(event) => event,
-//RS                         Err(error) => {
-//RS                             self.respond_backend_error(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 &error,
-//RS                                 "the native debugger could not settle before replacing source breakpoints",
-//RS                             );
-//RS                             self.terminate_backend(
-//RS                                 out,
-//RS                                 &error,
-//RS                                 "the native debugger lost the running session while replacing source breakpoints",
-//RS                             );
-//RS                             return Some(());
-//RS                         }
-//RS                     };
-//RS                     match result {
-//RS                         Ok(result) => self.emit_resume(out, result, mode),
-//RS                         Err(error) => {
-//RS                             self.respond_backend_error(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 &error,
-//RS                                 "the native debugger could not settle before replacing source breakpoints",
-//RS                             );
-//RS                             self.terminate_backend(
-//RS                                 out,
-//RS                                 &error,
-//RS                                 "the native debugger lost the running session while replacing source breakpoints",
-//RS                             );
-//RS                             return Some(());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 if self.state == State::Terminated || self.terminal_failure {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22034,
-//RS                         "the native debugger target terminated before source breakpoints could be replaced",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let statuses = if matches!(
-//RS                     self.state,
-//RS                     State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     match self.replace_source_breakpoints() {
-//RS                         Ok(statuses) => statuses,
-//RS                         Err(_error) => {
-//RS                             self.pending_breakpoints = previous_breakpoints;
-//RS                             self.pending_specs = previous_specs;
-//RS                             self.client_breakpoint_ids = previous_client_ids;
-//RS                             self.hit_counts = previous_hit_counts;
-//RS                             self.respond_err(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 "the native debugger could not replace source breakpoints",
-//RS                             );
-//RS                             return Some(());
-//RS                         }
-//RS                     }
-//RS                 } else {
-//RS                     lines
-//RS                         .iter()
-//RS                         .map(|line| self.map.rust_line_for(*line).is_some())
-//RS                         .collect()
-//RS                 };
-//RS                 let verified: Vec<String> = lines
-//RS                     .iter()
-//RS                     .zip(client_ids)
-//RS                     .zip(statuses)
-//RS                     .zip(self.pending_specs.iter())
-//RS                     .map(|(((line, id), verified), spec)| {
-//RS                         let verified = verified
-//RS                             && spec
-//RS                                 .condition
-//RS                                 .as_deref()
-//RS                                 .is_none_or(valid_condition)
-//RS                             && spec
-//RS                                 .hit_condition
-//RS                                 .as_deref()
-//RS                                 .is_none_or(valid_hit_condition);
-//RS                         if verified {
-//RS                             format!(
-//RS                                 "{{\"id\":{id},\"verified\":true,\"line\":{}}}",
-//RS                                 self.dap_line(*line)
-//RS                             )
-//RS                         } else {
-//RS                             format!(
-//RS                                 "{{\"id\":{id},\"verified\":false,\"line\":{},\"message\":\"E2235: no stoppable Jet statement at {}:{}\"}}",
-//RS                                 self.dap_line(*line),
-//RS                                 json_escape(&self.source_path()),
-//RS                                 self.dap_line(*line)
-//RS                             )
-//RS                         }
-//RS                     })
-//RS                     .collect();
-//RS                 let body = format!("{{\"breakpoints\":[{}]}}", verified.join(","));
-//RS                 self.respond(out, request_seq, command, true, &body);
-//RS                 if resume_after_replacement {
-//RS                     self.state = State::Running;
-//RS                     let mode = if self.entry_breakpoint_id.is_some() {
-//RS                         ResumeMode::Launch
-//RS                     } else {
-//RS                         ResumeMode::Continue
-//RS                     };
-//RS                     self.begin_resume(out, "continue", mode);
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "configurationDone" => {
-//RS                 if self.state != State::Configuring {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "configurationDone requires a launched or attached target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 self.respond(out, request_seq, command, true, "{}");
-//RS                 self.emit_target_started_events(out);
-//RS                 self.apply_pending_breakpoints_and_run(out);
-//RS                 Some(())
-//RS             }
-//RS             "threads" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "threads requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let threads = match self.inf.as_mut().map(Inferior::thread_backtraces) {
-//RS                     Some(Ok(threads)) => threads
-//RS                         .into_iter()
-//RS                         .filter_map(|(thread, backtrace)| {
-//RS                             let frames = Inferior::parse_frames(&backtrace);
-//RS                             has_jet_frame(&frames, &self.map, &self.rust_file).then(|| {
-//RS                                 (
-//RS                                     thread.id,
-//RS                                     jet_thread_name(
-//RS                                         thread.id,
-//RS                                         &backtrace,
-//RS                                         &self.map,
-//RS                                         &self.rust_file,
-//RS                                     ),
-//RS                                 )
-//RS                             })
-//RS                         })
-//RS                         .collect::<Vec<_>>(),
-//RS                     Some(Err(error)) => {
-//RS                         self.respond_backend_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             &error,
-//RS                             "the native debugger could not list Jet tasks",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     None => {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22031,
-//RS                             "threads requires a stopped target",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 if threads.is_empty() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22039,
-//RS                         "the stopped target has no verified Jet task",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let thread_json = threads
-//RS                     .iter()
-//RS                     .map(|(thread_id, name)| {
-//RS                         format!(
-//RS                             "{{\"id\":{},\"name\":\"{}\"}}",
-//RS                             thread_id,
-//RS                             json_escape(&name)
-//RS                         )
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",");
-//RS                 self.respond(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     true,
-//RS                     &format!("{{\"threads\":[{}]}}", thread_json),
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS             "stackTrace" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "stackTrace requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let Some(thread_id) = args
-//RS                     .and_then(|args| json_get(args, "threadId"))
-//RS                     .and_then(json_u32)
-//RS                     .filter(|thread_id| *thread_id > 0)
-//RS                 else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22032,
-//RS                         "stackTrace threadId must be a positive integer",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 if self.history_cursor.is_some() {
-//RS                     let start_frame = args
-//RS                         .and_then(|args| json_get(args, "startFrame"))
-//RS                         .and_then(json_u32)
-//RS                         .unwrap_or(0) as usize;
-//RS                     let levels = args
-//RS                         .and_then(|args| json_get(args, "levels"))
-//RS                         .and_then(json_u32)
-//RS                         .map(|levels| levels as usize);
-//RS                     let Some(body) = self.history_stack_body(thread_id, start_frame, levels) else {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22034,
-//RS                             "the recorded Jet stack is unavailable at this stop",
-//RS                         );
-//RS                         return Some(());
-//RS                     };
-//RS                     self.current_thread = thread_id;
-//RS                     self.respond(out, request_seq, command, true, &body);
-//RS                     return Some(());
-//RS                 }
-//RS                 if let Some(inf) = self.inf.as_mut() {
-//RS                     if let Err(_error) = inf.select_thread(thread_id) {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22034,
-//RS                             "the requested Jet task is no longer stopped",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     self.current_thread = thread_id;
-//RS                 }
-//RS                 let show_raw_frames = match self.raw_frames_for_request(args) {
-//RS                     Ok(value) => value,
-//RS                     Err(message) => {
-//RS                         self.respond_jet_error(out, request_seq, command, 22032, message);
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 let frames = match self.inf.as_mut().map(Inferior::backtrace) {
-//RS                     Some(Ok(out_text)) => Inferior::parse_frames(&out_text),
-//RS                     Some(Err(error)) => {
-//RS                         self.respond_backend_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             &error,
-//RS                             "the native debugger could not read the Jet stack",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     None => {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22031,
-//RS                             "stackTrace requires a stopped target",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 if !has_jet_frame(&frames, &self.map, &self.rust_file) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22039,
-//RS                         "the stopped target has no verified Jet frame",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let start_frame = args
-//RS                     .and_then(|args| json_get(args, "startFrame"))
-//RS                     .and_then(json_u32)
-//RS                     .unwrap_or(0) as usize;
-//RS                 let levels = args
-//RS                     .and_then(|args| json_get(args, "levels"))
-//RS                     .and_then(json_u32)
-//RS                     .map(|levels| levels as usize);
-//RS                 let projected =
-//RS                     project_frames(&frames, &self.map, &self.rust_file, show_raw_frames);
-//RS                 let total_frames = projected.len();
-//RS                 let mut entries = Vec::new();
-//RS                 for projected in projected
-//RS                     .into_iter()
-//RS                     .skip(start_frame)
-//RS                     .take(levels.unwrap_or(usize::MAX))
-//RS                 {
-//RS                     if projected.raw {
-//RS                         let id = self
-//RS                             .references
-//RS                             .issue_raw_frame(thread_id, projected.position);
-//RS                         entries.push(format!(
-//RS                             "{{\"id\":{},\"name\":\"[raw] {}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
-//RS                             id,
-//RS                             json_escape(&projected.frame.func),
-//RS                             json_escape(&projected.frame.rust_file),
-//RS                             self.dap_line(projected.frame.rust_line),
-//RS                             self.dap_column(1)
-//RS                         ));
-//RS                     } else if let Some(jline) = projected.jet_line {
-//RS                         let id = self.references.issue_frame(thread_id, projected.position);
-//RS                         entries.push(format!(
-//RS                             "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
-//RS                             id,
-//RS                             json_escape(&Inferior::safe_jet_func(&projected.frame.func)),
-//RS                             json_escape(&self.source_path()),
-//RS                             self.dap_line(jline),
-//RS                             self.dap_column(1)
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 let body = format!(
-//RS                     "{{\"stackFrames\":[{}],\"totalFrames\":{}}}",
-//RS                     entries.join(","),
-//RS                     total_frames
-//RS                 );
-//RS                 self.respond(out, request_seq, command, true, &body);
-//RS                 Some(())
-//RS             }
-//RS             "scopes" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "scopes requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let Some(frame_id) = args
-//RS                     .and_then(|args| json_get(args, "frameId"))
-//RS                     .and_then(json_u32)
-//RS                 else {
-//RS                     self.respond_err(out, request_seq, command, "frameId is required");
-//RS                     return Some(());
-//RS                 };
-//RS                 if !self.references.is_live(frame_id, ReferenceKind::Frame) {
-//RS                     self.respond_stale_reference(out, request_seq, command);
-//RS                     return Some(());
-//RS                 }
-//RS                 let Some(_location) = self.references.frame_location(frame_id) else {
-//RS                     self.respond_stale_reference(out, request_seq, command);
-//RS                     return Some(());
-//RS                 };
-//RS                 let requested_raw = match args.and_then(|args| json_get(args, "showRawFrames")) {
-//RS                     None => false,
-//RS                     Some(value) => match json_bool(value) {
-//RS                         Some(value) => value,
-//RS                         None => {
-//RS                             self.respond_jet_error(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 22032,
-//RS                                 "showRawFrames must be a boolean",
-//RS                             );
-//RS                             return Some(());
-//RS                         }
-//RS                     },
-//RS                 };
-//RS                 let raw_frame = self.references.frame_is_raw(frame_id).unwrap_or(false);
-//RS                 let show_raw_frames = requested_raw || self.show_raw_frames || raw_frame;
-//RS                 let mut scopes = Vec::new();
-//RS                 if raw_frame {
-//RS                     let scope_id = self
-//RS                         .references
-//RS                         .issue_scope(frame_id, ReferenceKind::RawScope);
-//RS                     scopes.push(format!(
-//RS                         "{{\"name\":\"[raw] Locals\",\"variablesReference\":{},\"expensive\":false}}",
-//RS                         scope_id
-//RS                     ));
-//RS                 } else {
-//RS                     let scope_id = self.references.issue_scope(frame_id, ReferenceKind::Scope);
-//RS                     scopes.push(format!(
-//RS                         "{{\"name\":\"Locals\",\"variablesReference\":{},\"expensive\":false}}",
-//RS                         scope_id
-//RS                     ));
-//RS                     if show_raw_frames {
-//RS                         let raw_scope_id = self
-//RS                             .references
-//RS                             .issue_scope(frame_id, ReferenceKind::RawScope);
-//RS                         scopes.push(format!(
-//RS                             "{{\"name\":\"[raw] Locals\",\"variablesReference\":{},\"expensive\":false}}",
-//RS                             raw_scope_id
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 let body = format!("{{\"scopes\":[{}]}}", scopes.join(","));
-//RS                 self.respond(out, request_seq, command, true, &body);
-//RS                 Some(())
-//RS             }
-//RS             "variables" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "variables requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let Some(scope_id) = args
-//RS                     .and_then(|args| json_get(args, "variablesReference"))
-//RS                     .and_then(json_u32)
-//RS                 else {
-//RS                     self.respond_err(out, request_seq, command, "variablesReference is required");
-//RS                     return Some(());
-//RS                 };
-//RS                 if self.history_cursor.is_some() {
-//RS                     if !self.references.is_live(scope_id, ReferenceKind::Scope) {
-//RS                         self.respond_stale_reference(out, request_seq, command);
-//RS                         return Some(());
-//RS                     }
-//RS                     let Some(body) = self.history_variables_body() else {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22034,
-//RS                             "recorded Jet locals are unavailable at this stop",
-//RS                         );
-//RS                         return Some(());
-//RS                     };
-//RS                     self.respond(out, request_seq, command, true, &body);
-//RS                     return Some(());
-//RS                 }
-//RS                 let value_reference = if self.references.is_live(scope_id, ReferenceKind::Value) {
-//RS                     let Some(value) = self.references.value(scope_id) else {
-//RS                         self.respond_stale_reference(out, request_seq, command);
-//RS                         return Some(());
-//RS                     };
-//RS                     Some((value.frame, value.expression.clone(), value.raw))
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 let raw_scope = value_reference
-//RS                     .as_ref()
-//RS                     .map(|(_, _, raw)| *raw)
-//RS                     .or_else(|| {
-//RS                         if self.references.is_live(scope_id, ReferenceKind::RawScope) {
-//RS                             Some(true)
-//RS                         } else if self.references.is_live(scope_id, ReferenceKind::Scope) {
-//RS                             Some(false)
-//RS                         } else {
-//RS                             None
-//RS                         }
-//RS                     });
-//RS                 let Some(raw_scope) = raw_scope else {
-//RS                     self.respond_stale_reference(out, request_seq, command);
-//RS                     return Some(());
-//RS                 };
-//RS                 let Some(frame) = value_reference
-//RS                     .as_ref()
-//RS                     .map(|(frame, _, _)| *frame)
-//RS                     .or_else(|| self.references.scope_location(scope_id))
-//RS                 else {
-//RS                     self.respond_stale_reference(out, request_seq, command);
-//RS                     return Some(());
-//RS                 };
-//RS                 self.current_thread = frame.thread_id;
-//RS                 if let Some(inf) = self.inf.as_mut() {
-//RS                     if inf.select_thread(frame.thread_id).is_err()
-//RS                         || inf.select_frame(frame.position).is_err()
-//RS                     {
-//RS                         self.respond_stale_reference(out, request_seq, command);
-//RS                         return Some(());
-//RS                     }
-//RS                 }
-//RS                 let locals = match self.inf.as_mut().map(|inf| {
-//RS                     if let Some((_, expression, _)) = value_reference.as_ref() {
-//RS                         inf.frame_variable(expression)
-//RS                     } else {
-//RS                         inf.locals()
-//RS                     }
-//RS                 }) {
-//RS                     Some(Ok(output)) => {
-//RS                         if value_reference.is_some() {
-//RS                             Inferior::parse_variable_children(&output)
-//RS                         } else {
-//RS                             Inferior::parse_typed_locals(&output)
-//RS                         }
-//RS                     }
-//RS                     Some(Err(error)) => {
-//RS                         self.respond_backend_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             &error,
-//RS                             "the native debugger could not read Jet variables",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     None => {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22031,
-//RS                             "variables requires a stopped target",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 // I2: only safe Jet bindings cross the adapter boundary. Rust
-//RS                 // temporaries, addresses, layouts, and optimized storage stay
-//RS                 // inside the backend.
-//RS                 let start = match args.and_then(|args| json_get(args, "start")) {
-//RS                     None => 0usize,
-//RS                     Some(value) => {
-//RS                         match json_u32(value).and_then(|value| usize::try_from(value).ok()) {
-//RS                             Some(value) => value,
-//RS                             None => {
-//RS                                 self.respond_jet_error(
-//RS                                     out,
-//RS                                     request_seq,
-//RS                                     command,
-//RS                                     22032,
-//RS                                     "variables start must be a nonnegative integer",
-//RS                                 );
-//RS                                 return Some(());
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 };
-//RS                 let count = match args.and_then(|args| json_get(args, "count")) {
-//RS                     None => None,
-//RS                     Some(value) => {
-//RS                         match json_u32(value).and_then(|value| usize::try_from(value).ok()) {
-//RS                             Some(value) => Some(value),
-//RS                             None => {
-//RS                                 self.respond_jet_error(
-//RS                                     out,
-//RS                                     request_seq,
-//RS                                     command,
-//RS                                     22032,
-//RS                                     "variables count must be a nonnegative integer",
-//RS                                 );
-//RS                                 return Some(());
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 };
-//RS                 let entries: Vec<String> = locals
-//RS                     .iter()
-//RS                     .filter_map(|(ty, name, value)| {
-//RS                         if value_reference.is_none()
-//RS                             && !raw_scope
-//RS                             && !Inferior::rust_local_is_jet_visible(name)
-//RS                         {
-//RS                             return None;
-//RS                         }
-//RS                         let display_name = if raw_scope {
-//RS                             name.clone()
-//RS                         } else if value_reference.is_some() {
-//RS                             Inferior::rust_member_to_jet(name)?
-//RS                         } else {
-//RS                             Inferior::rust_local_to_jet(name)?
-//RS                         };
-//RS                         let safe_value = if raw_scope {
-//RS                             value.clone()
-//RS                         } else {
-//RS                             Inferior::safe_value(ty, value)
-//RS                         };
-//RS                         let type_json = if raw_scope {
-//RS                             format!(",\"type\":\"{}\"", json_escape(ty))
-//RS                         } else {
-//RS                             Inferior::jet_type_name(ty)
-//RS                                 .map(|ty| format!(",\"type\":\"{}\"", json_escape(ty)))
-//RS                                 .unwrap_or_default()
-//RS                         };
-//RS                         let variables_reference = if Inferior::has_nested_value(value) {
-//RS                             let expression = if let Some((_, parent, _)) = value_reference.as_ref()
-//RS                             {
-//RS                                 if name.starts_with('[') {
-//RS                                     format!("{parent}{name}")
-//RS                                 } else {
-//RS                                     format!("{parent}.{name}")
-//RS                                 }
-//RS                             } else if raw_scope {
-//RS                                 name.clone()
-//RS                             } else {
-//RS                                 Inferior::jet_local_to_rust(&display_name)
-//RS                             };
-//RS                             self.references.issue_value_at(frame, expression, raw_scope)
-//RS                         } else {
-//RS                             0
-//RS                         };
-//RS                         Some(format!(
-//RS                             "{{\"name\":\"{}\",\"value\":\"{}\"{},\"variablesReference\":{}}}",
-//RS                             json_escape(&display_name),
-//RS                             json_escape(&safe_value),
-//RS                             type_json,
-//RS                             variables_reference
-//RS                         ))
-//RS                     })
-//RS                     .collect();
-//RS                 let total = entries.len();
-//RS                 let entries = entries
-//RS                     .into_iter()
-//RS                     .skip(start)
-//RS                     .take(count.unwrap_or(usize::MAX))
-//RS                     .collect::<Vec<_>>();
-//RS                 let body = format!(
-//RS                     "{{\"variables\":[{}],\"namedVariables\":{}}}",
-//RS                     entries.join(","),
-//RS                     total
-//RS                 );
-//RS                 self.respond(out, request_seq, command, true, &body);
-//RS                 Some(())
-//RS             }
-//RS             "evaluate" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "evaluate requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if let Some(context) = args.and_then(|args| json_get(args, "context")) {
-//RS                     if !matches!(json_str(context), Some("hover" | "watch" | "repl")) {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22032,
-//RS                             "evaluate context must be hover, watch, or repl",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                 }
-//RS                 let Some(expression) = args
-//RS                     .and_then(|args| json_get(args, "expression"))
-//RS                     .and_then(json_str)
-//RS                 else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22032,
-//RS                         "evaluate requires a Jet expression",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 let Some((root, suffix)) = jet_expression(expression) else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22033,
-//RS                         "only bounded read-only Jet local paths can be evaluated",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 if let Some(frame_id) = args
-//RS                     .and_then(|args| json_get(args, "frameId"))
-//RS                     .and_then(json_u32)
-//RS                 {
-//RS                     if !self.references.is_live(frame_id, ReferenceKind::Frame) {
-//RS                         self.respond_stale_reference(out, request_seq, command);
-//RS                         return Some(());
-//RS                     }
-//RS                     let Some(frame) = self.references.frame_location(frame_id) else {
-//RS                         self.respond_stale_reference(out, request_seq, command);
-//RS                         return Some(());
-//RS                     };
-//RS                     self.current_thread = frame.thread_id;
-//RS                     if let Some(inf) = self.inf.as_mut() {
-//RS                         if inf.select_thread(frame.thread_id).is_err()
-//RS                             || inf.select_frame(frame.position).is_err()
-//RS                         {
-//RS                             self.respond_stale_reference(out, request_seq, command);
-//RS                             return Some(());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let Some(rust_expression) = Inferior::jet_path_to_rust(&root, &suffix) else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22033,
-//RS                         "only bounded read-only Jet local paths can be evaluated",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 let output = match self
-//RS                     .inf
-//RS                     .as_mut()
-//RS                     .map(|inf| inf.frame_variable(&rust_expression))
-//RS                 {
-//RS                     Some(Ok(output)) => output,
-//RS                     Some(Err(error)) => {
-//RS                         self.respond_backend_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             &error,
-//RS                             "the Jet expression is unavailable at this stop",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     None => {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22034,
-//RS                             "the Jet expression is unavailable at this stop",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                 };
-//RS                 let Some((ty, _name, value)) =
-//RS                     Inferior::parse_typed_locals(&output).into_iter().next()
-//RS                 else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22034,
-//RS                         "the Jet expression has no readable value at this stop",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 let safe = Inferior::safe_value(&ty, &value);
-//RS                 let type_json = Inferior::jet_type_name(&ty)
-//RS                     .map(|ty| format!(",\"type\":\"{}\"", json_escape(ty)))
-//RS                     .unwrap_or_default();
-//RS                 self.respond(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     true,
-//RS                     &format!(
-//RS                         "{{\"result\":\"{}\"{} ,\"variablesReference\":0}}",
-//RS                         json_escape(&safe),
-//RS                         type_json
-//RS                     ),
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS             "reverseStep" | "stepBack" => {
-//RS                 self.reverse_history(out, request_seq, command, false);
-//RS                 Some(())
-//RS             }
-//RS             "reverseContinue" => {
-//RS                 self.reverse_history(out, request_seq, command, true);
-//RS                 Some(())
-//RS             }
-//RS             "dataBreakpointInfo" => {
-//RS                 self.data_breakpoint_info(out, request_seq, command, args);
-//RS                 Some(())
-//RS             }
-//RS             "setDataBreakpoints" => {
-//RS                 self.set_data_breakpoints(out, request_seq, command, args);
-//RS                 Some(())
-//RS             }
-//RS             "setExpression" => {
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     22033,
-//RS                     "setExpression cannot mutate a native Jet frame; use fix with an edited source checkpoint",
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS             "fix" => {
-//RS                 self.apply_fix(out, request_seq, command, args);
-//RS                 Some(())
-//RS             }
-//RS 
-//RS             "continue" | "next" | "stepIn" | "stepOut" => {
-//RS                 if self.state != State::Stopped {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "run control requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if self.history_cursor.is_some() {
-//RS                     let thread_id = args
-//RS                         .and_then(|args| json_get(args, "threadId"))
-//RS                         .and_then(json_u32)
-//RS                         .filter(|thread_id| *thread_id > 0);
-//RS                     if thread_id.is_none() {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22032,
-//RS                             "run control requires a positive threadId",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     self.current_thread = thread_id.expect("checked above");
-//RS                     self.replay_forward_history(out, request_seq, command, None);
-//RS                     return Some(());
-//RS                 }
-//RS                 if self.inf.is_none() {
-//RS                     self.invalidate_references();
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22034,
-//RS                         "Jet debugger has no target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if let Err((id, message)) = self.select_resume_thread(args) {
-//RS                     self.respond_jet_error(out, request_seq, command, id, message);
-//RS                     return Some(());
-//RS                 }
-//RS                 self.invalidate_references();
-//RS                 let resume_cmd = match command {
-//RS                     "continue" => "continue",
-//RS                     "next" => "thread step-over",
-//RS                     "stepIn" => "thread step-in",
-//RS                     _ => "thread step-out",
-//RS                 };
-//RS                 self.state = State::Running;
-//RS                 self.respond(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     true,
-//RS                     "{\"allThreadsContinued\":true}",
-//RS                 );
-//RS                 let mode = if command == "continue" {
-//RS                     ResumeMode::Continue
-//RS                 } else {
-//RS                     ResumeMode::Step
-//RS                 };
-//RS                 self.begin_resume(out, resume_cmd, mode);
-//RS                 Some(())
-//RS             }
-//RS             "pause" => {
-//RS                 if self.state != State::Running {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "pause requires a running target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if self.resume_task.is_some() {
-//RS                     self.resume_stop_requested = true;
-//RS                     if let Some(task) = self.resume_task.as_ref() {
-//RS                         task.interrupt();
-//RS                     }
-//RS                     self.invalidate_references();
-//RS                     self.respond(out, request_seq, command, true, "{}");
-//RS                     return Some(());
-//RS                 }
-//RS                 if self.inf.is_none() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22034,
-//RS                         "Jet debugger has no target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 self.invalidate_references();
-//RS                 self.respond(out, request_seq, command, true, "{}");
-//RS                 let result = self.inf.as_mut().map(Inferior::interrupt);
-//RS                 match result {
-//RS                     Some(Ok(bt_text)) => {
-//RS                         self.emit_resume(out, ResumeResult::Stopped(bt_text), ResumeMode::Pause);
-//RS                     }
-//RS                     Some(Err(error)) => {
-//RS                         self.terminate_backend(
-//RS                             out,
-//RS                             &error,
-//RS                             "the native debugger could not pause the program",
-//RS                         );
-//RS                     }
-//RS                     None => {
-//RS                         self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target");
-//RS                     }
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "setExceptionBreakpoints" => {
-//RS                 if !matches!(
-//RS                     self.state,
-//RS                     State::Ready | State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "exception filters are not legal before initialize or after termination",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 let Some(filters) = args.and_then(|args| json_get(args, "filters")) else {
-//RS                     self.exception_filters.clear();
-//RS                     self.respond(out, request_seq, command, true, "{}");
-//RS                     return Some(());
-//RS                 };
-//RS                 let DataTree::Array(values) = filters else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22032,
-//RS                         "exception filters must be a bounded array of Jet panic, error, signal, or all",
-//RS                     );
-//RS                     return Some(());
-//RS                 };
-//RS                 let mut selected = HashSet::new();
-//RS                 for value in values {
-//RS                     let Some(filter) = json_str(value) else {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22032,
-//RS                             "exception filters must be Jet panic, error, signal, or all",
-//RS                         );
-//RS                         return Some(());
-//RS                     };
-//RS                     if !matches!(filter, "all" | "error" | "panic" | "signal") {
-//RS                         self.respond_jet_error(
-//RS                             out,
-//RS                             request_seq,
-//RS                             command,
-//RS                             22032,
-//RS                             "exception filters must be Jet panic, error, signal, or all",
-//RS                         );
-//RS                         return Some(());
-//RS                     }
-//RS                     selected.insert(filter.to_string());
-//RS                 }
-//RS                 self.exception_filters = selected;
-//RS                 self.respond(out, request_seq, command, true, "{}");
-//RS                 Some(())
-//RS             }
-//RS             "exceptionInfo" => {
-//RS                 if !self.state.is_stopped() {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "exceptionInfo requires a stopped target",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 if let Some(kind) = self.last_exception.as_deref() {
-//RS                     let (exception_id, description) = if kind == "panic" {
-//RS                         ("JetPanic", "Jet panic".to_string())
-//RS                     } else if kind == "error" {
-//RS                         ("JetError", "Jet error".to_string())
-//RS                     } else {
-//RS                         (kind, format!("Jet target stopped on {kind}"))
-//RS                     };
-//RS                     self.respond(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         true,
-//RS                         &format!(
-//RS                             "{{\"exceptionId\":\"{}\",\"description\":\"{}\"}}",
-//RS                             json_escape(exception_id),
-//RS                             json_escape(&description)
-//RS                         ),
-//RS                     );
-//RS                 } else {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22034,
-//RS                         "the stopped Jet target has no exception information",
-//RS                     );
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "loadedSources" => {
-//RS                 if !matches!(
-//RS                     self.state,
-//RS                     State::Ready | State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "loadedSources requires an initialized debugger session",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 self.respond(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     true,
-//RS                     &format!(
-//RS                         "{{\"sources\":[{{\"name\":\"{}\",\"path\":\"{}\"}}]}}",
-//RS                         json_escape(&self.source_path()),
-//RS                         json_escape(&self.source_path())
-//RS                     ),
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS             "cancel" => {
-//RS                 if !matches!(
-//RS                     self.state,
-//RS                     State::Ready | State::Configuring | State::Running | State::Stopped
-//RS                 ) {
-//RS                     self.respond_jet_error(
-//RS                         out,
-//RS                         request_seq,
-//RS                         command,
-//RS                         22031,
-//RS                         "cancel requires an initialized debugger session",
-//RS                     );
-//RS                     return Some(());
-//RS                 }
-//RS                 self.respond(out, request_seq, command, true, "{}");
-//RS                 if let Some(task) = &self.resume_task {
-//RS                     self.resume_stop_requested = true;
-//RS                     task.interrupt();
-//RS                 }
-//RS                 Some(())
-//RS             }
-//RS             "disconnect" | "terminate" => {
-//RS                 let terminate = if command == "terminate" {
-//RS                     true
-//RS                 } else {
-//RS                     match args.and_then(|args| json_get(args, "terminateDebuggee")) {
-//RS                         None => self.target == Some(TargetKind::Launched),
-//RS                         Some(value) => match json_bool(value) {
-//RS                             Some(value) => value,
-//RS                             None => {
-//RS                                 self.respond_jet_error(
-//RS                                     out,
-//RS                                     request_seq,
-//RS                                     command,
-//RS                                     22032,
-//RS                                     "terminateDebuggee must be a boolean",
-//RS                                 );
-//RS                                 return Some(());
-//RS                             }
-//RS                         },
-//RS                     }
-//RS                 };
-//RS                 self.invalidate_references();
-//RS                 self.state = State::Terminated;
-//RS                 let resume_error = if self.resume_task.is_some() {
-//RS                     let settled = self.settle_resume();
-//RS                     self.emit_program_output(out);
-//RS                     settled.err()
-//RS                 } else {
-//RS                     None
-//RS                 };
-//RS                 match self.close_target(terminate) {
-//RS                     Ok(()) => {
-//RS                         if resume_error.is_some() {
-//RS                             self.respond_jet_error(
-//RS                                 out,
-//RS                                 request_seq,
-//RS                                 command,
-//RS                                 22034,
-//RS                                 "the native debugger could not settle before disconnect",
-//RS                             );
-//RS                         } else {
-//RS                             self.respond(out, request_seq, command, true, "{}");
-//RS                         }
-//RS                         if command == "terminate" {
-//RS                             self.event(out, "terminated", "{}");
-//RS                         }
-//RS                     }
-//RS                     Err(error) => {
-//RS                         let (id, message) = cleanup_error_details(&error);
-//RS                         self.respond_jet_error(out, request_seq, command, id, message)
-//RS                     }
-//RS                 }
-//RS                 None
-//RS             }
-//RS             _ => {
-//RS                 self.respond_jet_error(
-//RS                     out,
-//RS                     request_seq,
-//RS                     command,
-//RS                     22033,
-//RS                     "this Jet debugger operation is unsupported; use read-only Jet stack, scope, or evaluation requests",
-//RS                 );
-//RS                 Some(())
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn apply_pending_breakpoints_and_run(&mut self, out: &mut impl Write) {
-//RS         // Keep the source-level requests after the first run.  Restart uses
-//RS         // this same list to recreate backend breakpoints in the new inferior.
-//RS         let lines = self.pending_breakpoints.clone();
-//RS         let old = std::mem::take(&mut self.source_breakpoint_ids);
-//RS         let map = &self.map;
-//RS         let rust_file = self.rust_file.clone();
-//RS         let Some(inf) = self.inf.as_mut() else {
-//RS             self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target");
-//RS             return;
-//RS         };
-//RS         for id in old {
-//RS             if let Err(error) = inf.delete_breakpoint(id) {
-//RS                 // The DAP body stays a fixed string: this file has no JSON
-//RS                 // escaper, and an arbitrary error text would break the frame.
-//RS                 eprintln!("error: native debugger could not remove a source breakpoint: {error}");
-//RS                 self.terminate_with_diagnostic(
-//RS                     out,
-//RS                     "E2234",
-//RS                     "the native debugger could not remove a source breakpoint",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         }
-//RS         let (ids, statuses) = match Self::install_breakpoints(map, &rust_file, &lines, inf) {
-//RS             Ok(result) => result,
-//RS             Err(_error) => {
-//RS                 self.terminate_with_diagnostic(
-//RS                     out,
-//RS                     "E2234",
-//RS                     "the native debugger could not install source breakpoints",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS         };
-//RS         self.source_breakpoint_ids = ids;
-//RS         self.emit_breakpoint_statuses(out, &statuses);
-//RS         self.state = State::Running;
-//RS         let resume = if self.target == Some(TargetKind::Attached) {
-//RS             "continue"
-//RS         } else {
-//RS             "run"
-//RS         };
-//RS         let mode = if self.target == Some(TargetKind::Launched) {
-//RS             ResumeMode::Launch
-//RS         } else {
-//RS             ResumeMode::Continue
-//RS         };
-//RS         self.begin_resume(out, resume, mode);
-//RS     }
-//RS 
-//RS     /// Send a DAP `output` event for any Jet `print()`/`eprint()` the debuggee
-//RS     /// `Inferior.rs`'s module doc point 3).
-//RS     fn emit_program_output(&mut self, out: &mut impl Write) {
-//RS         let Some(inf) = &mut self.inf else { return };
-//RS         let (stdout, stderr) = inf.drain_program_output();
-//RS         if !stdout.is_empty() {
-//RS             let body = format!(
-//RS                 "{{\"category\":\"stdout\",\"output\":\"{}\"}}",
-//RS                 json_escape(&self.output_text(&stdout))
-//RS             );
-//RS             self.event(out, "output", &body);
-//RS         }
-//RS         if !stderr.is_empty() {
-//RS             let body = format!(
-//RS                 "{{\"category\":\"stderr\",\"output\":\"{}\"}}",
-//RS                 json_escape(&self.output_text(&stderr))
-//RS             );
-//RS             self.event(out, "output", &body);
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_resume(&mut self, out: &mut impl Write, result: ResumeResult, mode: ResumeMode) {
-//RS         self.emit_resume_inner(out, result, mode, 0);
-//RS     }
-//RS 
-//RS     fn emit_resume_inner(
-//RS         &mut self,
-//RS         out: &mut impl Write,
-//RS         result: ResumeResult,
-//RS         mode: ResumeMode,
-//RS         depth: usize,
-//RS     ) {
-//RS         let mut result = result;
-//RS         let mut mode = mode;
-//RS         let mut depth = depth;
-//RS         loop {
-//RS             if depth >= 200 && matches!(&result, ResumeResult::Stopped(_)) {
-//RS                 self.terminate_with_diagnostic(
-//RS                     out,
-//RS                     "E2235",
-//RS                     "native debugger produced too many stops without a verified Jet source mapping",
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             self.emit_program_output(out);
-//RS             let bt_text = match result {
-//RS                 ResumeResult::Exited { status, signal } => {
-//RS                     self.invalidate_references();
-//RS                     self.state = State::Terminated;
-//RS                     self.last_signal = signal.clone();
-//RS                     let body = match (status, signal) {
-//RS                         (Some(code), Some(signal)) => {
-//RS                             format!(
-//RS                                 "{{\"exitCode\":{},\"signal\":\"{}\"}}",
-//RS                                 code,
-//RS                                 json_escape(&signal)
-//RS                             )
-//RS                         }
-//RS                         (Some(code), None) => format!("{{\"exitCode\":{code}}}"),
-//RS                         (None, Some(signal)) => {
-//RS                             format!("{{\"signal\":\"{}\"}}", json_escape(&signal))
-//RS                         }
-//RS                         (None, None) => "{}".to_string(),
-//RS                     };
-//RS                     self.event(out, "exited", &body);
-//RS                     if self.cleanup_after_terminal_state(out) {
-//RS                         self.event(out, "terminated", "{}");
-//RS                     }
-//RS                     return;
-//RS                 }
-//RS                 ResumeResult::Stopped(text) => text,
-//RS             };
-//RS             self.last_signal = parse_exit_signal(&bt_text);
-//RS             let exception_kind = self.exception_kind(&bt_text).map(str::to_string);
-//RS             self.last_exception = exception_kind.clone().map(|kind| {
-//RS                 if kind == "signal" {
-//RS                     self.last_signal
-//RS                         .clone()
-//RS                         .unwrap_or_else(|| "unknown signal".to_string())
-//RS                 } else {
-//RS                     kind
-//RS                 }
-//RS             });
-//RS             if mode != ResumeMode::Pause {
-//RS                 if let Some(kind) = exception_kind.as_deref() {
-//RS                     if !self.exception_filter_enabled(kind) {
-//RS                         match self.resume_hidden_stop("continue") {
-//RS                             Ok(next) => {
-//RS                                 result = next;
-//RS                                 mode = ResumeMode::Continue;
-//RS                                 depth += 1;
-//RS                                 continue;
-//RS                             }
-//RS                             Err(error) => {
-//RS                                 self.terminate_backend(
-//RS                                 out,
-//RS                                 &error,
-//RS                                 "the native debugger lost the running session while skipping a non-Jet stop",
-//RS                             );
-//RS                                 return;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if let Some(thread) = parse_current_thread_id(&bt_text) {
-//RS                 self.current_thread = thread;
-//RS             }
-//RS             self.state = State::Stopped;
-//RS             let entry_stop = mode == ResumeMode::Launch
-//RS                 && self.entry_breakpoint_id.is_some()
-//RS                 && bt_text.contains("stop reason = breakpoint");
-//RS             if entry_stop {
-//RS                 let entry_id = self
-//RS                     .entry_breakpoint_id
-//RS                     .take()
-//RS                     .expect("entry breakpoint checked");
-//RS                 let removed = self.inf.as_mut().map(|inf| inf.delete_breakpoint(entry_id));
-//RS                 if !matches!(removed, Some(Ok(()))) {
-//RS                     self.terminate_with_diagnostic(
-//RS                         out,
-//RS                         "E2234",
-//RS                         "the native debugger could not retire the entry breakpoint",
-//RS                     );
-//RS                     return;
-//RS                 }
-//RS             }
-//RS             let mut reason = if mode == ResumeMode::Pause {
-//RS                 "pause"
-//RS             } else if self.last_exception.is_some() || self.last_signal.is_some() {
-//RS                 "exception"
-//RS             } else if entry_stop {
-//RS                 "entry"
-//RS             } else if mode == ResumeMode::Step {
-//RS                 "step"
-//RS             } else {
-//RS                 "breakpoint"
-//RS             };
-//RS             let mut hit_breakpoint_ids = Vec::new();
-//RS             if let Some(frame) = Inferior::parse_top_frame(&bt_text) {
-//RS                 match self
-//RS                     .map
-//RS                     .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
-//RS                 {
-//RS                     None => {
-//RS                         if self.unmapped_steps >= 200 {
-//RS                             self.terminate_with_diagnostic(
-//RS                             out,
-//RS                             "E2235",
-//RS                             "native debugger produced too many stops without a verified Jet source mapping",
-//RS                         );
-//RS                             return;
-//RS                         }
-//RS                         self.unmapped_steps += 1;
-//RS                         match self.resume_hidden_stop("thread step-over") {
-//RS                             Ok(next) => {
-//RS                                 result = next;
-//RS                                 depth += 1;
-//RS                                 continue;
-//RS                             }
-//RS                             Err(error) => {
-//RS                                 self.terminate_backend(
-//RS                                 out,
-//RS                                 &error,
-//RS                                 "the native debugger lost the running session while skipping a non-Jet stop",
-//RS                             );
-//RS                                 return;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     Some(jline)
-//RS                         if !entry_stop && mode != ResumeMode::Step && mode != ResumeMode::Pause =>
-//RS                     {
-//RS                         self.unmapped_steps = 0;
-//RS                         match self.breakpoint_action(jline) {
-//RS                             BreakpointAction::Stop(ids) => {
-//RS                                 hit_breakpoint_ids = ids;
-//RS                             }
-//RS                             BreakpointAction::Continue => {
-//RS                                 match self.resume_hidden_stop("continue") {
-//RS                                     Ok(next) => {
-//RS                                         result = next;
-//RS                                         mode = ResumeMode::Continue;
-//RS                                         // A verified Jet breakpoint that did not
-//RS                                         // match is normal control flow, not a
-//RS                                         // backend stop storm.
-//RS                                         depth = 0;
-//RS                                         continue;
-//RS                                     }
-//RS                                     Err(error) => {
-//RS                                         self.terminate_backend(
-//RS                                         out,
-//RS                                         &error,
-//RS                                         "the native debugger lost the running session while skipping a non-Jet stop",
-//RS                                     );
-//RS                                         return;
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                             BreakpointAction::Log(message) => {
-//RS                                 self.event(
-//RS                                     out,
-//RS                                     "output",
-//RS                                     &format!(
-//RS                                         "{{\"category\":\"console\",\"output\":\"{}\\n\"}}",
-//RS                                         json_escape(&message)
-//RS                                     ),
-//RS                                 );
-//RS                                 match self.resume_hidden_stop("continue") {
-//RS                                     Ok(next) => {
-//RS                                         result = next;
-//RS                                         mode = ResumeMode::Continue;
-//RS                                         depth = 0;
-//RS                                         continue;
-//RS                                     }
-//RS                                     Err(error) => {
-//RS                                         self.terminate_backend(
-//RS                                         out,
-//RS                                         &error,
-//RS                                         "the native debugger lost the running session while skipping a non-Jet stop",
-//RS                                     );
-//RS                                         return;
-//RS                                     }
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     Some(_) => {
-//RS                         self.unmapped_steps = 0;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             match Inferior::parse_top_frame(&bt_text) {
-//RS                 Some(frame) => {
-//RS                     let jet_line = self
-//RS                         .map
-//RS                         .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
-//RS                         .unwrap_or(1);
-//RS                     let _ = self.source_line(jet_line);
-//RS                     self.record_history_event(&bt_text, jet_line);
-//RS                     if reason == "breakpoint"
-//RS                         && self
-//RS                             .history
-//RS                             .events
-//RS                             .last()
-//RS                             .is_some_and(|event| self.history_write_matches(event))
-//RS                     {
-//RS                         reason = "data breakpoint";
-//RS                     }
-//RS                     let hit_ids = if hit_breakpoint_ids.is_empty() {
-//RS                         String::new()
-//RS                     } else {
-//RS                         format!(
-//RS                             ",\"hitBreakpointIds\":[{}]",
-//RS                             hit_breakpoint_ids
-//RS                                 .iter()
-//RS                                 .map(u32::to_string)
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(",")
-//RS                         )
-//RS                     };
-//RS                     let body = format!(
-//RS                         "{{\"reason\":\"{}\",\"threadId\":{},\"allThreadsStopped\":true{}}}",
-//RS                         reason, self.current_thread, hit_ids
-//RS                     );
-//RS                     self.event(out, "stopped", &body);
-//RS                 }
-//RS                 None => {
-//RS                     // No parseable frame cannot be represented as a Jet stop. A
-//RS                     // raw backend transcript is never a substitute for a Jet
-//RS                     // frame, even when the stop was caused by a signal.
-//RS                     self.terminate_with_diagnostic(
-//RS                         out,
-//RS                         "E2235",
-//RS                         "native debugger stopped without a verified Jet frame",
-//RS                     );
-//RS                 }
-//RS             }
-//RS             return;
-//RS         }
-//RS     }
-//RS 
-// END-PORT-PENDING 0747 crates/jet-debug/src/Dap.rs:1805-3655
+use std.io as io
+use jet_debug.Dap.*
+use jet_debug.Inferior.[Inferior, ResumeResult, parse_exit_signal, parse_current_thread_id]
+use jet_debug.LineMap.[LineMap]
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.JSON.[json_get, json_str, json_u32, json_escape]
 
+impl DapServer {
+    // Rust: crates/jet-debug/src/Dap.rs:1805
+    fn restart_target(self: &Self, out: &io.Write, request_seq: I64) -> {
+        was_configuring :: self.state == .Configuring
+        if self.resume_task.is_some() {
+            settled :: self.settle_resume()
+            self.emit_program_output(out)
+            if settled.is_err() {
+                if self.inf.take() == .Val(inf) -> inf.quit()
+                self.target = None
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not stop the current native target")
+                return
+            }
+        }
+        self.invalidate_references()
+        if self.inf.take() == .Val(inf) -> inf.quit()
+        self.reset_history()
+        self.current_thread = 1
+        self.last_signal = None
+        self.last_exception = None
+        self.unmapped_steps = 0
+        map_path :: self.binary.with_extension("jetmap")
+        match LineMap.load_verified(map_path, self.jet_file, self.jet_src, self.rust_file, self.rust_src, self.binary) {
+            .Ok(map) -> self.map = ^map
+            .Err(_error) -> {
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22037, "restart target no longer matches the verified Jet build")
+                return
+            }
+        }
+        (inf, entry_id) := match self.spawn_target() {
+            .Ok(target) -> ^target
+            .Err(_error) -> {
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not create a fresh native target")
+                return
+            }
+        }
+        if inf.configure_launch(self.launch_args, self.launch_cwd, self.launch_env).is_err() {
+            inf.quit()
+            self.target = None
+            self.entry_breakpoint_id = None
+            self.source_breakpoint_ids.clear()
+            self.state = .Ready
+            self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not restore launch arguments")
+            return
+        }
+        (source_ids, statuses) :: match Self.install_breakpoints(self.map, self.rust_file, self.pending_breakpoints, &inf) {
+            .Ok(result) -> ^result
+            .Err(_error) -> {
+                inf.quit()
+                self.target = None
+                self.entry_breakpoint_id = None
+                self.source_breakpoint_ids.clear()
+                self.state = .Ready
+                self.respond_jet_error(out, request_seq, "restart", 22034, "restart could not restore source breakpoints")
+                return
+            }
+        }
+        self.inf = .Val(^inf)
+        self.entry_breakpoint_id = entry_id
+        self.source_breakpoint_ids = ^source_ids
+        self.hit_counts = [Usize].repeat(0, self.pending_specs.len())
+        self.target = .Val(.Launched)
+        self.respond(out, request_seq, "restart", true, "{}")
+        self.emit_target_started_events(out)
+        self.emit_breakpoint_statuses(out, statuses)
+        if !was_configuring -> self.start_target(out)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1934
+    fn begin_resume(self: &Self, out: &io.Write, command: String, mode: ResumeMode) -> {
+        inf :: self.inf.take() ?? {
+            self.terminate_with_diagnostic(out, "E2234", "the native debugger has no target to start")
+            return
+        }
+        self.resume_stop_requested = false
+        self.state = .Running
+        // GATE #4494: real resume worker and interrupt ownership.
+        self.resume_task = .Val(ResumeTask.spawn(^inf, command, mode))
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1948
+    fn start_target(self: &Self, out: &io.Write) -> { self.begin_resume(out, "run", .Launch) }
+
+    // Rust: crates/jet-debug/src/Dap.rs:1954
+    // A present unit keeps the request loop alive; None closes it.
+    fn handle(self: &Self, msg: &DataTree, out: &io.Write) -> Unit? {
+        command :: json_get(msg, "command").and_then(json_str)?
+        client_seq :: json_get(msg, "seq").and_then(json_u32)?
+        request_seq :: client_seq as I64
+        if self.client_sequences.contains_key(client_seq) {
+            self.respond_jet_error(out, request_seq, command, 22032, "request sequence numbers must be unique")
+            return .Val(())
+        }
+        self.client_sequences[client_seq] = true
+        args :: json_get(msg, "arguments")
+        match command {
+            "initialize" -> {
+                if self.state != .New {
+                    self.respond_jet_error(out, request_seq, command, 22031, "initialize is only legal once at the start of a DAP session")
+                    return .Val(())
+                }
+                initialize :: match parse_initialize_arguments(args) {
+                    .Ok(arguments) -> ^arguments
+                    .Err(message) -> {
+                        self.respond_jet_error(out, request_seq, command, 22032, message)
+                        return .Val(())
+                    }
+                }
+                self.lines_start_at_1 = initialize.lines_start_at_1
+                self.columns_start_at_1 = initialize.columns_start_at_1
+                self.supports_ansi_styling = initialize.supports_ansi_styling
+                self.state = .Ready
+                self.respond(out, request_seq, "initialize", true, "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsStepBack\":true,\"supportsDataBreakpoints\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}")
+            }
+            "launch" | "attach" -> {
+                if self.state != .Ready {
+                    self.respond_jet_error(out, request_seq, command, 22031, "launch or attach requires a successful initialize request")
+                    return .Val(())
+                }
+                progress_id :: "jet-debug-{request_seq}"
+                self.progress_start(out, progress_id, "Starting Jet debug target")
+                target :: if command == "launch" {
+                    launch :: match parse_launch_arguments(args, self.jet_file) {
+                        .Ok(launch) -> ^launch
+                        .Err(message) -> {
+                            self.progress_end(out, progress_id, "Invalid launch configuration")
+                            self.respond_jet_error(out, request_seq, command, 22032, message)
+                            return .Val(())
+                        }
+                    }
+                    if args.and_then((a) -> json_get(a, "stopOnEntry")) == .Val(value) {
+                        stop :: json_bool(value) ?? {
+                            self.progress_end(out, progress_id, "Invalid launch configuration")
+                            self.respond_jet_error(out, request_seq, command, 22032, "stopOnEntry must be a boolean")
+                            return .Val(())
+                        }
+                        self.stop_on_entry = stop
+                    }
+                    target :: self.spawn_target().and_then(((inf, id)) -> {
+                        inf := ^inf
+                        inf.configure_launch(launch.args, launch.cwd, launch.env)?
+                        .Ok((^inf, id))
+                    })
+                    if target.is_ok() {
+                        self.show_raw_frames = launch.show_raw_frames
+                        self.launch_args = ^launch.args
+                        self.launch_cwd = ^launch.cwd
+                        self.launch_env = ^launch.env
+                    }
+                    ^target
+                } else {
+                    match self.attach_target(args) {
+                        .Ok((inf, map, show_raw_frames)) -> {
+                            self.map = ^map
+                            self.show_raw_frames = show_raw_frames
+                            .Ok((^inf, None))
+                        }
+                        .Err(failure) -> {
+                            (id, format) :: failure.error()
+                            self.progress_end(out, progress_id, "Attach rejected")
+                            self.respond_jet_error(out, request_seq, command, id, format)
+                            return .Val(())
+                        }
+                    }
+                }
+                match target {
+                    .Ok((inf, entry_id)) -> {
+                        self.progress_end(out, progress_id, "Jet debug target ready")
+                        self.inf = .Val(^inf)
+                        self.entry_breakpoint_id = entry_id
+                        self.source_breakpoint_ids.clear()
+                        self.target = .Val(if command == "launch" -> .Launched else -> .Attached)
+                        self.state = .Configuring
+                        self.respond(out, request_seq, command, true, "{}")
+                        self.event(out, "initialized", "{}")
+                    }
+                    .Err(_error) -> {
+                        self.progress_end(out, progress_id, "Target setup failed")
+                        self.respond_jet_error(out, request_seq, command, 22034, "the native debugger could not create the requested target")
+                    }
+                }
+            }
+            "restart" -> {
+                if self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "restart requires an active launched Jet target")
+                    return .Val(())
+                }
+                match self.target {
+                    .Val(.Launched) -> self.restart_target(out, request_seq)
+                    .Val(.Attached) -> self.respond_jet_error(out, request_seq, command, 22033, "restart is only supported for a launched Jet target")
+                    _ -> self.respond_jet_error(out, request_seq, command, 22031, "restart is not legal before a launched Jet target exists")
+                }
+            }
+            "setBreakpoints" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "source breakpoints are not legal after the target terminated")
+                    return .Val(())
+                }
+                if breakpoint_source(args, self.jet_file) == .Err(message) {
+                    self.respond_jet_error(out, request_seq, command, 22032, message)
+                    return .Val(())
+                }
+                specs :: match breakpoint_specs_for_origin(args, self.lines_start_at_1) {
+                    .Ok(specs) -> ^specs
+                    .Err(message) -> { self.respond_err(out, request_seq, command, message); return .Val(()) }
+                }
+                if validate_breakpoint_specs(specs) == .Err(message) {
+                    self.respond_jet_error(out, request_seq, command, 22032, message)
+                    return .Val(())
+                }
+                lines :: specs.iter().map((spec) -> spec.line).collect()
+                client_ids :: self.assign_client_breakpoint_ids(specs)
+                // Retain the backend's old state until replacement succeeds.
+                previous_breakpoints :: ~self.pending_breakpoints
+                previous_specs :: ~self.pending_specs
+                previous_client_ids :: ~self.client_breakpoint_ids
+                previous_hit_counts :: ~self.hit_counts
+                self.pending_breakpoints = ~lines
+                self.pending_specs = ^specs
+                self.client_breakpoint_ids = ~client_ids
+                self.hit_counts = [Usize].repeat(0, lines.len())
+                resume_after_replacement :: self.state == .Running && !self.resume_stop_requested
+                if resume_after_replacement && self.resume_task.is_some() {
+                    (mode, result) :: match self.take_resume_result() {
+                        .Ok(event) -> ^event
+                        .Err(error) -> {
+                            self.respond_backend_error(out, request_seq, command, error, "the native debugger could not settle before replacing source breakpoints")
+                            self.terminate_backend(out, error, "the native debugger lost the running session while replacing source breakpoints")
+                            return .Val(())
+                        }
+                    }
+                    match result {
+                        .Ok(result) -> self.emit_resume(out, ^result, mode)
+                        .Err(error) -> {
+                            self.respond_backend_error(out, request_seq, command, error, "the native debugger could not settle before replacing source breakpoints")
+                            self.terminate_backend(out, error, "the native debugger lost the running session while replacing source breakpoints")
+                            return .Val(())
+                        }
+                    }
+                }
+                if self.state == .Terminated || self.terminal_failure {
+                    self.respond_jet_error(out, request_seq, command, 22034, "the native debugger target terminated before source breakpoints could be replaced")
+                    return .Val(())
+                }
+                statuses :: if self.state == .Configuring || self.state == .Running || self.state == .Stopped {
+                    match self.replace_source_breakpoints() {
+                        .Ok(statuses) -> ^statuses
+                        .Err(_error) -> {
+                            self.pending_breakpoints = ^previous_breakpoints
+                            self.pending_specs = ^previous_specs
+                            self.client_breakpoint_ids = ^previous_client_ids
+                            self.hit_counts = ^previous_hit_counts
+                            self.respond_err(out, request_seq, command, "the native debugger could not replace source breakpoints")
+                            return .Val(())
+                        }
+                    }
+                } else -> lines.iter().map((line) -> self.map.rust_line_for(line).is_some()).collect()
+                verified := [String]{}
+                for i in 0..lines.len() {
+                    line :: lines[i]
+                    id :: client_ids[i]
+                    spec :: self.pending_specs[i]
+                    ok :: statuses[i] && spec.condition.is_none_or(valid_condition) && spec.hit_condition.is_none_or(valid_hit_condition)
+                    if ok {
+                        verified.push("{{\"id\":{id},\"verified\":true,\"line\":{self.dap_line(line)}}}")
+                    } else {
+                        verified.push("{{\"id\":{id},\"verified\":false,\"line\":{self.dap_line(line)},\"message\":\"E2235: no stoppable Jet statement at {json_escape(self.source_path())}:{self.dap_line(line)}\"}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"breakpoints\":[{verified.join(",")}]}}")
+                if resume_after_replacement {
+                    self.state = .Running
+                    mode :: if self.entry_breakpoint_id.is_some() -> ResumeMode.Launch else -> ResumeMode.Continue
+                    self.begin_resume(out, "continue", mode)
+                }
+            }
+            "configurationDone" -> {
+                if self.state != .Configuring {
+                    self.respond_jet_error(out, request_seq, command, 22031, "configurationDone requires a launched or attached target")
+                    return .Val(())
+                }
+                self.respond(out, request_seq, command, true, "{}")
+                self.emit_target_started_events(out)
+                self.apply_pending_breakpoints_and_run(out)
+            }
+            "threads" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "threads requires a stopped target")
+                    return .Val(())
+                }
+                threads :: match self.inf.as_mut().map((inf) -> inf.thread_backtraces()) {
+                    .Val(.Ok(threads)) -> threads.into_iter().filter_map(((thread, backtrace)) -> {
+                        frames :: Inferior.parse_frames(backtrace)
+                        has_jet_frame(frames, self.map, self.rust_file).then(() -> (thread.id, jet_thread_name(thread.id, backtrace, self.map, self.rust_file)))
+                    }).collect()
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not list Jet tasks")
+                        return .Val(())
+                    }
+                    None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "threads requires a stopped target")
+                        return .Val(())
+                    }
+                }
+                if threads.is_empty() {
+                    self.respond_jet_error(out, request_seq, command, 22039, "the stopped target has no verified Jet task")
+                    return .Val(())
+                }
+                thread_json :: threads.iter().map(((thread_id, name)) -> "{{\"id\":{thread_id},\"name\":\"{json_escape(name)}\"}}").collect().join(",")
+                self.respond(out, request_seq, command, true, "{{\"threads\":[{thread_json}]}}")
+            }
+            "stackTrace" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "stackTrace requires a stopped target")
+                    return .Val(())
+                }
+                thread_id :: args.and_then((a) -> json_get(a, "threadId")).and_then(json_u32).filter((id) -> id > 0) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22032, "stackTrace threadId must be a positive integer")
+                    return .Val(())
+                }
+                if self.history_cursor.is_some() {
+                    start_frame :: args.and_then((a) -> json_get(a, "startFrame")).and_then(json_u32).unwrap_or(0) as Usize
+                    levels :: args.and_then((a) -> json_get(a, "levels")).and_then(json_u32).map((n) -> n as Usize)
+                    body :: self.history_stack_body(thread_id, start_frame, levels) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the recorded Jet stack is unavailable at this stop")
+                        return .Val(())
+                    }
+                    self.current_thread = thread_id
+                    self.respond(out, request_seq, command, true, body)
+                    return .Val(())
+                }
+                if self.inf.as_mut() == .Val(inf) {
+                    if inf.select_thread(thread_id).is_err() {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the requested Jet task is no longer stopped")
+                        return .Val(())
+                    }
+                    self.current_thread = thread_id
+                }
+                show_raw_frames :: match self.raw_frames_for_request(args) {
+                    .Ok(value) -> value
+                    .Err(message) -> { self.respond_jet_error(out, request_seq, command, 22032, message); return .Val(()) }
+                }
+                frames :: match self.inf.as_mut().map((inf) -> inf.backtrace()) {
+                    .Val(.Ok(out_text)) -> Inferior.parse_frames(out_text)
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not read the Jet stack")
+                        return .Val(())
+                    }
+                    None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "stackTrace requires a stopped target")
+                        return .Val(())
+                    }
+                }
+                if !has_jet_frame(frames, self.map, self.rust_file) {
+                    self.respond_jet_error(out, request_seq, command, 22039, "the stopped target has no verified Jet frame")
+                    return .Val(())
+                }
+                start_frame :: args.and_then((a) -> json_get(a, "startFrame")).and_then(json_u32).unwrap_or(0) as Usize
+                levels :: args.and_then((a) -> json_get(a, "levels")).and_then(json_u32).map((n) -> n as Usize)
+                projected :: project_frames(frames, self.map, self.rust_file, show_raw_frames)
+                total_frames :: projected.len()
+                entries := [String]{}
+                for p in projected.into_iter().skip(start_frame).take(levels.unwrap_or(Usize.MAX)) {
+                    if p.raw {
+                        id :: self.references.issue_raw_frame(thread_id, p.position)
+                        entries.push("{{\"id\":{id},\"name\":\"[raw] {json_escape(p.frame.func)}\",\"source\":{{\"path\":\"{json_escape(p.frame.rust_file)}\"}},\"line\":{self.dap_line(p.frame.rust_line)},\"column\":{self.dap_column(1)}}}")
+                    } else if p.jet_line == .Val(jline) {
+                        id :: self.references.issue_frame(thread_id, p.position)
+                        entries.push("{{\"id\":{id},\"name\":\"{json_escape(Inferior.safe_jet_func(p.frame.func))}\",\"source\":{{\"path\":\"{json_escape(self.source_path())}\"}},\"line\":{self.dap_line(jline)},\"column\":{self.dap_column(1)}}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"stackFrames\":[{entries.join(",")}],\"totalFrames\":{total_frames}}}")
+            }
+            "scopes" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "scopes requires a stopped target")
+                    return .Val(())
+                }
+                frame_id :: args.and_then((a) -> json_get(a, "frameId")).and_then(json_u32) ?? {
+                    self.respond_err(out, request_seq, command, "frameId is required")
+                    return .Val(())
+                }
+                if !self.references.is_live(frame_id, .Frame) || self.references.frame_location(frame_id).is_none() {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(())
+                }
+                requested_raw :: match args.and_then((a) -> json_get(a, "showRawFrames")) {
+                    None -> false
+                    .Val(value) -> json_bool(value) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "showRawFrames must be a boolean")
+                        return .Val(())
+                    }
+                }
+                raw_frame :: self.references.frame_is_raw(frame_id).unwrap_or(false)
+                show_raw_frames :: requested_raw || self.show_raw_frames || raw_frame
+                scopes := [String]{}
+                if raw_frame {
+                    scope_id :: self.references.issue_scope(frame_id, .RawScope)
+                    scopes.push("{{\"name\":\"[raw] Locals\",\"variablesReference\":{scope_id},\"expensive\":false}}")
+                } else {
+                    scope_id :: self.references.issue_scope(frame_id, .Scope)
+                    scopes.push("{{\"name\":\"Locals\",\"variablesReference\":{scope_id},\"expensive\":false}}")
+                    if show_raw_frames {
+                        raw_scope_id :: self.references.issue_scope(frame_id, .RawScope)
+                        scopes.push("{{\"name\":\"[raw] Locals\",\"variablesReference\":{raw_scope_id},\"expensive\":false}}")
+                    }
+                }
+                self.respond(out, request_seq, command, true, "{{\"scopes\":[{scopes.join(",")}]}}")
+            }
+            "variables" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "variables requires a stopped target")
+                    return .Val(())
+                }
+                scope_id :: args.and_then((a) -> json_get(a, "variablesReference")).and_then(json_u32) ?? {
+                    self.respond_err(out, request_seq, command, "variablesReference is required")
+                    return .Val(())
+                }
+                if self.history_cursor.is_some() {
+                    if !self.references.is_live(scope_id, .Scope) {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(())
+                    }
+                    body :: self.history_variables_body() ?? {
+                        self.respond_jet_error(out, request_seq, command, 22034, "recorded Jet locals are unavailable at this stop")
+                        return .Val(())
+                    }
+                    self.respond(out, request_seq, command, true, body)
+                    return .Val(())
+                }
+                value_reference :: if self.references.is_live(scope_id, .Value) {
+                    value :: self.references.value(scope_id) ?? {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(())
+                    }
+                    .Val((value.frame, ~value.expression, value.raw))
+                } else -> None
+                raw_scope :: value_reference.as_ref().map(((_, _, raw)) -> raw).or_else(() -> {
+                    if self.references.is_live(scope_id, .RawScope) -> .Val(true)
+                    else if self.references.is_live(scope_id, .Scope) -> .Val(false)
+                    else -> None
+                }) ?? {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(())
+                }
+                frame :: value_reference.as_ref().map(((frame, _, _)) -> frame).or_else(() -> self.references.scope_location(scope_id)) ?? {
+                    self.respond_stale_reference(out, request_seq, command)
+                    return .Val(())
+                }
+                self.current_thread = frame.thread_id
+                if self.inf.as_mut() == .Val(inf) {
+                    if inf.select_thread(frame.thread_id).is_err() || inf.select_frame(frame.position).is_err() {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(())
+                    }
+                }
+                locals :: match self.inf.as_mut().map((inf) -> {
+                    if value_reference.as_ref() == .Val((_, expression, _)) -> inf.frame_variable(expression)
+                    else -> inf.locals()
+                }) {
+                    .Val(.Ok(output)) -> if value_reference.is_some() -> Inferior.parse_variable_children(output) else -> Inferior.parse_typed_locals(output)
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the native debugger could not read Jet variables")
+                        return .Val(())
+                    }
+                    None -> {
+                        self.respond_jet_error(out, request_seq, command, 22031, "variables requires a stopped target")
+                        return .Val(())
+                    }
+                }
+                // Only safe Jet bindings cross the adapter boundary, unless raw was requested.
+                start :: match args.and_then((a) -> json_get(a, "start")) {
+                    None -> 0 as Usize
+                    .Val(value) -> json_u32(value).and_then((n) -> Usize.try_from(n).ok()) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "variables start must be a nonnegative integer")
+                        return .Val(())
+                    }
+                }
+                count :: match args.and_then((a) -> json_get(a, "count")) {
+                    None -> None
+                    .Val(value) -> .Val(json_u32(value).and_then((n) -> Usize.try_from(n).ok()) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "variables count must be a nonnegative integer")
+                        return .Val(())
+                    })
+                }
+                entries := [String]{}
+                for (ty, name, value) in locals.iter() {
+                    if value_reference.is_none() && !raw_scope && !Inferior.rust_local_is_jet_visible(name) -> next
+                    display_name :: if raw_scope -> ~name
+                        else if value_reference.is_some() -> Inferior.rust_member_to_jet(name) ?? { next }
+                        else -> Inferior.rust_local_to_jet(name) ?? { next }
+                    safe_value :: if raw_scope -> ~value else -> Inferior.safe_value(ty, value)
+                    type_json :: if raw_scope -> ",\"type\":\"{json_escape(ty)}\""
+                        else -> Inferior.jet_type_name(ty).map((t) -> ",\"type\":\"{json_escape(t)}\"").unwrap_or_default()
+                    variables_reference :: if Inferior.has_nested_value(value) {
+                        expression :: if value_reference.as_ref() == .Val((_, parent, _)) {
+                            if name.starts_with('[') -> "{parent}{name}" else -> "{parent}.{name}"
+                        } else if raw_scope -> ~name else -> Inferior.jet_local_to_rust(display_name)
+                        self.references.issue_value_at(frame, ^expression, raw_scope)
+                    } else -> 0
+                    entries.push("{{\"name\":\"{json_escape(display_name)}\",\"value\":\"{json_escape(safe_value)}\"{type_json},\"variablesReference\":{variables_reference}}}")
+                }
+                total :: entries.len()
+                paged :: entries.into_iter().skip(start).take(count.unwrap_or(Usize.MAX)).collect()
+                self.respond(out, request_seq, command, true, "{{\"variables\":[{paged.join(",")}],\"namedVariables\":{total}}}")
+            }
+            "evaluate" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "evaluate requires a stopped target")
+                    return .Val(())
+                }
+                if args.and_then((a) -> json_get(a, "context")) == .Val(context) {
+                    context_name :: json_str(context)
+                    if context_name != .Val("hover") && context_name != .Val("watch") && context_name != .Val("repl") {
+                        self.respond_jet_error(out, request_seq, command, 22032, "evaluate context must be hover, watch, or repl")
+                        return .Val(())
+                    }
+                }
+                expression :: args.and_then((a) -> json_get(a, "expression")).and_then(json_str) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22032, "evaluate requires a Jet expression")
+                    return .Val(())
+                }
+                (root, suffix) :: jet_expression(expression) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22033, "only bounded read-only Jet local paths can be evaluated")
+                    return .Val(())
+                }
+                if args.and_then((a) -> json_get(a, "frameId")).and_then(json_u32) == .Val(frame_id) {
+                    if !self.references.is_live(frame_id, .Frame) {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(())
+                    }
+                    frame :: self.references.frame_location(frame_id) ?? {
+                        self.respond_stale_reference(out, request_seq, command)
+                        return .Val(())
+                    }
+                    self.current_thread = frame.thread_id
+                    if self.inf.as_mut() == .Val(inf) {
+                        if inf.select_thread(frame.thread_id).is_err() || inf.select_frame(frame.position).is_err() {
+                            self.respond_stale_reference(out, request_seq, command)
+                            return .Val(())
+                        }
+                    }
+                }
+                rust_expression :: Inferior.jet_path_to_rust(root, suffix) ?? {
+                    self.respond_jet_error(out, request_seq, command, 22033, "only bounded read-only Jet local paths can be evaluated")
+                    return .Val(())
+                }
+                output :: match self.inf.as_mut().map((inf) -> inf.frame_variable(rust_expression)) {
+                    .Val(.Ok(output)) -> ^output
+                    .Val(.Err(error)) -> {
+                        self.respond_backend_error(out, request_seq, command, error, "the Jet expression is unavailable at this stop")
+                        return .Val(())
+                    }
+                    None -> {
+                        self.respond_jet_error(out, request_seq, command, 22034, "the Jet expression is unavailable at this stop")
+                        return .Val(())
+                    }
+                }
+                (ty, _name, value) :: Inferior.parse_typed_locals(output).into_iter().next() ?? {
+                    self.respond_jet_error(out, request_seq, command, 22034, "the Jet expression has no readable value at this stop")
+                    return .Val(())
+                }
+                safe :: Inferior.safe_value(ty, value)
+                type_json :: Inferior.jet_type_name(ty).map((t) -> ",\"type\":\"{json_escape(t)}\"").unwrap_or_default()
+                self.respond(out, request_seq, command, true, "{{\"result\":\"{json_escape(safe)}\"{type_json} ,\"variablesReference\":0}}")
+            }
+            "reverseStep" | "stepBack" -> self.reverse_history(out, request_seq, command, false)
+            "reverseContinue" -> self.reverse_history(out, request_seq, command, true)
+            "dataBreakpointInfo" -> self.data_breakpoint_info(out, request_seq, command, args)
+            "setDataBreakpoints" -> self.set_data_breakpoints(out, request_seq, command, args)
+            "setExpression" -> self.respond_jet_error(out, request_seq, command, 22033, "setExpression cannot mutate a native Jet frame; use fix with an edited source checkpoint")
+            "fix" -> self.apply_fix(out, request_seq, command, args)
+            "continue" | "next" | "stepIn" | "stepOut" -> {
+                if self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "run control requires a stopped target")
+                    return .Val(())
+                }
+                if self.history_cursor.is_some() {
+                    thread_id :: args.and_then((a) -> json_get(a, "threadId")).and_then(json_u32).filter((id) -> id > 0) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "run control requires a positive threadId")
+                        return .Val(())
+                    }
+                    self.current_thread = thread_id
+                    self.replay_forward_history(out, request_seq, command, None)
+                    return .Val(())
+                }
+                if self.inf.is_none() {
+                    self.invalidate_references()
+                    self.respond_jet_error(out, request_seq, command, 22034, "Jet debugger has no target")
+                    return .Val(())
+                }
+                if self.select_resume_thread(args) == .Err((id, message)) {
+                    self.respond_jet_error(out, request_seq, command, id, message)
+                    return .Val(())
+                }
+                self.invalidate_references()
+                resume_cmd :: match command {
+                    "continue" -> "continue"
+                    "next" -> "thread step-over"
+                    "stepIn" -> "thread step-in"
+                    _ -> "thread step-out"
+                }
+                self.state = .Running
+                self.respond(out, request_seq, command, true, "{\"allThreadsContinued\":true}")
+                mode :: if command == "continue" -> ResumeMode.Continue else -> ResumeMode.Step
+                self.begin_resume(out, resume_cmd, mode)
+            }
+            "pause" -> {
+                if self.state != .Running {
+                    self.respond_jet_error(out, request_seq, command, 22031, "pause requires a running target")
+                    return .Val(())
+                }
+                if self.resume_task.is_some() {
+                    self.resume_stop_requested = true
+                    if self.resume_task.as_ref() == .Val(task) -> task.interrupt()
+                    self.invalidate_references()
+                    self.respond(out, request_seq, command, true, "{}")
+                    return .Val(())
+                }
+                if self.inf.is_none() {
+                    self.respond_jet_error(out, request_seq, command, 22034, "Jet debugger has no target")
+                    return .Val(())
+                }
+                self.invalidate_references()
+                self.respond(out, request_seq, command, true, "{}")
+                match self.inf.as_mut().map((inf) -> inf.interrupt()) {
+                    .Val(.Ok(bt_text)) -> self.emit_resume(out, .Stopped(^bt_text), .Pause)
+                    .Val(.Err(error)) -> self.terminate_backend(out, error, "the native debugger could not pause the program")
+                    None -> self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target")
+                }
+            }
+            "setExceptionBreakpoints" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "exception filters are not legal before initialize or after termination")
+                    return .Val(())
+                }
+                filters :: args.and_then((a) -> json_get(a, "filters")) ?? {
+                    self.exception_filters.clear()
+                    self.respond(out, request_seq, command, true, "{}")
+                    return .Val(())
+                }
+                values :: match filters {
+                    .Array(values) -> values
+                    _ -> {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be a bounded array of Jet panic, error, signal, or all")
+                        return .Val(())
+                    }
+                }
+                selected := [String:Bool]{}
+                for value in values {
+                    filter :: json_str(value) ?? {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be Jet panic, error, signal, or all")
+                        return .Val(())
+                    }
+                    if filter != "all" && filter != "error" && filter != "panic" && filter != "signal" {
+                        self.respond_jet_error(out, request_seq, command, 22032, "exception filters must be Jet panic, error, signal, or all")
+                        return .Val(())
+                    }
+                    selected[filter.to_string()] = true
+                }
+                self.exception_filters = ^selected
+                self.respond(out, request_seq, command, true, "{}")
+            }
+            "exceptionInfo" -> {
+                if !self.state.is_stopped() {
+                    self.respond_jet_error(out, request_seq, command, 22031, "exceptionInfo requires a stopped target")
+                    return .Val(())
+                }
+                if self.last_exception.as_ref() == .Val(kind) {
+                    (exception_id, description) :: if kind == "panic" -> ("JetPanic", "Jet panic")
+                        else if kind == "error" -> ("JetError", "Jet error")
+                        else -> (kind, "Jet target stopped on {kind}")
+                    self.respond(out, request_seq, command, true, "{{\"exceptionId\":\"{json_escape(exception_id)}\",\"description\":\"{json_escape(description)}\"}}")
+                } else -> self.respond_jet_error(out, request_seq, command, 22034, "the stopped Jet target has no exception information")
+            }
+            "loadedSources" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "loadedSources requires an initialized debugger session")
+                    return .Val(())
+                }
+                self.respond(out, request_seq, command, true, "{{\"sources\":[{{\"name\":\"{json_escape(self.source_path())}\",\"path\":\"{json_escape(self.source_path())}\"}}]}}")
+            }
+            "cancel" -> {
+                if self.state != .Ready && self.state != .Configuring && self.state != .Running && self.state != .Stopped {
+                    self.respond_jet_error(out, request_seq, command, 22031, "cancel requires an initialized debugger session")
+                    return .Val(())
+                }
+                self.respond(out, request_seq, command, true, "{}")
+                if self.resume_task.as_ref() == .Val(task) {
+                    self.resume_stop_requested = true
+                    task.interrupt()
+                }
+            }
+            "disconnect" | "terminate" -> {
+                terminate :: if command == "terminate" -> true else {
+                    match args.and_then((a) -> json_get(a, "terminateDebuggee")) {
+                        None -> self.target == .Val(.Launched)
+                        .Val(value) -> json_bool(value) ?? {
+                            self.respond_jet_error(out, request_seq, command, 22032, "terminateDebuggee must be a boolean")
+                            return .Val(())
+                        }
+                    }
+                }
+                self.invalidate_references()
+                self.state = .Terminated
+                resume_error :: if self.resume_task.is_some() {
+                    settled :: self.settle_resume()
+                    self.emit_program_output(out)
+                    settled.err()
+                } else -> None
+                match self.close_target(terminate) {
+                    .Ok(()) -> {
+                        if resume_error.is_some() -> self.respond_jet_error(out, request_seq, command, 22034, "the native debugger could not settle before disconnect")
+                        else -> self.respond(out, request_seq, command, true, "{}")
+                        if command == "terminate" -> self.event(out, "terminated", "{}")
+                    }
+                    .Err(error) -> {
+                        (id, message) :: cleanup_error_details(error)
+                        self.respond_jet_error(out, request_seq, command, id, message)
+                    }
+                }
+                return None
+            }
+            _ -> self.respond_jet_error(out, request_seq, command, 22033, "this Jet debugger operation is unsupported; use read-only Jet stack, scope, or evaluation requests")
+        }
+        return .Val(())
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3323
+    fn apply_pending_breakpoints_and_run(self: &Self, out: &io.Write) -> {
+        // Preserve source requests so restart can recreate them.
+        lines :: ~self.pending_breakpoints
+        old :: self.source_breakpoint_ids.take()
+        map :: &self.map
+        rust_file :: ~self.rust_file
+        inf :: self.inf.as_mut() ?? {
+            self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target")
+            return
+        }
+        for id in old {
+            if inf.delete_breakpoint(id) == .Err(error) {
+                io.eprintln("error: native debugger could not remove a source breakpoint: {error}") // GATE #4494
+                self.terminate_with_diagnostic(out, "E2234", "the native debugger could not remove a source breakpoint")
+                return
+            }
+        }
+        (ids, statuses) :: match Self.install_breakpoints(map, rust_file, lines, inf) {
+            .Ok(result) -> ^result
+            .Err(_error) -> {
+                self.terminate_with_diagnostic(out, "E2234", "the native debugger could not install source breakpoints")
+                return
+            }
+        }
+        self.source_breakpoint_ids = ^ids
+        self.emit_breakpoint_statuses(out, statuses)
+        self.state = .Running
+        resume :: if self.target == .Val(.Attached) -> "continue" else -> "run"
+        mode :: if self.target == .Val(.Launched) -> ResumeMode.Launch else -> ResumeMode.Continue
+        self.begin_resume(out, resume, mode)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3376
+    fn emit_program_output(self: &Self, out: &io.Write) -> {
+        inf :: self.inf.as_mut() ?? { return }
+        (stdout, stderr) :: inf.drain_program_output()
+        if !stdout.is_empty() -> self.event(out, "output", "{{\"category\":\"stdout\",\"output\":\"{json_escape(self.output_text(stdout))}\"}}")
+        if !stderr.is_empty() -> self.event(out, "output", "{{\"category\":\"stderr\",\"output\":\"{json_escape(self.output_text(stderr))}\"}}")
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3395
+    fn emit_resume(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode) -> {
+        self.emit_resume_inner(out, ^result, mode, 0)
+    }
+
+    // Rust: crates/jet-debug/src/Dap.rs:3399
+    fn emit_resume_inner(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode, depth: Usize) -> {
+        result := ^result
+        mode := mode
+        depth := depth
+        loop {
+            if depth >= 200 && result == .Stopped(_) {
+                self.terminate_with_diagnostic(out, "E2235", "native debugger produced too many stops without a verified Jet source mapping")
+                return
+            }
+            self.emit_program_output(out)
+            bt_text :: match result {
+                .Exited { status, signal } -> {
+                    self.invalidate_references()
+                    self.state = .Terminated
+                    self.last_signal = ~signal
+                    body :: match (status, signal) {
+                        (.Val(code), .Val(signal)) -> "{{\"exitCode\":{code},\"signal\":\"{json_escape(signal)}\"}}"
+                        (.Val(code), None) -> "{{\"exitCode\":{code}}}"
+                        (None, .Val(signal)) -> "{{\"signal\":\"{json_escape(signal)}\"}}"
+                        (None, None) -> "{}"
+                    }
+                    self.event(out, "exited", body)
+                    if self.cleanup_after_terminal_state(out) -> self.event(out, "terminated", "{}")
+                    return
+                }
+                .Stopped(text) -> ^text
+            }
+            self.last_signal = parse_exit_signal(bt_text)
+            exception_kind :: self.exception_kind(bt_text).map((kind) -> kind.to_string())
+            self.last_exception = exception_kind.map((kind) -> {
+                if kind == "signal" -> self.last_signal.unwrap_or_else(() -> "unknown signal") else -> kind
+            })
+            if mode != .Pause {
+                if exception_kind.as_ref() == .Val(kind) {
+                    if !self.exception_filter_enabled(kind) {
+                        match self.resume_hidden_stop("continue") {
+                            .Ok(following) -> { result = ^following; mode = .Continue; depth += 1; next }
+                            .Err(error) -> {
+                                self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                return
+                            }
+                        }
+                    }
+                }
+            }
+            if parse_current_thread_id(bt_text) == .Val(thread) -> self.current_thread = thread
+            self.state = .Stopped
+            entry_stop :: mode == .Launch && self.entry_breakpoint_id.is_some() && bt_text.contains("stop reason = breakpoint")
+            if entry_stop {
+                entry_id :: self.entry_breakpoint_id.take().expect("entry breakpoint checked")
+                removed :: self.inf.as_mut().map((inf) -> inf.delete_breakpoint(entry_id))
+                if removed != .Val(.Ok(())) {
+                    self.terminate_with_diagnostic(out, "E2234", "the native debugger could not retire the entry breakpoint")
+                    return
+                }
+            }
+            reason := if mode == .Pause -> "pause"
+                else if self.last_exception.is_some() || self.last_signal.is_some() -> "exception"
+                else if entry_stop -> "entry"
+                else if mode == .Step -> "step"
+                else -> "breakpoint"
+            hit_breakpoint_ids := [U32]{}
+            if Inferior.parse_top_frame(bt_text) == .Val(frame) {
+                match self.map.jet_line_for_file(frame.rust_file, self.rust_file, frame.rust_line) {
+                    None -> {
+                        if self.unmapped_steps >= 200 {
+                            self.terminate_with_diagnostic(out, "E2235", "native debugger produced too many stops without a verified Jet source mapping")
+                            return
+                        }
+                        self.unmapped_steps += 1
+                        match self.resume_hidden_stop("thread step-over") {
+                            .Ok(following) -> { result = ^following; depth += 1; next }
+                            .Err(error) -> {
+                                self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                return
+                            }
+                        }
+                    }
+                    .Val(jline) -> {
+                        self.unmapped_steps = 0
+                        if !entry_stop && mode != .Step && mode != .Pause {
+                            match self.breakpoint_action(jline) {
+                                .Stop(ids) -> hit_breakpoint_ids = ^ids
+                                .Continue -> {
+                                    match self.resume_hidden_stop("continue") {
+                                        .Ok(following) -> { result = ^following; mode = .Continue; depth = 0; next }
+                                        .Err(error) -> {
+                                            self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                            return
+                                        }
+                                    }
+                                }
+                                .Log(message) -> {
+                                    self.event(out, "output", "{{\"category\":\"console\",\"output\":\"{json_escape(message)}\\n\"}}")
+                                    match self.resume_hidden_stop("continue") {
+                                        .Ok(following) -> { result = ^following; mode = .Continue; depth = 0; next }
+                                        .Err(error) -> {
+                                            self.terminate_backend(out, error, "the native debugger lost the running session while skipping a non-Jet stop")
+                                            return
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            match Inferior.parse_top_frame(bt_text) {
+                .Val(frame) -> {
+                    jet_line :: self.map.jet_line_for_file(frame.rust_file, self.rust_file, frame.rust_line).unwrap_or(1)
+                    _ :: self.source_line(jet_line)
+                    self.record_history_event(bt_text, jet_line)
+                    if reason == "breakpoint" && self.history.events.last().is_some_and((event) -> self.history_write_matches(event)) -> reason = "data breakpoint"
+                    hit_ids :: if hit_breakpoint_ids.is_empty() -> "" else -> ",\"hitBreakpointIds\":[{hit_breakpoint_ids.iter().map((id) -> id.to_string()).collect().join(",")}]"
+                    self.event(out, "stopped", "{{\"reason\":\"{reason}\",\"threadId\":{self.current_thread},\"allThreadsStopped\":true{hit_ids}}}")
+                }
+                None -> self.terminate_with_diagnostic(out, "E2235", "native debugger stopped without a verified Jet frame")
+            }
+            return
+        }
+    }
+}

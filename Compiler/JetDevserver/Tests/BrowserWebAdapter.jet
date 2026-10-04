@@ -1,0 +1,86 @@
+use jet_devserver.BrowserWebAdapter.*
+use jet_devserver.BrowserHost.*
+use jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
+use jet_devserver.Devtools.catalog.[canonical]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, DevtoolsSessionState, DevtoolsCommandCapabilities, JET_DEVTOOLS_PROTOCOL]
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2287
+fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection]) {
+    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    envelope.push(JetDevtoolsEvent.from_parts(100 + sequence, "devserver", "state", "session", "{\"state\":\"ready\"}").unwrap())
+    event := envelope.events().next().unwrap().clone()
+    panels := canonical().unwrap().project(envelope, .BrowserInApp, JetDevtoolsPanelCapability.ALL)
+    projected := DevtoolsProjection { protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: "s1", source_id: .None,
+        build_id: .None, revision: "rev", world_id: .None, sequence: sequence, observed_at: 100 + sequence,
+        panels: [event], selection: .None,
+        status: DevtoolsStatusFact { state: .Ready, diagnostic_code: .None, diagnostic: .None, accepted_revision: .None,
+            last_good_revision: .None, run_target: .None, run_output: .None, test_state: .None },
+        command_capabilities: DevtoolsCommandCapabilities { project_rebuild: false,
+            project_rebuild_reason: .Val("no rebuild executor is registered for this host") },
+        command_receipts: [], reset: sequence == 1, truncation: false }
+    (projected, panels)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2340
+#Test("typed_projection_renders_both_placements_from_one_state") {
+    state := BrowserWebState.new("s1")
+    (projected, panels) := projection(1)
+    state.sync(projected, panels).unwrap()
+    in_app := state.host().view_model(.InApp)
+    workbench := state.host().view_model(.Workbench)
+    assert_eq(in_app.session_id, workbench.session_id)
+    assert_eq(in_app.panels[0].panel_id, workbench.panels[0].panel_id)
+    assert_ne(in_app.route, workbench.route)
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2352
+#Test("typed_status_and_identity_stay_frame_metadata") {
+    (projected, panels) := projection(1)
+    projected.source_id = .Val("src/main.jet"); projected.build_id = .Val("build-1"); projected.world_id = .Val("world-1")
+    projected.status = DevtoolsStatusFact { state: .Building, diagnostic_code: .Val("E0102"), diagnostic: .Val("missing name"),
+        accepted_revision: .Val("accepted"), last_good_revision: .Val("good"), run_target: .Val("browser"), run_output: .Val("web"), test_state: .Val("idle") }
+    state := BrowserWebState.new("s1")
+    state.sync(projected, panels).unwrap()
+    frame := state.frame(.InApp)
+    assert_eq(frame.source_id.as_deref(), .Val("src/main.jet"))
+    assert_eq(frame.state, BrowserSessionState.Building)
+    assert(!frame.panels.is_empty())
+    assert_eq(frame.status.diagnostic_code.as_deref(), .Val("E0102"))
+    assert(!frame.tools.rebuild)
+    json := view_json(state, .InApp)
+    assert(json.contains("\"source_id\":\"src/main.jet\""))
+    assert(json.contains("\"status\":{\"state\":\"building\""))
+    assert(json.contains("\"rebuild\":{\"available\":false,\"reason\":\"no rebuild executor is registered for this host\"}"))
+    assert(json.contains("\"receipts\":[]"))
+    assert(!json.contains("__session_status"))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2384
+#Test("page_offers_tools_only_where_the_host_has_them") {
+    (projected, panels) := projection(1)
+    projected.status.state = .Error
+    projected.status.diagnostic_code = .Val("E0102")
+    projected.status.diagnostic = .Val("Error [E0102]: unknown symbol\n  --> app.jet:12:9\n")
+    state := BrowserWebState.new("s1")
+    state.sync(projected, panels).unwrap()
+    page := render_page(state, .InApp)
+    assert(!page.contains("data-tool=\"source\""))
+    assert(!page.contains("data-tool=\"rebuild\""))
+    assert(page.contains("no rebuild executor is registered for this host"))
+    assert(page.contains("<pre class=\"diag\">Error [E0102]: unknown symbol"))
+    state.tools.source = true; state.tools.source_reason = .None
+    source_page := render_page(state, .InApp)
+    assert(source_page.contains("data-tool=\"source\" data-focus=\"tool:source\" data-file=\"app.jet\">Fix in source"))
+    assert(source_page.contains("class=\"source\""))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2408
+#Test("reconnect_reset_returns_bounded_snapshot_events") {
+    state := BrowserWebState.new("s1")
+    (projected, panels) := projection(1)
+    state.sync(projected, panels).unwrap()
+    body := reconnect_json(state, .None, true, false).unwrap()
+    assert(body.contains("\"reset\":true")); assert(body.contains("\"complete\":true")); assert(body.contains("\"sequence\":1"))
+    truncated := reconnect_json(state, .Val(0), true, true).unwrap()
+    assert(truncated.contains("\"truncation\":true")); assert(truncated.contains("\"complete\":false")); assert(truncated.contains("\"events\":[]"))
+}
+// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2424
+#Test("action_parser_requires_typed_grant_for_source_navigation") {
+    error := parse_action("{\"action\":\"navigate_source\",\"panel_id\":\"build\",\"node_id\":\"source\"}".as_bytes(), .InApp).unwrap_err()
+    assert(error.contains("grant"))
+}

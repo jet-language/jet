@@ -1,1656 +1,542 @@
-// PORT-PENDING 0755 crates-jet-devserver-src-browserhost: crates/jet-devserver/src/BrowserHost.rs:1-1652
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Typed browser-host projection for the shared `jet.devtools.v1` session.
-//RS //!
-//RS //! `Session` owns protocol decoding and supplies [`BrowserHostEvent`] values to
-//RS //! this module.  This module deliberately has no wire decoder, renderer, or
-//RS //! browser runtime.  It keeps the two browser placements on one state machine,
-//RS //! retains a bounded reconnect history, and accepts source/action requests only
-//RS //! when their typed grants still belong to the current session and revision.
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet, VecDeque};
-//RS use std::fmt;
-//RS 
-//RS /// The one protocol accepted by every devtools host.
-//RS pub const BROWSER_DEVTOOLS_PROTOCOL: &str = "jet.devtools.v1";
-//RS /// Compatibility spelling for callers that name the protocol after the wire.
-//RS pub const JET_DEVTOOLS_PROTOCOL: &str = BROWSER_DEVTOOLS_PROTOCOL;
-//RS 
-//RS /// Maximum number of event snapshots retained for a reconnecting browser.
-//RS pub const MAX_RECONNECT_EVENTS: usize = 256;
-//RS /// Maximum number of panels in one event.
-//RS pub const MAX_BROWSER_PANELS: usize = 128;
-//RS /// Maximum number of nodes in one event, including descendants.
-//RS pub const MAX_BROWSER_NODES: usize = 4096;
-//RS /// Maximum nesting depth of a typed node tree.
-//RS pub const MAX_BROWSER_NODE_DEPTH: usize = 64;
-//RS /// Maximum length of an identity, title, label, or status string.
-//RS pub const MAX_BROWSER_TEXT: usize = 256;
-//RS /// Maximum length of an explicitly published node value.
-//RS pub const MAX_BROWSER_VALUE: usize = 4096;
-//RS 
-//RS /// Browser placement backed by the same host state.
-//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum BrowserPlacement {
-//RS     /// The compact surface injected into the running application.
-//RS     #[default]
-//RS     InApp,
-//RS     /// The full `jet dev` workbench page.
-//RS     Workbench,
-//RS }
-//RS 
-//RS impl BrowserPlacement {
-//RS     /// Stable wire/view spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::InApp => "in-app",
-//RS             Self::Workbench => "workbench",
-//RS         }
-//RS     }
-//RS 
-//RS     const fn index(self) -> usize {
-//RS         match self {
-//RS             Self::InApp => 0,
-//RS             Self::Workbench => 1,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Closed node vocabulary for browser view facts.
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum BrowserNodeKind {
-//RS     /// A non-interactive text fact.
-//RS     Text,
-//RS     /// A status fact whose status field is meaningful to the host.
-//RS     Status,
-//RS     /// A tabular row or table summary.
-//RS     Table,
-//RS     /// A hierarchical inspector node.
-//RS     Tree,
-//RS     /// A chart summary or chart datum.
-//RS     Chart,
-//RS     /// An explicitly granted action affordance.
-//RS     Action,
-//RS }
-//RS 
-//RS impl BrowserNodeKind {
-//RS     /// Stable view spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Text => "text",
-//RS             Self::Status => "status",
-//RS             Self::Table => "table",
-//RS             Self::Tree => "tree",
-//RS             Self::Chart => "chart",
-//RS             Self::Action => "action",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Deterministic place in a browser panel layout.
-//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum BrowserDock {
-//RS     /// Left rail in the workbench, or the default dock for an in-app panel.
-//RS     #[default]
-//RS     Left,
-//RS     /// Right inspector rail.
-//RS     Right,
-//RS     /// Bottom timeline rail.
-//RS     Bottom,
-//RS     /// Floating lens/drawer.
-//RS     Floating,
-//RS }
-//RS 
-//RS impl BrowserDock {
-//RS     /// Stable view spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Left => "left",
-//RS             Self::Right => "right",
-//RS             Self::Bottom => "bottom",
-//RS             Self::Floating => "floating",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The six browser-visible session states from the devtools UX.
-//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub enum BrowserSessionState {
-//RS     /// No build/runtime state has been published yet.
-//RS     #[default]
-//RS     Idle,
-//RS     /// A source rebuild is in progress.
-//RS     Building,
-//RS     /// The last build failed, so the last-good page remains visible.
-//RS     BuildFailed,
-//RS     /// The running program reported a failure.
-//RS     RuntimeFailure,
-//RS     /// A compatible hot reload is in progress or has just completed.
-//RS     HotReload,
-//RS     /// The test panel reports a failing test run.
-//RS     TestsFailing,
-//RS }
-//RS 
-//RS impl BrowserSessionState {
-//RS     /// Stable view spelling.
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Idle => "idle",
-//RS             Self::Building => "building",
-//RS             Self::BuildFailed => "build-failed",
-//RS             Self::RuntimeFailure => "runtime-failure",
-//RS             Self::HotReload => "hot-reload",
-//RS             Self::TestsFailing => "tests-failing",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A source identity that a host may open after checking a grant.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserSourceLocation {
-//RS     /// Project-relative Jet source identity.
-//RS     pub source_id: String,
-//RS     /// One-based source line.
-//RS     pub line: u32,
-//RS     /// Zero-based source column.
-//RS     pub column: u32,
-//RS     /// Optional function identity at the source anchor.
-//RS     pub function: Option<String>,
-//RS }
-//RS 
-//RS impl BrowserSourceLocation {
-//RS     /// Construct a source location.  [`BrowserSourceLocation::validate`] is
-//RS     /// run when the location is used by a host action.
-//RS     pub fn new(
-//RS         source_id: impl Into<String>,
-//RS         line: u32,
-//RS         column: u32,
-//RS         function: Option<impl Into<String>>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             source_id: source_id.into(),
-//RS             line,
-//RS             column,
-//RS             function: function.map(Into::into),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Validate that the location is safe to hand to a source navigator.
-//RS     pub fn validate(&self) -> Result<(), BrowserHostError> {
-//RS         validate_source_id(&self.source_id)?;
-//RS         if self.line == 0 {
-//RS             return Err(BrowserHostError::InvalidSource(
-//RS                 "source line must be one-based".to_string(),
-//RS             ));
-//RS         }
-//RS         if let Some(function) = &self.function {
-//RS             validate_text(function, "source function", MAX_BROWSER_TEXT)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS /// A source-navigation capability minted by the canonical session projection.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserSourceGrant {
-//RS     /// Session that minted this grant.
-//RS     pub session_id: String,
-//RS     /// Source revision for which the grant is valid.
-//RS     pub revision: u64,
-//RS     /// Panel owning the source anchor.
-//RS     pub panel_id: String,
-//RS     /// Node owning the source anchor.
-//RS     pub node_id: String,
-//RS     /// Safe source target.
-//RS     pub source: BrowserSourceLocation,
-//RS }
-//RS 
-//RS impl BrowserSourceGrant {
-//RS     /// Construct a grant for one source anchor.
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         revision: u64,
-//RS         panel_id: impl Into<String>,
-//RS         node_id: impl Into<String>,
-//RS         source: BrowserSourceLocation,
-//RS     ) -> Self {
-//RS         Self {
-//RS             session_id: session_id.into(),
-//RS             revision,
-//RS             panel_id: panel_id.into(),
-//RS             node_id: node_id.into(),
-//RS             source,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Explicit alias used by callers that spell out the navigation capability.
-//RS pub type SourceNavigationGrant = BrowserSourceGrant;
-//RS /// Short alias for source-navigation callers.
-//RS pub type BrowserNavigationGrant = BrowserSourceGrant;
-//RS 
-//RS /// An action capability minted by the canonical session projection.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserActionGrant {
-//RS     /// Session that minted this grant.
-//RS     pub session_id: String,
-//RS     /// Source revision for which the grant is valid.
-//RS     pub revision: u64,
-//RS     /// Panel owning the action.
-//RS     pub panel_id: String,
-//RS     /// Node carrying the action affordance.
-//RS     pub node_id: String,
-//RS     /// Canonical action identity.
-//RS     pub action_id: String,
-//RS }
-//RS 
-//RS impl BrowserActionGrant {
-//RS     /// Construct an action capability.
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         revision: u64,
-//RS         panel_id: impl Into<String>,
-//RS         node_id: impl Into<String>,
-//RS         action_id: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             session_id: session_id.into(),
-//RS             revision,
-//RS             panel_id: panel_id.into(),
-//RS             node_id: node_id.into(),
-//RS             action_id: action_id.into(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Short alias for callers that use the generic grant name.
-//RS pub type ActionGrant = BrowserActionGrant;
-//RS 
-//RS /// One typed browser node.  It intentionally has no generic payload field.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserNode {
-//RS     /// Stable node identity within its panel.
-//RS     pub id: String,
-//RS     /// Closed node kind understood by every browser host.
-//RS     pub kind: BrowserNodeKind,
-//RS     /// Human-readable label.
-//RS     pub label: String,
-//RS     /// Explicitly published display value, if any.
-//RS     pub value: Option<String>,
-//RS     /// Optional typed status text.
-//RS     pub status: Option<String>,
-//RS     /// Child facts for tree-shaped nodes.
-//RS     pub children: Vec<BrowserNode>,
-//RS }
-//RS 
-//RS impl BrowserNode {
-//RS     /// Construct a node with no optional value, status, or children.
-//RS     pub fn new(id: impl Into<String>, kind: BrowserNodeKind, label: impl Into<String>) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             kind,
-//RS             label: label.into(),
-//RS             value: None,
-//RS             status: None,
-//RS             children: Vec::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Add an explicitly published display value.
-//RS     pub fn with_value(mut self, value: impl Into<String>) -> Self {
-//RS         self.value = Some(value.into());
-//RS         self
-//RS     }
-//RS 
-//RS     /// Add typed status text.
-//RS     pub fn with_status(mut self, status: impl Into<String>) -> Self {
-//RS         self.status = Some(status.into());
-//RS         self
-//RS     }
-//RS 
-//RS     /// Add child facts.
-//RS     pub fn with_children(mut self, children: Vec<BrowserNode>) -> Self {
-//RS         self.children = children;
-//RS         self
-//RS     }
-//RS }
-//RS 
-//RS /// A typed panel snapshot supplied by canonical Session parsing.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserPanelFact {
-//RS     /// Stable panel identity.
-//RS     pub panel_id: String,
-//RS     /// Human-readable panel title.
-//RS     pub title: String,
-//RS     /// Age of the panel fact at publication time.
-//RS     pub freshness_ms: u64,
-//RS     /// Typed status spelling for this panel.
-//RS     pub status: String,
-//RS     /// Canonical recording cursor for this panel, if the panel has time
-//RS     /// cursor semantics.  This is distinct from the enclosing reconnect
-//RS     /// cursor held by `BrowserHost`.
-//RS     pub cursor: Option<u64>,
-//RS     /// Typed node facts shown by the panel.
-//RS     pub nodes: Vec<BrowserNode>,
-//RS }
-//RS 
-//RS impl BrowserPanelFact {
-//RS     /// Construct a panel fact.
-//RS     pub fn new(
-//RS         panel_id: impl Into<String>,
-//RS         title: impl Into<String>,
-//RS         freshness_ms: u64,
-//RS         status: impl Into<String>,
-//RS         nodes: Vec<BrowserNode>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             panel_id: panel_id.into(),
-//RS             title: title.into(),
-//RS             freshness_ms,
-//RS             status: status.into(),
-//RS             cursor: None,
-//RS             nodes,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Attach the canonical recording cursor for this panel.
-//RS     pub fn with_cursor(mut self, cursor: Option<u64>) -> Self {
-//RS         self.cursor = cursor;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Identity spelling used by catalog consumers.
-//RS     pub fn identity(&self) -> &str {
-//RS         &self.panel_id
-//RS     }
-//RS }
-//RS 
-//RS /// One canonical, already-parsed devtools event for browser projection.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserHostEvent {
-//RS     /// Protocol identifier.  Must equal [`BROWSER_DEVTOOLS_PROTOCOL`].
-//RS     pub protocol: String,
-//RS     /// Resident session identity.
-//RS     pub session_id: String,
-//RS     /// Monotonic source revision.
-//RS     pub revision: u64,
-//RS     /// Monotonic event sequence within the session.
-//RS     pub sequence: u64,
-//RS     /// Canonical publication timestamp.
-//RS     pub observed_at_ms: u64,
-//RS     /// Typed panel facts; no generic JSON payload is accepted here.
-//RS     pub panels: Vec<BrowserPanelFact>,
-//RS }
-//RS 
-//RS impl BrowserHostEvent {
-//RS     /// Construct an event with the canonical protocol identifier.
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         revision: u64,
-//RS         sequence: u64,
-//RS         observed_at_ms: u64,
-//RS         panels: Vec<BrowserPanelFact>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             protocol: BROWSER_DEVTOOLS_PROTOCOL.to_string(),
-//RS             session_id: session_id.into(),
-//RS             revision,
-//RS             sequence,
-//RS             observed_at_ms,
-//RS             panels,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Validate this event without mutating a host.
-//RS     pub fn validate(&self) -> Result<(), BrowserHostError> {
-//RS         if self.protocol != BROWSER_DEVTOOLS_PROTOCOL {
-//RS             return Err(BrowserHostError::InvalidEvent(
-//RS                 "browser event protocol does not match jet.devtools.v1".to_string(),
-//RS             ));
-//RS         }
-//RS         validate_text(&self.session_id, "event session", MAX_BROWSER_TEXT)?;
-//RS         if self.panels.len() > MAX_BROWSER_PANELS {
-//RS             return Err(BrowserHostError::InvalidEvent(
-//RS                 "browser event exceeds the panel bound".to_string(),
-//RS             ));
-//RS         }
-//RS         let mut panel_ids = BTreeSet::new();
-//RS         let mut node_count = 0usize;
-//RS         for panel in &self.panels {
-//RS             validate_panel(panel, &mut node_count)?;
-//RS             if !panel_ids.insert(panel.panel_id.as_str()) {
-//RS                 return Err(BrowserHostError::InvalidEvent(format!(
-//RS                     "browser event repeats panel `{}`",
-//RS                     panel.panel_id
-//RS                 )));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS /// A reconnect cursor measured in canonical event sequence numbers.
-//RS #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
-//RS pub struct BrowserReconnectCursor {
-//RS     /// Last sequence acknowledged by the browser.
-//RS     pub sequence: u64,
-//RS }
-//RS 
-//RS impl BrowserReconnectCursor {
-//RS     /// Construct a cursor.
-//RS     pub const fn new(sequence: u64) -> Self {
-//RS         Self { sequence }
-//RS     }
-//RS }
-//RS 
-//RS impl From<u64> for BrowserReconnectCursor {
-//RS     fn from(sequence: u64) -> Self {
-//RS         Self::new(sequence)
-//RS     }
-//RS }
-//RS 
-//RS /// Bounded event response for a reconnecting browser.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserReconnect {
-//RS     /// Session to which this response belongs.
-//RS     pub session_id: String,
-//RS     /// Cursor supplied by the caller, if any.
-//RS     pub from: Option<BrowserReconnectCursor>,
-//RS     /// Highest sequence represented by this host.
-//RS     pub cursor: Option<BrowserReconnectCursor>,
-//RS     /// Retained events after `from`, in sequence order.
-//RS     pub events: Vec<BrowserHostEvent>,
-//RS     /// True when no retained events were evicted between `from` and now.
-//RS     pub complete: bool,
-//RS }
-//RS 
-//RS /// Shared selection reflected by both browser placements.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserSelection {
-//RS     /// Panel identity.
-//RS     pub panel_id: String,
-//RS     /// Node identity, if a node is selected.
-//RS     pub node_id: Option<String>,
-//RS }
-//RS 
-//RS /// Actions accepted by the browser host.  Source navigation and invocation
-//RS /// carry a required, session/revision-bound grant; panel layout remains local
-//RS /// host state.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum BrowserHostAction {
-//RS     /// Open a known panel in one placement.
-//RS     OpenPanel {
-//RS         /// Target placement.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS     },
-//RS     /// Close a known panel in one placement.
-//RS     ClosePanel {
-//RS         /// Target placement.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS     },
-//RS     /// Dock a known panel in one placement.
-//RS     DockPanel {
-//RS         /// Target placement.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// New dock position.
-//RS         dock: BrowserDock,
-//RS     },
-//RS     /// Navigate to a source anchor with a required grant.
-//RS     NavigateSource {
-//RS         /// Placement issuing the navigation.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// Node identity.
-//RS         node_id: String,
-//RS         /// Session/revision-bound source grant.
-//RS         grant: BrowserSourceGrant,
-//RS     },
-//RS     /// Invoke an explicitly granted Action node.
-//RS     InvokeAction {
-//RS         /// Placement issuing the invocation.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// Action node identity.
-//RS         node_id: String,
-//RS         /// Canonical action identity.
-//RS         action_id: String,
-//RS         /// Session/revision-bound action grant.
-//RS         grant: BrowserActionGrant,
-//RS     },
-//RS }
-//RS 
-//RS impl BrowserHostAction {
-//RS     /// Construct an open action.
-//RS     pub fn open(placement: BrowserPlacement, panel_id: impl Into<String>) -> Self {
-//RS         Self::OpenPanel {
-//RS             placement,
-//RS             panel_id: panel_id.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Construct a close action.
-//RS     pub fn close(placement: BrowserPlacement, panel_id: impl Into<String>) -> Self {
-//RS         Self::ClosePanel {
-//RS             placement,
-//RS             panel_id: panel_id.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Construct a dock action.
-//RS     pub fn dock(
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS         dock: BrowserDock,
-//RS     ) -> Self {
-//RS         Self::DockPanel {
-//RS             placement,
-//RS             panel_id: panel_id.into(),
-//RS             dock,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Construct a source-navigation action.
-//RS     pub fn navigate_source(
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS         node_id: impl Into<String>,
-//RS         grant: BrowserSourceGrant,
-//RS     ) -> Self {
-//RS         Self::NavigateSource {
-//RS             placement,
-//RS             panel_id: panel_id.into(),
-//RS             node_id: node_id.into(),
-//RS             grant,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Construct an invocation action.
-//RS     pub fn invoke_action(
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS         node_id: impl Into<String>,
-//RS         action_id: impl Into<String>,
-//RS         grant: BrowserActionGrant,
-//RS     ) -> Self {
-//RS         Self::InvokeAction {
-//RS             placement,
-//RS             panel_id: panel_id.into(),
-//RS             node_id: node_id.into(),
-//RS             action_id: action_id.into(),
-//RS             grant,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Result of an accepted host action.  Results carry identities only and never
-//RS /// leak an unrequested runtime payload.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum BrowserHostEffect {
-//RS     /// A panel became visible.
-//RS     PanelOpened {
-//RS         /// Placement changed.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS     },
-//RS     /// A panel became hidden.
-//RS     PanelClosed {
-//RS         /// Placement changed.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS     },
-//RS     /// A panel moved to another dock.
-//RS     PanelDocked {
-//RS         /// Placement changed.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// New dock position.
-//RS         dock: BrowserDock,
-//RS     },
-//RS     /// A source target was approved.
-//RS     SourceNavigated {
-//RS         /// Placement issuing the navigation.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// Node identity.
-//RS         node_id: String,
-//RS         /// Approved source target.
-//RS         source: BrowserSourceLocation,
-//RS     },
-//RS     /// An action was approved.
-//RS     ActionInvoked {
-//RS         /// Placement issuing the invocation.
-//RS         placement: BrowserPlacement,
-//RS         /// Panel identity.
-//RS         panel_id: String,
-//RS         /// Action node identity.
-//RS         node_id: String,
-//RS         /// Canonical action identity.
-//RS         action_id: String,
-//RS     },
-//RS }
-//RS 
-//RS /// Stable element facts consumed by a renderer.  This is a view model, not
-//RS /// HTML and not a second protocol.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserHtmlElement {
-//RS     /// Deterministic element identity.
-//RS     pub id: String,
-//RS     /// Element role/fact kind.
-//RS     pub kind: String,
-//RS     /// Owning panel, if any.
-//RS     pub panel_id: Option<String>,
-//RS     /// Owning node, if any.
-//RS     pub node_id: Option<String>,
-//RS     /// Visible label.
-//RS     pub label: String,
-//RS     /// Explicitly published visible value, if any.
-//RS     pub value: Option<String>,
-//RS     /// Typed status, if any.
-//RS     pub status: Option<String>,
-//RS }
-//RS 
-//RS /// Deterministic browser view model for either placement.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserHtmlViewModel {
-//RS     /// Placement represented by this model.
-//RS     pub placement: BrowserPlacement,
-//RS     /// Stable route expected by the eventual WebHost wiring.
-//RS     pub route: String,
-//RS     /// Canonical protocol identifier.
-//RS     pub protocol: String,
-//RS     /// Resident session identity.
-//RS     pub session_id: String,
-//RS     /// Current source revision, if an event has arrived.
-//RS     pub revision: Option<u64>,
-//RS     /// Current event sequence, if an event has arrived.
-//RS     pub sequence: Option<u64>,
-//RS     /// Latest event sequence used as the reconnect/bookmark cursor.  A
-//RS     /// recording cursor is carried independently by each panel view.
-//RS     pub cursor: Option<BrowserReconnectCursor>,
-//RS     /// Derived six-state session label.
-//RS     pub state: BrowserSessionState,
-//RS     /// Shared selected panel/node.
-//RS     pub selection: Option<BrowserSelection>,
-//RS     /// Panel views in deterministic panel-id order.
-//RS     pub panels: Vec<BrowserPanelView>,
-//RS     /// Flattened deterministic element facts for a renderer.
-//RS     pub elements: Vec<BrowserHtmlElement>,
-//RS }
-//RS 
-//RS /// Panel layout plus typed facts for a selected placement.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct BrowserPanelView {
-//RS     /// Stable panel identity.
-//RS     pub panel_id: String,
-//RS     /// Human-readable panel title.
-//RS     pub title: String,
-//RS     /// Fact freshness age.
-//RS     pub freshness_ms: u64,
-//RS     /// Typed status text.
-//RS     pub status: String,
-//RS     /// Canonical recording cursor for this panel, if any.
-//RS     pub cursor: Option<u64>,
-//RS     /// Whether this placement currently displays the panel.
-//RS     pub open: bool,
-//RS     /// Current dock position.
-//RS     pub dock: BrowserDock,
-//RS     /// Typed node facts.
-//RS     pub nodes: Vec<BrowserNode>,
-//RS }
-//RS 
-//RS /// Errors raised before a browser action or event can change host state.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum BrowserHostError {
-//RS     /// Event failed shape/protocol validation.
-//RS     InvalidEvent(String),
-//RS     /// An event belongs to another resident session.
-//RS     WrongSession { expected: String, received: String },
-//RS     /// An event moved backwards in source revision.
-//RS     StaleRevision { current: u64, received: u64 },
-//RS     /// An event reused or moved backwards in sequence.
-//RS     StaleSequence { current: u64, received: u64 },
-//RS     /// A reconnect cursor points before retained history.
-//RS     CursorExpired { cursor: u64, earliest: u64 },
-//RS     /// A reconnect cursor points beyond the current event.
-//RS     CursorAhead { cursor: u64, current: u64 },
-//RS     /// The requested panel is not in the canonical catalog.
-//RS     UnknownPanel(String),
-//RS     /// The requested node is not in the canonical panel facts.
-//RS     UnknownNode { panel_id: String, node_id: String },
-//RS     /// A source/action request carries no matching capability.
-//RS     ActionNotGranted(String),
-//RS     /// A source target is not safe to open.
-//RS     InvalidSource(String),
-//RS     /// A generic local action request is malformed.
-//RS     InvalidAction(String),
-//RS }
-//RS 
-//RS impl fmt::Display for BrowserHostError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::InvalidEvent(message) => write!(formatter, "invalid browser event: {message}"),
-//RS             Self::WrongSession { expected, received } => write!(
-//RS                 formatter,
-//RS                 "browser event belongs to session `{received}`, expected `{expected}`"
-//RS             ),
-//RS             Self::StaleRevision { current, received } => write!(
-//RS                 formatter,
-//RS                 "stale browser revision {received}; current revision is {current}"
-//RS             ),
-//RS             Self::StaleSequence { current, received } => write!(
-//RS                 formatter,
-//RS                 "stale browser sequence {received}; current sequence is {current}"
-//RS             ),
-//RS             Self::CursorExpired { cursor, earliest } => write!(
-//RS                 formatter,
-//RS                 "browser reconnect cursor {cursor} predates retained sequence {earliest}"
-//RS             ),
-//RS             Self::CursorAhead { cursor, current } => write!(
-//RS                 formatter,
-//RS                 "browser reconnect cursor {cursor} is ahead of current sequence {current}"
-//RS             ),
-//RS             Self::UnknownPanel(panel_id) => write!(formatter, "unknown browser panel `{panel_id}`"),
-//RS             Self::UnknownNode { panel_id, node_id } => write!(
-//RS                 formatter,
-//RS                 "unknown browser node `{node_id}` in panel `{panel_id}`"
-//RS             ),
-//RS             Self::ActionNotGranted(message) => write!(formatter, "browser action not granted: {message}"),
-//RS             Self::InvalidSource(message) => write!(formatter, "invalid browser source: {message}"),
-//RS             Self::InvalidAction(message) => write!(formatter, "invalid browser action: {message}"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for BrowserHostError {}
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct PanelState {
-//RS     fact: BrowserPanelFact,
-//RS     layout: [PanelLayout; 2],
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Default)]
-//RS struct PanelLayout {
-//RS     open: bool,
-//RS     dock: BrowserDock,
-//RS }
-//RS 
-//RS /// One state machine shared by the in-app surface and workbench page.
-//RS #[derive(Clone, Debug)]
-//RS pub struct BrowserHost {
-//RS     session_id: String,
-//RS     revision: Option<u64>,
-//RS     sequence: Option<u64>,
-//RS     observed_at_ms: Option<u64>,
-//RS     state: BrowserSessionState,
-//RS     cursor: Option<BrowserReconnectCursor>,
-//RS     selection: Option<BrowserSelection>,
-//RS     panels: BTreeMap<String, PanelState>,
-//RS     history: VecDeque<BrowserHostEvent>,
-//RS }
-//RS 
-//RS impl BrowserHost {
-//RS     /// Bind a host to one resident session.  Events from every other session
-//RS     /// are rejected before they can affect placement or cursor state.
-//RS     pub fn new(session_id: impl Into<String>) -> Self {
-//RS         Self {
-//RS             session_id: session_id.into(),
-//RS             revision: None,
-//RS             sequence: None,
-//RS             observed_at_ms: None,
-//RS             state: BrowserSessionState::Idle,
-//RS             cursor: None,
-//RS             selection: None,
-//RS             panels: BTreeMap::new(),
-//RS             history: VecDeque::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Alias emphasizing the session binding.
-//RS     pub fn for_session(session_id: impl Into<String>) -> Self {
-//RS         Self::new(session_id)
-//RS     }
-//RS 
-//RS     /// Resident session identity.
-//RS     pub fn session_id(&self) -> &str {
-//RS         &self.session_id
-//RS     }
-//RS 
-//RS     /// Current source revision.
-//RS     pub fn revision(&self) -> Option<u64> {
-//RS         self.revision
-//RS     }
-//RS 
-//RS     /// Current accepted event sequence.
-//RS     pub fn sequence(&self) -> Option<u64> {
-//RS         self.sequence
-//RS     }
-//RS 
-//RS     /// Last canonical publication timestamp.
-//RS     pub fn observed_at_ms(&self) -> Option<u64> {
-//RS         self.observed_at_ms
-//RS     }
-//RS 
-//RS     /// Derived browser-visible state.
-//RS     pub fn state(&self) -> BrowserSessionState {
-//RS         self.state
-//RS     }
-//RS 
-//RS     /// Latest event sequence used as the reconnect/bookmark cursor.  Panel
-//RS     /// recording cursors are stored on their individual facts.
-//RS     pub fn cursor(&self) -> Option<BrowserReconnectCursor> {
-//RS         self.cursor
-//RS     }
-//RS 
-//RS     /// Shared selection.
-//RS     pub fn selection(&self) -> Option<&BrowserSelection> {
-//RS         self.selection.as_ref()
-//RS     }
-//RS 
-//RS     /// Apply one already-parsed canonical event.
-//RS     pub fn apply_event(&mut self, event: BrowserHostEvent) -> Result<(), BrowserHostError> {
-//RS         event.validate()?;
-//RS         if event.session_id != self.session_id {
-//RS             return Err(BrowserHostError::WrongSession {
-//RS                 expected: self.session_id.clone(),
-//RS                 received: event.session_id,
-//RS             });
-//RS         }
-//RS         if let Some(current) = self.revision {
-//RS             if event.revision < current {
-//RS                 return Err(BrowserHostError::StaleRevision {
-//RS                     current,
-//RS                     received: event.revision,
-//RS                 });
-//RS             }
-//RS         }
-//RS         if let Some(current) = self.sequence {
-//RS             if event.sequence <= current {
-//RS                 return Err(BrowserHostError::StaleSequence {
-//RS                     current,
-//RS                     received: event.sequence,
-//RS                 });
-//RS             }
-//RS         }
-//RS 
-//RS         let next_ids = event
-//RS             .panels
-//RS             .iter()
-//RS             .map(|panel| panel.panel_id.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         self.panels.retain(|panel_id, _| next_ids.contains(panel_id.as_str()));
-//RS         for fact in &event.panels {
-//RS             if let Some(panel) = self.panels.get_mut(&fact.panel_id) {
-//RS                 panel.fact = fact.clone();
-//RS             } else {
-//RS                 self.panels.insert(
-//RS                     fact.panel_id.clone(),
-//RS                     PanelState {
-//RS                         fact: fact.clone(),
-//RS                         layout: [PanelLayout::default(), PanelLayout::default()],
-//RS                     },
-//RS                 );
-//RS             }
-//RS         }
-//RS         self.revision = Some(event.revision);
-//RS         self.sequence = Some(event.sequence);
-//RS         self.observed_at_ms = Some(event.observed_at_ms);
-//RS         self.state = derive_session_state(&event.panels);
-//RS         self.cursor = Some(BrowserReconnectCursor::new(event.sequence));
-//RS         if let Some(selection) = &self.selection {
-//RS             if !self.node_exists(&selection.panel_id, selection.node_id.as_deref()) {
-//RS                 self.selection = None;
-//RS             }
-//RS         }
-//RS         if self.history.len() == MAX_RECONNECT_EVENTS {
-//RS             self.history.pop_front();
-//RS         }
-//RS         self.history.push_back(event);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Short alias for event application.
-//RS     pub fn apply(&mut self, event: BrowserHostEvent) -> Result<(), BrowserHostError> {
-//RS         self.apply_event(event)
-//RS     }
-//RS 
-//RS     /// Return the retained event stream after `cursor`.
-//RS     pub fn resume_from(
-//RS         &self,
-//RS         cursor: Option<BrowserReconnectCursor>,
-//RS     ) -> Result<BrowserReconnect, BrowserHostError> {
-//RS         let current = self.sequence;
-//RS         if let (Some(requested), Some(current)) = (cursor, current) {
-//RS             if requested.sequence > current {
-//RS                 return Err(BrowserHostError::CursorAhead {
-//RS                     cursor: requested.sequence,
-//RS                     current,
-//RS                 });
-//RS             }
-//RS         }
-//RS         if let Some(requested) = cursor {
-//RS             if let Some(earliest) = self.history.front().map(|event| event.sequence) {
-//RS                 if requested.sequence.saturating_add(1) < earliest {
-//RS                     return Err(BrowserHostError::CursorExpired {
-//RS                         cursor: requested.sequence,
-//RS                         earliest,
-//RS                     });
-//RS                 }
-//RS             } else if requested.sequence > 0 {
-//RS                 return Err(BrowserHostError::CursorExpired {
-//RS                     cursor: requested.sequence,
-//RS                     earliest: 0,
-//RS                 });
-//RS             }
-//RS         }
-//RS         let events = self
-//RS             .history
-//RS             .iter()
-//RS             .filter(|event| cursor.is_none_or(|from| event.sequence > from.sequence))
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         Ok(BrowserReconnect {
-//RS             session_id: self.session_id.clone(),
-//RS             from: cursor,
-//RS             cursor: self.sequence.map(BrowserReconnectCursor::new),
-//RS             events,
-//RS             complete: true,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Resume from a plain sequence number.
-//RS     pub fn events_since(&self, sequence: Option<u64>) -> Result<Vec<BrowserHostEvent>, BrowserHostError> {
-//RS         Ok(self
-//RS             .resume_from(sequence.map(BrowserReconnectCursor::new))?
-//RS             .events)
-//RS     }
-//RS 
-//RS     /// Set the shared time cursor.  A cursor must refer to retained history.
-//RS     pub fn set_cursor(&mut self, cursor: Option<BrowserReconnectCursor>) -> Result<(), BrowserHostError> {
-//RS         if let Some(cursor) = cursor {
-//RS             self.resume_from(Some(cursor))?;
-//RS         }
-//RS         self.cursor = cursor;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Scrub the shared cursor from either placement.
-//RS     pub fn scrub(&mut self, sequence: Option<u64>) -> Result<(), BrowserHostError> {
-//RS         self.set_cursor(sequence.map(BrowserReconnectCursor::new))
-//RS     }
-//RS 
-//RS     /// Return the immutable panel catalog in deterministic identity order.
-//RS     pub fn panel_catalog(&self) -> Vec<BrowserPanelFact> {
-//RS         let mut panels = self
-//RS             .panels
-//RS             .values()
-//RS             .map(|panel| panel.fact.clone())
-//RS             .collect::<Vec<_>>();
-//RS         let catalog = crate::Devtools::catalog::descriptors();
-//RS         panels.sort_by_key(|panel| {
-//RS             catalog
-//RS                 .iter()
-//RS                 .position(|descriptor| descriptor.id.as_str() == panel.panel_id)
-//RS                 .unwrap_or(usize::MAX)
-//RS         });
-//RS         panels
-//RS     }
-//RS 
-//RS     /// Return one panel fact from the canonical catalog.
-//RS     pub fn panel(&self, panel_id: &str) -> Option<&BrowserPanelFact> {
-//RS         self.panels.get(panel_id).map(|panel| &panel.fact)
-//RS     }
-//RS 
-//RS     /// Is a panel open in the selected placement?
-//RS     pub fn is_open(&self, placement: BrowserPlacement, panel_id: &str) -> bool {
-//RS         self.panels
-//RS             .get(panel_id)
-//RS             .is_some_and(|panel| panel.layout[placement.index()].open)
-//RS     }
-//RS 
-//RS     /// Current dock for a panel, if it is known.
-//RS     pub fn dock(&self, placement: BrowserPlacement, panel_id: &str) -> Option<BrowserDock> {
-//RS         self.panels
-//RS             .get(panel_id)
-//RS             .map(|panel| panel.layout[placement.index()].dock)
-//RS     }
-//RS 
-//RS     /// Open a known panel in one placement.
-//RS     pub fn open_panel(
-//RS         &mut self,
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS     ) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         let panel_id = panel_id.into();
-//RS         let panel = self.require_panel(&panel_id)?;
-//RS         panel.layout[placement.index()].open = true;
-//RS         Ok(BrowserHostEffect::PanelOpened {
-//RS             placement,
-//RS             panel_id,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Close a known panel in one placement.
-//RS     pub fn close_panel(
-//RS         &mut self,
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS     ) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         let panel_id = panel_id.into();
-//RS         let panel = self.require_panel(&panel_id)?;
-//RS         panel.layout[placement.index()].open = false;
-//RS         if self
-//RS             .selection
-//RS             .as_ref()
-//RS             .is_some_and(|selection| selection.panel_id == panel_id)
-//RS         {
-//RS             self.selection = None;
-//RS         }
-//RS         Ok(BrowserHostEffect::PanelClosed {
-//RS             placement,
-//RS             panel_id,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Dock a known panel in one placement.
-//RS     pub fn dock_panel(
-//RS         &mut self,
-//RS         placement: BrowserPlacement,
-//RS         panel_id: impl Into<String>,
-//RS         dock: BrowserDock,
-//RS     ) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         let panel_id = panel_id.into();
-//RS         let panel = self.require_panel(&panel_id)?;
-//RS         panel.layout[placement.index()].dock = dock;
-//RS         Ok(BrowserHostEffect::PanelDocked {
-//RS             placement,
-//RS             panel_id,
-//RS             dock,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Select a known panel/node.  Selection is intentionally shared across
-//RS     /// placements, so a workbench and in-app model cannot drift.
-//RS     pub fn select(
-//RS         &mut self,
-//RS         panel_id: impl Into<String>,
-//RS         node_id: Option<impl Into<String>>,
-//RS     ) -> Result<(), BrowserHostError> {
-//RS         let panel_id = panel_id.into();
-//RS         let node_id = node_id.map(Into::into);
-//RS         self.require_panel(&panel_id)?;
-//RS         if let Some(node_id) = node_id.as_deref() {
-//RS             self.require_node(&panel_id, node_id)?;
-//RS         }
-//RS         self.selection = Some(BrowserSelection { panel_id, node_id });
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Clear shared selection.
-//RS     pub fn clear_selection(&mut self) {
-//RS         self.selection = None;
-//RS     }
-//RS 
-//RS     /// Apply a typed host action.
-//RS     pub fn dispatch(&mut self, action: BrowserHostAction) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         match action {
-//RS             BrowserHostAction::OpenPanel {
-//RS                 placement,
-//RS                 panel_id,
-//RS             } => self.open_panel(placement, panel_id),
-//RS             BrowserHostAction::ClosePanel {
-//RS                 placement,
-//RS                 panel_id,
-//RS             } => self.close_panel(placement, panel_id),
-//RS             BrowserHostAction::DockPanel {
-//RS                 placement,
-//RS                 panel_id,
-//RS                 dock,
-//RS             } => self.dock_panel(placement, panel_id, dock),
-//RS             BrowserHostAction::NavigateSource {
-//RS                 placement,
-//RS                 panel_id,
-//RS                 node_id,
-//RS                 grant,
-//RS             } => self.navigate_source(placement, &panel_id, &node_id, grant),
-//RS             BrowserHostAction::InvokeAction {
-//RS                 placement,
-//RS                 panel_id,
-//RS                 node_id,
-//RS                 action_id,
-//RS                 grant,
-//RS             } => self.invoke_action(placement, &panel_id, &node_id, &action_id, grant),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Approve a source navigation only when the grant is current and the
-//RS     /// node still exists in the current canonical event.
-//RS     pub fn navigate_source(
-//RS         &self,
-//RS         placement: BrowserPlacement,
-//RS         panel_id: &str,
-//RS         node_id: &str,
-//RS         grant: BrowserSourceGrant,
-//RS     ) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         self.validate_grant_context(panel_id, node_id, &grant.session_id, grant.revision)?;
-//RS         if grant.panel_id != panel_id || grant.node_id != node_id {
-//RS             return Err(BrowserHostError::ActionNotGranted(
-//RS                 "source grant does not name the requested panel/node".to_string(),
-//RS             ));
-//RS         }
-//RS         grant.source.validate()?;
-//RS         Ok(BrowserHostEffect::SourceNavigated {
-//RS             placement,
-//RS             panel_id: panel_id.to_string(),
-//RS             node_id: node_id.to_string(),
-//RS             source: grant.source,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Approve an action only when the grant is current and the target node is
-//RS     /// an explicit `Action` node with the same canonical action identity.
-//RS     pub fn invoke_action(
-//RS         &self,
-//RS         placement: BrowserPlacement,
-//RS         panel_id: &str,
-//RS         node_id: &str,
-//RS         action_id: &str,
-//RS         grant: BrowserActionGrant,
-//RS     ) -> Result<BrowserHostEffect, BrowserHostError> {
-//RS         self.validate_grant_context(panel_id, node_id, &grant.session_id, grant.revision)?;
-//RS         if grant.panel_id != panel_id || grant.node_id != node_id || grant.action_id != action_id {
-//RS             return Err(BrowserHostError::ActionNotGranted(
-//RS                 "action grant does not name the requested panel/node/action".to_string(),
-//RS             ));
-//RS         }
-//RS         validate_text(action_id, "action identity", MAX_BROWSER_TEXT)
-//RS             .map_err(|error| BrowserHostError::ActionNotGranted(error.to_string()))?;
-//RS         let node = self.require_node(panel_id, node_id)?;
-//RS         if node.kind != BrowserNodeKind::Action || node.id != action_id {
-//RS             return Err(BrowserHostError::ActionNotGranted(
-//RS                 "the requested node is not an explicitly granted Action node".to_string(),
-//RS             ));
-//RS         }
-//RS         Ok(BrowserHostEffect::ActionInvoked {
-//RS             placement,
-//RS             panel_id: panel_id.to_string(),
-//RS             node_id: node_id.to_string(),
-//RS             action_id: action_id.to_string(),
-//RS         })
-//RS     }
-//RS 
-//RS     /// Build deterministic view facts for one browser placement.
-//RS     pub fn view_model(&self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
-//RS         let mut panels = self
-//RS             .panels
-//RS             .values()
-//RS             .map(|panel| BrowserPanelView {
-//RS                 panel_id: panel.fact.panel_id.clone(),
-//RS                 title: panel.fact.title.clone(),
-//RS                 freshness_ms: panel.fact.freshness_ms,
-//RS                 status: panel.fact.status.clone(),
-//RS                 cursor: panel.fact.cursor,
-//RS                 open: panel.layout[placement.index()].open,
-//RS                 dock: panel.layout[placement.index()].dock,
-//RS                 nodes: panel.fact.nodes.clone(),
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let catalog = crate::Devtools::catalog::descriptors();
-//RS         panels.sort_by_key(|panel| {
-//RS             catalog
-//RS                 .iter()
-//RS                 .position(|descriptor| descriptor.id.as_str() == panel.panel_id)
-//RS                 .unwrap_or(usize::MAX)
-//RS         });
-//RS         let mut elements = Vec::new();
-//RS         elements.push(BrowserHtmlElement {
-//RS             id: format!("jet-devtools-{}", placement.as_str()),
-//RS             kind: "host".to_string(),
-//RS             panel_id: None,
-//RS             node_id: None,
-//RS             label: self.state.as_str().to_string(),
-//RS             value: self.sequence.map(|sequence| sequence.to_string()),
-//RS             status: Some(self.state.as_str().to_string()),
-//RS         });
-//RS         for panel in &panels {
-//RS             elements.push(BrowserHtmlElement {
-//RS                 id: element_id(placement, &panel.panel_id, None),
-//RS                 kind: "panel".to_string(),
-//RS                 panel_id: Some(panel.panel_id.clone()),
-//RS                 node_id: None,
-//RS                 label: panel.title.clone(),
-//RS                 value: None,
-//RS                 status: Some(panel.status.clone()),
-//RS             });
-//RS             flatten_nodes(
-//RS                 placement,
-//RS                 &panel.panel_id,
-//RS                 &panel.nodes,
-//RS                 &mut elements,
-//RS             );
-//RS         }
-//RS         BrowserHtmlViewModel {
-//RS             placement,
-//RS             route: match placement {
-//RS                 BrowserPlacement::InApp => "/__jet_devtools".to_string(),
-//RS                 BrowserPlacement::Workbench => "/__jet_devtools/workbench".to_string(),
-//RS             },
-//RS             protocol: BROWSER_DEVTOOLS_PROTOCOL.to_string(),
-//RS             session_id: self.session_id.clone(),
-//RS             revision: self.revision,
-//RS             sequence: self.sequence,
-//RS             cursor: self.cursor,
-//RS             state: self.state,
-//RS             selection: self.selection.clone(),
-//RS             panels,
-//RS             elements,
-//RS         }
-//RS     }
-//RS 
-//RS     fn require_panel(&mut self, panel_id: &str) -> Result<&mut PanelState, BrowserHostError> {
-//RS         self.panels
-//RS             .get_mut(panel_id)
-//RS             .ok_or_else(|| BrowserHostError::UnknownPanel(panel_id.to_string()))
-//RS     }
-//RS 
-//RS     fn require_node(&self, panel_id: &str, node_id: &str) -> Result<&BrowserNode, BrowserHostError> {
-//RS         let panel = self
-//RS             .panels
-//RS             .get(panel_id)
-//RS             .ok_or_else(|| BrowserHostError::UnknownPanel(panel_id.to_string()))?;
-//RS         find_node(&panel.fact.nodes, node_id).ok_or_else(|| BrowserHostError::UnknownNode {
-//RS             panel_id: panel_id.to_string(),
-//RS             node_id: node_id.to_string(),
-//RS         })
-//RS     }
-//RS 
-//RS     fn node_exists(&self, panel_id: &str, node_id: Option<&str>) -> bool {
-//RS         match node_id {
-//RS             Some(node_id) => self.require_node(panel_id, node_id).is_ok(),
-//RS             None => self.panels.contains_key(panel_id),
-//RS         }
-//RS     }
-//RS 
-//RS     fn validate_grant_context(
-//RS         &self,
-//RS         panel_id: &str,
-//RS         node_id: &str,
-//RS         grant_session: &str,
-//RS         grant_revision: u64,
-//RS     ) -> Result<(), BrowserHostError> {
-//RS         let Some(current_revision) = self.revision else {
-//RS             return Err(BrowserHostError::ActionNotGranted(
-//RS                 "no canonical event has established a current revision".to_string(),
-//RS             ));
-//RS         };
-//RS         if grant_session != self.session_id {
-//RS             return Err(BrowserHostError::WrongSession {
-//RS                 expected: self.session_id.clone(),
-//RS                 received: grant_session.to_string(),
-//RS             });
-//RS         }
-//RS         if grant_revision != current_revision {
-//RS             return Err(BrowserHostError::StaleRevision {
-//RS                 current: current_revision,
-//RS                 received: grant_revision,
-//RS             });
-//RS         }
-//RS         self.require_node(panel_id, node_id)?;
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS impl Default for BrowserHost {
-//RS     fn default() -> Self {
-//RS         Self::new("")
-//RS     }
-//RS }
-//RS 
-//RS fn validate_panel(panel: &BrowserPanelFact, node_count: &mut usize) -> Result<(), BrowserHostError> {
-//RS     validate_text(&panel.panel_id, "panel identity", MAX_BROWSER_TEXT)?;
-//RS     validate_text(&panel.title, "panel title", MAX_BROWSER_TEXT)?;
-//RS     validate_text(&panel.status, "panel status", MAX_BROWSER_TEXT)?;
-//RS     let mut node_ids = BTreeSet::new();
-//RS     for node in &panel.nodes {
-//RS         validate_node(node, 0, node_count, &mut node_ids)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_node(
-//RS     node: &BrowserNode,
-//RS     depth: usize,
-//RS     node_count: &mut usize,
-//RS     node_ids: &mut BTreeSet<String>,
-//RS ) -> Result<(), BrowserHostError> {
-//RS     if depth > MAX_BROWSER_NODE_DEPTH {
-//RS         return Err(BrowserHostError::InvalidEvent(
-//RS             "browser node tree exceeds the depth bound".to_string(),
-//RS         ));
-//RS     }
-//RS     *node_count = node_count.saturating_add(1);
-//RS     if *node_count > MAX_BROWSER_NODES {
-//RS         return Err(BrowserHostError::InvalidEvent(
-//RS             "browser event exceeds the node bound".to_string(),
-//RS         ));
-//RS     }
-//RS     validate_text(&node.id, "node identity", MAX_BROWSER_TEXT)?;
-//RS     validate_text(&node.label, "node label", MAX_BROWSER_TEXT)?;
-//RS     if let Some(value) = &node.value {
-//RS         validate_text(value, "node value", MAX_BROWSER_VALUE)?;
-//RS     }
-//RS     if let Some(status) = &node.status {
-//RS         validate_text(status, "node status", MAX_BROWSER_TEXT)?;
-//RS     }
-//RS     if !node_ids.insert(node.id.clone()) {
-//RS         return Err(BrowserHostError::InvalidEvent(format!(
-//RS             "browser panel repeats node `{}`",
-//RS             node.id
-//RS         )));
-//RS     }
-//RS     for child in &node.children {
-//RS         validate_node(child, depth + 1, node_count, node_ids)?;
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_text(value: &str, label: &str, limit: usize) -> Result<(), BrowserHostError> {
-//RS     if value.is_empty() || value.len() > limit || value.chars().any(char::is_control) {
-//RS         return Err(BrowserHostError::InvalidEvent(format!(
-//RS             "{label} is empty, too long, or contains control text"
-//RS         )));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_source_id(source_id: &str) -> Result<(), BrowserHostError> {
-//RS     if source_id.is_empty()
-//RS         || source_id.len() > MAX_BROWSER_TEXT
-//RS         || source_id.chars().any(char::is_control)
-//RS         || source_id.starts_with('/')
-//RS         || source_id.starts_with('\\')
-//RS         || source_id.contains('\\')
-//RS         || source_id.split('/').any(|part| part == ".." || part.is_empty())
-//RS         || source_id.contains("://")
-//RS     {
-//RS         return Err(BrowserHostError::InvalidSource(
-//RS             "source identity must be a non-empty project-relative path".to_string(),
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn derive_session_state(panels: &[BrowserPanelFact]) -> BrowserSessionState {
-//RS     let mut state = BrowserSessionState::Idle;
-//RS     for panel in panels {
-//RS         let value = panel.status.trim().to_ascii_lowercase();
-//RS         let candidate = match value.as_str() {
-//RS             "building" => BrowserSessionState::Building,
-//RS             "build_failed" | "build-failed" | "build failed" => BrowserSessionState::BuildFailed,
-//RS             "runtime_failure" | "runtime-failure" | "runtime failure" => {
-//RS                 BrowserSessionState::RuntimeFailure
-//RS             }
-//RS             "hot_reload" | "hot-reload" | "hot reload" => BrowserSessionState::HotReload,
-//RS             "tests_failing" | "tests-failing" | "tests failing" => {
-//RS                 BrowserSessionState::TestsFailing
-//RS             }
-//RS             _ => continue,
-//RS         };
-//RS         state = prefer_state(state, candidate);
-//RS     }
-//RS     state
-//RS }
-//RS 
-//RS fn prefer_state(current: BrowserSessionState, candidate: BrowserSessionState) -> BrowserSessionState {
-//RS     fn rank(state: BrowserSessionState) -> u8 {
-//RS         match state {
-//RS             BrowserSessionState::Idle => 0,
-//RS             BrowserSessionState::HotReload => 1,
-//RS             BrowserSessionState::Building => 2,
-//RS             BrowserSessionState::TestsFailing => 3,
-//RS             BrowserSessionState::RuntimeFailure => 4,
-//RS             BrowserSessionState::BuildFailed => 5,
-//RS         }
-//RS     }
-//RS     if rank(candidate) >= rank(current) {
-//RS         candidate
-//RS     } else {
-//RS         current
-//RS     }
-//RS }
-//RS 
-//RS fn find_node<'a>(nodes: &'a [BrowserNode], node_id: &str) -> Option<&'a BrowserNode> {
-//RS     nodes.iter().find_map(|node| {
-//RS         if node.id == node_id {
-//RS             Some(node)
-//RS         } else {
-//RS             find_node(&node.children, node_id)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn element_id(
-//RS     placement: BrowserPlacement,
-//RS     panel_id: &str,
-//RS     node_id: Option<&str>,
-//RS ) -> String {
-//RS     let mut id = format!("jet-devtools-{}-panel-{}", placement.as_str(), stable_fragment(panel_id));
-//RS     if let Some(node_id) = node_id {
-//RS         id.push_str("-node-");
-//RS         id.push_str(&stable_fragment(node_id));
-//RS     }
-//RS     id
-//RS }
-//RS 
-//RS fn stable_fragment(value: &str) -> String {
-//RS     let mut output = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         if character.is_ascii_alphanumeric() || character == '_' || character == '-' {
-//RS             output.push(character);
-//RS         } else {
-//RS             output.push('-');
-//RS         }
-//RS     }
-//RS     if output.is_empty() {
-//RS         "item".to_string()
-//RS     } else {
-//RS         output
-//RS     }
-//RS }
-//RS 
-//RS fn flatten_nodes(
-//RS     placement: BrowserPlacement,
-//RS     panel_id: &str,
-//RS     nodes: &[BrowserNode],
-//RS     elements: &mut Vec<BrowserHtmlElement>,
-//RS ) {
-//RS     for node in nodes {
-//RS         elements.push(BrowserHtmlElement {
-//RS             id: element_id(placement, panel_id, Some(&node.id)),
-//RS             kind: node.kind.as_str().to_string(),
-//RS             panel_id: Some(panel_id.to_string()),
-//RS             node_id: Some(node.id.clone()),
-//RS             label: node.label.clone(),
-//RS             value: node.value.clone(),
-//RS             status: node.status.clone(),
-//RS         });
-//RS         flatten_nodes(placement, panel_id, &node.children, elements);
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     fn panel(status: &str, nodes: Vec<BrowserNode>) -> BrowserPanelFact {
-//RS         BrowserPanelFact::new("build", "Build", 12, status, nodes)
-//RS     }
-//RS 
-//RS     fn event(session: &str, revision: u64, sequence: u64, status: &str) -> BrowserHostEvent {
-//RS         BrowserHostEvent::new(
-//RS             session,
-//RS             revision,
-//RS             sequence,
-//RS             100 + sequence,
-//RS             vec![panel(
-//RS                 status,
-//RS                 vec![
-//RS                     BrowserNode::new("go", BrowserNodeKind::Action, "Go"),
-//RS                     BrowserNode::new("source", BrowserNodeKind::Text, "Source"),
-//RS                 ],
-//RS             )],
-//RS         )
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn event_validation_and_monotonic_projection() {
-//RS         let mut host = BrowserHost::new("s1");
-//RS         host.apply_event(event("s1", 1, 1, "ready")).unwrap();
-//RS         assert_eq!(host.revision(), Some(1));
-//RS         assert_eq!(host.sequence(), Some(1));
-//RS         assert_eq!(host.state(), BrowserSessionState::Idle);
-//RS         assert_eq!(host.panel_catalog().len(), 1);
-//RS         assert!(matches!(
-//RS             host.apply_event(event("s1", 0, 2, "ready")),
-//RS             Err(BrowserHostError::StaleRevision { .. })
-//RS         ));
-//RS         assert!(matches!(
-//RS             host.apply_event(event("s1", 1, 1, "ready")),
-//RS             Err(BrowserHostError::StaleSequence { .. })
-//RS         ));
-//RS         assert!(matches!(
-//RS             host.apply_event(event("s2", 2, 2, "ready")),
-//RS             Err(BrowserHostError::WrongSession { .. })
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn layout_and_selection_are_shared_but_open_state_is_placement_local() {
-//RS         let mut host = BrowserHost::new("s1");
-//RS         host.apply_event(event("s1", 1, 1, "ready")).unwrap();
-//RS         host.open_panel(BrowserPlacement::InApp, "build").unwrap();
-//RS         host.open_panel(BrowserPlacement::Workbench, "build").unwrap();
-//RS         host.select("build", Some("source")).unwrap();
-//RS         host.dock_panel(BrowserPlacement::Workbench, "build", BrowserDock::Right)
-//RS             .unwrap();
-//RS         let in_app = host.view_model(BrowserPlacement::InApp);
-//RS         let workbench = host.view_model(BrowserPlacement::Workbench);
-//RS         assert!(in_app.panels[0].open);
-//RS         assert!(workbench.panels[0].open);
-//RS         assert_eq!(in_app.panels[0].dock, BrowserDock::Left);
-//RS         assert_eq!(workbench.panels[0].dock, BrowserDock::Right);
-//RS         assert_eq!(in_app.selection, workbench.selection);
-//RS         assert_eq!(in_app.route, "/__jet_devtools");
-//RS         assert_eq!(workbench.route, "/__jet_devtools/workbench");
-//RS         assert_eq!(in_app.elements, workbench.elements.iter().map(|element| {
-//RS             BrowserHtmlElement {
-//RS                 id: element.id.replace("workbench", "in-app"),
-//RS                 kind: element.kind.clone(),
-//RS                 panel_id: element.panel_id.clone(),
-//RS                 node_id: element.node_id.clone(),
-//RS                 label: element.label.clone(),
-//RS                 value: element.value.clone(),
-//RS                 status: element.status.clone(),
-//RS             }
-//RS         }).collect::<Vec<_>>());
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn reconnect_is_bounded_and_cursor_resumes() {
-//RS         let mut host = BrowserHost::new("s1");
-//RS         for sequence in 1..=(MAX_RECONNECT_EVENTS as u64 + 2) {
-//RS             host.apply_event(event("s1", sequence, sequence, "ready"))
-//RS                 .unwrap();
-//RS         }
-//RS         let retained = host.resume_from(Some(254.into())).unwrap();
-//RS         assert_eq!(retained.events.len(), 4);
-//RS         assert_eq!(retained.events[0].sequence, 255);
-//RS         assert!(matches!(
-//RS             host.resume_from(Some(1.into())),
-//RS             Err(BrowserHostError::CursorExpired { .. })
-//RS         ));
-//RS         assert!(matches!(
-//RS             host.resume_from(Some((MAX_RECONNECT_EVENTS as u64 + 3).into())),
-//RS             Err(BrowserHostError::CursorAhead { .. })
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn stale_wrong_session_and_ungranted_actions_are_rejected() {
-//RS         let mut host = BrowserHost::new("s1");
-//RS         host.apply_event(event("s1", 7, 1, "ready")).unwrap();
-//RS         let source = BrowserSourceGrant::new(
-//RS             "s1",
-//RS             7,
-//RS             "build",
-//RS             "source",
-//RS             BrowserSourceLocation::new("src/main.jet", 4, 2, Some("main")),
-//RS         );
-//RS         let effect = host
-//RS             .dispatch(BrowserHostAction::navigate_source(
-//RS                 BrowserPlacement::InApp,
-//RS                 "build",
-//RS                 "source",
-//RS                 source.clone(),
-//RS             ))
-//RS             .unwrap();
-//RS         assert!(matches!(effect, BrowserHostEffect::SourceNavigated { .. }));
-//RS         let stale = BrowserSourceGrant::new(
-//RS             "s1",
-//RS             6,
-//RS             "build",
-//RS             "source",
-//RS             source.source.clone(),
-//RS         );
-//RS         assert!(matches!(
-//RS             host.dispatch(BrowserHostAction::navigate_source(
-//RS                 BrowserPlacement::Workbench,
-//RS                 "build",
-//RS                 "source",
-//RS                 stale,
-//RS             )),
-//RS             Err(BrowserHostError::StaleRevision { .. })
-//RS         ));
-//RS         let wrong = BrowserSourceGrant::new(
-//RS             "s2",
-//RS             7,
-//RS             "build",
-//RS             "source",
-//RS             source.source.clone(),
-//RS         );
-//RS         assert!(matches!(
-//RS             host.dispatch(BrowserHostAction::navigate_source(
-//RS                 BrowserPlacement::InApp,
-//RS                 "build",
-//RS                 "source",
-//RS                 wrong,
-//RS             )),
-//RS             Err(BrowserHostError::WrongSession { .. })
-//RS         ));
-//RS         let action = BrowserActionGrant::new("s1", 7, "build", "source", "source");
-//RS         assert!(matches!(
-//RS             host.dispatch(BrowserHostAction::invoke_action(
-//RS                 BrowserPlacement::InApp,
-//RS                 "build",
-//RS                 "source",
-//RS                 "source",
-//RS                 action,
-//RS             )),
-//RS             Err(BrowserHostError::ActionNotGranted(_))
-//RS         ));
-//RS     }
-//RS }
-// END-PORT-PENDING 0755 crates/jet-devserver/src/BrowserHost.rs:1-1652
-
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1
+// Typed projection of the shared session; no wire decoder or renderer lives here.
+use std.collections.[VecDeque]
+use std.fmt as fmt
+use jet_devserver.Devtools.catalog.[descriptors]
+// Rust: crates/jet-devserver/src/BrowserHost.rs:13
+pub BROWSER_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
+// Rust: crates/jet-devserver/src/BrowserHost.rs:15
+pub JET_DEVTOOLS_PROTOCOL :: BROWSER_DEVTOOLS_PROTOCOL
+// Rust: crates/jet-devserver/src/BrowserHost.rs:18
+pub MAX_RECONNECT_EVENTS :: 256
+// Rust: crates/jet-devserver/src/BrowserHost.rs:20
+pub MAX_BROWSER_PANELS :: 128
+// Rust: crates/jet-devserver/src/BrowserHost.rs:22
+pub MAX_BROWSER_NODES :: 4096
+// Rust: crates/jet-devserver/src/BrowserHost.rs:24
+pub MAX_BROWSER_NODE_DEPTH :: 64
+// Rust: crates/jet-devserver/src/BrowserHost.rs:26
+pub MAX_BROWSER_TEXT :: 256
+// Rust: crates/jet-devserver/src/BrowserHost.rs:28
+pub MAX_BROWSER_VALUE :: 4096
+// Rust: crates/jet-devserver/src/BrowserHost.rs:32
+pub enum BrowserPlacement { InApp; Workbench }
+impl BrowserPlacement {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:42
+    pub fn as_str(self) -> String { if self == { .InApp -> "in-app", .Workbench -> "workbench" } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:49
+    fn index(self) -> USize { if self == { .InApp -> 0, .Workbench -> 1 } }
+    fn default() -> BrowserPlacement { .InApp }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:59
+pub enum BrowserNodeKind { Text; Status; Table; Tree; Chart; Action }
+impl BrowserNodeKind {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:76
+    pub fn as_str(self) -> String {
+        if self == { .Text -> "text", .Status -> "status", .Table -> "table", .Tree -> "tree", .Chart -> "chart", .Action -> "action" }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:90
+pub enum BrowserDock { Left; Right; Bottom; Floating }
+impl BrowserDock {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:104
+    pub fn as_str(self) -> String { if self == { .Left -> "left", .Right -> "right", .Bottom -> "bottom", .Floating -> "floating" } }
+    fn default() -> BrowserDock { .Left }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:116
+pub enum BrowserSessionState { Idle; Building; BuildFailed; RuntimeFailure; HotReload; TestsFailing }
+impl BrowserSessionState {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:134
+    pub fn as_str(self) -> String {
+        if self == { .Idle -> "idle", .Building -> "building", .BuildFailed -> "build-failed", .RuntimeFailure -> "runtime-failure", .HotReload -> "hot-reload", .TestsFailing -> "tests-failing" }
+    }
+    fn default() -> BrowserSessionState { .Idle }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:148
+pub struct BrowserSourceLocation { pub source_id: String; pub line: U32; pub column: U32; pub function: String? }
+impl BrowserSourceLocation {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:162
+    pub fn new(source_id: String, line: U32, column: U32, function: String?) -> BrowserSourceLocation {
+        BrowserSourceLocation { source_id: ^source_id, line: line, column: column, function: ^function }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:177
+    pub fn validate(self) -> () BrowserHostError! {
+        _ :: validate_source_id(self.source_id) ?? return .Err(err)
+        if self.line == 0 -> return .Err(.InvalidSource("source line must be one-based"))
+        if self.function == .Val(function) -> _ :: validate_text(function, "source function", MAX_BROWSER_TEXT) ?? return .Err(err)
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:193
+pub struct BrowserSourceGrant {
+    pub session_id: String; pub revision: U64; pub panel_id: String; pub node_id: String; pub source: BrowserSourceLocation
+}
+impl BrowserSourceGrant {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:208
+    pub fn new(session_id: String, revision: U64, panel_id: String, node_id: String, source: BrowserSourceLocation) -> BrowserSourceGrant {
+        BrowserSourceGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, source: ^source }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:226
+pub type SourceNavigationGrant = BrowserSourceGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:228
+pub type BrowserNavigationGrant = BrowserSourceGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:232
+pub struct BrowserActionGrant { pub session_id: String; pub revision: U64; pub panel_id: String; pub node_id: String; pub action_id: String }
+impl BrowserActionGrant {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:247
+    pub fn new(session_id: String, revision: U64, panel_id: String, node_id: String, action_id: String) -> BrowserActionGrant {
+        BrowserActionGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:265
+pub type ActionGrant = BrowserActionGrant
+// Rust: crates/jet-devserver/src/BrowserHost.rs:269
+pub struct BrowserNode { pub id: String; pub kind: BrowserNodeKind; pub label: String; pub value: String?; pub status: String?; pub children: [BrowserNode] }
+impl BrowserNode {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:286
+    pub fn new(id: String, kind: BrowserNodeKind, label: String) -> BrowserNode {
+        BrowserNode { id: ^id, kind: kind, label: ^label, value: None, status: None, children: [] }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:298
+    pub fn with_value(self: BrowserNode, value: String) -> BrowserNode {
+        self := ^self
+        self.value = .Val(^value)
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:304
+    pub fn with_status(self: BrowserNode, status: String) -> BrowserNode {
+        self := ^self
+        self.status = .Val(^status)
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:310
+    pub fn with_children(self: BrowserNode, children: [BrowserNode]) -> BrowserNode {
+        self := ^self
+        self.children = ^children
+        return self
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:318
+pub struct BrowserPanelFact {
+    pub panel_id: String; pub title: String; pub freshness_ms: U64; pub status: String; pub cursor: U64?; pub nodes: [BrowserNode]
+}
+impl BrowserPanelFact {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:337
+    pub fn new(panel_id: String, title: String, freshness_ms: U64, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
+        BrowserPanelFact { panel_id: ^panel_id, title: ^title, freshness_ms: freshness_ms, status: ^status, cursor: None, nodes: ^nodes }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:355
+    pub fn with_cursor(self: BrowserPanelFact, cursor: U64?) -> BrowserPanelFact {
+        self := ^self
+        self.cursor = cursor
+        return self
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:361
+    pub fn identity(self) -> String { self.panel_id }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:368
+pub struct BrowserHostEvent {
+    pub protocol: String; pub session_id: String; pub revision: U64; pub sequence: U64; pub observed_at_ms: U64; pub panels: [BrowserPanelFact]
+}
+impl BrowserHostEvent {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:385
+    pub fn new(session_id: String, revision: U64, sequence: U64, observed_at_ms: U64, panels: [BrowserPanelFact]) -> BrowserHostEvent {
+        BrowserHostEvent { protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: ^session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: ^panels }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:403
+    pub fn validate(self) -> () BrowserHostError! {
+        if self.protocol != BROWSER_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEvent("browser event protocol does not match jet.devtools.v1"))
+        _ :: validate_text(self.session_id, "event session", MAX_BROWSER_TEXT) ?? return .Err(err)
+        if self.panels.len() > MAX_BROWSER_PANELS -> return .Err(.InvalidEvent("browser event exceeds the panel bound"))
+        panel_ids := [String:Bool]{}
+        node_count := USize{0}
+        loop panel in self.panels {
+            _ :: validate_panel(panel, &node_count) ?? return .Err(err)
+            if panel_ids.contains(panel.panel_id) -> return .Err(.InvalidEvent("browser event repeats panel `{panel.panel_id}`"))
+            &panel_ids.insert(panel.panel_id, true)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:432
+pub struct BrowserReconnectCursor { pub sequence: U64 }
+impl BrowserReconnectCursor {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:439
+    pub fn new(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor { sequence: sequence } }
+    fn default() -> BrowserReconnectCursor { BrowserReconnectCursor.new(0) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:445
+impl From[U64] for BrowserReconnectCursor {
+    fn from(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor.new(sequence) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:452
+pub struct BrowserReconnect {
+    pub session_id: String; pub from: BrowserReconnectCursor?; pub cursor: BrowserReconnectCursor?; pub events: [BrowserHostEvent]; pub complete: Bool
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:467
+pub struct BrowserSelection { pub panel_id: String; pub node_id: String? }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:479
+pub enum BrowserHostAction {
+    OpenPanel { placement: BrowserPlacement, panel_id: String }
+    ClosePanel { placement: BrowserPlacement, panel_id: String }
+    DockPanel { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
+    NavigateSource { placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant }
+    InvokeAction { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant }
+}
+impl BrowserHostAction {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:530
+    pub fn open(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .OpenPanel { placement: placement, panel_id: ^panel_id } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:538
+    pub fn close(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .ClosePanel { placement: placement, panel_id: ^panel_id } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:546
+    pub fn dock(placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostAction { .DockPanel { placement: placement, panel_id: ^panel_id, dock: dock } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:559
+    pub fn navigate_source(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostAction { .NavigateSource { placement: placement, panel_id: ^panel_id, node_id: ^node_id, grant: ^grant } }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:574
+    pub fn invoke_action(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostAction { .InvokeAction { placement: placement, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id, grant: ^grant } }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:595
+pub enum BrowserHostEffect {
+    PanelOpened { placement: BrowserPlacement, panel_id: String }
+    PanelClosed { placement: BrowserPlacement, panel_id: String }
+    PanelDocked { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
+    SourceNavigated { placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation }
+    ActionInvoked { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:646
+pub struct BrowserHtmlElement {
+    pub id: String; pub kind: String; pub panel_id: String?; pub node_id: String?; pub label: String; pub value: String?; pub status: String?
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:665
+pub struct BrowserHtmlViewModel {
+    pub placement: BrowserPlacement; pub route: String; pub protocol: String; pub session_id: String;
+    pub revision: U64?; pub sequence: U64?; pub cursor: BrowserReconnectCursor?; pub state: BrowserSessionState;
+    pub selection: BrowserSelection?; pub panels: [BrowserPanelView]; pub elements: [BrowserHtmlElement]
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:693
+pub struct BrowserPanelView {
+    pub panel_id: String; pub title: String; pub freshness_ms: U64; pub status: String; pub cursor: U64?;
+    pub open: Bool; pub dock: BrowserDock; pub nodes: [BrowserNode]
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:714
+#Error
+pub enum BrowserHostError {
+    InvalidEvent(String)
+    WrongSession { expected: String, received: String }
+    StaleRevision { current: U64, received: U64 }
+    StaleSequence { current: U64, received: U64 }
+    CursorExpired { cursor: U64, earliest: U64 }
+    CursorAhead { cursor: U64, current: U64 }
+    UnknownPanel(String)
+    UnknownNode { panel_id: String, node_id: String }
+    ActionNotGranted(String)
+    InvalidSource(String)
+    InvalidAction(String)
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:738
+impl fmt.Display for BrowserHostError {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:739
+    fn fmt(self, formatter: &fmt.Formatter) -> fmt.Result {
+        message :: if self == {
+            .InvalidEvent(message) -> "invalid browser event: {message}",
+            .WrongSession { expected, received } -> "browser event belongs to session `{received}`, expected `{expected}`",
+            .StaleRevision { current, received } -> "stale browser revision {received}; current revision is {current}",
+            .StaleSequence { current, received } -> "stale browser sequence {received}; current sequence is {current}",
+            .CursorExpired { cursor, earliest } -> "browser reconnect cursor {cursor} predates retained sequence {earliest}",
+            .CursorAhead { cursor, current } -> "browser reconnect cursor {cursor} is ahead of current sequence {current}",
+            .UnknownPanel(panel_id) -> "unknown browser panel `{panel_id}`",
+            .UnknownNode { panel_id, node_id } -> "unknown browser node `{node_id}` in panel `{panel_id}`",
+            .ActionNotGranted(message) -> "browser action not granted: {message}",
+            .InvalidSource(message) -> "invalid browser source: {message}",
+            .InvalidAction(message) -> "invalid browser action: {message}"
+        }
+        return &formatter.write_str(message)
+    }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:777
+struct PanelState { fact: BrowserPanelFact; layout: [PanelLayout] }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:783
+struct PanelLayout { open: Bool; dock: BrowserDock }
+impl PanelLayout { fn default() -> PanelLayout { PanelLayout { open: false, dock: .Left } } }
+// Rust: crates/jet-devserver/src/BrowserHost.rs:791
+pub struct BrowserHost {
+    session_id: String; revision: U64?; sequence: U64?; observed_at_ms: U64?; state: BrowserSessionState;
+    cursor: BrowserReconnectCursor?; selection: BrowserSelection?; panels: [String:PanelState]; history: VecDeque[BrowserHostEvent]
+}
+impl BrowserHost {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:805
+    pub fn new(session_id: String) -> BrowserHost {
+        BrowserHost { session_id: ^session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: [:], history: VecDeque[BrowserHostEvent].new() }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:820
+    pub fn for_session(session_id: String) -> BrowserHost { BrowserHost.new(^session_id) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:825
+    pub fn session_id(self) -> String { self.session_id }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:830
+    pub fn revision(self) -> U64? { self.revision }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:835
+    pub fn sequence(self) -> U64? { self.sequence }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:840
+    pub fn observed_at_ms(self) -> U64? { self.observed_at_ms }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:845
+    pub fn state(self) -> BrowserSessionState { self.state }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:851
+    pub fn cursor(self) -> BrowserReconnectCursor? { self.cursor }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:856
+    pub fn selection(self) -> BrowserSelection? { self.selection }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:861
+    pub fn apply_event(&self, event: BrowserHostEvent) -> () BrowserHostError! {
+        _ :: event.validate() ?? return .Err(err)
+        if event.session_id != self.session_id -> return .Err(.WrongSession { expected: ~self.session_id, received: ^event.session_id })
+        if self.revision == .Val(current) && event.revision < current -> return .Err(.StaleRevision { current: current, received: event.revision })
+        if self.sequence == .Val(current) && event.sequence <= current -> return .Err(.StaleSequence { current: current, received: event.sequence })
+        next_ids := [String:Bool]{}
+        loop panel in event.panels { &next_ids.insert(panel.panel_id, true) }
+        &self.panels.retain((panel_id, _) -> next_ids.contains(panel_id))
+        loop fact in event.panels {
+            if self.panels.get_mut(fact.panel_id) == .Val(panel) {
+                panel.fact = ~fact
+            } else {
+                &self.panels.insert(~fact.panel_id, PanelState { fact: ~fact, layout: [PanelLayout.default(), PanelLayout.default()] })
+            }
+        }
+        self.revision = .Val(event.revision)
+        self.sequence = .Val(event.sequence)
+        self.observed_at_ms = .Val(event.observed_at_ms)
+        self.state = derive_session_state(event.panels)
+        self.cursor = .Val(BrowserReconnectCursor.new(event.sequence))
+        if self.selection == .Val(selection) && !self.node_exists(selection.panel_id, selection.node_id) -> self.selection = None
+        if self.history.len() == MAX_RECONNECT_EVENTS -> _ :: &self.history.pop_front()
+        &self.history.push_back(^event)
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:923
+    pub fn apply(&self, event: BrowserHostEvent) -> () BrowserHostError! { &self.apply_event(^event) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:928
+    pub fn resume_from(self, cursor: BrowserReconnectCursor?) -> BrowserReconnect BrowserHostError! {
+        if cursor == .Val(requested) && self.sequence == .Val(current) && requested.sequence > current -> return .Err(.CursorAhead { cursor: requested.sequence, current: current })
+        if cursor == .Val(requested) {
+            if self.history.front() == .Val(first) {
+                earliest :: first.sequence
+                if requested.sequence.saturating_add(1) < earliest -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: earliest })
+            } else if requested.sequence > 0 -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: 0 })
+        }
+        events :: self.history.iter().filter((event) -> cursor == None || cursor.is_some_and((from) -> event.sequence > from.sequence)).cloned().collect[[BrowserHostEvent]]()
+        return BrowserReconnect { session_id: ~self.session_id, from: cursor, cursor: self.sequence.map(BrowserReconnectCursor.new), events: ^events, complete: true }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:972
+    pub fn events_since(self, sequence: U64?) -> [BrowserHostEvent] BrowserHostError! {
+        resumed :: self.resume_from(sequence.map(BrowserReconnectCursor.new)) ?? return .Err(err)
+        return ^resumed.events
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:979
+    pub fn set_cursor(&self, cursor: BrowserReconnectCursor?) -> () BrowserHostError! {
+        if cursor == .Val(value) -> _ :: self.resume_from(.Val(value)) ?? return .Err(err)
+        self.cursor = cursor
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:988
+    pub fn scrub(&self, sequence: U64?) -> () BrowserHostError! { &self.set_cursor(sequence.map(BrowserReconnectCursor.new)) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:993
+    pub fn panel_catalog(self) -> [BrowserPanelFact] {
+        keys := self.panels.keys().collect[[String]]()
+        &keys.sort()
+        panels := keys.iter().map((key) -> ~self.panels[key].fact).collect[[BrowserPanelFact]]()
+        catalog :: descriptors()
+        ranks := [String:USize]{}
+        loop (index, descriptor) in catalog.iter().enumerate() {
+            if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
+        }
+        // Stable rank sort preserves BTree identity order for unlisted panels.
+        &panels.sort_by_key((panel) -> ranks.get(panel.panel_id) ?? USize.MAX)
+        return panels
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1010
+    pub fn panel(self, panel_id: String) -> BrowserPanelFact? { self.panels.get(panel_id).map((panel) -> panel.fact) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1015
+    pub fn is_open(self, placement: BrowserPlacement, panel_id: String) -> Bool { self.panels.get(panel_id).is_some_and((panel) -> panel.layout[placement.index()].open) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1022
+    pub fn dock(self, placement: BrowserPlacement, panel_id: String) -> BrowserDock? { self.panels.get(panel_id).map((panel) -> panel.layout[placement.index()].dock) }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1029
+    pub fn open_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].open = true
+        return .PanelOpened { placement: placement, panel_id: ^panel_id }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1044
+    pub fn close_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].open = false
+        if self.selection.is_some_and((selection) -> selection.panel_id == panel_id) -> self.selection = None
+        return .PanelClosed { placement: placement, panel_id: ^panel_id }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1066
+    pub fn dock_panel(&self, placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostEffect BrowserHostError! {
+        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+        panel.layout[placement.index()].dock = dock
+        return .PanelDocked { placement: placement, panel_id: ^panel_id, dock: dock }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1084
+    pub fn select(&self, panel_id: String, node_id: String?) -> () BrowserHostError! {
+        _ :: &self.require_panel(panel_id) ?? return .Err(err)
+        if node_id == .Val(id) -> _ :: self.require_node(panel_id, id) ?? return .Err(err)
+        self.selection = .Val(BrowserSelection { panel_id: ^panel_id, node_id: ^node_id })
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1100
+    pub fn clear_selection(&self) -> { self.selection = None }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1105
+    pub fn dispatch(&self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
+        if action == {
+            .OpenPanel { placement, panel_id } -> &self.open_panel(placement, ^panel_id),
+            .ClosePanel { placement, panel_id } -> &self.close_panel(placement, ^panel_id),
+            .DockPanel { placement, panel_id, dock } -> &self.dock_panel(placement, ^panel_id, dock),
+            .NavigateSource { placement, panel_id, node_id, grant } -> self.navigate_source(placement, panel_id, node_id, ^grant),
+            .InvokeAction { placement, panel_id, node_id, action_id, grant } -> self.invoke_action(placement, panel_id, node_id, action_id, ^grant)
+        }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1138
+    pub fn navigate_source(self, placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostEffect BrowserHostError! {
+        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+        if grant.panel_id != panel_id || grant.node_id != node_id -> return .Err(.ActionNotGranted("source grant does not name the requested panel/node"))
+        _ :: grant.source.validate() ?? return .Err(err)
+        return .SourceNavigated { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), source: ^grant.source }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1162
+    pub fn invoke_action(self, placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostEffect BrowserHostError! {
+        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+        if grant.panel_id != panel_id || grant.node_id != node_id || grant.action_id != action_id -> return .Err(.ActionNotGranted("action grant does not name the requested panel/node/action"))
+        _ :: validate_text(action_id, "action identity", MAX_BROWSER_TEXT) ?? return .Err(.ActionNotGranted(err.to_string()))
+        node :: self.require_node(panel_id, node_id) ?? return .Err(err)
+        if node.kind != .Action || node.id != action_id -> return .Err(.ActionNotGranted("the requested node is not an explicitly granted Action node"))
+        return .ActionInvoked { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), action_id: action_id.to_string() }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1193
+    pub fn view_model(self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
+        keys := self.panels.keys().collect[[String]]()
+        &keys.sort()
+        panels := keys.iter().map((key) -> {
+            panel :: self.panels[key]
+            BrowserPanelView { panel_id: ~panel.fact.panel_id, title: ~panel.fact.title, freshness_ms: panel.fact.freshness_ms, status: ~panel.fact.status, cursor: panel.fact.cursor, open: panel.layout[placement.index()].open, dock: panel.layout[placement.index()].dock, nodes: ~panel.fact.nodes }
+        }).collect[[BrowserPanelView]]()
+        catalog :: descriptors()
+        ranks := [String:USize]{}
+        loop (index, descriptor) in catalog.iter().enumerate() {
+            if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
+        }
+        &panels.sort_by_key((panel) -> ranks.get(panel.panel_id) ?? USize.MAX)
+        elements := [BrowserHtmlElement {
+            id: "jet-devtools-{placement.as_str()}", kind: "host", panel_id: None, node_id: None,
+            label: self.state.as_str(), value: self.sequence.map((sequence) -> sequence.to_string()), status: .Val(self.state.as_str())
+        }]
+        loop panel in panels {
+            &elements.push(BrowserHtmlElement { id: element_id(placement, panel.panel_id, None), kind: "panel", panel_id: .Val(~panel.panel_id), node_id: None, label: ~panel.title, value: None, status: .Val(~panel.status) })
+            flatten_nodes(placement, panel.panel_id, panel.nodes, &elements)
+        }
+        return BrowserHtmlViewModel {
+            placement: placement, route: if placement == { .InApp -> "/__jet_devtools", .Workbench -> "/__jet_devtools/workbench" },
+            protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: ~self.session_id, revision: self.revision, sequence: self.sequence,
+            cursor: self.cursor, state: self.state, selection: ~self.selection, panels: ^panels, elements: ^elements
+        }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1260
+    fn require_panel(&self, panel_id: String) -> &PanelState BrowserHostError! {
+        self.panels.get_mut(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1266
+    fn require_node(self, panel_id: String, node_id: String) -> BrowserNode BrowserHostError! {
+        panel :: self.panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+        find_node(panel.fact.nodes, node_id) ?? return .Err(.UnknownNode { panel_id: panel_id.to_string(), node_id: node_id.to_string() })
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1277
+    fn node_exists(self, panel_id: String, node_id: String?) -> Bool {
+        if node_id == { .Val(id) -> self.require_node(panel_id, id).is_ok(), None -> self.panels.contains(panel_id) }
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1284
+    fn validate_grant_context(self, panel_id: String, node_id: String, grant_session: String, grant_revision: U64) -> () BrowserHostError! {
+        current_revision :: self.revision ?? return .Err(.ActionNotGranted("no canonical event has established a current revision"))
+        if grant_session != self.session_id -> return .Err(.WrongSession { expected: ~self.session_id, received: grant_session.to_string() })
+        if grant_revision != current_revision -> return .Err(.StaleRevision { current: current_revision, received: grant_revision })
+        _ :: self.require_node(panel_id, node_id) ?? return .Err(err)
+    }
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1314
+    pub fn default() -> BrowserHost { BrowserHost.new("") }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1319
+fn validate_panel(panel: BrowserPanelFact, node_count: &USize) -> () BrowserHostError! {
+    _ :: validate_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(panel.title, "panel title", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(panel.status, "panel status", MAX_BROWSER_TEXT) ?? return .Err(err)
+    node_ids := [String:Bool]{}
+    loop node in panel.nodes { _ :: validate_node(node, 0, node_count, &node_ids) ?? return .Err(err) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1330
+fn validate_node(node: BrowserNode, depth: USize, node_count: &USize, node_ids: &[String:Bool]) -> () BrowserHostError! {
+    if depth > MAX_BROWSER_NODE_DEPTH -> return .Err(.InvalidEvent("browser node tree exceeds the depth bound"))
+    node_count = node_count.saturating_add(1)
+    if node_count > MAX_BROWSER_NODES -> return .Err(.InvalidEvent("browser event exceeds the node bound"))
+    _ :: validate_text(node.id, "node identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _ :: validate_text(node.label, "node label", MAX_BROWSER_TEXT) ?? return .Err(err)
+    if node.value == .Val(value) -> _ :: validate_text(value, "node value", MAX_BROWSER_VALUE) ?? return .Err(err)
+    if node.status == .Val(status) -> _ :: validate_text(status, "node status", MAX_BROWSER_TEXT) ?? return .Err(err)
+    if node_ids.contains(node.id) -> return .Err(.InvalidEvent("browser panel repeats node `{node.id}`"))
+    &node_ids.insert(node.id, true)
+    loop child in node.children { _ :: validate_node(child, depth + 1, node_count, node_ids) ?? return .Err(err) }
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1367
+fn validate_text(value: String, label: String, limit: USize) -> () BrowserHostError! {
+    if value.is_empty() || value.len() > limit || value.chars().any((c) -> c.is_control()) -> return .Err(.InvalidEvent("{label} is empty, too long, or contains control text"))
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1376
+fn validate_source_id(source_id: String) -> () BrowserHostError! {
+    if source_id.is_empty() || source_id.len() > MAX_BROWSER_TEXT || source_id.chars().any((c) -> c.is_control()) || source_id.starts_with('/') || source_id.starts_with('\\') || source_id.contains('\\') || source_id.split('/').any((part) -> part == ".." || part.is_empty()) || source_id.contains("://") -> return .Err(.InvalidSource("source identity must be a non-empty project-relative path"))
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1393
+fn derive_session_state(panels: [BrowserPanelFact]) -> BrowserSessionState {
+    state := BrowserSessionState.Idle
+    loop panel in panels {
+        value := panel.status.trim() // #4303
+        value = value.to_ascii_lowercase()
+        candidate :: if value == {
+            "building" -> .Building,
+            "build_failed" | "build-failed" | "build failed" -> .BuildFailed,
+            "runtime_failure" | "runtime-failure" | "runtime failure" -> .RuntimeFailure,
+            "hot_reload" | "hot-reload" | "hot reload" -> .HotReload,
+            "tests_failing" | "tests-failing" | "tests failing" -> .TestsFailing,
+            else -> next
+        }
+        state = prefer_state(state, candidate)
+    }
+    return state
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1414
+fn prefer_state(current: BrowserSessionState, candidate: BrowserSessionState) -> BrowserSessionState {
+    // Rust: crates/jet-devserver/src/BrowserHost.rs:1415
+    fn rank(state: BrowserSessionState) -> U8 {
+        if state == { .Idle -> 0, .HotReload -> 1, .Building -> 2, .TestsFailing -> 3, .RuntimeFailure -> 4, .BuildFailed -> 5 }
+    }
+    if rank(candidate) >= rank(current) -> candidate else -> current
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1432
+fn find_node(nodes: [BrowserNode], node_id: String) -> BrowserNode? {
+    loop node in nodes {
+        if node.id == node_id -> return .Val(node)
+        if find_node(node.children, node_id) == .Val(found) -> return .Val(found)
+    }
+    return None
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1442
+fn element_id(placement: BrowserPlacement, panel_id: String, node_id: String?) -> String {
+    id := "jet-devtools-{placement.as_str()}-panel-{stable_fragment(panel_id)}"
+    if node_id == .Val(node_id) { &id.push_str("-node-"); &id.push_str(stable_fragment(node_id)) }
+    return id
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1455
+fn stable_fragment(value: String) -> String {
+    output := String.with_capacity(value.len())
+    loop character in value.chars() { &output.push(if character.is_ascii_alphanumeric() || character == '_' || character == '-' -> character else -> '-') }
+    if output.is_empty() -> "item" else -> output
+}
+// Rust: crates/jet-devserver/src/BrowserHost.rs:1471
+fn flatten_nodes(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: &[BrowserHtmlElement]) -> {
+    loop node in nodes {
+        &elements.push(BrowserHtmlElement { id: element_id(placement, panel_id, .Val(node.id)), kind: node.kind.as_str(), panel_id: .Val(panel_id.to_string()), node_id: .Val(~node.id), label: ~node.label, value: ~node.value, status: ~node.status })
+        flatten_nodes(placement, panel_id, node.children, elements)
+    }
+}

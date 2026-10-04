@@ -1,2479 +1,993 @@
-// PORT-PENDING 0761 crates-jet-devserver-src-canvas-edit-actions-slice-1815: crates/jet-devserver/src/Canvas/edit_actions.rs:1815-4289
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS struct StatementLoc {
-//RS     anchor: SourceSpan,
-//RS     source: SourceSpan,
-//RS     full: SourceSpan,
-//RS     block: Vec<usize>,
-//RS     index: usize,
-//RS     is_guard: bool,
-//RS     is_expr: bool,
-//RS     guard_span: Option<SourceSpan>,
-//RS }
-//RS 
-//RS fn apply_reorder_statements(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     moved: SourceSpan,
-//RS     anchor: SourceSpan,
-//RS     position: &str,
-//RS ) -> Result<String, String> {
-//RS     let Some(name_span) = graph_id_name_span(graph_id) else {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas graph id is not a function graph",
-//RS         ));
-//RS     };
-//RS     let path_str = path.to_string_lossy();
-//RS     let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
-//RS     let errors = diags
-//RS         .iter()
-//RS         .filter(|d| d.severity == Severity::Error)
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     if !errors.is_empty() {
-//RS         return Err(diagnostics_error(path, src, &errors));
-//RS     }
-//RS     let Some(bundle) = bundle else {
-//RS         return Err(edit_error(
-//RS             "check",
-//RS             "Canvas could not read checked statement facts",
-//RS         ));
-//RS     };
-//RS     let Some(func) = find_func_by_name_span(&bundle, name_span) else {
-//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
-//RS     };
-//RS     let mut locs = Vec::new();
-//RS     collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
-//RS     let Some(moved_loc) = locs
-//RS         .iter()
-//RS         .find(|loc| same_span(loc.anchor, moved))
-//RS         .cloned()
-//RS     else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas step to move no longer exists",
-//RS         ));
-//RS     };
-//RS     let Some(anchor_loc) = locs
-//RS         .iter()
-//RS         .find(|loc| same_span(loc.anchor, anchor))
-//RS         .cloned()
-//RS     else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas anchor step no longer exists",
-//RS         ));
-//RS     };
-//RS     if moved_loc.block != anchor_loc.block {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "can't move a step into a different branch yet",
-//RS         ));
-//RS     }
-//RS     if moved_loc.index == anchor_loc.index {
-//RS         return Ok(edit_ok(false, path));
-//RS     }
-//RS     if moved_loc.full.start <= anchor_loc.full.start && anchor_loc.full.start < moved_loc.full.end {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "can't anchor a step inside the moved source yet",
-//RS         ));
-//RS     }
-//RS     let insert = match position {
-//RS         "before" => anchor_loc.full.start,
-//RS         "after" => anchor_loc.full.end,
-//RS         _ => {
-//RS             return Err(edit_error(
-//RS                 "bad_request",
-//RS                 "Canvas reorder position must be before or after",
-//RS             ))
-//RS         }
-//RS     };
-//RS     let chunk = src
-//RS         .get(moved_loc.full.start..moved_loc.full.end)
-//RS         .ok_or_else(|| edit_error("bad_request", "Canvas moved source span is stale"))?
-//RS         .to_string();
-//RS     let mut changed = String::with_capacity(src.len());
-//RS     changed.push_str(&src[..moved_loc.full.start]);
-//RS     changed.push_str(&src[moved_loc.full.end..]);
-//RS     let mut insert_at = insert;
-//RS     if insert_at > moved_loc.full.start {
-//RS         insert_at = insert_at.saturating_sub(moved_loc.full.end - moved_loc.full.start);
-//RS     }
-//RS     insert_at = insert_at.min(changed.len());
-//RS     changed.insert_str(insert_at, &chunk);
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS /// Build one source-backed execution convergence edit.
-//RS ///
-//RS /// The browser owns the gesture and the preview choice. It does not own source
-//RS /// construction: this function resolves both pins against the checked AST,
-//RS /// creates the ordinary Jet helper/call text, and sends the result through the
-//RS /// same formatter, sema check, and atomic writer as every other Canvas edit.
-//RS fn apply_exec_convergence(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     from_span: SourceSpan,
-//RS     target_span: SourceSpan,
-//RS     from_pin_name: &str,
-//RS     strategy: &str,
-//RS     function: &str,
-//RS     helper_name: Option<&str>,
-//RS ) -> Result<String, String> {
-//RS     validate_ident(function)?;
-//RS     if !matches!(strategy, "extract" | "helper" | "duplicate") {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas convergence strategy must be extract, helper, or duplicate",
-//RS         ));
-//RS     }
-//RS     if same_span(from_span, target_span) {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas convergence needs two different source pins",
-//RS         ));
-//RS     }
-//RS 
-//RS     let func = checked_func_for_graph(path, src, graph_id)?;
-//RS     let Some(target) = find_expression_selection(&func.body, target_span, src) else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas convergence target source selection no longer exists",
-//RS         ));
-//RS     };
-//RS     let target_text = src
-//RS         .get(target.span.start..target.span.end)
-//RS         .ok_or_else(|| edit_error("bad_request", "Canvas convergence target span is stale"))?
-//RS         .trim()
-//RS         .to_string();
-//RS     if target_text.is_empty() {
-//RS         return Err(edit_error(
-//RS             "ambiguous",
-//RS             "Canvas needs one or more complete ordinary source statements to converge",
-//RS         ));
-//RS     }
-//RS 
-//RS     let Some(insertion) = find_exec_insertion(src, &func.body, from_span, from_pin_name)? else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas convergence source path no longer exists",
-//RS         ));
-//RS     };
-//RS     if insertion.branch && target.span.start >= insertion.owner.end {
-//RS         return Err(edit_error(
-//RS             "structured_join",
-//RS             "This source already has a structured join after the branch; keep the downstream step single",
-//RS         ));
-//RS     }
-//RS 
-//RS     let params = convergence_params(path, target.span)?;
-//RS     let args = params
-//RS         .iter()
-//RS         .map(|(name, _)| name.as_str())
-//RS         .collect::<Vec<_>>()
-//RS         .join(", ");
-//RS     let call_name = if strategy == "helper" {
-//RS         helper_name.unwrap_or(function)
-//RS     } else {
-//RS         function
-//RS     };
-//RS     let call = format!("{call_name}({args})");
-//RS     let incoming_source = if strategy == "duplicate" {
-//RS         target_text.clone()
-//RS     } else {
-//RS         call.clone()
-//RS     };
-//RS 
-//RS     let bundle = checked_bundle(path, src)?;
-//RS     let exact_helper = exact_body_helper_name(bundle, src, &target_text, &func.name);
-//RS     let mut edits = Vec::new();
-//RS     let insertion_text = format!("{}{}\n", insertion.indent, incoming_source);
-//RS     edits.push(edit(
-//RS         SourceSpan {
-//RS             start: insertion.offset,
-//RS             end: insertion.offset,
-//RS         },
-//RS         &insertion_text,
-//RS     ));
-//RS 
-//RS     match strategy {
-//RS         "helper" => {
-//RS             let Some(helper_name) = helper_name.filter(|name| !name.is_empty()) else {
-//RS                 return Err(edit_error(
-//RS                     "bad_request",
-//RS                     "Canvas exact-body helper choice has no helper name",
-//RS                 ));
-//RS             };
-//RS             validate_ident(helper_name)?;
-//RS             if exact_helper.as_deref() != Some(helper_name) {
-//RS                 return Err(edit_error(
-//RS                     "stale",
-//RS                     "The selected helper body no longer matches the converged source",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         "extract" => {
-//RS             if function_name_exists(bundle, function) {
-//RS                 return Err(edit_error(
-//RS                     "bad_request",
-//RS                     "Canvas helper name already exists; choose another name",
-//RS                 ));
-//RS             }
-//RS             let signature = params
-//RS                 .iter()
-//RS                 .map(|(name, ty)| format!("{name}: {ty}"))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let body = target_text
-//RS                 .lines()
-//RS                 .map(|line| format!("    {}\n", line.trim()))
-//RS                 .collect::<String>();
-//RS             let helper = format!("fn {function}({signature}) {{\n{body}}}\n\n");
-//RS             edits.push(edit(SourceSpan { start: 0, end: 0 }, &helper));
-//RS         }
-//RS         "duplicate" => {}
-//RS         _ => unreachable!(),
-//RS     }
-//RS 
-//RS     if strategy != "duplicate" {
-//RS         let suffix = src
-//RS             .get(target.span.end..target.full.end)
-//RS             .ok_or_else(|| edit_error("bad_request", "Canvas convergence target line is stale"))?;
-//RS         let replacement = format!(
-//RS             "{}{}{}",
-//RS             indentation_at(src, target.full.start),
-//RS             call,
-//RS             suffix
-//RS         );
-//RS         edits.push(edit(target.full, &replacement));
-//RS     }
-//RS 
-//RS     let changed = FixEngine::apply_edits(src, &edits)
-//RS         .map_err(|_| edit_error("overlap", "Canvas convergence source edits overlapped"))?;
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn convergence_params(path: &Path, target: SourceSpan) -> Result<Vec<(String, String)>, String> {
-//RS     let index = jet_semindex::open(path).map_err(|error| {
-//RS         edit_error(
-//RS             "check",
-//RS             &format!("Canvas could not resolve convergence captures: {error}"),
-//RS         )
-//RS     })?;
-//RS     let mut references = index
-//RS         .references()
-//RS         .iter()
-//RS         .filter(|reference| {
-//RS             reference.span.start >= target.start && reference.span.end <= target.end
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     references.sort_by_key(|reference| (reference.span.start, reference.span.end));
-//RS 
-//RS     let mut params = Vec::new();
-//RS     for reference in references {
-//RS         let Some(target_def) = reference.target.as_ref() else {
-//RS             continue;
-//RS         };
-//RS         let Some(definition) = index.definitions().iter().find(|definition| {
-//RS             definition.module_path == target_def.module_path
-//RS                 && definition.def_span == target_def.def_span
-//RS         }) else {
-//RS             continue;
-//RS         };
-//RS         let ty = match &definition.kind {
-//RS             jet_semindex::SymbolKind::Local { ty: Some(ty), .. }
-//RS             | jet_semindex::SymbolKind::Param { ty } => ty.clone(),
-//RS             jet_semindex::SymbolKind::Local { ty: None, .. } => {
-//RS                 return Err(edit_error(
-//RS                     "ambiguous",
-//RS                     "Canvas could not preserve a convergence capture type",
-//RS                 ));
-//RS             }
-//RS             _ => continue,
-//RS         };
-//RS         if !params.iter().any(|(name, _)| name == &reference.name) {
-//RS             params.push((reference.name.clone(), ty));
-//RS         }
-//RS     }
-//RS     Ok(params)
-//RS }
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS struct ExpressionSelection {
-//RS     span: SourceSpan,
-//RS     full: SourceSpan,
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct ExecInsertion {
-//RS     offset: usize,
-//RS     indent: String,
-//RS     owner: SourceSpan,
-//RS     branch: bool,
-//RS }
-//RS 
-//RS fn find_expression_selection(
-//RS     stmts: &[Stmt],
-//RS     target: SourceSpan,
-//RS     src: &str,
-//RS ) -> Option<ExpressionSelection> {
-//RS     if let Some(found) = find_expression_selection_in_block(stmts, target, src) {
-//RS         return Some(found);
-//RS     }
-//RS     for stmt in stmts {
-//RS         if let Some(found) = find_expression_selection_in_children(stmt, target, src) {
-//RS             return Some(found);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_expression_selection_in_block(
-//RS     stmts: &[Stmt],
-//RS     target: SourceSpan,
-//RS     src: &str,
-//RS ) -> Option<ExpressionSelection> {
-//RS     let mut first = None;
-//RS     let mut last = None;
-//RS     for (index, stmt) in stmts.iter().enumerate() {
-//RS         let Stmt::Expr(expr) = stmt else {
-//RS             continue;
-//RS         };
-//RS         let anchor: SourceSpan = expr.span().into();
-//RS         let expr_span = source_expression_span(src, expr);
-//RS         if same_span(anchor, target)
-//RS             || same_span(expr_span, target)
-//RS             || span_contains(expr_span, target)
-//RS             || span_contains(target, expr_span)
-//RS             || source_spans_overlap(expr_span, target)
-//RS         {
-//RS             first.get_or_insert(index);
-//RS             last = Some(index);
-//RS         }
-//RS     }
-//RS     let (Some(first), Some(last)) = (first, last) else {
-//RS         return None;
-//RS     };
-//RS     let mut selected = Vec::with_capacity(last - first + 1);
-//RS     for stmt in &stmts[first..=last] {
-//RS         let Stmt::Expr(expr) = stmt else {
-//RS             return None;
-//RS         };
-//RS         selected.push(source_expression_span(src, expr));
-//RS     }
-//RS     let span = SourceSpan {
-//RS         start: selected.first()?.start,
-//RS         end: selected.last()?.end,
-//RS     };
-//RS     if selected.len() > 1 && (span.start < target.start || span.end > target.end) {
-//RS         return None;
-//RS     }
-//RS     Some(ExpressionSelection {
-//RS         span,
-//RS         full: SourceSpan {
-//RS             start: line_start(src, span.start),
-//RS             end: line_after(src, span.end),
-//RS         },
-//RS     })
-//RS }
-//RS 
-//RS fn source_expression_span(src: &str, expr: &Expr) -> SourceSpan {
-//RS     let start = match expr {
-//RS         Expr::Call(call) => call.name_span.start,
-//RS         Expr::MethodCall { receiver, .. } => source_expression_span(src, receiver).start,
-//RS         Expr::Try(inner, ..) | Expr::OrFallback { value: inner, .. } => {
-//RS             source_expression_span(src, inner).start
-//RS         }
-//RS         Expr::Paren(_, span) => span.start,
-//RS         _ => expr.span().start,
-//RS     };
-//RS     let fallback_end = expr.span().end;
-//RS     let end = match expr {
-//RS         Expr::Call(call) => call_source_end(src, call.name_span.end, fallback_end),
-//RS         Expr::MethodCall { method_span, .. } => call_source_end(src, method_span.end, fallback_end),
-//RS         Expr::Try(inner, span, ..) => {
-//RS             let inner_end = source_expression_span(src, inner).end;
-//RS             let mut end = inner_end.max(span.end);
-//RS             if src.as_bytes().get(end) == Some(&b'?') {
-//RS                 end += 1;
-//RS             }
-//RS             end
-//RS         }
-//RS         _ => fallback_end,
-//RS     };
-//RS     SourceSpan {
-//RS         start,
-//RS         end: end.max(start),
-//RS     }
-//RS }
-//RS 
-//RS fn call_source_end(src: &str, name_end: usize, fallback_end: usize) -> usize {
-//RS     let Some(open) = find_unquoted_char(src, name_end, '(') else {
-//RS         return fallback_end;
-//RS     };
-//RS     matching_delimiter(src, open, '(', ')').map_or(fallback_end, |close| close.saturating_add(1))
-//RS }
-//RS 
-//RS fn span_contains(outer: SourceSpan, inner: SourceSpan) -> bool {
-//RS     inner.start >= outer.start && inner.end <= outer.end
-//RS }
-//RS 
-//RS fn source_spans_overlap(a: SourceSpan, b: SourceSpan) -> bool {
-//RS     a.start < b.end && b.start < a.end
-//RS }
-//RS 
-//RS fn find_expression_selection_in_children(
-//RS     stmt: &Stmt,
-//RS     target: SourceSpan,
-//RS     src: &str,
-//RS ) -> Option<ExpressionSelection> {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_expression_selection(body, target, src),
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => arms
-//RS             .iter()
-//RS             .find_map(|arm| find_expression_selection(&arm.body, target, src))
-//RS             .or_else(|| {
-//RS                 else_body
-//RS                     .as_deref()
-//RS                     .and_then(|body| find_expression_selection(body, target, src))
-//RS             }),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => find_expression_selection(then_body, target, src).or_else(|| {
-//RS             else_body
-//RS                 .as_deref()
-//RS                 .and_then(|body| find_expression_selection(body, target, src))
-//RS         }),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn find_exec_insertion(
-//RS     src: &str,
-//RS     stmts: &[Stmt],
-//RS     node_span: SourceSpan,
-//RS     pin_name: &str,
-//RS ) -> Result<Option<ExecInsertion>, String> {
-//RS     for stmt in stmts {
-//RS         if exec_branch_node_matches(stmt, node_span) {
-//RS             let body = matching_exec_branch(stmt, node_span, pin_name).ok_or_else(|| {
-//RS                 edit_error(
-//RS                     "ambiguous",
-//RS                     "Canvas convergence pin has no source-backed branch body",
-//RS                 )
-//RS             })?;
-//RS             let owner = branch_source_span(src, stmt);
-//RS             return branch_exec_insertion(src, body, owner).map(Some);
-//RS         }
-//RS         let source = stmt_source_span(stmt);
-//RS         let anchor: SourceSpan = stmt_canvas_anchor(stmt).into();
-//RS         if same_span(source, node_span) || same_span(anchor, node_span) {
-//RS             if execution_terminates(stmt) {
-//RS                 return Err(edit_error(
-//RS                     "ambiguous",
-//RS                     "Canvas cannot add a convergence step after an early exit",
-//RS                 ));
-//RS             }
-//RS             let full = stmt_text_span(src, stmt);
-//RS             return Ok(Some(ExecInsertion {
-//RS                 offset: full.end,
-//RS                 indent: indentation_at(src, full.start),
-//RS                 owner: full,
-//RS                 branch: false,
-//RS             }));
-//RS         }
-//RS         if let Some(found) = find_exec_insertion_in_children(src, stmt, node_span, pin_name)? {
-//RS             return Ok(Some(found));
-//RS         }
-//RS     }
-//RS     Ok(None)
-//RS }
-//RS 
-//RS fn exec_branch_node_matches(stmt: &Stmt, node_span: SourceSpan) -> bool {
-//RS     match stmt {
-//RS         Stmt::Switch { arms, span, .. } | Stmt::ComptimeSwitch { arms, span, .. } => {
-//RS             same_span((*span).into(), node_span)
-//RS                 || arms
-//RS                     .iter()
-//RS                     .any(|arm| same_span(arm.cond.span().into(), node_span))
-//RS         }
-//RS         Stmt::ComptimeIf { span, .. } => same_span((*span).into(), node_span),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn branch_source_span(src: &str, stmt: &Stmt) -> SourceSpan {
-//RS     let line = line_start(src, stmt.span().start);
-//RS     let keyword = find_word(src, line, "if").unwrap_or(stmt.span().start);
-//RS     let Some(open) = find_unquoted_char(src, keyword, '{') else {
-//RS         return stmt.span().into();
-//RS     };
-//RS     let mut close = matching_delimiter(src, open, '{', '}').unwrap_or(stmt.span().end);
-//RS     loop {
-//RS         let Some(else_start) = find_word(src, close + 1, "else") else {
-//RS             break;
-//RS         };
-//RS         let between = &src[close + 1..else_start];
-//RS         if !between.chars().all(char::is_whitespace) {
-//RS             break;
-//RS         }
-//RS         let Some(next_open) = find_unquoted_char(src, else_start + "else".len(), '{') else {
-//RS             break;
-//RS         };
-//RS         let Some(next_close) = matching_delimiter(src, next_open, '{', '}') else {
-//RS             break;
-//RS         };
-//RS         close = next_close;
-//RS     }
-//RS     SourceSpan {
-//RS         start: keyword,
-//RS         end: close.saturating_add(1),
-//RS     }
-//RS }
-//RS 
-//RS fn find_word(src: &str, start: usize, word: &str) -> Option<usize> {
-//RS     let mut cursor = start.min(src.len());
-//RS     while let Some(relative) = src[cursor..].find(word) {
-//RS         let found = cursor + relative;
-//RS         let before = found.checked_sub(1).and_then(|i| src.as_bytes().get(i));
-//RS         let after = src.as_bytes().get(found + word.len());
-//RS         if !before.is_some_and(u8::is_ascii_alphanumeric)
-//RS             && !before.is_some_and(|byte| *byte == b'_')
-//RS             && !after.is_some_and(u8::is_ascii_alphanumeric)
-//RS             && !after.is_some_and(|byte| *byte == b'_')
-//RS         {
-//RS             return Some(found);
-//RS         }
-//RS         cursor = found + word.len();
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_unquoted_char(src: &str, start: usize, wanted: char) -> Option<usize> {
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     let mut line_comment = false;
-//RS     let mut cursor = start.min(src.len());
-//RS     while cursor < src.len() {
-//RS         let ch = src[cursor..].chars().next()?;
-//RS         let width = ch.len_utf8();
-//RS         let next = src[cursor + width..].chars().next();
-//RS         if line_comment {
-//RS             if ch == '\n' {
-//RS                 line_comment = false;
-//RS             }
-//RS         } else if let Some(quoted) = quote {
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if ch == '\\' {
-//RS                 escaped = true;
-//RS             } else if ch == quoted {
-//RS                 quote = None;
-//RS             }
-//RS         } else if ch == '"' || ch == '\'' {
-//RS             quote = Some(ch);
-//RS         } else if ch == '/' && next == Some('/') {
-//RS             line_comment = true;
-//RS             cursor += width;
-//RS         } else if ch == wanted {
-//RS             return Some(cursor);
-//RS         }
-//RS         cursor += width;
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn matching_delimiter(src: &str, open: usize, opening: char, closing: char) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     let mut line_comment = false;
-//RS     let mut cursor = open.min(src.len());
-//RS     while cursor < src.len() {
-//RS         let ch = src[cursor..].chars().next()?;
-//RS         let width = ch.len_utf8();
-//RS         let next = src[cursor + width..].chars().next();
-//RS         if line_comment {
-//RS             if ch == '\n' {
-//RS                 line_comment = false;
-//RS             }
-//RS         } else if let Some(quoted) = quote {
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if ch == '\\' {
-//RS                 escaped = true;
-//RS             } else if ch == quoted {
-//RS                 quote = None;
-//RS             }
-//RS         } else if ch == '"' || ch == '\'' {
-//RS             quote = Some(ch);
-//RS         } else if ch == '/' && next == Some('/') {
-//RS             line_comment = true;
-//RS             cursor += width;
-//RS         } else if ch == opening {
-//RS             depth += 1;
-//RS         } else if ch == closing {
-//RS             depth = depth.saturating_sub(1);
-//RS             if depth == 0 {
-//RS                 return Some(cursor);
-//RS             }
-//RS         }
-//RS         cursor += width;
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_exec_insertion_in_children(
-//RS     src: &str,
-//RS     stmt: &Stmt,
-//RS     node_span: SourceSpan,
-//RS     pin_name: &str,
-//RS ) -> Result<Option<ExecInsertion>, String> {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_exec_insertion(src, body, node_span, pin_name),
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             for arm in arms {
-//RS                 if let Some(found) = find_exec_insertion(src, &arm.body, node_span, pin_name)? {
-//RS                     return Ok(Some(found));
-//RS                 }
-//RS             }
-//RS             else_body
-//RS                 .as_deref()
-//RS                 .map(|body| find_exec_insertion(src, body, node_span, pin_name))
-//RS                 .transpose()
-//RS                 .map(|found| found.flatten())
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             if let Some(found) = find_exec_insertion(src, then_body, node_span, pin_name)? {
-//RS                 return Ok(Some(found));
-//RS             }
-//RS             else_body
-//RS                 .as_deref()
-//RS                 .map(|body| find_exec_insertion(src, body, node_span, pin_name))
-//RS                 .transpose()
-//RS                 .map(|found| found.flatten())
-//RS         }
-//RS         _ => Ok(None),
-//RS     }
-//RS }
-//RS 
-//RS fn matching_exec_branch<'a>(
-//RS     stmt: &'a Stmt,
-//RS     node_span: SourceSpan,
-//RS     pin_name: &str,
-//RS ) -> Option<&'a [Stmt]> {
-//RS     if let Stmt::ComptimeIf {
-//RS         then_body,
-//RS         else_body,
-//RS         span,
-//RS         ..
-//RS     } = stmt
-//RS     {
-//RS         if !same_span((*span).into(), node_span) {
-//RS             return None;
-//RS         }
-//RS         return match pin_name {
-//RS             "then" => Some(then_body.as_slice()),
-//RS             "else" => else_body.as_deref(),
-//RS             _ => None,
-//RS         };
-//RS     }
-//RS     let (arms, else_body, span) = match stmt {
-//RS         Stmt::Switch {
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } => (arms, else_body, *span),
-//RS         _ => return None,
-//RS     };
-//RS     let node_matches = same_span(span.into(), node_span)
-//RS         || arms
-//RS             .iter()
-//RS             .any(|arm| same_span(arm.cond.span().into(), node_span));
-//RS     if !node_matches {
-//RS         return None;
-//RS     }
-//RS     if pin_name == "else" {
-//RS         return else_body.as_deref();
-//RS     }
-//RS     if pin_name == "then" {
-//RS         return arms.first().map(|arm| arm.body.as_slice());
-//RS     }
-//RS     let index = pin_name.strip_prefix("arm")?.parse::<usize>().ok()?;
-//RS     arms.get(index.checked_sub(1)?)
-//RS         .map(|arm| arm.body.as_slice())
-//RS }
-//RS 
-//RS fn branch_exec_insertion(
-//RS     src: &str,
-//RS     body: &[Stmt],
-//RS     owner: SourceSpan,
-//RS ) -> Result<ExecInsertion, String> {
-//RS     let Some(last) = body.last() else {
-//RS         return Err(edit_error(
-//RS             "ambiguous",
-//RS             "Canvas needs a non-empty source-backed branch body to converge",
-//RS         ));
-//RS     };
-//RS     if execution_terminates(last)
-//RS         || matches!(
-//RS             last,
-//RS             Stmt::While { .. }
-//RS                 | Stmt::For { .. }
-//RS                 | Stmt::Loop { .. }
-//RS                 | Stmt::CountedLoop { .. }
-//RS                 | Stmt::Switch { .. }
-//RS                 | Stmt::ComptimeSwitch { .. }
-//RS                 | Stmt::ComptimeIf { .. }
-//RS         )
-//RS     {
-//RS         return Err(edit_error(
-//RS             "ambiguous",
-//RS             "Canvas cannot prove a convergence path after this branch body",
-//RS         ));
-//RS     }
-//RS     let full = stmt_text_span(src, last);
-//RS     let inline = full.end > owner.end;
-//RS     let (offset, indent) = if inline {
-//RS         let last_end = match last {
-//RS             Stmt::Expr(expr) => source_expression_span(src, expr).end,
-//RS             _ => stmt_source_span(last).end,
-//RS         };
-//RS         let Some(close) =
-//RS             find_unquoted_char(src, last_end, '}').filter(|offset| *offset < owner.end)
-//RS         else {
-//RS             return Err(edit_error(
-//RS                 "ambiguous",
-//RS                 "Canvas could not locate the source-backed branch body boundary",
-//RS             ));
-//RS         };
-//RS         // The formatter may keep a one-statement branch on the declaration line.
-//RS         // Insert a new line before its closing brace, then let the formatter
-//RS         // restore the canonical block layout.
-//RS         (close, format!("\n{}    ", indentation_at(src, owner.start)))
-//RS     } else {
-//RS         (full.end, indentation_at(src, full.start))
-//RS     };
-//RS     Ok(ExecInsertion {
-//RS         offset,
-//RS         indent,
-//RS         owner,
-//RS         branch: true,
-//RS     })
-//RS }
-//RS 
-//RS fn execution_terminates(stmt: &Stmt) -> bool {
-//RS     matches!(
-//RS         stmt,
-//RS         Stmt::Return(..)
-//RS             | Stmt::Break(..)
-//RS             | Stmt::BreakValue(..)
-//RS             | Stmt::BreakLabel(..)
-//RS             | Stmt::BreakLabelValue(..)
-//RS             | Stmt::Continue(..)
-//RS             | Stmt::ContinueLabel(..)
-//RS     )
-//RS }
-//RS 
-//RS fn exact_body_helper_name(
-//RS     bundle: &AST::ProgramBundle,
-//RS     src: &str,
-//RS     target: &str,
-//RS     current: &str,
-//RS ) -> Option<String> {
-//RS     fn in_items(items: &[Item], src: &str, target: &str, current: &str) -> Option<String> {
-//RS         for item in items {
-//RS             match item {
-//RS                 Item::Func(func) if func.name != current => {
-//RS                     if expression_body_source(src, &func.body)
-//RS                         .is_some_and(|body| formatted_expression_matches(&body, target))
-//RS                     {
-//RS                         return Some(func.name.clone());
-//RS                     }
-//RS                 }
-//RS                 Item::Struct(structure) => {
-//RS                     if let Some(found) = structure.methods.iter().find_map(|method| {
-//RS                         if method.name == current {
-//RS                             return None;
-//RS                         }
-//RS                         expression_body_source(src, &method.body).and_then(|body| {
-//RS                             formatted_expression_matches(&body, target).then(|| method.name.clone())
-//RS                         })
-//RS                     }) {
-//RS                         return Some(found);
-//RS                     }
-//RS                 }
-//RS                 Item::Impl(implementation) => {
-//RS                     if let Some(found) = implementation.methods.iter().find_map(|method| {
-//RS                         if method.name == current {
-//RS                             return None;
-//RS                         }
-//RS                         expression_body_source(src, &method.body).and_then(|body| {
-//RS                             formatted_expression_matches(&body, target).then(|| method.name.clone())
-//RS                         })
-//RS                     }) {
-//RS                         return Some(found);
-//RS                     }
-//RS                 }
-//RS                 Item::CodeModule(module) => {
-//RS                     if let Some(body) = &module.body {
-//RS                         if let Some(found) = in_items(body, src, target, current) {
-//RS                             return Some(found);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS     bundle
-//RS         .modules
-//RS         .iter()
-//RS         .find_map(|module| in_items(&module.items, src, target, current))
-//RS }
-//RS 
-//RS fn expression_body_source(src: &str, body: &[Stmt]) -> Option<String> {
-//RS     let mut spans = Vec::with_capacity(body.len());
-//RS     for stmt in body {
-//RS         let Stmt::Expr(expr) = stmt else {
-//RS             return None;
-//RS         };
-//RS         spans.push(source_expression_span(src, expr));
-//RS     }
-//RS     let start = spans.first()?.start;
-//RS     let end = spans.last()?.end;
-//RS     Some(
-//RS         source_snippet(src, SourceSpan { start, end })
-//RS             .trim()
-//RS             .to_string(),
-//RS     )
-//RS }
-//RS 
-//RS fn source_snippet(src: &str, span: SourceSpan) -> String {
-//RS     src.get(span.start..span.end)
-//RS         .unwrap_or_default()
-//RS         .to_string()
-//RS }
-//RS 
-//RS fn formatted_expression_matches(left: &str, right: &str) -> bool {
-//RS     let wrap = |expr: &str| {
-//RS         let candidate = format!("fn canvas_match() {{\n    {}\n}}\n", expr.trim());
-//RS         jet_driver::Formatter::format_source(&candidate).unwrap_or_else(|_| candidate.clone())
-//RS     };
-//RS     let left = wrap(left);
-//RS     let right = wrap(right);
-//RS     left == right || normalized_source_shape(&left) == normalized_source_shape(&right)
-//RS }
-//RS 
-//RS fn normalized_source_shape(source: &str) -> String {
-//RS     let mut normalized = String::with_capacity(source.len());
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     for ch in source.chars() {
-//RS         if let Some(quoted) = quote {
-//RS             normalized.push(ch);
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if ch == '\\' {
-//RS                 escaped = true;
-//RS             } else if ch == quoted {
-//RS                 quote = None;
-//RS             }
-//RS         } else if ch == '"' || ch == '\'' {
-//RS             quote = Some(ch);
-//RS             normalized.push(ch);
-//RS         } else if !ch.is_whitespace() {
-//RS             normalized.push(ch);
-//RS         }
-//RS     }
-//RS     normalized
-//RS }
-//RS 
-//RS fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
-//RS     fn in_items(items: &[Item], name: &str) -> bool {
-//RS         items.iter().any(|item| match item {
-//RS             Item::Func(func) => func.name == name,
-//RS             Item::Struct(structure) => structure.methods.iter().any(|method| method.name == name),
-//RS             Item::Impl(implementation) => implementation
-//RS                 .methods
-//RS                 .iter()
-//RS                 .any(|method| method.name == name),
-//RS             Item::CodeModule(module) => module
-//RS                 .body
-//RS                 .as_deref()
-//RS                 .is_some_and(|body| in_items(body, name)),
-//RS             _ => false,
-//RS         })
-//RS     }
-//RS     bundle
-//RS         .modules
-//RS         .iter()
-//RS         .any(|module| in_items(&module.items, name))
-//RS }
-//RS 
-//RS fn apply_add_pattern_arm(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     node_span: SourceSpan,
-//RS     pattern: &str,
-//RS ) -> Result<String, String> {
-//RS     let func = checked_func_for_graph(path, src, graph_id)?;
-//RS     let head = normalize_pattern_arm_head(pattern);
-//RS     if head.is_empty() {
-//RS         return Err(edit_error("bad_request", "pattern arm text is empty"));
-//RS     }
-//RS     let mut target = None;
-//RS     find_pattern_target(src, &func.body, node_span, &mut target);
-//RS     let Some(target) = target else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas pattern node no longer exists",
-//RS         ));
-//RS     };
-//RS     let body = fresh_arm_body(func);
-//RS     let changed = match target {
-//RS         PatternTarget::Classic {
-//RS             arm,
-//RS             else_body,
-//RS             span,
-//RS         } => add_arm_to_classic_switch(src, arm, else_body, span, &head, &body)?,
-//RS         PatternTarget::Switch {
-//RS             arms,
-//RS             else_body,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             // Insert right after the last existing arm so the new arm never
-//RS             // lands inside the else body's block (its first-statement
-//RS             // offset sits *inside* `else -> { ... }`, not before it — that
-//RS             // splice used to tear a multi-line else block in half).
-//RS             let insert = if let Some(last) = arms.last() {
-//RS                 line_after(src, last.span.end)
-//RS             } else if let Some(else_body) = else_body {
-//RS                 line_start(src, first_stmt_start(else_body).unwrap_or(span.end))
-//RS             } else {
-//RS                 dispatch_body_insert_offset(src, span)
-//RS             };
-//RS             let indent = indentation_at(src, insert);
-//RS             let arm = format!("{indent}{head} -> {{\n{indent}    {body}\n{indent}}}\n");
-//RS             FixEngine::apply_edits(
-//RS                 src,
-//RS                 &[edit(
-//RS                     SourceSpan {
-//RS                         start: insert,
-//RS                         end: insert,
-//RS                     },
-//RS                     &arm,
-//RS                 )],
-//RS             )
-//RS             .map_err(|_| edit_error("overlap", "Canvas pattern arm insert overlapped"))?
-//RS         }
-//RS     };
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn apply_edit_pattern_arm(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     pattern_span: SourceSpan,
-//RS     pattern: &str,
-//RS ) -> Result<String, String> {
-//RS     let func = checked_func_for_graph(path, src, graph_id)?;
-//RS     let head = normalize_pattern_arm_head(pattern);
-//RS     if head.is_empty() {
-//RS         return Err(edit_error("bad_request", "pattern arm text is empty"));
-//RS     }
-//RS     if !pattern_span_belongs_to_graph(src, &func.body, pattern_span) {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas pattern arm no longer exists",
-//RS         ));
-//RS     }
-//RS     let changed = FixEngine::apply_edits(src, &[edit(pattern_span, &head)])
-//RS         .map_err(|_| edit_error("overlap", "Canvas pattern arm edit overlapped"))?;
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn apply_remove_pattern_arm(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     pattern_span: SourceSpan,
-//RS ) -> Result<String, String> {
-//RS     let func = checked_func_for_graph(path, src, graph_id)?;
-//RS     let mut arm = None;
-//RS     find_pattern_arm_remove_span(src, &func.body, pattern_span, &mut arm);
-//RS     let Some(info) = arm else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas pattern arm no longer exists",
-//RS         ));
-//RS     };
-//RS     if info.only_arm_without_else {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "can't remove the last pattern arm; the branch would have no path left",
-//RS         ));
-//RS     }
-//RS     let changed = FixEngine::apply_edits(src, &[edit(info.remove_span, "")])
-//RS         .map_err(|_| edit_error("overlap", "Canvas pattern arm delete overlapped"))?;
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn apply_toggle_switch_state(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS     node_span: SourceSpan,
-//RS ) -> Result<String, String> {
-//RS     let func = checked_func_for_graph(path, src, graph_id)?;
-//RS     match find_switched_node(&func.body, node_span) {
-//RS         Some(SwitchedNode::Marker(marker_span)) => {
-//RS             let changed = FixEngine::apply_edits(src, &[edit(marker_span, "")])
-//RS                 .map_err(|_| edit_error("overlap", "Canvas statement-state toggle overlapped"))?;
-//RS             write_checked_formatted(path, src, &changed)
-//RS         }
-//RS         Some(SwitchedNode::Nested) => Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas node is already inside a statement state",
-//RS         )),
-//RS         None if !statement_contains_span(&func.body, node_span)
-//RS             || same_span(func.name_span.into(), node_span) =>
-//RS         {
-//RS             Err(edit_error(
-//RS                 "not_found",
-//RS                 "Canvas statement node no longer exists",
-//RS             ))
-//RS         }
-//RS         None => {
-//RS             let insert = line_start(src, node_span.start);
-//RS             let changed = FixEngine::apply_edits(
-//RS                 src,
-//RS                 &[edit(
-//RS                     SourceSpan {
-//RS                         start: insert,
-//RS                         end: insert,
-//RS                     },
-//RS                     "#Off ",
-//RS                 )],
-//RS             )
-//RS             .map_err(|_| edit_error("overlap", "Canvas statement-state toggle overlapped"))?;
-//RS             write_checked_formatted(path, src, &changed)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS enum SwitchedNode {
-//RS     Marker(SourceSpan),
-//RS     Nested,
-//RS }
-//RS 
-//RS fn find_switched_node(stmts: &[Stmt], node_span: SourceSpan) -> Option<SwitchedNode> {
-//RS     for stmt in stmts {
-//RS         match stmt {
-//RS             Stmt::Switched { marker, body, span } => {
-//RS                 let switched_span: SourceSpan = (*span).into();
-//RS                 if same_span(switched_span, node_span) {
-//RS                     return Some(SwitchedNode::Marker(marker.span.into()));
-//RS                 }
-//RS                 if span_within(node_span, switched_span) {
-//RS                     return Some(SwitchedNode::Nested);
-//RS                 }
-//RS                 if let Some(found) = find_switched_node(body, node_span) {
-//RS                     return Some(found);
-//RS                 }
-//RS             }
-//RS             _ => {
-//RS                 if let Some(found) = find_switched_node_in_children(stmt, node_span) {
-//RS                     return Some(found);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn find_switched_node_in_children(stmt: &Stmt, node_span: SourceSpan) -> Option<SwitchedNode> {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_switched_node(body, node_span),
-//RS         Stmt::CountedLoop { step, body, .. } => step
-//RS             .as_deref()
-//RS             .and_then(|step| find_switched_node(std::slice::from_ref(step), node_span))
-//RS             .or_else(|| find_switched_node(body, node_span)),
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             for arm in arms {
-//RS                 if let Some(found) = find_switched_node(&arm.body, node_span) {
-//RS                     return Some(found);
-//RS                 }
-//RS             }
-//RS             else_body
-//RS                 .as_deref()
-//RS                 .and_then(|body| find_switched_node(body, node_span))
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => find_switched_node(then_body, node_span).or_else(|| {
-//RS             else_body
-//RS                 .as_deref()
-//RS                 .and_then(|body| find_switched_node(body, node_span))
-//RS         }),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn statement_contains_span(stmts: &[Stmt], node_span: SourceSpan) -> bool {
-//RS     stmts
-//RS         .iter()
-//RS         .any(|stmt| span_within(node_span, stmt.span().into()))
-//RS }
-//RS 
-//RS fn apply_append_multi_input(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     node_span: SourceSpan,
-//RS     element: &str,
-//RS ) -> Result<String, String> {
-//RS     let mut target = None;
-//RS     let func = checked_func_containing_span(path, src, node_span)?;
-//RS     find_multi_input_target(&func.body, node_span, &mut target);
-//RS     let Some(target) = target else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas multi-input node no longer exists",
-//RS         ));
-//RS     };
-//RS     let (span, item_spans) = match target {
-//RS         MultiInputTarget::List { span, item_spans } => (span, item_spans),
-//RS     };
-//RS     let list_source = src
-//RS         .get(span.start..span.end)
-//RS         .ok_or_else(|| edit_error("bad_request", "Canvas multi-input source span is stale"))?;
-//RS     let insert = if let Some(item) = item_spans.last() {
-//RS         item.end
-//RS     } else {
-//RS         list_source
-//RS             .rfind(']')
-//RS             .map(|idx| span.start + idx)
-//RS             .ok_or_else(|| edit_error("bad_request", "Canvas multi-input source span is stale"))?
-//RS     };
-//RS     let prefix = if item_spans.is_empty() { "" } else { ", " };
-//RS     let changed = FixEngine::apply_edits(
-//RS         src,
-//RS         &[edit(
-//RS             SourceSpan {
-//RS                 start: insert,
-//RS                 end: insert,
-//RS             },
-//RS             &format!("{prefix}{element}"),
-//RS         )],
-//RS     )
-//RS     .map_err(|_| edit_error("overlap", "Canvas multi-input append overlapped"))?;
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn apply_remove_multi_input_element(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     node_span: SourceSpan,
-//RS     element_span: SourceSpan,
-//RS ) -> Result<String, String> {
-//RS     let func = checked_func_containing_span(path, src, node_span)?;
-//RS     if !multi_input_element_belongs_to_graph(&func.body, node_span, element_span) {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas multi-input element no longer exists",
-//RS         ));
-//RS     }
-//RS     let remove = comma_separated_remove_span(src, node_span, element_span)?;
-//RS     let changed = FixEngine::apply_edits(src, &[edit(remove, "")])
-//RS         .map_err(|_| edit_error("overlap", "Canvas multi-input delete overlapped"))?;
-//RS     write_checked_formatted(path, src, &changed)
-//RS }
-//RS 
-//RS fn checked_func_for_graph(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     graph_id: &str,
-//RS ) -> Result<&'static AST::Func, String> {
-//RS     let Some(name_span) = graph_id_name_span(graph_id) else {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas graph id is not a function graph",
-//RS         ));
-//RS     };
-//RS     checked_func_by_name_span(path, src, name_span)
-//RS }
-//RS 
-//RS fn checked_func_containing_span(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     span: SourceSpan,
-//RS ) -> Result<&'static AST::Func, String> {
-//RS     let bundle = checked_bundle(path, src)?;
-//RS     let func = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .find_map(|module| find_func_containing_span(&module.items, span));
-//RS     let Some(func) = func else {
-//RS         return Err(edit_error(
-//RS             "not_found",
-//RS             "Canvas source node no longer belongs to a function",
-//RS         ));
-//RS     };
-//RS     Ok(func)
-//RS }
-//RS 
-//RS fn checked_func_by_name_span(
-//RS     path: &Path,
-//RS     src: &str,
-//RS     name_span: SourceSpan,
-//RS ) -> Result<&'static AST::Func, String> {
-//RS     let bundle = checked_bundle(path, src)?;
-//RS     let Some(func) = find_func_by_name_span(&bundle, name_span) else {
-//RS         return Err(edit_error("not_found", "Canvas graph no longer exists"));
-//RS     };
-//RS     Ok(func)
-//RS }
-//RS 
-//RS fn checked_bundle(path: &Path, src: &str) -> Result<&'static AST::ProgramBundle, String> {
-//RS     let path_str = path.to_string_lossy();
-//RS     let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
-//RS     let errors = diags
-//RS         .iter()
-//RS         .filter(|d| d.severity == Severity::Error)
-//RS         .cloned()
-//RS         .collect::<Vec<_>>();
-//RS     if !errors.is_empty() {
-//RS         return Err(diagnostics_error(path, src, &errors));
-//RS     }
-//RS     let Some(bundle) = bundle else {
-//RS         return Err(edit_error(
-//RS             "check",
-//RS             "Canvas could not read checked pattern facts",
-//RS         ));
-//RS     };
-//RS     Ok(Box::leak(Box::new(bundle)))
-//RS }
-//RS 
-//RS enum PatternTarget<'a> {
-//RS     Classic {
-//RS         arm: &'a AST::SwitchArm,
-//RS         else_body: Option<&'a Vec<Stmt>>,
-//RS         span: SourceSpan,
-//RS     },
-//RS     Switch {
-//RS         arms: &'a [AST::SwitchArm],
-//RS         else_body: Option<&'a Vec<Stmt>>,
-//RS         span: SourceSpan,
-//RS     },
-//RS }
-//RS 
-//RS fn find_pattern_target<'a>(
-//RS     src: &str,
-//RS     stmts: &'a [Stmt],
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<PatternTarget<'a>>,
-//RS ) {
-//RS     if out.is_some() {
-//RS         return;
-//RS     }
-//RS     for stmt in stmts {
-//RS         match stmt {
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 let classic = AST::is_subjectless_guard(subject, *span)
-//RS                     && arms.first().is_some_and(|arm| {
-//RS                         AST::uses_classic_if_spelling(src, *span, arm.cond.span())
-//RS                     });
-//RS                 if classic {
-//RS                     if let Some(arm) = arms.first() {
-//RS                         if (same_span(arm.cond.span().into(), node_span)
-//RS                             || same_span((*span).into(), node_span))
-//RS                             && matches!(arm.cond, Expr::PatternTest { .. })
-//RS                         {
-//RS                             *out = Some(PatternTarget::Classic {
-//RS                                 arm,
-//RS                                 else_body: else_body.as_ref(),
-//RS                                 span: stmt_text_span(src, stmt),
-//RS                             });
-//RS                             return;
-//RS                         }
-//RS                     }
-//RS                 } else if same_span((*span).into(), node_span) {
-//RS                     *out = Some(PatternTarget::Switch {
-//RS                         arms,
-//RS                         else_body: else_body.as_ref(),
-//RS                         span: (*span).into(),
-//RS                     });
-//RS                     return;
-//RS                 }
-//RS                 for arm in arms {
-//RS                     find_pattern_target(src, &arm.body, node_span, out);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_target(src, body, node_span, out);
-//RS                 }
-//RS             }
-//RS             Stmt::ComptimeSwitch {
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS                 ..
-//RS             } => {
-//RS                 if same_span((*span).into(), node_span) {
-//RS                     *out = Some(PatternTarget::Switch {
-//RS                         arms,
-//RS                         else_body: else_body.as_ref(),
-//RS                         span: (*span).into(),
-//RS                     });
-//RS                     return;
-//RS                 }
-//RS                 for arm in arms {
-//RS                     find_pattern_target(src, &arm.body, node_span, out);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_target(src, body, node_span, out);
-//RS                 }
-//RS             }
-//RS             _ => find_pattern_target_in_children(src, stmt, node_span, out),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn find_pattern_target_in_children<'a>(
-//RS     src: &str,
-//RS     stmt: &'a Stmt,
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<PatternTarget<'a>>,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_pattern_target(src, body, node_span, out),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             find_pattern_target(src, then_body, node_span, out);
-//RS             if let Some(body) = else_body {
-//RS                 find_pattern_target(src, body, node_span, out);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS struct RemoveArmInfo {
-//RS     remove_span: SourceSpan,
-//RS     only_arm_without_else: bool,
-//RS }
-//RS 
-//RS fn find_pattern_arm_remove_span(
-//RS     src: &str,
-//RS     stmts: &[Stmt],
-//RS     pattern_span: SourceSpan,
-//RS     out: &mut Option<RemoveArmInfo>,
-//RS ) {
-//RS     if out.is_some() {
-//RS         return;
-//RS     }
-//RS     for stmt in stmts {
-//RS         match stmt {
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS             } => {
-//RS                 for arm in arms {
-//RS                     let classic = AST::is_subjectless_guard(subject, *span)
-//RS                         && AST::uses_classic_if_spelling(src, *span, arm.cond.span());
-//RS                     if same_span(switch_arm_edit_span(src, subject, *span, arm), pattern_span) {
-//RS                         *out = Some(RemoveArmInfo {
-//RS                             remove_span: if classic {
-//RS                                 stmt_text_span(src, stmt)
-//RS                             } else {
-//RS                                 stmt_arm_text_span(src, arm)
-//RS                             },
-//RS                             only_arm_without_else: classic
-//RS                                 || (arms.len() == 1 && else_body.is_none()),
-//RS                         });
-//RS                         return;
-//RS                     }
-//RS                     find_pattern_arm_remove_span(src, &arm.body, pattern_span, out);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_arm_remove_span(src, body, pattern_span, out);
-//RS                 }
-//RS             }
-//RS             Stmt::ComptimeSwitch {
-//RS                 arms, else_body, ..
-//RS             } => {
-//RS                 for arm in arms {
-//RS                     if same_span(arm.cond.span().into(), pattern_span) {
-//RS                         *out = Some(RemoveArmInfo {
-//RS                             remove_span: stmt_arm_text_span(src, arm),
-//RS                             only_arm_without_else: arms.len() == 1 && else_body.is_none(),
-//RS                         });
-//RS                         return;
-//RS                     }
-//RS                     find_pattern_arm_remove_span(src, &arm.body, pattern_span, out);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_arm_remove_span(src, body, pattern_span, out);
-//RS                 }
-//RS             }
-//RS             _ => find_pattern_arm_remove_span_in_children(src, stmt, pattern_span, out),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn find_pattern_arm_remove_span_in_children(
-//RS     src: &str,
-//RS     stmt: &Stmt,
-//RS     pattern_span: SourceSpan,
-//RS     out: &mut Option<RemoveArmInfo>,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => {
-//RS             find_pattern_arm_remove_span(src, body, pattern_span, out)
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             find_pattern_arm_remove_span(src, then_body, pattern_span, out);
-//RS             if let Some(body) = else_body {
-//RS                 find_pattern_arm_remove_span(src, body, pattern_span, out);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn pattern_span_belongs_to_graph(src: &str, stmts: &[Stmt], pattern_span: SourceSpan) -> bool {
-//RS     let mut found = false;
-//RS     find_pattern_span(src, stmts, pattern_span, &mut found);
-//RS     found
-//RS }
-//RS 
-//RS fn find_pattern_span(src: &str, stmts: &[Stmt], pattern_span: SourceSpan, found: &mut bool) {
-//RS     if *found {
-//RS         return;
-//RS     }
-//RS     for stmt in stmts {
-//RS         match stmt {
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 span,
-//RS             } => {
-//RS                 for arm in arms {
-//RS                     if same_span(switch_arm_edit_span(src, subject, *span, arm), pattern_span) {
-//RS                         *found = true;
-//RS                         return;
-//RS                     }
-//RS                     find_pattern_span(src, &arm.body, pattern_span, found);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_span(src, body, pattern_span, found);
-//RS                 }
-//RS             }
-//RS             Stmt::ComptimeSwitch {
-//RS                 arms, else_body, ..
-//RS             } => {
-//RS                 for arm in arms {
-//RS                     if same_span(arm.cond.span().into(), pattern_span) {
-//RS                         *found = true;
-//RS                         return;
-//RS                     }
-//RS                     find_pattern_span(src, &arm.body, pattern_span, found);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     find_pattern_span(src, body, pattern_span, found);
-//RS                 }
-//RS             }
-//RS             _ => find_pattern_span_in_children(src, stmt, pattern_span, found),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn find_pattern_span_in_children(
-//RS     src: &str,
-//RS     stmt: &Stmt,
-//RS     pattern_span: SourceSpan,
-//RS     found: &mut bool,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_pattern_span(src, body, pattern_span, found),
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             find_pattern_span(src, then_body, pattern_span, found);
-//RS             if let Some(body) = else_body {
-//RS                 find_pattern_span(src, body, pattern_span, found);
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS enum MultiInputTarget {
-//RS     List {
-//RS         span: SourceSpan,
-//RS         item_spans: Vec<SourceSpan>,
-//RS     },
-//RS }
-//RS 
-//RS fn find_multi_input_target(
-//RS     stmts: &[Stmt],
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<MultiInputTarget>,
-//RS ) {
-//RS     if out.is_some() {
-//RS         return;
-//RS     }
-//RS     for stmt in stmts {
-//RS         find_multi_input_in_stmt(stmt, node_span, out);
-//RS     }
-//RS }
-//RS 
-//RS fn find_multi_input_in_stmt(
-//RS     stmt: &Stmt,
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<MultiInputTarget>,
-//RS ) {
-//RS     if out.is_some() {
-//RS         return;
-//RS     }
-//RS     match stmt {
-//RS         Stmt::Val(b) => find_multi_input_in_expr(&b.init, node_span, out),
-//RS         Stmt::Assign { target, value, .. } => {
-//RS             find_multi_input_in_lvalue(target, node_span, out);
-//RS             find_multi_input_in_expr(value, node_span, out);
-//RS         }
-//RS         Stmt::Expr(e) | Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
-//RS             find_multi_input_in_expr(e, node_span, out)
-//RS         }
-//RS         Stmt::DeferClose { close, .. } => find_multi_input_in_expr(close, node_span, out),
-//RS         Stmt::Return(Some(e), _) => find_multi_input_in_expr(e, node_span, out),
-//RS         Stmt::Yield(e, _) => find_multi_input_in_expr(e, node_span, out),
-//RS         Stmt::Switch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             subject,
-//RS             arms,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             find_multi_input_in_expr(subject, node_span, out);
-//RS             for arm in arms {
-//RS                 find_multi_input_in_expr(&arm.cond, node_span, out);
-//RS                 find_multi_input_target(&arm.body, node_span, out);
-//RS             }
-//RS             if let Some(body) = else_body {
-//RS                 find_multi_input_target(body, node_span, out);
-//RS             }
-//RS         }
-//RS         Stmt::While { cond, body, .. } => {
-//RS             find_multi_input_in_expr(cond, node_span, out);
-//RS             find_multi_input_target(body, node_span, out);
-//RS         }
-//RS         Stmt::For { kind, body, .. } => {
-//RS             match kind {
-//RS                 AST::ForKind::Range {
-//RS                     start,
-//RS                     end,
-//RS                     step,
-//RS                     exclusive: _,
-//RS                 } => {
-//RS                     find_multi_input_in_expr(start, node_span, out);
-//RS                     find_multi_input_in_expr(end, node_span, out);
-//RS                     if let Some(step) = step {
-//RS                         find_multi_input_in_expr(step, node_span, out);
-//RS                     }
-//RS                 }
-//RS                 AST::ForKind::In { collection, step } => {
-//RS                     find_multi_input_in_expr(collection, node_span, out);
-//RS                     if let Some(step) = step {
-//RS                         find_multi_input_in_expr(step, node_span, out);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             find_multi_input_target(body, node_span, out);
-//RS         }
-//RS         Stmt::CountedLoop {
-//RS             init,
-//RS             cond,
-//RS             step,
-//RS             body,
-//RS             ..
-//RS         } => {
-//RS             find_multi_input_in_expr(&init.init, node_span, out);
-//RS             find_multi_input_in_expr(cond, node_span, out);
-//RS             if let Some(step) = step {
-//RS                 find_multi_input_in_stmt(step, node_span, out);
-//RS             }
-//RS             find_multi_input_target(body, node_span, out);
-//RS         }
-//RS         Stmt::Loop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => find_multi_input_target(body, node_span, out),
-//RS         Stmt::ComptimeIf {
-//RS             cond,
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             find_multi_input_in_expr(cond, node_span, out);
-//RS             find_multi_input_target(then_body, node_span, out);
-//RS             if let Some(body) = else_body {
-//RS                 find_multi_input_target(body, node_span, out);
-//RS             }
-//RS         }
-//RS         Stmt::Return(None, _)
-//RS         | Stmt::Break(_)
-//RS         | Stmt::Continue(_)
-//RS         | Stmt::BreakLabel(_, _)
-//RS         | Stmt::ContinueLabel(_, _) => {}
-//RS     }
-//RS }
-//RS 
-//RS fn find_multi_input_in_lvalue(
-//RS     target: &AST::LValue,
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<MultiInputTarget>,
-//RS ) {
-//RS     match target {
-//RS         AST::LValue::Index { base, index, .. } => {
-//RS             find_multi_input_in_expr(base, node_span, out);
-//RS             find_multi_input_in_expr(index, node_span, out);
-//RS         }
-//RS         AST::LValue::Field { base, .. } => find_multi_input_in_expr(base, node_span, out),
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn find_multi_input_in_expr(
-//RS     expr: &Expr,
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<MultiInputTarget>,
-//RS ) {
-//RS     if out.is_some() {
-//RS         return;
-//RS     }
-//RS     match expr {
-//RS         Expr::ListLit(items, span) if same_span((*span).into(), node_span) => {
-//RS             *out = Some(MultiInputTarget::List {
-//RS                 span: (*span).into(),
-//RS                 item_spans: items.iter().map(|item| item.span().into()).collect(),
-//RS             });
-//RS         }
-//RS         _ => walk_expr_children_for_multi_input(expr, node_span, out),
-//RS     }
-//RS }
-//RS 
-//RS fn walk_expr_children_for_multi_input(
-//RS     expr: &Expr,
-//RS     node_span: SourceSpan,
-//RS     out: &mut Option<MultiInputTarget>,
-//RS ) {
-//RS     match expr {
-//RS         Expr::Call(c) => {
-//RS             for arg in &c.args {
-//RS                 find_multi_input_in_expr(&arg.expr, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::MethodCall { receiver, args, .. } => {
-//RS             find_multi_input_in_expr(receiver, node_span, out);
-//RS             for arg in args {
-//RS                 find_multi_input_in_expr(&arg.expr, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::ListLit(items, _) => {
-//RS             for item in items {
-//RS                 find_multi_input_in_expr(item, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::Index { base, index, .. } => {
-//RS             find_multi_input_in_expr(base, node_span, out);
-//RS             find_multi_input_in_expr(index, node_span, out);
-//RS         }
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             find_multi_input_in_expr(base, node_span, out);
-//RS             if let Some(range) = range {
-//RS                 find_multi_input_in_expr(range, node_span, out);
-//RS             } else {
-//RS                 find_multi_input_in_expr(start, node_span, out);
-//RS                 find_multi_input_in_expr(end, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::MapLit(items, _) => {
-//RS             for (key, value) in items {
-//RS                 find_multi_input_in_expr(key, node_span, out);
-//RS                 find_multi_input_in_expr(value, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::Binary(_, left, right, _) => {
-//RS             find_multi_input_in_expr(left, node_span, out);
-//RS             find_multi_input_in_expr(right, node_span, out);
-//RS         }
-//RS         Expr::Unary(_, expr, _)
-//RS         | Expr::Try(expr, ..)
-//RS         | Expr::Present(expr, _)
-//RS         | Expr::Ok(expr, _)
-//RS         | Expr::Err(expr, _)
-//RS         | Expr::Paren(expr, _)
-//RS         | Expr::Copy(expr, _)
-//RS         | Expr::Field(expr, _, _)
-//RS         | Expr::RawOf(expr, _)
-//RS         | Expr::Tainted(expr, _, _) => find_multi_input_in_expr(expr, node_span, out),
-//RS         Expr::PatternTest { subject, .. } => find_multi_input_in_expr(subject, node_span, out),
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             find_multi_input_in_expr(cond, node_span, out);
-//RS             find_multi_input_target(then_body, node_span, out);
-//RS             find_multi_input_in_expr(then_value, node_span, out);
-//RS             find_multi_input_target(else_body, node_span, out);
-//RS             find_multi_input_in_expr(else_value, node_span, out);
-//RS         }
-//RS         Expr::TupleLit(items, _, _) => {
-//RS             for (_, item) in items {
-//RS                 find_multi_input_in_expr(item, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::StructLit { fields, .. } => {
-//RS             for (_, _, value) in fields {
-//RS                 find_multi_input_in_expr(value, node_span, out);
-//RS             }
-//RS         }
-//RS         Expr::EnumLit { args, .. } => {
-//RS             for arg in args {
-//RS                 match arg {
-//RS                     AST::EnumLitArg::Positional(expr) => {
-//RS                         find_multi_input_in_expr(expr, node_span, out)
-//RS                     }
-//RS                     AST::EnumLitArg::Named { expr, .. } => {
-//RS                         find_multi_input_in_expr(expr, node_span, out)
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn multi_input_element_belongs_to_graph(
-//RS     stmts: &[Stmt],
-//RS     node_span: SourceSpan,
-//RS     element_span: SourceSpan,
-//RS ) -> bool {
-//RS     let mut target = None;
-//RS     find_multi_input_target(stmts, node_span, &mut target);
-//RS     match target {
-//RS         Some(MultiInputTarget::List { item_spans, .. }) => item_spans
-//RS             .iter()
-//RS             .any(|item_span| same_span(*item_span, element_span)),
-//RS         None => false,
-//RS     }
-//RS }
-//RS 
-//RS fn normalize_pattern_arm_head(pattern: &str) -> String {
-//RS     let trimmed = pattern.trim();
-//RS     trimmed
-//RS         .strip_prefix("==")
-//RS         .map(str::trim)
-//RS         .unwrap_or(trimmed)
-//RS         .trim_end_matches("->")
-//RS         .trim()
-//RS         .to_string()
-//RS }
-//RS 
-//RS fn fresh_arm_body(func: &AST::Func) -> String {
-//RS     match func.return_type.as_ref().map(AST::Type::name) {
-//RS         Some(ret) if ret != "Void" => format!("return {}", default_arg_for_type(&ret)),
-//RS         _ => "print(\"canvas arm\")".to_string(),
-//RS     }
-//RS }
-//RS 
-//RS fn switch_arm_edit_span(
-//RS     src: &str,
-//RS     subject: &Expr,
-//RS     switch_span: Span,
-//RS     arm: &AST::SwitchArm,
-//RS ) -> SourceSpan {
-//RS     if AST::is_subjectless_guard(subject, switch_span)
-//RS         && AST::uses_classic_if_spelling(src, switch_span, arm.cond.span())
-//RS     {
-//RS         if let Expr::PatternTest { pattern, .. } = &arm.cond {
-//RS             return span_through_closing_parens(src, pattern.span());
-//RS         }
-//RS     }
-//RS     arm.cond.span().into()
-//RS }
-//RS 
-//RS fn add_arm_to_classic_switch(
-//RS     src: &str,
-//RS     arm: &AST::SwitchArm,
-//RS     else_body: Option<&Vec<Stmt>>,
-//RS     span: SourceSpan,
-//RS     new_head: &str,
-//RS     fresh_body: &str,
-//RS ) -> Result<String, String> {
-//RS     let Expr::PatternTest {
-//RS         subject, pattern, ..
-//RS     } = &arm.cond
-//RS     else {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas branch is not a pattern branch",
-//RS         ));
-//RS     };
-//RS     let subject_src = snippet(src, subject.span());
-//RS     let pattern_span = span_through_closing_parens(src, pattern.span());
-//RS     let head = src
-//RS         .get(pattern_span.start..pattern_span.end)
-//RS         .map(str::to_owned)
-//RS         .unwrap_or_else(|| snippet(src, pattern.span()));
-//RS     let then_body = block_body_source(src, &arm.body, 2);
-//RS     let else_body = if let Some(body) = else_body {
-//RS         let body = block_body_source(src, body, 2);
-//RS         format!("    else -> {{\n{body}    }}\n")
-//RS     } else {
-//RS         String::new()
-//RS     };
-//RS     let replacement = format!(
-//RS         "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_body}}}\n"
-//RS     );
-//RS     FixEngine::apply_edits(src, &[edit(span, &replacement)])
-//RS         .map_err(|_| edit_error("overlap", "Canvas pattern branch conversion overlapped"))
-//RS }
-//RS 
-//RS fn block_body_source(src: &str, stmts: &[Stmt], levels: usize) -> String {
-//RS     if stmts.is_empty() {
-//RS         return String::new();
-//RS     }
-//RS     let mut out = String::new();
-//RS     let indent = "    ".repeat(levels);
-//RS     for stmt in stmts {
-//RS         let span = stmt_text_span(src, stmt);
-//RS         let text = src
-//RS             .get(span.start..span.end)
-//RS             .unwrap_or("")
-//RS             .trim_matches('\n')
-//RS             .trim();
-//RS         for line in text.lines() {
-//RS             out.push_str(&indent);
-//RS             out.push_str(line.trim());
-//RS             out.push('\n');
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn first_stmt_start(stmts: &[Stmt]) -> Option<usize> {
-//RS     stmts.first().map(|stmt| stmt.span().start)
-//RS }
-//RS 
-//RS fn dispatch_body_insert_offset(src: &str, span: SourceSpan) -> usize {
-//RS     src.get(span.start..span.end)
-//RS         .and_then(|chunk| chunk.find('{').map(|idx| line_after(src, span.start + idx)))
-//RS         .unwrap_or(span.end)
-//RS }
-//RS 
-//RS fn stmt_arm_text_span(src: &str, arm: &AST::SwitchArm) -> SourceSpan {
-//RS     SourceSpan {
-//RS         start: line_start(src, arm.span.start),
-//RS         end: line_after(src, arm.span.end),
-//RS     }
-//RS }
-//RS 
-//RS fn comma_separated_remove_span(
-//RS     src: &str,
-//RS     container: SourceSpan,
-//RS     element: SourceSpan,
-//RS ) -> Result<SourceSpan, String> {
-//RS     let Some(container_text) = src.get(container.start..container.end) else {
-//RS         return Err(edit_error(
-//RS             "bad_request",
-//RS             "Canvas multi-input span is stale",
-//RS         ));
-//RS     };
-//RS     let rel_start = element.start.saturating_sub(container.start);
-//RS     let rel_end = element.end.saturating_sub(container.start);
-//RS     let before = &container_text[..rel_start.min(container_text.len())];
-//RS     let after = &container_text[rel_end.min(container_text.len())..];
-//RS     if let Some(pos) = after.find(',') {
-//RS         let end = element.end + pos + 1;
-//RS         return Ok(SourceSpan {
-//RS             start: element.start,
-//RS             end: consume_trailing_space(src, end, container.end),
-//RS         });
-//RS     }
-//RS     if let Some(pos) = before.rfind(',') {
-//RS         let start = container.start + consume_leading_space_back(before, pos);
-//RS         return Ok(SourceSpan {
-//RS             start,
-//RS             end: element.end,
-//RS         });
-//RS     }
-//RS     Ok(element)
-//RS }
-//RS 
-//RS fn consume_trailing_space(src: &str, mut offset: usize, limit: usize) -> usize {
-//RS     while offset < limit
-//RS         && src
-//RS             .as_bytes()
-//RS             .get(offset)
-//RS             .is_some_and(u8::is_ascii_whitespace)
-//RS     {
-//RS         offset += 1;
-//RS     }
-//RS     offset
-//RS }
-//RS 
-//RS fn consume_leading_space_back(before: &str, comma: usize) -> usize {
-//RS     let mut start = comma;
-//RS     while start > 0 && before.as_bytes()[start - 1].is_ascii_whitespace() {
-//RS         start -= 1;
-//RS     }
-//RS     start
-//RS }
-//RS 
-//RS fn find_func_containing_span<'a>(items: &'a [Item], span: SourceSpan) -> Option<&'a AST::Func> {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(f) if span_within(span, func_source_span(f)) => return Some(f),
-//RS             Item::Struct(s) => {
-//RS                 for method in &s.methods {
-//RS                     if span_within(span, func_source_span(method)) {
-//RS                         return Some(method);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::Impl(i) => {
-//RS                 for method in &i.methods {
-//RS                     if span_within(span, func_source_span(method)) {
-//RS                         return Some(method);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Item::CodeModule(m) => {
-//RS                 if let Some(body) = &m.body {
-//RS                     if let Some(found) = find_func_containing_span(body, span) {
-//RS                         return Some(found);
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn span_within(inner: SourceSpan, outer: SourceSpan) -> bool {
-//RS     inner.start >= outer.start && inner.end <= outer.end
-//RS }
-//RS 
-//RS fn find_func_by_name_span<'a>(
-//RS     bundle: &'a AST::ProgramBundle,
-//RS     name_span: SourceSpan,
-//RS ) -> Option<&'a AST::Func> {
-//RS     fn find_in_items<'a>(items: &'a [Item], name_span: SourceSpan) -> Option<&'a AST::Func> {
-//RS         for item in items {
-//RS             match item {
-//RS                 Item::Func(f) if same_span(f.name_span.into(), name_span) => return Some(f),
-//RS                 Item::Struct(s) => {
-//RS                     for method in &s.methods {
-//RS                         if same_span(method.name_span.into(), name_span) {
-//RS                             return Some(method);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::Impl(i) => {
-//RS                     for method in &i.methods {
-//RS                         if same_span(method.name_span.into(), name_span) {
-//RS                             return Some(method);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Item::CodeModule(m) => {
-//RS                     if let Some(body) = &m.body {
-//RS                         if let Some(found) = find_in_items(body, name_span) {
-//RS                             return Some(found);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         None
-//RS     }
-//RS     for module in &bundle.modules {
-//RS         if let Some(found) = find_in_items(&module.items, name_span) {
-//RS             return Some(found);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn collect_statement_locs(
-//RS     src: &str,
-//RS     stmts: &[Stmt],
-//RS     block: &mut Vec<usize>,
-//RS     out: &mut Vec<StatementLoc>,
-//RS ) {
-//RS     for (index, stmt) in stmts.iter().enumerate() {
-//RS         out.push(StatementLoc {
-//RS             anchor: stmt_canvas_anchor(stmt).into(),
-//RS             source: stmt_source_span(stmt),
-//RS             full: stmt_text_span(src, stmt),
-//RS             block: block.clone(),
-//RS             index,
-//RS             is_guard: matches!(stmt, Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. }),
-//RS             is_expr: matches!(stmt, Stmt::Expr(_)),
-//RS             guard_span: match stmt {
-//RS                 Stmt::Switch { arms, .. } | Stmt::ComptimeSwitch { arms, .. } => {
-//RS                     arms.first().map(|arm| arm.cond.span().into())
-//RS                 }
-//RS                 _ => None,
-//RS             },
-//RS         });
-//RS         block.push(index);
-//RS         collect_child_statement_locs(src, stmt, block, out);
-//RS         block.pop();
-//RS     }
-//RS }
-//RS 
-//RS fn collect_child_statement_locs(
-//RS     src: &str,
-//RS     stmt: &Stmt,
-//RS     block: &mut Vec<usize>,
-//RS     out: &mut Vec<StatementLoc>,
-//RS ) {
-//RS     match stmt {
-//RS         Stmt::While { body, .. }
-//RS         | Stmt::For { body, .. }
-//RS         | Stmt::Loop { body, .. }
-//RS         | Stmt::CountedLoop { body, .. }
-//RS         | Stmt::Unsafe { body, .. }
-//RS         | Stmt::Impure { body, .. }
-//RS         | Stmt::Reactive { body, .. }
-//RS         | Stmt::Shield { body, .. }
-//RS         | Stmt::Switched { body, .. }
-//RS         | Stmt::Region { body, .. }
-//RS         | Stmt::Policy { body, .. }
-//RS         | Stmt::TaskGroup { body, .. }
-//RS         | Stmt::Layout { body, .. }
-//RS         | Stmt::AuthorityScope { body, .. }
-//RS         | Stmt::ComptimeBlock { body, .. }
-//RS         | Stmt::ContextBlock { body, .. }
-//RS         | Stmt::Live { body, .. }
-//RS         | Stmt::AssumeDet { body, .. }
-//RS         | Stmt::Transact { body, .. }
-//RS         | Stmt::ScopeMember { body, .. } => {
-//RS             block.push(0);
-//RS             collect_statement_locs(src, body, block, out);
-//RS             block.pop();
-//RS         }
-//RS         Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             for (i, arm) in arms.iter().enumerate() {
-//RS                 block.push(i);
-//RS                 collect_statement_locs(src, &arm.body, block, out);
-//RS                 block.pop();
-//RS             }
-//RS             if let Some(body) = else_body {
-//RS                 block.push(arms.len());
-//RS                 collect_statement_locs(src, body, block, out);
-//RS                 block.pop();
-//RS             }
-//RS         }
-//RS         Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             block.push(0);
-//RS             collect_statement_locs(src, then_body, block, out);
-//RS             block.pop();
-//RS             if let Some(body) = else_body {
-//RS                 block.push(1);
-//RS                 collect_statement_locs(src, body, block, out);
-//RS                 block.pop();
-//RS             }
-//RS         }
-//RS         _ => {}
-//RS     }
-//RS }
-//RS 
-//RS fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
-//RS     match stmt {
-//RS         Stmt::Val(b) => b.name_span,
-//RS         Stmt::Assign { target, .. } => target.span(),
-//RS         Stmt::Expr(e) => e.span(),
-//RS         Stmt::Return(_, span)
-//RS         | Stmt::Break(span)
-//RS         | Stmt::Continue(span)
-//RS         | Stmt::BreakLabel(_, span)
-//RS         | Stmt::ContinueLabel(_, span) => *span,
-//RS         Stmt::BreakValue(_, span) | Stmt::BreakLabelValue(_, _, _, span) => *span,
-//RS         _ => stmt.span(),
-//RS     }
-//RS }
-//RS 
-//RS fn stmt_text_span(src: &str, stmt: &Stmt) -> SourceSpan {
-//RS     let span = match stmt {
-//RS         Stmt::Expr(expr) => source_expression_span(src, expr),
-//RS         _ => stmt_source_span(stmt),
-//RS     };
-//RS     SourceSpan {
-//RS         start: line_start(src, span.start),
-//RS         end: line_after(src, span.end),
-//RS     }
-//RS }
-//RS 
-//RS fn stmt_source_span(stmt: &Stmt) -> SourceSpan {
-//RS     match stmt {
-//RS         Stmt::Val(b) => SourceSpan {
-//RS             start: b.name_span.start,
-//RS             end: b.init.span().end,
-//RS         },
-//RS         Stmt::Assign { target, value, .. } => SourceSpan {
-//RS             start: target.span().start,
-//RS             end: value.span().end,
-//RS         },
-//RS         Stmt::Expr(e) => e.span().into(),
-//RS         Stmt::Return(Some(e), span) => SourceSpan {
-//RS             start: span.start,
-//RS             end: e.span().end,
-//RS         },
-//RS         Stmt::BreakValue(e, span) | Stmt::BreakLabelValue(_, _, e, span) => SourceSpan {
-//RS             start: span.start,
-//RS             end: e.span().end,
-//RS         },
-//RS         _ => stmt.span().into(),
-//RS     }
-//RS }
-//RS 
-//RS fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
-//RS     a.start == b.start && a.end == b.end
-//RS }
-//RS 
-//RS fn write_checked_formatted(
-//RS     path: &Path,
-//RS     before: &str,
-//RS     candidate: &str,
-//RS ) -> Result<String, String> {
-//RS     let formatted = jet_driver::Formatter::format_source(candidate)
-//RS         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;
-//RS     write_checked_candidate(path, before, &formatted)
-//RS }
-//RS 
-//RS fn write_checked_source(
-//RS     path: &Path,
-//RS     before: &str,
-//RS     candidate: &str,
-//RS ) -> Result<String, String> {
-//RS     write_checked_candidate(path, before, candidate)
-//RS }
-//RS 
-//RS fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
-//RS     let path_str = path.to_string_lossy();
-//RS     let abs = canonical_path(path);
-//RS     let (diags, _, _) =
-//RS         jet_driver::Driver::check_file_with_effect_facts(&path_str, Some((&abs, candidate)), true);
-//RS     let errors: Vec<Diagnostic> = diags
-//RS         .iter()
-//RS         .filter(|d| d.severity == Severity::Error)
-//RS         .cloned()
-//RS         .collect();
-//RS     if !errors.is_empty() {
-//RS         return Err(diagnostics_error(path, candidate, &errors));
-//RS     }
-//RS     let changed = candidate != before;
-//RS     if changed {
-//RS         write_source_if_unchanged(path, before, candidate).map_err(|error| match error {
-//RS             SourceWriteError::Conflict => {
-//RS                 let current_revision = read_source_without_symlinks(path)
-//RS                     .map(|source| source_revision(&source))
-//RS                     .unwrap_or_else(|_| "missing".to_string());
-//RS                 edit_conflict(
-//RS                     "source changed while this Canvas edit was prepared",
-//RS                     &current_revision,
-//RS                 )
-//RS             }
-//RS             SourceWriteError::Io(error) => edit_error("io", &error.to_string()),
-//RS         })?;
-//RS     }
-//RS     Ok(edit_ok_source(changed, candidate))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::check_canvas_candidate;
-//RS     use std::path::PathBuf;
-//RS     use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS     fn test_root(label: &str) -> PathBuf {
-//RS         std::env::temp_dir().join(format!(
-//RS             "jet-canvas-action-overlay-{label}-{}-{}",
-//RS             std::process::id(),
-//RS             TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-//RS         ))
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn canvas_action_check_ignores_final_swap_in_legacy_temp_name() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = test_root("final");
-//RS         std::fs::create_dir_all(&root).unwrap();
-//RS         let source = root.join("main.jet");
-//RS         std::fs::write(&source, "fn run() {}\n").unwrap();
-//RS         let outside = root.join("outside.jet");
-//RS         std::fs::write(&outside, "must survive\n").unwrap();
-//RS         let legacy_temp = root.join("main.canvas-action-check.jet");
-//RS         let overlay_path = std::fs::canonicalize(&source).unwrap();
-//RS         symlink(&outside, &legacy_temp).unwrap();
-//RS 
-//RS         let _ = check_canvas_candidate(&source, &overlay_path, "fn run() {}\n");
-//RS 
-//RS         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive\n");
-//RS         assert!(
-//RS             std::fs::symlink_metadata(&legacy_temp)
-//RS                 .unwrap()
-//RS                 .file_type()
-//RS                 .is_symlink()
-//RS         );
-//RS         std::fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn canvas_action_check_ignores_ancestor_swap_in_legacy_temp_name() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = test_root("ancestor");
-//RS         let real = root.join("real");
-//RS         let held = root.join("held");
-//RS         let outside = root.join("outside");
-//RS         std::fs::create_dir_all(&real).unwrap();
-//RS         std::fs::create_dir_all(&outside).unwrap();
-//RS         let source = real.join("main.jet");
-//RS         std::fs::write(&source, "fn run() {}\n").unwrap();
-//RS         let outside_temp = outside.join("main.canvas-action-check.jet");
-//RS         std::fs::write(&outside_temp, "must survive\n").unwrap();
-//RS         let overlay_path = std::fs::canonicalize(&source).unwrap();
-//RS 
-//RS         std::fs::rename(&real, &held).unwrap();
-//RS         symlink(&outside, &real).unwrap();
-//RS         let _ = check_canvas_candidate(&source, &overlay_path, "fn run() {}\n");
-//RS 
-//RS         assert_eq!(std::fs::read_to_string(&outside_temp).unwrap(), "must survive\n");
-//RS         assert!(
-//RS             std::fs::symlink_metadata(&real)
-//RS                 .unwrap()
-//RS                 .file_type()
-//RS                 .is_symlink()
-//RS         );
-//RS         std::fs::remove_file(real).unwrap();
-//RS         std::fs::remove_dir_all(root).unwrap();
-//RS     }
-//RS }
-// END-PORT-PENDING 0761 crates/jet-devserver/src/Canvas/edit_actions.rs:1815-4289
+use jet_devserver.Canvas.EditActions.*
+use jet_parser.AST.[Stmt, Expr, Item, ProgramBundle, LValue]
+use jet_foundation.[SourceSpan, Severity]
+use jet_driver.Driver.[check_file]
+use jet_fixer.FixEngine.[FixEngine]
+use jet_semindex.[SymbolKind]
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1815
+struct StatementLoc { anchor: SourceSpan; source: SourceSpan; full: SourceSpan; block: [USize]; index: USize; is_guard: Bool; is_expr: Bool; guard_span: SourceSpan? }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1826
+fn apply_reorder_statements(path: &OSPath, src: String, graph_id: String, moved: SourceSpan, anchor: SourceSpan, position: String) -> String Err! {
+    name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    (diags, checked) := check_file(path.to_string_lossy(), .None, true)
+    errors := diags.iter().filter((d) -> d.severity == Severity.Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
+    bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked statement facts"))
+    func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    locs: [StatementLoc] := []; block: [USize] := []
+    collect_statement_locs(src, func.body, &block, &locs)
+    moved_loc := locs.iter().find((loc) -> same_span(loc.anchor, moved)).cloned() ?? return .Err(edit_error("not_found", "Canvas step to move no longer exists"))
+    anchor_loc := locs.iter().find((loc) -> same_span(loc.anchor, anchor)).cloned() ?? return .Err(edit_error("not_found", "Canvas anchor step no longer exists"))
+    if moved_loc.block != anchor_loc.block -> return .Err(edit_error("bad_request", "can't move a step into a different branch yet"))
+    if moved_loc.index == anchor_loc.index -> return .Ok(edit_ok(false, path))
+    if moved_loc.full.start <= anchor_loc.full.start && anchor_loc.full.start < moved_loc.full.end -> return .Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
+    insert := if position == { "before" -> anchor_loc.full.start, "after" -> anchor_loc.full.end,
+        _ -> return .Err(edit_error("bad_request", "Canvas reorder position must be before or after")) }
+    chunk := src.get(moved_loc.full.start..moved_loc.full.end).ok_or_else(() -> edit_error("bad_request", "Canvas moved source span is stale"))?.to_string()
+    changed := String.with_capacity(src.len())
+    changed.push_str(src[..moved_loc.full.start]); changed.push_str(src[moved_loc.full.end..])
+    insert_at := insert
+    if insert_at > moved_loc.full.start -> insert_at = insert_at.saturating_sub(moved_loc.full.end - moved_loc.full.start)
+    insert_at = insert_at.min(changed.len())
+    changed.insert_str(insert_at, chunk)
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1928
+fn apply_exec_convergence(path: &OSPath, src: String, graph_id: String, from_span: SourceSpan, target_span: SourceSpan, from_pin_name: String, strategy: String, function: String, helper_name: String?) -> String Err! {
+    validate_ident(function)?
+    if !["extract", "helper", "duplicate"].contains(strategy) -> return .Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
+    if same_span(from_span, target_span) -> return .Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
+    func := checked_func_for_graph(path, src, graph_id)?
+    target := find_expression_selection(func.body, target_span, src) ?? return .Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
+    target_view := src.get(target.span.start..target.span.end).ok_or_else(() -> edit_error("bad_request", "Canvas convergence target span is stale"))?.trim() // #4303
+    target_text := target_view.to_string()
+    if target_text.is_empty() -> return .Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
+    insertion := find_exec_insertion(src, func.body, from_span, from_pin_name)? ?? return .Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
+    if insertion.branch && target.span.start >= insertion.owner.end -> return .Err(edit_error("structured_join", "This source already has a structured join after the branch; keep the downstream step single"))
+    params := convergence_params(path, target.span)?
+    args := params.iter().map((param) -> param.0.as_str()).collect().join(", ")
+    call_name := if strategy == "helper" -> helper_name.unwrap_or(function) else function
+    call := "{call_name}({args})"
+    incoming_source := if strategy == "duplicate" -> target_text.clone() else call.clone()
+    bundle := checked_bundle(path, src)?
+    exact_helper := exact_body_helper_name(bundle, src, target_text, func.name)
+    edits := []
+    insertion_text := "{insertion.indent}{incoming_source}\n"
+    edits.push(edit(SourceSpan { start: insertion.offset, end: insertion.offset }, insertion_text))
+    if strategy == {
+        "helper" -> {
+            name := helper_name.filter((name) -> !name.is_empty()) ?? return .Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
+            validate_ident(name)?
+            if exact_helper.as_deref() != .Val(name) -> return .Err(edit_error("stale", "The selected helper body no longer matches the converged source"))
+        },
+        "extract" -> {
+            if function_name_exists(bundle, function) -> return .Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
+            signature := params.iter().map((param) -> "{param.0}: {param.1}").collect().join(", ")
+            body := target_text.lines().map((line) -> {
+                trimmed := line.trim() // #4303
+                "    {trimmed}\n"
+            }).collect<String>()
+            helper := "fn {function}({signature}) -> {{\n{body}}}\n\n"
+            edits.push(edit(SourceSpan { start: 0, end: 0 }, helper))
+        },
+        "duplicate" -> {},
+        _ -> unreachable()
+    }
+    if strategy != "duplicate" {
+        suffix := src.get(target.span.end..target.full.end).ok_or_else(() -> edit_error("bad_request", "Canvas convergence target line is stale"))?
+        replacement := "{indentation_at(src, target.full.start)}{call}{suffix}"
+        edits.push(edit(target.full, replacement))
+    }
+    changed := FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas convergence source edits overlapped"))
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2072
+fn convergence_params(path: &OSPath, target: SourceSpan) -> [(String, String)] Err! {
+    index := jet_semindex.open(path) ?? return .Err(edit_error("check", "Canvas could not resolve convergence captures: {err}"))
+    references := index.references().iter().filter((reference) -> reference.span.start >= target.start && reference.span.end <= target.end).collect()
+    references.sort_by_key((reference) -> (reference.span.start, reference.span.end))
+    params: [(String, String)] := []
+    for reference in references {
+        target_def := reference.target.as_ref() ?? continue
+        definition := index.definitions().iter().find((definition) -> definition.module_path == target_def.module_path && definition.def_span == target_def.def_span) ?? continue
+        ty := if definition.kind == {
+            .Local { ty: .Val(ty), .. } | .Param { ty } -> ty.clone(),
+            .Local { ty: .None, .. } -> return .Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type")),
+            _ -> continue
+        }
+        if !params.iter().any((param) -> param.0 == reference.name) -> params.push((reference.name.clone(), ty))
+    }
+    .Ok(params)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2118
+struct ExpressionSelection { span: SourceSpan; full: SourceSpan }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2124
+struct ExecInsertion { offset: USize; indent: String; owner: SourceSpan; branch: Bool }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2131
+fn find_expression_selection(stmts: &[Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
+    if find_expression_selection_in_block(stmts, target, src) == .Val(found) -> return .Val(found)
+    for stmt in stmts {
+        if find_expression_selection_in_children(stmt, target, src) == .Val(found) -> return .Val(found)
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2147
+fn find_expression_selection_in_block(stmts: &[Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
+    first: USize? := .None; last: USize? := .None
+    for (index, stmt) in stmts.iter().enumerate() {
+        expr := if stmt == { .Expr(expr) -> expr, _ -> continue }
+        anchor: SourceSpan := expr.span().into()
+        expr_span := source_expression_span(src, expr)
+        if same_span(anchor, target) || same_span(expr_span, target) || span_contains(expr_span, target) || span_contains(target, expr_span) || source_spans_overlap(expr_span, target) {
+            _ :: first.get_or_insert(index); last = .Val(index)
+        }
+    }
+    begin := first?; end := last?
+    selected: [SourceSpan] := [].with_capacity(end - begin + 1)
+    for stmt in stmts[begin..=end] {
+        expr := if stmt == { .Expr(expr) -> expr, _ -> return .None }
+        selected.push(source_expression_span(src, expr))
+    }
+    span := SourceSpan { start: selected.first()?.start, end: selected.last()?.end }
+    if selected.len() > 1 && (span.start < target.start || span.end > target.end) -> return .None
+    .Val(ExpressionSelection { span: span, full: SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) } })
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2196
+fn source_expression_span(src: String, expr: &Expr) -> SourceSpan {
+    start := if expr == {
+        .Call(call) -> call.name_span.start, .MethodCall { receiver, .. } -> source_expression_span(src, receiver).start,
+        .Try(inner, ..) | .OrFallback { value: inner, .. } -> source_expression_span(src, inner).start,
+        .Paren(_, span) -> span.start, _ -> expr.span().start
+    }
+    fallback_end := expr.span().end
+    end := if expr == {
+        .Call(call) -> call_source_end(src, call.name_span.end, fallback_end),
+        .MethodCall { method_span, .. } -> call_source_end(src, method_span.end, fallback_end),
+        .Try(inner, span, ..) -> {
+            end := source_expression_span(src, inner).end.max(span.end)
+            if src.as_bytes().get(end) == .Val('?' as U8) -> end += 1
+            end
+        },
+        _ -> fallback_end
+    }
+    SourceSpan { start: start, end: end.max(start) }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2226
+fn call_source_end(src: String, name_end: USize, fallback_end: USize) -> USize {
+    open := find_unquoted_char(src, name_end, '(') ?? return fallback_end
+    matching_delimiter(src, open, '(', ')').map_or(fallback_end, (close) -> close.saturating_add(1))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2233
+fn span_contains(outer: SourceSpan, inner: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2237
+fn source_spans_overlap(a: SourceSpan, b: SourceSpan) -> Bool { a.start < b.end && b.start < a.end }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2241
+fn find_expression_selection_in_children(stmt: &Stmt, target: SourceSpan, src: String) -> ExpressionSelection? {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_expression_selection(body, target, src),
+        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } ->
+            arms.iter().find_map((arm) -> find_expression_selection(arm.body, target, src)).or_else(() -> else_body.as_deref().and_then((body) -> find_expression_selection(body, target, src))),
+        .ComptimeIf { then_body, else_body, .. } -> find_expression_selection(then_body, target, src).or_else(() -> else_body.as_deref().and_then((body) -> find_expression_selection(body, target, src))),
+        _ -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2293
+fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
+    for stmt in stmts {
+        if exec_branch_node_matches(stmt, node_span) {
+            body := matching_exec_branch(stmt, node_span, pin_name).ok_or_else(() -> edit_error("ambiguous", "Canvas convergence pin has no source-backed branch body"))?
+            owner := branch_source_span(src, stmt)
+            return branch_exec_insertion(src, body, owner).map((value) -> .Val(value))
+        }
+        source := stmt_source_span(stmt)
+        anchor: SourceSpan := stmt_canvas_anchor(stmt).into()
+        if same_span(source, node_span) || same_span(anchor, node_span) {
+            if execution_terminates(stmt) -> return .Err(edit_error("ambiguous", "Canvas cannot add a convergence step after an early exit"))
+            full := stmt_text_span(src, stmt)
+            return .Ok(.Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false }))
+        }
+        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+    }
+    .Ok(.None)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2334
+fn exec_branch_node_matches(stmt: &Stmt, node_span: SourceSpan) -> Bool {
+    if stmt == {
+        .Switch { arms, span, .. } | .ComptimeSwitch { arms, span, .. } -> same_span(span.into(), node_span) || arms.iter().any((arm) -> same_span(arm.cond.span().into(), node_span)),
+        .ComptimeIf { span, .. } -> same_span(span.into(), node_span), _ -> false
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2347
+fn branch_source_span(src: String, stmt: &Stmt) -> SourceSpan {
+    line := line_start(src, stmt.span().start)
+    keyword := find_word(src, line, "if").unwrap_or(stmt.span().start)
+    open := find_unquoted_char(src, keyword, '{') ?? return stmt.span().into()
+    close := matching_delimiter(src, open, '{', '}').unwrap_or(stmt.span().end)
+    loop {
+        else_start := find_word(src, close + 1, "else") ?? break
+        between := src[close + 1..else_start]
+        if !between.chars().all((c) -> c.is_whitespace()) -> break
+        next_open := find_unquoted_char(src, else_start + "else".len(), '{') ?? break
+        next_close := matching_delimiter(src, next_open, '{', '}') ?? break
+        close = next_close
+    }
+    SourceSpan { start: keyword, end: close.saturating_add(1) }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2376
+fn find_word(src: String, start: USize, word: String) -> USize? {
+    cursor := start.min(src.len())
+    loop {
+        relative := src[cursor..].find(word) ?? break
+        found := cursor + relative
+        before := found.checked_sub(1).and_then((i) -> src.as_bytes().get(i))
+        after := src.as_bytes().get(found + word.len())
+        if !before.is_some_and((b) -> b.is_ascii_alphanumeric()) && !before.is_some_and((b) -> b == '_' as U8) &&
+            !after.is_some_and((b) -> b.is_ascii_alphanumeric()) && !after.is_some_and((b) -> b == '_' as U8) -> return .Val(found)
+        cursor = found + word.len()
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2394
+fn find_unquoted_char(src: String, start: USize, wanted: Char) -> USize? {
+    quote: Char? := .None; escaped := false; line_comment := false; cursor := start.min(src.len())
+    while cursor < src.len() {
+        ch := src[cursor..].chars().next()?
+        width := ch.len_utf8(); next := src[cursor + width..].chars().next()
+        if line_comment { if ch == '\n' -> line_comment = false }
+        else if quote == .Val(quoted) {
+            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
+        } else if ch == '"' || ch == '\'' { quote = .Val(ch) }
+        else if ch == '/' && next == .Val('/') { line_comment = true; cursor += width }
+        else if ch == wanted { return .Val(cursor) }
+        cursor += width
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2428
+fn matching_delimiter(src: String, open: USize, opening: Char, closing: Char) -> USize? {
+    depth: USize := 0; quote: Char? := .None; escaped := false; line_comment := false; cursor := open.min(src.len())
+    while cursor < src.len() {
+        ch := src[cursor..].chars().next()?
+        width := ch.len_utf8(); next := src[cursor + width..].chars().next()
+        if line_comment { if ch == '\n' -> line_comment = false }
+        else if quote == .Val(quoted) {
+            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
+        } else if ch == '"' || ch == '\'' { quote = .Val(ch) }
+        else if ch == '/' && next == .Val('/') { line_comment = true; cursor += width }
+        else if ch == opening { depth += 1 }
+        else if ch == closing { depth = depth.saturating_sub(1); if depth == 0 -> return .Val(cursor) }
+        cursor += width
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2468
+fn find_exec_insertion_in_children(src: String, stmt: &Stmt, node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_exec_insertion(src, body, node_span, pin_name),
+        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
+            for arm in arms {
+                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+            }
+            else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
+        },
+        .ComptimeIf { then_body, else_body, .. } -> {
+            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+            else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
+        },
+        _ -> .Ok(.None)
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2530
+fn matching_exec_branch(stmt: &Stmt, node_span: SourceSpan, pin_name: String) -> &[Stmt]? {
+    if stmt == .ComptimeIf { then_body, else_body, span, .. } {
+        if !same_span(span.into(), node_span) -> return .None
+        return if pin_name == { "then" -> .Val(then_body.as_slice()), "else" -> else_body.as_deref(), _ -> .None }
+    }
+    (arms, else_body, span) := if stmt == {
+        .Switch { arms, else_body, span, .. } | .ComptimeSwitch { arms, else_body, span, .. } -> (arms, else_body, span),
+        _ -> return .None
+    }
+    node_matches := same_span(span.into(), node_span) || arms.iter().any((arm) -> same_span(arm.cond.span().into(), node_span))
+    if !node_matches -> return .None
+    if pin_name == "else" -> return else_body.as_deref()
+    if pin_name == "then" -> return arms.first().map((arm) -> arm.body.as_slice())
+    index := pin_name.strip_prefix("arm")?.parse<USize>().ok()?
+    arms.get(index.checked_sub(1)?).map((arm) -> arm.body.as_slice())
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2584
+fn branch_exec_insertion(src: String, body: &[Stmt], owner: SourceSpan) -> ExecInsertion Err! {
+    last := body.last().ok_or_else(() -> edit_error("ambiguous", "Canvas needs a non-empty source-backed branch body to converge"))?
+    structured := if last == { .While { .. } | .For { .. } | .Loop { .. } | .CountedLoop { .. } | .Switch { .. } | .ComptimeSwitch { .. } | .ComptimeIf { .. } -> true, _ -> false }
+    if execution_terminates(last) || structured -> return .Err(edit_error("ambiguous", "Canvas cannot prove a convergence path after this branch body"))
+    full := stmt_text_span(src, last)
+    inline := full.end > owner.end
+    (offset, indent) := if inline {
+        last_end := if last == { .Expr(expr) -> source_expression_span(src, expr).end, _ -> stmt_source_span(last).end }
+        close := find_unquoted_char(src, last_end, '}').filter((offset) -> offset < owner.end).ok_or_else(() -> edit_error("ambiguous", "Canvas could not locate the source-backed branch body boundary"))?
+        (close, "\n{indentation_at(src, owner.start)}    ")
+    } else { (full.end, indentation_at(src, full.start)) }
+    .Ok(ExecInsertion { offset: offset, indent: indent, owner: owner, branch: true })
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2642
+fn execution_terminates(stmt: &Stmt) -> Bool {
+    if stmt == { .Return(..) | .Break(..) | .BreakValue(..) | .BreakLabel(..) | .BreakLabelValue(..) | .Continue(..) | .ContinueLabel(..) -> true, _ -> false }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2655
+fn exact_body_helper_name(bundle: &ProgramBundle, src: String, target: String, current: String) -> String? {
+    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2661
+    fn in_items(items: &[Item], src: String, target: String, current: String) -> String? {
+        for item in items {
+            if item == {
+                .Func(func) if func.name != current -> {
+                    if expression_body_source(src, func.body).is_some_and((body) -> formatted_expression_matches(body, target)) -> return .Val(func.name.clone())
+                },
+                .Struct(structure) -> {
+                    if structure.methods.iter().find_map((method) -> {
+                        if method.name == current -> return .None
+                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else .None)
+                    }) == .Val(found) -> return .Val(found)
+                },
+                .Impl(implementation) -> {
+                    if implementation.methods.iter().find_map((method) -> {
+                        if method.name == current -> return .None
+                        expression_body_source(src, method.body).and_then((body) -> if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else .None)
+                    }) == .Val(found) -> return .Val(found)
+                },
+                .CodeModule(module) -> {
+                    if module.body == .Val(body) && in_items(body, src, target, current) == .Val(found) -> return .Val(found)
+                },
+                _ -> {}
+            }
+        }
+        .None
+    }
+    bundle.modules.iter().find_map((module) -> in_items(module.items, src, target, current))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2713
+fn expression_body_source(src: String, body: &[Stmt]) -> String? {
+    spans: [SourceSpan] := [].with_capacity(body.len())
+    for stmt in body {
+        expr := if stmt == { .Expr(expr) -> expr, _ -> return .None }
+        spans.push(source_expression_span(src, expr))
+    }
+    start := spans.first()?.start; end := spans.last()?.end
+    text := source_snippet(src, SourceSpan { start: start, end: end }).trim() // #4303
+    .Val(text.to_string())
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2730
+fn source_snippet(src: String, span: SourceSpan) -> String { src.get(span.start..span.end).unwrap_or_default().to_string() }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2736
+fn formatted_expression_matches(left: String, right: String) -> Bool {
+    wrap := (expr: String) -> {
+        trimmed := expr.trim() // #4303
+        candidate := "fn canvas_match() -> {{\n    {trimmed}\n}}\n"
+        jet_driver.Formatter.format_source(candidate).unwrap_or_else((_) -> candidate.clone())
+    }
+    l := wrap(left); r := wrap(right)
+    l == r || normalized_source_shape(l) == normalized_source_shape(r)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2746
+fn normalized_source_shape(source: String) -> String {
+    normalized := String.with_capacity(source.len()); quote: Char? := .None; escaped := false
+    for ch in source.chars() {
+        if quote == .Val(quoted) {
+            normalized.push(ch)
+            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
+        } else if ch == '"' || ch == '\'' { quote = .Val(ch); normalized.push(ch) }
+        else if !ch.is_whitespace() { normalized.push(ch) }
+    }
+    normalized
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2770
+fn function_name_exists(bundle: &ProgramBundle, name: String) -> Bool {
+    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2771
+    fn in_items(items: &[Item], name: String) -> Bool {
+        items.iter().any((item) -> if item == {
+            .Func(func) -> func.name == name,
+            .Struct(structure) -> structure.methods.iter().any((method) -> method.name == name),
+            .Impl(implementation) -> implementation.methods.iter().any((method) -> method.name == name),
+            .CodeModule(module) -> module.body.as_deref().is_some_and((body) -> in_items(body, name)), _ -> false
+        })
+    }
+    bundle.modules.iter().any((module) -> in_items(module.items, name))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2792
+fn apply_add_pattern_arm(path: &OSPath, src: String, graph_id: String, node_span: SourceSpan, pattern: String) -> String Err! {
+    func := checked_func_for_graph(path, src, graph_id)?
+    head := normalize_pattern_arm_head(pattern)
+    if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
+    target: PatternTarget? := .None
+    find_pattern_target(src, func.body, node_span, &target)
+    selected := target ?? return .Err(edit_error("not_found", "Canvas pattern node no longer exists"))
+    body := fresh_arm_body(func)
+    changed := if selected == {
+        .Classic { arm, else_body, span } -> add_arm_to_classic_switch(src, arm, else_body, span, head, body)?,
+        .Switch { arms, else_body, span, .. } -> {
+            insert := if arms.last() == .Val(last) { line_after(src, last.span.end) }
+                else if else_body == .Val(else_body) { line_start(src, first_stmt_start(else_body).unwrap_or(span.end)) }
+                else { dispatch_body_insert_offset(src, span) }
+            indent := indentation_at(src, insert)
+            arm := "{indent}{head} -> {{\n{indent}    {body}\n{indent}}}\n"
+            FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, arm)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm insert overlapped"))
+        }
+    }
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2854
+fn apply_edit_pattern_arm(path: &OSPath, src: String, graph_id: String, pattern_span: SourceSpan, pattern: String) -> String Err! {
+    func := checked_func_for_graph(path, src, graph_id)?
+    head := normalize_pattern_arm_head(pattern)
+    if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
+    if !pattern_span_belongs_to_graph(src, func.body, pattern_span) -> return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
+    changed := FixEngine.apply_edits(src, [edit(pattern_span, head)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm edit overlapped"))
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2877
+fn apply_remove_pattern_arm(path: &OSPath, src: String, graph_id: String, pattern_span: SourceSpan) -> String Err! {
+    func := checked_func_for_graph(path, src, graph_id)?
+    arm: RemoveArmInfo? := .None
+    find_pattern_arm_remove_span(src, func.body, pattern_span, &arm)
+    info := arm ?? return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
+    if info.only_arm_without_else -> return .Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
+    changed := FixEngine.apply_edits(src, [edit(info.remove_span, "")]) ?? return .Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2903
+fn apply_toggle_switch_state(path: &OSPath, src: String, graph_id: String, node_span: SourceSpan) -> String Err! {
+    func := checked_func_for_graph(path, src, graph_id)?
+    if find_switched_node(func.body, node_span) == {
+        .Val(.Marker(marker_span)) -> {
+            changed := FixEngine.apply_edits(src, [edit(marker_span, "")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
+            write_checked_formatted(path, src, changed)
+        },
+        .Val(.Nested) -> .Err(edit_error("bad_request", "Canvas node is already inside a statement state")),
+        .None if !statement_contains_span(func.body, node_span) || same_span(func.name_span.into(), node_span) -> .Err(edit_error("not_found", "Canvas statement node no longer exists")),
+        .None -> {
+            insert := line_start(src, node_span.start)
+            changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "#Off ")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
+            write_checked_formatted(path, src, changed)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2946
+enum SwitchedNode { Marker(SourceSpan); Nested }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2951
+fn find_switched_node(stmts: &[Stmt], node_span: SourceSpan) -> SwitchedNode? {
+    for stmt in stmts {
+        if stmt == {
+            .Switched { marker, body, span } -> {
+                switched_span: SourceSpan := span.into()
+                if same_span(switched_span, node_span) -> return .Val(.Marker(marker.span.into()))
+                if span_within(node_span, switched_span) -> return .Val(.Nested)
+                if find_switched_node(body, node_span) == .Val(found) -> return .Val(found)
+            },
+            _ -> { if find_switched_node_in_children(stmt, node_span) == .Val(found) -> return .Val(found) }
+        }
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2976
+fn find_switched_node_in_children(stmt: &Stmt, node_span: SourceSpan) -> SwitchedNode? {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Region { body, .. } |
+        .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } |
+        .ComptimeBlock { body, .. } | .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } |
+        .Transact { body, .. } | .ScopeMember { body, .. } -> find_switched_node(body, node_span),
+        .CountedLoop { step, body, .. } -> step.as_deref().and_then((step) -> find_switched_node(std.slice.from_ref(step), node_span)).or_else(() -> find_switched_node(body, node_span)),
+        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
+            for arm in arms { if find_switched_node(arm.body, node_span) == .Val(found) -> return .Val(found) }
+            else_body.as_deref().and_then((body) -> find_switched_node(body, node_span))
+        },
+        .ComptimeIf { then_body, else_body, .. } -> find_switched_node(then_body, node_span).or_else(() -> else_body.as_deref().and_then((body) -> find_switched_node(body, node_span))),
+        _ -> .None
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3028
+fn statement_contains_span(stmts: &[Stmt], node_span: SourceSpan) -> Bool { stmts.iter().any((stmt) -> span_within(node_span, stmt.span().into())) }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3034
+fn apply_append_multi_input(path: &OSPath, src: String, node_span: SourceSpan, element: String) -> String Err! {
+    target: MultiInputTarget? := .None
+    func := checked_func_containing_span(path, src, node_span)?
+    find_multi_input_target(func.body, node_span, &target)
+    selected := target ?? return .Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
+    (span, item_spans) := if selected == { .List { span, item_spans } -> (span, item_spans) }
+    list_source := src.get(span.start..span.end).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))?
+    insert := if item_spans.last() == .Val(item) { item.end } else {
+        list_source.rfind(']').map((idx) -> span.start + idx).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))?
+    }
+    prefix := if item_spans.is_empty() -> "" else ", "
+    changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "{prefix}{element}")]) ?? return .Err(edit_error("overlap", "Canvas multi-input append overlapped"))
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3078
+fn apply_remove_multi_input_element(path: &OSPath, src: String, node_span: SourceSpan, element_span: SourceSpan) -> String Err! {
+    func := checked_func_containing_span(path, src, node_span)?
+    if !multi_input_element_belongs_to_graph(func.body, node_span, element_span) -> return .Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
+    remove := comma_separated_remove_span(src, node_span, element_span)?
+    changed := FixEngine.apply_edits(src, [edit(remove, "")]) ?? return .Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
+    write_checked_formatted(path, src, changed)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3097
+fn checked_func_for_graph(path: &OSPath, src: String, graph_id: String) -> &jet_parser.AST.Func Err! {
+    name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    checked_func_by_name_span(path, src, name_span)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3111
+fn checked_func_containing_span(path: &OSPath, src: String, span: SourceSpan) -> &jet_parser.AST.Func Err! {
+    bundle := checked_bundle(path, src)?
+    func := bundle.modules.iter().find_map((module) -> find_func_containing_span(module.items, span)) ?? return .Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
+    .Ok(func)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3130
+fn checked_func_by_name_span(path: &OSPath, src: String, name_span: SourceSpan) -> &jet_parser.AST.Func Err! {
+    bundle := checked_bundle(path, src)?
+    func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    .Ok(func)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3142
+fn checked_bundle(path: &OSPath, src: String) -> &ProgramBundle Err! {
+    (diags, checked) := check_file(path.to_string_lossy(), .None, true)
+    errors := diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
+    bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked pattern facts"))
+    .Ok(std.box.Box.leak(std.box.Box.new(bundle))) // GATE #4494: retained checked AST allocation.
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3162
+enum PatternTarget {
+    Classic { arm: &jet_parser.AST.SwitchArm; else_body: &[Stmt]?; span: SourceSpan }
+    Switch { arms: &[jet_parser.AST.SwitchArm]; else_body: &[Stmt]?; span: SourceSpan }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3175
+fn find_pattern_target(src: String, stmts: &[Stmt], node_span: SourceSpan, out: &PatternTarget?) -> {
+    if out.is_some() -> return
+    for stmt in stmts {
+        if stmt == {
+            .Switch { subject, arms, else_body, span, .. } -> {
+                classic := jet_parser.AST.is_subjectless_guard(subject, span) && arms.first().is_some_and((arm) -> jet_parser.AST.uses_classic_if_spelling(src, span, arm.cond.span()))
+                if classic {
+                    if arms.first() == .Val(arm) {
+                        pattern_test := if arm.cond == { .PatternTest { .. } -> true, _ -> false }
+                        if (same_span(arm.cond.span().into(), node_span) || same_span(span.into(), node_span)) && pattern_test {
+                            out = .Val(.Classic { arm: arm, else_body: else_body.as_ref(), span: stmt_text_span(src, stmt) }); return
+                        }
+                    }
+                } else if same_span(span.into(), node_span) {
+                    out = .Val(.Switch { arms: arms, else_body: else_body.as_ref(), span: span.into() }); return
+                }
+                for arm in arms -> find_pattern_target(src, arm.body, node_span, out)
+                if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
+            },
+            .ComptimeSwitch { arms, else_body, span, .. } -> {
+                if same_span(span.into(), node_span) {
+                    out = .Val(.Switch { arms: arms, else_body: else_body.as_ref(), span: span.into() }); return
+                }
+                for arm in arms -> find_pattern_target(src, arm.body, node_span, out)
+                if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
+            },
+            _ -> find_pattern_target_in_children(src, stmt, node_span, out)
+        }
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3252
+fn find_pattern_target_in_children(src: String, stmt: &Stmt, node_span: SourceSpan, out: &PatternTarget?) -> {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_target(src, body, node_span, out),
+        .ComptimeIf { then_body, else_body, .. } -> {
+            find_pattern_target(src, then_body, node_span, out)
+            if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
+        },
+        _ -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3293
+struct RemoveArmInfo { remove_span: SourceSpan; only_arm_without_else: Bool }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3298
+fn find_pattern_arm_remove_span(src: String, stmts: &[Stmt], pattern_span: SourceSpan, out: &RemoveArmInfo?) -> {
+    if out.is_some() -> return
+    for stmt in stmts {
+        if stmt == {
+            .Switch { subject, arms, else_body, span } -> {
+                for arm in arms {
+                    classic := jet_parser.AST.is_subjectless_guard(subject, span) && jet_parser.AST.uses_classic_if_spelling(src, span, arm.cond.span())
+                    if same_span(switch_arm_edit_span(src, subject, span, arm), pattern_span) {
+                        out = .Val(RemoveArmInfo { remove_span: if classic -> stmt_text_span(src, stmt) else stmt_arm_text_span(src, arm),
+                            only_arm_without_else: classic || (arms.len() == 1 && else_body.is_none()) }); return
+                    }
+                    find_pattern_arm_remove_span(src, arm.body, pattern_span, out)
+                }
+                if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
+            },
+            .ComptimeSwitch { arms, else_body, .. } -> {
+                for arm in arms {
+                    if same_span(arm.cond.span().into(), pattern_span) {
+                        out = .Val(RemoveArmInfo { remove_span: stmt_arm_text_span(src, arm), only_arm_without_else: arms.len() == 1 && else_body.is_none() }); return
+                    }
+                    find_pattern_arm_remove_span(src, arm.body, pattern_span, out)
+                }
+                if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
+            },
+            _ -> find_pattern_arm_remove_span_in_children(src, stmt, pattern_span, out)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3358
+fn find_pattern_arm_remove_span_in_children(src: String, stmt: &Stmt, pattern_span: SourceSpan, out: &RemoveArmInfo?) -> {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_arm_remove_span(src, body, pattern_span, out),
+        .ComptimeIf { then_body, else_body, .. } -> {
+            find_pattern_arm_remove_span(src, then_body, pattern_span, out)
+            if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
+        },
+        _ -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3401
+fn pattern_span_belongs_to_graph(src: String, stmts: &[Stmt], pattern_span: SourceSpan) -> Bool {
+    found := false; find_pattern_span(src, stmts, pattern_span, &found); found
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3407
+fn find_pattern_span(src: String, stmts: &[Stmt], pattern_span: SourceSpan, found: &Bool) -> {
+    if found -> return
+    for stmt in stmts {
+        if stmt == {
+            .Switch { subject, arms, else_body, span } -> {
+                for arm in arms {
+                    if same_span(switch_arm_edit_span(src, subject, span, arm), pattern_span) { found = true; return }
+                    find_pattern_span(src, arm.body, pattern_span, found)
+                }
+                if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
+            },
+            .ComptimeSwitch { arms, else_body, .. } -> {
+                for arm in arms {
+                    if same_span(arm.cond.span().into(), pattern_span) { found = true; return }
+                    find_pattern_span(src, arm.body, pattern_span, found)
+                }
+                if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
+            },
+            _ -> find_pattern_span_in_children(src, stmt, pattern_span, found)
+        }
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3449
+fn find_pattern_span_in_children(src: String, stmt: &Stmt, pattern_span: SourceSpan, found: &Bool) -> {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_span(src, body, pattern_span, found),
+        .ComptimeIf { then_body, else_body, .. } -> {
+            find_pattern_span(src, then_body, pattern_span, found)
+            if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
+        },
+        _ -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3490
+enum MultiInputTarget { List { span: SourceSpan; item_spans: [SourceSpan] } }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3497
+fn find_multi_input_target(stmts: &[Stmt], node_span: SourceSpan, out: &MultiInputTarget?) -> {
+    if out.is_some() -> return
+    for stmt in stmts -> find_multi_input_in_stmt(stmt, node_span, out)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3510
+fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &MultiInputTarget?) -> {
+    if out.is_some() -> return
+    if stmt == {
+        .Val(b) -> find_multi_input_in_expr(b.init, node_span, out),
+        .Assign { target, value, .. } -> { find_multi_input_in_lvalue(target, node_span, out); find_multi_input_in_expr(value, node_span, out) },
+        .Expr(e) | .BreakValue(e, _) | .BreakLabelValue(_, _, e, _) | .Return(.Val(e), _) | .Yield(e, _) -> find_multi_input_in_expr(e, node_span, out),
+        .DeferClose { close, .. } -> find_multi_input_in_expr(close, node_span, out),
+        .Switch { subject, arms, else_body, .. } | .ComptimeSwitch { subject, arms, else_body, .. } -> {
+            find_multi_input_in_expr(subject, node_span, out)
+            for arm in arms { find_multi_input_in_expr(arm.cond, node_span, out); find_multi_input_target(arm.body, node_span, out) }
+            if else_body == .Val(body) -> find_multi_input_target(body, node_span, out)
+        },
+        .While { cond, body, .. } -> { find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(body, node_span, out) },
+        .For { kind, body, .. } -> {
+            if kind == {
+                .Range { start, end, step, exclusive: _ } -> {
+                    find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out)
+                    if step == .Val(step) -> find_multi_input_in_expr(step, node_span, out)
+                },
+                .In { collection, step } -> {
+                    find_multi_input_in_expr(collection, node_span, out)
+                    if step == .Val(step) -> find_multi_input_in_expr(step, node_span, out)
+                }
+            }
+            find_multi_input_target(body, node_span, out)
+        },
+        .CountedLoop { init, cond, step, body, .. } -> {
+            find_multi_input_in_expr(init.init, node_span, out); find_multi_input_in_expr(cond, node_span, out)
+            if step == .Val(step) -> find_multi_input_in_stmt(step, node_span, out)
+            find_multi_input_target(body, node_span, out)
+        },
+        .Loop { body, .. } | .Unsafe { body, .. } | .Impure { body, .. } | .Reactive { body, .. } |
+        .Shield { body, .. } | .Switched { body, .. } | .Region { body, .. } | .Policy { body, .. } |
+        .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } |
+        .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } |
+        .ScopeMember { body, .. } -> find_multi_input_target(body, node_span, out),
+        .ComptimeIf { cond, then_body, else_body, .. } -> {
+            find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(then_body, node_span, out)
+            if else_body == .Val(body) -> find_multi_input_target(body, node_span, out)
+        },
+        .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3629
+fn find_multi_input_in_lvalue(target: &LValue, node_span: SourceSpan, out: &MultiInputTarget?) -> {
+    if target == {
+        .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) },
+        .Field { base, .. } -> find_multi_input_in_expr(base, node_span, out), _ -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3644
+fn find_multi_input_in_expr(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) -> {
+    if out.is_some() -> return
+    if expr == {
+        .ListLit(items, span) if same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map((item) -> item.span().into()).collect() }),
+        _ -> walk_expr_children_for_multi_input(expr, node_span, out)
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3663
+fn walk_expr_children_for_multi_input(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) -> {
+    if expr == {
+        .Call(c) -> { for arg in c.args -> find_multi_input_in_expr(arg.expr, node_span, out) },
+        .MethodCall { receiver, args, .. } -> {
+            find_multi_input_in_expr(receiver, node_span, out)
+            for arg in args -> find_multi_input_in_expr(arg.expr, node_span, out)
+        },
+        .ListLit(items, _) -> { for item in items -> find_multi_input_in_expr(item, node_span, out) },
+        .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) },
+        .Slice { base, start, end, range, .. } -> {
+            find_multi_input_in_expr(base, node_span, out)
+            if range == .Val(range) { find_multi_input_in_expr(range, node_span, out) }
+            else { find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out) }
+        },
+        .MapLit(items, _) -> {
+            for (key, value) in items { find_multi_input_in_expr(key, node_span, out); find_multi_input_in_expr(value, node_span, out) }
+        },
+        .Binary(_, left, right, _) -> { find_multi_input_in_expr(left, node_span, out); find_multi_input_in_expr(right, node_span, out) },
+        .Unary(_, expr, _) | .Try(expr, ..) | .Present(expr, _) | .Ok(expr, _) | .Err(expr, _) |
+        .Paren(expr, _) | .Copy(expr, _) | .Field(expr, _, _) | .RawOf(expr, _) | .Tainted(expr, _, _) -> find_multi_input_in_expr(expr, node_span, out),
+        .PatternTest { subject, .. } -> find_multi_input_in_expr(subject, node_span, out),
+        .If { cond, then_body, then_value, else_body, else_value, .. } -> {
+            find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(then_body, node_span, out)
+            find_multi_input_in_expr(then_value, node_span, out); find_multi_input_target(else_body, node_span, out)
+            find_multi_input_in_expr(else_value, node_span, out)
+        },
+        .TupleLit(items, _, _) -> { for (_, item) in items -> find_multi_input_in_expr(item, node_span, out) },
+        .StructLit { fields, .. } -> { for (_, _, value) in fields -> find_multi_input_in_expr(value, node_span, out) },
+        .EnumLit { args, .. } -> {
+            for arg in args {
+                if arg == { .Positional(expr) | .Named { expr, .. } -> find_multi_input_in_expr(expr, node_span, out) }
+            }
+        },
+        _ -> {}
+    }
+}
+
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3765
+fn multi_input_element_belongs_to_graph(stmts: &[Stmt], node_span: SourceSpan, element_span: SourceSpan) -> Bool {
+    target: MultiInputTarget? := .None; find_multi_input_target(stmts, node_span, &target)
+    if target == { .Val(.List { item_spans, .. }) -> item_spans.iter().any((item_span) -> same_span(item_span, element_span)), .None -> false }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3780
+fn normalize_pattern_arm_head(pattern: String) -> String {
+    trimmed := pattern.trim() // #4303
+    head := trimmed.strip_prefix("==").map((s) -> s.trim()).unwrap_or(trimmed).trim_end_matches("->").trim() // #4303
+    head.to_string()
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3791
+fn fresh_arm_body(func: &jet_parser.AST.Func) -> String {
+    if func.return_type.as_ref().map(jet_parser.AST.Type.name) == {
+        .Val(ret) if ret != "Void" -> "return {default_arg_for_type(ret)}", _ -> "print(\"canvas arm\")"
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3798
+fn switch_arm_edit_span(src: String, subject: &Expr, switch_span: jet_foundation.Span, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
+    if jet_parser.AST.is_subjectless_guard(subject, switch_span) && jet_parser.AST.uses_classic_if_spelling(src, switch_span, arm.cond.span()) {
+        if arm.cond == .PatternTest { pattern, .. } -> return span_through_closing_parens(src, pattern.span())
+    }
+    arm.cond.span().into()
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3814
+fn add_arm_to_classic_switch(src: String, arm: &jet_parser.AST.SwitchArm, else_body: &[Stmt]?, span: SourceSpan, new_head: String, fresh_body: String) -> String Err! {
+    (subject, pattern) := if arm.cond == { .PatternTest { subject, pattern, .. } -> (subject, pattern),
+        _ -> return .Err(edit_error("bad_request", "Canvas branch is not a pattern branch")) }
+    subject_src := snippet(src, subject.span())
+    pattern_span := span_through_closing_parens(src, pattern.span())
+    head := src.get(pattern_span.start..pattern_span.end).map((s) -> s.to_owned()).unwrap_or_else(() -> snippet(src, pattern.span()))
+    then_body := block_body_source(src, arm.body, 2)
+    else_text := if else_body == .Val(body) {
+        body_text := block_body_source(src, body, 2)
+        "    else -> {{\n{body_text}    }}\n"
+    } else { String.new() }
+    replacement := "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_text}}}\n"
+    FixEngine.apply_edits(src, [edit(span, replacement)]).map_err((_) -> edit_error("overlap", "Canvas pattern branch conversion overlapped"))
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3851
+fn block_body_source(src: String, stmts: &[Stmt], levels: USize) -> String {
+    if stmts.is_empty() -> return String.new()
+    out := String.new(); indent := "    ".repeat(levels)
+    for stmt in stmts {
+        span := stmt_text_span(src, stmt)
+        text := src.get(span.start..span.end).unwrap_or("").trim_matches('\n').trim() // #4303
+        for line in text.lines() {
+            trimmed := line.trim() // #4303
+            out.push_str(indent); out.push_str(trimmed); out.push('\n')
+        }
+    }
+    out
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3873
+fn first_stmt_start(stmts: &[Stmt]) -> USize? { stmts.first().map((stmt) -> stmt.span().start) }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3877
+fn dispatch_body_insert_offset(src: String, span: SourceSpan) -> USize {
+    src.get(span.start..span.end).and_then((chunk) -> chunk.find('{').map((idx) -> line_after(src, span.start + idx))).unwrap_or(span.end)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3883
+fn stmt_arm_text_span(src: String, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
+    SourceSpan { start: line_start(src, arm.span.start), end: line_after(src, arm.span.end) }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3890
+fn comma_separated_remove_span(src: String, container: SourceSpan, element: SourceSpan) -> SourceSpan Err! {
+    container_text := src.get(container.start..container.end) ?? return .Err(edit_error("bad_request", "Canvas multi-input span is stale"))
+    rel_start := element.start.saturating_sub(container.start); rel_end := element.end.saturating_sub(container.start)
+    before := container_text[..rel_start.min(container_text.len())]; after := container_text[rel_end.min(container_text.len())..]
+    if after.find(',') == .Val(pos) {
+        end := element.end + pos + 1
+        return .Ok(SourceSpan { start: element.start, end: consume_trailing_space(src, end, container.end) })
+    }
+    if before.rfind(',') == .Val(pos) {
+        start := container.start + consume_leading_space_back(before, pos)
+        return .Ok(SourceSpan { start: start, end: element.end })
+    }
+    .Ok(element)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3922
+fn consume_trailing_space(src: String, offset: USize, limit: USize) -> USize {
+    while offset < limit && src.as_bytes().get(offset).is_some_and((b) -> b.is_ascii_whitespace()) -> offset += 1
+    offset
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3934
+fn consume_leading_space_back(before: String, comma: USize) -> USize {
+    start := comma
+    while start > 0 && before.as_bytes()[start - 1].is_ascii_whitespace() -> start -= 1
+    start
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3942
+fn find_func_containing_span(items: &[Item], span: SourceSpan) -> &jet_parser.AST.Func? {
+    for item in items {
+        if item == {
+            .Func(f) if span_within(span, func_source_span(f)) -> return .Val(f),
+            .Struct(s) -> { for method in s.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } },
+            .Impl(i) -> { for method in i.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } },
+            .CodeModule(m) -> { if m.body == .Val(body) && find_func_containing_span(body, span) == .Val(found) -> return .Val(found) },
+            _ -> {}
+        }
+    }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3973
+fn span_within(inner: SourceSpan, outer: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3977
+fn find_func_by_name_span(bundle: &ProgramBundle, name_span: SourceSpan) -> &jet_parser.AST.Func? {
+    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3981
+    fn find_in_items(items: &[Item], name_span: SourceSpan) -> &jet_parser.AST.Func? {
+        for item in items {
+            if item == {
+                .Func(f) if same_span(f.name_span.into(), name_span) -> return .Val(f),
+                .Struct(s) -> { for method in s.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } },
+                .Impl(i) -> { for method in i.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } },
+                .CodeModule(m) -> { if m.body == .Val(body) && find_in_items(body, name_span) == .Val(found) -> return .Val(found) },
+                _ -> {}
+            }
+        }
+        .None
+    }
+    for module in bundle.modules { if find_in_items(module.items, name_span) == .Val(found) -> return .Val(found) }
+    .None
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4019
+fn collect_statement_locs(src: String, stmts: &[Stmt], block: &[USize], out: &[StatementLoc]) -> {
+    for (index, stmt) in stmts.iter().enumerate() {
+        out.push(StatementLoc { anchor: stmt_canvas_anchor(stmt).into(), source: stmt_source_span(stmt), full: stmt_text_span(src, stmt),
+            block: block.clone(), index: index,
+            is_guard: if stmt == { .Switch { .. } | .ComptimeSwitch { .. } -> true, _ -> false },
+            is_expr: if stmt == { .Expr(_) -> true, _ -> false },
+            guard_span: if stmt == { .Switch { arms, .. } | .ComptimeSwitch { arms, .. } -> arms.first().map((arm) -> arm.cond.span().into()), _ -> .None } })
+        block.push(index); collect_child_statement_locs(src, stmt, block, out); _ :: block.pop()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4047
+fn collect_child_statement_locs(src: String, stmt: &Stmt, block: &[USize], out: &[StatementLoc]) -> {
+    if stmt == {
+        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
+        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
+        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> {
+            block.push(0); collect_statement_locs(src, body, block, out); _ :: block.pop()
+        },
+        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
+            for (i, arm) in arms.iter().enumerate() { block.push(i); collect_statement_locs(src, arm.body, block, out); _ :: block.pop() }
+            if else_body == .Val(body) { block.push(arms.len()); collect_statement_locs(src, body, block, out); _ :: block.pop() }
+        },
+        .ComptimeIf { then_body, else_body, .. } -> {
+            block.push(0); collect_statement_locs(src, then_body, block, out); _ :: block.pop()
+            if else_body == .Val(body) { block.push(1); collect_statement_locs(src, body, block, out); _ :: block.pop() }
+        },
+        _ -> {}
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4113
+fn stmt_canvas_anchor(stmt: &Stmt) -> jet_foundation.Span {
+    if stmt == {
+        .Val(b) -> b.name_span, .Assign { target, .. } -> target.span(), .Expr(e) -> e.span(),
+        .Return(_, span) | .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) |
+        .BreakValue(_, span) | .BreakLabelValue(_, _, _, span) -> span, _ -> stmt.span()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4128
+fn stmt_text_span(src: String, stmt: &Stmt) -> SourceSpan {
+    span := if stmt == { .Expr(expr) -> source_expression_span(src, expr), _ -> stmt_source_span(stmt) }
+    SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4139
+fn stmt_source_span(stmt: &Stmt) -> SourceSpan {
+    if stmt == {
+        .Val(b) -> SourceSpan { start: b.name_span.start, end: b.init.span().end },
+        .Assign { target, value, .. } -> SourceSpan { start: target.span().start, end: value.span().end },
+        .Expr(e) -> e.span().into(),
+        .Return(.Val(e), span) | .BreakValue(e, span) | .BreakLabelValue(_, _, e, span) -> SourceSpan { start: span.start, end: e.span().end },
+        _ -> stmt.span().into()
+    }
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4162
+fn same_span(a: SourceSpan, b: SourceSpan) -> Bool { a.start == b.start && a.end == b.end }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4166
+fn write_checked_formatted(path: &OSPath, before: String, candidate: String) -> String Err! {
+    formatted := jet_driver.Formatter.format_source(candidate) ?? return .Err(diagnostics_error(path, candidate, err))
+    write_checked_candidate(path, before, formatted)
+}
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4176
+fn write_checked_source(path: &OSPath, before: String, candidate: String) -> String Err! { write_checked_candidate(path, before, candidate) }
+// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4184
+fn write_checked_candidate(path: &OSPath, before: String, candidate: String) -> String Err! {
+    abs := canonical_path(path)
+    (diags, _, _) := jet_driver.Driver.check_file_with_effect_facts(path.to_string_lossy(), .Val((abs, candidate)), true)
+    errors := diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    if !errors.is_empty() -> return .Err(diagnostics_error(path, candidate, errors))
+    changed := candidate != before
+    if changed {
+        write_source_if_unchanged(path, before, candidate).map_err((error) -> if error == {
+            .Conflict -> {
+                current_revision := read_source_without_symlinks(path).map((source) -> source_revision(source)).unwrap_or_else((_) -> "missing".to_string())
+                edit_conflict("source changed while this Canvas edit was prepared", current_revision)
+            },
+            .Io(error) -> edit_error("io", error.to_string())
+        })? // GATE #4494: atomic retained-descriptor source writer.
+    }
+    .Ok(edit_ok_source(changed, candidate))
+}
 

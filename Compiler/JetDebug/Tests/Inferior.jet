@@ -1,0 +1,211 @@
+use jet_debug.Inferior.*
+use std.process.[Command, Stdio]
+use std.io as io
+use std.fs as fs
+use core.files.[OSPath]
+use core.sys.target.[selected_os]
+use std.sync.mpsc as mpsc
+
+// Rust: crates/jet-debug/src/Inferior.rs:1750
+#Test("exited_lldb_is_not_reported_as_a_proven_disconnect") {
+    // GATE #4494: actual exited child, not a fabricated cleanup receipt.
+    child := Command.new("true").stdin(Stdio.piped()).spawn().expect("spawn exited debugger stand-in")
+    stdin :: child.stdin.take().expect("piped stdin")
+    child.wait().expect("reap exited debugger stand-in")
+    (_tx, rx) :: mpsc.channel[U8]()
+    inferior := Inferior { child: ^child, stdin: ^stdin, rx: ^rx, _reader: None, stdout_path: OSPath.new(), stderr_path: OSPath.new(), stdout_pos: 0, stderr_pos: 0, attached: None, detached: false, debuggee_exited: false, closed: false }
+    error :: inferior.detach().expect_err("dead lldb cannot prove detach")
+    assert_eq(error.kind(), io.ErrorKind.UnexpectedEof)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1780
+#Test("attach_identity_verifies_a_real_process_and_rejects_another_binary") {
+    if selected_os() != "linux" -> return
+    target := Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
+    pid :: target.id()
+    result :: (() -> {
+        target_binary :: fs.canonicalize("/proc/{pid}/exe")?
+        identity :: TargetIdentity.capture(target_binary, pid)?
+        identity.verify()?
+        other_binary :: std.env.current_exe()?
+        match TargetIdentity.capture(other_binary, pid) {
+            .Err(error) -> if error.kind() != .PermissionDenied -> return .Err(io.Error.new(error.kind(), "wrong-binary attach failed for the wrong reason"))
+            .Ok(_) -> return .Err(io.Error.new(.Other, "wrong-binary attach was accepted"))
+        }
+        .Ok(())
+    })()
+    _ :: target.kill()
+    _ :: target.wait()
+    result.expect("real-process attach identity verification")
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1816
+#Test("attaches_to_and_detaches_from_a_real_local_process") {
+    if selected_os() != "linux" -> return
+    if !Inferior.available() {
+        io.eprintln("skipping live native attach test: lldb is unavailable")
+        return
+    }
+    target := Command.new("sleep").arg("30").spawn().expect("spawn real attach target")
+    pid :: target.id()
+    target_binary :: fs.canonicalize("/proc/{pid}/exe").expect("resolve real attach target binary")
+    inferior := match Inferior.attach(target_binary, pid) {
+        .Ok(inferior) -> ^inferior
+        .Err(error) -> { _ :: target.kill(); _ :: target.wait(); panic("real local attach failed: {error}") }
+    }
+    detach :: inferior.detach()
+    inferior.quit()
+    _ :: target.kill()
+    _ :: target.wait()
+    detach.expect("real local detach was not proven")
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1844
+#Test("parses_a_frame_line") {
+    out :: "Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n    frame #0: 0x0000000100000f50 jet_golden_05_loops`__jet_main + 20 at 05_loops.rs:7:5\n"
+    f :: Inferior.parse_top_frame(out).expect("frame parsed")
+    assert_eq(f.func, "__jet_main")
+    assert_eq(f.rust_file, "05_loops.rs")
+    assert_eq(f.rust_line, 7)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1853
+#Test("parses_breakpoint_identity_and_pending_state") {
+    resolved :: parse_breakpoint("Breakpoint 4: where = prog`run + 8 at app.rs:7:1").unwrap()
+    assert_eq(resolved.id, 4)
+    assert(resolved.resolved)
+    pending :: parse_breakpoint("Breakpoint 5: no locations (pending).").unwrap()
+    assert_eq(pending.id, 5)
+    assert(!pending.resolved)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1865
+#Test("parses_exit_status_and_quotes_paths_for_lldb") {
+    assert_eq(parse_exit_status("Process 1 exited with status = 17 (0x11)"), .Val(17))
+    assert_eq(lldb_quote("a file\\name.rs"), "\"a file\\\\name.rs\"")
+    assert_eq(parse_exit_signal("Process 1 exited due to signal SIGTERM\n"), .Val("SIGTERM"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1878
+#Test("sentinel_requires_the_lldb_prompt_echo") {
+    assert(!sentinel_echo_at_end(SENTINEL.as_bytes()))
+    assert(!sentinel_echo_at_end("(lldb) frame variable text = __jet_dbg_sentinel_9f3c__".as_bytes()))
+    assert(sentinel_echo_at_end("(lldb) __jet_dbg_sentinel_9f3c__".as_bytes()))
+    assert(sentinel_echo_at_end("output\n(lldb) __jet_dbg_sentinel_9f3c__".as_bytes()))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1891
+#Test("resume_wait_requires_a_real_process_event") {
+    assert(!resume_settled("(lldb) run\nProcess 1 launched\n"))
+    assert(!resume_settled("Process 1 exited with"))
+    assert(resume_settled("Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n"))
+    assert(resume_settled("Process 1 exited with status = 0\n"))
+    assert(resume_settled("Process 1 exited due to signal SIGTERM\n"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1902
+#Test("parses_multiple_frames_for_backtrace") {
+    out :: "  * frame #0: 0x1 bin`__jet_helper at a.rs:3:1\n    frame #1: 0x2 bin`__jet_main + 10 at a.rs:9:1\n"
+    frames :: Inferior.parse_frames(out)
+    assert_eq(frames.len(), 2)
+    assert_eq(frames[0].func, "__jet_helper")
+    assert_eq(frames[1].rust_line, 9)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1912
+#Test("parses_locals_with_type_prefix") {
+    assert_eq(Inferior.parse_typed_locals("(int) n = 5\n(int) total = 0\n"), [("int", "n", "5"), ("int", "total", "0")])
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1927
+#Test("parses_a_string_summary_and_drops_its_synthetic_children") {
+    out :: "(alloc::string::String) text = \"hi\" { [0] = 'h' [1] = 'i' }\n"
+    assert_eq(Inferior.parse_typed_locals(out), [("alloc::string::String", "text", "\"hi\"")])
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1944
+#Test("parses_a_multiline_struct_without_a_summary_provider") {
+    locals :: Inferior.parse_typed_locals("(__jet_Point) p = {\n  x = 1\n  y = 2\n}\n")
+    assert_eq(locals.len(), 1)
+    assert_eq(locals[0].0, "__jet_Point")
+    assert_eq(locals[0].1, "p")
+    assert(locals[0].2.contains("x = 1") && locals[0].2.contains("y = 2"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1954
+#Test("parses_immediate_children_without_exposing_deeper_rows") {
+    out :: "(__jet_Point) __jet_point = {\n  (__int) __jet_x = 1\n  (__jet_Point) __jet_nested = {\n    (__int) __jet_y = 2\n  }\n}\n"
+    assert_eq(Inferior.parse_variable_children(out), [("__int", "__jet_x", "1"), ("__jet_Point", "__jet_nested", "{")])
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1970
+#Test("parses_immediate_children_after_lldb_command_echo") {
+    out :: "(lldb) frame variable __jet_point\n(__jet_Point) __jet_point = {\n  (__int) __jet_x = 1\n}\n"
+    assert_eq(Inferior.parse_variable_children(out), [("__int", "__jet_x", "1")])
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1979
+#Test("parses_immediate_children_of_a_sized_composite") {
+    out :: "(__jet_Array) __jet_values = size=2 {\n  (__int) [0] = 7\n  (__int) [1] = 8\n}\n"
+    assert_eq(Inferior.parse_variable_children(out), [("__int", "[0]", "7"), ("__int", "[1]", "8")])
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1992
+#Test("recognizes_lldb_sized_composites_as_expandable_values") {
+    assert(Inferior.has_nested_value("size=2 { [0] = 1 [1] = 2 }"))
+    assert(!Inferior.has_nested_value("\"literal { text\""))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:1997
+#Test("no_frame_line_is_none") {
+    assert(Inferior.parse_top_frame("Process 1 exited with status = 0\n").is_none())
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2002
+#Test("local_name_translation_round_trips") {
+    assert_eq(Inferior.rust_local_to_jet("__jet_total"), .Val("total"))
+    assert_eq(Inferior.jet_local_to_rust("total"), "__jet_total")
+    assert_eq(Inferior.rust_local_to_jet("__jet_switch_subject"), .Val("switch_subject"))
+    assert_eq(Inferior.rust_local_to_jet("__jet___switch_subject"), .Val("__switch_subject"))
+    assert_eq(Inferior.jet_local_to_rust("__switch_subject"), "__jet___switch_subject")
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2024
+#Test("default_local_projection_hides_internal_names_and_unknown_values") {
+    assert(Inferior.rust_local_is_jet_visible("__jet_total"))
+    assert(!Inferior.rust_local_is_jet_visible("__jet_"))
+    assert(!Inferior.rust_local_is_jet_visible("__jet___temporary"))
+    assert(!Inferior.rust_local_is_jet_visible("allocator_temp"))
+    assert_eq(Inferior.safe_value("int", "7"), "7")
+    assert_eq(Inferior.safe_value("SomeRustStruct", "{ address = 0x1 }"), "<unavailable>")
+    assert_eq(Inferior.safe_value("int", "<optimized out>"), "<optimized out>")
+    assert_eq(Inferior.jet_type_name("SomeRustStruct"), None)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2042
+#Test("optimized_unsigned_values_keep_jet_integer_meaning") {
+    max :: "340282366920938463463374607431768211455"
+    assert_eq(Inferior.safe_value("u128", max), max)
+    assert_eq(Inferior.safe_value("u128", "-1"), "<unavailable>")
+    assert_eq(Inferior.jet_type_name("u128"), .Val("Int"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2050
+#Test("lldb_integer_aliases_keep_jet_integer_meaning") {
+    assert_eq(Inferior.safe_value("long", "7"), "7")
+    assert_eq(Inferior.safe_value("unsigned long", "7"), "7")
+    assert_eq(Inferior.jet_type_name("long"), .Val("Int"))
+    assert_eq(Inferior.jet_type_name("unsigned long"), .Val("Int"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2058
+#Test("lldb_paths_reject_control_characters") {
+    assert(checked_lldb_quote("safe/name.rs").is_ok())
+    assert(checked_lldb_quote("bad\nname.rs").is_err())
+    assert(valid_frame_expression("__jet_value.items[0]"))
+    assert(!valid_frame_expression("__jet_value; process kill"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2066
+#Test("translates_jet_paths_and_keeps_array_indices_literal") {
+    assert_eq(Inferior.jet_path_to_rust("point", ".x[2].label"), .Val("__jet_point.__jet_x[2].__jet_label"))
+    assert_eq(Inferior.jet_path_to_rust("point", "."), None)
+    assert_eq(Inferior.rust_member_to_jet("__jet_x"), .Val("x"))
+    assert_eq(Inferior.rust_member_to_jet("allocator_temp"), None)
+    assert_eq(Inferior.rust_member_to_jet("__jet___temporary"), None)
+    assert_eq(Inferior.rust_member_to_jet("[2]"), .Val("[2]"))
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2082
+#Test("parses_the_selected_thread_id_from_a_stop_banner") {
+    assert_eq(parse_current_thread_id("* thread #7, stop reason = breakpoint 1.1\n"), .Val(7))
+    assert_eq(parse_current_thread_id("  thread #1, stop reason = none\n* thread #7, stop reason = breakpoint 1.1\n"), .Val(7))
+    assert_eq(parse_current_thread_id("Process 1 exited with status = 0"), None)
+}
+// Rust: crates/jet-debug/src/Inferior.rs:2100
+#Test("func_name_strips_crate_path_and_hash") {
+    assert_eq(Inferior.rust_func_to_jet("prog::main::h40021039c79c235b"), "main")
+    assert_eq(Inferior.rust_func_to_jet("prog::__jet_helper::h991a2b3c4d5e6f70"), "helper")
+    assert_eq(Inferior.rust_func_to_jet("__libc_start_main"), "__libc_start_main")
+    assert_eq(Inferior.safe_jet_func("__libc_start_main"), "<native frame>")
+    assert_eq(Inferior.safe_jet_func("prog::helper::h4002"), "<native frame>")
+    assert_eq(Inferior.safe_jet_func("prog::__jet_run::h4002"), "run")
+    assert_eq(Inferior.safe_jet_func("prog::__jet_run::{{closure}}::h4002"), "run")
+}

@@ -1,0 +1,64 @@
+use jet_devserver.BrowserTrace.*
+use std.fs as fs
+use std.sync.[Mutex]
+use core.sys.target.[selected_os, selected_family]
+use jet_foundation.JSON.[parse, json_str]
+use jet_foundation.Report.[STATUS_SCHEMA]
+
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:682
+pub static TEST_LOCK :: Mutex.new(())
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:688
+fn manifest() -> String {
+    map :: "source\t6170702e6a6574\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nsymbol\t6170702e6a6574\t6c6f61645f7265706f7274\tfn"
+    return "{{\n  \"traceMap\": \"{hex(map.as_bytes())}\"\n}}\n"
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:694
+#Test("relay_maps_payload_free_rows_and_rejects_extra_fields") {
+    _guard :: TEST_LOCK.lock().unwrap()
+    relay :: Relay.new(manifest()).unwrap()
+    header :: fs.read_to_string(relay_path(std.process.id())).unwrap()
+    header := header.trim_end() // #4303
+    parsed :: parse(header).unwrap()
+    assert_eq(parsed.get_opt("schema").and_then(json_str), .Val(STATUS_SCHEMA))
+    if selected_family() == "unix" {
+        mode :: fs.metadata(relay_path(std.process.id())).unwrap().permissions().mode() & 0o777
+        assert_eq(mode, 0o600, "relay mode must be atomic owner-only")
+    }
+    relay.record("class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15".as_bytes()).unwrap()
+    assert_eq(relay.record("class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret".as_bytes()), .Err(RecordError.Malformed))
+    capture :: read(std.process.id()).unwrap()
+    assert_eq(capture.sources[0].path, "app.jet")
+    assert_eq(capture.rows.len(), 1)
+    assert_eq(capture.rows[0].symbol, "load_report")
+    assert(!capture.truncated)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:730
+#Test("dead_devserver_relay_is_rejected_and_removed") {
+    if selected_os() != "linux" && selected_os() != "android" -> return
+    _guard :: TEST_LOCK.lock().unwrap()
+    relay :: Relay.new(manifest()).unwrap()
+    path :: relay_path(std.process.id())
+    error :: read_with_process_state(std.process.id(), ProcessState.Dead).unwrap_err()
+    assert(error.contains("stale process session"), "{error}")
+    assert(!path.exists(), "dead devserver relay was not removed")
+    drop(^relay)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:741
+#Test("unknown_process_identity_fails_closed_without_consuming_relay") {
+    _guard :: TEST_LOCK.lock().unwrap()
+    relay :: Relay.new(manifest()).unwrap()
+    path :: relay_path(std.process.id())
+    error :: read_with_process_state(std.process.id(), ProcessState.Unknown).unwrap_err()
+    assert(error.contains("cannot be verified"), "{error}")
+    assert(path.exists(), "unknown identity must not mutate relay ownership")
+    drop(^relay)
+}
+// Rust: crates/jet-devserver/src/BrowserTrace.rs:755
+#Test("relay_caps_rows_and_records_truncation") {
+    _guard :: TEST_LOCK.lock().unwrap()
+    relay :: Relay.new(manifest()).unwrap()
+    for _ in 0..ROW_LIMIT + 1 -> relay.record("class=dom&symbol=run&start_ns=1&duration_ns=1&clock_ns=2".as_bytes()).unwrap()
+    capture :: read(std.process.id()).unwrap()
+    assert_eq(capture.rows.len(), ROW_LIMIT)
+    assert(capture.truncated)
+}
